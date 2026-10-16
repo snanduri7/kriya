@@ -1,0 +1,424 @@
+{
+ "_scenario": {
+  "doc": "",
+  "generated_from": "4eaf610",
+  "name": "milestone_rerun_reuses_completed",
+  "normalized": "run ids, uuid/transaction ids, ISO times, tmp/state/workspace paths and workspace identity, trace row ids -> first-appearance tokens; CLOCK_KEYS -> <clock>; timing-derived digests (VOLATILE_DIGEST_KEYS, progress vector, junit file, prompt segments) -> <vdigest>; pytest and junit gate output reduced to collected/outcome/FAILED lines; free text -> digests",
+  "terminal_path": "milestone rerun: completed milestones reused (MATCH)"
+ },
+ "evidence": [],
+ "extra": {
+  "completed": [
+   "M1",
+   "M2"
+  ]
+ },
+ "result": {
+  "legacy_result": {
+   "keys": [
+    "engine_calls",
+    "group_id",
+    "integration_result",
+    "milestone_reuse",
+    "milestone_total",
+    "status",
+    "work_unit_states"
+   ],
+   "values": {
+    "engine_calls": [
+     "INTEGRATION"
+    ],
+    "group_id": "grp",
+    "integration_result": {
+     "design": "d",
+     "files": [],
+     "quality_gates_passed": true
+    },
+    "milestone_reuse": {
+     "assessed_at": "<time>",
+     "decisions": [
+      {
+       "action": "SKIP",
+       "milestone_id": "M1",
+       "reasons": [],
+       "status": "MATCH"
+      },
+      {
+       "action": "SKIP",
+       "milestone_id": "M2",
+       "reasons": [],
+       "status": "MATCH"
+      }
+     ],
+     "events": [],
+     "run_id": "<run:1>",
+     "schema_version": 1
+    },
+    "milestone_total": 2,
+    "status": "success",
+    "work_unit_states": {
+     "M1": {
+      "blocked_by": [],
+      "reason_codes": [
+       "COMPLETION_REUSED"
+      ],
+      "status": "VERIFIED",
+      "work_unit_id": "M1"
+     },
+     "M2": {
+      "blocked_by": [],
+      "reason_codes": [
+       "COMPLETION_REUSED"
+      ],
+      "status": "VERIFIED",
+      "work_unit_id": "M2"
+     },
+     "__integration__": {
+      "blocked_by": [],
+      "reason_codes": [],
+      "status": "VERIFIED",
+      "work_unit_id": "__integration__"
+     }
+    }
+   }
+  },
+  "type": "dict"
+ },
+ "run_events": [],
+ "run_records": [
+  {
+   "active_work_unit": null,
+   "approved_plan_hash": null,
+   "base_source_revision": null,
+   "base_tree_hash": null,
+   "candidate_hash": "f87ffe55eadbb3538ebdc82f088d4998df32b73d1e1e6f4f1dd4e16bf3b3a01f",
+   "commit_intent": "APPLY_VERIFIED_CANDIDATE",
+   "commit_result": "COMMITTED",
+   "commit_transaction_id": "<hex:1>",
+   "commits": [
+    {
+     "candidate_hash": "7beb8998708b4795fbe965810b6153e7efeec55f2ad23b61779994b14a208319",
+     "intent": "APPLY_VERIFIED_CANDIDATE",
+     "result": "COMMITTED",
+     "transaction_id": "<hex:2>",
+     "work_unit": {
+      "definition_digest": "5b2e5b9f4be6aa51bd47c9d581c467d70a52d6123eafb7ae0fa5d92b540b94a8",
+      "group_id": "grp",
+      "kind": "milestone",
+      "milestone_id": "M1"
+     }
+    },
+    {
+     "candidate_hash": "f87ffe55eadbb3538ebdc82f088d4998df32b73d1e1e6f4f1dd4e16bf3b3a01f",
+     "intent": "APPLY_VERIFIED_CANDIDATE",
+     "result": "COMMITTED",
+     "transaction_id": "<hex:1>",
+     "work_unit": {
+      "definition_digest": "6b0908fcb805adca24193c18d3a50b5b7737c61e1434ae0254b5208d62821e86",
+      "group_id": "grp",
+      "kind": "milestone",
+      "milestone_id": "M2"
+     }
+    }
+   ],
+   "created_at": "<clock>",
+   "effective_config_fingerprint": null,
+   "execution_plan": {
+    "commit_strategy": "incremental_work_unit",
+    "fingerprint": "e9f4bf17f8148e3f111379c3c07e4cf1410a7d10babc8d04e50da4da55a87f51",
+    "plan_id": "grp",
+    "provenance": {
+     "group_id": "grp"
+    },
+    "schema": 1,
+    "source_kind": "milestone",
+    "terminal_phases": [
+     "replay_prior_verifications"
+    ],
+    "work_units": [
+     {
+      "acceptance_criteria": [],
+      "consumes": [],
+      "definition_digest": "5b2e5b9f4be6aa51bd47c9d581c467d70a52d6123eafb7ae0fa5d92b540b94a8",
+      "depends_on": [],
+      "goal": "build M1",
+      "id": "M1",
+      "obligation_refs": [],
+      "provenance": {
+       "milestone": {
+        "acceptance": [],
+        "adds_dependencies": [],
+        "consumes": [],
+        "depends_on": [],
+        "entrypoint": null,
+        "extends": null,
+        "goal": "build M1",
+        "id": "M1",
+        "kind": "milestone",
+        "mode": null,
+        "name": null,
+        "provides": []
+       }
+      },
+      "provides": [],
+      "role": "primary",
+      "verification_requirements": []
+     },
+     {
+      "acceptance_criteria": [],
+      "consumes": [],
+      "definition_digest": "6b0908fcb805adca24193c18d3a50b5b7737c61e1434ae0254b5208d62821e86",
+      "depends_on": [
+       "M1"
+      ],
+      "goal": "build M2",
+      "id": "M2",
+      "obligation_refs": [],
+      "provenance": {
+       "milestone": {
+        "acceptance": [],
+        "adds_dependencies": [],
+        "consumes": [],
+        "depends_on": [
+         "M1"
+        ],
+        "entrypoint": null,
+        "extends": null,
+        "goal": "build M2",
+        "id": "M2",
+        "kind": "milestone",
+        "mode": null,
+        "name": null,
+        "provides": []
+       }
+      },
+      "provides": [],
+      "role": "primary",
+      "verification_requirements": []
+     },
+     {
+      "acceptance_criteria": [],
+      "consumes": [],
+      "definition_digest": "e7df322c1af12d0bd0aaad2766e4658b418b2655510d47ef6082438a0f678ac8",
+      "depends_on": [
+       "M1",
+       "M2"
+      ],
+      "goal": "This is the final integration/verification pass over a project already built across 2 milestones, in this workspace. Do NOT rewrite, restructure, or regenerate working code. Your job is to confirm the COMPLETE assembled system - all milestones together - satisfies the original goal below, fix ONLY what's broken, and verify EVERY milestone's own behavior still holds, not just the final one.\n\nOriginal goal:\nthe goal\n\nMilestones already applied, each with its own success criterion that must STILL hold after all later milestones:\n",
+      "id": "__integration__",
+      "obligation_refs": [],
+      "provenance": {
+       "original_goal": "the goal"
+      },
+      "provides": [],
+      "role": "integration",
+      "verification_requirements": []
+     }
+    ]
+   },
+   "goal_hash": null,
+   "lifecycle_state": "SUCCESS",
+   "milestone_reuse": null,
+   "model_runtime_fingerprint_ids": [],
+   "obligation_ledger_hash": null,
+   "obligation_ledger_revision": null,
+   "recovery": null,
+   "resume_decision": null,
+   "retry_counters": {},
+   "retry_state_reference": null,
+   "revision": 21,
+   "run_id": "<run:2>",
+   "schema_version": 3,
+   "terminal_status": "SUCCESS",
+   "updated_at": "<time>",
+   "verification_evidence_ids": [],
+   "work_unit_states": {
+    "M1": {
+     "blocked_by": [],
+     "reason_codes": [],
+     "status": "VERIFIED",
+     "work_unit_id": "M1"
+    },
+    "M2": {
+     "blocked_by": [],
+     "reason_codes": [],
+     "status": "VERIFIED",
+     "work_unit_id": "M2"
+    },
+    "__integration__": {
+     "blocked_by": [],
+     "reason_codes": [],
+     "status": "VERIFIED",
+     "work_unit_id": "__integration__"
+    }
+   },
+   "workspace_identity": "<workspace_id:1>"
+  },
+  {
+   "active_work_unit": null,
+   "approved_plan_hash": null,
+   "base_source_revision": null,
+   "base_tree_hash": null,
+   "candidate_hash": null,
+   "commit_intent": null,
+   "commit_result": "NO_COMMIT",
+   "commit_transaction_id": null,
+   "commits": [],
+   "created_at": "<clock>",
+   "effective_config_fingerprint": null,
+   "execution_plan": {
+    "commit_strategy": "incremental_work_unit",
+    "fingerprint": "e9f4bf17f8148e3f111379c3c07e4cf1410a7d10babc8d04e50da4da55a87f51",
+    "plan_id": "grp",
+    "provenance": {
+     "group_id": "grp"
+    },
+    "schema": 1,
+    "source_kind": "milestone",
+    "terminal_phases": [
+     "replay_prior_verifications"
+    ],
+    "work_units": [
+     {
+      "acceptance_criteria": [],
+      "consumes": [],
+      "definition_digest": "5b2e5b9f4be6aa51bd47c9d581c467d70a52d6123eafb7ae0fa5d92b540b94a8",
+      "depends_on": [],
+      "goal": "build M1",
+      "id": "M1",
+      "obligation_refs": [],
+      "provenance": {
+       "milestone": {
+        "acceptance": [],
+        "adds_dependencies": [],
+        "consumes": [],
+        "depends_on": [],
+        "entrypoint": null,
+        "extends": null,
+        "goal": "build M1",
+        "id": "M1",
+        "kind": "milestone",
+        "mode": null,
+        "name": null,
+        "provides": []
+       }
+      },
+      "provides": [],
+      "role": "primary",
+      "verification_requirements": []
+     },
+     {
+      "acceptance_criteria": [],
+      "consumes": [],
+      "definition_digest": "6b0908fcb805adca24193c18d3a50b5b7737c61e1434ae0254b5208d62821e86",
+      "depends_on": [
+       "M1"
+      ],
+      "goal": "build M2",
+      "id": "M2",
+      "obligation_refs": [],
+      "provenance": {
+       "milestone": {
+        "acceptance": [],
+        "adds_dependencies": [],
+        "consumes": [],
+        "depends_on": [
+         "M1"
+        ],
+        "entrypoint": null,
+        "extends": null,
+        "goal": "build M2",
+        "id": "M2",
+        "kind": "milestone",
+        "mode": null,
+        "name": null,
+        "provides": []
+       }
+      },
+      "provides": [],
+      "role": "primary",
+      "verification_requirements": []
+     },
+     {
+      "acceptance_criteria": [],
+      "consumes": [],
+      "definition_digest": "e7df322c1af12d0bd0aaad2766e4658b418b2655510d47ef6082438a0f678ac8",
+      "depends_on": [
+       "M1",
+       "M2"
+      ],
+      "goal": "This is the final integration/verification pass over a project already built across 2 milestones, in this workspace. Do NOT rewrite, restructure, or regenerate working code. Your job is to confirm the COMPLETE assembled system - all milestones together - satisfies the original goal below, fix ONLY what's broken, and verify EVERY milestone's own behavior still holds, not just the final one.\n\nOriginal goal:\nthe goal\n\nMilestones already applied, each with its own success criterion that must STILL hold after all later milestones:\n",
+      "id": "__integration__",
+      "obligation_refs": [],
+      "provenance": {
+       "original_goal": "the goal"
+      },
+      "provides": [],
+      "role": "integration",
+      "verification_requirements": []
+     }
+    ]
+   },
+   "goal_hash": null,
+   "lifecycle_state": "SUCCESS",
+   "milestone_reuse": {
+    "assessed_at": "<time>",
+    "decisions": [
+     {
+      "action": "SKIP",
+      "milestone_id": "M1",
+      "reasons": [],
+      "status": "MATCH"
+     },
+     {
+      "action": "SKIP",
+      "milestone_id": "M2",
+      "reasons": [],
+      "status": "MATCH"
+     }
+    ],
+    "events": [],
+    "run_id": "<run:1>",
+    "schema_version": 1
+   },
+   "model_runtime_fingerprint_ids": [],
+   "obligation_ledger_hash": null,
+   "obligation_ledger_revision": null,
+   "recovery": null,
+   "resume_decision": null,
+   "retry_counters": {},
+   "retry_state_reference": null,
+   "revision": 10,
+   "run_id": "<run:1>",
+   "schema_version": 3,
+   "terminal_status": "SUCCESS",
+   "updated_at": "<time>",
+   "verification_evidence_ids": [],
+   "work_unit_states": {
+    "M1": {
+     "blocked_by": [],
+     "reason_codes": [
+      "COMPLETION_REUSED"
+     ],
+     "status": "VERIFIED",
+     "work_unit_id": "M1"
+    },
+    "M2": {
+     "blocked_by": [],
+     "reason_codes": [
+      "COMPLETION_REUSED"
+     ],
+     "status": "VERIFIED",
+     "work_unit_id": "M2"
+    },
+    "__integration__": {
+     "blocked_by": [],
+     "reason_codes": [],
+     "status": "VERIFIED",
+     "work_unit_id": "__integration__"
+    }
+   },
+   "workspace_identity": "<workspace_id:1>"
+  }
+ ]
+}

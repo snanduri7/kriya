@@ -1,0 +1,3413 @@
+{
+ "_scenario": {
+  "doc": "The PRD-026 terminal: identical candidates failing with an identical (constant) compile output.",
+  "generated_from": "4eaf610",
+  "name": "legacy_no_progress",
+  "normalized": "run ids, uuid/transaction ids, ISO times, tmp/state/workspace paths and workspace identity, trace row ids -> first-appearance tokens; CLOCK_KEYS -> <clock>; timing-derived digests (VOLATILE_DIGEST_KEYS, progress vector, junit file, prompt segments) -> <vdigest>; pytest and junit gate output reduced to collected/outcome/FAILED lines; free text -> digests",
+  "terminal_path": "stopped early: no_progress"
+ },
+ "evidence": [
+  {
+   "records": [
+    {
+     "attempt": null,
+     "kind": "run.opened",
+     "payload": "sha256:0943e382ebb07a9f",
+     "payload_keys": [
+      "base_revision",
+      "base_tree_hash",
+      "kriya_build",
+      "workspace_identity",
+      "workspace_path"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
+     "content": {
+      "goal": "sha256:0f3c92131d8b5897"
+     },
+     "kind": "unit.opened",
+     "payload": "sha256:aad29e8eea551a52",
+     "payload_keys": [
+      "authorized_write_scope",
+      "current_subtask_id",
+      "invocation_seq",
+      "milestone_group_id",
+      "milestone_index",
+      "plan_fingerprint",
+      "plan_id",
+      "planned_source_files",
+      "resume",
+      "resume_id",
+      "unit_id",
+      "unit_kind",
+      "write_scope_mode"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "goal": "sha256:0f3c92131d8b5897"
+     },
+     "kind": "unit.opened",
+     "payload": "sha256:4af4d8963b61a1fa",
+     "payload_keys": [
+      "authorized_write_scope",
+      "current_subtask_id",
+      "invocation_seq",
+      "milestone_group_id",
+      "milestone_index",
+      "plan_fingerprint",
+      "plan_id",
+      "planned_source_files",
+      "resume",
+      "resume_id",
+      "unit_id",
+      "unit_kind",
+      "write_scope_mode"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:d6e1c83a0fd7dd40"
+     },
+     "event": "egress.authority",
+     "kind": "mirror.event",
+     "payload": "sha256:ad83cb73627e8bd8",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:b8d89986afaa0136"
+     },
+     "event": "evidence.attempt_store",
+     "kind": "mirror.event",
+     "payload": "sha256:6a59c13934b413a5",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:4ee911c6721f9d81"
+     },
+     "event": "model.runtime",
+     "kind": "mirror.event",
+     "payload": "sha256:6eb65ce1ab77f257",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:93c80a464497eeab"
+     },
+     "event": "model.role_independence",
+     "kind": "mirror.event",
+     "payload": "sha256:cb6d658abeb32638",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:2d49c6b5eab9558e"
+     },
+     "event": "requirement.derived",
+     "kind": "mirror.event",
+     "payload": "sha256:64d1510f667f2463",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:32ca5c7fc1f2d029"
+     },
+     "event": "verification_contract.compiled",
+     "kind": "mirror.event",
+     "payload": "sha256:c4496da9371fbc20",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:81564c21128f8c4c"
+     },
+     "event": "verification_contract.sealed",
+     "kind": "mirror.event",
+     "payload": "sha256:e6c4d0baf6fac7ec",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:82d834a6d8e2bcc3"
+     },
+     "event": "requirement.lineage",
+     "kind": "mirror.event",
+     "payload": "sha256:52e3dca741811db9",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:97936644f719307c"
+     },
+     "event": "requirement.lineage",
+     "kind": "mirror.event",
+     "payload": "sha256:52e3dca741811db9",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "evidence": "sha256:4c19786b92921d81"
+     },
+     "kind": "mirror.evidence",
+     "payload": "sha256:d4db084723716661",
+     "payload_keys": [
+      "attempt",
+      "kind",
+      "sensitivity",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:7ae216c22c3fbecd"
+     },
+     "event": "validation_baseline.policy",
+     "kind": "mirror.event",
+     "payload": "sha256:cd2866e1984b1c5f",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "event": "sha256:34f8d30fab39c7b0"
+     },
+     "event": "attempt.started",
+     "kind": "mirror.event",
+     "payload": "sha256:dcca6f3febc57ef2",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "kind": "attempt.opened",
+     "payload": "sha256:9fe95055761d2fb0",
+     "payload_keys": [
+      "attempts_by_mode_before",
+      "mode",
+      "operation",
+      "reserved_fallback"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "event": "sha256:16c8cb878c930119"
+     },
+     "event": "context.retry_target_source",
+     "kind": "mirror.event",
+     "payload": "sha256:f06dcb26aa2ae656",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "event": "sha256:dbd274adb6481e7e"
+     },
+     "event": "retry.progress_decision",
+     "kind": "mirror.event",
+     "payload": "sha256:45076216871ac02c",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "event": "sha256:79180166bb672932"
+     },
+     "event": "context.known_target_package",
+     "kind": "mirror.event",
+     "payload": "sha256:bea80a58277daa3c",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "kind": "fallback.decision",
+     "payload": "sha256:6f1c78797a397b8c",
+     "payload_keys": [
+      "fallback",
+      "phase",
+      "profile_digest",
+      "requested",
+      "requested_profile_digest",
+      "requested_rejection",
+      "selected"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "event": "sha256:9e56229a4df096c6"
+     },
+     "event": "model.transition",
+     "kind": "mirror.event",
+     "payload": "sha256:76a6deb42291e965",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "event": "sha256:fbc8805ca809d881"
+     },
+     "event": "context.edit_capability",
+     "kind": "mirror.event",
+     "payload": "sha256:8ea68a4fa2bb4485",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "kind": "authority.snapshot",
+     "payload": "sha256:7065dde41e5baa14",
+     "payload_keys": [
+      "authorized_write_scope",
+      "known_target_files",
+      "model",
+      "targets",
+      "write_scope_mode"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "kind": "prompt.sections",
+     "payload": "sha256:bbe882398875ca33",
+     "payload_keys": [
+      "capacity_tokens",
+      "fitted",
+      "fitter",
+      "optional_sections_unchanged",
+      "request",
+      "request_tokens",
+      "segments",
+      "unlocated_sections"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "analysis_model_claimed": "sha256:0e409100b4f1a8a8"
+     },
+     "kind": "developer.parse",
+     "payload": "sha256:03b089df9f12e168",
+     "payload_keys": [
+      "call_seq_parsed",
+      "detail",
+      "edit_count",
+      "final_newline",
+      "kind",
+      "path",
+      "protocol",
+      "protocol_selected",
+      "reason_code",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "event": "sha256:26ea07ed6232715d"
+     },
+     "event": "developer.prompt_composition",
+     "kind": "mirror.event",
+     "payload": "sha256:487933487355e5be",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "event": "sha256:b6d0210db6f56db9"
+     },
+     "event": "generation.completed",
+     "kind": "mirror.event",
+     "payload": "sha256:6a398e2a0dc0feb2",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "after": "sha256:bb10c3e88fcd298b",
+      "before": "sha256:af626eb7a9c3d865",
+      "diff": "sha256:c68ceefff79a9f25"
+     },
+     "kind": "candidate.change",
+     "payload": "sha256:d4dbd02151942f74",
+     "payload_keys": [
+      "after_digest",
+      "before_digest",
+      "created",
+      "decision",
+      "deleted",
+      "lines_added",
+      "lines_removed",
+      "path",
+      "text_diff",
+      "unchanged"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "kind": "obligations.snapshot",
+     "payload": "sha256:46ab75a04d797eae",
+     "payload_keys": [
+      "ledger_digest",
+      "ledger_revision",
+      "unresolved_terminal"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "kind": "attempt.closed",
+     "payload": "sha256:d3cbe7c23490c25c",
+     "payload_keys": [
+      "candidate_gates_passed",
+      "outcome"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "event": "sha256:e50d666e42e7cc2a"
+     },
+     "event": "static_analysis.result",
+     "kind": "mirror.event",
+     "payload": "sha256:3df43d85ee152453",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "kind": "prompt.sections",
+     "payload": "sha256:046ccba1c9e5f276",
+     "payload_keys": [
+      "builds",
+      "fitter",
+      "kept_chars",
+      "kept_digest",
+      "omitted",
+      "room_tokens",
+      "section",
+      "used_tokens"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "event": "sha256:a854589a8f87845f"
+     },
+     "event": "approval.decision",
+     "kind": "mirror.event",
+     "payload": "sha256:3487eee98eba5099",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "outcome": "sha256:cd241d36652f1156"
+     },
+     "kind": "mirror.gate_outcome",
+     "payload": "sha256:3cca75888021620b",
+     "payload_keys": [
+      "attempt",
+      "index",
+      "success",
+      "type"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "event": "sha256:45da8a3f3bd65cca"
+     },
+     "event": "failure.recorded",
+     "kind": "mirror.event",
+     "payload": "sha256:2b96fa74f90ecd86",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "evidence": "sha256:ed7a38d211f9383e"
+     },
+     "kind": "mirror.evidence",
+     "payload": "sha256:6867e3e35a89cbca",
+     "payload_keys": [
+      "attempt",
+      "kind",
+      "sensitivity",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "event": "sha256:c9409d0ee2192ae9"
+     },
+     "event": "attempt.failed",
+     "kind": "mirror.event",
+     "payload": "sha256:2c5c5a7c54856f15",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "event": "sha256:51db13789ddcf243"
+     },
+     "event": "retry.progress_vector",
+     "kind": "mirror.event",
+     "payload": "sha256:616dde6599d17907",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "content": {
+      "attribution_reasoning": "sha256:529720fc811eddec",
+      "message": "sha256:498d71f4dc59cc17",
+      "raw_output": "sha256:4c5fd343e85e6f46"
+     },
+     "kind": "diagnosis",
+     "payload": "sha256:6e16ebf12ee1c69c",
+     "payload_keys": [
+      "attempt",
+      "attribution_confidence",
+      "attribution_kind",
+      "attribution_tier",
+      "authority",
+      "evidence_class",
+      "file_locations",
+      "likely_files",
+      "mode",
+      "operation",
+      "raw_output",
+      "reason_code",
+      "source",
+      "subtask_id",
+      "type"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "kind": "recovery.decision",
+     "payload": "sha256:7b10551e14fd7c1b",
+     "payload_keys": [
+      "action",
+      "attempt",
+      "attempt_mode",
+      "budgets_exhausted",
+      "consecutive_no_progress_attempts",
+      "containment_setup_failure",
+      "environment_failure",
+      "failure_type",
+      "internal_framework_bug",
+      "no_progress_reason",
+      "no_progress_terminated",
+      "plan_scope_conflict",
+      "progress_classification",
+      "retry",
+      "retry_decision",
+      "stop_loop",
+      "stop_reason_code",
+      "unrecoverable_denial_reason",
+      "unrecoverable_scope_denial"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 1,
+     "kind": "attempt.concluded",
+     "payload": "sha256:3ca37bc4847d9e6f",
+     "payload_keys": [
+      "succeeded"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "content": {
+      "event": "sha256:8f4571fca910a3f0"
+     },
+     "event": "attempt.started",
+     "kind": "mirror.event",
+     "payload": "sha256:dd33c61b2494788e",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "kind": "attempt.opened",
+     "payload": "sha256:21b86d113e043552",
+     "payload_keys": [
+      "attempts_by_mode_before",
+      "mode",
+      "operation",
+      "reserved_fallback"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "content": {
+      "event": "sha256:383609375fcabb5d"
+     },
+     "event": "context.retry_target_source",
+     "kind": "mirror.event",
+     "payload": "sha256:26a8ab8c0762b4ce",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "content": {
+      "event": "sha256:0721ea6cc43168b6"
+     },
+     "event": "retry.progress_decision",
+     "kind": "mirror.event",
+     "payload": "sha256:cca13ddb591394b1",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "kind": "fallback.decision",
+     "payload": "sha256:6f1c78797a397b8c",
+     "payload_keys": [
+      "fallback",
+      "phase",
+      "profile_digest",
+      "requested",
+      "requested_profile_digest",
+      "requested_rejection",
+      "selected"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "content": {
+      "event": "sha256:8c5c68936f343b72"
+     },
+     "event": "context.edit_capability",
+     "kind": "mirror.event",
+     "payload": "sha256:ede0d3d6849f432c",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "kind": "authority.snapshot",
+     "payload": "sha256:3c245beeb3be0692",
+     "payload_keys": [
+      "authorized_write_scope",
+      "known_target_files",
+      "model",
+      "targets",
+      "write_scope_mode"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "kind": "developer.parse",
+     "payload": "sha256:d859ef0442c2f9a4",
+     "payload_keys": [
+      "call_seq_parsed",
+      "detail",
+      "edit_count",
+      "final_newline",
+      "kind",
+      "path",
+      "protocol",
+      "protocol_selected",
+      "reason_code",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "content": {
+      "event": "sha256:ade8b1b0e9fe13d2"
+     },
+     "event": "developer.prompt_composition",
+     "kind": "mirror.event",
+     "payload": "sha256:a48796663daad8e9",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "content": {
+      "event": "sha256:5b261d8826d44e9f"
+     },
+     "event": "generation.completed",
+     "kind": "mirror.event",
+     "payload": "sha256:18db88225eaa21aa",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "content": {
+      "after": "sha256:bb10c3e88fcd298b",
+      "before": "sha256:af626eb7a9c3d865",
+      "diff": "sha256:c68ceefff79a9f25"
+     },
+     "kind": "candidate.change",
+     "payload": "sha256:d4dbd02151942f74",
+     "payload_keys": [
+      "after_digest",
+      "before_digest",
+      "created",
+      "decision",
+      "deleted",
+      "lines_added",
+      "lines_removed",
+      "path",
+      "text_diff",
+      "unchanged"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "kind": "obligations.snapshot",
+     "payload": "sha256:46ab75a04d797eae",
+     "payload_keys": [
+      "ledger_digest",
+      "ledger_revision",
+      "unresolved_terminal"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "kind": "retry.delta",
+     "payload": "sha256:e7fdaf1b16f14c3d",
+     "payload_keys": [
+      "attempt",
+      "changed",
+      "dimensions",
+      "information_gain",
+      "previous_attempt",
+      "reason"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "kind": "attempt.closed",
+     "payload": "sha256:d3cbe7c23490c25c",
+     "payload_keys": [
+      "candidate_gates_passed",
+      "outcome"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "content": {
+      "event": "sha256:457265799d111bf6"
+     },
+     "event": "static_analysis.result",
+     "kind": "mirror.event",
+     "payload": "sha256:c5e444b3d74d2bf4",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "kind": "prompt.sections",
+     "payload": "sha256:046ccba1c9e5f276",
+     "payload_keys": [
+      "builds",
+      "fitter",
+      "kept_chars",
+      "kept_digest",
+      "omitted",
+      "room_tokens",
+      "section",
+      "used_tokens"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "content": {
+      "event": "sha256:434afc026796c162"
+     },
+     "event": "approval.decision",
+     "kind": "mirror.event",
+     "payload": "sha256:2123f6e9aa4ecf78",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "content": {
+      "outcome": "sha256:b6b3c7cedbf4985e"
+     },
+     "kind": "mirror.gate_outcome",
+     "payload": "sha256:cd1e3275b23b5227",
+     "payload_keys": [
+      "attempt",
+      "index",
+      "success",
+      "type"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "content": {
+      "event": "sha256:4c2979ea65f42b7b"
+     },
+     "event": "failure.recorded",
+     "kind": "mirror.event",
+     "payload": "sha256:2c093dc48e3628d7",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "content": {
+      "evidence": "sha256:23399e092bbcf730"
+     },
+     "kind": "mirror.evidence",
+     "payload": "sha256:8a6a4204ddb60ee8",
+     "payload_keys": [
+      "attempt",
+      "kind",
+      "sensitivity",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "content": {
+      "event": "sha256:81c0d4f3af02fbcb"
+     },
+     "event": "attempt.failed",
+     "kind": "mirror.event",
+     "payload": "sha256:bf7f5d37902b0215",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "content": {
+      "event": "sha256:abf0e76a0d1dcb52"
+     },
+     "event": "retry.progress_vector",
+     "kind": "mirror.event",
+     "payload": "sha256:cb4764b7cb845fee",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "content": {
+      "attribution_reasoning": "sha256:529720fc811eddec",
+      "message": "sha256:498d71f4dc59cc17",
+      "raw_output": "sha256:4c5fd343e85e6f46"
+     },
+     "kind": "diagnosis",
+     "payload": "sha256:5bed6a4c937c96fd",
+     "payload_keys": [
+      "attempt",
+      "attribution_confidence",
+      "attribution_kind",
+      "attribution_tier",
+      "authority",
+      "evidence_class",
+      "file_locations",
+      "likely_files",
+      "mode",
+      "operation",
+      "raw_output",
+      "reason_code",
+      "source",
+      "subtask_id",
+      "type"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "kind": "recovery.decision",
+     "payload": "sha256:c24f122bc645ada8",
+     "payload_keys": [
+      "action",
+      "attempt",
+      "attempt_mode",
+      "budgets_exhausted",
+      "consecutive_no_progress_attempts",
+      "containment_setup_failure",
+      "environment_failure",
+      "failure_type",
+      "internal_framework_bug",
+      "no_progress_reason",
+      "no_progress_terminated",
+      "plan_scope_conflict",
+      "progress_classification",
+      "retry",
+      "retry_decision",
+      "stop_loop",
+      "stop_reason_code",
+      "unrecoverable_denial_reason",
+      "unrecoverable_scope_denial"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 2,
+     "kind": "attempt.concluded",
+     "payload": "sha256:3ca37bc4847d9e6f",
+     "payload_keys": [
+      "succeeded"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "event": "sha256:c62e2aeed8fc9cef"
+     },
+     "event": "attempt.started",
+     "kind": "mirror.event",
+     "payload": "sha256:37ef29767121290e",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "kind": "attempt.opened",
+     "payload": "sha256:f4584c0c9746eed5",
+     "payload_keys": [
+      "attempts_by_mode_before",
+      "mode",
+      "operation",
+      "reserved_fallback"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "event": "sha256:8fe8556e0fef2b60"
+     },
+     "event": "context.retry_target_source",
+     "kind": "mirror.event",
+     "payload": "sha256:c1ada2f21b41de68",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "event": "sha256:6ccbbd40a36e6b18"
+     },
+     "event": "retry.sampling_resample",
+     "kind": "mirror.event",
+     "payload": "sha256:f36396e575d5dc6f",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "event": "sha256:1f8a66d227f4a17e"
+     },
+     "event": "retry.progress_decision",
+     "kind": "mirror.event",
+     "payload": "sha256:dc78ee71e8d8b1ea",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "kind": "fallback.decision",
+     "payload": "sha256:6f1c78797a397b8c",
+     "payload_keys": [
+      "fallback",
+      "phase",
+      "profile_digest",
+      "requested",
+      "requested_profile_digest",
+      "requested_rejection",
+      "selected"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "event": "sha256:112b8e6390ca9f5a"
+     },
+     "event": "context.edit_capability",
+     "kind": "mirror.event",
+     "payload": "sha256:927eea64fded427a",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "kind": "authority.snapshot",
+     "payload": "sha256:3c245beeb3be0692",
+     "payload_keys": [
+      "authorized_write_scope",
+      "known_target_files",
+      "model",
+      "targets",
+      "write_scope_mode"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "kind": "developer.parse",
+     "payload": "sha256:d859ef0442c2f9a4",
+     "payload_keys": [
+      "call_seq_parsed",
+      "detail",
+      "edit_count",
+      "final_newline",
+      "kind",
+      "path",
+      "protocol",
+      "protocol_selected",
+      "reason_code",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "event": "sha256:848a5b63811d77fc"
+     },
+     "event": "developer.prompt_composition",
+     "kind": "mirror.event",
+     "payload": "sha256:0a442d7303be3be6",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "event": "sha256:07ce618baced9ea2"
+     },
+     "event": "generation.completed",
+     "kind": "mirror.event",
+     "payload": "sha256:b2b018ebe505eae7",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "after": "sha256:bb10c3e88fcd298b",
+      "before": "sha256:af626eb7a9c3d865",
+      "diff": "sha256:c68ceefff79a9f25"
+     },
+     "kind": "candidate.change",
+     "payload": "sha256:d4dbd02151942f74",
+     "payload_keys": [
+      "after_digest",
+      "before_digest",
+      "created",
+      "decision",
+      "deleted",
+      "lines_added",
+      "lines_removed",
+      "path",
+      "text_diff",
+      "unchanged"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "kind": "obligations.snapshot",
+     "payload": "sha256:46ab75a04d797eae",
+     "payload_keys": [
+      "ledger_digest",
+      "ledger_revision",
+      "unresolved_terminal"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "kind": "retry.delta",
+     "payload": "sha256:1606a4fccfa2aea5",
+     "payload_keys": [
+      "attempt",
+      "changed",
+      "dimensions",
+      "information_gain",
+      "previous_attempt",
+      "reason"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "kind": "attempt.closed",
+     "payload": "sha256:d3cbe7c23490c25c",
+     "payload_keys": [
+      "candidate_gates_passed",
+      "outcome"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "event": "sha256:831b0e0bcd9bdba5"
+     },
+     "event": "static_analysis.result",
+     "kind": "mirror.event",
+     "payload": "sha256:c90157899a19c927",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "kind": "prompt.sections",
+     "payload": "sha256:046ccba1c9e5f276",
+     "payload_keys": [
+      "builds",
+      "fitter",
+      "kept_chars",
+      "kept_digest",
+      "omitted",
+      "room_tokens",
+      "section",
+      "used_tokens"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "event": "sha256:f6ad0c07c860c772"
+     },
+     "event": "approval.decision",
+     "kind": "mirror.event",
+     "payload": "sha256:b8fced336bd4d0d8",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "outcome": "sha256:ca31497db11afba5"
+     },
+     "kind": "mirror.gate_outcome",
+     "payload": "sha256:c934a21b4f821e5b",
+     "payload_keys": [
+      "attempt",
+      "index",
+      "success",
+      "type"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "event": "sha256:c41dcb9ba39409dd"
+     },
+     "event": "failure.recorded",
+     "kind": "mirror.event",
+     "payload": "sha256:4c6c8d45d9d0bdda",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "evidence": "sha256:23ce0b8e2b305af0"
+     },
+     "kind": "mirror.evidence",
+     "payload": "sha256:e17b140379ffc606",
+     "payload_keys": [
+      "attempt",
+      "kind",
+      "sensitivity",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "event": "sha256:d18b1189e48f303e"
+     },
+     "event": "attempt.failed",
+     "kind": "mirror.event",
+     "payload": "sha256:7409d602b76663ac",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "event": "sha256:6590923fd868612c"
+     },
+     "event": "retry.progress_vector",
+     "kind": "mirror.event",
+     "payload": "sha256:e544383a7b334b34",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "event": "sha256:8d33ee572fb44338"
+     },
+     "event": "retry.strategy_transition",
+     "kind": "mirror.event",
+     "payload": "sha256:e3f2af24be815553",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "content": {
+      "attribution_reasoning": "sha256:529720fc811eddec",
+      "message": "sha256:498d71f4dc59cc17",
+      "raw_output": "sha256:4c5fd343e85e6f46"
+     },
+     "kind": "diagnosis",
+     "payload": "sha256:2504f3e4c79e26cf",
+     "payload_keys": [
+      "attempt",
+      "attribution_confidence",
+      "attribution_kind",
+      "attribution_tier",
+      "authority",
+      "evidence_class",
+      "file_locations",
+      "likely_files",
+      "mode",
+      "operation",
+      "raw_output",
+      "reason_code",
+      "source",
+      "subtask_id",
+      "type"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "kind": "recovery.decision",
+     "payload": "sha256:0aec8073fcbf2779",
+     "payload_keys": [
+      "action",
+      "attempt",
+      "attempt_mode",
+      "budgets_exhausted",
+      "consecutive_no_progress_attempts",
+      "containment_setup_failure",
+      "environment_failure",
+      "failure_type",
+      "internal_framework_bug",
+      "no_progress_reason",
+      "no_progress_terminated",
+      "plan_scope_conflict",
+      "progress_classification",
+      "retry",
+      "retry_decision",
+      "stop_loop",
+      "stop_reason_code",
+      "unrecoverable_denial_reason",
+      "unrecoverable_scope_denial"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 3,
+     "kind": "attempt.concluded",
+     "payload": "sha256:3ca37bc4847d9e6f",
+     "payload_keys": [
+      "succeeded"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "event": "sha256:d6f3af365374fbfa"
+     },
+     "event": "attempt.started",
+     "kind": "mirror.event",
+     "payload": "sha256:5c1b4c90889892e3",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "kind": "attempt.opened",
+     "payload": "sha256:674e8ac24326f662",
+     "payload_keys": [
+      "attempts_by_mode_before",
+      "mode",
+      "operation",
+      "reserved_fallback"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "event": "sha256:9cc422ea0d986a63"
+     },
+     "event": "context.retry_target_source",
+     "kind": "mirror.event",
+     "payload": "sha256:7e37cc4c922537c0",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "event": "sha256:badfb76185724e71"
+     },
+     "event": "retry.sampling_resample",
+     "kind": "mirror.event",
+     "payload": "sha256:c6f78bf8a245cd7f",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "event": "sha256:bf799314d47020a1"
+     },
+     "event": "retry.progress_decision",
+     "kind": "mirror.event",
+     "payload": "sha256:21371443701e9527",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "kind": "fallback.decision",
+     "payload": "sha256:6f1c78797a397b8c",
+     "payload_keys": [
+      "fallback",
+      "phase",
+      "profile_digest",
+      "requested",
+      "requested_profile_digest",
+      "requested_rejection",
+      "selected"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "event": "sha256:9cd1c3c8c466b3a6"
+     },
+     "event": "context.edit_capability",
+     "kind": "mirror.event",
+     "payload": "sha256:6165769f4ec66cbb",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "kind": "authority.snapshot",
+     "payload": "sha256:3c245beeb3be0692",
+     "payload_keys": [
+      "authorized_write_scope",
+      "known_target_files",
+      "model",
+      "targets",
+      "write_scope_mode"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "kind": "developer.parse",
+     "payload": "sha256:d859ef0442c2f9a4",
+     "payload_keys": [
+      "call_seq_parsed",
+      "detail",
+      "edit_count",
+      "final_newline",
+      "kind",
+      "path",
+      "protocol",
+      "protocol_selected",
+      "reason_code",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "event": "sha256:64c2cb03d515e377"
+     },
+     "event": "developer.prompt_composition",
+     "kind": "mirror.event",
+     "payload": "sha256:9759f9e505adf3c9",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "event": "sha256:644e1ac6cf0c3648"
+     },
+     "event": "generation.completed",
+     "kind": "mirror.event",
+     "payload": "sha256:e582a6b5aba31113",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "after": "sha256:bb10c3e88fcd298b",
+      "before": "sha256:af626eb7a9c3d865",
+      "diff": "sha256:c68ceefff79a9f25"
+     },
+     "kind": "candidate.change",
+     "payload": "sha256:d4dbd02151942f74",
+     "payload_keys": [
+      "after_digest",
+      "before_digest",
+      "created",
+      "decision",
+      "deleted",
+      "lines_added",
+      "lines_removed",
+      "path",
+      "text_diff",
+      "unchanged"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "kind": "obligations.snapshot",
+     "payload": "sha256:46ab75a04d797eae",
+     "payload_keys": [
+      "ledger_digest",
+      "ledger_revision",
+      "unresolved_terminal"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "kind": "retry.delta",
+     "payload": "sha256:dcd2730ac8bbf024",
+     "payload_keys": [
+      "attempt",
+      "changed",
+      "dimensions",
+      "information_gain",
+      "previous_attempt",
+      "reason"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "kind": "attempt.closed",
+     "payload": "sha256:d3cbe7c23490c25c",
+     "payload_keys": [
+      "candidate_gates_passed",
+      "outcome"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "event": "sha256:f97b4e9e349ce844"
+     },
+     "event": "static_analysis.result",
+     "kind": "mirror.event",
+     "payload": "sha256:5e7d9b0a8236fa77",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "kind": "prompt.sections",
+     "payload": "sha256:046ccba1c9e5f276",
+     "payload_keys": [
+      "builds",
+      "fitter",
+      "kept_chars",
+      "kept_digest",
+      "omitted",
+      "room_tokens",
+      "section",
+      "used_tokens"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "event": "sha256:4a0ab66be8d8de5a"
+     },
+     "event": "approval.decision",
+     "kind": "mirror.event",
+     "payload": "sha256:255e9485f3c9e734",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "outcome": "sha256:c9f84f67759a85c2"
+     },
+     "kind": "mirror.gate_outcome",
+     "payload": "sha256:edcf50509eb7568e",
+     "payload_keys": [
+      "attempt",
+      "index",
+      "success",
+      "type"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "event": "sha256:1756786d0bc30b38"
+     },
+     "event": "failure.recorded",
+     "kind": "mirror.event",
+     "payload": "sha256:e9c5b0d5ab7597e4",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "evidence": "sha256:ab8354a52118b2c2"
+     },
+     "kind": "mirror.evidence",
+     "payload": "sha256:d10dd1d3d60d53ac",
+     "payload_keys": [
+      "attempt",
+      "kind",
+      "sensitivity",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "event": "sha256:53906d202088e220"
+     },
+     "event": "attempt.failed",
+     "kind": "mirror.event",
+     "payload": "sha256:7fae8db6fc8f13b1",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "event": "sha256:793abcffb72ec3d5"
+     },
+     "event": "retry.progress_vector",
+     "kind": "mirror.event",
+     "payload": "sha256:b674eb54f922c968",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "event": "sha256:38f20febc93031f7"
+     },
+     "event": "retry.no_progress_terminal",
+     "kind": "mirror.event",
+     "payload": "sha256:985a73d0f93b5449",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": "attempt",
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "content": {
+      "attribution_reasoning": "sha256:529720fc811eddec",
+      "message": "sha256:498d71f4dc59cc17",
+      "raw_output": "sha256:4c5fd343e85e6f46"
+     },
+     "kind": "diagnosis",
+     "payload": "sha256:04099056d754f526",
+     "payload_keys": [
+      "attempt",
+      "attribution_confidence",
+      "attribution_kind",
+      "attribution_tier",
+      "authority",
+      "evidence_class",
+      "file_locations",
+      "likely_files",
+      "mode",
+      "operation",
+      "raw_output",
+      "reason_code",
+      "source",
+      "subtask_id",
+      "type"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "kind": "recovery.decision",
+     "payload": "sha256:007d7881dd29aa23",
+     "payload_keys": [
+      "action",
+      "attempt",
+      "attempt_mode",
+      "budgets_exhausted",
+      "consecutive_no_progress_attempts",
+      "containment_setup_failure",
+      "environment_failure",
+      "failure_type",
+      "internal_framework_bug",
+      "no_progress_reason",
+      "no_progress_terminated",
+      "plan_scope_conflict",
+      "progress_classification",
+      "retry",
+      "retry_decision",
+      "stop_loop",
+      "stop_reason_code",
+      "unrecoverable_denial_reason",
+      "unrecoverable_scope_denial"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": 4,
+     "kind": "attempt.concluded",
+     "payload": "sha256:3ca37bc4847d9e6f",
+     "payload_keys": [
+      "succeeded"
+     ],
+     "phase": "attempt",
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:1d7eeabebfe3216c"
+     },
+     "event": "model.role_metrics",
+     "kind": "mirror.event",
+     "payload": "sha256:138a879bbe275a71",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "kind": "prompt.sections",
+     "payload": "sha256:0ead8561559953e2",
+     "payload_keys": [
+      "builds",
+      "fitter",
+      "kept_chars",
+      "kept_digest",
+      "omitted",
+      "room_tokens",
+      "section",
+      "used_tokens"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "kind": "unit.closed",
+     "payload": "sha256:877d8ee5e06b3cf9",
+     "payload_keys": [
+      "failure_category",
+      "outcome",
+      "quality_gates_passed",
+      "status"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "kind": "unit.closed",
+     "payload": "sha256:877d8ee5e06b3cf9",
+     "payload_keys": [
+      "failure_category",
+      "outcome",
+      "quality_gates_passed",
+      "status"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "kind": "run.closed",
+     "payload": "sha256:39443c4663a55ecd",
+     "payload_keys": [
+      "commit_result",
+      "lifecycle_state",
+      "model_calls",
+      "record_revision",
+      "terminal_status",
+      "unit_invocations"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": null
+    }
+   ],
+   "run": "<run:1>",
+   "sealed": true,
+   "verification": "VERIFIED"
+  }
+ ],
+ "extra": {
+  "developer_calls": [
+   "primary-coder:30b",
+   "primary-coder:30b",
+   "primary-coder:30b",
+   "primary-coder:30b"
+  ]
+ },
+ "result": {
+  "control_state": {
+   "acceptance_approval_digest": null,
+   "base_commit": null,
+   "created_at": "<clock>",
+   "current_artifact_registry_hash": null,
+   "current_contract_hash": null,
+   "current_milestone_id": null,
+   "current_plan_hash": null,
+   "engineering_route": {
+    "current_risk_class": 1,
+    "deterministic_signals": {
+     "creation_language": false,
+     "dependency_graph_available": false,
+     "dependency_terms": false,
+     "enhancement_language": false,
+     "known_files_count": 0,
+     "migration_language": false,
+     "multi_part_structure": false,
+     "repo_appears_empty": false,
+     "repro_shape": false,
+     "scope_language": "none",
+     "security_terms": false
+    },
+    "execution_weight": "light",
+    "impact": {
+     "build_system_change": false,
+     "configuration_change": false,
+     "dependency_change": false,
+     "downstream_references": 0,
+     "files_touched": 0,
+     "persistence_change": false,
+     "public_contract_change": false,
+     "security_boundary_change": false,
+     "shared_entrypoint_change": false,
+     "symbols_impacted": 0
+    },
+    "initial_execution_weight": "light",
+    "initial_impact": {
+     "build_system_change": false,
+     "configuration_change": false,
+     "dependency_change": false,
+     "downstream_references": 0,
+     "files_touched": 0,
+     "persistence_change": false,
+     "public_contract_change": false,
+     "security_boundary_change": false,
+     "shared_entrypoint_change": false,
+     "symbols_impacted": 0
+    },
+    "initial_risk_class": 1,
+    "kind": "task",
+    "max_observed_risk_class": 1,
+    "reason_codes": [
+     "no_signals_fired_defaulted_to_task"
+    ],
+    "router_confidence": null,
+    "router_used": false
+   },
+   "last_verified_checkpoint": null,
+   "milestone_group_id": null,
+   "milestone_states": {},
+   "patch_hash": null,
+   "process_profile": {
+    "auto_merge_allowed": true,
+    "context_depth": "narrow",
+    "contract_analysis_required": false,
+    "execution_weight": "light",
+    "full_test_suite_required": false,
+    "human_review_required": false,
+    "impact_revalidation_required": false,
+    "planning_required": false,
+    "structured_subtasks_required": false,
+    "verification_tier": "light"
+   },
+   "requirement_contract_digest": null,
+   "run_id": "<run:1>",
+   "schema_version": 1,
+   "subtask_completion_scope": null,
+   "subtask_states": {},
+   "subtask_written_files": {},
+   "tree_hash": null,
+   "updated_at": "<time>",
+   "verification_contract_digest": null,
+   "workspace_content_hash": null
+  },
+  "decisions": [],
+  "fields": [
+   "run_id",
+   "control_state",
+   "route",
+   "legacy_result",
+   "subtask_results",
+   "decisions",
+   "verification_report"
+  ],
+  "legacy_result": {
+   "keys": [
+    "accepted_risk",
+    "accepted_risks",
+    "active_skill_manifest",
+    "candidate_gates_passed",
+    "completion_kind",
+    "contract_registry",
+    "design",
+    "deterministic_gate_evidence",
+    "environment_failure",
+    "failure_category",
+    "failure_report",
+    "files",
+    "generation_metrics",
+    "last_failure",
+    "lsp_warning",
+    "no_progress_reason",
+    "overall_attempt_passed",
+    "plan",
+    "plan_scope_conflict",
+    "quality_gates_passed",
+    "requirements",
+    "retry_progress",
+    "review",
+    "review_included_in_approval",
+    "run_id",
+    "skill_staleness_warnings",
+    "static_analysis",
+    "terminal_regression_passed",
+    "toolchain_warning",
+    "unchanged_files",
+    "unresolved_skill_gaps",
+    "verification_results",
+    "workspace_commit_failure"
+   ],
+   "values": {
+    "accepted_risk": false,
+    "accepted_risks": [],
+    "active_skill_manifest": [],
+    "candidate_gates_passed": false,
+    "completion_kind": null,
+    "contract_registry": null,
+    "design": {
+     "chars": 22,
+     "text": "sha256:9b856f09b860a3e2"
+    },
+    "deterministic_gate_evidence": [
+     {
+      "attempt": 4,
+      "passed": false,
+      "status": "FAILED",
+      "type": "compile"
+     }
+    ],
+    "environment_failure": null,
+    "failure_category": "no_progress",
+    "failure_report": [
+     {
+      "attribution_tier": "full_set",
+      "category": "build",
+      "failure_type": "compile"
+     },
+     {
+      "attribution_tier": "full_set",
+      "category": "build",
+      "failure_type": "compile"
+     },
+     {
+      "attribution_tier": "full_set",
+      "category": "build",
+      "failure_type": "compile"
+     },
+     {
+      "attribution_tier": "full_set",
+      "category": "build",
+      "failure_type": "compile"
+     }
+    ],
+    "files": [
+     "calc.py"
+    ],
+    "generation_metrics": {
+     "calls": 4,
+     "duration_seconds": "<clock>",
+     "files_requested": 4,
+     "llm": {
+      "architect_calls": 1,
+      "architect_wall_seconds": "<clock>",
+      "calls": 11,
+      "developer_calls": 4,
+      "developer_completion_tokens": 0,
+      "developer_prompt_tokens": 0,
+      "developer_tokens_available_for": 0,
+      "developer_wall_seconds": "<clock>",
+      "planner_calls": 1,
+      "planner_wall_seconds": "<clock>",
+      "reviewer_calls": 5,
+      "reviewer_wall_seconds": "<clock>",
+      "wall_seconds": "<clock>"
+     },
+     "operation_fallbacks": 0,
+     "retry": {
+      "attempts_by_mode": {
+       "full_set": 4
+      },
+      "baseline_replay_count": 0,
+      "candidate_independent_diagnostic_invocations": 4,
+      "full_set_attempts": 4,
+      "targeted_attempts": 0,
+      "unrecoverable_scope_denials": 0
+     },
+     "successful_calls": 4,
+     "terminal_status": "failed",
+     "total_wall_seconds": "<clock>",
+     "validated_files": 0,
+     "validation_invalidations": 0,
+     "validators": {
+      "by_kind": {
+       "compile": 4
+      },
+      "invocations": 4,
+      "wall_seconds": "<clock>"
+     }
+    },
+    "last_failure": {
+     "message": {
+      "chars": 63,
+      "text": "sha256:498d71f4dc59cc17"
+     },
+     "raw_output": {
+      "chars": 42,
+      "text": "sha256:4c5fd343e85e6f46"
+     },
+     "type": "compile"
+    },
+    "lsp_warning": null,
+    "no_progress_reason": "RETRY_NO_PROGRESS_EXHAUSTED",
+    "overall_attempt_passed": false,
+    "plan": {
+     "chars": 15,
+     "text": "sha256:fc080ea7506657a2"
+    },
+    "plan_scope_conflict": null,
+    "quality_gates_passed": false,
+    "requirements": {
+     "digest": "fa33368f735ceabf231dc4a3ff814c986cf58c17c883dad894d94befc4267ee8",
+     "evidence": {},
+     "goal_digest": "7492a2adf814d645cc177c34cdd6243fe50019842e654be6f5cb7489be89eb7b",
+     "outcomes": {
+      "REQ-1": "pending"
+     },
+     "requirements": [
+      {
+       "id": "REQ-1",
+       "kind": "requirement",
+       "ordinal": 1,
+       "source": "goal",
+       "text": {
+        "chars": 52,
+        "text": "sha256:0f3c92131d8b5897"
+       }
+      }
+     ],
+     "verdicts": {
+      "REQ-1": {
+       "detail": "",
+       "evidence_class": null,
+       "evidence_id": null,
+       "model_outcome": "pending",
+       "outcome": "pending",
+       "reason_code": "NOT_YET_VERIFIED",
+       "revision": 0,
+       "source": "requirements.derive_requirements",
+       "verifier": {}
+      }
+     },
+     "version": 1
+    },
+    "retry_progress": {
+     "classification": "REPEATED_VECTOR",
+     "consecutive_no_progress_attempts": 3,
+     "distinct_vectors": 2,
+     "last_vector_digest": "<vdigest>",
+     "no_progress_terminated": true,
+     "sampling_resamples": 2,
+     "terminal_reason": "RETRY_NO_PROGRESS_EXHAUSTED"
+    },
+    "review": {
+     "chars": 322,
+     "text": "sha256:6821a77f755aefac"
+    },
+    "review_included_in_approval": false,
+    "run_id": "<run:2>",
+    "skill_staleness_warnings": null,
+    "static_analysis": {
+     "accepted_risk": false,
+     "banner": {
+      "chars": 58,
+      "text": "sha256:211848915218d44c"
+     },
+     "coverage": null,
+     "evidence_digest": "eff54be508cf0a561e30563264cdfb34206a0b54f037d0ccaf45d2d2a21a6c18",
+     "evidence_path": null,
+     "outcome": "DISABLED",
+     "permits_commit": true,
+     "provider": null,
+     "reason_codes": [
+      "STATIC_ANALYSIS_NOT_CONFIGURED"
+     ],
+     "requirement": "optional",
+     "summary": null,
+     "waiver_ids": []
+    },
+    "terminal_regression_passed": false,
+    "toolchain_warning": null,
+    "unchanged_files": [],
+    "unresolved_skill_gaps": null,
+    "verification_results": [],
+    "workspace_commit_failure": null
+   }
+  },
+  "route": {
+   "current_risk_class": 1,
+   "deterministic_signals": {
+    "creation_language": false,
+    "dependency_graph_available": false,
+    "dependency_terms": false,
+    "enhancement_language": false,
+    "known_files_count": 0,
+    "migration_language": false,
+    "multi_part_structure": false,
+    "repo_appears_empty": false,
+    "repro_shape": false,
+    "scope_language": "none",
+    "security_terms": false
+   },
+   "execution_weight": "light",
+   "impact": {
+    "build_system_change": false,
+    "configuration_change": false,
+    "dependency_change": false,
+    "downstream_references": 0,
+    "files_touched": 0,
+    "persistence_change": false,
+    "public_contract_change": false,
+    "security_boundary_change": false,
+    "shared_entrypoint_change": false,
+    "symbols_impacted": 0
+   },
+   "initial_execution_weight": "light",
+   "initial_impact": {
+    "build_system_change": false,
+    "configuration_change": false,
+    "dependency_change": false,
+    "downstream_references": 0,
+    "files_touched": 0,
+    "persistence_change": false,
+    "public_contract_change": false,
+    "security_boundary_change": false,
+    "shared_entrypoint_change": false,
+    "symbols_impacted": 0
+   },
+   "initial_risk_class": 1,
+   "kind": "task",
+   "max_observed_risk_class": 1,
+   "reason_codes": [
+    "no_signals_fired_defaulted_to_task"
+   ],
+   "router_confidence": null,
+   "router_used": false
+  },
+  "run_id": "<run:1>",
+  "subtask_results": [],
+  "type": "WorkflowResult",
+  "verification_report": null
+ },
+ "run_events": [
+  {
+   "events": [
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:63bec0eabfbb8010",
+     "kind": "egress.authority",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:dcb4d47ac26afa2c",
+     "kind": "evidence.attempt_store",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:7d651dc9bf442516",
+     "kind": "model.runtime",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:ce2159ab4ad8660b",
+     "kind": "model.role_independence",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:a18a7b57c698f386",
+     "kind": "requirement.derived",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:89844e8375dd5fea",
+     "kind": "verification_contract.compiled",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "authoritative",
+     "details": "sha256:857f7c253ea81b16",
+     "kind": "verification_contract.sealed",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:20022ff3adcc229f",
+     "kind": "requirement.lineage",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:8e7824dea38fb59b",
+     "kind": "requirement.lineage",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:baa6ff663d0dc636",
+     "kind": "validation_baseline.policy",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 1,
+     "authority": "advisory",
+     "details": "sha256:ba20d088849fcde5",
+     "kind": "attempt.started",
+     "source": "workflow"
+    },
+    {
+     "attempt": 1,
+     "authority": "advisory",
+     "details": "sha256:6534c2dfc92c585f",
+     "kind": "context.retry_target_source",
+     "source": "attempt._prepare_retry_context"
+    },
+    {
+     "attempt": 1,
+     "authority": "advisory",
+     "details": "sha256:b3c1240d63a530c8",
+     "kind": "retry.progress_decision",
+     "source": "attempt._prepare_retry_context"
+    },
+    {
+     "attempt": 1,
+     "authority": "advisory",
+     "details": "sha256:c10212f9047d6ab6",
+     "kind": "context.known_target_package",
+     "source": "attempt.run_attempt"
+    },
+    {
+     "attempt": 1,
+     "authority": "advisory",
+     "details": "sha256:d35b276864f04274",
+     "kind": "model.transition",
+     "source": "attempt._run_developer_generation"
+    },
+    {
+     "attempt": 1,
+     "authority": "advisory",
+     "details": "sha256:1a0f361a1ec74ad2",
+     "kind": "context.edit_capability",
+     "source": "attempt._decide_edit_capabilities"
+    },
+    {
+     "attempt": 1,
+     "authority": "advisory",
+     "details": "sha256:c34b420dd8f0f833",
+     "kind": "developer.prompt_composition",
+     "source": "developer"
+    },
+    {
+     "attempt": 1,
+     "authority": "advisory",
+     "details": "sha256:769f62f9b070f071",
+     "kind": "generation.completed",
+     "source": "developer"
+    },
+    {
+     "attempt": 1,
+     "authority": "authoritative",
+     "details": "sha256:aad9ec87dc5e8cdf",
+     "kind": "static_analysis.result",
+     "source": "static_analysis_gate"
+    },
+    {
+     "attempt": 1,
+     "authority": "authoritative",
+     "details": "sha256:f61de9a5363040ee",
+     "kind": "approval.decision",
+     "source": "workflow.approval_gate"
+    },
+    {
+     "attempt": 1,
+     "authority": "authoritative",
+     "details": "sha256:21598a7b9e42ea2a",
+     "kind": "failure.recorded",
+     "source": "quality_gate"
+    },
+    {
+     "attempt": 1,
+     "authority": "authoritative",
+     "details": "sha256:7066fc3955ec2dd7",
+     "kind": "attempt.failed",
+     "source": "workflow"
+    },
+    {
+     "attempt": 1,
+     "authority": "advisory",
+     "details": "sha256:20cfb754d731509a",
+     "kind": "retry.progress_vector",
+     "source": "retry_strategy.record_workspace_progress"
+    },
+    {
+     "attempt": 2,
+     "authority": "advisory",
+     "details": "sha256:ba20d088849fcde5",
+     "kind": "attempt.started",
+     "source": "workflow"
+    },
+    {
+     "attempt": 2,
+     "authority": "advisory",
+     "details": "sha256:6534c2dfc92c585f",
+     "kind": "context.retry_target_source",
+     "source": "attempt._prepare_retry_context"
+    },
+    {
+     "attempt": 2,
+     "authority": "advisory",
+     "details": "sha256:b3c1240d63a530c8",
+     "kind": "retry.progress_decision",
+     "source": "attempt._prepare_retry_context"
+    },
+    {
+     "attempt": 2,
+     "authority": "advisory",
+     "details": "sha256:714a95fcd6e8eab8",
+     "kind": "context.edit_capability",
+     "source": "attempt._decide_edit_capabilities"
+    },
+    {
+     "attempt": 2,
+     "authority": "advisory",
+     "details": "sha256:181f16eda04777c0",
+     "kind": "developer.prompt_composition",
+     "source": "developer"
+    },
+    {
+     "attempt": 2,
+     "authority": "advisory",
+     "details": "sha256:769f62f9b070f071",
+     "kind": "generation.completed",
+     "source": "developer"
+    },
+    {
+     "attempt": 2,
+     "authority": "authoritative",
+     "details": "sha256:aad9ec87dc5e8cdf",
+     "kind": "static_analysis.result",
+     "source": "static_analysis_gate"
+    },
+    {
+     "attempt": 2,
+     "authority": "authoritative",
+     "details": "sha256:f61de9a5363040ee",
+     "kind": "approval.decision",
+     "source": "workflow.approval_gate"
+    },
+    {
+     "attempt": 2,
+     "authority": "authoritative",
+     "details": "sha256:21598a7b9e42ea2a",
+     "kind": "failure.recorded",
+     "source": "quality_gate"
+    },
+    {
+     "attempt": 2,
+     "authority": "authoritative",
+     "details": "sha256:7066fc3955ec2dd7",
+     "kind": "attempt.failed",
+     "source": "workflow"
+    },
+    {
+     "attempt": 2,
+     "authority": "advisory",
+     "details": "sha256:2843cc357f244586",
+     "kind": "retry.progress_vector",
+     "source": "retry_strategy.record_workspace_progress"
+    },
+    {
+     "attempt": 3,
+     "authority": "advisory",
+     "details": "sha256:ba20d088849fcde5",
+     "kind": "attempt.started",
+     "source": "workflow"
+    },
+    {
+     "attempt": 3,
+     "authority": "advisory",
+     "details": "sha256:6534c2dfc92c585f",
+     "kind": "context.retry_target_source",
+     "source": "attempt._prepare_retry_context"
+    },
+    {
+     "attempt": 3,
+     "authority": "advisory",
+     "details": "sha256:bd9e21453131d991",
+     "kind": "retry.sampling_resample",
+     "source": "attempt._prepare_retry_context"
+    },
+    {
+     "attempt": 3,
+     "authority": "advisory",
+     "details": "sha256:f19b4a9aca329170",
+     "kind": "retry.progress_decision",
+     "source": "attempt._prepare_retry_context"
+    },
+    {
+     "attempt": 3,
+     "authority": "advisory",
+     "details": "sha256:714a95fcd6e8eab8",
+     "kind": "context.edit_capability",
+     "source": "attempt._decide_edit_capabilities"
+    },
+    {
+     "attempt": 3,
+     "authority": "advisory",
+     "details": "sha256:181f16eda04777c0",
+     "kind": "developer.prompt_composition",
+     "source": "developer"
+    },
+    {
+     "attempt": 3,
+     "authority": "advisory",
+     "details": "sha256:769f62f9b070f071",
+     "kind": "generation.completed",
+     "source": "developer"
+    },
+    {
+     "attempt": 3,
+     "authority": "authoritative",
+     "details": "sha256:aad9ec87dc5e8cdf",
+     "kind": "static_analysis.result",
+     "source": "static_analysis_gate"
+    },
+    {
+     "attempt": 3,
+     "authority": "authoritative",
+     "details": "sha256:f61de9a5363040ee",
+     "kind": "approval.decision",
+     "source": "workflow.approval_gate"
+    },
+    {
+     "attempt": 3,
+     "authority": "authoritative",
+     "details": "sha256:21598a7b9e42ea2a",
+     "kind": "failure.recorded",
+     "source": "quality_gate"
+    },
+    {
+     "attempt": 3,
+     "authority": "authoritative",
+     "details": "sha256:7066fc3955ec2dd7",
+     "kind": "attempt.failed",
+     "source": "workflow"
+    },
+    {
+     "attempt": 3,
+     "authority": "advisory",
+     "details": "sha256:69d408ea5b12f186",
+     "kind": "retry.progress_vector",
+     "source": "retry_strategy.record_workspace_progress"
+    },
+    {
+     "attempt": 3,
+     "authority": "advisory",
+     "details": "sha256:1cc3e7925f10c901",
+     "kind": "retry.strategy_transition",
+     "source": "retry_strategy.handle_attempt_failure"
+    },
+    {
+     "attempt": 4,
+     "authority": "advisory",
+     "details": "sha256:ba20d088849fcde5",
+     "kind": "attempt.started",
+     "source": "workflow"
+    },
+    {
+     "attempt": 4,
+     "authority": "advisory",
+     "details": "sha256:6534c2dfc92c585f",
+     "kind": "context.retry_target_source",
+     "source": "attempt._prepare_retry_context"
+    },
+    {
+     "attempt": 4,
+     "authority": "advisory",
+     "details": "sha256:74cb1ff6fe58594a",
+     "kind": "retry.sampling_resample",
+     "source": "attempt._prepare_retry_context"
+    },
+    {
+     "attempt": 4,
+     "authority": "advisory",
+     "details": "sha256:f19b4a9aca329170",
+     "kind": "retry.progress_decision",
+     "source": "attempt._prepare_retry_context"
+    },
+    {
+     "attempt": 4,
+     "authority": "advisory",
+     "details": "sha256:714a95fcd6e8eab8",
+     "kind": "context.edit_capability",
+     "source": "attempt._decide_edit_capabilities"
+    },
+    {
+     "attempt": 4,
+     "authority": "advisory",
+     "details": "sha256:181f16eda04777c0",
+     "kind": "developer.prompt_composition",
+     "source": "developer"
+    },
+    {
+     "attempt": 4,
+     "authority": "advisory",
+     "details": "sha256:769f62f9b070f071",
+     "kind": "generation.completed",
+     "source": "developer"
+    },
+    {
+     "attempt": 4,
+     "authority": "authoritative",
+     "details": "sha256:aad9ec87dc5e8cdf",
+     "kind": "static_analysis.result",
+     "source": "static_analysis_gate"
+    },
+    {
+     "attempt": 4,
+     "authority": "authoritative",
+     "details": "sha256:f61de9a5363040ee",
+     "kind": "approval.decision",
+     "source": "workflow.approval_gate"
+    },
+    {
+     "attempt": 4,
+     "authority": "authoritative",
+     "details": "sha256:21598a7b9e42ea2a",
+     "kind": "failure.recorded",
+     "source": "quality_gate"
+    },
+    {
+     "attempt": 4,
+     "authority": "authoritative",
+     "details": "sha256:7066fc3955ec2dd7",
+     "kind": "attempt.failed",
+     "source": "workflow"
+    },
+    {
+     "attempt": 4,
+     "authority": "advisory",
+     "details": "sha256:381fdcb19efc8105",
+     "kind": "retry.progress_vector",
+     "source": "retry_strategy.record_workspace_progress"
+    },
+    {
+     "attempt": 4,
+     "authority": "advisory",
+     "details": "sha256:e9439a0ee6a12393",
+     "kind": "retry.no_progress_terminal",
+     "source": "retry_strategy.record_workspace_progress"
+    },
+    {
+     "attempt": 4,
+     "authority": "auxiliary",
+     "details": "sha256:7ef4fe30be22e841",
+     "kind": "model.role_metrics",
+     "source": "workflow"
+    }
+   ],
+   "run": "<trace:1>",
+   "status": "failure"
+  }
+ ],
+ "run_records": [
+  {
+   "active_work_unit": null,
+   "approved_plan_hash": null,
+   "base_source_revision": "8cbaf223b56502224788ff90b18262130ca53ebc",
+   "base_tree_hash": "9805afc31ed2dc0dd48bd9cf8eb585340b2f0b28",
+   "candidate_hash": null,
+   "commit_intent": null,
+   "commit_result": "NOT_COMMITTED",
+   "commit_transaction_id": null,
+   "commits": [],
+   "created_at": "<clock>",
+   "effective_config_fingerprint": "53e0f6b7069ef494fe5540994152fa17bf3da6743a6528759e11a18a56bf9f08",
+   "execution_plan": {
+    "commit_strategy": "incremental_work_unit",
+    "fingerprint": "4e1f0d6216887b277a2ea6a9dd288f5ed4cbfdf950ea32d497f1042c2b806596",
+    "plan_id": "<run:1>",
+    "provenance": {},
+    "schema": 1,
+    "source_kind": "direct",
+    "terminal_phases": [],
+    "work_units": [
+     {
+      "acceptance_criteria": [],
+      "consumes": [],
+      "definition_digest": "0f3c92131d8b5897a3682f7534bdf1adb583e55e2eb989b06ceda5a1ada06d46",
+      "depends_on": [],
+      "goal": "Add a function mul(a, b) returning a * b to calc.py.",
+      "id": "direct",
+      "obligation_refs": [],
+      "provenance": {},
+      "provides": [],
+      "role": "primary",
+      "verification_requirements": []
+     }
+    ]
+   },
+   "goal_hash": "0f3c92131d8b5897a3682f7534bdf1adb583e55e2eb989b06ceda5a1ada06d46",
+   "lifecycle_state": "FAILURE",
+   "milestone_reuse": null,
+   "model_runtime_fingerprint_ids": [],
+   "obligation_ledger_hash": null,
+   "obligation_ledger_revision": null,
+   "recovery": null,
+   "resume_decision": null,
+   "retry_counters": {},
+   "retry_state_reference": null,
+   "revision": 11,
+   "run_id": "<run:1>",
+   "schema_version": 3,
+   "terminal_status": "FAILURE",
+   "updated_at": "<time>",
+   "verification_evidence_ids": [],
+   "work_unit_states": {
+    "direct": {
+     "blocked_by": [],
+     "reason_codes": [
+      "WORK_UNIT_FAILED",
+      "STATUS:failed"
+     ],
+     "status": "FAILED",
+     "work_unit_id": "direct"
+    }
+   },
+   "workspace_identity": "<workspace_id:1>"
+  }
+ ]
+}

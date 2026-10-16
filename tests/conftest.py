@@ -182,6 +182,8 @@ STATE_MACHINE_TIER_FILES = frozenset({
     "test_prd032_chaos_static_analysis.py", "test_prd031a_static_analysis.py",
     # process lifecycle feeding workflow decisions
     "test_platform_process_control_contract.py", "test_prd032_chaos_runtime.py",
+    # kernel seams: patched names and their call-through (full modularization E1; the W4 per-slice gate)
+    "test_kernel_seams.py",
 })
 
 
@@ -209,7 +211,7 @@ MODULE_TIER_FILES = {
         "test_fs1c0_named_test_oracle.py", "test_fs1c1_requirement_claims.py",
         "test_fs1c_named_test_oracle_dependency.py", "test_generation_time_budget.py",
         "test_gr0_retry_no_information_gain.py", "test_greenfield_direct_plan_runtime.py",
-        "test_jdtls_candidate_isolation.py", "test_kup_evidence_corruption_matrix.py",
+        "test_jdtls_candidate_isolation.py", "test_kernel_seams.py", "test_kup_evidence_corruption_matrix.py",
         "test_launch_refuses_milestone_mode.py", "test_live_prd017_019_model_roles.py",
         "test_lr_r1_m1_attempt_iteration.py", "test_lr_r1_m1_candidate_gates.py", "test_lr_r1_m1_recovery.py",
         "test_lr_r1_p4_verification_only_retry_reproducer.py", "test_lr_r1_p4_verification_retry_admission.py",

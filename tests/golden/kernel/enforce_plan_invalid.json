@@ -1,0 +1,458 @@
+{
+ "_scenario": {
+  "doc": "",
+  "generated_from": "4eaf610",
+  "name": "enforce_plan_invalid",
+  "normalized": "run ids, uuid/transaction ids, ISO times, tmp/state/workspace paths and workspace identity, trace row ids -> first-appearance tokens; CLOCK_KEYS -> <clock>; timing-derived digests (VOLATILE_DIGEST_KEYS, progress vector, junit file, prompt segments) -> <vdigest>; pytest and junit gate output reduced to collected/outcome/FAILED lines; free text -> digests",
+  "terminal_path": "plan invalid: PLANNING_ERROR after structured plan repair exhausted"
+ },
+ "evidence": [
+  {
+   "records": [
+    {
+     "attempt": null,
+     "kind": "run.opened",
+     "payload": "sha256:c4804dc4085fc0b5",
+     "payload_keys": [
+      "base_revision",
+      "base_tree_hash",
+      "kriya_build",
+      "workspace_identity",
+      "workspace_path"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
+     "content": {
+      "decision": "sha256:e73e54ed9631f973"
+     },
+     "kind": "mirror.decision",
+     "payload": "sha256:d884ac82794bb30b",
+     "payload_keys": [
+      "type"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
+     "content": {
+      "decision": "sha256:8a974c9aa5e08317"
+     },
+     "kind": "mirror.decision",
+     "payload": "sha256:aa6b5d0358feec1f",
+     "payload_keys": [
+      "type"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
+     "content": {
+      "decision": "sha256:d60f4bbab608acf2"
+     },
+     "kind": "mirror.decision",
+     "payload": "sha256:f6f2bb762d5ad001",
+     "payload_keys": [
+      "type"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
+     "content": {
+      "decision": "sha256:ce32ffdf05c4439e"
+     },
+     "kind": "mirror.decision",
+     "payload": "sha256:d884ac82794bb30b",
+     "payload_keys": [
+      "type"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
+     "content": {
+      "decision": "sha256:1fe51673779158f3"
+     },
+     "kind": "mirror.decision",
+     "payload": "sha256:aa6b5d0358feec1f",
+     "payload_keys": [
+      "type"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
+     "content": {
+      "decision": "sha256:5fadbb66f893844b"
+     },
+     "kind": "mirror.decision",
+     "payload": "sha256:f6f2bb762d5ad001",
+     "payload_keys": [
+      "type"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
+     "content": {
+      "decision": "sha256:52cc0057766806f0"
+     },
+     "kind": "mirror.decision",
+     "payload": "sha256:d884ac82794bb30b",
+     "payload_keys": [
+      "type"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
+     "content": {
+      "decision": "sha256:11606dafbe14c252"
+     },
+     "kind": "mirror.decision",
+     "payload": "sha256:aa6b5d0358feec1f",
+     "payload_keys": [
+      "type"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:1ff7edd9746ccfe1"
+     },
+     "event": "planning.failed",
+     "kind": "mirror.event",
+     "payload": "sha256:c8e8ae727d50d513",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:16e9b5103c0ed807"
+     },
+     "event": "model.role_metrics",
+     "kind": "mirror.event",
+     "payload": "sha256:d38a7bfa95dc54fa",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
+     "kind": "run.closed",
+     "payload": "sha256:2375e7b20716498d",
+     "payload_keys": [
+      "commit_result",
+      "lifecycle_state",
+      "model_calls",
+      "record_revision",
+      "terminal_status",
+      "unit_invocations"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": null
+    }
+   ],
+   "run": "<run:1>",
+   "sealed": true,
+   "verification": "VERIFIED"
+  }
+ ],
+ "extra": {
+  "approvals": [],
+  "event_kinds": [],
+  "gate_outcome_types": []
+ },
+ "result": {
+  "control_state": {
+   "acceptance_approval_digest": null,
+   "base_commit": null,
+   "created_at": "<clock>",
+   "current_artifact_registry_hash": null,
+   "current_contract_hash": null,
+   "current_milestone_id": null,
+   "current_plan_hash": null,
+   "engineering_route": {
+    "current_risk_class": 1,
+    "deterministic_signals": {
+     "creation_language": false,
+     "dependency_graph_available": false,
+     "dependency_terms": false,
+     "enhancement_language": false,
+     "known_files_count": 0,
+     "migration_language": false,
+     "multi_part_structure": false,
+     "repo_appears_empty": false,
+     "repro_shape": false,
+     "scope_language": "none",
+     "security_terms": false
+    },
+    "execution_weight": "light",
+    "impact": {
+     "build_system_change": false,
+     "configuration_change": false,
+     "dependency_change": false,
+     "downstream_references": 0,
+     "files_touched": 0,
+     "persistence_change": false,
+     "public_contract_change": false,
+     "security_boundary_change": false,
+     "shared_entrypoint_change": false,
+     "symbols_impacted": 0
+    },
+    "initial_execution_weight": "light",
+    "initial_impact": {
+     "build_system_change": false,
+     "configuration_change": false,
+     "dependency_change": false,
+     "downstream_references": 0,
+     "files_touched": 0,
+     "persistence_change": false,
+     "public_contract_change": false,
+     "security_boundary_change": false,
+     "shared_entrypoint_change": false,
+     "symbols_impacted": 0
+    },
+    "initial_risk_class": 1,
+    "kind": "task",
+    "max_observed_risk_class": 1,
+    "reason_codes": [
+     "no_signals_fired_defaulted_to_task"
+    ],
+    "router_confidence": null,
+    "router_used": false
+   },
+   "last_verified_checkpoint": null,
+   "milestone_group_id": null,
+   "milestone_states": {},
+   "patch_hash": null,
+   "process_profile": {
+    "auto_merge_allowed": true,
+    "context_depth": "narrow",
+    "contract_analysis_required": false,
+    "execution_weight": "light",
+    "full_test_suite_required": false,
+    "human_review_required": false,
+    "impact_revalidation_required": false,
+    "planning_required": false,
+    "structured_subtasks_required": false,
+    "verification_tier": "light"
+   },
+   "requirement_contract_digest": null,
+   "run_id": "<run:1>",
+   "schema_version": 1,
+   "subtask_completion_scope": null,
+   "subtask_states": {},
+   "subtask_written_files": {},
+   "tree_hash": null,
+   "updated_at": "<time>",
+   "verification_contract_digest": null,
+   "workspace_content_hash": null
+  },
+  "decisions": [],
+  "fields": [
+   "run_id",
+   "control_state",
+   "route",
+   "legacy_result",
+   "subtask_results",
+   "decisions",
+   "verification_report"
+  ],
+  "legacy_result": {
+   "keys": [
+    "error",
+    "failure_type",
+    "files",
+    "invalid_subtask_ids",
+    "plan_repair_attempts",
+    "quality_gates_passed",
+    "reason_codes",
+    "recovery",
+    "run_id",
+    "status"
+   ],
+   "values": {
+    "error": {
+     "chars": 65,
+     "text": "sha256:d1c618358aaea37d"
+    },
+    "failure_type": "PLANNING_ERROR",
+    "files": [],
+    "invalid_subtask_ids": [],
+    "plan_repair_attempts": 2,
+    "quality_gates_passed": false,
+    "reason_codes": [
+     "SUBTASK_DEPENDS_ON_UNKNOWN_ID",
+     "STRUCTURED_PLAN_REPAIR_EXHAUSTED",
+     "PLAN_REPAIR_NON_CONVERGENCE"
+    ],
+    "recovery": "PLAN_REPAIR",
+    "run_id": "<run:1>",
+    "status": "needs_review"
+   }
+  },
+  "route": {
+   "current_risk_class": 1,
+   "deterministic_signals": {
+    "creation_language": false,
+    "dependency_graph_available": false,
+    "dependency_terms": false,
+    "enhancement_language": false,
+    "known_files_count": 0,
+    "migration_language": false,
+    "multi_part_structure": false,
+    "repo_appears_empty": false,
+    "repro_shape": false,
+    "scope_language": "none",
+    "security_terms": false
+   },
+   "execution_weight": "light",
+   "impact": {
+    "build_system_change": false,
+    "configuration_change": false,
+    "dependency_change": false,
+    "downstream_references": 0,
+    "files_touched": 0,
+    "persistence_change": false,
+    "public_contract_change": false,
+    "security_boundary_change": false,
+    "shared_entrypoint_change": false,
+    "symbols_impacted": 0
+   },
+   "initial_execution_weight": "light",
+   "initial_impact": {
+    "build_system_change": false,
+    "configuration_change": false,
+    "dependency_change": false,
+    "downstream_references": 0,
+    "files_touched": 0,
+    "persistence_change": false,
+    "public_contract_change": false,
+    "security_boundary_change": false,
+    "shared_entrypoint_change": false,
+    "symbols_impacted": 0
+   },
+   "initial_risk_class": 1,
+   "kind": "task",
+   "max_observed_risk_class": 1,
+   "reason_codes": [
+    "no_signals_fired_defaulted_to_task"
+   ],
+   "router_confidence": null,
+   "router_used": false
+  },
+  "run_id": "<run:1>",
+  "subtask_results": [],
+  "type": "WorkflowResult",
+  "verification_report": null
+ },
+ "run_events": [
+  {
+   "events": [
+    {
+     "attempt": 0,
+     "authority": "authoritative",
+     "details": "sha256:65587dde84383dfd",
+     "kind": "planning.failed",
+     "source": "workflow_controller.enforce"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:2663cfe1a0c31959",
+     "kind": "model.role_metrics",
+     "source": "workflow_controller.enforce"
+    }
+   ],
+   "run": "<trace:1>",
+   "status": "needs_review"
+  }
+ ],
+ "run_records": [
+  {
+   "active_work_unit": null,
+   "approved_plan_hash": null,
+   "base_source_revision": "9feb8d6e4a285cf42532663f0e23150071dbba90",
+   "base_tree_hash": "58afe713a64fc71c931ecc8118b8a5a04e632b98",
+   "candidate_hash": null,
+   "commit_intent": null,
+   "commit_result": "NOT_COMMITTED",
+   "commit_transaction_id": null,
+   "commits": [],
+   "created_at": "<clock>",
+   "effective_config_fingerprint": "<vdigest>",
+   "execution_plan": null,
+   "goal_hash": "f4791ae625dcc414ffb22c371a51e7705688559d65ba91df483700c9f4c8bc75",
+   "lifecycle_state": "FAILURE",
+   "milestone_reuse": null,
+   "model_runtime_fingerprint_ids": [],
+   "obligation_ledger_hash": null,
+   "obligation_ledger_revision": null,
+   "recovery": null,
+   "resume_decision": null,
+   "retry_counters": {},
+   "retry_state_reference": null,
+   "revision": 4,
+   "run_id": "<run:1>",
+   "schema_version": 3,
+   "terminal_status": "FAILURE",
+   "updated_at": "<time>",
+   "verification_evidence_ids": [],
+   "work_unit_states": null,
+   "workspace_identity": "<workspace_id:1>"
+  }
+ ]
+}
