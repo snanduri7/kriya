@@ -1,0 +1,108 @@
+Looking at the error message and the code, I can see the issue clearly. The `ProtocolParser.java` file is trying to access private fields of the `Protocol` class directly, but those fields are private. The parser needs to use getters to access these fields.
+
+Let me analyze the current `ProtocolParser.java`:
+
+1. Line 10: `buffer.put((byte) protocol.protocolVersion);` - trying to access private field
+2. Line 11: `buffer.put((byte) protocol.softwareVersion);` - trying to access private field  
+3. Line 12: `buffer.putInt(protocol.dataLength);` - trying to access private field
+4. Line 13: `buffer.putLong(protocol.time);` - trying to access private field
+5. Line 18: `buffer.get(body);` - trying to access private field
+
+The solution is to use the getter methods instead of direct field access.
+
+<<<KRIYA:EDIT path="src/main/java/com/example/protocol/ProtocolParser.java">>>
+<<<KRIYA:SEARCH>>>
+package com.example.protocol;
+
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+
+public class ProtocolParser {
+    
+    public byte[] encode(Protocol protocol) {
+        // Create a buffer with enough space for the 9-byte header + body
+        int totalLength = 9 + protocol.body.length;
+        ByteBuffer buffer = ByteBuffer.allocate(totalLength);
+        buffer.order(ByteOrder.BIG_ENDIAN);
+        
+        // Encode header fields
+        buffer.put((byte) protocol.protocolVersion);
+        buffer.put((byte) protocol.softwareVersion);
+        buffer.putInt(protocol.dataLength);
+        buffer.putLong(protocol.time);
+        
+        // Encode body
+        buffer.put(protocol.body);
+        
+        return buffer.array();
+    }
+    
+    public Protocol decode(byte[] data) {
+        if (data == null || data.length < 9) {
+            throw new IllegalArgumentException("Data must be at least 9 bytes long for header");
+        }
+        
+        ByteBuffer buffer = ByteBuffer.wrap(data);
+        buffer.order(ByteOrder.BIG_ENDIAN);
+        
+        // Decode header fields
+        int protocolVersion = buffer.get() & 0xFF; // unsigned byte
+        int softwareVersion = buffer.get() & 0xFF; // unsigned byte
+        int dataLength = buffer.getInt();
+        long time = buffer.getLong();
+        
+        // Extract body (remaining bytes)
+        byte[] body = new byte[data.length - 9];
+        buffer.get(body);
+        
+        return new Protocol(protocolVersion, softwareVersion, dataLength, time, body);
+    }
+}
+<<<KRIYA:REPLACE>>>
+package com.example.protocol;
+
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+
+public class ProtocolParser {
+    
+    public byte[] encode(Protocol protocol) {
+        // Create a buffer with enough space for the 9-byte header + body
+        int totalLength = 9 + protocol.getBody().length;
+        ByteBuffer buffer = ByteBuffer.allocate(totalLength);
+        buffer.order(ByteOrder.BIG_ENDIAN);
+        
+        // Encode header fields
+        buffer.put((byte) protocol.getProtocolVersion());
+        buffer.put((byte) protocol.getSoftwareVersion());
+        buffer.putInt(protocol.getDataLength());
+        buffer.putLong(protocol.getTime());
+        
+        // Encode body
+        buffer.put(protocol.getBody());
+        
+        return buffer.array();
+    }
+    
+    public Protocol decode(byte[] data) {
+        if (data == null || data.length < 9) {
+            throw new IllegalArgumentException("Data must be at least 9 bytes long for header");
+        }
+        
+        ByteBuffer buffer = ByteBuffer.wrap(data);
+        buffer.order(ByteOrder.BIG_ENDIAN);
+        
+        // Decode header fields
+        int protocolVersion = buffer.get() & 0xFF; // unsigned byte
+        int softwareVersion = buffer.get() & 0xFF; // unsigned byte
+        int dataLength = buffer.getInt();
+        long time = buffer.getLong();
+        
+        // Extract body (remaining bytes)
+        byte[] body = new byte[data.length - 9];
+        buffer.get(body);
+        
+        return new Protocol(protocolVersion, softwareVersion, dataLength, time, body);
+    }
+}
+<<<KRIYA:END_EDIT>>>

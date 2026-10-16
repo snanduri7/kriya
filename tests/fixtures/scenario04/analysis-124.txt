@@ -1,0 +1,3 @@
+The error indicates that `ProtocolParser.java` cannot access the private fields of the `Protocol` class. The issue is in `ProtocolParser.java` where it tries to directly access `protocol.protocolVersion`, `protocol.softwareVersion`, `protocol.dataLength`, `protocol.time`, and `protocol.body` which are all private in `Protocol.java`. To fix this, we need to make these fields accessible to the parser class. However, looking at the existing `Protocol.java` file, it already has public getters for all fields, so we should use those instead of direct field access.
+
+The solution is to modify `ProtocolParser.java` to use the getter methods from `Protocol` class instead of direct field access.

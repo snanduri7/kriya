@@ -424,7 +424,7 @@ MODULE_TIER_FILES = {
         "test_prd032_planner_workspace_path.py", "test_prd032_terminal_commit_stop.py"
     }),
 }
-MODULE_TIER_DIRECTORIES = {"state_machine": "kernel", "architecture": "architecture"}
+MODULE_TIER_DIRECTORIES = {"state_machine": "kernel", "architecture": "architecture", "integration": "integration"}
 _TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 _MODULE_MARKERS_BY_FILE = {}
 for _marker, _names in MODULE_TIER_FILES.items():

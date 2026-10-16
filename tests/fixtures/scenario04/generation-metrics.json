@@ -1,0 +1,131 @@
+{
+ "generation_metrics": {
+  "calls": 4,
+  "duration_seconds": 434.92064362496603,
+  "engineering_route": {
+   "current_risk_class": "HIGH",
+   "deterministic_signals": {
+    "creation_language": false,
+    "dependency_graph_available": false,
+    "dependency_terms": true,
+    "enhancement_language": false,
+    "known_files_count": 0,
+    "migration_language": false,
+    "multi_part_structure": false,
+    "repo_appears_empty": false,
+    "repro_shape": false,
+    "scope_language": "quick",
+    "security_terms": true
+   },
+   "escalated": false,
+   "escalation_stage": "post_architect",
+   "execution_weight": "heavy",
+   "final_execution_weight": "heavy",
+   "impact": {
+    "build_system_change": true,
+    "configuration_change": true,
+    "dependency_change": true,
+    "downstream_references": 0,
+    "files_touched": 4,
+    "persistence_change": false,
+    "public_contract_change": false,
+    "security_boundary_change": false,
+    "shared_entrypoint_change": false,
+    "symbols_impacted": 0
+   },
+   "impact_final": {
+    "build_system_change": true,
+    "configuration_change": true,
+    "dependency_change": true,
+    "downstream_references": 0,
+    "files_touched": 4,
+    "persistence_change": false,
+    "public_contract_change": false,
+    "security_boundary_change": false,
+    "shared_entrypoint_change": false,
+    "symbols_impacted": 0
+   },
+   "impact_initial": {
+    "build_system_change": false,
+    "configuration_change": false,
+    "dependency_change": true,
+    "downstream_references": 0,
+    "files_touched": 0,
+    "persistence_change": false,
+    "public_contract_change": false,
+    "security_boundary_change": true,
+    "shared_entrypoint_change": false,
+    "symbols_impacted": 0
+   },
+   "initial_execution_weight": "heavy",
+   "initial_risk_class": "HIGH",
+   "kind": "task",
+   "max_observed_risk_class": "HIGH",
+   "reason_codes": [
+    "no_signals_fired_defaulted_to_task",
+    "security_boundary_change",
+    "dependency_change",
+    "post_architect:build_system_change",
+    "post_architect:configuration_change",
+    "post_architect:dependency_change"
+   ],
+   "router_confidence": null,
+   "router_used": false
+  },
+  "files_requested": 9,
+  "llm": {
+   "architect_calls": 0,
+   "architect_wall_seconds": 0.0,
+   "calls": 6,
+   "developer_calls": 4,
+   "developer_completion_tokens": 2960,
+   "developer_prompt_tokens": 48086,
+   "developer_tokens_available_for": 4,
+   "developer_wall_seconds": 434.92064362496603,
+   "planner_calls": 0,
+   "planner_wall_seconds": 0.0,
+   "reviewer_calls": 2,
+   "reviewer_wall_seconds": 55.54298937495332,
+   "wall_seconds": 490.46363299991935
+  },
+  "operation_fallbacks": 0,
+  "process_profile": {
+   "auto_merge_allowed": false,
+   "context_depth": "impact_wide",
+   "contract_analysis_required": false,
+   "execution_weight": "heavy",
+   "full_test_suite_required": true,
+   "heavy_extended_checks_not_yet_available": true,
+   "human_review_required": true,
+   "impact_revalidation_required": true,
+   "planning_required": true,
+   "structured_subtasks_required": false,
+   "verification_tier": "heavy"
+  },
+  "retry": {
+   "attempts_by_mode": {
+    "fallback_targeted": 1,
+    "full_set": 1,
+    "targeted": 3
+   },
+   "baseline_replay_count": 0,
+   "candidate_independent_diagnostic_invocations": 4,
+   "full_set_attempts": 1,
+   "targeted_attempts": 3,
+   "unrecoverable_scope_denials": 0
+  },
+  "successful_calls": 4,
+  "terminal_status": "environment_failure",
+  "total_wall_seconds": 653.4328224579804,
+  "validated_files": 0,
+  "validation_invalidations": 0,
+  "validators": {
+   "by_kind": {
+    "compile": 1
+   },
+   "invocations": 1,
+   "wall_seconds": 1.9493637080304325
+  }
+ },
+ "run_id": "69ec71fc"
+}

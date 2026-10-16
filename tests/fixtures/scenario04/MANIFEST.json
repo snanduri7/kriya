@@ -1,0 +1,126 @@
+{
+ "evidence_dir": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04",
+ "files": {
+  "analysis-095.txt": {
+   "content_sha256": "7bd4cfa9574cbff151d716e39cdf3b21570162e547e3f90857e203683ee1871f",
+   "copy": "verbatim",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/095-developer.parse-callNone-analysis_model_claimed.txt",
+   "source_sha256": "7bd4cfa9574cbff151d716e39cdf3b21570162e547e3f90857e203683ee1871f"
+  },
+  "analysis-124.txt": {
+   "content_sha256": "82c9401fbb92fa4d665163888793fdb1ae223dcbf4bae90c69d5d4c13e65d892",
+   "copy": "verbatim",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/124-developer.parse-callNone-analysis_model_claimed.txt",
+   "source_sha256": "82c9401fbb92fa4d665163888793fdb1ae223dcbf4bae90c69d5d4c13e65d892"
+  },
+  "analysis-130.txt": {
+   "content_sha256": "c1d8d038e9e76acb7f121ded55d0fd41b96b115542d76052b91f68c189b265a4",
+   "copy": "verbatim",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/130-developer.parse-callNone-analysis_model_claimed.txt",
+   "source_sha256": "c1d8d038e9e76acb7f121ded55d0fd41b96b115542d76052b91f68c189b265a4"
+  },
+  "analysis-161.txt": {
+   "content_sha256": "724dcc570887b46ce2d031c7372c1b883bfc2315756a2f2bee41ce44b983b093",
+   "copy": "verbatim",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/161-developer.parse-callNone-analysis_model_claimed.txt",
+   "source_sha256": "724dcc570887b46ce2d031c7372c1b883bfc2315756a2f2bee41ce44b983b093"
+  },
+  "analysis-167.txt": {
+   "content_sha256": "8cba33af851f924007cc4183a124bc79cdece5e08cb5500d31ae247921a46145",
+   "copy": "verbatim",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/167-developer.parse-callNone-analysis_model_claimed.txt",
+   "source_sha256": "8cba33af851f924007cc4183a124bc79cdece5e08cb5500d31ae247921a46145"
+  },
+  "attempt1-Protocol.java": {
+   "content_sha256": "5f57befa8e18b2525ed2bc7753569062eb074c6443995af697c898dccd371165",
+   "copy": "verbatim",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/059-candidate.change-callNone-after.txt",
+   "source_sha256": "5f57befa8e18b2525ed2bc7753569062eb074c6443995af697c898dccd371165"
+  },
+  "attempt1-ProtocolParser.java": {
+   "content_sha256": "f2b199fa272bcf68989ec76db8ddfd9ea821e7d7d9b608d593c74ffa045ebc33",
+   "copy": "verbatim",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/060-candidate.change-callNone-after.txt",
+   "source_sha256": "f2b199fa272bcf68989ec76db8ddfd9ea821e7d7d9b608d593c74ffa045ebc33"
+  },
+  "attempt1-compile-output.txt": {
+   "content_sha256": "de8442ebfc32b5fa10474c64cb048815c607aef6dc67bcb1acd58553ddb8e1aa",
+   "copy": "verbatim",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/071-gate.result-callNone-output.txt",
+   "source_sha256": "de8442ebfc32b5fa10474c64cb048815c607aef6dc67bcb1acd58553ddb8e1aa"
+  },
+  "generation-metrics.json": {
+   "content_sha256": "133f5e48ccfbc0c605b5ad1b69e1d417b3418d9e75ff13d54f746c88707c92f3",
+   "copy": "runs.generation_metrics of row run_id=69ec71fc (the generation run; JSON re-serialized with sorted keys)",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/state/traces.db",
+   "source_sha256": "b74394f2dda01775aed3be78ab4e7c031bb2aa13193a7312aa89d93508e38485"
+  },
+  "kriya-log-lines.txt": {
+   "content_sha256": "74287b7b3a4e84c281b3ad7a486f51264094b327134010254ca7b7836f415a31",
+   "copy": "only the log lines the tests read (budget_timeline.py's patterns, the budget lines, the attempt 2-4 refusal lines), verbatim, original order",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/kriya-log-slice-from-0949.txt",
+   "source_sha256": "be249265a7343632994eb774770e3e53130cf6066cda6734f425114804d85217"
+  },
+  "request-call08-messages.json.gz": {
+   "content_sha256": "05fccbe797f2bc65e160a55411bbabda06edd195e3812a7d750b070a73776e36",
+   "copy": "verbatim, gzip",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/091-model.request-call8-messages.txt",
+   "source_sha256": "05fccbe797f2bc65e160a55411bbabda06edd195e3812a7d750b070a73776e36"
+  },
+  "request-call09-messages.json.gz": {
+   "content_sha256": "654b7ef0c5e526ac4ba3828282c18323417dd0c4d8771875621aa5853f2f196c",
+   "copy": "verbatim, gzip",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/120-model.request-call9-messages.txt",
+   "source_sha256": "654b7ef0c5e526ac4ba3828282c18323417dd0c4d8771875621aa5853f2f196c"
+  },
+  "request-call10-messages.json.gz": {
+   "content_sha256": "2d7211e0e19260fa264e1b9a681d16ad8cc8191eeb231c481f05ba15ad680729",
+   "copy": "verbatim, gzip",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/127-model.request-call10-messages.txt",
+   "source_sha256": "2d7211e0e19260fa264e1b9a681d16ad8cc8191eeb231c481f05ba15ad680729"
+  },
+  "request-call11-messages.json.gz": {
+   "content_sha256": "ef3455747ee2975ef5844e28468cc6c84562b0b5984cbfcf8216f797cd6d6797",
+   "copy": "verbatim, gzip",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/157-model.request-call11-messages.txt",
+   "source_sha256": "ef3455747ee2975ef5844e28468cc6c84562b0b5984cbfcf8216f797cd6d6797"
+  },
+  "request-call12-messages.json.gz": {
+   "content_sha256": "3d4029e27185986e810c50dc82d020590563b2bc5b7b273a4923332c0eaf3988",
+   "copy": "verbatim, gzip",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/164-model.request-call12-messages.txt",
+   "source_sha256": "3d4029e27185986e810c50dc82d020590563b2bc5b7b273a4923332c0eaf3988"
+  },
+  "response-call08.txt": {
+   "content_sha256": "3e6f17f502b61a1690c83cd6704afeefd3a097c22068484b327eb8f85a880e25",
+   "copy": "verbatim",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/093-model.response-call8-content.txt",
+   "source_sha256": "3e6f17f502b61a1690c83cd6704afeefd3a097c22068484b327eb8f85a880e25"
+  },
+  "response-call09.txt": {
+   "content_sha256": "ebbd5583b8ee1b2b16905b80dc1c267e14f5daf672f8a4f0d80b41bc96010dbc",
+   "copy": "verbatim",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/122-model.response-call9-content.txt",
+   "source_sha256": "ebbd5583b8ee1b2b16905b80dc1c267e14f5daf672f8a4f0d80b41bc96010dbc"
+  },
+  "response-call10.txt": {
+   "content_sha256": "27f487d866d6d9ca5f8b53aa75a163fec0bfbb0f9b9e85ef0a644249c42d8d20",
+   "copy": "verbatim",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/128-model.response-call10-content.txt",
+   "source_sha256": "27f487d866d6d9ca5f8b53aa75a163fec0bfbb0f9b9e85ef0a644249c42d8d20"
+  },
+  "response-call11.txt": {
+   "content_sha256": "7cd057c6ae625d4ab483311590f5a41439217d5a1a02fa91b98e19d25d3e645c",
+   "copy": "verbatim",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/159-model.response-call11-content.txt",
+   "source_sha256": "7cd057c6ae625d4ab483311590f5a41439217d5a1a02fa91b98e19d25d3e645c"
+  },
+  "response-call12.txt": {
+   "content_sha256": "0c246cbd84202a05b6c4daac04c79230bb07145b1893e1ea3e3ca85f019a986a",
+   "copy": "verbatim",
+   "source": "handover/SPRING-IGNITE-PROTOCOL/evidence/live-failure-20261016T094912-e7b4804c/scenario-04/extracted/165-model.response-call12-content.txt",
+   "source_sha256": "0c246cbd84202a05b6c4daac04c79230bb07145b1893e1ea3e3ca85f019a986a"
+  }
+ },
+ "run": "20261016T094912-e7b4804c"
+}
