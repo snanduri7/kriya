@@ -126,3 +126,4 @@ Reversed edges out of lower layers:
 6. Provider names: `kriya/workflow` and `kriya/agents` never contain `"ollama"`/`"vllm"`; adding a provider = a new adapter module registered with `register_runtime_adapter` + a `static_analysis`-style tripwire that nothing else changed (I4 proves it with a fake adapter).
 7. `kriya/workflow` never imports `kriya/metrics` (existing tripwire, kept).
 8. Coordinators/services never import the controller/engine facades (existing `test_prd030_terminal_services.py`, `test_prd031_coordinators.py` kept and generalized by `test_patch_points.py`).
+9. (Owner directive 2 #9) An old physical path is acceptable; an old architectural dependency is not. By P1/P2 every forbidden direct import is gone, every facade is removed or carries a written justification in `FACADES` that `test_facades.py` asserts, and architecture tests protect each ownership. Module-level kernel purity is judged by dependencies and state, not by directory layout.

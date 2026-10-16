@@ -292,7 +292,19 @@ class Finding:                             # workflow/finding.py (evolves open_f
     evidence: str; evidence_digest: str; locators: Tuple[Locator, ...]; affected_files: Tuple[str, ...]; unit: Optional[str]
     repair_scope: Tuple[str, ...]; state: FindingState; precedence: EvidenceClass; depends_on: Tuple[FindingId, ...]; first_attempt: int
 @dataclass(frozen=True)
-class AttributionSource: tier: str; evidence_class: EvidenceClass; files: Tuple[str, ...]; confidence: Literal["high","medium","low"]; reasoning: str; exhausted: bool
+class Provenance(str, Enum):               # OWNER DIRECTIVE 2 #5: authority comes from PROVENANCE, never from which optional field is populated
+    DETERMINISTIC_EXACT_LOCATOR = "deterministic_exact_locator"          # file:line from compiler/test/validator output (highest)
+    STRUCTURED_AUTHORITATIVE_FILE_SET = "structured_authoritative_file_set"  # validator/manifest file set (e.g. migration manifest); high
+    STRUCTURAL_DEPENDENCY = "structural_dependency"                      # code_intel symbol/type edge, plan ownership; medium/high by source
+    MODEL_SELF_DIAGNOSIS = "model_self_diagnosis"                        # advisory
+    MODEL_TRIAGE = "model_triage"                                        # advisory/fallback
+# F1 MUST first classify every current producer of failure.authoritative_files into a Provenance (MEASURED from the producers, not
+# assumed from the field name); the conflict rule when both an exact locator and a file set occur is derived from that table and pinned
+# by a regression test built from the real recorded case. A rule such as "authoritative_files > locator" is forbidden unless every producer proves it.
+@dataclass(frozen=True)
+class AttributionSource:                   # callers read authority from these fields, never infer it from which optional field was set
+    tier: str; evidence_class: EvidenceClass; provenance: Provenance; authority_level: int; files: Tuple[str, ...]
+    confidence: Literal["high","medium","low"]; reasoning: str; evidence_ref: str; exhausted: bool
 @dataclass(frozen=True)
 class AttributionDecision:                 # evolves attribution.AttributionResult (tier, files, confidence, reasoning stay as properties)
     finding_id: FindingId; selected: AttributionSource; considered: Tuple[AttributionSource, ...]; ignored_advisory: Tuple[AttributionSource, ...]
@@ -306,7 +318,15 @@ class RedirectSignal: from_file: str; to_file: str; statement: str              
 class RetryTargetDecision:
     attempt: int; findings: Tuple[FindingId, ...]; attribution: Tuple[AttributionDecision, ...]
     selected_files: Tuple[str, ...]; read_only_context: Tuple[str, ...]; ignored_advisory: Tuple[Tuple[str, str], ...]   # (file, why)
-    scope_filter: str; precedence_rule: str; reason_code: str; inputs_digest: str
+    rejected_candidates: Tuple[Tuple[str, str], ...]                 # (file, reason): out of scope, contradicted by stronger evidence, unevaluated A, ...
+    origin: Literal["original", "expansion", "fallback"]            # OWNER DIRECTIVE 2 #6: ONE recorded decision answers: unresolved findings,
+    authoritative_locator: Optional[Locator]; advisory_evidence: Tuple[AttributionSource, ...]   # locator, advisory evidence, rule applied,
+    scope_filter: str; precedence_rule: str; reason_code: str; inputs_digest: str                 # selected, rejected + why, original/expansion/fallback
+# EXPANSION rule (owner directive 2 #4; F4): advisory file B may be ADDED (origin="expansion") only when ALL hold: deterministic locator file A was
+# staged AND its change evaluated by the authoritative gate; the same NORMALIZED failure signature remains; B is inside the legal work-unit/write scope;
+# no stronger deterministic attribution contradicts B; structural dependency evidence A<->B is used when it exists (model prose alone never
+# establishes dependency). B never replaces A's authoritative attribution. A bare mention, a quoted compiler message naming another file, or a
+# SUCCESSFUL deterministic repair of A can never produce an expansion.
 @dataclass(frozen=True)
 class RepairPackage:                       # evolves retry_package.RetryPackage; the ONE source of truth rendered by retry_prompts
     findings: Tuple[Finding, ...]; targets: RetryTargetDecision; allowed_edit_scope: Tuple[str, ...]; authoritative_locators: Tuple[Locator, ...]
@@ -325,6 +345,11 @@ class CandidateTransaction:                # workflow/candidate_transaction.py
     staged_identity: CandidateIdentity     # == what source review and gates later see (G4 test: reviewed bytes == staged bytes)
     decision: Literal["staged", "partially_staged", "refused"]; reason_code: str
 class BudgetPhase(str, Enum): PLANNER, DEVELOPER, REPAIR, VERIFICATION, FALLBACK_RESERVE, HUMAN_WAIT, LIVENESS
+# OWNER DIRECTIVE 2 #3: five quantities, NEVER conflated internally: ACTIVE inference budget (generation_time_budget_seconds), HUMAN WAIT elapsed,
+# TOTAL RUN WALL-CLOCK, RUN LIVENESS CEILING (run_liveness_seconds), GATE/FALLBACK RESERVES. The liveness default is
+# `active + HUMAN_WAIT_ALLOWANCE_SECONDS` where HUMAN_WAIT_ALLOWANCE_SECONDS = 1800 is ONE documented constant owned by workflow/budget_policy.py
+# (surfaced as autonomy.budgets.human_wait_allowance_seconds in config); no other module contains the literal. Liveness termination has its own
+# typed reason code and BudgetDecision/evidence, distinct from the generation-budget-exhausted reason.
 @dataclass(frozen=True)
 class BudgetView: phase: BudgetPhase; allowed_seconds: Optional[float]; consumed_seconds: float; remaining_seconds: Optional[float]; liveness_remaining: Optional[float]
 @dataclass(frozen=True)

@@ -81,3 +81,11 @@ Conventions: `P=.venv/bin/pytest -q`; Tier 1 is the exact file(s) the slice adds
 ## 5. Mutation checks (ENGINEERING_RULES §8; listed per slice in SLICE-PLAN; the rule)
 
 Every slice that touches retry, fallback, recovery, authority, verification, commit, lifecycle, cleanup, state transitions, security or budget logic lists its mutants; each mutant is applied by hand (or with the existing `tests/_chaos_harness.py` style scripted mutation where available), the named test must fail, and the slice report records `mutant -> failing test id`. Surviving mutant = strengthen the test or delete the dead branch before commit.
+
+## 6. Per-module test speed record (owner directive 2 #10; a DELIVERABLE, filled by each module's last slice and completed in Q1)
+
+Goal: working on vLLM/providers, Skills, Tools, execution, authority or the kernel normally needs only that module's command, not the 11,000+ test suite. For every final module record in this table: exact command/marker, test count, measured elapsed time (`--durations=0` summary, serial, on the owner's machine class), whether it needs network/model/process/container, and which contract and integration suites it participates in. A module row without measured numbers blocks Q1.
+
+| Module | Command / marker | Tests | Elapsed (s) | Network / model / process / container | Contract suites | Integration suites | Measured in slice |
+|---|---|---|---|---|---|---|---|
+| (architecture) | `P -m architecture` | | | none | - | - | A1 (to be completed) |
