@@ -443,6 +443,16 @@ def _module_markers(path):
     return [MODULE_TIER_DIRECTORIES[sub]] if parent == _TESTS_DIR and sub in MODULE_TIER_DIRECTORIES else []
 
 
+# pyproject's addopts deselects these tiers by default, but an explicit `-m <module marker>` REPLACES that
+# expression, so a module marker on one of their tests would pull a live/real-toolchain run into an ordinary
+# module selection (W2 wave check: `-m adapters` selected test_live_prd033_metrics). They carry no module marker.
+_DEFAULT_EXCLUDED_TIERS = ("live_model", "live_static_analysis", "real_toolchain")
+
+
+def _in_default_excluded_tier(item):
+    return any(marker.name in _DEFAULT_EXCLUDED_TIERS for marker in item.iter_markers())
+
+
 # Parallel runs (`-n 8 --dist loadgroup`): every test that starts real
 # containers runs on ONE worker, serially. Their leak checks list every
 # kriya-oci-*/kriya-acq-* container on the daemon - deliberately global - so
@@ -463,8 +473,9 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if item.path.name in STATE_MACHINE_TIER_FILES:
             item.add_marker(pytest.mark.state_machine)
-        for marker in _module_markers(item.path):
-            item.add_marker(getattr(pytest.mark, marker))
+        if not _in_default_excluded_tier(item):
+            for marker in _module_markers(item.path):
+                item.add_marker(getattr(pytest.mark, marker))
         if _needs_real_docker(item):
             item.add_marker(pytest.mark.xdist_group("docker"))
 
