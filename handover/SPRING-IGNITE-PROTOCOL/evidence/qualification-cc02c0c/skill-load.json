@@ -1,0 +1,33 @@
+{
+ "service_total": 1,
+ "service_ids": [
+  "ignite-java17"
+ ],
+ "engine_skills": [
+  "ignite-java17"
+ ],
+ "relevant_to_goal": true,
+ "verified": true,
+ "verified_context": "org.apache.ignite:ignite-core 2.18.0",
+ "tags": [
+  "ignite",
+  "apache-ignite",
+  "ignite-cache"
+ ],
+ "supported_versions": "*",
+ "rule_count": 44,
+ "trusted_rules": 44,
+ "unverified_rules": 0,
+ "has_instructions": true,
+ "example_count": 1,
+ "rules_carry_exec_exec_guidance": true,
+ "rules_carry_add_opens": true,
+ "rules_carry_one_mechanism": true,
+ "rules_carry_close_context": true,
+ "descriptor_digest": "sha256:8e6dfbee096991604b07ee39e7c72371e8e617ab36d8df49e74b0d26bb84ffdc",
+ "descriptor_scope": "configured",
+ "descriptor_unknown_fields": [
+  "skill_version"
+ ],
+ "ok": true
+}

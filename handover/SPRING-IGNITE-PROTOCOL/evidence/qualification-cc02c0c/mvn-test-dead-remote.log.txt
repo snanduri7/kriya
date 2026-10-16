@@ -1,0 +1,139 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ------------------< com.example:protocol-ignite-demo >------------------
+[INFO] Building protocol-ignite-demo 1.0-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.2.0:clean (default-clean) @ protocol-ignite-demo ---
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ protocol-ignite-demo ---
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ protocol-ignite-demo ---
+[INFO] Changes detected - recompiling the module! :source
+[INFO] Compiling 5 source files with javac [debug target 17] to target/classes
+[WARNING] location of system modules is not set in conjunction with -source 17
+  not setting the location of system modules may lead to class files that cannot run on JDK 17
+    --release 17 is recommended instead of -source 17 -target 17 because it sets the location of system modules automatically
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ protocol-ignite-demo ---
+[INFO] Copying 2 resources from src/test/resources to target/test-classes
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ protocol-ignite-demo ---
+[INFO] Changes detected - recompiling the module! :dependency
+[INFO] Compiling 2 source files with javac [debug target 17] to target/test-classes
+[WARNING] location of system modules is not set in conjunction with -source 17
+  not setting the location of system modules may lead to class files that cannot run on JDK 17
+    --release 17 is recommended instead of -source 17 -target 17 because it sets the location of system modules automatically
+[INFO] 
+[INFO] --- surefire:2.22.2:test (default-test) @ protocol-ignite-demo ---
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.example.protocol.ProtocolParserTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.016 s - in com.example.protocol.ProtocolParserTest
+[INFO] Running com.example.ProtocolCacheRoundTripTest
+Oct 16, 2026 8:41:36 AM org.apache.ignite.logger.java.JavaLogger warning
+WARNING: Failed to resolve default logging config file: config/java.util.logging.properties
+[08:41:37]    __________  ________________ 
+[08:41:37]   /  _/ ___/ |/ /  _/_  __/ __/ 
+[08:41:37]  _/ // (7 7    // /  / / / _/   
+[08:41:37] /___/\___/_/|_/___/ /_/ /x___/  
+[08:41:37] 
+[08:41:37] ver. 2.18.0#20260423-sha1:d49adada
+[08:41:37] 2026 Copyright(C) Apache Software Foundation
+[08:41:37] 
+[08:41:37] Ignite documentation: https://ignite.apache.org
+[08:41:37] 
+[08:41:37] Quiet mode.
+[08:41:37]   ^-- Logging by 'JavaLogger [quiet=true, config=null]'
+[08:41:37]   ^-- To see **FULL** console log here add -DIGNITE_QUIET=false or "-v" to ignite.{sh|bat}
+[08:41:37] 
+[08:41:37] OS: Mac OS X 27.0.1 aarch64
+[08:41:37] VM information: OpenJDK Runtime Environment 26.0.1 Homebrew OpenJDK 64-Bit Server VM 26.0.1
+[08:41:37] Please set system property '-Djava.net.preferIPv4Stack=true' to avoid possible problems in mixed environments.
+[08:41:37] Configured plugins:
+[08:41:37]   ^-- None
+[08:41:37] 
+[08:41:37] Configured failure handler: [hnd=StopNodeOrHaltFailureHandler [tryStop=false, timeout=0, super=AbstractFailureHandler [ignoredFailureTypes=UnmodifiableSet [SYSTEM_WORKER_BLOCKED, SYSTEM_CRITICAL_OPERATION_TIMEOUT]]]]
+[08:41:37] Initial heap size is 8MB (should be no less than 512MB, use -Xms512m -Xmx512m).
+[08:41:37] Message queue limit is set to 0 which may lead to potential OOMEs when running cache operations in FULL_ASYNC or PRIMARY_SYNC modes due to message queues growth on sender and receiver sides.
+[08:41:44] Data Regions Started: 3
+[08:41:44] 
+[08:41:44]     ^--   sysMemPlc region [type=internal, persistence=false, lazyAlloc=false,
+[08:41:44]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=40MB]
+[08:41:44]     ^--   default region [type=default, persistence=false, lazyAlloc=true,
+[08:41:44]       ...  initCfg=256MB, maxCfg=13107MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+[08:41:44]     ^--   volatileDsMemPlc region [type=user, persistence=false, lazyAlloc=true,
+[08:41:44]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+[08:41:44] Security status [authentication=off, sandbox=off, tls/ssl=off]
+[08:41:44] Performance suggestions for grid 'ignite-test-witness' (fix if possible)
+[08:41:44] To disable, set -DIGNITE_PERFORMANCE_SUGGESTIONS_DISABLED=true
+[08:41:44]   ^-- Specify JVM heap max size (add '-Xmx<size>[g|G|m|M|k|K]' to JVM options)
+[08:41:44]   ^-- Set max direct memory size if getting 'OOME: Direct buffer memory' (add '-XX:MaxDirectMemorySize=<size>[g|G|m|M|k|K]' to JVM options)
+[08:41:44]   ^-- Disable assertions (remove '-ea' from JVM options)
+[08:41:44] Refer to this page for more performance suggestions: https://ignite.apache.org/docs/latest/perf-and-troubleshooting/memory-tuning
+[08:41:44] 
+[08:41:44] 
+[08:41:44] Ignite node started OK (id=f3bd3efd, instance name=ignite-test-witness)
+[08:41:44] Topology snapshot [ver=1, locNode=f3bd3efd, servers=1, clients=0, state=ACTIVE, CPUs=10, offheap=13.0GB, heap=16.0GB]
+[08:41:44]   ^-- Baseline [id=0, size=1, online=1, offline=0]
+[08:41:45] Ignite node stopped OK [name=ignite-test-witness, uptime=00:00:00.496]
+[08:41:45]    __________  ________________ 
+[08:41:45]   /  _/ ___/ |/ /  _/_  __/ __/ 
+[08:41:45]  _/ // (7 7    // /  / / / _/   
+[08:41:45] /___/\___/_/|_/___/ /_/ /x___/  
+[08:41:45] 
+[08:41:45] ver. 2.18.0#20260423-sha1:d49adada
+[08:41:45] 2026 Copyright(C) Apache Software Foundation
+[08:41:45] 
+[08:41:45] Ignite documentation: https://ignite.apache.org
+[08:41:45] 
+[08:41:45] Quiet mode.
+[08:41:45]   ^-- Logging by 'JavaLogger [quiet=true, config=null]'
+[08:41:45]   ^-- To see **FULL** console log here add -DIGNITE_QUIET=false or "-v" to ignite.{sh|bat}
+[08:41:45] 
+[08:41:45] OS: Mac OS X 27.0.1 aarch64
+[08:41:45] VM information: OpenJDK Runtime Environment 26.0.1 Homebrew OpenJDK 64-Bit Server VM 26.0.1
+[08:41:45] Please set system property '-Djava.net.preferIPv4Stack=true' to avoid possible problems in mixed environments.
+[08:41:45] Configured plugins:
+[08:41:45]   ^-- None
+[08:41:45] 
+[08:41:45] Configured failure handler: [hnd=StopNodeOrHaltFailureHandler [tryStop=false, timeout=0, super=AbstractFailureHandler [ignoredFailureTypes=UnmodifiableSet [SYSTEM_WORKER_BLOCKED, SYSTEM_CRITICAL_OPERATION_TIMEOUT]]]]
+[08:41:45] Initial heap size is 8MB (should be no less than 512MB, use -Xms512m -Xmx512m).
+[08:41:45] Message queue limit is set to 0 which may lead to potential OOMEs when running cache operations in FULL_ASYNC or PRIMARY_SYNC modes due to message queues growth on sender and receiver sides.
+[08:41:46] Data Regions Started: 3
+[08:41:46] 
+[08:41:46]     ^--   sysMemPlc region [type=internal, persistence=false, lazyAlloc=false,
+[08:41:46]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=40MB]
+[08:41:46]     ^--   default region [type=default, persistence=false, lazyAlloc=true,
+[08:41:46]       ...  initCfg=256MB, maxCfg=13107MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+[08:41:46]     ^--   volatileDsMemPlc region [type=user, persistence=false, lazyAlloc=true,
+[08:41:46]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+[08:41:46] Security status [authentication=off, sandbox=off, tls/ssl=off]
+[08:41:46] Performance suggestions for grid 'ignite-test-plain' (fix if possible)
+[08:41:46] To disable, set -DIGNITE_PERFORMANCE_SUGGESTIONS_DISABLED=true
+[08:41:46]   ^-- Specify JVM heap max size (add '-Xmx<size>[g|G|m|M|k|K]' to JVM options)
+[08:41:46]   ^-- Set max direct memory size if getting 'OOME: Direct buffer memory' (add '-XX:MaxDirectMemorySize=<size>[g|G|m|M|k|K]' to JVM options)
+[08:41:46]   ^-- Disable assertions (remove '-ea' from JVM options)
+[08:41:46] Refer to this page for more performance suggestions: https://ignite.apache.org/docs/latest/perf-and-troubleshooting/memory-tuning
+[08:41:46] 
+[08:41:46] 
+[08:41:46] Ignite node started OK (id=f1500976, instance name=ignite-test-plain)
+[08:41:46] Topology snapshot [ver=1, locNode=f1500976, servers=1, clients=0, state=ACTIVE, CPUs=10, offheap=13.0GB, heap=16.0GB]
+[08:41:46]   ^-- Baseline [id=0, size=1, online=1, offline=0]
+[08:41:46] Ignite node stopped OK [name=ignite-test-plain, uptime=00:00:00.013]
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 9.727 s - in com.example.ProtocolCacheRoundTripTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  10.901 s
+[INFO] Finished at: 2026-10-16T08:41:46+05:30
+[INFO] ------------------------------------------------------------------------

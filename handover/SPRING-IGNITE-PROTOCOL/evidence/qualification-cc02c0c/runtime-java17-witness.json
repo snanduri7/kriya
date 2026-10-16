@@ -1,0 +1,30 @@
+{
+ "mode": "host",
+ "witness": true,
+ "checks": {
+  "gate_success": true,
+  "exit_code_0": true,
+  "not_timed_out": true,
+  "ignite_node_started": true,
+  "ignite_node_stopped": true,
+  "expected_result_line_exact": true,
+  "verification_pass_marker": true,
+  "protocol_class_registered_with_ignite_marshaller": true
+ },
+ "elapsed_seconds": 11.3,
+ "runtime_artifacts": [
+  "ignite/README.txt",
+  "ignite/work/db/marshaller/-165319811.classname0"
+ ],
+ "only_ignite_runtime_state": true,
+ "egress": null,
+ "toolchain": {
+  "runtime_version": null,
+  "build_tool_version": null,
+  "containment_image": null,
+  "observed_runtime_version": null,
+  "observed_build_tool_version": null
+ },
+ "result_line_lines_before_it": 40,
+ "ok": true
+}
