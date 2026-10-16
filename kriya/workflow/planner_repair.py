@@ -277,7 +277,8 @@ def format_unprovided_capability_feedback(facts: List[Dict[str, str]]) -> str:
 
 def missing_invariant_projection_facts(previous_plan_text: str) -> Dict[str, Any]:
     """Typed facts about the global-invariant projection of the previous plan, read deterministically from the plan itself (never from error text or the model's explanation): the ids of the
-    subtasks whose ``relevant_global_invariant_ids`` is empty and the invariants the plan declares. Only a plan with more than one subtask is subject to the projection rule
+    subtasks whose ``relevant_global_invariant_ids`` is empty and the invariants the plan declares. They are read from the Planner's RAW draft, before the controller's normalisations
+    (for example same-file owner merging), so on a draft the validator would first normalise this may list a subtask the validator no longer reports: it over-asks, never under-asks. Only a plan with more than one subtask is subject to the projection rule
     (plan_validation.py), so a single-subtask plan reports nothing. Returns empty facts when the text is not a parsable structured plan."""
     from kriya.agents.contracts import parse_planner_structured_output
 
@@ -312,7 +313,8 @@ def format_missing_invariant_projection_feedback(facts: Dict[str, Any]) -> str:
         "  1. list the declared id(s) whose statement actually constrains what that subtask builds (a subtask relevant to only part of a compound invariant references its whole id);\n"
         "  2. if no declared invariant constrains it, add a global_invariants entry (a new unique id and a statement) for a constraint the original request states that applies to that stage "
         "(for example a language or runtime level, a required format, packaging, resource handling or exit behavior), and list that new id on the subtask.\n"
-        "  Do not invent a constraint the request does not state, do not restate a statement as an id, and do not change anything else in the plan. "
+        "  If the request states no constraint that applies to a stage, list the declared invariant that applies most broadly instead of inventing one. "
+        "Do not invent a constraint the request does not state, do not restate a statement as an id, and do not change anything else in the plan. "
         "Leaving the list empty is not a repair: it is rejected again.\n"
     )
     return "".join(lines)

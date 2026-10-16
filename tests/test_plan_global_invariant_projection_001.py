@@ -16,6 +16,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -35,8 +36,12 @@ from kriya.workflow.planner_repair import (
     format_missing_invariant_projection_feedback,
     missing_invariant_projection_facts,
 )
-from kriya.workflow.triage import ChangeKind
-from kriya.workflow.workflow_controller import AUTHORITATIVE_PLANNER_SYSTEM_PROMPT, build_authoritative_planner_request
+from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
+from kriya.workflow.workflow_controller import (
+    AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
+    WorkflowController,
+    build_authoritative_planner_request,
+)
 
 DATA = json.loads((Path(__file__).parent / "fixtures" / "plan_global_invariant_projection_001.json").read_text(encoding="utf-8"))
 RESPONSE: str = DATA["planner_response"]
@@ -137,6 +142,7 @@ def test_the_repair_prompt_now_states_the_rule_names_the_subtasks_and_lists_the_
     assert "Do not invent" in prompt.split("SUBTASK_GLOBAL_INVARIANTS_MISSING:")[1]
     assert "do not change anything else" in prompt.split("SUBTASK_GLOBAL_INVARIANTS_MISSING:")[1].lower()
     assert "leaving the list empty is not a repair" in prompt.lower()
+    assert "applies most broadly instead of inventing one" in prompt  # the corner where the request states no constraint for a stage has a legal answer that is not an invention
 
 
 def test_negative_control_no_block_when_the_reason_code_is_absent_or_nothing_is_missing(recorded) -> None:
@@ -199,3 +205,54 @@ def test_the_new_text_does_not_contradict_the_existing_unknown_invariant_guidanc
     # Existing guidance: a subtask relevant to only PART of a compound invariant references the whole id; never invent an undeclared id.
     assert "Never reference an id that isn't declared" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT and "a subtask relevant to only PART of a compound invariant" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
     assert "split" not in GLOBAL_INVARIANT_PROJECTION_RULE.lower()  # no per-clause splitting is invited
+
+
+# ---- 4. the REAL controller repair loop, scripted planner (no model): the wiring from the validator's finding to the repair request ----
+
+@pytest.fixture(autouse=True)
+def _keep_the_controller_on_its_explicit_workspace(monkeypatch):
+    monkeypatch.setattr("kriya.workflow.workflow_controller.create_git_worktree", lambda workspace: workspace)
+
+
+def _scripted_engine(answers: List[str]) -> MagicMock:
+    engine = MagicMock()
+    route = EngineeringRoute(
+        kind=ChangeKind.MILESTONE, impact=ImpactVector(), initial_risk_class=RiskClass.LOW, current_risk_class=RiskClass.LOW,
+        max_observed_risk_class=RiskClass.LOW, execution_weight=ExecutionWeight.STANDARD)
+    engine.engineering_triage.classify = AsyncMock(return_value=route)
+    engine.engineering_triage.recompute_from_files = AsyncMock(return_value=route)
+    engine.planner.run = AsyncMock(side_effect=answers)
+    engine.run_generation_workflow = AsyncMock(return_value={"status": "success", "quality_gates_passed": True, "files": []})
+    engine.kernel = None
+    return engine
+
+
+def _giving_every_subtask_gi1(plan_text: str) -> str:
+    plan = json.loads(plan_text)
+    for subtask in plan["subtasks"]:
+        if not subtask["relevant_global_invariant_ids"]:
+            subtask["relevant_global_invariant_ids"] = ["gi1"]
+    return json.dumps(plan)
+
+
+@pytest.mark.asyncio
+async def test_the_real_repair_loop_sends_the_new_block_and_accepts_a_plan_that_complies(tmp_path: Path) -> None:
+    engine = _scripted_engine([RESPONSE, _giving_every_subtask_gi1(RESPONSE)])
+    result = await WorkflowController(engine).execute(GOAL, str(tmp_path), migration_mode="enforce")
+    assert engine.planner.run.await_count == 2  # one repair round was enough once the answer complied
+    second_request = engine.planner.run.await_args_list[1].args[0]
+    assert "SUBTASK_GLOBAL_INVARIANTS_MISSING:" in second_request and "s1, s2, s3, s4, s6" in second_request
+    assert "STRUCTURED_PLAN_REPAIR_EXHAUSTED" not in json.dumps(result.legacy_result, default=str)  # planning converged; the plan reached execution
+
+
+@pytest.mark.asyncio
+async def test_the_real_repair_loop_still_fails_closed_when_the_planner_keeps_returning_the_same_plan(tmp_path: Path) -> None:
+    # The live outcome, reproduced through the controller: three identical answers exhaust the two bounded repairs. The fix cannot make a model comply; it must not hide non-compliance.
+    engine = _scripted_engine([RESPONSE, RESPONSE, RESPONSE])
+    result = await WorkflowController(engine).execute(GOAL, str(tmp_path), migration_mode="enforce")
+    assert engine.planner.run.await_count == 3
+    for call in engine.planner.run.await_args_list[1:]:
+        assert "SUBTASK_GLOBAL_INVARIANTS_MISSING:" in call.args[0]  # both repair requests carry the targeted block
+    codes = result.legacy_result["reason_codes"]
+    assert "SUBTASK_GLOBAL_INVARIANTS_MISSING" in codes and "STRUCTURED_PLAN_REPAIR_EXHAUSTED" in codes and "PLAN_REPAIR_NON_CONVERGENCE" in codes
+    engine.run_generation_workflow.assert_not_called()  # nothing was executed or applied
