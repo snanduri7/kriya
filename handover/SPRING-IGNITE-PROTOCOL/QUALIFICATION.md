@@ -2,7 +2,7 @@
 
 Branch `demo/spring-ignite-protocol`, from the frozen tag `kriya-v1.2.0-demo-v2-validated` (`f731c26`; the tag and `demo/v2` are untouched). No product code is changed. **No live model was run.** Date of the work: 2026-10-16.
 Evidence status words follow `handover/ENGINEERING_RULES.md`: MEASURED (observed by a command), TRACED (read in the code that produces it), INFERRED, CONFIRMED (a discriminating check), UNKNOWN.
-Evidence directory: `handover/SPRING-IGNITE-PROTOCOL/evidence/qualification-0637589/` (a run of `demo-v2/scripts/qualify_spring_ignite.sh --with-containment` on the exact commit `0637589`, clean tracked tree) and `evidence/supplementary-measurements.md`.
+Evidence: `handover/SPRING-IGNITE-PROTOCOL/evidence/qualification-6f379c8/` is the CURRENT run of `demo-v2/scripts/qualify_spring_ignite.sh --with-containment` (executable revision `6f379c8`, clean tracked tree, recorded in its `toolchain.txt`); `qualification-0637589/` is the first run on the pre-review revision and is kept as history (not replaced). Also `evidence/supplementary-measurements.md`, `mutation-controls.md`, the two JVM-flag leave-one-out files. Later commits are evidence/documentation only.
 
 ## 0. What the historical record actually is (a correction to the brief's framing)
 
