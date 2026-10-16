@@ -174,8 +174,12 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.cli", "kriya.workflow.worktree"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.code_intel.store", "kriya.core.db"): ("P2", _P2),  # non-public FOUNDATION module
     ("kriya.config.config", "kriya.config.authority_approval"): ("P2", _P2),  # non-public AUTHORITY module
-    ("kriya.config.config", "kriya.core.state_paths"): ("D3", _D3),  # direction CONFIG -> STATE
-    ("kriya.config.config", "kriya.static_analysis.registry"): ("D3", _D3),  # direction CONFIG -> EXECUTION
+    # Re-tagged D3 -> P2 (D3 cannot remove it without a behaviour change): StaticAnalysisConfig._consistent validates the
+    # SECURITY_AUTHORITY static_analysis section through the EXECUTION-owned provider registry at schema construction, so every
+    # AppConfig(...) - not only load_config - refuses an unregistered provider. An injected validator needs a default for the direct
+    # constructions, and any default other than this registry is fail-open; P2 decides (a declared CONFIG -> EXECUTION footnote edge for
+    # the registry's validation surface, or the provider settings models moved into CONFIG).
+    ("kriya.config.config", "kriya.static_analysis.registry"): ("P2", _P2 + " (SECURITY_AUTHORITY provider validation at schema construction; re-tagged in D3)"),  # direction CONFIG -> EXECUTION
     ("kriya.control.artifacts", "kriya.core.tomlcompat"): ("P1", _P1),  # non-public FOUNDATION module
     ("kriya.control.commit_state", "kriya.workflow.edit_safety"): ("M1", _M1),  # direction STATE -> KERNEL
     ("kriya.control.control_store", "kriya.workflow.edit_safety"): ("M1", _M1),  # direction STATE -> KERNEL
@@ -198,7 +202,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.core.llm", "kriya.core.model_qualification"): ("P2", _P2),  # direction PROVIDER -> QUALIFICATION
     ("kriya.core.llm", "kriya.policy.execution"): ("P2", _P2),  # direction PROVIDER -> AUTHORITY
     ("kriya.core.llm", "kriya.policy.model"): ("P2", _P2),  # direction PROVIDER -> AUTHORITY
-    ("kriya.core.logging_setup", "kriya.control.persistence"): ("D3", _D3),  # direction CONFIG -> STATE
     ("kriya.core.model_capabilities", "kriya.core.model_qualification"): ("P2", _P2),  # direction PROVIDER -> QUALIFICATION
     ("kriya.core.model_qualification", "kriya"): ("N1", _N1),  # non-public FOUNDATION module
     ("kriya.core.model_qualification", "kriya.agents.response_protocol"): ("N1", _N1),  # non-public KERNEL module

@@ -1,6 +1,6 @@
 {
- "files": 373,
- "edges": 1552,
+ "files": 375,
+ "edges": 1556,
  "top_level_sccs": [
   [
    "kriya.tools.containment",
@@ -13,7 +13,7 @@
  ],
  "all_import_scc_sizes": [
   67,
-  8,
+  7,
   7,
   6,
   4,
@@ -35,14 +35,13 @@
    "kriya.workflow": 50
   },
   {
-   "kriya.control": 7,
-   "kriya.core": 1
-  },
-  {
    "kriya(top)": 1,
    "kriya.capabilities": 3,
    "kriya.tools": 2,
    "kriya.workflow": 1
+  },
+  {
+   "kriya.control": 7
   },
   {
    "kriya.tools": 6
@@ -143,16 +142,6 @@
    "kriya.workflow.workflow_controller"
   ],
   [
-   "kriya.control.checkpoint",
-   "kriya.control.commit_state",
-   "kriya.control.launch",
-   "kriya.control.launch_approval",
-   "kriya.control.persistence",
-   "kriya.control.retention",
-   "kriya.control.run_coordinator",
-   "kriya.core.logging_setup"
-  ],
-  [
    "kriya.capabilities",
    "kriya.capabilities.gradle",
    "kriya.capabilities.maven",
@@ -160,6 +149,15 @@
    "kriya.tools.test_execution",
    "kriya.tools.validate",
    "kriya.workflow.jvm_module_ownership"
+  ],
+  [
+   "kriya.control.checkpoint",
+   "kriya.control.commit_state",
+   "kriya.control.launch",
+   "kriya.control.launch_approval",
+   "kriya.control.persistence",
+   "kriya.control.retention",
+   "kriya.control.run_coordinator"
   ],
   [
    "kriya.tools.containment",

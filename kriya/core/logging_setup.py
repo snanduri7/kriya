@@ -28,6 +28,7 @@ from typing import Iterator, List, Optional, Tuple
 
 from kriya.config.environment import Environment, default_log_dir, expand_user
 from kriya.config.environment import log_dir as environment_log_dir
+from kriya.foundation.ids import is_control_id
 
 ENV_LOG_DIR = "KRIYA_LOG_DIR"
 APPLICATION_LOG_FILENAME = "kriya.log"
@@ -80,9 +81,7 @@ def application_log_path(log_dir: str) -> str:
 
 
 def run_log_path(log_dir: str, run_id: str) -> str:
-    from kriya.control.persistence import _valid_run_id
-
-    if not _valid_run_id(run_id):
+    if not is_control_id(run_id):  # the control-plane id rule (FOUNDATION; the same rule control.persistence applies)
         raise ValueError("run_id must contain only letters, digits, '-' or '_'")
     return os.path.join(log_dir, RUN_LOGS_DIRNAME, run_id, APPLICATION_LOG_FILENAME)
 

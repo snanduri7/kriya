@@ -55,6 +55,17 @@ class PartialFacade(NamedTuple):
 
 
 PARTIAL_FACADES: Dict[str, PartialFacade] = {
+    "kriya/config/config.py": PartialFacade(
+        "kriya.config.resolution",
+        ("ConfigResolutionState", "PRODUCTION_FIXED_RUNTIME_GUARANTEES", "PRODUCTION_GENERATION_TIME_BUDGET_SECONDS", "REMOVED_LOGGING_FILE_MESSAGE",
+         "REMOVED_PATHS_LOGS_MESSAGE", "RemovedConfigFieldError", "production_sealed_requirement", "production_sealed_value_satisfied",
+         "resolve_config_state", "runtime_profile_preset_fields"), "P1",
+        "D3: configuration resolution split from the schema; the schema and load_config stay; 1 patch target "
+        "(kriya.config.config.resolve_config_state, test_state_location) and ~20 importers use the old path"),
+    "kriya/core/state_paths.py": PartialFacade(
+        "kriya.config.resolution", ("StateDirectoryError", "WORKSPACE_STATE_PARENT", "require_workspace_local_state_under_kriya_dir"), "P1",
+        "D3: the paths.state rule and its error owned by CONFIG (resolution needs them without importing STATE); the state directory, "
+        "trace database and legacy migration stay"),
     "kriya/workflow/triage.py": PartialFacade(
         "kriya.policy.risk",
         ("ChangeKind", "EngineeringRoute", "ExecutionWeight", "ImpactVector", "RiskClass", "determine_execution_weight"), "P1",

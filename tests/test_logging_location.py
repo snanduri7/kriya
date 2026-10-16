@@ -385,3 +385,19 @@ def test_programmatic_logging_file_is_rejected_too():
         AppConfig(logging={"file": "/tmp/kriya.log"})
     with pytest.raises(ValueError):
         AppConfig().logging.file = "/tmp/kriya.log"
+
+
+@pytest.mark.parametrize("run_id", ["a.b", "..", "a:b", "a/b", "", "a b"])
+def test_the_run_log_and_the_control_records_refuse_the_same_unsafe_run_ids(run_id, tmp_path):
+    """D3: the control-plane id rule moved to FOUNDATION (kriya.foundation.ids.is_control_id) so CONFIG's run-log path no longer
+    imports STATE; it stays the STRICTER rule (letters, digits, '-', '_'): '.' and ':' that the history run-id rule admits are refused."""
+    from kriya.control import persistence
+    from kriya.core.logging_setup import run_log_path
+    from kriya.foundation.ids import is_control_id
+
+    assert persistence._valid_run_id is is_control_id
+    with pytest.raises(ValueError):
+        run_log_path(str(tmp_path), run_id)
+    with pytest.raises(ValueError):
+        persistence.run_record_path(str(tmp_path), run_id)
+    assert run_log_path(str(tmp_path), "run-1_A").endswith(os.path.join("runs", "run-1_A", "kriya.log"))

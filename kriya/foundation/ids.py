@@ -23,9 +23,19 @@ RUN_ID_MAX_CHARS = 256
 RUN_ID_RULE = "run_id must match [A-Za-z0-9][A-Za-z0-9._:-]* and be at most 256 characters"
 
 
+# The CONTROL-PLANE id rule (moved from kriya/control/persistence.py ``_RUN_ID_CHARS``/``_valid_run_id`` in D3, unchanged): the stricter
+# rule every control record path, launch/review id and run-log path is built from - letters, digits, '-' and '_' only (no '.' or ':',
+# unlike the history/evidence run-id rule above).
+CONTROL_ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+
+
+def is_control_id(run_id: str) -> bool:
+    return bool(run_id) and set(run_id) <= CONTROL_ID_CHARS
+
+
 def is_valid_run_id(value: Any) -> bool:
     return isinstance(value, str) and bool(value) and len(value) <= RUN_ID_MAX_CHARS and bool(RUN_ID_RE.match(value))
 
 
-__all__ = ["FindingId", "LaunchId", "RUN_ID_MAX_CHARS", "RUN_ID_RE", "RUN_ID_RULE", "RequestId", "RunId", "TransactionId",
-           "WorkspaceId", "is_valid_run_id"]
+__all__ = ["CONTROL_ID_CHARS", "FindingId", "LaunchId", "RUN_ID_MAX_CHARS", "RUN_ID_RE", "RUN_ID_RULE", "RequestId", "RunId", "TransactionId",
+           "WorkspaceId", "is_control_id", "is_valid_run_id"]

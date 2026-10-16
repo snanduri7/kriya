@@ -35,6 +35,7 @@ from kriya.control.contracts import ContractRegistry, ContractRegistryCorruptErr
 from kriya.control.control_store import write_control_file
 from kriya.control.run_record import RunRecord
 from kriya.control.state import ControlState
+from kriya.foundation.ids import CONTROL_ID_CHARS, is_control_id
 from kriya.workflow.edit_safety import content_revision, read_file_revision
 from kriya.workflow.file_integrity import raw_digest
 
@@ -83,11 +84,9 @@ def approved_plan_path(workspace_path: str, plan_id: str) -> str:
     return os.path.join(_control_dir(workspace_path), _APPROVED_PLANS_DIRNAME, f"{safe_plan_id}.json")
 
 
-_RUN_ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
-
-
-def _valid_run_id(run_id: str) -> bool:
-    return bool(run_id) and set(run_id) <= _RUN_ID_CHARS
+# The control-plane id rule lives in FOUNDATION since D3 (CONFIG's run-log path needs it too, without importing STATE).
+_RUN_ID_CHARS = CONTROL_ID_CHARS
+_valid_run_id = is_control_id
 
 
 def run_record_path(workspace_path: str, run_id: str) -> str:

@@ -123,7 +123,6 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
     },
     "home": {},
     "cwd": {
-        "kriya.config.config": (4, "D3", "ConfigService.resolve(ctx): the workspace comes from RequestContext"),
         "kriya.core.release_candidate": (1, "P2", _P2),
         "kriya.mcp.mcp": (4, "P2", _P2),
         "kriya.skills.skill": (2, "J1", "skill scopes (ScopeRef) instead of load_cwd's process cwd"),

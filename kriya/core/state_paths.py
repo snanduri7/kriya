@@ -29,7 +29,13 @@ from typing import Optional, Tuple
 
 from kriya.config.environment import Environment, default_state_dir, expand_user
 from kriya.config.environment import state_dir as environment_state_dir
-from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, path_identity, path_relation
+
+# D3: the paths.state rule and its error are CONFIG's (kriya/config/resolution.py), re-exported here (PARTIAL_FACADES). Removed in P1.
+from kriya.config.resolution import WORKSPACE_STATE_PARENT as WORKSPACE_STATE_PARENT
+from kriya.config.resolution import StateDirectoryError as StateDirectoryError
+from kriya.config.resolution import (
+    require_workspace_local_state_under_kriya_dir as require_workspace_local_state_under_kriya_dir,
+)
 
 ENV_STATE_DIR = "KRIYA_STATE_DIR"
 TRACE_DB_FILENAME = "traces.db"
@@ -37,10 +43,6 @@ TRACE_DB_FILENAME = "traces.db"
 STATE_DIR_SOURCE_ENV = "env"
 STATE_DIR_SOURCE_CONFIG = "config"
 STATE_DIR_SOURCE_DEFAULT = "default"
-
-
-class StateDirectoryError(ValueError):
-    """The state directory is relative (outside config resolution) or invalid."""
 
 
 class LegacyTraceMigrationError(RuntimeError):
@@ -79,26 +81,6 @@ def resolve_state_directory(cfg, environment: Optional[Environment] = None) -> T
 
 def trace_db_path(cfg) -> str:
     return os.path.join(resolve_state_directory(cfg)[0], TRACE_DB_FILENAME)
-
-
-WORKSPACE_STATE_PARENT = ".kriya"
-
-
-def require_workspace_local_state_under_kriya_dir(resolved: str, workspace_root: str, original: str) -> None:
-    """A state directory inside the workspace must be beneath
-    ``<workspace>/.kriya/`` (e.g. ``.kriya/state``); ``./state`` or ``./logs``
-    would put Kriya state among the repository's own files."""
-    workspace = os.path.realpath(workspace_root)
-    target = os.path.realpath(resolved)
-    if path_relation(workspace, target) is not PathRelation.WITHIN:
-        return  # outside the workspace: SEC-009 path authority decides
-    kriya_dir = os.path.join(workspace, WORKSPACE_STATE_PARENT)
-    if path_relation(kriya_dir, target) is PathRelation.WITHIN and path_identity(kriya_dir, target) is not PathIdentity.SAME:
-        return
-    raise StateDirectoryError(
-        f"paths.state {original!r} resolves inside the workspace ({target}) but not beneath "
-        f"{kriya_dir}/; use e.g. '.kriya/state', or a directory outside the workspace."
-    )
 
 
 def kriya_install_dir() -> str:
