@@ -1,0 +1,26 @@
+=== scenario 04 model-free qualification (evidence: /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-main-demo/handover/SPRING-IGNITE-PROTOCOL/evidence/qualification-0637589) ===
+INFO  desktop app environment: java = openjdk version "21.0.12.1" 2026-08-18 LTS
+INFO  desktop app environment: mvn  = Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5) Java version: 26.0.1, vendor: Homebrew, runtime: /opt/homebrew/Cellar/openjdk/26.0.1/libexec/openjdk.jdk/Contents/Home 
+INFO  this shell:              java = openjdk version "17.0.10" 2024-01-16 (JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home)
+PASS  java 21 (>= 17) is what the desktop app's PATH resolves; the project targets Java 17 through its compiler settings
+PASS  mvn is available on the desktop app's PATH
+PASS  offline repository holds org/apache/ignite/ignite-core/2.18.0/ignite-core-2.18.0.jar
+PASS  offline repository holds org/apache/ignite/ignite-spring/2.18.0/ignite-spring-2.18.0.jar
+PASS  offline repository holds org/springframework/spring-context/5.3.39/spring-context-5.3.39.jar
+PASS  offline repository holds org/junit/jupiter/junit-jupiter/5.8.2/junit-jupiter-5.8.2.pom
+PASS  offline repository holds org/apache/maven/plugins/maven-surefire-plugin/2.22.2/maven-surefire-plugin-2.22.2.jar
+PASS  offline repository holds org/apache/maven/plugins/maven-compiler-plugin/3.11.0/maven-compiler-plugin-3.11.0.jar
+PASS  offline repository holds org/codehaus/mojo/exec-maven-plugin/3.1.0/exec-maven-plugin-3.1.0.jar
+PASS  reference candidate digest f1df7e46f7faadf1db9a1642f3aaad7f0e058580a8ee7f6c8b943464cd1882df
+PASS  skill ignite-java17 digest 947b0ae781df56754285191d00dd8adbe65b90985334af0ead9822d38b865d90
+PASS  offline 'mvn test' (compile + JUnit 5.8.2 via surefire 2.22.2): 3/3 tests passed
+PASS  Maven WITHOUT -o and with every remote unreachable still builds, tests and runs the reference: the scenario needs no public network when its dependencies are cached
+PASS  runtime leg 'desktop-app-environment': Spring XML loaded, Ignite 2.18.0 started, ProtocolParser + cache put/get ran, exact [RESULT] line printed, Ignite stopped, exit 0 (7.0 s)
+PASS  runtime leg 'java17': Spring XML loaded, Ignite 2.18.0 started, ProtocolParser + cache put/get ran, exact [RESULT] line printed, Ignite stopped, exit 0 (7.3 s)
+PASS  no application process is left running
+PASS  containment leg: the SAME candidate ran under the OCI backend with network DENIED (loopback is sufficient for the embedded node)
+PASS  the containment leg left no container behind
+PASS  KnowledgeGuard: the default guard WOULD stop a desktop run on this goal (with or without the skill); offline mode + the verified skill clears it; offline mode alone does not
+PASS  skill ignite-java17 loads through Kriya's SkillService/SkillEngine from the scenario configuration, is verified, and is relevant to the goal
+=== qualification result: 0 failed (evidence: /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-main-demo/handover/SPRING-IGNITE-PROTOCOL/evidence/qualification-0637589) ===
+DEMO_V2_WORK=$S/work3 demo-v2/scripts/qualify_spring_ignite.sh  --evidence-di  37.24s user 8.71s system 104% cpu 43.984 total
