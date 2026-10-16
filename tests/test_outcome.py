@@ -320,6 +320,18 @@ def test_the_terminal_trace_row_carries_the_outcome_and_a_trace_failure_is_logge
     deps.logger.warning.assert_called_once_with("pre-Reviewer: disk full")
 
 
+def test_the_trace_row_counts_the_candidates_best_of_n_discarded_as_attempts():
+    """Orchestrator mutant (E2): `attempts=retry_count` alone survived every existing test, including all of test_workflow.py. retry_count is
+    reset for each fresh Best-of-N candidate, so the row must add the discarded candidates or it understates the effort of the run."""
+    from kriya.workflow.run_lifecycle import RunTrace, TraceDetail, persist_run_trace
+
+    state = _state()
+    state.budgets.retry_count, state.budgets.best_of_n_candidates_tried = 1, 2
+    with patch("kriya.control.trace.TraceLogger.log_run") as log_run:
+        persist_run_trace(_deps(), state, RunTrace("t-b", "g", 0.0), TraceDetail([], [], ""), status="failure")
+    assert log_run.call_args.kwargs["attempts"] == 3
+
+
 def test_the_moved_lifecycle_code_logs_through_the_engines_patched_logger():
     """The E2 guard for ``kriya.workflow.workflow.logger`` (2 suite patches): the facade hands its logger to the moved
     code at call time (``WorkflowEngine._stage_deps`` and the ``_record_run_exception`` forwarder), so a patch of the
