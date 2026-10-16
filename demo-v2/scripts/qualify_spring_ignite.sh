@@ -67,7 +67,7 @@ done
 REF="$TMP/reference"; cp -R "$DEMO_V2_DIR/$REFERENCE_DIR" "$REF"
 if ( cd "$REF" && env -i PATH="$APP_PATH" HOME="$HOME" mvn -o -B clean test >"$EVIDENCE/mvn-test.log" 2>&1 ); then
   N="$(sed -n 's/^\[INFO\] Tests run: \([0-9]*\), Failures: 0, Errors: 0, Skipped: 0$/\1/p' "$EVIDENCE/mvn-test.log" | tail -1)"
-  [ "$N" = "$REFERENCE_TEST_COUNT" ] && pass "offline 'mvn test' (compile + JUnit 5.8.2 via surefire 2.22.2): $N/$N tests passed" || fail "offline 'mvn test' passed but ran '$N' tests, expected $REFERENCE_TEST_COUNT"
+  [ "$N" = "$REFERENCE_TEST_COUNT" ] && pass "offline 'mvn test' (compile + JUnit 5.8.2 via surefire 2.22.2, including real embedded-Ignite round-trip tests): $N/$N tests passed" || fail "offline 'mvn test' passed but ran '$N' tests, expected $REFERENCE_TEST_COUNT"
 else fail "offline 'mvn test' failed (see $EVIDENCE/mvn-test.log)"; fi
 
 # ---- 4b. Kriya's host mode runs Maven WITHOUT -o: prove the reference needs no remote at all (every remote is a dead mirror with the id "central", so any fetch would fail) ----
@@ -85,12 +85,22 @@ else fail "the reference needs a remote repository even though everything is cac
 run_runtime_leg() {
   local label="$1"; shift
   local out="$EVIDENCE/runtime-$label.json"
-  if env -i "$@" PYTHONDONTWRITEBYTECODE=1 "$KRIYA_PY" -I "$HELPER" runtime --repo "$REPO_ROOT" --fixture "$DEMO_V2_DIR/$REFERENCE_DIR" >"$out" 2>"$EVIDENCE/runtime-$label.err"; then
-    pass "runtime leg '$label': Spring XML loaded, Ignite 2.18.0 started and stopped, ProtocolParser ran, a Protocol was put into an Ignite cache (marshaller registry), exact [RESULT] line printed, exit 0 ($("$KRIYA_PY" -I -c "import json; r=json.load(open('$out')); print(str(r['elapsed_seconds'])+' s')"))"
+  if env -i "$@" PYTHONDONTWRITEBYTECODE=1 "$KRIYA_PY" -I "$HELPER" runtime --repo "$REPO_ROOT" --fixture "$DEMO_V2_DIR/$REFERENCE_DIR" ${RUNTIME_ARGS:-} >"$out" 2>"$EVIDENCE/runtime-$label.err"; then
+    if [ -n "${RUNTIME_ARGS:-}" ]; then WHAT="the cache itself shifted time by 1000 and the program printed time=1700001000, equals=false: the [RESULT] line is built from the value READ BACK from Ignite"
+    else WHAT="exact [RESULT] line printed from the retrieved Protocol, a Protocol was put into an Ignite cache (marshaller registry)"; fi
+    pass "runtime leg '$label': Spring XML loaded, Ignite 2.18.0 started and stopped, ProtocolParser ran, $WHAT, exit 0 ($("$KRIYA_PY" -I -c "import json; r=json.load(open('$out')); print(str(r['elapsed_seconds'])+' s')"))"
   else fail "runtime leg '$label' failed (see $out and $EVIDENCE/runtime-$label.err)"; fi
 }
 run_runtime_leg "desktop-app-environment" PATH="$APP_PATH" HOME="$HOME"
-if [ -n "$JAVA17_HOME" ]; then run_runtime_leg "java17" PATH="$JAVA17_HOME/bin:$APP_PATH" HOME="$HOME" JAVA_HOME="$JAVA17_HOME"; else fail "no Java 17 installation found by java_home: the explicit Java 17 leg cannot run (the scenario targets Java 17)"; fi
+RUNTIME_ARGS="--witness" run_runtime_leg "desktop-app-environment-witness" PATH="$APP_PATH" HOME="$HOME"
+if [ -n "$JAVA17_HOME" ]; then
+  run_runtime_leg "java17" PATH="$JAVA17_HOME/bin:$APP_PATH" HOME="$HOME" JAVA_HOME="$JAVA17_HOME"
+  RUNTIME_ARGS="--witness" run_runtime_leg "java17-witness" PATH="$JAVA17_HOME/bin:$APP_PATH" HOME="$HOME" JAVA_HOME="$JAVA17_HOME"
+else fail "no Java 17 installation found by java_home: the explicit Java 17 leg cannot run (the scenario targets Java 17)"; fi
+# ---- 5b. mutation self-check of the read-back proof: every way of discarding, replacing or bypassing cache.get must be KILLED (JUnit or the witness leg); the control must pass ----
+if env -i PATH="$APP_PATH" HOME="$HOME" PYTHONDONTWRITEBYTECODE=1 "$KRIYA_PY" -I "$HELPER" mutants --repo "$REPO_ROOT" --fixture "$DEMO_V2_DIR/$REFERENCE_DIR" >"$EVIDENCE/read-back-mutants.json" 2>"$EVIDENCE/read-back-mutants.err"; then
+  pass "read-back mutation self-check: the unmutated reference passes and every cache.get mutant is killed (no surviving mutant): $("$KRIYA_PY" -I -c "import json; r=json.load(open('$EVIDENCE/read-back-mutants.json')); print(', '.join(n+' <- '+'+'.join(c['killed_by']) for n,c in r['cases'].items() if n!='unmutated_reference'))")"
+else fail "read-back mutation self-check FAILED: a mutant survived or the control did not pass (see $EVIDENCE/read-back-mutants.json)"; fi
 ! pgrep -f "com.example.Main" >/dev/null 2>&1 && pass "no application process is left running" || fail "an application process (com.example.Main) is still running"
 
 # ---- 6. optional: the same candidate under OCI containment, network DENIED ----
@@ -99,6 +109,9 @@ if [ "$WITH_CONTAINMENT" = 1 ]; then
   if env -i PATH="$APP_PATH" HOME="$HOME" PYTHONDONTWRITEBYTECODE=1 "$KRIYA_PY" -I "$HELPER" runtime --repo "$REPO_ROOT" --fixture "$DEMO_V2_DIR/$REFERENCE_DIR" --contained >"$EVIDENCE/runtime-contained.json" 2>"$EVIDENCE/runtime-contained.err"; then
     pass "containment leg: the SAME candidate ran under the OCI backend with network DENIED (loopback is sufficient for the embedded node)"
   else fail "containment leg failed (see $EVIDENCE/runtime-contained.json)"; fi
+  if env -i PATH="$APP_PATH" HOME="$HOME" PYTHONDONTWRITEBYTECODE=1 "$KRIYA_PY" -I "$HELPER" runtime --repo "$REPO_ROOT" --fixture "$DEMO_V2_DIR/$REFERENCE_DIR" --contained --witness >"$EVIDENCE/runtime-contained-witness.json" 2>"$EVIDENCE/runtime-contained-witness.err"; then
+    pass "containment witness leg: under OCI with network DENIED the printed line still comes from the value read back from Ignite"
+  else fail "containment witness leg failed (see $EVIDENCE/runtime-contained-witness.json)"; fi
   CONTAINERS_AFTER="$(docker ps -a --format '{{.Names}}' 2>/dev/null | sort | tr '\n' ' ' || true)"
   [ "$CONTAINERS_BEFORE" = "$CONTAINERS_AFTER" ] && pass "the containment leg left no container behind" || fail "containers before/after differ: '$CONTAINERS_BEFORE' vs '$CONTAINERS_AFTER'"
 fi

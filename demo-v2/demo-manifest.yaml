@@ -51,7 +51,7 @@ scenarios:
     dir: scenarios/04-spring-ignite-protocol
     status: NOT_YET_REHEARSED   # model-free qualification PASS (scripts/qualify_spring_ignite.sh); no live model has run this goal
     model: live_local
-    network: none
+    network: no_external_network_local_ignite_listeners
     fixtures: [spring-ignite-protocol]
     expected: expected/scenario-04.md
     controlled: false

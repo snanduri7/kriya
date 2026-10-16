@@ -8,6 +8,11 @@ Subcommands print ONE JSON object on stdout and exit 0 only when every check ins
       and checks the application-owned success line, the Ignite start and the exit code.
       --contained uses the OCI backend (network DENIED); the Maven cache is pre-seeded from --cache-seed so no
       network is needed (the workflow's own compile/test gates would normally have filled it).
+      --witness additionally places ./cache-witness (offset 1000) in the project: the cache itself then stores every Protocol with `time` moved by 1000,
+      so the expected line changes to time=1700001000, equals=false, and only a program that really used the value read back from the cache can print it.
+  mutants  --repo R --fixture F
+      Mutation self-check of the read-back proof: each mutant (cache.get discarded / replaced by a local copy / Main printing the original / round trip bypassed)
+      must be KILLED by the JUnit round-trip tests or by the witness runtime leg; a surviving mutant fails the qualification.
   guard    --repo R --goal G --skill S
       KnowledgeGuard on the scenario goal: the desktop is always knowledge-policy strict, so ANY gap stops the run.
   skill    --repo R --config C --workspace W --goal G
@@ -51,6 +56,10 @@ def _expected_line() -> str:
     raise SystemExit("EXPECTED_RESULT_LINE missing from fixture.env")
 
 
+WITNESS_OFFSET = 1000
+WITNESS_LINE = "[RESULT] protocolVersion=1, softwareVersion=2, dataLength=15, time=1700001000, bodyLength=15, equals=false"
+
+
 def cmd_runtime(args: argparse.Namespace) -> Dict[str, Any]:
     sys.path.insert(0, args.repo)
     from kriya.config.config import AutonomyConfig
@@ -59,12 +68,17 @@ def cmd_runtime(args: argparse.Namespace) -> Dict[str, Any]:
 
     fixture = Path(args.fixture)
     files = sorted(str(p.relative_to(fixture)) for p in fixture.rglob("*") if p.is_file())
-    report: Dict[str, Any] = {"mode": "contained" if args.contained else "host", "checks": {}}
+    witness = bool(getattr(args, "witness", False))
+    if witness:
+        files.append("cache-witness")
+    report: Dict[str, Any] = {"mode": "contained" if args.contained else "host", "witness": witness, "checks": {}}
     with tempfile.TemporaryDirectory(prefix="qualify04-") as tmp:
         if args.contained:
             os.environ["KRIYA_STATE_DIR"] = os.path.join(tmp, "state")
         workspace = os.path.join(tmp, "ws")
         shutil.copytree(fixture, workspace)
+        if witness:
+            Path(workspace, "cache-witness").write_text(f"{WITNESS_OFFSET}\n", encoding="utf-8")
         subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)  # the candidate is untracked, as in a fresh unit
         if args.contained:
             key = hashlib.sha256(os.path.realpath(workspace).encode()).hexdigest()[:16]
@@ -83,7 +97,7 @@ def cmd_runtime(args: argparse.Namespace) -> Dict[str, Any]:
             return report
         report["elapsed_seconds"] = round(time.time() - started, 1)
         output = result["output"]
-        expected = _expected_line()
+        expected = WITNESS_LINE if witness else _expected_line()
         checks = {
             "gate_success": bool(result["success"]),
             "exit_code_0": result["returncode"] == 0,
@@ -91,7 +105,7 @@ def cmd_runtime(args: argparse.Namespace) -> Dict[str, Any]:
             "ignite_node_started": "Ignite node started OK" in output,
             "ignite_node_stopped": "Ignite node stopped OK" in output,
             "expected_result_line_exact": expected in output.splitlines(),
-            "verification_pass_marker": "[VERIFICATION] PASS" in output,
+            "verification_pass_marker": ("[VERIFICATION] FAIL" if witness else "[VERIFICATION] PASS") in output,
         }
         artifacts = result.get("runtime_artifacts") or []
         # Independent runtime proof that a Protocol INSTANCE went into the Ignite cache: Ignite writes <work>/db/marshaller/<typeId>.classname0 when it first marshals a user class.
@@ -106,6 +120,53 @@ def cmd_runtime(args: argparse.Namespace) -> Dict[str, Any]:
         report["ok"] = all(checks.values()) and report["only_ignite_runtime_state"]
         if not report["ok"]:
             report["output_tail"] = output[-2500:]
+    return report
+
+
+MUTANTS = (
+    # name, file, text to replace, replacement: each breaks the READ-BACK in one specific way
+    ("get_result_discarded", "src/main/java/com/example/ProtocolCacheDemo.java", "Protocol retrieved = cache.get(KEY);",
+     "cache.get(KEY);\n        Protocol retrieved = protocol;"),
+    ("get_replaced_by_a_local_copy", "src/main/java/com/example/ProtocolCacheDemo.java", "Protocol retrieved = cache.get(KEY);",
+     "cache.get(KEY);\n        Protocol retrieved = new Protocol(protocol.getProtocolVersion(), protocol.getSoftwareVersion(), protocol.getTime(), protocol.getBody());"),
+    ("main_prints_the_original_not_the_retrieved", "src/main/java/com/example/Main.java", "ProtocolCacheDemo.resultLine(original, retrieved)",
+     "ProtocolCacheDemo.resultLine(original, original)"),
+    ("main_bypasses_the_cache_round_trip", "src/main/java/com/example/Main.java", "Protocol retrieved = ProtocolCacheDemo.roundTrip(cache, decoded);",
+     "Protocol retrieved = decoded;"),
+)
+
+
+def _mvn_test_passes(project: str) -> bool:
+    result = subprocess.run(["mvn", "-o", "-B", "clean", "test"], cwd=project, capture_output=True, text=True, check=False, timeout=600)
+    return result.returncode == 0 and "Tests run: 5, Failures: 0, Errors: 0, Skipped: 0" in result.stdout
+
+
+def cmd_mutants(args: argparse.Namespace) -> Dict[str, Any]:
+    fixture = Path(args.fixture)
+    report: Dict[str, Any] = {"cases": {}}
+    with tempfile.TemporaryDirectory(prefix="qualify04-mutants-") as tmp:
+        for name, rel, old, new in (("unmutated_reference", None, None, None), *MUTANTS):
+            project = os.path.join(tmp, name)
+            shutil.copytree(fixture, project)
+            if rel is not None:
+                target = Path(project, rel)
+                text = target.read_text(encoding="utf-8")
+                if text.count(old) != 1:
+                    report["cases"][name] = {"error": f"mutation target not found exactly once in {rel}"}
+                    continue
+                target.write_text(text.replace(old, new), encoding="utf-8")
+            pristine = project + "-for-witness"  # the JUnit run leaves target/ and ignite/ behind; the runtime leg must start from the mutated sources only
+            shutil.copytree(project, pristine)
+            tests_pass = _mvn_test_passes(project)
+            witness = cmd_runtime(argparse.Namespace(repo=args.repo, fixture=pristine, contained=False, cache_seed="", witness=True))
+            case = {"junit_passes": tests_pass, "witness_leg_ok": bool(witness.get("ok"))}
+            case["killed"] = not (tests_pass and case["witness_leg_ok"])
+            case["killed_by"] = [label for label, alive in (("junit", not tests_pass), ("witness_leg", not case["witness_leg_ok"])) if alive]
+            report["cases"][name] = case
+    control = report["cases"].get("unmutated_reference", {})
+    report["control_passes"] = control.get("junit_passes") is True and control.get("witness_leg_ok") is True
+    report["surviving_mutants"] = [n for n, c in report["cases"].items() if n != "unmutated_reference" and not c.get("killed")]
+    report["ok"] = report["control_passes"] and not report["surviving_mutants"] and len(report["cases"]) == len(MUTANTS) + 1
     return report
 
 
@@ -188,6 +249,10 @@ def main() -> int:
     runtime.add_argument("--fixture", required=True)
     runtime.add_argument("--contained", action="store_true")
     runtime.add_argument("--cache-seed", default="~/.m2/repository")
+    runtime.add_argument("--witness", action="store_true")
+    mutants = sub.add_parser("mutants")
+    mutants.add_argument("--repo", required=True)
+    mutants.add_argument("--fixture", required=True)
     guard = sub.add_parser("guard")
     guard.add_argument("--repo", required=True)
     guard.add_argument("--goal", required=True)
@@ -198,7 +263,7 @@ def main() -> int:
     skill.add_argument("--workspace", required=True)
     skill.add_argument("--goal", required=True)
     args = parser.parse_args()
-    report = {"runtime": cmd_runtime, "guard": cmd_guard, "skill": cmd_skill}[args.command](args)
+    report = {"runtime": cmd_runtime, "mutants": cmd_mutants, "guard": cmd_guard, "skill": cmd_skill}[args.command](args)
     print(json.dumps(report, indent=1, default=str))
     return 0 if report.get("ok") else 1
 

@@ -211,6 +211,7 @@ assert c['llm']['model'] == 'qwen3-coder:30b' and 'localhost:11434' in c['llm'][
       SK="$(sed -n 's/^\[[A-Z]*\] Tests run: [0-9]*, Failures: 0, Errors: 0, Skipped: \([0-9]*\).*/\1/p' "$W04/evidence/post-test.log" | tail -1)"
       [ -n "$N" ] && [ "$N" -ge 1 ] && [ "${SK:-0}" = "0" ] && pass "independent offline 'mvn test' passes with $N test(s) executed, none skipped" || fail "independent offline 'mvn test' passed but executed no tests or skipped some (see $W04/evidence/post-test.log)"
     else fail "independent offline 'mvn test' failed (see $W04/evidence/post-test.log)"; fi
+    rm -rf "$CHECK/ignite"   # the project's own tests may have started Ignite in this copy: the marshaller evidence below must come from the APPLICATION run only
     MAINS="$(grep -rl 'public static void main' "$S04/src/main/java" 2>/dev/null | head -1 || true)"
     if [ -n "$MAINS" ]; then
       PKG="$(sed -n 's/^package \([A-Za-z0-9_.]*\);.*/\1/p' "$MAINS" | head -1)"; CLS="$(basename "$MAINS" .java)"; FQN="${PKG:+$PKG.}$CLS"

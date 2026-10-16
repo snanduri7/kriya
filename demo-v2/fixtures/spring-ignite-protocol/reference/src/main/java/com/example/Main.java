@@ -12,26 +12,14 @@ public class Main {
     public static void main(String[] args) {
         ProtocolParser parser = new ProtocolParser();
         Protocol original = new Protocol(1, 2, 1700000000L, "Hello, Protocol".getBytes(StandardCharsets.UTF_8));
-        byte[] encoded = parser.encode(original);
-        Protocol decoded = parser.decode(encoded);
+        Protocol decoded = parser.decode(parser.encode(original));
 
         try (ConfigurableApplicationContext context = new ClassPathXmlApplicationContext("ignite-config.xml")) {
             Ignite ignite = (Ignite) context.getBean("igniteNode");
-            IgniteCache<Integer, Protocol> cache = ignite.getOrCreateCache("protocol-cache");
-            cache.put(1, decoded);
-            Protocol fromCache = cache.get(1);
-
-            boolean equal = original.equals(fromCache);
-            System.out.println("[RESULT] protocolVersion=" + fromCache.getProtocolVersion()
-                    + ", softwareVersion=" + fromCache.getSoftwareVersion()
-                    + ", dataLength=" + fromCache.getDataLength()
-                    + ", time=" + fromCache.getTime()
-                    + ", bodyLength=" + fromCache.getBody().length
-                    + ", equals=" + equal);
-            if (!equal) {
-                throw new IllegalStateException("Protocol read back from the Ignite cache differs from the original");
-            }
-            System.out.println("[VERIFICATION] PASS");
+            IgniteCache<Integer, Protocol> cache = ignite.getOrCreateCache(ProtocolCacheDemo.CACHE_NAME);
+            Protocol retrieved = ProtocolCacheDemo.roundTrip(cache, decoded);
+            System.out.println(ProtocolCacheDemo.resultLine(original, retrieved));
+            System.out.println(original.equals(retrieved) ? "[VERIFICATION] PASS" : "[VERIFICATION] FAIL");
         }
     }
 }

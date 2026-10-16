@@ -8,6 +8,16 @@
     <bean id="ignite.cfg" class="org.apache.ignite.configuration.IgniteConfiguration">
         <property name="igniteInstanceName" value="ignite-server-node"/>
         <property name="peerClassLoadingEnabled" value="true"/>
+        <property name="cacheConfiguration">
+            <list>
+                <bean class="org.apache.ignite.configuration.CacheConfiguration">
+                    <property name="name" value="protocol-cache"/>
+                    <property name="interceptor">
+                        <bean class="com.example.WitnessInterceptor"/>
+                    </property>
+                </bean>
+            </list>
+        </property>
     </bean>
 
     <!-- Starts the Ignite node when the Spring context loads; closing the context stops it. -->

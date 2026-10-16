@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict
@@ -219,7 +221,9 @@ def test_reference_pom_satisfies_the_build_contract() -> None:
     assert pom.rstrip().index("<argument>${exec.mainClass}</argument>") > pom.index("<classpath/>")  # the main class is the FINAL argument, overridable
     for required in ("--add-opens=java.base/java.nio=ALL-UNNAMED", "--add-opens=java.base/java.util=ALL-UNNAMED"):  # MEASURED required on Java 17 and 21 (QUALIFICATION.md section 6; raw output in evidence/)
         assert required in pom
-    assert pom.count("--add-opens=") == 24  # the full documented Ignite list from the verified skill (22 of them are optional for this workload)
+    assert pom.count("<argument>--add-opens=") == 24  # the full documented Ignite list from the verified skill (22 of them are optional for this workload)
+    argline = re.search(r"<artifactId>maven-surefire-plugin</artifactId>.*?<argLine>(.*?)</argLine>", pom, re.DOTALL)
+    assert argline is not None and "--add-opens=java.base/java.nio=ALL-UNNAMED" in argline.group(1) and "--add-opens=java.base/java.util=ALL-UNNAMED" in argline.group(1)  # the real-Ignite JUnit tests need them too
 
 
 def test_reference_spring_xml_uses_exactly_one_start_mechanism() -> None:
@@ -230,19 +234,34 @@ def test_reference_spring_xml_uses_exactly_one_start_mechanism() -> None:
     assert 'getBean("igniteNode")' in main and "try (ConfigurableApplicationContext" in main  # by id, and the context is closed so the JVM can exit
 
 
-def test_reference_main_really_uses_protocol_parser_and_the_cache() -> None:
+def test_reference_main_builds_its_result_from_the_value_read_back_from_the_cache() -> None:
     main = _ref("src", "main", "java", "com", "example", "Main.java")
+    demo = _ref("src", "main", "java", "com", "example", "ProtocolCacheDemo.java")
     assert "IgniteCache<Integer, Protocol> cache" in main  # explicitly typed, as in the staged Stage 2 evidence
-    assert "cache.put(1, decoded)" in main and "Protocol fromCache = cache.get(1)" in main
-    assert "parser.decode(parser.encode(original))" not in main and "parser.decode(encoded)" in main
-    assert "original.equals(fromCache)" in main  # the comparison is against what came back FROM THE CACHE
-    assert main.index("cache.put(") < main.index("cache.get(") < main.index("[RESULT]")
-    assert "fromCache.getDataLength()" in main  # the printed values are the cache's, not the in-memory original's
+    assert "parser.decode(parser.encode(original))" in main
+    assert "Protocol retrieved = ProtocolCacheDemo.roundTrip(cache, decoded);" in main
+    assert "ProtocolCacheDemo.resultLine(original, retrieved)" in main
+    assert demo.index("cache.put(KEY, protocol)") < demo.index("Protocol retrieved = cache.get(KEY)") < demo.index("return retrieved;")
+    result_line = demo[demo.index("public static String resultLine"):]
+    assert "retrieved.getTime()" in result_line and "original.getTime()" not in result_line  # only the comparison involves the original
+    # The text checks above are only a sanity net: the causal proof is the runtime witness leg, the JUnit witness test and the mutation self-check (below).
+
+
+def test_reference_has_a_cache_side_witness_that_is_inert_by_default() -> None:
+    interceptor = _ref("src", "main", "java", "com", "example", "WitnessInterceptor.java")
+    assert "private long timeOffset;" in interceptor and "if (timeOffset == 0)" in interceptor and "return newVal;" in interceptor
+    assert 'Path.of("cache-witness")' in interceptor  # active only when the qualification places that file in the project
+    assert "WitnessInterceptor" in _ref("src", "main", "resources", "ignite-config.xml")
 
 
 def test_reference_test_is_meaningful_not_vacuous() -> None:
     test = _ref("src", "test", "java", "com", "example", "protocol", "ProtocolParserTest.java")
-    assert len(re.findall(r"@Test", test)) == int(_env(FIXTURE / "fixture.env")["REFERENCE_TEST_COUNT"])
+    cache_test = _ref("src", "test", "java", "com", "example", "ProtocolCacheRoundTripTest.java")
+    assert len(re.findall(r"@Test", test)) + len(re.findall(r"@Test", cache_test)) == int(_env(FIXTURE / "fixture.env")["REFERENCE_TEST_COUNT"])
+    # a genuine embedded-Ignite round trip with field assertions, and a cache-side witness proving the returned value is the cache's
+    assert "new ClassPathXmlApplicationContext(springXml)" in cache_test and "ProtocolCacheDemo.roundTrip(cache, decoded)" in cache_test
+    assert "assertEquals(ORIGINAL.getTime() + 5000, retrieved.getTime())" in cache_test and "assertNotEquals(ORIGINAL, retrieved)" in cache_test
+    assert "assertEquals(1700000000L, retrieved.getTime())" in cache_test and "Mockito" not in cache_test and "mock(" not in cache_test
     assert "assertTrue(true)" not in test and "assertTrue(1" not in test and "assertEquals(true, true)" not in test
     assert "parser.decode(parser.encode(original))" in test and "assertEquals(original, decoded)" in test  # a real round trip
     assert "assertArrayEquals(new byte[] {1, 2, 0, 0, 3, 1, 2, 3, 4, 9, 8, 7}, encoded)" in test  # pins the big-endian header bytes
@@ -378,3 +397,24 @@ def test_post_check_rejects_missing_tests_and_a_leftover_ignite_directory(tmp_pa
     (workspace / "ignite").mkdir()
     failures = [line for line in _post(work) if line.startswith("FAIL")]
     assert any("no test under src/test/java" in line for line in failures) and any("ignite/ work directory is left" in line for line in failures), failures
+
+
+# ---- read-back is CAUSALLY proven: the reference's own mutants are killed (needs Maven + the offline repository; skipped where absent) ----
+
+@pytest.mark.skipif(not _HAS_OFFLINE_STACK, reason="needs mvn and the offline Maven repository (Ignite 2.18.0, JUnit 5.8.2)")
+def test_every_cache_get_mutant_of_the_reference_is_killed_and_the_control_passes() -> None:
+    result = subprocess.run([sys.executable, "-I", str(DEMO_V2 / "scripts" / "qualify_spring_ignite.py"), "mutants", "--repo", str(REPO), "--fixture", str(REFERENCE)],
+                            capture_output=True, text=True, check=False, timeout=900)
+    report = json.loads(result.stdout)
+    assert report["control_passes"] is True, report
+    assert set(report["cases"]) == {"unmutated_reference", "get_result_discarded", "get_replaced_by_a_local_copy", "main_prints_the_original_not_the_retrieved", "main_bypasses_the_cache_round_trip"}
+    assert report["surviving_mutants"] == [], report
+    assert "junit" in report["cases"]["get_result_discarded"]["killed_by"]  # discarding the get result fails the real-Ignite JUnit test, not only the runtime leg
+    assert report["cases"]["main_prints_the_original_not_the_retrieved"]["killed_by"] == ["witness_leg"]  # a print-level bypass is only visible at runtime
+    assert result.returncode == 0
+
+
+def test_negative_control_the_witness_expectation_differs_from_the_plain_one() -> None:
+    helper = _helper()
+    assert helper.WITNESS_LINE != _env(FIXTURE / "fixture.env")["EXPECTED_RESULT_LINE"]  # otherwise the witness leg could not tell a bypass from the real thing
+    assert "time=1700001000" in helper.WITNESS_LINE and "equals=false" in helper.WITNESS_LINE
