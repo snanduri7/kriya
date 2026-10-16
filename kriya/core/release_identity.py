@@ -53,8 +53,8 @@ def kriya_revision(source_root: str = _SOURCE_ROOT) -> Dict[str, Any]:
     with its dirty flag (RELEASE-IDENTITY-WHEEL-001); UNAVAILABLE only when
     neither exists. A checkout's identity is unchanged (git is still read)."""
     if not os.path.exists(os.path.join(source_root, ".git")):
-        from kriya.build_info import UNKNOWN as UNKNOWN_BUILD
-        from kriya.build_info import embedded_build_info
+        from kriya.foundation.build_info import UNKNOWN as UNKNOWN_BUILD
+        from kriya.foundation.build_info import embedded_build_info
 
         embedded = embedded_build_info()
         if embedded["commit"] != UNKNOWN_BUILD:

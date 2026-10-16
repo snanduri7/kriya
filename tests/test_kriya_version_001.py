@@ -12,8 +12,9 @@ from importlib import metadata
 import pytest
 from click.testing import CliRunner
 
-from kriya import build_info
+import kriya
 from kriya.cli import main
+from kriya.foundation import build_info
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COMMIT, TREE = "28fa21f4f0d42b7a979ff4cc1ba81cdd75d16a09", "bc6ffc113f0dac7e2fcf93111111280e4ea0aafc"
@@ -58,7 +59,7 @@ def test_version_json_is_exactly_the_identity_and_nothing_else(embedded):
     report = json.loads(out)  # the whole of stdout parses: no prose or log lines mixed in
     assert report == {"product": "kriya", "version": metadata.version("kriya"), "commit": COMMIT, "tree": TREE,
                       "dirty": False, "build_provenance": "embedded", "python": report["python"],
-                      "install_path": os.path.dirname(os.path.abspath(build_info.__file__))}
+                      "install_path": os.path.dirname(os.path.abspath(kriya.__file__))}
     assert report["python"] == sys.version.split()[0]
 
 

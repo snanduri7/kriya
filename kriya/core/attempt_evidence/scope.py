@@ -230,7 +230,7 @@ def ensure_store(cfg: Any) -> None:
 
 
 def _run_manifest(context: Any) -> Dict[str, Any]:
-    from kriya.build_info import version_report
+    from kriya.foundation.build_info import version_report
 
     try:
         build = version_report()

@@ -185,6 +185,261 @@ STATE_MACHINE_TIER_FILES = frozenset({
 })
 
 
+# --- module tiers (full modularization; handover/MODULARIZATION/TEST-MATRIX.md §1) ---------------------
+# `pytest -m <module>` selects one logical module's owning suites. Built in slice A1 from the
+# TEST-MATRIX name families (a family is a substring of the file name, never a glob) and listed
+# explicitly so a rename is visible; every entry must exist (tests/architecture/test_import_direction.py).
+# A file may carry several markers. tests/state_machine/ is `kernel` and tests/architecture/ is
+# `architecture` by directory; tests/contracts/ and tests/integration/ join in the slices that create
+# them. Q1 (test_module_selectors.py) makes the table total; until then a file outside it simply
+# carries no module marker.
+MODULE_TIER_FILES = {
+    "kernel": frozenset({
+        "test_attribution.py", "test_backend_final_closure_005_planner_guidance.py",
+        "test_backend_final_closure_005_repair_cycle.py", "test_backend_final_closure_005_retry_grounding.py",
+        "test_backend_readiness_v2_plan_grounding.py", "test_best_of_n.py", "test_candidate_verification_binding.py",
+        "test_code_intel_index_correctness.py", "test_code_intel_planner_grounding.py", "test_code_intel_retry_t0.py",
+        "test_context_budget.py", "test_context_edit_protocol_001.py", "test_context_edit_protocol_large_file_001.py",
+        "test_corr016_planner_authority_gate.py", "test_corr018_general_case_closure.py",
+        "test_d2_validator_attribution_authority.py", "test_d5b_recovery_evidence.py",
+        "test_direct_plan_real_maven.py", "test_edit_revisions.py", "test_edit_safety_policy_audit.py",
+        "test_enforce_verified_no_change.py", "test_failure_signature_run_noise.py",
+        "test_file_integrity_contract_001.py", "test_file_integrity_contract_001b.py",
+        "test_fs1_false_success_reproducer.py", "test_fs1a_test_execution_evidence.py",
+        "test_fs1c0_named_test_oracle.py", "test_fs1c1_requirement_claims.py",
+        "test_fs1c_named_test_oracle_dependency.py", "test_generation_time_budget.py",
+        "test_gr0_retry_no_information_gain.py", "test_greenfield_direct_plan_runtime.py",
+        "test_jdtls_candidate_isolation.py", "test_kup_evidence_corruption_matrix.py",
+        "test_launch_refuses_milestone_mode.py", "test_live_prd017_019_model_roles.py",
+        "test_lr_r1_m1_attempt_iteration.py", "test_lr_r1_m1_candidate_gates.py", "test_lr_r1_m1_recovery.py",
+        "test_lr_r1_p4_verification_only_retry_reproducer.py", "test_lr_r1_p4_verification_retry_admission.py",
+        "test_milestone2.py", "test_milestone3_4.py", "test_milestone_validation.py", "test_milestones.py",
+        "test_p2_compile_regression_attribution.py", "test_p2_regression_attribution_reproducer.py",
+        "test_p3c_prose_candidate_delta.py", "test_plan_edit_feasibility_001.py", "test_plan_executability.py",
+        "test_plan_external_package_capability_001.py", "test_plan_global_invariant_projection_001.py",
+        "test_plan_obligation_superseded.py", "test_plan_schema.py", "test_plan_validation.py",
+        "test_plan_verification_scope.py", "test_planner_candidate_evidence.py", "test_planner_context_fit.py",
+        "test_planner_file_ownership.py", "test_planner_robust_001_repair.py", "test_planner_structured_output.py",
+        "test_planner_target_consistency.py", "test_planner_test_stage_no_change.py",
+        "test_planner_verification_contract.py", "test_platform_process_control_contract.py",
+        "test_policy_enforcement.py", "test_policy_enforcement_adversarial.py", "test_prd006_candidate_workspace.py",
+        "test_prd008_commit_state_gate.py", "test_prd008_recovery.py", "test_prd008_resume_fingerprints.py",
+        "test_prd008_s4b_milestone_completion.py", "test_prd008_s4c_milestone_resume.py",
+        "test_prd008a_plan_adapters.py", "test_prd008a_plan_executor.py", "test_prd008a_resume_convergence.py",
+        "test_prd016_adaptive_budget.py", "test_prd016_token_budget.py", "test_prd017_fallback_transition.py",
+        "test_prd019_milestone_route_resume.py", "test_prd020_milestone_requirements.py",
+        "test_prd022_ownership_recovery.py", "test_prd026_retry_progress.py", "test_prd030_terminal_services.py",
+        "test_prd031_coordinators.py", "test_prd031a_static_analysis.py", "test_prd032_chaos_commit.py",
+        "test_prd032_chaos_runtime.py", "test_prd032_chaos_static_analysis.py", "test_prd032_planner_vocabulary.py",
+        "test_prd032_planner_workspace_path.py", "test_prd032_terminal_commit_stop.py",
+        "test_prompt_budget_fit_001ab.py", "test_prompt_budget_fit_001c.py", "test_prv17_preflight.py",
+        "test_prv17_stage_contract_architecture.py", "test_reg_r1_workflow_reproducer.py",
+        "test_reg_r2_workflow_reproducer.py", "test_regression_attribution.py",
+        "test_repair_002_d1_candidate_gate_baseline.py", "test_repair_002_d2_structural_evidence.py",
+        "test_repair_002_d3_file_resolution_scope.py", "test_repair_002_d4_identical_write.py",
+        "test_repair_003_f1_residual_self_correction_rerun_environment_stop.py",
+        "test_repair_003_f1_runtime_environment_stop.py", "test_repair_003_f3_suite_preservation_baseline_policy.py",
+        "test_repair_003_p1_2_suite_preservation_attribution.py", "test_repair_003_p2_2_venv_environment_failure.py",
+        "test_repair_contract.py", "test_repair_executor.py", "test_resume_integrity.py",
+        "test_retry_inference_identity.py", "test_retry_package.py", "test_retry_policy.py",
+        "test_self_correction.py", "test_subtask_checkpoint.py", "test_subtask_context_projection.py",
+        "test_subtask_executor.py", "test_subtask_telemetry.py", "test_tool003_p2_oci_enforcement.py",
+        "test_tool_subtask_hitl_confirmation.py", "test_val001_g1r3_retry_context.py", "test_workflow.py",
+        "test_workflow_approval_policy_audit.py", "test_workflow_authorize_action.py", "test_workflow_controller.py",
+        "test_workflow_controller_enforce.py", "test_workflow_execution_policy_config_wiring.py",
+        "test_workflow_recovery_handback.py"
+    }),
+    "application": frozenset({
+        "test_kup_catalog.py", "test_kup_change_review.py", "test_kup_config_approval.py", "test_kup_execution.py",
+        "test_kup_project_context.py", "test_kup_project_init.py", "test_kup_runtime_command_review.py",
+        "test_kup_workspace.py", "test_launch_approval.py"
+    }),
+    "context": frozenset({
+        "test_backend_readiness_004_platform_paths.py", "test_linux_oci_workspace_identity.py",
+        "test_plat002_outside_workspace_identity.py", "test_state001_checkpoint_workspace_identity.py",
+        "test_workspace_identity.py"
+    }),
+    "authority": frozenset({
+        "test_architecture_regression_index.py", "test_authority_cli_refusal.py",
+        "test_backend_readiness_004_authority_request.py", "test_backend_readiness_v2_gradle_regression.py",
+        "test_candidate_verification_binding.py", "test_corr016_planner_authority_gate.py",
+        "test_d1_operation_mode_authority.py", "test_d2_validator_attribution_authority.py",
+        "test_d8_terminal_toolchain_authority.py", "test_edit_safety_policy_audit.py",
+        "test_empty_change_source_approval.py", "test_execution_policy_config.py",
+        "test_gr0_negative_model_authority.py", "test_gr1b_spec_gate_model_authority.py",
+        "test_kup_config_approval.py", "test_kup_content_authority.py", "test_launch_approval.py",
+        "test_learn_egress_policy.py", "test_live_prd012_egress_injection.py",
+        "test_llm_egress_policy_integration.py", "test_lr_r1_m1_authority_parse.py",
+        "test_p2_compile_regression_attribution.py", "test_p2_regression_attribution_reproducer.py",
+        "test_p3a_sent_request_anchor_authority.py", "test_policy_approval_rules.py",
+        "test_policy_approved_sources.py", "test_policy_command_allowlist.py", "test_policy_enforcement.py",
+        "test_policy_enforcement_adversarial.py", "test_policy_errors.py", "test_policy_execution.py",
+        "test_policy_execution_sensitive_path_override.py", "test_policy_filesystem.py",
+        "test_policy_filesystem_authorized_writer.py", "test_policy_git_destructive.py", "test_policy_injection.py",
+        "test_policy_model.py", "test_policy_network_egress.py", "test_policy_package_supply_chain.py",
+        "test_policy_telemetry.py", "test_policy_trust.py", "test_prd012_egress.py", "test_prd012_egress_docker.py",
+        "test_prd012_network_inventory.py", "test_prd024_baseline_auto_policy.py",
+        "test_prd028_authority_escalation.py", "test_reg_r1_pytest_regression_authority.py",
+        "test_regression_attribution.py", "test_regression_unattributed_prose_001.py",
+        "test_repair_003_f3_suite_preservation_baseline_policy.py", "test_retry_policy.py",
+        "test_runtime_command_approval.py", "test_sec009_config_authority.py", "test_sec009_p2_authority_approval.py",
+        "test_semantic_region_authority.py", "test_tool002_mcp_invocation_authority.py",
+        "test_tool002_p2_invocation_approval.py", "test_tool002_p2_real_cli.py",
+        "test_tool002_tool003_combined_closure.py", "test_tool003_mcp_capability_authority.py",
+        "test_tool003_p2_deterministic.py", "test_tool003_p2_oci_enforcement.py", "test_validate_policy_audit.py",
+        "test_validate_resource_authority.py", "test_verification_contract_003_authority.py",
+        "test_web_policy_audit.py", "test_workflow_approval_policy_audit.py",
+        "test_workflow_execution_policy_config_wiring.py", "test_worktree_policy_audit.py"
+    }),
+    "evidence": frozenset({
+        "test_backend_readiness_004_evidence_tools.py", "test_batch6_live_evidence_status.py",
+        "test_d5b_recovery_evidence.py", "test_fs1a_test_execution_evidence.py", "test_kup_evidence_call_content.py",
+        "test_kup_evidence_change_content.py", "test_kup_evidence_cli.py", "test_kup_evidence_corruption_matrix.py",
+        "test_kup_evidence_manifest.py", "test_kup_evidence_records.py", "test_kup_evidence_verify.py",
+        "test_lr_r1_m1_0_inventory.py", "test_lr_r1_m1_attempt_iteration.py", "test_lr_r1_m1_authority_parse.py",
+        "test_lr_r1_m1_candidate_gates.py", "test_lr_r1_m1_cli.py", "test_lr_r1_m1_doctor.py",
+        "test_lr_r1_m1_equivalence.py", "test_lr_r1_m1_equivalence_scenarios.py", "test_lr_r1_m1_layout_tripwire.py",
+        "test_lr_r1_m1_legacy_import.py", "test_lr_r1_m1_lv2_q4.py", "test_lr_r1_m1_mirroring.py",
+        "test_lr_r1_m1_model_calls.py", "test_lr_r1_m1_native_wire_parity.py", "test_lr_r1_m1_reader_json_shape.py",
+        "test_lr_r1_m1_reason_codes.py", "test_lr_r1_m1_recovery.py", "test_lr_r1_m1_retention.py",
+        "test_lr_r1_m1_scopes.py", "test_lr_r1_m1_sections.py", "test_lr_r1_m1_store.py", "test_lr_r1_m1_t6_fixes.py",
+        "test_lr_r1_m1_t6_paths.py", "test_lr_r1_m1_wire.py", "test_lr_r1_p5_integration_evidence.py",
+        "test_model_evidence_hardening_001.py", "test_model_evidence_hardening_final.py",
+        "test_planner_candidate_evidence.py", "test_prd011_toolchain_evidence.py", "test_prd025_verifier_evidence.py",
+        "test_repair_002_d2_structural_evidence.py", "test_sec002_fail_closed_evidence.py",
+        "test_ver004_pyproject_dependency_evidence.py"
+    }),
+    "state": frozenset({
+        "test_checkpoint_control_plane_hashes.py", "test_control_artifact_persistence.py",
+        "test_control_artifacts.py", "test_control_context.py", "test_control_contract_persistence.py",
+        "test_control_contracts.py", "test_control_decisions.py", "test_control_persistence.py",
+        "test_control_plane_end_to_end.py", "test_control_state.py", "test_control_telemetry.py",
+        "test_kup_acquisition.py", "test_kup_host_environment.py", "test_lr_r1_m1_retention.py",
+        "test_plat039_trusted_control_paths.py", "test_platform_process_control_contract.py",
+        "test_prd008_commit_state_gate.py", "test_prd008_recovery.py", "test_prd008_resume_fingerprints.py",
+        "test_prd008_s4b_milestone_completion.py", "test_prd008_s4c_milestone_resume.py",
+        "test_prd008a_cross_path.py", "test_prd008a_execution_plan.py", "test_prd008a_plan_adapters.py",
+        "test_prd008a_plan_executor.py", "test_prd008a_resume_convergence.py",
+        "test_prd019_milestone_route_resume.py", "test_reopened_project_history.py", "test_resume_integrity.py",
+        "test_run_record.py", "test_state001_checkpoint_workspace_identity.py", "test_state_location.py",
+        "test_subtask_checkpoint.py", "test_traces_command.py"
+    }),
+    "config": frozenset({
+        "test_autonomy_config_registry_hosts.py", "test_code_intel_config.py", "test_config.py",
+        "test_config_command.py", "test_config_extra.py", "test_execution_policy_config.py",
+        "test_kup_config_approval.py", "test_qual_config_001.py", "test_sec009_config_authority.py",
+        "test_workflow_execution_policy_config_wiring.py"
+    }),
+    "provider": frozenset({
+        "test_embedding_contract_001.py", "test_inf001_runtime_parity.py", "test_inf001_runtime_port.py",
+        "test_learn_embedding_failure_warning.py", "test_live_prd013_016_model_runtime.py",
+        "test_live_prd017_019_model_roles.py", "test_llm_egress_policy_integration.py", "test_llm_extra.py",
+        "test_lr_r1_p1_capability_routing.py", "test_prd013_model_runtime.py", "test_prd014_model_qualification.py",
+        "test_prd015_completion_result.py", "test_prd016_adaptive_budget.py", "test_prd016_allocation.py",
+        "test_prd016_token_budget.py", "test_prd017_fallback_transition.py", "test_prd018_role_metrics.py",
+        "test_prd019_milestone_route_resume.py", "test_prd019_model_routing.py", "test_prompt_budget_fit_001ab.py",
+        "test_prompt_budget_fit_001c.py", "test_provider_contract_001.py", "test_provider_contract_001a.py",
+        "test_provider_contract_native.py", "test_routing.py"
+    }),
+    "skills": frozenset({
+        "test_auto_skills.py", "test_shared_skills_dir_guard.py", "test_skill_service.py", "test_skill_sources.py",
+        "test_skills.py"
+    }),
+    "tools": frozenset({
+        "test_backend_readiness_004_evidence_tools.py", "test_d8_terminal_toolchain_authority.py",
+        "test_live_prd011_toolchain_parity.py", "test_mcp.py", "test_plugins.py", "test_plugins_command.py",
+        "test_prd011_toolchain_evidence.py", "test_prd011_toolchain_fingerprint.py",
+        "test_prd011_toolchain_identity.py", "test_prd011_toolchain_identity_oci.py",
+        "test_prd011_toolchain_migration.py", "test_prd_tools.py", "test_sec003_mcp_env_isolation.py",
+        "test_sec004_mcp_lifecycle.py", "test_tool001_autonomous_tool_execution.py",
+        "test_tool002_mcp_invocation_authority.py", "test_tool002_p2_invocation_approval.py",
+        "test_tool002_p2_real_cli.py", "test_tool002_tool003_combined_closure.py",
+        "test_tool003_mcp_capability_authority.py", "test_tool003_p2_deterministic.py",
+        "test_tool003_p2_oci_enforcement.py", "test_tool_service.py", "test_tool_subtask_hitl_confirmation.py",
+        "test_tools.py", "test_tools_command.py"
+    }),
+    "execution": frozenset({
+        "test_backend_readiness_v2_no_sandbox.py", "test_capability_adapters.py", "test_containment.py",
+        "test_containment_gitfile_mask.py", "test_containment_oci.py", "test_containment_oci_registry_scoped_unit.py",
+        "test_d2_validator_attribution_authority.py", "test_d3_diagnosis_mismatch_scope.py",
+        "test_d3_runtime_prerequisite.py", "test_d4_runtime_entrypoint_ownership.py",
+        "test_d5_runtime_resource_grounding.py", "test_direct_plan_real_maven.py",
+        "test_gradle_wrapper_containment_001.py", "test_live_process_helper.py", "test_lsp.py",
+        "test_platform_process_control_contract.py", "test_prd031a_semgrep_adapter.py",
+        "test_prd031a_semgrep_live.py", "test_prd031a_static_analysis.py", "test_prd032_chaos_static_analysis.py",
+        "test_process_controller.py", "test_process_controller_containment.py", "test_process_profile.py",
+        "test_repair_002_d3_file_resolution_scope.py", "test_repair_002_d4_identical_write.py",
+        "test_runtime_maven_acquisition.py", "test_sandbox.py", "test_service_runtime.py",
+        "test_service_runtime_oci.py", "test_validate_maven_acquisition.py", "test_validate_oci.py",
+        "test_validate_package_audit.py", "test_validate_policy_audit.py", "test_validate_resource_authority.py",
+        "test_ver006_distrust_containment.py"
+    }),
+    "repository": frozenset({
+        "test_backend_final_closure_005_git_metadata.py", "test_backend_readiness_v2_terminal_masking_gate.py",
+        "test_d8_terminal_toolchain_authority.py", "test_edit_safety_policy_audit.py",
+        "test_file_integrity_contract_001.py", "test_file_integrity_contract_001b.py",
+        "test_prd004_commit_failure.py", "test_prd005_commit_transactions.py", "test_prd008_commit_state_gate.py",
+        "test_prd030_terminal_services.py", "test_prd032_chaos_commit.py", "test_prd032_terminal_commit_stop.py",
+        "test_worktree_canonical_root.py", "test_worktree_hooks.py", "test_worktree_policy_audit.py",
+        "test_worktree_pollution_001.py"
+    }),
+    "knowledge": frozenset({
+        "test_analyzer.py", "test_analyzer_cache.py", "test_cagc_ab_analyzer.py", "test_code_intel_chunks.py",
+        "test_code_intel_config.py", "test_code_intel_construction_sites.py", "test_code_intel_developer_t0.py",
+        "test_code_intel_index_correctness.py", "test_code_intel_integration.py",
+        "test_code_intel_localization_decision.py", "test_code_intel_planner_grounding.py",
+        "test_code_intel_retrieval.py", "test_code_intel_retry_t0.py", "test_code_intel_service.py",
+        "test_code_intel_structure.py", "test_demo_v2_knowledge_task.py", "test_demo_v2_knowledge_task_c2.py",
+        "test_dependency_graph.py", "test_graph_context_empty_header_001.py", "test_graphify_oversize_request_001.py",
+        "test_knowledge.py", "test_knowledge_extraction.py", "test_knowledge_readpath_001.py",
+        "test_outbound_lookup.py", "test_prd027_context_certification.py", "test_prd027_precision_expansion_seeds.py",
+        "test_prd027_retrieval_defects.py", "test_prd027_score_normalization_001.py"
+    }),
+    "qualification": frozenset({
+        "test_doctor_command.py", "test_live_prd035_certification.py", "test_live_production_doctor.py",
+        "test_lr_r1_m1_doctor.py", "test_model_qual_identity_001.py", "test_platform_release_identity.py",
+        "test_prd014_model_qualification.py", "test_prd027_context_certification.py", "test_prd034_certification.py",
+        "test_prd035_certification_records.py", "test_prd036_release_gate.py", "test_production_doctor.py",
+        "test_qual_config_001.py", "test_qual_environment_identity.py", "test_qualification_artifact_stability_001.py"
+    }),
+    "adapters": frozenset({
+        "test_authority_cli_refusal.py", "test_cli_smoke.py", "test_kup_cli.py", "test_kup_content_authority.py",
+        "test_kup_display_goal.py", "test_kup_evidence_cli.py", "test_kup_request_fuzz.py", "test_kup_serve.py",
+        "test_kup_write_boundary.py", "test_live_prd033_metrics.py", "test_lr_r1_m1_cli.py",
+        "test_prd018_role_metrics.py", "test_prd033_events_and_cli.py", "test_prd033_metrics.py", "test_repl.py",
+        "test_tool002_p2_real_cli.py"
+    }),
+    "architecture": frozenset({
+        "test_architecture_regression_index.py", "test_auth_goal_contamination_001.py", "test_backlog_registry.py",
+        "test_file_integrity_contract_001.py", "test_file_integrity_contract_001b.py",
+        "test_knowledge_readpath_001.py", "test_lr_r1_m1_0_inventory.py", "test_platform_architecture_guard.py",
+        "test_prd012_network_inventory.py", "test_prd030_terminal_services.py", "test_prd031_coordinators.py",
+        "test_strict_doubles.py", "test_tool001_autonomous_tool_execution.py"
+    }),
+    "integration": frozenset({
+        "test_direct_plan_real_maven.py", "test_live_prd032_chaos.py", "test_live_smoke.py",
+        "test_plan_global_invariant_projection_001.py", "test_prd032_chaos_commit.py", "test_prd032_chaos_harness.py",
+        "test_prd032_chaos_injection.py", "test_prd032_chaos_model.py", "test_prd032_chaos_runtime.py",
+        "test_prd032_chaos_static_analysis.py", "test_prd032_planner_vocabulary.py",
+        "test_prd032_planner_workspace_path.py", "test_prd032_terminal_commit_stop.py"
+    }),
+}
+MODULE_TIER_DIRECTORIES = {"state_machine": "kernel", "architecture": "architecture"}
+_TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+_MODULE_MARKERS_BY_FILE = {}
+for _marker, _names in MODULE_TIER_FILES.items():
+    for _name in _names:
+        _MODULE_MARKERS_BY_FILE.setdefault(_name, []).append(_marker)
+
+
+def _module_markers(path):
+    directory, name = os.path.split(str(path))
+    if directory == _TESTS_DIR:
+        return _MODULE_MARKERS_BY_FILE.get(name, [])
+    parent, sub = os.path.split(directory)
+    return [MODULE_TIER_DIRECTORIES[sub]] if parent == _TESTS_DIR and sub in MODULE_TIER_DIRECTORIES else []
+
+
 # Parallel runs (`-n 8 --dist loadgroup`): every test that starts real
 # containers runs on ONE worker, serially. Their leak checks list every
 # kriya-oci-*/kriya-acq-* container on the daemon - deliberately global - so
@@ -205,6 +460,8 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if item.path.name in STATE_MACHINE_TIER_FILES:
             item.add_marker(pytest.mark.state_machine)
+        for marker in _module_markers(item.path):
+            item.add_marker(getattr(pytest.mark, marker))
         if _needs_real_docker(item):
             item.add_marker(pytest.mark.xdist_group("docker"))
 

@@ -11,7 +11,7 @@ from pathlib import Path
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACKAGE_ROOT = os.path.join(REPO_ROOT, "kriya")
-TOMLCOMPAT = os.path.join(PACKAGE_ROOT, "core", "tomlcompat.py")
+TOMLCOMPAT = os.path.join(PACKAGE_ROOT, "foundation", "tomlcompat.py")
 
 
 def _python_sources():
@@ -65,7 +65,7 @@ def test_tomllib_is_imported_only_through_tomlcompat():
                 names = [node.module]
             if any(name.split(".")[0] in {"tomllib", "tomli"} for name in names):
                 offenders.append(f"{os.path.relpath(path, REPO_ROOT)}:{node.lineno}")
-    assert offenders == [], f"import tomllib via kriya.core.tomlcompat: {offenders}"
+    assert offenders == [], f"import tomllib via kriya.foundation.tomlcompat: {offenders}"
 
 
 def test_tomli_backport_is_declared_for_python_310():

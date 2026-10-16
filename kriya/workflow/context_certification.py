@@ -354,7 +354,7 @@ def certification_identity(
     served window (PRD-016); certification pins the version-controlled
     reference budget instead, so a chat-model change or requalification
     never stales a certification."""
-    from kriya import __version__
+    from kriya.foundation import __version__
 
     return {
         "suite_version": CERTIFICATION_SUITE_VERSION,

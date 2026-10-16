@@ -26,7 +26,7 @@ dependencies = [
     "tree-sitter>=0.25.2,<0.26",
     "tree-sitter-java>=0.23.5",
     "tree-sitter-python>=0.25.0",
-    # stdlib tomllib is 3.11+; kriya/core/tomlcompat.py uses this backport on 3.10.
+    # stdlib tomllib is 3.11+; kriya/foundation/tomlcompat.py uses this backport on 3.10.
     "tomli>=1.1.0; python_version < '3.11'",
 ]
 
@@ -101,6 +101,23 @@ markers = [
     "real_embedding_identity: EMBEDDING-CONTRACT-001 - the test exercises OllamaEmbeddingClient.fingerprint() itself (through an injected transport); every other test gets a fixed fake identity (tests/conftest.py::_no_embedding_identity_probe)",
     "live_static_analysis: requires the exact pinned static-analysis scanner (Semgrep 1.178.0; Docker + the pinned image for OCI cases) - excluded by default, run explicitly with `pytest -m live_static_analysis`",
     "real_toolchain: Demo V2 bounded real-JDK/Maven check of the direct plan (tests/test_direct_plan_real_maven.py) - no model, offline, skips when the toolchain or its local repository is missing; excluded by default, run explicitly with `pytest -m real_toolchain`",
+    "kernel: module tier - KERNEL (kriya/workflow, kriya/agents, core kernel/events); applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "application: module tier - APPLICATION + CLIENT; applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "context: module tier - CONTEXT; applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "authority: module tier - AUTHORITY; applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "evidence: module tier - EVIDENCE; applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "state: module tier - STATE / history; applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "config: module tier - CONFIG; applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "provider: module tier - PROVIDER (model runtime); applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "skills: module tier - SKILLS; applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "tools: module tier - TOOLBOX; applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "execution: module tier - EXECUTION; applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "repository: module tier - REPOSITORY; applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "knowledge: module tier - KNOWLEDGE + RETRIEVAL; applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "qualification: module tier - QUALIFICATION; applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "adapters: module tier - ADAPTER-KUP, ADAPTER-CLI, METRICS; applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "architecture: module tier - architecture and inventory tripwires (tests/architecture/ and the existing guards); applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "integration: module tier - cross-module integration; applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
     "xdist_group(name): pytest-xdist scheduling group; tests/conftest.py pins every real-Docker test to the `docker` group so `--dist loadgroup` runs them on one worker. pytest-xdist registers this marker itself when installed; it is registered here too so a sequential run without pytest-xdist raises no PytestUnknownMarkWarning (the marker is then inert)",
 ]
 # Excluded by default so a bare `pytest` never unexpectedly hangs/fails for

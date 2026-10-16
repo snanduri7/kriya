@@ -137,16 +137,16 @@ def test_an_installed_wheel_reports_its_embedded_commit_not_unavailable(tmp_path
     no_checkout = tmp_path / "site-packages-kriya"
     no_checkout.mkdir()
     embedded = {"commit": "abc123def4567890abc123def4567890abc12345", "tree": "t", "dirty": False}
-    with patch("kriya.build_info.embedded_build_info", return_value=embedded):
+    with patch("kriya.foundation.build_info.embedded_build_info", return_value=embedded):
         assert ri.kriya_revision(str(no_checkout)) == {"revision": embedded["commit"], "dirty": False}
-    with patch("kriya.build_info.embedded_build_info", return_value={"commit": "UNKNOWN", "tree": "UNKNOWN", "dirty": None}):
+    with patch("kriya.foundation.build_info.embedded_build_info", return_value={"commit": "UNKNOWN", "tree": "UNKNOWN", "dirty": None}):
         assert ri.kriya_revision(str(no_checkout)) == {"revision": ri.UNAVAILABLE, "dirty": None}
 
 
 def test_a_checkout_still_reads_git_never_the_embedded_identity(tmp_path):
     source = _repo(tmp_path / "src", {"a.py": "x = 1\n"})
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=source, capture_output=True, text=True, check=True).stdout.strip()
-    with patch("kriya.build_info.embedded_build_info", side_effect=AssertionError("a checkout never reads the embedded identity")):
+    with patch("kriya.foundation.build_info.embedded_build_info", side_effect=AssertionError("a checkout never reads the embedded identity")):
         assert ri.kriya_revision(str(source)) == {"revision": head, "dirty": False}
 
 
