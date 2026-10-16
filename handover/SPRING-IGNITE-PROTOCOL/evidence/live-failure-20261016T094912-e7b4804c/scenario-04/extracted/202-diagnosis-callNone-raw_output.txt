@@ -1,0 +1,1 @@
+remaining_seconds=226.8; estimated_generation_seconds=180.0; gate_reserve_seconds=120

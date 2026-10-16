@@ -1,0 +1,1 @@
+{"acceptance_criteria_count":1,"kind":"milestone","model_subtask_count":6,"plan_hash":"391ecff1b9635058abba35310137c4d7b5006e3d8fdcd9cfcea7878ac45096b0","plan_id":"20261016T094912-e7b4804c","subtask_count":6,"timestamp":"2026-10-16T04:20:31.715708+00:00","tool_subtask_count":0,"type":"plan_created"}

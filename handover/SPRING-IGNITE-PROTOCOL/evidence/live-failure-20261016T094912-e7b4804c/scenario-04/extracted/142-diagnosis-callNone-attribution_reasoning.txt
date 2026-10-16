@@ -1,0 +1,1 @@
+Already-validated likely_files (e.g. RunVerifierAgent.grade()'s own inference, or an anchored-edit's known filepath) or a filename substring match, with no precise line locator.

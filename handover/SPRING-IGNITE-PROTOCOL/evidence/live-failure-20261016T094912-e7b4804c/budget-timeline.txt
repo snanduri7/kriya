@@ -1,0 +1,12 @@
+budget clock starts at the first model call (09:49:13.857000); the fallback pass was refused at 10:00:26.847000: 673.0 s consumed of 900 s
+     77.9 s  planning (2 planner calls, repair of a schema-invalid first plan)
+    129.6 s  attempt 1 Developer: 4 files, one model call each
+     20.2 s  attempt 1 reviewer + static checks (before the human gate)
+    128.5 s  HUMAN source review wait (owner reading and approving)
+      6.3 s  attempt 1 gates + attribution
+     49.5 s  attempt 2 (retry 1/3: ProtocolParser only)
+     85.6 s  attempt 3 (retry 2/3: Protocol + ProtocolParser)
+    174.0 s  attempt 4 (retry 3/3: Protocol + ProtocolParser)
+  sum of rows 671.6 s; unattributed gaps 1.4 s
+remaining 227.0 s vs required 300.0 s (2 files x 90 s configured estimate for the never-used fallback model + 120 s gate reserve)
+if the human wait were not counted: remaining would have been 355.5 s -> the fallback pass would have started

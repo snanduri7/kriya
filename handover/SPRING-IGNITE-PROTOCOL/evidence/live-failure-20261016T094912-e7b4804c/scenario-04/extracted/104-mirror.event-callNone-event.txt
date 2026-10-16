@@ -1,0 +1,1 @@
+{"attempt":2,"authority":"authoritative","created_at":1792124765.9870179,"details":{"applied":false,"candidate_gates_passed":false,"failure_type":"anchored_edit","passed":false,"terminal_regression_passed":false},"failure_type":null,"kind":"attempt.failed","message":"","operation":"targeted","source":"workflow"}

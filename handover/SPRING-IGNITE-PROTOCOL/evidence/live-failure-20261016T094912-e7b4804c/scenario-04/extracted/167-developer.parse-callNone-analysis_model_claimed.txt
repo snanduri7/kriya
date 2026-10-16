@@ -1,0 +1,11 @@
+Looking at the error message and the code, I can see the issue clearly. The `ProtocolParser.java` file is trying to access private fields of the `Protocol` class directly, but those fields are private. The parser needs to use getters to access these fields.
+
+Let me analyze the current `ProtocolParser.java`:
+
+1. Line 10: `buffer.put((byte) protocol.protocolVersion);` - trying to access private field
+2. Line 11: `buffer.put((byte) protocol.softwareVersion);` - trying to access private field  
+3. Line 12: `buffer.putInt(protocol.dataLength);` - trying to access private field
+4. Line 13: `buffer.putLong(protocol.time);` - trying to access private field
+5. Line 18: `buffer.get(body);` - trying to access private field
+
+The solution is to use the getter methods instead of direct field access.

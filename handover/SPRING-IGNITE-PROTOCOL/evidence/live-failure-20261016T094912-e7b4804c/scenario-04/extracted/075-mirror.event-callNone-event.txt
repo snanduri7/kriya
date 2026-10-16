@@ -1,0 +1,1 @@
+{"attempt":1,"authority":"authoritative","created_at":1792124713.3970802,"details":{"applied":false,"candidate_gates_passed":false,"failure_type":"compile","passed":false,"terminal_regression_passed":false},"failure_type":null,"kind":"attempt.failed","message":"","operation":"full-set","source":"workflow"}

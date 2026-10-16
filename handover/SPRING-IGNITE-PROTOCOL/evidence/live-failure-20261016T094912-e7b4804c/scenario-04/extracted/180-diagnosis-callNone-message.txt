@@ -1,0 +1,1 @@
+ANCHORED EDIT FAILURE in src/main/java/com/example/protocol/Protocol.java: INDENTATION_STYLE_MISMATCH: edit #1: the SEARCH block matches only when indentation is ignored, and its indentation cannot be mapped onto the file's by one consistent shift (tabs vs spaces?)

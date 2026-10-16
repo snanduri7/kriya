@@ -1,0 +1,116 @@
+Looking at the error messages and the code, I can see the issue clearly. The `ProtocolParser` class is trying to access private fields of the `Protocol` class directly, but these fields are private. The parser needs to use getters to access these fields.
+
+Let me analyze what needs to be fixed:
+1. Line 10: `protocol.protocolVersion` - needs to use `protocol.getProtocolVersion()`
+2. Line 15: `protocol.softwareVersion` - needs to use `protocol.getSoftwareVersion()`  
+3. Line 16: `protocol.dataLength` - needs to use `protocol.getDataLength()`
+4. Line 17: `protocol.time` - needs to use `protocol.getTime()`
+5. Line 21: `protocol.body` - needs to use `protocol.getBody()`
+
+However, I notice that the Protocol class doesn't have getters for all fields. Looking at the Protocol.java file, it only has getters for protocolVersion, softwareVersion, dataLength, time, and body (which is wrong - it should be getBody()). Let me check what fields are actually available.
+
+Based on the Protocol.java file I see, there are no getter methods defined, which means the parser can't access these private fields. The fix needs to either:
+1. Add proper getters to Protocol class, or
+2. Make the fields package-private or public
+
+Looking more carefully at the Protocol.java, it seems like it has all the needed getters (I see getProtocolVersion(), getSoftwareVersion(), getDataLength(), getTime(), and getBody()). But the error says the fields are not visible, which suggests there might be an access issue.
+
+Let me check if the parser is accessing via the field directly instead of using getters. The issue is that the ProtocolParser.java should be using the getter methods.
+
+Looking at the current ProtocolParser.java code, it's trying to access fields directly instead of using getters. I need to fix this by making the accesses use appropriate getter methods.
+<<<KRIYA:EDIT path="src/main/java/com/example/protocol/ProtocolParser.java">>>
+<<<KRIYA:SEARCH>>>
+package com.example.protocol;
+
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+
+public class ProtocolParser {
+    
+    public byte[] encode(Protocol protocol) {
+        // Create a buffer with enough space for the 9-byte header + body
+        int totalLength = 9 + protocol.body.length;
+        ByteBuffer buffer = ByteBuffer.allocate(totalLength);
+        buffer.order(ByteOrder.BIG_ENDIAN);
+        
+        // Encode header fields
+        buffer.put((byte) protocol.protocolVersion);
+        buffer.put((byte) protocol.softwareVersion);
+        buffer.putInt(protocol.dataLength);
+        buffer.putLong(protocol.time);
+        
+        // Encode body
+        buffer.put(protocol.body);
+        
+        return buffer.array();
+    }
+    
+    public Protocol decode(byte[] data) {
+        if (data == null || data.length < 9) {
+            throw new IllegalArgumentException("Data must be at least 9 bytes long for header");
+        }
+        
+        ByteBuffer buffer = ByteBuffer.wrap(data);
+        buffer.order(ByteOrder.BIG_ENDIAN);
+        
+        // Decode header fields
+        int protocolVersion = buffer.get() & 0xFF; // unsigned byte
+        int softwareVersion = buffer.get() & 0xFF; // unsigned byte
+        int dataLength = buffer.getInt();
+        long time = buffer.getLong();
+        
+        // Extract body (remaining bytes)
+        byte[] body = new byte[data.length - 9];
+        buffer.get(body);
+        
+        return new Protocol(protocolVersion, softwareVersion, dataLength, time, body);
+    }
+}
+<<<KRIYA:REPLACE>>>
+package com.example.protocol;
+
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+
+public class ProtocolParser {
+    
+    public byte[] encode(Protocol protocol) {
+        // Create a buffer with enough space for the 9-byte header + body
+        int totalLength = 9 + protocol.getBody().length;
+        ByteBuffer buffer = ByteBuffer.allocate(totalLength);
+        buffer.order(ByteOrder.BIG_ENDIAN);
+        
+        // Encode header fields
+        buffer.put((byte) protocol.getProtocolVersion());
+        buffer.put((byte) protocol.getSoftwareVersion());
+        buffer.putInt(protocol.getDataLength());
+        buffer.putLong(protocol.getTime());
+        
+        // Encode body
+        buffer.put(protocol.getBody());
+        
+        return buffer.array();
+    }
+    
+    public Protocol decode(byte[] data) {
+        if (data == null || data.length < 9) {
+            throw new IllegalArgumentException("Data must be at least 9 bytes long for header");
+        }
+        
+        ByteBuffer buffer = ByteBuffer.wrap(data);
+        buffer.order(ByteOrder.BIG_ENDIAN);
+        
+        // Decode header fields
+        int protocolVersion = buffer.get() & 0xFF; // unsigned byte
+        int softwareVersion = buffer.get() & 0xFF; // unsigned byte
+        int dataLength = buffer.getInt();
+        long time = buffer.getLong();
+        
+        // Extract body (remaining bytes)
+        byte[] body = new byte[data.length - 9];
+        buffer.get(body);
+        
+        return new Protocol(protocolVersion, softwareVersion, dataLength, time, body);
+    }
+}
+<<<KRIYA:END_EDIT>>>

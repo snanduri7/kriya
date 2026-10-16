@@ -1,0 +1,18 @@
+=== DIAGNOSTIC FINDINGS ===
+This candidate submission was rejected by Quality Gates due to a generation time budget exhaustion - the system refused to start a 2-file generation pass with only 226.8s remaining, as it estimated that the full generation plus gate reserve would require 300.0s.
+
+The content provided shows a complete Maven project structure with:
+1. A pom.xml file defining Java 17 project properties, Ignite 2.18.0 dependencies (core and spring), JUnit 5, Mockito, and an exec-maven-plugin configuration with required --add-opens flags for Java 17 module system compatibility
+2. A Protocol class with proper serialization support, equals/hashCode/toString implementations
+3. A ProtocolParser class implementing the specified wire format (9-byte big-endian header + body)
+4. An applicationContext.xml Spring configuration file to start an embedded Ignite node
+
+The changes are consistent with the authoritative goal - creating a Java 17 Maven application using Spring XML configuration to start an embedded Apache Ignite node, with Protocol and ProtocolParser classes as specified. The implementation correctly handles:
+- Big-endian byte order encoding/decoding
+- Proper header structure (protocolVersion 1 byte, softwareVersion 1 byte, dataLength 4 bytes, time 8 bytes)
+- Correct handling of null body cases in equals method
+- Proper use of Spring's IgniteSpringBean for node startup
+- Maven exec plugin configuration that avoids the Java 17 module system issues
+
+However, this candidate was never applied to the workspace and only represents the last (failing) attempt before the time budget exhaustion. The actual application code and main class (com.example.App) are missing from the provided evidence.
+=== END DIAGNOSTIC FINDINGS ===

@@ -1,0 +1,39 @@
+{
+  "_workspace": {
+    "version": "2",
+    "workspace_id": "a5f3c3432dd33bd05f4a556317ecffc85348598359dc7b0e79604793ee70558e"
+  },
+  "active_work_unit": null,
+  "approved_plan_hash": "cbd103cada1fd714289ad280936373ac8612631f57c204f39475ab798fa52b10",
+  "base_source_revision": null,
+  "base_tree_hash": null,
+  "candidate_hash": null,
+  "commit_intent": null,
+  "commit_result": "NOT_COMMITTED",
+  "commit_transaction_id": null,
+  "commits": [],
+  "created_at": "2026-10-16T04:19:13.602963+00:00",
+  "effective_config_fingerprint": "e317ed033beee9ff02c7a88b82a95ec5ef409602436999c6778f9e53fcde5eb3",
+  "execution_plan": null,
+  "goal_hash": "240703960af42dfd4cff1342961417888c9e967697f45b8006cadba09082d4a5",
+  "lifecycle_state": "FAILURE",
+  "milestone_reuse": null,
+  "model_runtime_fingerprint_ids": [
+    "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+    "0620f41c3b0c34d389c89e516b00a59cf20a96b78ac759f37b696a67250ab1a8"
+  ],
+  "obligation_ledger_hash": null,
+  "obligation_ledger_revision": null,
+  "recovery": null,
+  "resume_decision": null,
+  "retry_counters": {},
+  "retry_state_reference": null,
+  "revision": 8,
+  "run_id": "20261016T094912-e7b4804c",
+  "schema_version": 3,
+  "terminal_status": "FAILURE",
+  "updated_at": "2026-10-16T04:31:25.842398+00:00",
+  "verification_evidence_ids": [],
+  "work_unit_states": null,
+  "workspace_identity": "a5f3c3432dd33bd05f4a556317ecffc85348598359dc7b0e79604793ee70558e"
+}

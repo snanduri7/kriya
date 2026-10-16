@@ -1,0 +1,1 @@
+{"attempt":0,"created_at":1792124432.8237069,"kind":"active_skills","payload":{"skills":[{"content_hash":"8e6dfbee096991604b07ee39e7c72371e8e617ab36d8df49e74b0d26bb84ffdc","name":"ignite-java17","source_path":"/Users/sriramnanduri/kriya-demo-v2-work/scenario-04/skills/ignite-java17","supported_versions":"*","verified":true}]},"sensitivity":"local_only","source":"skill_engine"}

@@ -1,0 +1,228 @@
+{
+  "global_invariants": [
+    {
+      "id": "gi1",
+      "statement": "The application must be built with Java 17 and use Maven for dependency management."
+    },
+    {
+      "id": "gi2",
+      "statement": "Spring XML configuration must be used to start an embedded Apache Ignite 2.18.0 node."
+    },
+    {
+      "id": "gi3",
+      "statement": "The Protocol class must contain protocolVersion, softwareVersion, dataLength, time, and body fields with specified types."
+    },
+    {
+      "id": "gi4",
+      "statement": "The ProtocolParser must implement encode(Protocol) returning byte[] and decode(byte[]) returning Protocol using the defined wire format."
+    },
+    {
+      "id": "gi5",
+      "statement": "All Spring and Ignite resources must be properly closed to ensure normal application exit."
+    }
+  ],
+  "subtasks": [
+    {
+      "id": "s1",
+      "description": "Create Maven project structure with Java 17 source and test directories, and add dependencies for Spring Framework, Apache Ignite 2.18.0, JUnit 5, and Mockito.",
+      "execution_method": "model",
+      "execution_role": "implementation",
+      "depends_on": [],
+      "planned_files": [
+        {
+          "path": "pom.xml",
+          "action": "create",
+          "environment_requirements": ["java", "maven"],
+          "requires_capabilities": [],
+          "preserved_references": []
+        },
+        {
+          "path": "src/main/java/com/example/protocol/Protocol.java",
+          "action": "create",
+          "environment_requirements": [],
+          "requires_capabilities": [],
+          "preserved_references": []
+        },
+        {
+          "path": "src/main/java/com/example/protocol/ProtocolParser.java",
+          "action": "create",
+          "environment_requirements": [],
+          "requires_capabilities": [],
+          "preserved_references": []
+        },
+        {
+          "path": "src/main/resources/applicationContext.xml",
+          "action": "create",
+          "environment_requirements": [],
+          "requires_capabilities": [],
+          "preserved_references": []
+        }
+      ],
+      "provides": ["maven_project_structure", "protocol_classes", "spring_configuration"],
+      "requires": [],
+      "relevant_global_invariant_ids": ["gi1", "gi2", "gi3", "gi4"],
+      "verification": [
+        {
+          "type": "tool",
+          "description": "Verify Maven project compiles successfully with Java 17 and required dependencies.",
+          "tool_name": "compile",
+          "verifier_kind": "compile",
+          "requires_runtime_execution": false
+        }
+      ],
+      "acceptance_criteria_ids": []
+    },
+    {
+      "id": "s2",
+      "description": "Implement the Protocol class with specified fields and constructors, and implement the ProtocolParser with encode and decode methods using the defined wire format.",
+      "execution_method": "model",
+      "execution_role": "implementation",
+      "depends_on": ["s1"],
+      "planned_files": [
+        {
+          "path": "src/main/java/com/example/protocol/Protocol.java",
+          "action": "modify",
+          "environment_requirements": [],
+          "requires_capabilities": [],
+          "preserved_references": []
+        },
+        {
+          "path": "src/main/java/com/example/protocol/ProtocolParser.java",
+          "action": "modify",
+          "environment_requirements": [],
+          "requires_capabilities": [],
+          "preserved_references": []
+        }
+      ],
+      "provides": ["protocol_implementation", "parser_implementation"],
+      "requires": ["protocol_classes", "parser_implementation"],
+      "relevant_global_invariant_ids": ["gi3", "gi4"],
+      "verification": [
+        {
+          "type": "tool",
+          "description": "Verify Protocol and ProtocolParser compile without errors.",
+          "tool_name": "compile",
+          "verifier_kind": "compile",
+          "requires_runtime_execution": false
+        }
+      ],
+      "acceptance_criteria_ids": []
+    },
+    {
+      "id": "s3",
+      "description": "Configure Spring XML to initialize an embedded Apache Ignite 2.18.0 node with proper cache configuration.",
+      "execution_method": "model",
+      "execution_role": "implementation",
+      "depends_on": ["s1"],
+      "planned_files": [
+        {
+          "path": "src/main/resources/applicationContext.xml",
+          "action": "modify",
+          "environment_requirements": [],
+          "requires_capabilities": [],
+          "preserved_references": []
+        }
+      ],
+      "provides": ["ignite_configuration"],
+      "requires": ["spring_configuration"],
+      "relevant_global_invariant_ids": ["gi2"],
+      "verification": [
+        {
+          "type": "tool",
+          "description": "Verify Spring configuration loads without errors.",
+          "tool_name": "compile",
+          "verifier_kind": "compile",
+          "requires_runtime_execution": false
+        }
+      ],
+      "acceptance_criteria_ids": []
+    },
+    {
+      "id": "s4",
+      "description": "Create main application class that creates a sample Protocol, encodes and decodes it, stores in Ignite cache, retrieves it, and prints the result line.",
+      "execution_method": "model",
+      "execution_role": "implementation",
+      "depends_on": ["s1", "s2", "s3"],
+      "planned_files": [
+        {
+          "path": "src/main/java/com/example/MainApplication.java",
+          "action": "create",
+          "environment_requirements": [],
+          "requires_capabilities": [],
+          "preserved_references": []
+        }
+      ],
+      "provides": ["main_application"],
+      "requires": ["protocol_implementation", "parser_implementation", "ignite_configuration"],
+      "relevant_global_invariant_ids": ["gi1", "gi2", "gi3", "gi4", "gi5"],
+      "verification": [
+        {
+          "type": "tool",
+          "description": "Verify main application compiles without errors.",
+          "tool_name": "compile",
+          "verifier_kind": "compile",
+          "requires_runtime_execution": false
+        }
+      ],
+      "acceptance_criteria_ids": ["ac1"]
+    },
+    {
+      "id": "s5",
+      "description": "Write a JUnit test that verifies the ProtocolParser round-trip functionality using various test cases.",
+      "execution_method": "model",
+      "execution_role": "implementation",
+      "depends_on": ["s2"],
+      "planned_files": [
+        {
+          "path": "src/test/java/com/example/ProtocolParserTest.java",
+          "action": "create",
+          "environment_requirements": [],
+          "requires_capabilities": [],
+          "preserved_references": []
+        }
+      ],
+      "provides": ["protocol_parser_test"],
+      "requires": ["parser_implementation"],
+      "relevant_global_invariant_ids": ["gi4"],
+      "verification": [
+        {
+          "type": "tool",
+          "description": "Run JUnit tests for ProtocolParser to ensure round-trip functionality.",
+          "tool_name": "test",
+          "verifier_kind": "test",
+          "requires_runtime_execution": false
+        }
+      ],
+      "acceptance_criteria_ids": []
+    },
+    {
+      "id": "s6",
+      "description": "Run the main application and verify that it correctly performs the protocol round-trip, stores/retrieves from Ignite cache, and prints expected output.",
+      "execution_method": "model",
+      "execution_role": "verification",
+      "depends_on": ["s4"],
+      "planned_files": [],
+      "provides": [],
+      "requires": ["main_application"],
+      "relevant_global_invariant_ids": ["gi1", "gi2", "gi3", "gi4", "gi5"],
+      "verification": [
+        {
+          "type": "judgment",
+          "description": "Verify that the application output matches the required format and result.",
+          "verifier_kind": "application_runtime",
+          "requires_runtime_execution": true
+        }
+      ],
+      "acceptance_criteria_ids": ["ac1"]
+    }
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "ac1",
+      "description": "The application must print exactly one line in the format [RESULT] protocolVersion=X, softwareVersion=Y, dataLength=Z, time=T, bodyLength=B, equals=<the real comparison result> when run.",
+      "method": "judgment"
+    }
+  ],
+  "extension_points": [],
+  "refactor_baseline": null
+}

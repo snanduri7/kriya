@@ -1,0 +1,200 @@
+{
+  "_workspace": {
+    "version": "2",
+    "workspace_id": "a5f3c3432dd33bd05f4a556317ecffc85348598359dc7b0e79604793ee70558e"
+  },
+  "approval_history": [],
+  "approval_required": null,
+  "declined_decisions": [],
+  "ended": {
+    "at": "2026-10-16T04:31:25.860454+00:00",
+    "error": null,
+    "exit_code": 1,
+    "failure_category": null,
+    "note": "copied from the workflow's own result; the RunRecord, evidence store and trace row are the outcome authority",
+    "quality_gates_passed": false,
+    "trace_run_id": "69ec71fc",
+    "workflow_status": "failed"
+  },
+  "goal": {
+    "chars": 1109,
+    "sha256": "240703960af42dfd4cff1342961417888c9e967697f45b8006cadba09082d4a5"
+  },
+  "history": [
+    {
+      "at": "2026-10-16T04:19:13.550027+00:00",
+      "phase": "STARTING"
+    },
+    {
+      "at": "2026-10-16T04:19:13.603996+00:00",
+      "phase": "RUNNING"
+    },
+    {
+      "at": "2026-10-16T04:31:25.860467+00:00",
+      "phase": "ENDED"
+    }
+  ],
+  "kind": "kriya.launch",
+  "launch_id": "20261016T094912-e7b4804c",
+  "options": {
+    "interactive": false,
+    "knowledge_policy": "strict"
+  },
+  "pending_approval": {
+    "candidate_digest": "sha256:d12e42beafe79d20104a70bc3bc9d280d16caf520ad5483cc9dcc478c689a0fe",
+    "decision": {
+      "decided_at": "2026-10-16T04:25:10.205+00:00",
+      "decision": "approve",
+      "source": "launch-decision"
+    },
+    "expires_at": "2026-10-16T05:23:02.865+00:00",
+    "files": [
+      {
+        "diff_sha256": "sha256:e806e77e0b7b0c9c83f4e71dc80d62ebe6386cf81e12cc730ba55dd39c12f0b2",
+        "filepath": "pom.xml",
+        "lines_added": 120,
+        "lines_removed": 0
+      },
+      {
+        "diff_sha256": "sha256:3fbc70c810468434bea0f354119b4d937eaf0531f793f7497b2b2083204cd9cb",
+        "filepath": "src/main/java/com/example/protocol/Protocol.java",
+        "lines_added": 128,
+        "lines_removed": 0
+      },
+      {
+        "diff_sha256": "sha256:0de313e98c3fcd1287159b9908bcf449bbe881b4d86cef26f037cf5529457ddd",
+        "filepath": "src/main/java/com/example/protocol/ProtocolParser.java",
+        "lines_added": 46,
+        "lines_removed": 0
+      },
+      {
+        "diff_sha256": "sha256:537a10b062a4de35e6d90607a761f422462629c84adaaebf83584e816a60c435",
+        "filepath": "src/main/resources/applicationContext.xml",
+        "lines_added": 18,
+        "lines_removed": 0
+      }
+    ],
+    "kind": "change_approval",
+    "reason": "Human-in-the-loop review policy\nPre-checks passed: expected files present, static rules, stack contract. Nothing has been built, tested or run yet.\nBuild and tests: will run after you approve.\nIf the application needs to be run, you will be asked separately before any command runs.\n\n=== Automated Code Review ===\n## Kriya Review of Proposed Code Changes\n\n### Summary of Findings\n\nThe submitted code implements a Java 17 Maven application using Spring XML configuration to start an embedded Apache Ignite 2.18.0 node. It includes a Protocol class and a ProtocolParser with encode/decode methods, adhering to the specified wire format. The implementation correctly handles the 9-byte big-endian header (protocolVersion 1 byte, softwareVersion 1 byte, dataLength 3 bytes, time 4 bytes) followed by body bytes.\n\nThe application structure is well-defined with proper Maven configuration and Spring XML setup. However, several critical issues were identified:\n\n1. **Missing Main Application Class**: The `com.example.App` class referenced in the pom.xml's exec.mainClass property is not provided in the submission.\n2. **Incomplete Test Coverage**: No JUnit test file was included to verify the ProtocolParser round-trip functionality as required.\n3. **Resource Management**: No explicit resource cleanup mechanism for Ignite and Spring resources is implemented, which is crucial for proper application shutdown.\n4. **Missing Cache Operations**: The required cache put/get operations and result printing logic are absent from the provided code.\n\n### Code Review Details\n\n| File | Issue Description | Severity |\n|------|------------------|----------|\n| pom.xml | Missing `com.example.App` class definition, no main method for execution | Critical |\n| pom.xml | No test class for ProtocolParser round-trip verification | Critical |\n| src/main/java/com/example/protocol/Protocol.java | No issues found; implementation correct | Low |\n| src/main/java/com/example/protocol/ProtocolParser.java | No issues found; implementation correct | Low |\n| src/main/resources/applicationContext.xml | No issues found; configuration correct | Low |\n\n### Approval Status\n\n**REJECTED**\n\nThe submission is rejected due to the following critical issues:\n1. Missing `com.example.App` main class required for execution\n2. Absence of JUnit test file verifying ProtocolParser functionality\n3. Lack of resource cleanup implementation for Ignite and Spring beans\n4. Missing cache operations and result printing logic\n\n### Recommendations\n\n1. **Implement Main Application Class**: Create the `com.example.App` class with proper Ignite node startup, Protocol creation, encoding/decoding, cache operations, and result printing.\n\n2. **Add JUnit Test File**: Include a test class that verifies the ProtocolParser round-trip functionality (encode followed by decode produces equivalent Protocol objects).\n\n3. **Implement Resource Cleanup**: Add proper shutdown mechanisms to close Ignite node and Spring context gracefully.\n\n4. **Complete Cache Operations**: Implement the required cache put/get operations with verification logic to print the result in the specified format.\n\n5. **Add Missing Imports**: Ensure all necessary imports are included in the main application class.\n\n### How to Run the Application\n\nBased on the provided configuration, the application should be run using:\n\n```\nmvn -q compile exec:exec -Dexec.mainClass=com.example.App\n```\n\nHowever, due to the missing `com.example.App` class and associated implementation, this command will fail with a \"cannot find symbol\" error. The application cannot be executed until the main class is properly implemented with all required functionality including cache operations and resource management.\n\nThe current pom.xml configuration includes the necessary JVM arguments for Ignite compatibility but requires the full implementation of the main application logic to function correctly.\n\n=== Static Analysis ===\nSTATIC ANALYSIS: DISABLED (STATIC_ANALYSIS_NOT_CONFIGURED)",
+    "reason_sha256": "sha256:27f46d3ea1ed693c5e0d7536fecacd76f162930d9189850e0ebab78a5db38130",
+    "reason_truncated": false,
+    "requested_at": "2026-10-16T04:23:02.865+00:00",
+    "review_id": "ra-2d4dc1da47bdaf547a93ef57",
+    "sequence": 1,
+    "status": "APPROVED"
+  },
+  "phase": "ENDED",
+  "preflight": {
+    "blockers": [],
+    "configuration": {
+      "authority": {
+        "fields": [
+          "llm_chain",
+          "autonomy.mode",
+          "embedding.base_url",
+          "llm.base_url",
+          "paths.memory",
+          "paths.skills",
+          "paths.state",
+          "search.base_url",
+          "workflow_controller.enabled",
+          "workflow_controller.mode"
+        ],
+        "status": "approved"
+      },
+      "directory": "/Users/sriramnanduri/kriya-demo-v2-work/scenario-04/workspace",
+      "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+      "file": "/Users/sriramnanduri/kriya-demo-v2-work/scenario-04/workspace/kriya.yaml",
+      "fingerprint": "e317ed033beee9ff02c7a88b82a95ec5ef409602436999c6778f9e53fcde5eb3",
+      "source": "auto_discovered_cwd",
+      "status": "loaded"
+    },
+    "interaction": {
+      "approvals": "change_review",
+      "autonomy_mode": "human-in-the-loop",
+      "knowledge_policy": "strict",
+      "note": "A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you."
+    },
+    "model": {
+      "context_window": 32768,
+      "endpoint": "http://localhost:11434/v1",
+      "fallback_chain": [
+        "qwen3.6:35b-a3b-q4_K_M"
+      ],
+      "model": "qwen3-coder:30b",
+      "provider": "openai",
+      "role_overrides": {}
+    },
+    "ready": true,
+    "recovery": {
+      "run_active": false,
+      "status": "CLEAN"
+    },
+    "state": {
+      "cockpit_directory": null,
+      "directory": "/Users/sriramnanduri/kriya-demo-v2-work/scenario-04/state",
+      "observable_by_cockpit": null,
+      "source": "env"
+    },
+    "toolchains": {
+      "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+      "tools": [
+        {
+          "available": true,
+          "checked": "ran --version",
+          "path": "/usr/bin/python3",
+          "tool": "python3"
+        },
+        {
+          "available": true,
+          "checked": "ran --version",
+          "path": "/usr/bin/git",
+          "tool": "git"
+        },
+        {
+          "available": true,
+          "checked": "registered JDK (java_home)",
+          "path": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home/bin/java",
+          "tool": "java"
+        },
+        {
+          "available": true,
+          "checked": "found on PATH",
+          "path": "/opt/homebrew/bin/mvn",
+          "tool": "mvn"
+        },
+        {
+          "available": false,
+          "checked": "not on PATH",
+          "path": null,
+          "tool": "gradle"
+        },
+        {
+          "available": true,
+          "checked": "ran --version",
+          "path": "/opt/homebrew/bin/node",
+          "tool": "node"
+        }
+      ]
+    },
+    "workspace": {
+      "identity": "a5f3c3432dd33bd05f4a556317ecffc85348598359dc7b0e79604793ee70558e",
+      "name": "workspace",
+      "path": "/Users/sriramnanduri/kriya-demo-v2-work/scenario-04/workspace"
+    }
+  },
+  "process": {
+    "pid": 51294
+  },
+  "requested_at": "2026-10-16T04:19:13.549867+00:00",
+  "run": {
+    "base_revision": null,
+    "run_id": "20261016T094912-e7b4804c",
+    "started_at": "2026-10-16T04:19:13.603988+00:00"
+  },
+  "schema": 1,
+  "workspace": {
+    "identity": "a5f3c3432dd33bd05f4a556317ecffc85348598359dc7b0e79604793ee70558e",
+    "path": "/Users/sriramnanduri/kriya-demo-v2-work/scenario-04/workspace"
+  }
+}

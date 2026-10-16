@@ -1,0 +1,1 @@
+{"invalid_subtask_ids":[],"reason_codes":["STRUCTURED_PLAN_SCHEMA_INVALID"],"repair_attempt":1,"run_id":"20261016T094912-e7b4804c","timestamp":"2026-10-16T04:19:56.012164+00:00","type":"structured_plan_repair_requested"}

@@ -1,0 +1,1 @@
+{"attempt":1,"authority":"advisory","created_at":1792124433.057024,"details":{"mode":"full_set"},"failure_type":null,"kind":"attempt.started","message":"","operation":"create_full_file","source":"workflow"}

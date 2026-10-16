@@ -1,0 +1,28 @@
+{
+ "recorded_analyses_attached_to_ProtocolParser": {
+  "095-developer.parse-callNone-analysis_model_claimed.txt": [
+   "src/main/java/com/example/protocol/Protocol.java"
+  ],
+  "124-developer.parse-callNone-analysis_model_claimed.txt": [
+   "src/main/java/com/example/protocol/Protocol.java"
+  ],
+  "130-developer.parse-callNone-analysis_model_claimed.txt": [
+   "src/main/java/com/example/protocol/Protocol.java"
+  ],
+  "161-developer.parse-callNone-analysis_model_claimed.txt": [
+   "src/main/java/com/example/protocol/Protocol.java"
+  ],
+  "167-developer.parse-callNone-analysis_model_claimed.txt": [
+   "src/main/java/com/example/protocol/Protocol.java"
+  ]
+ },
+ "controls": {
+  "analysis that only QUOTES the compiler message (names the class Protocol, says to use getters in the parser)": [
+   "src/main/java/com/example/protocol/Protocol.java"
+  ],
+  "analysis that names no other file": [],
+  "analysis that really redirects ('the defect is in Protocol.java')": [
+   "src/main/java/com/example/protocol/Protocol.java"
+  ]
+ }
+}

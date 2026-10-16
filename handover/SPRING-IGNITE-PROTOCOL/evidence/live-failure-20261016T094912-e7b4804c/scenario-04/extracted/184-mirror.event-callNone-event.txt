@@ -1,0 +1,1 @@
+{"attempt":5,"authority":"advisory","created_at":1792125026.8387861,"details":{"mode":"fallback_targeted"},"failure_type":null,"kind":"attempt.started","message":"","operation":"repair_with_patch","source":"workflow"}

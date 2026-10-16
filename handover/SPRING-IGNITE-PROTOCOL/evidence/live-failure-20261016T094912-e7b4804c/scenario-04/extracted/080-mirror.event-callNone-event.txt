@@ -1,0 +1,1 @@
+{"attempt":2,"authority":"advisory","created_at":1792124717.702485,"details":{"mode":"targeted"},"failure_type":null,"kind":"attempt.started","message":"","operation":"repair_with_patch","source":"workflow"}

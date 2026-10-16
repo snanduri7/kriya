@@ -1,0 +1,15 @@
+=== Authoritative Goal ===
+This is the real, unmediated user request - the source of truth for what is actually required. Nothing below this section may expand it: a concrete identifier, structure, or value that appears ONLY in the Planned Implementation Strategy below (never in this section) is the Planner's own implementation choice, not a new user requirement.
+Create a Java 17 Maven application that uses Spring XML configuration to start an embedded Apache Ignite 2.18.0 node. Define a Protocol class with protocolVersion (int), softwareVersion (int), dataLength (int), time (long) and body (byte[]), and a ProtocolParser with encode(Protocol) returning byte[] and decode(byte[]) returning Protocol, using this wire format: a 9-byte big-endian header (protocolVersion 1 byte, softwareVersion 1 byte, dataLength 3 bytes, time 4 bytes) followed by the raw body bytes. In the application, create a sample Protocol (protocolVersion 1, softwareVersion 2, time 1700000000, body "Hello, Protocol" as UTF-8), encode it, decode it, store the decoded Protocol in an Ignite cache, read it back from the cache and check that it equals the original. Print one line in the format [RESULT] protocolVersion=X, softwareVersion=Y, dataLength=Z, time=T, bodyLength=B, equals=<the real comparison result>. Include a JUnit test that proves the ProtocolParser round trip, close all Spring and Ignite resources so the application exits normally, and make the application runnable with Maven.
+
+=== Planned Implementation Strategy ===
+The Planner's own chosen approach for satisfying the authoritative goal above for THIS subtask - follow it, but it may be adapted if it conflicts with the authoritative goal or with real constraints discovered while implementing it.
+Create Maven project structure with Java 17 source and test directories, and add dependencies for Spring Framework, Apache Ignite 2.18.0, JUnit 5, and Mockito.
+
+Files this subtask should touch:
+- pom.xml (create)
+- src/main/java/com/example/protocol/Protocol.java (create)
+- src/main/java/com/example/protocol/ProtocolParser.java (create)
+- src/main/resources/applicationContext.xml (create)
+
+Verification: Verify Maven project compiles successfully with Java 17 and required dependencies.

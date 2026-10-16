@@ -1,0 +1,1 @@
+{"attempt":3,"authority":"authoritative","created_at":1792124851.594841,"details":{"applied":false,"candidate_gates_passed":false,"failure_type":"operation_contract","passed":false,"terminal_regression_passed":false},"failure_type":null,"kind":"attempt.failed","message":"","operation":"targeted","source":"workflow"}

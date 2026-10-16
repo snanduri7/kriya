@@ -1,0 +1,1 @@
+{"attempt":1,"authority":"authoritative","created_at":1792124710.433215,"details":{"outcome":"approved","triggers":["human_in_the_loop"]},"failure_type":null,"kind":"approval.decision","message":"human approval: approved","operation":null,"source":"workflow.approval_gate"}

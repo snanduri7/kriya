@@ -1,0 +1,46 @@
+{
+ "baseline_javac_errors_of_attempt1_parser": [
+  "/tmp/tmpo96n3pfp/com/example/protocol/ProtocolParser.java:10: error: body has private access in Protocol",
+  "/tmp/tmpo96n3pfp/com/example/protocol/ProtocolParser.java:15: error: protocolVersion has private access in Protocol",
+  "/tmp/tmpo96n3pfp/com/example/protocol/ProtocolParser.java:16: error: softwareVersion has private access in Protocol",
+  "/tmp/tmpo96n3pfp/com/example/protocol/ProtocolParser.java:17: error: dataLength has private access in Protocol",
+  "/tmp/tmpo96n3pfp/com/example/protocol/ProtocolParser.java:18: error: time has private access in Protocol",
+  "/tmp/tmpo96n3pfp/com/example/protocol/ProtocolParser.java:21: error: body has private access in Protocol"
+ ],
+ "attempt2_call8_parser_edit": {
+  "call": 8,
+  "path": "src/main/java/com/example/protocol/ProtocolParser.java",
+  "parse_kind": "edits",
+  "parse_reason_code": null,
+  "edit_engine": "REFUSED ANCHOR_NOT_IN_FILE: Anchor matching failed for edit #1: the search block occurs neither in the source shown to the model nor in the current file (fabricated or stale)."
+ },
+ "attempt3_call9_protocol_response": {
+  "call": 9,
+  "path": "src/main/java/com/example/protocol/Protocol.java",
+  "parse_kind": "invalid",
+  "parse_reason_code": "INVALID_EDIT_PROTOCOL"
+ },
+ "attempt3_call10_parser_edit": {
+  "call": 10,
+  "path": "src/main/java/com/example/protocol/ProtocolParser.java",
+  "parse_kind": "edits",
+  "parse_reason_code": null,
+  "edit_engine": "APPLIED",
+  "javac_errors_after": []
+ },
+ "attempt4_call11_protocol_edit": {
+  "call": 11,
+  "path": "src/main/java/com/example/protocol/Protocol.java",
+  "parse_kind": "edits",
+  "parse_reason_code": null,
+  "edit_engine": "REFUSED INDENTATION_STYLE_MISMATCH: edit #1: the SEARCH block matches only when indentation is ignored, and its indentation cannot be mapped onto the file's by one consistent shift (tabs vs spaces?)"
+ },
+ "attempt4_call12_parser_edit": {
+  "call": 12,
+  "path": "src/main/java/com/example/protocol/ProtocolParser.java",
+  "parse_kind": "edits",
+  "parse_reason_code": null,
+  "edit_engine": "APPLIED",
+  "javac_errors_after": []
+ }
+}

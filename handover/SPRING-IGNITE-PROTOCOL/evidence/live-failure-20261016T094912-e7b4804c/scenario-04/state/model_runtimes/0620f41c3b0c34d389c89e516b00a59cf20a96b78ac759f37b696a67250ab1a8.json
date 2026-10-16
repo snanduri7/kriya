@@ -1,0 +1,43 @@
+{
+  "adapter_version": "kriya-openai-compat/3",
+  "alias": "qwen3.6:35b-a3b-q4_K_M",
+  "artifact_digest": "sha256:b52ca43760e9d78765c095f8eae18551b9268262e216d38637e93a67b09d9e71",
+  "chat_template": "renderer:qwen3.5",
+  "configured_context_window": 32768,
+  "digest": "0620f41c3b0c34d389c89e516b00a59cf20a96b78ac759f37b696a67250ab1a8",
+  "effective_context_window": null,
+  "endpoint": "http://localhost:11434/v1",
+  "exact": true,
+  "family": "qwen35moe",
+  "kriya_protocol": "capabilities-sha256:15361471c56f2dd67805fd781e32ef4ea477eb335f38c2c3f82959a0d265b714",
+  "missing_components": [
+    "effective_context_window"
+  ],
+  "model_context_length": 262144,
+  "model_format": "gguf",
+  "parameter_size": "36.0B",
+  "probe_errors": [],
+  "provider": "ollama",
+  "provider_version": "0.40.4",
+  "quantization": "Q4_K_M",
+  "runtime_parameters_digest": "sha256:37dea17ab78ebcc88569a0239d1a99fd692ca68297c6555cd985ee8d2fcbba72",
+  "schema_version": 1,
+  "served_capabilities": [
+    "completion",
+    "thinking",
+    "tools",
+    "vision"
+  ],
+  "server_parameters": [
+    "min_p 0",
+    "presence_penalty 1.5",
+    "repeat_penalty 1",
+    "temperature 1",
+    "top_k 20",
+    "top_p 0.95"
+  ],
+  "tokenizer_digest": "sha256:3f1a2932b98cd5a39553f0336164ef55c8a6333722c1a6058735b3fdabd795d9",
+  "tokenizer_identity": "gpt2/qwen35",
+  "tool_call_parser": "parser:qwen3.5",
+  "weights_digest": "sha256:3f87bb0b360974ed352d5259efb632059b0a52f06dab044491d2de2e7c5e5f77"
+}

@@ -1,0 +1,1 @@
+GENERATION TIME BUDGET EXHAUSTED: refusing to start a 2-file generation pass with 226.8s remaining; estimated generation plus gate reserve requires 300.0s.

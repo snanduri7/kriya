@@ -1,0 +1,49 @@
+--- /dev/null
++++ b/src/main/java/com/example/protocol/ProtocolParser.java
+@@ -0,0 +1,46 @@
++package com.example.protocol;
++
++import java.nio.ByteBuffer;
++import java.nio.ByteOrder;
++
++public class ProtocolParser {
++    
++    public byte[] encode(Protocol protocol) {
++        // Create a buffer with enough space for the 9-byte header + body
++        int totalLength = 9 + protocol.body.length;
++        ByteBuffer buffer = ByteBuffer.allocate(totalLength);
++        buffer.order(ByteOrder.BIG_ENDIAN);
++        
++        // Encode header fields
++        buffer.put((byte) protocol.protocolVersion);
++        buffer.put((byte) protocol.softwareVersion);
++        buffer.putInt(protocol.dataLength);
++        buffer.putLong(protocol.time);
++        
++        // Encode body
++        buffer.put(protocol.body);
++        
++        return buffer.array();
++    }
++    
++    public Protocol decode(byte[] data) {
++        if (data == null || data.length < 9) {
++            throw new IllegalArgumentException("Data must be at least 9 bytes long for header");
++        }
++        
++        ByteBuffer buffer = ByteBuffer.wrap(data);
++        buffer.order(ByteOrder.BIG_ENDIAN);
++        
++        // Decode header fields
++        int protocolVersion = buffer.get() & 0xFF; // unsigned byte
++        int softwareVersion = buffer.get() & 0xFF; // unsigned byte
++        int dataLength = buffer.getInt();
++        long time = buffer.getLong();
++        
++        // Extract body (remaining bytes)
++        byte[] body = new byte[data.length - 9];
++        buffer.get(body);
++        
++        return new Protocol(protocolVersion, softwareVersion, dataLength, time, body);
++    }
++}
