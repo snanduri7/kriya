@@ -88,4 +88,4 @@ Goal: working on vLLM/providers, Skills, Tools, execution, authority or the kern
 
 | Module | Command / marker | Tests | Elapsed (s) | Network / model / process / container | Contract suites | Integration suites | Measured in slice |
 |---|---|---|---|---|---|---|---|
-| (architecture) | `P -m architecture` | | | none | - | - | A1 (to be completed) |
+| (architecture) | `P -m architecture` (measured so far: `P tests/architecture` only; the marker run with the existing guard files is not yet measured) | 44 (`tests/architecture`, after A2; 15 after A1) | 3.7 s pytest-reported, 5.8 s wall, serial (after A2; 1.3 s / 2.4 s after A1); every kriya file parsed once per session (`module_map.trees()`) | none (one subprocess-free AST pass; `test_facades` imports the two facade modules) | - | - | A1, A2 (to be completed in Q1 with `-m architecture`) |

@@ -19,7 +19,7 @@ Files under ``kriya/core/`` (a folder with no logical owner) are declared
 to their target owner now.
 
 The import scanner lives here too so every architecture test parses
-``kriya/`` once per session (``scan()`` is cached). Edge semantics are the
+``kriya/`` once per session (``sources()``/``trees()``/``scan()`` are cached). Edge semantics are the
 ones of the Wave 1 inventory script (CURRENT-DEPENDENCY-MAP.md): module to
 module; ``from a.b import c`` is an edge to ``a.b.c`` when that is a module,
 else to ``a.b``; relative imports resolved against the importing package;
@@ -266,22 +266,44 @@ def _import_targets(tree: ast.AST, source: str, is_package: bool, modules: Set[s
     return found
 
 
+def parse_sources(sources: Mapping[str, str]) -> Dict[str, ast.Module]:
+    return {path: ast.parse(text, filename=path) for path, text in sources.items()}
+
+
+def scan_trees(trees_by_path: Mapping[str, ast.Module]) -> Tuple[Edge, ...]:
+    """Edges of a {relpath: parsed module} tree."""
+    modules = {module_name(path) for path in trees_by_path}
+    edges = []
+    for path in sorted(trees_by_path):
+        source = module_name(path)
+        targets = _import_targets(trees_by_path[path], source, path.endswith("__init__.py"), modules)
+        edges.extend(Edge(source, target, lazy) for target, lazy in sorted(targets.items()))
+    return tuple(edges)
+
+
 def scan_sources(sources: Mapping[str, str]) -> Tuple[Edge, ...]:
     """Edges of a {relpath: source text} tree (the self-checks feed planted trees)."""
-    modules = {module_name(path) for path in sources}
-    edges = []
-    for path in sorted(sources):
-        source = module_name(path)
-        tree = ast.parse(sources[path], filename=path)
-        for target, lazy in sorted(_import_targets(tree, source, path.endswith("__init__.py"), modules).items()):
-            edges.append(Edge(source, target, lazy))
-    return tuple(edges)
+    return scan_trees(parse_sources(sources))
+
+
+@functools.lru_cache(maxsize=1)
+def sources() -> Dict[str, str]:
+    """relpath -> source text of every kriya file, read once per session."""
+    return {path: (REPO / path).read_text(encoding="utf-8") for path in python_files()}
+
+
+@functools.lru_cache(maxsize=1)
+def trees() -> Dict[str, ast.Module]:
+    """relpath -> parsed module of every kriya file: each file is parsed ONCE
+    per session for every architecture test (import edges, direct-access
+    owners, kernel purity, facades). Callers must not mutate the trees."""
+    return parse_sources(sources())
 
 
 @functools.lru_cache(maxsize=1)
 def scan() -> Tuple[Edge, ...]:
-    """Every kriya import edge at the current tree, parsed once per session."""
-    return scan_sources({path: (REPO / path).read_text(encoding="utf-8") for path in python_files()})
+    """Every kriya import edge at the current tree."""
+    return scan_trees(trees())
 
 
 # ---------------------------------------------------------------- ownership
