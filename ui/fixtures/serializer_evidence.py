@@ -31,9 +31,9 @@ from typing import Any, Dict, List
 
 sys.dont_write_bytecode = True
 
-from kriya.core.trace import TraceLogger  # noqa: E402 - after dont_write_bytecode, like the CLI
-from kriya.control.history.acquire import acquire_snapshot  # noqa: E402 - moved from kriya.kup.acquire in D2
 from kriya.control.history import history_detail  # noqa: E402 - moved from kriya.kup.inspect in D2
+from kriya.control.history.acquire import acquire_snapshot  # noqa: E402 - moved from kriya.kup.acquire in D2
+from kriya.core.trace import TraceLogger  # noqa: E402 - after dont_write_bytecode, like the CLI
 from kriya.workflow.edit_safety import content_revision  # noqa: E402
 from kriya.workflow.evidence import EvidenceRecord  # noqa: E402
 from kriya.workflow.failure import Failure, FileLocation  # noqa: E402
