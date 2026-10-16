@@ -11,10 +11,10 @@ taken as proof: only bytes are.
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from kriya.config.environment import expand_user
 from kriya.core.attempt_evidence import reader
 
 LEAK_CHECK_VERSION = "kriya.hidden_oracle_leak_check/1"
@@ -129,7 +129,7 @@ def check_run(
 def read_texts(paths: Iterable[str]) -> List[str]:
     texts: List[str] = []
     for path in paths:
-        with open(os.path.expanduser(path), "r", encoding="utf-8", errors="replace") as handle:
+        with open(expand_user(path), "r", encoding="utf-8", errors="replace") as handle:
             texts.append(handle.read())
     return texts
 

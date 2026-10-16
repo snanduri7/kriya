@@ -54,6 +54,8 @@ import uuid
 import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
+from kriya.config.environment import expand_user
+from kriya.config.environment import state_dir as environment_state_dir
 from kriya.tools import test_execution
 
 JVM_ACCEPTANCE_CONTRACT_VERSION = 1
@@ -192,9 +194,9 @@ def parse_java_acceptance(source: bytes) -> Tuple[Tuple[Any, ...], Dict[str, str
 # ------------------------------------------------------------ execution
 
 def _state_root() -> str:
-    from kriya.core.state_paths import ENV_STATE_DIR, default_state_directory
+    from kriya.core.state_paths import default_state_directory
 
-    return os.path.realpath(os.path.expanduser(os.environ.get(ENV_STATE_DIR) or default_state_directory()))
+    return os.path.realpath(expand_user(environment_state_dir() or default_state_directory()))
 
 
 def _file_digest(path: str) -> Optional[str]:

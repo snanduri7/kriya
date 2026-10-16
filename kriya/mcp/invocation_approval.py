@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from kriya.config.environment import Environment, mcp_approval_home
 from kriya.context.workspace_identity import workspace_identity
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.policy.model import MCPCapabilityProfileIdentity, MCPToolIdentity
@@ -223,10 +224,8 @@ def is_tool_approved(
 
 # --- Storage: local (home-dir, outside workspace) ---------------------------
 
-def _approval_home_dir() -> str:
-    override = os.environ.get(ENV_HOME_OVERRIDE)
-    base = override if override else os.path.join(os.path.expanduser("~"), ".kriya", "mcp_approvals")
-    return os.path.realpath(base)
+def _approval_home_dir(environment: Optional[Environment] = None) -> str:
+    return os.path.realpath(mcp_approval_home(environment))  # KRIYA_MCP_APPROVAL_HOME, else ~/.kriya/mcp_approvals
 
 
 def validate_store_path_outside_workspace(store_path: str, workspace_root: str) -> None:

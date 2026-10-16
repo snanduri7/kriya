@@ -9,9 +9,6 @@ import os
 import re
 from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-# `name as name` marks an explicit re-export: the helper moved to its own module
-# during modularization, and callers (tests, review_context.py, spikes) still
-# import it from here. Ruff keeps these; remove one only with its last caller.
 from kriya.agents.agent import (
     ArchitectAgent,
     DeveloperAgent,
@@ -25,6 +22,11 @@ from kriya.agents.agent import (
 from kriya.agents.contracts import parse_planner_structured_output, partition_file_list_escapes
 from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.code_intel.model import CALLABLE_KINDS
+
+# `name as name` marks an explicit re-export: the helper moved to its own module
+# during modularization, and callers (tests, review_context.py, spikes) still
+# import it from here. Ruff keeps these; remove one only with its last caller.
+from kriya.config.environment import expand_user
 from kriya.control.launch_approval import REVIEW_SECTION_HEADER
 from kriya.control.persistence import UnreadableRunRecordError, load_run_record
 from kriya.control.run_coordinator import (
@@ -942,8 +944,8 @@ def _resolve_protected_relpath(workspace_path: str, protected_source_file: Optio
     if not protected_source_file:
         return None
     try:
-        abs_target = os.path.realpath(os.path.expanduser(protected_source_file))
-        abs_workspace = os.path.realpath(os.path.expanduser(workspace_path))
+        abs_target = os.path.realpath(expand_user(protected_source_file))
+        abs_workspace = os.path.realpath(expand_user(workspace_path))
     except Exception:
         return None
     if path_relation(abs_workspace, abs_target) is not PathRelation.WITHIN:

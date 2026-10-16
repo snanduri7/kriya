@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
+from kriya.config.environment import child_environment
 from kriya.control.persistence import load_run_record, scan_run_records
 from kriya.control.recovery import (
     canonical_workspace,
@@ -365,7 +366,7 @@ def workspace_evidence_hash(workspace_path: str) -> Optional[str]:
     from kriya.workflow.checkpoint import compute_base_commit
 
     index = os.path.join(tempfile.gettempdir(), f".kriya-evidence-index-{uuid.uuid4().hex}")
-    env = {**os.environ, "GIT_INDEX_FILE": index}
+    env = {**child_environment(), "GIT_INDEX_FILE": index}
     generated = [f":(exclude,glob)**/{name}/**" for name in sorted(GENERATED_OUTPUT_DIRS)]
     steps = (
         ["git", "read-tree", "HEAD"],

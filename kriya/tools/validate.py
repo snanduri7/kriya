@@ -14,6 +14,8 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 
 from kriya.capabilities import BUILD_ADAPTERS, JAVA, JAVAC, PIP, PYTHON, build_adapter_for_tool
 from kriya.config.config import AutonomyConfig
+from kriya.config.environment import child_environment, expand_user
+from kriya.config.environment import state_dir as environment_state_dir
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
@@ -1033,7 +1035,7 @@ class PolymorphicValidator:
             # invocation resolves the same way, in case anything downstream
             # doesn't consult JAVA_HOME) covers both real mechanisms a JDK
             # gets selected by.
-            env = dict(env) if env is not None else dict(os.environ)
+            env = dict(env) if env is not None else child_environment()
             env["JAVA_HOME"] = self.java_home_override
             env["PATH"] = os.path.join(self.java_home_override, "bin") + os.pathsep + env.get("PATH", "")
         return env, preexec_fn
@@ -1179,13 +1181,13 @@ class PolymorphicValidator:
         ContainmentSetupError: the gate refuses, never runs unverified)."""
         if not getattr(self.autonomy_cfg, "git_metadata_export", False):
             return None
-        from kriya.core.state_paths import ENV_STATE_DIR, default_state_directory
+        from kriya.core.state_paths import default_state_directory
         from kriya.tools.git_metadata import bound_git_metadata
 
         cache = self._git_metadata_mounts
         key = os.path.realpath(mounted_workspace)
         if key not in cache:
-            state_root = os.path.realpath(os.path.expanduser(os.environ.get(ENV_STATE_DIR) or default_state_directory()))
+            state_root = os.path.realpath(expand_user(environment_state_dir() or default_state_directory()))
             cache[key] = bound_git_metadata(mounted_workspace=mounted_workspace,
                                             original_workspace=self.original_workspace_path,
                                             state_root=state_root, enabled=True)
@@ -1243,9 +1245,9 @@ class PolymorphicValidator:
         GRADLE-WRAPPER-CONTAINMENT-001), OUTSIDE every source tree, under the
         Kriya state root at ``dependency-cache/<tool>/<workspace key>``,
         keyed by the validator's original workspace (see _maven_cache_dir)."""
-        from kriya.core.state_paths import ENV_STATE_DIR, default_state_directory
+        from kriya.core.state_paths import default_state_directory
 
-        root = os.path.realpath(os.path.expanduser(os.environ.get(ENV_STATE_DIR) or default_state_directory()))
+        root = os.path.realpath(expand_user(environment_state_dir() or default_state_directory()))
         workspace = os.path.realpath(self.original_workspace_path or self.workspace_path)
         key = hashlib.sha256(workspace.encode("utf-8")).hexdigest()[:16]
         cache_dir = os.path.join(root, "dependency-cache", tool, key)
@@ -1265,9 +1267,9 @@ class PolymorphicValidator:
         cached artifact files it found there. Created on demand -
         ``OCIContainmentBackend`` refuses to mount a ``dependency_cache_paths``
         entry that does not already exist as a real directory."""
-        from kriya.core.state_paths import ENV_STATE_DIR, default_state_directory
+        from kriya.core.state_paths import default_state_directory
 
-        root = os.path.realpath(os.path.expanduser(os.environ.get(ENV_STATE_DIR) or default_state_directory()))
+        root = os.path.realpath(expand_user(environment_state_dir() or default_state_directory()))
         workspace = os.path.realpath(self.original_workspace_path or self.workspace_path)
         key = hashlib.sha256(workspace.encode("utf-8")).hexdigest()[:16]
         cache_dir = os.path.join(root, "dependency-cache", "maven", key)

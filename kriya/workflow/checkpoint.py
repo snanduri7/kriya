@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
+from kriya.config.environment import child_environment
 from kriya.control.checkpoint import CHECKPOINT_DIR as CHECKPOINT_DIR
 from kriya.control.checkpoint import OBSERVATIONAL_CONFIG_SECTIONS as OBSERVATIONAL_CONFIG_SECTIONS
 from kriya.control.checkpoint import checkpoint_path as checkpoint_path
@@ -163,7 +164,7 @@ def compute_workspace_content_hash(workspace_path: str) -> Optional[str]:
         tempfile.gettempdir(), f".kriya-scratch-index-{uuid.uuid4().hex}",
     )
     try:
-        env = {**os.environ, "GIT_INDEX_FILE": tmp_index_path}
+        env = {**child_environment(), "GIT_INDEX_FILE": tmp_index_path}
         seed = subprocess.run(
             ["git", "read-tree", "HEAD"], cwd=workspace_path, env=env, capture_output=True, text=True,
         )

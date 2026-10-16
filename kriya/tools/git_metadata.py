@@ -46,6 +46,7 @@ import tempfile
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+from kriya.config.environment import toolchain
 from kriya.tools.containment import ContainmentSetupError, GitMetadataMount
 
 GIT_METADATA_FORMAT = "kriya.git_metadata/1"
@@ -155,7 +156,7 @@ def _git_candidates() -> List[str]:
     """Every distinct ``git`` on PATH, in PATH order. A shim that cannot run (the macOS developer-tools stub that refuses until a license is
     accepted) must not hide a working git later in the same approved PATH."""
     found: List[str] = []
-    for directory in os.environ.get("PATH", "/usr/bin:/bin").split(os.pathsep):
+    for directory in toolchain("PATH", "/usr/bin:/bin").split(os.pathsep):
         candidate = os.path.join(directory, "git")
         if directory and os.path.isfile(candidate) and os.access(candidate, os.X_OK) and candidate not in found:
             found.append(candidate)
@@ -166,7 +167,7 @@ _FILTER_COMMAND_KEYS = re.compile(r"^filter\..+\.(clean|smudge|process)$", re.IG
 
 
 def _probe_env() -> Dict[str, str]:
-    return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", ""), "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"}
+    return {"PATH": toolchain("PATH", "/usr/bin:/bin"), "HOME": toolchain("HOME", ""), "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"}
 
 
 def _filter_overrides(git: str, cwd: str) -> List[str]:

@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
+from kriya.config.environment import expand_user
+from kriya.config.environment import trust_file as environment_trust_file
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 logger = logging.getLogger(__name__)
@@ -958,9 +960,9 @@ class ModelRoutingConfig(BaseModel):
     @field_validator("table_path", "frozen_routes_path")
     @classmethod
     def _absolute_path(cls, path: Optional[str]) -> Optional[str]:
-        if path is not None and not os.path.isabs(os.path.expanduser(path)):
+        if path is not None and not os.path.isabs(expand_user(path)):
             raise ValueError(f"model_policy.routing paths must be absolute, got {path!r}")
-        return os.path.realpath(os.path.expanduser(path)) if path is not None else None
+        return os.path.realpath(expand_user(path)) if path is not None else None
 
     @model_validator(mode="after")
     def _consistent(self) -> "ModelRoutingConfig":
@@ -1867,7 +1869,7 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                         state_value = user_data["paths"].get("state")
                         if isinstance(state_value, str):
                             from kriya.core.state_paths import require_workspace_local_state_under_kriya_dir
-                            expanded = os.path.expanduser(state_value)
+                            expanded = expand_user(state_value)
                             user_data["paths"]["state"] = os.path.realpath(
                                 expanded if os.path.isabs(expanded) else os.path.join(config_dir, expanded)
                             )
@@ -1928,7 +1930,7 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                         def _anchor(raw: Any) -> Any:
                             if not isinstance(raw, str) or not raw:
                                 return raw
-                            expanded = os.path.expanduser(raw)
+                            expanded = expand_user(raw)
                             return os.path.realpath(
                                 expanded if os.path.isabs(expanded) else os.path.join(config_dir, expanded)
                             )
@@ -2149,7 +2151,7 @@ def load_config(config_path: Optional[str] = None, trust_file: Optional[str] = N
     state = resolve_config_state(config_path)
 
     if state.violations:
-        effective_trust_file = trust_file or os.environ.get("KRIYA_TRUST_FILE")
+        effective_trust_file = trust_file or environment_trust_file()
         if effective_trust_file:
             # Refuses a trust-file path resolving inside the workspace root -
             # the load-bearing guard against a checked-out branch shipping

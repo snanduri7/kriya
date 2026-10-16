@@ -26,6 +26,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Iterator, List, Optional, Tuple
 
+from kriya.config.environment import Environment, default_log_dir, expand_user
+from kriya.config.environment import log_dir as environment_log_dir
+
 ENV_LOG_DIR = "KRIYA_LOG_DIR"
 APPLICATION_LOG_FILENAME = "kriya.log"
 RUN_LOGS_DIRNAME = "runs"
@@ -41,9 +44,9 @@ class LogDirectoryError(ValueError):
     """The configured log directory is relative, invalid, or unwritable."""
 
 
-def default_log_directory() -> str:
+def default_log_directory(environment: Optional[Environment] = None) -> str:
     """``~/.kriya/logs``, computed at call time (tests point HOME elsewhere)."""
-    return os.path.join(os.path.expanduser("~"), ".kriya", "logs")
+    return default_log_dir(environment)
 
 
 def canonical_log_directory(value: str, origin: str) -> str:
@@ -51,7 +54,7 @@ def canonical_log_directory(value: str, origin: str) -> str:
     refused rather than anchored to the CWD."""
     if not isinstance(value, str) or not value.strip():
         raise LogDirectoryError(f"{origin} must be a non-empty absolute directory path.")
-    expanded = os.path.expanduser(value)
+    expanded = expand_user(value)
     if not os.path.isabs(expanded):
         raise LogDirectoryError(
             f"{origin} must be an absolute path (got {value!r}); Kriya never resolves "
@@ -60,16 +63,16 @@ def canonical_log_directory(value: str, origin: str) -> str:
     return os.path.realpath(expanded)
 
 
-def resolve_log_directory(cfg) -> Tuple[str, str]:
+def resolve_log_directory(cfg, environment: Optional[Environment] = None) -> Tuple[str, str]:
     """(directory, source) with precedence env > config > default. Pure: no
     filesystem side effects."""
-    env_value = os.environ.get(ENV_LOG_DIR)
+    env_value = environment_log_dir(environment)
     if env_value:
         return canonical_log_directory(env_value, ENV_LOG_DIR), LOG_DIR_SOURCE_ENV
     configured = getattr(cfg.logging, "directory", None)
     if configured is not None:
         return canonical_log_directory(configured, "logging.directory"), LOG_DIR_SOURCE_CONFIG
-    return os.path.realpath(default_log_directory()), LOG_DIR_SOURCE_DEFAULT
+    return os.path.realpath(default_log_directory(environment)), LOG_DIR_SOURCE_DEFAULT
 
 
 def application_log_path(log_dir: str) -> str:

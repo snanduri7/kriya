@@ -63,6 +63,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.config.authority import ConfigAuthorityViolation, get_field_value
+from kriya.config.environment import Environment, authority_home
 from kriya.context.workspace_identity import workspace_identity
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
@@ -354,10 +355,8 @@ def is_approval_current_for(
 
 # --- Storage: local (home-dir, outside workspace) and explicit trust file --
 
-def _authority_home_dir() -> str:
-    override = os.environ.get(ENV_HOME_OVERRIDE)
-    base = override if override else os.path.join(os.path.expanduser("~"), ".kriya", "authority")
-    return os.path.realpath(base)
+def _authority_home_dir(environment: Optional[Environment] = None) -> str:
+    return os.path.realpath(authority_home(environment))  # KRIYA_AUTHORITY_HOME, else ~/.kriya/authority
 
 
 def validate_trust_path_outside_workspace(trust_path: str, workspace_root: str) -> None:

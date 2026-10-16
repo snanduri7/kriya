@@ -225,7 +225,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.knowledge.channels.repo_manifest", "kriya.skills.skill"): ("P2", _P2),  # non-public SKILLS module
     ("kriya.knowledge.staging", "kriya.skills.skill"): ("P2", _P2),  # non-public SKILLS module
     ("kriya.knowledge.staging", "kriya.workflow.skill_extraction"): ("J1", _J1),  # direction KNOWLEDGE -> KERNEL
-    ("kriya.kup.authority_ops", "kriya.config.authority_approval"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY
     ("kriya.kup.cli_ops", "kriya.core.state_paths"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.context_ops", "kriya.core.llm"): ("O1", _O1),  # direction ADAPTER-KUP -> PROVIDER
     ("kriya.kup.execution", "kriya.config.authority"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY

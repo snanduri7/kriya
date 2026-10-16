@@ -33,12 +33,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 import threading
 import urllib.parse
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Optional, Tuple
 
+from kriya.config.environment import execution_environment_probe_enabled
 from kriya.platform.host_properties import UNAVAILABLE as UNAVAILABLE
 from kriya.platform.host_properties import host_properties as host_properties
 
@@ -128,7 +128,7 @@ def environment_from_properties(props: Dict[str, Any], *, provider: str, provide
 
 
 def probing_enabled() -> bool:
-    return os.environ.get(PROBE_ENV_VAR, "1").strip().lower() not in ("0", "false", "no", "off")
+    return execution_environment_probe_enabled()  # KRIYA_EXECUTION_ENVIRONMENT_PROBE: on unless 0/false/no/off
 
 
 def endpoint_is_this_machine(endpoint: str) -> bool:

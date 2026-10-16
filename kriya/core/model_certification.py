@@ -23,6 +23,9 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
 
+from kriya.config.environment import Environment
+from kriya.config.environment import certification_home as environment_certification_home
+
 CERTIFICATION_HOME_ENV = "KRIYA_CERTIFICATION_HOME"
 RECORD_SCHEMA_VERSION = 1
 # The live certification matrix's case set; bump when a case is added,
@@ -50,10 +53,8 @@ class CertificationKey:
         return _digest(asdict(self))
 
 
-def certification_home() -> str:
-    configured = os.environ.get(CERTIFICATION_HOME_ENV)
-    home = os.path.expanduser(configured) if configured else os.path.join(os.path.expanduser("~"), ".kriya", "certifications")
-    return os.path.realpath(home)
+def certification_home(environment: Optional[Environment] = None) -> str:
+    return os.path.realpath(environment_certification_home(environment))  # KRIYA_CERTIFICATION_HOME (~ expanded), else ~/.kriya/certifications
 
 
 def record_path(key: CertificationKey) -> str:

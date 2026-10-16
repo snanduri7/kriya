@@ -36,6 +36,8 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from kriya.config.environment import model_runtime_probe_enabled
+from kriya.config.environment import state_dir as environment_state_dir
 from kriya.core.inference_runtime import (
     ChatRequest,
     ChatResponse,
@@ -350,7 +352,7 @@ def _http_json(url: str, payload: Optional[Dict[str, Any]], api_key: str) -> Dic
 
 
 def probing_enabled() -> bool:
-    return os.environ.get(PROBE_ENV_VAR, "1").strip().lower() not in ("0", "false", "no", "off")
+    return model_runtime_probe_enabled()  # KRIYA_MODEL_RUNTIME_PROBE: on unless 0/false/no/off
 
 
 def probe_model_runtime(
@@ -617,12 +619,12 @@ def _binding_for(config: Any, model: str) -> Dict[str, Any]:
 
 def fingerprint_store_dir(config: Any = None) -> str:
     """``<state dir>/model_runtimes`` (KRIYA_STATE_DIR > paths.state > ~/.kriya/state)."""
-    from kriya.core.state_paths import ENV_STATE_DIR, default_state_directory, resolve_state_directory
+    from kriya.core.state_paths import default_state_directory, resolve_state_directory
 
     if config is not None:
         state = resolve_state_directory(config)[0]
     else:
-        state = os.path.realpath(os.environ.get(ENV_STATE_DIR) or default_state_directory())
+        state = os.path.realpath(environment_state_dir() or default_state_directory())
     return os.path.join(state, "model_runtimes")
 
 

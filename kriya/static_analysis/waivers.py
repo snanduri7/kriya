@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.config.authority_approval import validate_trust_path_outside_workspace
+from kriya.config.environment import Environment, expand_user, static_analysis_home
 from kriya.context.workspace_identity import workspace_identity
 from kriya.static_analysis.model import (
     WAIVER_DIGEST_INVALID,
@@ -147,12 +148,12 @@ def _record_from_dict(data: Mapping[str, Any]) -> WaiverRecord:
 
 # --- Store location ------------------------------------------------------
 
-def waiver_store_path(configured: Optional[str], workspace_root: str) -> str:
+def waiver_store_path(configured: Optional[str], workspace_root: str, environment: Optional[Environment] = None) -> str:
     """The store path; always outside the workspace (TrustPathInsideWorkspaceError otherwise)."""
     if configured:
-        path = os.path.realpath(os.path.expanduser(configured))
+        path = os.path.realpath(expand_user(configured, environment))
     else:
-        home = os.environ.get(ENV_HOME_OVERRIDE) or os.path.join(os.path.expanduser("~"), ".kriya", "static_analysis", "waivers")
+        home = static_analysis_home(environment)  # KRIYA_STATIC_ANALYSIS_HOME, else ~/.kriya/static_analysis/waivers
         path = os.path.join(os.path.realpath(home), f"{workspace_identity(workspace_root)}.json")
     validate_trust_path_outside_workspace(path, workspace_root)
     return path

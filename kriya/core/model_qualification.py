@@ -65,6 +65,8 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
 
 from kriya.config.config import ModelQualificationConfig
+from kriya.config.environment import Environment
+from kriya.config.environment import qualification_home as environment_qualification_home
 from kriya.core.execution_environment import (
     ENVIRONMENT_DEPENDENT_CAPABILITIES,
     ExecutionEnvironment,
@@ -468,10 +470,8 @@ def offered_context_tiers(config: Any, model: str, fingerprint: ModelRuntimeFing
 # Store
 # --------------------------------------------------------------------------
 
-def qualification_home() -> str:
-    configured = os.environ.get(QUALIFICATION_HOME_ENV)
-    home = os.path.expanduser(configured) if configured else os.path.join(os.path.expanduser("~"), ".kriya", "qualifications")
-    return os.path.realpath(home)
+def qualification_home(environment: Optional[Environment] = None) -> str:
+    return os.path.realpath(environment_qualification_home(environment))  # KRIYA_QUALIFICATION_HOME (~ expanded), else ~/.kriya/qualifications
 
 
 def _refuse_inside_workspace(path: str, workspace_root: Optional[str]) -> None:

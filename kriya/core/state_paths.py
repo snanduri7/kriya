@@ -27,6 +27,8 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from kriya.config.environment import Environment, default_state_dir, expand_user
+from kriya.config.environment import state_dir as environment_state_dir
 from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, path_identity, path_relation
 
 ENV_STATE_DIR = "KRIYA_STATE_DIR"
@@ -45,15 +47,15 @@ class LegacyTraceMigrationError(RuntimeError):
     """An explicit legacy trace migration was refused."""
 
 
-def default_state_directory() -> str:
+def default_state_directory(environment: Optional[Environment] = None) -> str:
     """``~/.kriya/state``, computed at call time (tests point HOME elsewhere)."""
-    return os.path.join(os.path.expanduser("~"), ".kriya", "state")
+    return default_state_dir(environment)
 
 
 def _absolute(value: str, origin: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise StateDirectoryError(f"{origin} must be a non-empty directory path.")
-    expanded = os.path.expanduser(value)
+    expanded = expand_user(value)
     if not os.path.isabs(expanded):
         raise StateDirectoryError(
             f"{origin} must be an absolute path here (got {value!r}); Kriya never resolves "
@@ -62,9 +64,9 @@ def _absolute(value: str, origin: str) -> str:
     return os.path.realpath(expanded)
 
 
-def resolve_state_directory(cfg) -> Tuple[str, str]:
+def resolve_state_directory(cfg, environment: Optional[Environment] = None) -> Tuple[str, str]:
     """(directory, source) with precedence env > config > default. Pure."""
-    env_value = os.environ.get(ENV_STATE_DIR)
+    env_value = environment_state_dir(environment)
     if env_value:
         return _absolute(env_value, ENV_STATE_DIR), STATE_DIR_SOURCE_ENV
     configured = getattr(cfg.paths, "state", None)
@@ -72,7 +74,7 @@ def resolve_state_directory(cfg) -> Tuple[str, str]:
         # load_config() already made this absolute (anchored at the config
         # file's directory); a directly built AppConfig must do the same.
         return _absolute(configured, "paths.state"), STATE_DIR_SOURCE_CONFIG
-    return os.path.realpath(default_state_directory()), STATE_DIR_SOURCE_DEFAULT
+    return os.path.realpath(default_state_directory(environment)), STATE_DIR_SOURCE_DEFAULT
 
 
 def trace_db_path(cfg) -> str:
@@ -122,8 +124,8 @@ def legacy_trace_db_path(cfg, legacy_path: Optional[str] = None) -> Optional[str
     the historical packaged default is considered. Never the current trace
     database itself, and never a CWD-relative guess."""
     if legacy_path is not None:
-        candidate = os.path.realpath(os.path.expanduser(legacy_path))
-        if not os.path.isabs(os.path.expanduser(legacy_path)):
+        candidate = os.path.realpath(expand_user(legacy_path))
+        if not os.path.isabs(expand_user(legacy_path)):
             raise LegacyTraceMigrationError(f"--legacy-path must be an absolute path (got {legacy_path!r}).")
         if not os.path.isfile(candidate):
             raise LegacyTraceMigrationError(f"No trace database at {candidate}.")

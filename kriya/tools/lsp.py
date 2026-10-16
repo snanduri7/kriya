@@ -30,6 +30,7 @@ import shutil
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
+from kriya.config.environment import child_environment
 from kriya.tools.process import spawn_subprocess_exec_fail_closed, terminate_process_tree
 
 logger = logging.getLogger(__name__)
@@ -118,7 +119,7 @@ class JdtlsClient:
         # nothing to do with what jdtls itself needs to run. Launching without
         # inheriting JAVA_HOME lets jdtls's own wrapper script fall back to its
         # sensible built-in default, confirmed live to work.
-        jdtls_env = {k: v for k, v in os.environ.items() if k != "JAVA_HOME"}
+        jdtls_env = {k: v for k, v in child_environment().items() if k != "JAVA_HOME"}
         # PLAT-LSP-TREE-KILL-001: spawned as the root of a process tree the
         # platform's ProcessControlPort owns (its own session on POSIX), so
         # _release can kill the launcher AND the JVM it starts, not only the

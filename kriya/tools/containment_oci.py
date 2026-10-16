@@ -71,6 +71,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
+from kriya.config.environment import oci_image
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.tools.containment import (
     BackendUnavailableError,
@@ -98,10 +99,11 @@ _CONTAINER_CACHE_PREFIX = "/kriya/cache"
 # these are purely "which image has the right toolchain preinstalled").
 # Overridable via env var for a repo that needs a different pinned image,
 # without adding new ContainmentProfile/AutonomyConfig surface this pass.
-_DEFAULT_IMAGE = os.environ.get("KRIYA_OCI_IMAGE", "debian:bookworm-slim")
-_MAVEN_IMAGE = os.environ.get("KRIYA_OCI_MAVEN_IMAGE", "maven:3.9-eclipse-temurin-21")
-_GRADLE_IMAGE = os.environ.get("KRIYA_OCI_GRADLE_IMAGE", "gradle:8-jdk21")
-_PYTHON_IMAGE = os.environ.get("KRIYA_OCI_PYTHON_IMAGE", "python:3.12-slim")
+# Read ONCE, at import (as before D3), through CONFIG's environment reader.
+_DEFAULT_IMAGE = oci_image("KRIYA_OCI_IMAGE", "debian:bookworm-slim")
+_MAVEN_IMAGE = oci_image("KRIYA_OCI_MAVEN_IMAGE", "maven:3.9-eclipse-temurin-21")
+_GRADLE_IMAGE = oci_image("KRIYA_OCI_GRADLE_IMAGE", "gradle:8-jdk21")
+_PYTHON_IMAGE = oci_image("KRIYA_OCI_PYTHON_IMAGE", "python:3.12-slim")
 
 # A fixed PID cap (fork-bomb backstop) - Task B asks for a "process/PID
 # limit" but ContainmentProfile has no field for it (not a per-caller

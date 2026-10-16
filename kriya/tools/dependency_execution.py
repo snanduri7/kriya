@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Sequence
 
+from kriya.config.environment import toolchain, user_home
 from kriya.tools.containment import ContainmentBackend, ContainmentProfile, NetworkAuthority, TrustClass
 from kriya.tools.containment_oci import (
     MAVEN_CACHE_MOUNT,
@@ -256,7 +257,7 @@ def seed_gradle_distribution_from_host(
     extracted = f"gradle-{distribution.version}"
     if os.path.isfile(os.path.join(target, marker)) and os.path.isdir(os.path.join(target, extracted, "lib")):
         return {**record, "status": "present", "source": target}
-    home = host_gradle_home or os.environ.get("GRADLE_USER_HOME") or os.path.join(os.path.expanduser("~"), ".gradle")
+    home = host_gradle_home or toolchain("GRADLE_USER_HOME") or os.path.join(user_home(), ".gradle")
     source = os.path.join(home, "wrapper", "dists", distribution.name, distribution.url_hash)
     if not os.path.isdir(source):
         return {**record, "status": "not_in_host_cache", "source": source}

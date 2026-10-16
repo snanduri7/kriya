@@ -57,6 +57,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Iterable, Optional, Sequence, Tuple
 
+from kriya.config.environment import expand_user
 from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, fold_name, path_identity, path_relation
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
@@ -156,7 +157,7 @@ def trusted_control_path_denial(target_path: str) -> PolicyResult:
 
 
 def _canonical(path: str) -> str:
-    return os.path.realpath(os.path.expanduser(path))
+    return os.path.realpath(expand_user(path))
 
 
 def normalize_workspace_relpath(path: str) -> str:

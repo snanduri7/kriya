@@ -1,0 +1,1132 @@
+{
+ "discovered": {
+  "load": {
+   "app": "3f1e248fb2eda6206b1aa8e08dcf949d0533a43f985c36ec278f4c603fb251fc",
+   "logging_directory": null,
+   "paths": {
+    "memory": "<INSTALL>/memory",
+    "skills": "<INSTALL>/skills",
+    "state": null
+   },
+   "sensitive_paths": [
+    ".*\\.env$",
+    ".*secrets.*",
+    "\\.github/workflows/.*",
+    "Jenkinsfile",
+    ".*credentials.*",
+    ".*password.*"
+   ]
+  },
+  "resolve": {
+   "config_dict": "3ecb68c875bd76a24d713236f8cf3c4c32a7e76a4c14c8ce3a4d752382e8fa9f",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "discovered_yml": {
+  "load": {
+   "app": "efbebccde69145ed3d31602663f909fdd95648cd2c2c2fae3fce0fcb7b9c3ced",
+   "logging_directory": null,
+   "paths": {
+    "memory": "<INSTALL>/memory",
+    "skills": "<INSTALL>/skills",
+    "state": null
+   },
+   "sensitive_paths": [
+    ".*\\.env$",
+    ".*secrets.*",
+    "\\.github/workflows/.*",
+    "Jenkinsfile",
+    ".*credentials.*",
+    ".*password.*"
+   ]
+  },
+  "resolve": {
+   "config_dict": "e3ded1a3fb9de30957dc79c90a5174224d449c8c7c41648f4e8f3b4bd61c5a7a",
+   "config_path": "<TMP>/ws/kriya.yml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "explicit_missing": {
+  "load": {
+   "app": "b658dc3e9f83a982de5abd93c0c1f922b83af985856330afbc094c754061415d",
+   "logging_directory": null,
+   "paths": {
+    "memory": "<INSTALL>/memory",
+    "skills": "<INSTALL>/skills",
+    "state": null
+   },
+   "sensitive_paths": [
+    ".*\\.env$",
+    ".*secrets.*",
+    "\\.github/workflows/.*",
+    "Jenkinsfile",
+    ".*credentials.*",
+    ".*password.*"
+   ]
+  },
+  "resolve": {
+   "config_dict": "b0546f7089f386d7915f924d26d9952db7e1e7a15bc54f27947104f69e1a79ed",
+   "config_path": null,
+   "config_source": null,
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "explicit_outside": {
+  "load": {
+   "app": "857e30b3b702e172f3d3a6e7abb8e86df9412ba3c42801cee960d3dd5831663b",
+   "logging_directory": null,
+   "paths": {
+    "memory": "<INSTALL>/memory",
+    "skills": "<TMP>/outside/conf/skills",
+    "state": null
+   },
+   "sensitive_paths": [
+    ".*\\.env$",
+    ".*secrets.*",
+    "\\.github/workflows/.*",
+    "Jenkinsfile",
+    ".*credentials.*",
+    ".*password.*"
+   ]
+  },
+  "resolve": {
+   "config_dict": "b9be585c00e7232bfe25df937e8a381c289aa1343273b1db88fcca3e27043158",
+   "config_path": "<TMP>/outside/conf/kriya.yaml",
+   "config_source": "explicit_config_path_outside_workspace",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<TMP>/outside/conf/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "explicit_symlink": {
+  "load": {
+   "app": "65889ed2a3a4a03ae198b80a84986fc71bb56ce596fe0ea05fe1a5daf50210d2",
+   "logging_directory": null,
+   "paths": {
+    "memory": "<INSTALL>/memory",
+    "skills": "<INSTALL>/skills",
+    "state": null
+   },
+   "sensitive_paths": [
+    ".*\\.env$",
+    ".*secrets.*",
+    "\\.github/workflows/.*",
+    "Jenkinsfile",
+    ".*credentials.*",
+    ".*password.*"
+   ]
+  },
+  "resolve": {
+   "config_dict": "0ee5ad3b731aea81fa4b296e7f30ac84e4b220a35eb06be946fa2777717705e3",
+   "config_path": "<TMP>/outside/real/kriya.yaml",
+   "config_source": "explicit_config_path_outside_workspace",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "log_null": {
+  "load": {
+   "app": "b658dc3e9f83a982de5abd93c0c1f922b83af985856330afbc094c754061415d",
+   "logging_directory": null,
+   "paths": {
+    "memory": "<INSTALL>/memory",
+    "skills": "<INSTALL>/skills",
+    "state": null
+   },
+   "sensitive_paths": [
+    ".*\\.env$",
+    ".*secrets.*",
+    "\\.github/workflows/.*",
+    "Jenkinsfile",
+    ".*credentials.*",
+    ".*password.*"
+   ]
+  },
+  "resolve": {
+   "config_dict": "b0546f7089f386d7915f924d26d9952db7e1e7a15bc54f27947104f69e1a79ed",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "log_relative": {
+  "load": {
+   "error": "LogDirectoryError",
+   "message": "logging.directory must be an absolute path (got 'logs'); Kriya never resolves a log directory against the current working directory."
+  },
+  "resolve": {
+   "error": "LogDirectoryError",
+   "message": "logging.directory must be an absolute path (got 'logs'); Kriya never resolves a log directory against the current working directory."
+  }
+ },
+ "log_tilde": {
+  "load": {
+   "error": "ConfigAuthorityError",
+   "message": "Configuration-authority denied (SEC-009) - repository-controlled configuration cannot grant itself Kriya control-plane authority without explicit approval. 1 field(s) rejected:\n  - logging.directory: source=auto_discovered_cwd, classification=security_authority - classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'\nRun 'kriya authority inspect' to see pending security-authority fields, or 'kriya authority approve' to grant explicit, digest-bound approval.",
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "logging.directory",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ]
+  },
+  "resolve": {
+   "config_dict": "3a16e9d4a0a9ba8c0f48946453235c110ae2c48bd99a65d463c24c31eec2b531",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": "<TMP>/home/klogs",
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "logging.directory",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "malformed": {
+  "load": {
+   "error": "ValueError",
+   "message": "Failed to load configuration at <TMP>/ws/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/ws/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but got '<stream end>'\n  in \"<TMP>/ws/kriya.yaml\", line 2, column 1"
+  },
+  "resolve": {
+   "error": "ValueError",
+   "message": "Failed to load configuration at <TMP>/ws/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/ws/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but got '<stream end>'\n  in \"<TMP>/ws/kriya.yaml\", line 2, column 1"
+  }
+ },
+ "mcp_escape": {
+  "load": {
+   "error": "ValueError",
+   "message": "Failed to load configuration at <TMP>/ws/kriya.yaml: mcp.srv.capabilities.additional_read_paths entry '../escape' is a relative path that resolves outside '<TMP>/ws' - a relative capability path must stay within the config's own directory; use an absolute path to explicitly authorize a host path outside it."
+  },
+  "resolve": {
+   "error": "ValueError",
+   "message": "Failed to load configuration at <TMP>/ws/kriya.yaml: mcp.srv.capabilities.additional_read_paths entry '../escape' is a relative path that resolves outside '<TMP>/ws' - a relative capability path must stay within the config's own directory; use an absolute path to explicitly authorize a host path outside it."
+  }
+ },
+ "mcp_paths": {
+  "load": {
+   "error": "ConfigAuthorityError",
+   "message": "Configuration-authority denied (SEC-009) - repository-controlled configuration cannot grant itself Kriya control-plane authority without explicit approval. 1 field(s) rejected:\n  - mcp.srv: source=auto_discovered_cwd, classification=security_authority - classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'\nRun 'kriya authority inspect' to see pending security-authority fields, or 'kriya authority approve' to grant explicit, digest-bound approval.",
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "mcp.srv",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ]
+  },
+  "resolve": {
+   "config_dict": "030e4a23d6f30acd90282abfc441b99a4189696a20698b8ef1dcd4056ba68c72",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {
+     "srv": {
+      "capabilities": {
+       "additional_read_paths": [
+        "<TMP>/ws/inner",
+        "/abs/path"
+       ]
+      },
+      "command": "x"
+     }
+    },
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "mcp.srv",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "none": {
+  "load": {
+   "app": "b658dc3e9f83a982de5abd93c0c1f922b83af985856330afbc094c754061415d",
+   "logging_directory": null,
+   "paths": {
+    "memory": "<INSTALL>/memory",
+    "skills": "<INSTALL>/skills",
+    "state": null
+   },
+   "sensitive_paths": [
+    ".*\\.env$",
+    ".*secrets.*",
+    "\\.github/workflows/.*",
+    "Jenkinsfile",
+    ".*credentials.*",
+    ".*password.*"
+   ]
+  },
+  "resolve": {
+   "config_dict": "b0546f7089f386d7915f924d26d9952db7e1e7a15bc54f27947104f69e1a79ed",
+   "config_path": null,
+   "config_source": null,
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "preset_conflict": {
+  "load": {
+   "error": "ValueError",
+   "message": "runtime_profile cannot be combined with explicit ['engineering_triage']; choose the preset or configure the individual subsystems"
+  },
+  "resolve": {
+   "error": "ValueError",
+   "message": "runtime_profile cannot be combined with explicit ['engineering_triage']; choose the preset or configure the individual subsystems"
+  }
+ },
+ "production_contradiction": {
+  "load": {
+   "error": "ValueError",
+   "message": "runtime_profile 'production' rejects contradictory overrides: knowledge.offline_mode=False (production requires True)"
+  },
+  "resolve": {
+   "error": "ValueError",
+   "message": "runtime_profile 'production' rejects contradictory overrides: knowledge.offline_mode=False (production requires True)"
+  }
+ },
+ "protected_approved": {
+  "load": {
+   "app": "b269d2e92dfb149dda0642e48cc9bccbf13e7fff82843c9091b8e75ad45f60e7",
+   "logging_directory": null,
+   "paths": {
+    "memory": "<INSTALL>/memory",
+    "skills": "<INSTALL>/skills",
+    "state": null
+   },
+   "sensitive_paths": [
+    ".*\\.env$",
+    ".*secrets.*",
+    "\\.github/workflows/.*",
+    "Jenkinsfile",
+    ".*credentials.*",
+    ".*password.*"
+   ]
+  },
+  "resolve": {
+   "config_dict": "882d6abd291a9d0ab337e4bae2f6e31bc4a73bd05d46cfa3f8ffe49f48f93085",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "llm.base_url",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "protected_trust_absolute": {
+  "load": {
+   "error": "ConfigAuthorityError",
+   "message": "Configuration-authority denied (SEC-009) - repository-controlled configuration cannot grant itself Kriya control-plane authority without explicit approval. 1 field(s) rejected:\n  - llm.base_url: source=auto_discovered_cwd, classification=security_authority - classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'\nRun 'kriya authority inspect' to see pending security-authority fields, or 'kriya authority approve' to grant explicit, digest-bound approval.",
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "llm.base_url",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ]
+  },
+  "resolve": {
+   "config_dict": "882d6abd291a9d0ab337e4bae2f6e31bc4a73bd05d46cfa3f8ffe49f48f93085",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "llm.base_url",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "protected_trust_argument": {
+  "load": {
+   "error": "ConfigAuthorityError",
+   "message": "Configuration-authority denied (SEC-009) - repository-controlled configuration cannot grant itself Kriya control-plane authority without explicit approval. 1 field(s) rejected:\n  - llm.base_url: source=auto_discovered_cwd, classification=security_authority - classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'\nRun 'kriya authority inspect' to see pending security-authority fields, or 'kriya authority approve' to grant explicit, digest-bound approval.",
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "llm.base_url",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ]
+  },
+  "resolve": {
+   "config_dict": "882d6abd291a9d0ab337e4bae2f6e31bc4a73bd05d46cfa3f8ffe49f48f93085",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "llm.base_url",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "protected_trust_empty": {
+  "load": {
+   "error": "ConfigAuthorityError",
+   "message": "Configuration-authority denied (SEC-009) - repository-controlled configuration cannot grant itself Kriya control-plane authority without explicit approval. 1 field(s) rejected:\n  - llm.base_url: source=auto_discovered_cwd, classification=security_authority - classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'\nRun 'kriya authority inspect' to see pending security-authority fields, or 'kriya authority approve' to grant explicit, digest-bound approval.",
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "llm.base_url",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ]
+  },
+  "resolve": {
+   "config_dict": "882d6abd291a9d0ab337e4bae2f6e31bc4a73bd05d46cfa3f8ffe49f48f93085",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "llm.base_url",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "protected_trust_inside": {
+  "load": {
+   "error": "TrustPathInsideWorkspaceError",
+   "message": "trust-artifact path '<TMP>/ws/trust.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must live outside the workspace a repository/checkout can populate; see kriya/config/authority_approval.py's module docstring for why this is refused, not just discouraged."
+  },
+  "resolve": {
+   "config_dict": "882d6abd291a9d0ab337e4bae2f6e31bc4a73bd05d46cfa3f8ffe49f48f93085",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "llm.base_url",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "protected_trust_relative": {
+  "load": {
+   "error": "TrustPathInsideWorkspaceError",
+   "message": "trust-artifact path 'trust.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must live outside the workspace a repository/checkout can populate; see kriya/config/authority_approval.py's module docstring for why this is refused, not just discouraged."
+  },
+  "resolve": {
+   "config_dict": "882d6abd291a9d0ab337e4bae2f6e31bc4a73bd05d46cfa3f8ffe49f48f93085",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "llm.base_url",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "protected_unapproved": {
+  "load": {
+   "error": "ConfigAuthorityError",
+   "message": "Configuration-authority denied (SEC-009) - repository-controlled configuration cannot grant itself Kriya control-plane authority without explicit approval. 1 field(s) rejected:\n  - llm.base_url: source=auto_discovered_cwd, classification=security_authority - classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'\nRun 'kriya authority inspect' to see pending security-authority fields, or 'kriya authority approve' to grant explicit, digest-bound approval.",
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "llm.base_url",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ]
+  },
+  "resolve": {
+   "config_dict": "882d6abd291a9d0ab337e4bae2f6e31bc4a73bd05d46cfa3f8ffe49f48f93085",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "llm.base_url",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "removed_logging_file": {
+  "load": {
+   "error": "RemovedConfigFieldError",
+   "message": "<TMP>/ws/kriya.yaml: logging.file was removed; use logging.directory to configure the log directory (or logging.file_enabled: false to turn the application log off)."
+  },
+  "resolve": {
+   "error": "RemovedConfigFieldError",
+   "message": "<TMP>/ws/kriya.yaml: logging.file was removed; use logging.directory to configure the log directory (or logging.file_enabled: false to turn the application log off)."
+  }
+ },
+ "removed_paths_logs": {
+  "load": {
+   "error": "RemovedConfigFieldError",
+   "message": "<TMP>/ws/kriya.yaml: paths.logs was removed; use logging.directory for logs or paths.state for trace state."
+  },
+  "resolve": {
+   "error": "RemovedConfigFieldError",
+   "message": "<TMP>/ws/kriya.yaml: paths.logs was removed; use logging.directory for logs or paths.state for trace state."
+  }
+ },
+ "routing_relative": {
+  "load": {
+   "error": "ConfigAuthorityError",
+   "message": "Configuration-authority denied (SEC-009) - repository-controlled configuration cannot grant itself Kriya control-plane authority without explicit approval. 1 field(s) rejected:\n  - model_policy.routing: source=auto_discovered_cwd, classification=security_authority - classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'\nRun 'kriya authority inspect' to see pending security-authority fields, or 'kriya authority approve' to grant explicit, digest-bound approval.",
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "model_policy.routing",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ]
+  },
+  "resolve": {
+   "config_dict": "d179da46859d4e9e257b1869e350cb96a69103ebfeb81898821061a24829001f",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "model_policy.routing",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "routing_tilde": {
+  "load": {
+   "error": "ConfigAuthorityError",
+   "message": "Configuration-authority denied (SEC-009) - repository-controlled configuration cannot grant itself Kriya control-plane authority without explicit approval. 1 field(s) rejected:\n  - model_policy.routing: source=auto_discovered_cwd, classification=security_authority - classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'\nRun 'kriya authority inspect' to see pending security-authority fields, or 'kriya authority approve' to grant explicit, digest-bound approval.",
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "model_policy.routing",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ]
+  },
+  "resolve": {
+   "config_dict": "7fec15f981d85698474a1a33b403c4e242b4beb6149101c640a3af5804f991a4",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "model_policy.routing",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "state_is_kriya_dir": {
+  "load": {
+   "error": "StateDirectoryError",
+   "message": "paths.state '.kriya' resolves inside the workspace (<TMP>/ws/.kriya) but not beneath <TMP>/ws/.kriya/; use e.g. '.kriya/state', or a directory outside the workspace."
+  },
+  "resolve": {
+   "error": "StateDirectoryError",
+   "message": "paths.state '.kriya' resolves inside the workspace (<TMP>/ws/.kriya) but not beneath <TMP>/ws/.kriya/; use e.g. '.kriya/state', or a directory outside the workspace."
+  }
+ },
+ "state_null": {
+  "load": {
+   "app": "b658dc3e9f83a982de5abd93c0c1f922b83af985856330afbc094c754061415d",
+   "logging_directory": null,
+   "paths": {
+    "memory": "<INSTALL>/memory",
+    "skills": "<INSTALL>/skills",
+    "state": null
+   },
+   "sensitive_paths": [
+    ".*\\.env$",
+    ".*secrets.*",
+    "\\.github/workflows/.*",
+    "Jenkinsfile",
+    ".*credentials.*",
+    ".*password.*"
+   ]
+  },
+  "resolve": {
+   "config_dict": "b0546f7089f386d7915f924d26d9952db7e1e7a15bc54f27947104f69e1a79ed",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": null
+   },
+   "violations": [],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "state_outside": {
+  "load": {
+   "error": "ConfigAuthorityError",
+   "message": "Configuration-authority denied (SEC-009) - repository-controlled configuration cannot grant itself Kriya control-plane authority without explicit approval. 1 field(s) rejected:\n  - paths.state: source=auto_discovered_cwd, classification=security_authority - classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'\nRun 'kriya authority inspect' to see pending security-authority fields, or 'kriya authority approve' to grant explicit, digest-bound approval.",
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "paths.state",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ]
+  },
+  "resolve": {
+   "config_dict": "125ed2e13dc3ad6a7db23bf507dfa99f4f61d9849e94b1bdf86073e51a0ab153",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": "<TMP>/outside/state"
+    },
+    "static_analysis": null
+   },
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "paths.state",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "state_relative": {
+  "load": {
+   "error": "StateDirectoryError",
+   "message": "paths.state 'state' resolves inside the workspace (<TMP>/ws/state) but not beneath <TMP>/ws/.kriya/; use e.g. '.kriya/state', or a directory outside the workspace."
+  },
+  "resolve": {
+   "error": "StateDirectoryError",
+   "message": "paths.state 'state' resolves inside the workspace (<TMP>/ws/state) but not beneath <TMP>/ws/.kriya/; use e.g. '.kriya/state', or a directory outside the workspace."
+  }
+ },
+ "state_tilde": {
+  "load": {
+   "error": "ConfigAuthorityError",
+   "message": "Configuration-authority denied (SEC-009) - repository-controlled configuration cannot grant itself Kriya control-plane authority without explicit approval. 1 field(s) rejected:\n  - paths.state: source=auto_discovered_cwd, classification=security_authority - classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'\nRun 'kriya authority inspect' to see pending security-authority fields, or 'kriya authority approve' to grant explicit, digest-bound approval.",
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "paths.state",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ]
+  },
+  "resolve": {
+   "config_dict": "a21bb13b3e8c5fe5315a3047964821104ad56a401ba7c4111b98c86c8ba90a5d",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": "<TMP>/home/kstate"
+    },
+    "static_analysis": null
+   },
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "paths.state",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "state_under_kriya": {
+  "load": {
+   "app": "4e4acc20009b87ded7578fa75a0eb3b923ae850f3a298862eebe8bb0e1d079b6",
+   "logging_directory": null,
+   "paths": {
+    "memory": "<INSTALL>/memory",
+    "skills": "<INSTALL>/skills",
+    "state": "<TMP>/ws/.kriya/state"
+   },
+   "sensitive_paths": [
+    ".*\\.env$",
+    ".*secrets.*",
+    "\\.github/workflows/.*",
+    "Jenkinsfile",
+    ".*credentials.*",
+    ".*password.*"
+   ]
+  },
+  "resolve": {
+   "config_dict": "96ee97b736b4227cdea567e4735612ddfc98fca0b16ed23605901e03374d2f13",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": "<TMP>/ws/.kriya/state"
+    },
+    "static_analysis": null
+   },
+   "violations": [],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "static_paths": {
+  "load": {
+   "error": "ConfigAuthorityError",
+   "message": "Configuration-authority denied (SEC-009) - repository-controlled configuration cannot grant itself Kriya control-plane authority without explicit approval. 2 field(s) rejected:\n  - static_analysis.providers: source=auto_discovered_cwd, classification=security_authority - classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'\n  - static_analysis.waivers: source=auto_discovered_cwd, classification=security_authority - classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'\nRun 'kriya authority inspect' to see pending security-authority fields, or 'kriya authority approve' to grant explicit, digest-bound approval.",
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "static_analysis.providers",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    },
+    {
+     "classification": "security_authority",
+     "field": "static_analysis.waivers",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ]
+  },
+  "resolve": {
+   "config_dict": "698a492cddf33da352c29ca901a1cf55fe0c24631130adfd8c56c343d7698ab8",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": {
+     "providers": {
+      "semgrep": {
+       "rule_packs": [
+        "<TMP>/ws/rules",
+        {
+         "path": "<TMP>/ws/packs/p"
+        }
+       ]
+      }
+     },
+     "waivers": {
+      "store": "<TMP>/home/waivers.json"
+     }
+    }
+   },
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "static_analysis.providers",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    },
+    {
+     "classification": "security_authority",
+     "field": "static_analysis.waivers",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "workspace_root": "<TMP>/ws"
+  }
+ },
+ "static_unregistered": {
+  "load": {
+   "error": "ValidationError",
+   "message": "1 validation error for AppConfig\nstatic_analysis\n  Value error, static_analysis.provider 'nope' is not a registered provider [type=value_error, input_value={'enabled': True, 'provider': 'nope'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+  },
+  "resolve": {
+   "config_dict": "5858f91de6ab90d77066647574c2726693995527f6f59c53ca194949bd8acec7",
+   "config_path": "<TMP>/ws/kriya.yaml",
+   "config_source": "auto_discovered_cwd",
+   "user_sections": {
+    "logging": {
+     "directory": null,
+     "file_enabled": true,
+     "level": "INFO",
+     "run_file_enabled": true
+    },
+    "mcp": {},
+    "paths": {
+     "memory": "<INSTALL>/memory",
+     "skills": "<INSTALL>/skills",
+     "state": null
+    },
+    "static_analysis": {
+     "enabled": true,
+     "provider": "nope"
+    }
+   },
+   "violations": [
+    {
+     "classification": "security_authority",
+     "field": "static_analysis.enabled",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    },
+    {
+     "classification": "security_authority",
+     "field": "static_analysis.provider",
+     "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "workspace_root": "<TMP>/ws"
+  }
+ }
+}

@@ -24,6 +24,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from kriya.config.environment import Environment, adjudication_home
 from kriya.metrics.evidence import canonical_digest
 
 ENV_HOME_OVERRIDE = "KRIYA_ADJUDICATION_HOME"
@@ -71,8 +72,8 @@ class Adjudication:
         return canonical_digest(self.body())
 
 
-def store_path() -> str:
-    home = os.environ.get(ENV_HOME_OVERRIDE) or os.path.join(os.path.expanduser("~"), ".kriya", "adjudications")
+def store_path(environment: Optional[Environment] = None) -> str:
+    home = adjudication_home(environment)  # KRIYA_ADJUDICATION_HOME, else ~/.kriya/adjudications
     return os.path.join(os.path.realpath(home), STORE_FILENAME)
 
 

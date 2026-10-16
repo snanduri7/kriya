@@ -47,9 +47,9 @@ FORBIDDEN_IMPORT_ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
 # KERNEL module -> removal slice, per mechanism (the slice of the same module's
 # entry in test_direct_access_owners.ALLOWLIST).
 KERNEL_MECHANISM_ALLOWLIST: Dict[str, Dict[str, str]] = {
-    "os_environ": {"kriya.workflow.acceptance_jvm": "D3", "kriya.workflow.checkpoint": "D3",
-                   "kriya.workflow.milestone_completion": "D3"},
-    "home": {"kriya.workflow.acceptance_jvm": "D3", "kriya.workflow.workflow": "D3"},
+    # D3: the kernel's env/home reads (acceptance_jvm/checkpoint/milestone_completion/workflow) go through kriya.config.environment.
+    "os_environ": {},
+    "home": {},
     "subprocess": {"kriya.workflow.checkpoint": "M2", "kriya.workflow.file_integrity": "M1",
                    "kriya.workflow.milestone_completion": "M3", "kriya.workflow.named_test_oracle": "L2",
                    "kriya.workflow.worktree": "M2"},

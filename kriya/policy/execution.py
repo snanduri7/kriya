@@ -52,8 +52,10 @@ so a real caller with config access (WorkflowEngine) can hand in
 AutonomyConfig.sensitive_paths instead of drifting from the hardcoded
 default; ExecutionPolicy() with no arguments is still every other call
 site's exact construction, unchanged. This module itself still never
-imports or reads kriya.config directly, and still consults no LLM to reach
-a decision - MA4.15's actual AUDIT-vs-ENFORCE mode switch
+imports or reads the configuration (kriya.config.config / AppConfig) - its
+one path expansion (``~``) goes through CONFIG's environment reader,
+kriya.config.environment, since full-modularization D3 - and still consults
+no LLM to reach a decision - MA4.15's actual AUDIT-vs-ENFORCE mode switch
 (kriya.config.config.ExecutionPolicyConfig) lives in the callers
 (WorkflowEngine._authorize_action's `enforce` argument), never inside this
 engine.
@@ -64,6 +66,7 @@ import re
 import shlex
 from typing import Callable, FrozenSet, List, Optional, Sequence, Tuple
 
+from kriya.config.environment import expand_user
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.policy.egress import is_local_url
 from kriya.policy.model import (
@@ -396,7 +399,7 @@ def _normalize_path(path: str) -> str:
     # existing parent directories go and appends any nonexistent tail
     # components literally, which is exactly the "where would this write
     # really land" question containment needs answered.
-    return os.path.realpath(os.path.expanduser(path))
+    return os.path.realpath(expand_user(path))
 
 
 # MA4.8 - git-write classification, all effect-based (section 31: "requires

@@ -1,0 +1,1109 @@
+{
+ "GRADLE_USER_HOME=absolute": {
+  "error": "TypeError",
+  "message": "expected str, bytes or os.PathLike object, not _FakeDistribution"
+ },
+ "GRADLE_USER_HOME=empty": {
+  "error": "TypeError",
+  "message": "expected str, bytes or os.PathLike object, not _FakeDistribution"
+ },
+ "GRADLE_USER_HOME=unset": {
+  "error": "TypeError",
+  "message": "expected str, bytes or os.PathLike object, not _FakeDistribution"
+ },
+ "KRIYA_ADJUDICATION_HOME=absolute": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/outside/override/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_ADJUDICATION_HOME=empty": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_ADJUDICATION_HOME=relative": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/ws/rel/override/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_ADJUDICATION_HOME=tilde": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/ws/~/override/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_ADJUDICATION_HOME=unset": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_AUTHORITY_HOME=absolute": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/outside/override",
+  "authority_local_path": "<TMP>/outside/override/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_AUTHORITY_HOME=empty": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_AUTHORITY_HOME=relative": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/ws/rel/override",
+  "authority_local_path": {
+   "error": "TrustPathInsideWorkspaceError",
+   "message": "trust-artifact path '<TMP>/ws/rel/override/x.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must live outside the workspace a repository/checkout can populate; see kriya/config/authority_approval.py's module docstring for why this is refused, not just discouraged."
+  },
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_AUTHORITY_HOME=tilde": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/ws/~/override",
+  "authority_local_path": {
+   "error": "TrustPathInsideWorkspaceError",
+   "message": "trust-artifact path '<TMP>/ws/~/override/x.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must live outside the workspace a repository/checkout can populate; see kriya/config/authority_approval.py's module docstring for why this is refused, not just discouraged."
+  },
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_AUTHORITY_HOME=unset": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_CERTIFICATION_HOME=absolute": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/outside/override",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_CERTIFICATION_HOME=empty": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_CERTIFICATION_HOME=relative": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/ws/rel/override",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_CERTIFICATION_HOME=tilde": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/override",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_CERTIFICATION_HOME=unset": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_EXECUTION_ENVIRONMENT_PROBE=empty": true,
+ "KRIYA_EXECUTION_ENVIRONMENT_PROBE=false_padded": false,
+ "KRIYA_EXECUTION_ENVIRONMENT_PROBE=no": false,
+ "KRIYA_EXECUTION_ENVIRONMENT_PROBE=off": false,
+ "KRIYA_EXECUTION_ENVIRONMENT_PROBE=one": true,
+ "KRIYA_EXECUTION_ENVIRONMENT_PROBE=unset": true,
+ "KRIYA_EXECUTION_ENVIRONMENT_PROBE=yes": true,
+ "KRIYA_EXECUTION_ENVIRONMENT_PROBE=zero": false,
+ "KRIYA_LOG_DIR=absolute": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/outside/override",
+   "env"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_LOG_DIR=empty": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_LOG_DIR=relative": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": {
+   "error": "LogDirectoryError",
+   "message": "KRIYA_LOG_DIR must be an absolute path (got 'rel/override'); Kriya never resolves a log directory against the current working directory."
+  },
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_LOG_DIR=tilde": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/override",
+   "env"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_LOG_DIR=unset": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_MCP_APPROVAL_HOME=absolute": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/outside/override",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_MCP_APPROVAL_HOME=empty": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_MCP_APPROVAL_HOME=relative": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/ws/rel/override",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_MCP_APPROVAL_HOME=tilde": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/ws/~/override",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_MCP_APPROVAL_HOME=unset": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_MODEL_RUNTIME_PROBE=empty": true,
+ "KRIYA_MODEL_RUNTIME_PROBE=false_padded": false,
+ "KRIYA_MODEL_RUNTIME_PROBE=no": false,
+ "KRIYA_MODEL_RUNTIME_PROBE=off": false,
+ "KRIYA_MODEL_RUNTIME_PROBE=one": true,
+ "KRIYA_MODEL_RUNTIME_PROBE=unset": true,
+ "KRIYA_MODEL_RUNTIME_PROBE=yes": true,
+ "KRIYA_MODEL_RUNTIME_PROBE=zero": false,
+ "KRIYA_QUALIFICATION_HOME=absolute": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/outside/override",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_QUALIFICATION_HOME=empty": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_QUALIFICATION_HOME=relative": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/ws/rel/override",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_QUALIFICATION_HOME=tilde": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/override",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_QUALIFICATION_HOME=unset": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_STATE_DIR=absolute": {
+  "acceptance_jvm_state_root": "<TMP>/outside/override",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/outside/override/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/outside/override",
+   "env"
+  ],
+  "trace_db_path": "<TMP>/outside/override/traces.db",
+  "validator_dependency_cache": "<TMP>/outside/override/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/outside/override/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_STATE_DIR=empty": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_STATE_DIR=relative": {
+  "acceptance_jvm_state_root": "<TMP>/ws/rel/override",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/ws/rel/override/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": {
+   "error": "StateDirectoryError",
+   "message": "KRIYA_STATE_DIR must be an absolute path here (got 'rel/override'); Kriya never resolves a state directory against the current working directory."
+  },
+  "trace_db_path": {
+   "error": "StateDirectoryError",
+   "message": "KRIYA_STATE_DIR must be an absolute path here (got 'rel/override'); Kriya never resolves a state directory against the current working directory."
+  },
+  "validator_dependency_cache": "<TMP>/ws/rel/override/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/ws/rel/override/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_STATE_DIR=tilde": {
+  "acceptance_jvm_state_root": "<TMP>/home/override",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/ws/~/override/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/override",
+   "env"
+  ],
+  "trace_db_path": "<TMP>/home/override/traces.db",
+  "validator_dependency_cache": "<TMP>/home/override/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/override/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_STATE_DIR=unset": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_STATIC_ANALYSIS_HOME=absolute": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/outside/override/<WS>_ID.json"
+ },
+ "KRIYA_STATIC_ANALYSIS_HOME=empty": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "KRIYA_STATIC_ANALYSIS_HOME=relative": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": {
+   "error": "TrustPathInsideWorkspaceError",
+   "message": "trust-artifact path '<TMP>/ws/rel/override/<WS>_ID.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must live outside the workspace a repository/checkout can populate; see kriya/config/authority_approval.py's module docstring for why this is refused, not just discouraged."
+  }
+ },
+ "KRIYA_STATIC_ANALYSIS_HOME=tilde": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": {
+   "error": "TrustPathInsideWorkspaceError",
+   "message": "trust-artifact path '<TMP>/ws/~/override/<WS>_ID.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must live outside the workspace a repository/checkout can populate; see kriya/config/authority_approval.py's module docstring for why this is refused, not just discouraged."
+  }
+ },
+ "KRIYA_STATIC_ANALYSIS_HOME=unset": {
+  "acceptance_jvm_state_root": "<TMP>/home/.kriya/state",
+  "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
+  "authority_home": "<TMP>/home/.kriya/authority",
+  "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
+  "certification_home": "<TMP>/home/.kriya/certifications",
+  "default_log_directory": "<TMP>/home/.kriya/logs",
+  "default_state_directory": "<TMP>/home/.kriya/state",
+  "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
+  "model_runtime_fingerprint_store": "<TMP>/home/.kriya/state/model_runtimes",
+  "qualification_home": "<TMP>/home/.kriya/qualifications",
+  "resolve_log_directory": [
+   "<TMP>/home/.kriya/logs",
+   "default"
+  ],
+  "resolve_state_directory": [
+   "<TMP>/home/.kriya/state",
+   "default"
+  ],
+  "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
+  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
+  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "waiver_store_configured_tilde": "<TMP>/home/w.json",
+  "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
+ },
+ "PATH=empty": {
+  "git_candidates": [],
+  "probe_env": {
+   "GIT_OPTIONAL_LOCKS": "0",
+   "GIT_TERMINAL_PROMPT": "0",
+   "HOME": "<TMP>/home",
+   "LC_ALL": "C",
+   "PATH": ""
+  }
+ },
+ "PATH=two": {
+  "git_candidates": [
+   "<TMP>/outside/bin2/git"
+  ],
+  "probe_env": {
+   "GIT_OPTIONAL_LOCKS": "0",
+   "GIT_TERMINAL_PROMPT": "0",
+   "HOME": "<TMP>/home",
+   "LC_ALL": "C",
+   "PATH": "<TMP>/outside/bin1:<TMP>/outside/bin2"
+  }
+ },
+ "PATH=unset": {
+  "git_candidates": [
+   "/usr/bin/git"
+  ],
+  "probe_env": {
+   "GIT_OPTIONAL_LOCKS": "0",
+   "GIT_TERMINAL_PROMPT": "0",
+   "HOME": "",
+   "LC_ALL": "C",
+   "PATH": "/usr/bin:/bin"
+  }
+ },
+ "expansion": {
+  "kernel_protected_relpath": null,
+  "kernel_protected_relpath_inside": "a.py",
+  "kernel_protected_relpath_tilde_workspace": "b.py",
+  "leak_check_read_texts": [
+   "hidden text"
+  ],
+  "policy_execution_normalize": "<TMP>/home/a/b",
+  "policy_filesystem_canonical": "<TMP>/home/b"
+ },
+ "oci_images": {
+  "empty": [
+   "",
+   "",
+   "",
+   ""
+  ],
+  "set": [
+   "img/kriya_oci_image:1",
+   "img/kriya_oci_maven_image:1",
+   "img/kriya_oci_gradle_image:1",
+   "img/kriya_oci_python_image:1"
+  ],
+  "unset": [
+   "debian:bookworm-slim",
+   "maven:3.9-eclipse-temurin-21",
+   "gradle:8-jdk21",
+   "python:3.12-slim"
+  ]
+ }
+}

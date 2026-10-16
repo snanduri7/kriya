@@ -1,0 +1,2695 @@
+{
+ "no_trust/configuration.approval_status:malformed": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "CONFIG_LOAD_FAILED",
+   "database_state": null,
+   "message": "the configuration cannot be read: ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+  },
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/configuration.approval_status:plain": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blocking_reason": null,
+   "can_approve": false,
+   "fingerprint": null,
+   "identity": "<PLAIN>_ID",
+   "note": "Only the names of the settings are shown. Their values are not sent to the application.",
+   "protected_fields": [],
+   "reason": null,
+   "required": false,
+   "scope": "This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.",
+   "status": "not_required",
+   "values_shown": false,
+   "workspace": "<TMP>/plain"
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/configuration.approval_status:protected": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blocking_reason": null,
+   "can_approve": true,
+   "fingerprint": "sha256:<DIGEST>",
+   "identity": "<PROTECTED>_ID",
+   "note": "Only the names of the settings are shown. Their values are not sent to the application.",
+   "protected_fields": [
+    {
+     "classification": "security_authority",
+     "field": "llm.base_url",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "reason": "no_approval",
+   "required": true,
+   "scope": "This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.",
+   "status": "required",
+   "values_shown": false,
+   "workspace": "<TMP>/protected"
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/configuration.approval_status:refused": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blocking_reason": null,
+   "can_approve": true,
+   "fingerprint": "sha256:<DIGEST>",
+   "identity": "<REFUSED>_ID",
+   "note": "Only the names of the settings are shown. Their values are not sent to the application.",
+   "protected_fields": [
+    {
+     "classification": "security_authority",
+     "field": "execution_policy.enabled",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "reason": "no_approval",
+   "required": true,
+   "scope": "This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.",
+   "status": "required",
+   "values_shown": false,
+   "workspace": "<TMP>/refused"
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/configuration.approval_status:state_relative": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "CONFIG_LOAD_FAILED",
+   "database_state": null,
+   "message": "the configuration cannot be read: StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+  },
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/configuration.approve:malformed": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "CONFIG_LOAD_FAILED",
+   "database_state": null,
+   "message": "the configuration cannot be read: ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+  },
+  "observed_at": "<volatile>",
+  "operation": "configuration.approve",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/execution.context:malformed": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "authority_status": "failed",
+   "available": false,
+   "egress": null,
+   "routing": [],
+   "skills": null,
+   "tools": null,
+   "unavailable_reason": {
+    "code": "CONFIG_LOAD_FAILED",
+    "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+   },
+   "workspace": {
+    "identity": "<MALFORMED>_ID",
+    "name": "malformed",
+    "path": "<TMP>/malformed"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.context",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/execution.context:plain": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "authority_status": "no_findings",
+   "available": true,
+   "egress": {
+    "policy": "local_only",
+    "web_lookup_enabled": false
+   },
+   "routing": [
+    {
+     "context_window": 32768,
+     "endpoint": "http://localhost:11434/v1",
+     "fallback": [],
+     "model": "qwen3-coder:30b",
+     "provider": "openai",
+     "role": "planner",
+     "source": "default"
+    },
+    {
+     "context_window": 32768,
+     "endpoint": "http://localhost:11434/v1",
+     "fallback": [],
+     "model": "qwen3-coder:30b",
+     "provider": "openai",
+     "role": "architect",
+     "source": "default"
+    },
+    {
+     "context_window": 32768,
+     "endpoint": "http://localhost:11434/v1",
+     "fallback": [
+      "qwen3.6:35b-a3b-q4_K_M"
+     ],
+     "model": "qwen3-coder:30b",
+     "provider": "openai",
+     "role": "developer",
+     "source": "default"
+    },
+    {
+     "context_window": 32768,
+     "endpoint": "http://localhost:11434/v1",
+     "fallback": [],
+     "model": "qwen3-coder:30b",
+     "provider": "openai",
+     "role": "reviewer",
+     "source": "default"
+    },
+    {
+     "context_window": 32768,
+     "endpoint": "http://localhost:11434/v1",
+     "fallback": [],
+     "model": "qwen3-coder:30b",
+     "provider": "openai",
+     "role": "run_verifier",
+     "source": "default"
+    },
+    {
+     "context_window": 32768,
+     "endpoint": "http://localhost:11434/v1",
+     "fallback": [],
+     "model": "qwen3-coder:30b",
+     "provider": "openai",
+     "role": "skill_gap",
+     "source": "default"
+    },
+    {
+     "context_window": 32768,
+     "endpoint": "http://localhost:11434/v1",
+     "fallback": [],
+     "model": "qwen3-coder:30b",
+     "provider": "openai",
+     "role": "spec_compliance",
+     "source": "default"
+    }
+   ],
+   "skills": {
+    "items": [
+     {
+      "category": "Messaging",
+      "description": "Embedded ActiveMQ Artemis AMQP Broker configuration and setup rules.",
+      "example_count": 2,
+      "gap_acknowledged": false,
+      "has_instructions": true,
+      "name": "activemq-artemis",
+      "origin": "kriya_install",
+      "rule_count": 8,
+      "staged_rule_count": 0,
+      "supported_versions": "*",
+      "tags": [
+       "artemis",
+       "activemq"
+      ],
+      "verified": false,
+      "verified_at": null,
+      "verified_context": null
+     },
+     {
+      "category": "Serialization",
+      "description": "Encoding/decoding fixed-width binary wire protocols in Java, where a field's declared byte width may be narrower than its natural Java primitive type (e.g. a 3-byte field holding an int).",
+      "example_count": 1,
+      "gap_acknowledged": false,
+      "has_instructions": true,
+      "name": "binary-wire-protocol",
+      "origin": "kriya_install",
+      "rule_count": 7,
+      "staged_rule_count": 0,
+      "supported_versions": "*",
+      "tags": [
+       "wire format",
+       "big-endian",
+       "little-endian",
+       "binary protocol",
+       "byte-level protocol"
+      ],
+      "verified": true,
+      "verified_at": "2026-08-20",
+      "verified_context": "version unspecified"
+     },
+     {
+      "category": "Database",
+      "description": "Coding guidelines and configurations for Apache Ignite 2.18.0 on Java 17 using Maven.",
+      "example_count": 1,
+      "gap_acknowledged": false,
+      "has_instructions": true,
+      "name": "ignite-java17",
+      "origin": "kriya_install",
+      "rule_count": 44,
+      "staged_rule_count": 0,
+      "supported_versions": "*",
+      "tags": [
+       "ignite",
+       "apache-ignite",
+       "ignite-cache"
+      ],
+      "verified": true,
+      "verified_at": "2026-09-09",
+      "verified_context": "org.apache.ignite:ignite-core 2.18.0"
+     },
+     {
+      "category": "Messaging",
+      "description": "Apache Qpid Broker-J (embedded) and qpid-jms AMQP 1.0 client setup rules. Also covers \"Red Hat Qpid MRG\" / \"Red Hat AMQ\" branded requests, which map to the same underlying Apache Qpid broker and qpid-jms client, not ActiveMQ Artemis.",
+      "example_count": 6,
+      "gap_acknowledged": false,
+      "has_instructions": true,
+      "name": "qpid",
+      "origin": "kriya_install",
+      "rule_count": 24,
+      "staged_rule_count": 0,
+      "supported_versions": "*",
+      "tags": [
+       "qpid",
+       "qpid-jms",
+       "qpid-broker-j",
+       "redhat-mrg",
+       "mrg",
+       "amqp-1.0"
+      ],
+      "verified": true,
+      "verified_at": "2026-09-09",
+      "verified_context": "org.apache.qpid:qpid-broker-core unspecified"
+     }
+    ],
+    "management": "Skills are created, reviewed and promoted with `kriya skills` in a terminal; this application does not change them.",
+    "selection": "automatic",
+    "selection_note": "Kriya selects Skills automatically for each run from the goal and the repository; there is no manual selection. The Skills a run used are recorded with the run.",
+    "total": 4,
+    "truncated": false
+   },
+   "tools": {
+    "health": "not_checked",
+    "health_note": "A server's health is learned only by starting it (`kriya mcp inspect`); opening a folder never starts one.",
+    "management": "Tools, MCP servers and their invocation approvals are operator-managed (configuration and `kriya mcp`); this application shows them and changes nothing.",
+    "mcp_servers": [],
+    "plugins": {
+     "directory": "<INSTALL>/plugins",
+     "enabled": []
+    }
+   },
+   "unavailable_reason": null,
+   "workspace": {
+    "identity": "<PLAIN>_ID",
+    "name": "plain",
+    "path": "<TMP>/plain"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.context",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/execution.context:protected": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "authority_status": "refused",
+   "available": false,
+   "egress": null,
+   "routing": [],
+   "skills": null,
+   "tools": null,
+   "unavailable_reason": {
+    "code": "CONFIG_AUTHORITY_REFUSED",
+    "message": "1 field(s) in this folder's configuration need an operator approval (kriya authority approve): llm.base_url"
+   },
+   "workspace": {
+    "identity": "<PROTECTED>_ID",
+    "name": "protected",
+    "path": "<TMP>/protected"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.context",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/execution.context:refused": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "authority_status": "refused",
+   "available": false,
+   "egress": null,
+   "routing": [],
+   "skills": null,
+   "tools": null,
+   "unavailable_reason": {
+    "code": "CONFIG_AUTHORITY_REFUSED",
+    "message": "1 field(s) in this folder's configuration need an operator approval (kriya authority approve): execution_policy.enabled"
+   },
+   "workspace": {
+    "identity": "<REFUSED>_ID",
+    "name": "refused",
+    "path": "<TMP>/refused"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.context",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/execution.context:state_relative": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "authority_status": "failed",
+   "available": false,
+   "egress": null,
+   "routing": [],
+   "skills": null,
+   "tools": null,
+   "unavailable_reason": {
+    "code": "CONFIG_LOAD_FAILED",
+    "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+   },
+   "workspace": {
+    "identity": "<STATE_RELATIVE>_ID",
+    "name": "state_relative",
+    "path": "<TMP>/state_relative"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.context",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/execution.preflight:malformed": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [
+    {
+     "code": "CONFIG_LOAD_FAILED",
+     "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+    }
+   ],
+   "configuration": {
+    "authority": {
+     "fields": [],
+     "status": "failed"
+    },
+    "directory": "<TMP>/malformed",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": null,
+    "fingerprint": null,
+    "source": "unreadable",
+    "status": "failed"
+   },
+   "interaction": {
+    "approvals": "unknown",
+    "autonomy_mode": null,
+    "knowledge_policy": "strict",
+    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "model": null,
+   "ready": false,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": null,
+    "observable_by_cockpit": null,
+    "source": null
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<MALFORMED>_ID",
+    "name": "malformed",
+    "path": "<TMP>/malformed"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "no_trust/execution.preflight:plain": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [],
+   "configuration": {
+    "authority": {
+     "fields": [],
+     "status": "no_findings"
+    },
+    "directory": "<TMP>/plain",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": "<TMP>/plain/kriya.yaml",
+    "fingerprint": "29f228760c58c6e231fe1b0b4837bc91730284d676f24d2d6ddb410b8e820f05",
+    "source": "auto_discovered_cwd",
+    "status": "loaded"
+   },
+   "interaction": {
+    "approvals": "change_review",
+    "autonomy_mode": "human-in-the-loop",
+    "knowledge_policy": "strict",
+    "note": "A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you."
+   },
+   "model": {
+    "context_window": 32768,
+    "endpoint": "http://localhost:11434/v1",
+    "fallback_chain": [
+     "qwen3.6:35b-a3b-q4_K_M"
+    ],
+    "model": "qwen3-coder:30b",
+    "provider": "openai",
+    "role_overrides": {}
+   },
+   "ready": true,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": "<TMP>/outside/state",
+    "observable_by_cockpit": true,
+    "source": "env"
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<PLAIN>_ID",
+    "name": "plain",
+    "path": "<TMP>/plain"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "no_trust/execution.preflight:protected": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [
+    {
+     "code": "CONFIG_AUTHORITY_REFUSED",
+     "message": "1 field(s) in this folder's configuration need an operator approval (kriya authority approve): llm.base_url"
+    }
+   ],
+   "configuration": {
+    "authority": {
+     "fields": [
+      {
+       "classification": "security_authority",
+       "field": "llm.base_url",
+       "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+       "source": "auto_discovered_cwd"
+      }
+     ],
+     "status": "refused"
+    },
+    "directory": "<TMP>/protected",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": "<TMP>/protected/kriya.yaml",
+    "fingerprint": null,
+    "source": "auto_discovered_cwd",
+    "status": "refused"
+   },
+   "interaction": {
+    "approvals": "unknown",
+    "autonomy_mode": null,
+    "knowledge_policy": "strict",
+    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "model": null,
+   "ready": false,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": null,
+    "observable_by_cockpit": null,
+    "source": null
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<PROTECTED>_ID",
+    "name": "protected",
+    "path": "<TMP>/protected"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "no_trust/execution.preflight:refused": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [
+    {
+     "code": "CONFIG_AUTHORITY_REFUSED",
+     "message": "1 field(s) in this folder's configuration need an operator approval (kriya authority approve): execution_policy.enabled"
+    }
+   ],
+   "configuration": {
+    "authority": {
+     "fields": [
+      {
+       "classification": "security_authority",
+       "field": "execution_policy.enabled",
+       "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+       "source": "auto_discovered_cwd"
+      }
+     ],
+     "status": "refused"
+    },
+    "directory": "<TMP>/refused",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": "<TMP>/refused/kriya.yaml",
+    "fingerprint": null,
+    "source": "auto_discovered_cwd",
+    "status": "refused"
+   },
+   "interaction": {
+    "approvals": "unknown",
+    "autonomy_mode": null,
+    "knowledge_policy": "strict",
+    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "model": null,
+   "ready": false,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": null,
+    "observable_by_cockpit": null,
+    "source": null
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<REFUSED>_ID",
+    "name": "refused",
+    "path": "<TMP>/refused"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "no_trust/execution.preflight:state_relative": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [
+    {
+     "code": "CONFIG_LOAD_FAILED",
+     "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+    }
+   ],
+   "configuration": {
+    "authority": {
+     "fields": [],
+     "status": "failed"
+    },
+    "directory": "<TMP>/state_relative",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": null,
+    "fingerprint": null,
+    "source": "unreadable",
+    "status": "failed"
+   },
+   "interaction": {
+    "approvals": "unknown",
+    "autonomy_mode": null,
+    "knowledge_policy": "strict",
+    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "model": null,
+   "ready": false,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": null,
+    "observable_by_cockpit": null,
+    "source": null
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<STATE_RELATIVE>_ID",
+    "name": "state_relative",
+    "path": "<TMP>/state_relative"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "no_trust/skills.list:malformed": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "authority_status": "failed",
+   "available": false,
+   "items": [],
+   "total": 0,
+   "truncated": false,
+   "unavailable_reason": {
+    "code": "CONFIG_LOAD_FAILED",
+    "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+   },
+   "workspace": {
+    "identity": "<MALFORMED>_ID",
+    "name": "malformed",
+    "path": "<TMP>/malformed"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "skills.list",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/skills.list:plain": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "authority_status": "no_findings",
+   "available": true,
+   "items": [
+    {
+     "category": "Messaging",
+     "description": "Embedded ActiveMQ Artemis AMQP Broker configuration and setup rules.",
+     "digest": "sha256:<DIGEST>",
+     "example_count": 2,
+     "has_instructions": true,
+     "id": "activemq-artemis",
+     "name": "activemq-artemis",
+     "origin": "kriya_install",
+     "provenance": {
+      "sources": [],
+      "sources_truncated": false,
+      "state": "NONE_RECORDED",
+      "tracked_rule_count": 0,
+      "untracked_rule_count": 8,
+      "verified_tracked_count": 0
+     },
+     "rule_count": 8,
+     "scope": "install",
+     "skill_version": null,
+     "source": "local_directory",
+     "staged_rule_count": 0,
+     "supported_versions": "*",
+     "tags": [
+      "artemis",
+      "activemq"
+     ],
+     "unknown_fields": [
+      "skill_version"
+     ],
+     "verification_gap_acknowledged": false,
+     "verified": false,
+     "verified_at": null,
+     "verified_context": null
+    },
+    {
+     "category": "Serialization",
+     "description": "Encoding/decoding fixed-width binary wire protocols in Java, where a field's declared byte width may be narrower than its natural Java primitive type (e.g. a 3-byte field holding an int).",
+     "digest": "sha256:<DIGEST>",
+     "example_count": 1,
+     "has_instructions": true,
+     "id": "binary-wire-protocol",
+     "name": "binary-wire-protocol",
+     "origin": "kriya_install",
+     "provenance": {
+      "sources": [],
+      "sources_truncated": false,
+      "state": "NONE_RECORDED",
+      "tracked_rule_count": 0,
+      "untracked_rule_count": 7,
+      "verified_tracked_count": 0
+     },
+     "rule_count": 7,
+     "scope": "install",
+     "skill_version": null,
+     "source": "local_directory",
+     "staged_rule_count": 0,
+     "supported_versions": "*",
+     "tags": [
+      "wire format",
+      "big-endian",
+      "little-endian",
+      "binary protocol",
+      "byte-level protocol"
+     ],
+     "unknown_fields": [
+      "skill_version"
+     ],
+     "verification_gap_acknowledged": false,
+     "verified": true,
+     "verified_at": "2026-08-20",
+     "verified_context": "version unspecified"
+    },
+    {
+     "category": "Database",
+     "description": "Coding guidelines and configurations for Apache Ignite 2.18.0 on Java 17 using Maven.",
+     "digest": "sha256:<DIGEST>",
+     "example_count": 1,
+     "has_instructions": true,
+     "id": "ignite-java17",
+     "name": "ignite-java17",
+     "origin": "kriya_install",
+     "provenance": {
+      "sources": [
+       {
+        "first_added": "2026-07-31",
+        "last_added": "2026-07-31",
+        "rule_count": 5,
+        "source": "live_lookup:https://ignite.apache.org/docs/ignite2/latest/setup",
+        "verified_count": 5
+       }
+      ],
+      "sources_truncated": false,
+      "state": "RECORDED",
+      "tracked_rule_count": 5,
+      "untracked_rule_count": 39,
+      "verified_tracked_count": 5
+     },
+     "rule_count": 44,
+     "scope": "install",
+     "skill_version": null,
+     "source": "local_directory",
+     "staged_rule_count": 0,
+     "supported_versions": "*",
+     "tags": [
+      "ignite",
+      "apache-ignite",
+      "ignite-cache"
+     ],
+     "unknown_fields": [
+      "skill_version"
+     ],
+     "verification_gap_acknowledged": false,
+     "verified": true,
+     "verified_at": "2026-09-09",
+     "verified_context": "org.apache.ignite:ignite-core 2.18.0"
+    },
+    {
+     "category": "Messaging",
+     "description": "Apache Qpid Broker-J (embedded) and qpid-jms AMQP 1.0 client setup rules. Also covers \"Red Hat Qpid MRG\" / \"Red Hat AMQ\" branded requests, which map to the same underlying Apache Qpid broker and qpid-jms client, not ActiveMQ Artemis.",
+     "digest": "sha256:<DIGEST>",
+     "example_count": 6,
+     "has_instructions": true,
+     "id": "qpid",
+     "name": "qpid",
+     "origin": "kriya_install",
+     "provenance": {
+      "sources": [],
+      "sources_truncated": false,
+      "state": "NONE_RECORDED",
+      "tracked_rule_count": 0,
+      "untracked_rule_count": 24,
+      "verified_tracked_count": 0
+     },
+     "rule_count": 24,
+     "scope": "install",
+     "skill_version": null,
+     "source": "local_directory",
+     "staged_rule_count": 0,
+     "supported_versions": "*",
+     "tags": [
+      "qpid",
+      "qpid-jms",
+      "qpid-broker-j",
+      "redhat-mrg",
+      "mrg",
+      "amqp-1.0"
+     ],
+     "unknown_fields": [
+      "skill_version"
+     ],
+     "verification_gap_acknowledged": false,
+     "verified": true,
+     "verified_at": "2026-09-09",
+     "verified_context": "org.apache.qpid:qpid-broker-core unspecified"
+    }
+   ],
+   "total": 4,
+   "truncated": false,
+   "unavailable_reason": null,
+   "workspace": {
+    "identity": "<PLAIN>_ID",
+    "name": "plain",
+    "path": "<TMP>/plain"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "skills.list",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/skills.list:protected": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "authority_status": "refused",
+   "available": false,
+   "items": [],
+   "total": 0,
+   "truncated": false,
+   "unavailable_reason": {
+    "code": "CONFIG_AUTHORITY_REFUSED",
+    "message": "1 field(s) in this folder's configuration need an operator approval (kriya authority approve): llm.base_url"
+   },
+   "workspace": {
+    "identity": "<PROTECTED>_ID",
+    "name": "protected",
+    "path": "<TMP>/protected"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "skills.list",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/skills.list:refused": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "authority_status": "refused",
+   "available": false,
+   "items": [],
+   "total": 0,
+   "truncated": false,
+   "unavailable_reason": {
+    "code": "CONFIG_AUTHORITY_REFUSED",
+    "message": "1 field(s) in this folder's configuration need an operator approval (kriya authority approve): execution_policy.enabled"
+   },
+   "workspace": {
+    "identity": "<REFUSED>_ID",
+    "name": "refused",
+    "path": "<TMP>/refused"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "skills.list",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/skills.list:state_relative": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "authority_status": "failed",
+   "available": false,
+   "items": [],
+   "total": 0,
+   "truncated": false,
+   "unavailable_reason": {
+    "code": "CONFIG_LOAD_FAILED",
+    "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+   },
+   "workspace": {
+    "identity": "<STATE_RELATIVE>_ID",
+    "name": "state_relative",
+    "path": "<TMP>/state_relative"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "skills.list",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/tools.list:malformed": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "authority_status": "failed",
+   "available": false,
+   "items": [],
+   "total": 0,
+   "unavailable_reason": {
+    "code": "CONFIG_LOAD_FAILED",
+    "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+   },
+   "workspace": {
+    "identity": "<MALFORMED>_ID",
+    "name": "malformed",
+    "path": "<TMP>/malformed"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "tools.list",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/tools.list:plain": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "authority_status": "no_findings",
+   "available": true,
+   "items": [],
+   "total": 0,
+   "unavailable_reason": null,
+   "workspace": {
+    "identity": "<PLAIN>_ID",
+    "name": "plain",
+    "path": "<TMP>/plain"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "tools.list",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/tools.list:protected": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "authority_status": "refused",
+   "available": false,
+   "items": [],
+   "total": 0,
+   "unavailable_reason": {
+    "code": "CONFIG_AUTHORITY_REFUSED",
+    "message": "1 field(s) in this folder's configuration need an operator approval (kriya authority approve): llm.base_url"
+   },
+   "workspace": {
+    "identity": "<PROTECTED>_ID",
+    "name": "protected",
+    "path": "<TMP>/protected"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "tools.list",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/tools.list:refused": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "authority_status": "refused",
+   "available": false,
+   "items": [],
+   "total": 0,
+   "unavailable_reason": {
+    "code": "CONFIG_AUTHORITY_REFUSED",
+    "message": "1 field(s) in this folder's configuration need an operator approval (kriya authority approve): execution_policy.enabled"
+   },
+   "workspace": {
+    "identity": "<REFUSED>_ID",
+    "name": "refused",
+    "path": "<TMP>/refused"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "tools.list",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "no_trust/tools.list:state_relative": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "authority_status": "failed",
+   "available": false,
+   "items": [],
+   "total": 0,
+   "unavailable_reason": {
+    "code": "CONFIG_LOAD_FAILED",
+    "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+   },
+   "workspace": {
+    "identity": "<STATE_RELATIVE>_ID",
+    "name": "state_relative",
+    "path": "<TMP>/state_relative"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "tools.list",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_inside/configuration.approval_status:malformed": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "CONFIG_LOAD_FAILED",
+   "database_state": null,
+   "message": "the configuration cannot be read: ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+  },
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_inside/configuration.approval_status:plain": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blocking_reason": null,
+   "can_approve": false,
+   "fingerprint": null,
+   "identity": "<PLAIN>_ID",
+   "note": "Only the names of the settings are shown. Their values are not sent to the application.",
+   "protected_fields": [],
+   "reason": null,
+   "required": false,
+   "scope": "This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.",
+   "status": "not_required",
+   "values_shown": false,
+   "workspace": "<TMP>/plain"
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_inside/configuration.approval_status:protected": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blocking_reason": "The approval store is configured inside this folder, which Kriya refuses; it must live outside the folder.",
+   "can_approve": false,
+   "fingerprint": "sha256:<DIGEST>",
+   "identity": "<PROTECTED>_ID",
+   "note": "Only the names of the settings are shown. Their values are not sent to the application.",
+   "protected_fields": [
+    {
+     "classification": "security_authority",
+     "field": "llm.base_url",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "reason": "trust_file_inside_workspace",
+   "required": true,
+   "scope": "This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.",
+   "status": "unavailable",
+   "values_shown": false,
+   "workspace": "<TMP>/protected"
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_inside/configuration.approval_status:refused": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blocking_reason": "The approval store is configured inside this folder, which Kriya refuses; it must live outside the folder.",
+   "can_approve": false,
+   "fingerprint": "sha256:<DIGEST>",
+   "identity": "<REFUSED>_ID",
+   "note": "Only the names of the settings are shown. Their values are not sent to the application.",
+   "protected_fields": [
+    {
+     "classification": "security_authority",
+     "field": "execution_policy.enabled",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "reason": "trust_file_inside_workspace",
+   "required": true,
+   "scope": "This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.",
+   "status": "unavailable",
+   "values_shown": false,
+   "workspace": "<TMP>/refused"
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_inside/configuration.approval_status:state_relative": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "CONFIG_LOAD_FAILED",
+   "database_state": null,
+   "message": "the configuration cannot be read: StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+  },
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_inside/configuration.approve:protected": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "APPROVAL_STALE",
+   "database_state": null,
+   "message": "The configuration changed after it was reviewed; nothing was approved. Review the current configuration before approving.",
+   "reason": "configuration_changed"
+  },
+  "observed_at": "<volatile>",
+  "operation": "configuration.approve",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_inside/execution.preflight:malformed": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [
+    {
+     "code": "CONFIG_LOAD_FAILED",
+     "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+    }
+   ],
+   "configuration": {
+    "authority": {
+     "fields": [],
+     "status": "failed"
+    },
+    "directory": "<TMP>/malformed",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": null,
+    "fingerprint": null,
+    "source": "unreadable",
+    "status": "failed"
+   },
+   "interaction": {
+    "approvals": "unknown",
+    "autonomy_mode": null,
+    "knowledge_policy": "strict",
+    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "model": null,
+   "ready": false,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": null,
+    "observable_by_cockpit": null,
+    "source": null
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<MALFORMED>_ID",
+    "name": "malformed",
+    "path": "<TMP>/malformed"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "trust_inside/execution.preflight:plain": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [],
+   "configuration": {
+    "authority": {
+     "fields": [],
+     "status": "no_findings"
+    },
+    "directory": "<TMP>/plain",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": "<TMP>/plain/kriya.yaml",
+    "fingerprint": "29f228760c58c6e231fe1b0b4837bc91730284d676f24d2d6ddb410b8e820f05",
+    "source": "auto_discovered_cwd",
+    "status": "loaded"
+   },
+   "interaction": {
+    "approvals": "change_review",
+    "autonomy_mode": "human-in-the-loop",
+    "knowledge_policy": "strict",
+    "note": "A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you."
+   },
+   "model": {
+    "context_window": 32768,
+    "endpoint": "http://localhost:11434/v1",
+    "fallback_chain": [
+     "qwen3.6:35b-a3b-q4_K_M"
+    ],
+    "model": "qwen3-coder:30b",
+    "provider": "openai",
+    "role_overrides": {}
+   },
+   "ready": true,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": "<TMP>/outside/state",
+    "observable_by_cockpit": true,
+    "source": "env"
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<PLAIN>_ID",
+    "name": "plain",
+    "path": "<TMP>/plain"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "trust_inside/execution.preflight:protected": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [
+    {
+     "code": "CONFIG_LOAD_FAILED",
+     "message": "TrustPathInsideWorkspaceError: trust-artifact path '<TMP>/protected/trust.json' resolves inside the workspace root '<TMP>/protected' - a trust artifact must live outside the workspace a repository/checkout"
+    }
+   ],
+   "configuration": {
+    "authority": {
+     "fields": [],
+     "status": "failed"
+    },
+    "directory": "<TMP>/protected",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": "<TMP>/protected/kriya.yaml",
+    "fingerprint": null,
+    "source": "auto_discovered_cwd",
+    "status": "failed"
+   },
+   "interaction": {
+    "approvals": "unknown",
+    "autonomy_mode": null,
+    "knowledge_policy": "strict",
+    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "model": null,
+   "ready": false,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": null,
+    "observable_by_cockpit": null,
+    "source": null
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<PROTECTED>_ID",
+    "name": "protected",
+    "path": "<TMP>/protected"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "trust_inside/execution.preflight:refused": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [
+    {
+     "code": "CONFIG_LOAD_FAILED",
+     "message": "TrustPathInsideWorkspaceError: trust-artifact path '<TMP>/refused/trust.json' resolves inside the workspace root '<TMP>/refused' - a trust artifact must live outside the workspace a repository/checkout can"
+    }
+   ],
+   "configuration": {
+    "authority": {
+     "fields": [],
+     "status": "failed"
+    },
+    "directory": "<TMP>/refused",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": "<TMP>/refused/kriya.yaml",
+    "fingerprint": null,
+    "source": "auto_discovered_cwd",
+    "status": "failed"
+   },
+   "interaction": {
+    "approvals": "unknown",
+    "autonomy_mode": null,
+    "knowledge_policy": "strict",
+    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "model": null,
+   "ready": false,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": null,
+    "observable_by_cockpit": null,
+    "source": null
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<REFUSED>_ID",
+    "name": "refused",
+    "path": "<TMP>/refused"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "trust_inside/execution.preflight:state_relative": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [
+    {
+     "code": "CONFIG_LOAD_FAILED",
+     "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+    }
+   ],
+   "configuration": {
+    "authority": {
+     "fields": [],
+     "status": "failed"
+    },
+    "directory": "<TMP>/state_relative",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": null,
+    "fingerprint": null,
+    "source": "unreadable",
+    "status": "failed"
+   },
+   "interaction": {
+    "approvals": "unknown",
+    "autonomy_mode": null,
+    "knowledge_policy": "strict",
+    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "model": null,
+   "ready": false,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": null,
+    "observable_by_cockpit": null,
+    "source": null
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<STATE_RELATIVE>_ID",
+    "name": "state_relative",
+    "path": "<TMP>/state_relative"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "trust_outside/configuration.approval_status:malformed": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "CONFIG_LOAD_FAILED",
+   "database_state": null,
+   "message": "the configuration cannot be read: ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+  },
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_outside/configuration.approval_status:plain": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blocking_reason": null,
+   "can_approve": false,
+   "fingerprint": null,
+   "identity": "<PLAIN>_ID",
+   "note": "Only the names of the settings are shown. Their values are not sent to the application.",
+   "protected_fields": [],
+   "reason": null,
+   "required": false,
+   "scope": "This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.",
+   "status": "not_required",
+   "values_shown": false,
+   "workspace": "<TMP>/plain"
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_outside/configuration.approval_status:protected": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blocking_reason": "A trust file is in effect for Kriya (KRIYA_TRUST_FILE), so approvals given here would not be consulted.",
+   "can_approve": false,
+   "fingerprint": "sha256:<DIGEST>",
+   "identity": "<PROTECTED>_ID",
+   "note": "Only the names of the settings are shown. Their values are not sent to the application.",
+   "protected_fields": [
+    {
+     "classification": "security_authority",
+     "field": "llm.base_url",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "reason": "trust_file_in_effect",
+   "required": true,
+   "scope": "This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.",
+   "status": "unavailable",
+   "values_shown": false,
+   "workspace": "<TMP>/protected"
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_outside/configuration.approval_status:refused": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blocking_reason": "A trust file is in effect for Kriya (KRIYA_TRUST_FILE), so approvals given here would not be consulted.",
+   "can_approve": false,
+   "fingerprint": "sha256:<DIGEST>",
+   "identity": "<REFUSED>_ID",
+   "note": "Only the names of the settings are shown. Their values are not sent to the application.",
+   "protected_fields": [
+    {
+     "classification": "security_authority",
+     "field": "execution_policy.enabled",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "reason": "trust_file_in_effect",
+   "required": true,
+   "scope": "This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.",
+   "status": "unavailable",
+   "values_shown": false,
+   "workspace": "<TMP>/refused"
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_outside/configuration.approval_status:state_relative": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "CONFIG_LOAD_FAILED",
+   "database_state": null,
+   "message": "the configuration cannot be read: StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+  },
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_outside/configuration.approve:protected": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "APPROVAL_STALE",
+   "database_state": null,
+   "message": "The configuration changed after it was reviewed; nothing was approved. Review the current configuration before approving.",
+   "reason": "configuration_changed"
+  },
+  "observed_at": "<volatile>",
+  "operation": "configuration.approve",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_outside/execution.preflight:malformed": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [
+    {
+     "code": "CONFIG_LOAD_FAILED",
+     "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+    }
+   ],
+   "configuration": {
+    "authority": {
+     "fields": [],
+     "status": "failed"
+    },
+    "directory": "<TMP>/malformed",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": null,
+    "fingerprint": null,
+    "source": "unreadable",
+    "status": "failed"
+   },
+   "interaction": {
+    "approvals": "unknown",
+    "autonomy_mode": null,
+    "knowledge_policy": "strict",
+    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "model": null,
+   "ready": false,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": null,
+    "observable_by_cockpit": null,
+    "source": null
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<MALFORMED>_ID",
+    "name": "malformed",
+    "path": "<TMP>/malformed"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "trust_outside/execution.preflight:plain": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [],
+   "configuration": {
+    "authority": {
+     "fields": [],
+     "status": "no_findings"
+    },
+    "directory": "<TMP>/plain",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": "<TMP>/plain/kriya.yaml",
+    "fingerprint": "29f228760c58c6e231fe1b0b4837bc91730284d676f24d2d6ddb410b8e820f05",
+    "source": "auto_discovered_cwd",
+    "status": "loaded"
+   },
+   "interaction": {
+    "approvals": "change_review",
+    "autonomy_mode": "human-in-the-loop",
+    "knowledge_policy": "strict",
+    "note": "A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you."
+   },
+   "model": {
+    "context_window": 32768,
+    "endpoint": "http://localhost:11434/v1",
+    "fallback_chain": [
+     "qwen3.6:35b-a3b-q4_K_M"
+    ],
+    "model": "qwen3-coder:30b",
+    "provider": "openai",
+    "role_overrides": {}
+   },
+   "ready": true,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": "<TMP>/outside/state",
+    "observable_by_cockpit": true,
+    "source": "env"
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<PLAIN>_ID",
+    "name": "plain",
+    "path": "<TMP>/plain"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "trust_outside/execution.preflight:protected": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [
+    {
+     "code": "CONFIG_AUTHORITY_REFUSED",
+     "message": "1 field(s) in this folder's configuration need an operator approval (kriya authority approve): llm.base_url"
+    }
+   ],
+   "configuration": {
+    "authority": {
+     "fields": [
+      {
+       "classification": "security_authority",
+       "field": "llm.base_url",
+       "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+       "source": "auto_discovered_cwd"
+      }
+     ],
+     "status": "refused"
+    },
+    "directory": "<TMP>/protected",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": "<TMP>/protected/kriya.yaml",
+    "fingerprint": null,
+    "source": "auto_discovered_cwd",
+    "status": "refused"
+   },
+   "interaction": {
+    "approvals": "unknown",
+    "autonomy_mode": null,
+    "knowledge_policy": "strict",
+    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "model": null,
+   "ready": false,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": null,
+    "observable_by_cockpit": null,
+    "source": null
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<PROTECTED>_ID",
+    "name": "protected",
+    "path": "<TMP>/protected"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "trust_outside/execution.preflight:refused": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [
+    {
+     "code": "CONFIG_AUTHORITY_REFUSED",
+     "message": "1 field(s) in this folder's configuration need an operator approval (kriya authority approve): execution_policy.enabled"
+    }
+   ],
+   "configuration": {
+    "authority": {
+     "fields": [
+      {
+       "classification": "security_authority",
+       "field": "execution_policy.enabled",
+       "reason": "classification security_authority requires a trusted or explicitly authorized source - see 'kriya authority inspect'/'kriya authority approve'",
+       "source": "auto_discovered_cwd"
+      }
+     ],
+     "status": "refused"
+    },
+    "directory": "<TMP>/refused",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": "<TMP>/refused/kriya.yaml",
+    "fingerprint": null,
+    "source": "auto_discovered_cwd",
+    "status": "refused"
+   },
+   "interaction": {
+    "approvals": "unknown",
+    "autonomy_mode": null,
+    "knowledge_policy": "strict",
+    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "model": null,
+   "ready": false,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": null,
+    "observable_by_cockpit": null,
+    "source": null
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<REFUSED>_ID",
+    "name": "refused",
+    "path": "<TMP>/refused"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "trust_outside/execution.preflight:state_relative": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [
+    {
+     "code": "CONFIG_LOAD_FAILED",
+     "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+    }
+   ],
+   "configuration": {
+    "authority": {
+     "fields": [],
+     "status": "failed"
+    },
+    "directory": "<TMP>/state_relative",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": null,
+    "fingerprint": null,
+    "source": "unreadable",
+    "status": "failed"
+   },
+   "interaction": {
+    "approvals": "unknown",
+    "autonomy_mode": null,
+    "knowledge_policy": "strict",
+    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "model": null,
+   "ready": false,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": null,
+    "observable_by_cockpit": null,
+    "source": null
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<STATE_RELATIVE>_ID",
+    "name": "state_relative",
+    "path": "<TMP>/state_relative"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "trust_relative/configuration.approval_status:malformed": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "CONFIG_LOAD_FAILED",
+   "database_state": null,
+   "message": "the configuration cannot be read: ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+  },
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_relative/configuration.approval_status:plain": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blocking_reason": null,
+   "can_approve": false,
+   "fingerprint": null,
+   "identity": "<PLAIN>_ID",
+   "note": "Only the names of the settings are shown. Their values are not sent to the application.",
+   "protected_fields": [],
+   "reason": null,
+   "required": false,
+   "scope": "This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.",
+   "status": "not_required",
+   "values_shown": false,
+   "workspace": "<TMP>/plain"
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_relative/configuration.approval_status:protected": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blocking_reason": "A trust file is in effect for Kriya (KRIYA_TRUST_FILE), so approvals given here would not be consulted.",
+   "can_approve": false,
+   "fingerprint": "sha256:<DIGEST>",
+   "identity": "<PROTECTED>_ID",
+   "note": "Only the names of the settings are shown. Their values are not sent to the application.",
+   "protected_fields": [
+    {
+     "classification": "security_authority",
+     "field": "llm.base_url",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "reason": "trust_file_in_effect",
+   "required": true,
+   "scope": "This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.",
+   "status": "unavailable",
+   "values_shown": false,
+   "workspace": "<TMP>/protected"
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_relative/configuration.approval_status:refused": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blocking_reason": "A trust file is in effect for Kriya (KRIYA_TRUST_FILE), so approvals given here would not be consulted.",
+   "can_approve": false,
+   "fingerprint": "sha256:<DIGEST>",
+   "identity": "<REFUSED>_ID",
+   "note": "Only the names of the settings are shown. Their values are not sent to the application.",
+   "protected_fields": [
+    {
+     "classification": "security_authority",
+     "field": "execution_policy.enabled",
+     "source": "auto_discovered_cwd"
+    }
+   ],
+   "reason": "trust_file_in_effect",
+   "required": true,
+   "scope": "This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.",
+   "status": "unavailable",
+   "values_shown": false,
+   "workspace": "<TMP>/refused"
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_relative/configuration.approval_status:state_relative": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "CONFIG_LOAD_FAILED",
+   "database_state": null,
+   "message": "the configuration cannot be read: StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+  },
+  "observed_at": "<volatile>",
+  "operation": "configuration.approval_status",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_relative/configuration.approve:protected": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "APPROVAL_STALE",
+   "database_state": null,
+   "message": "The configuration changed after it was reviewed; nothing was approved. Review the current configuration before approving.",
+   "reason": "configuration_changed"
+  },
+  "observed_at": "<volatile>",
+  "operation": "configuration.approve",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "trust_relative/execution.preflight:malformed": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [
+    {
+     "code": "CONFIG_LOAD_FAILED",
+     "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+    }
+   ],
+   "configuration": {
+    "authority": {
+     "fields": [],
+     "status": "failed"
+    },
+    "directory": "<TMP>/malformed",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": null,
+    "fingerprint": null,
+    "source": "unreadable",
+    "status": "failed"
+   },
+   "interaction": {
+    "approvals": "unknown",
+    "autonomy_mode": null,
+    "knowledge_policy": "strict",
+    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "model": null,
+   "ready": false,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": null,
+    "observable_by_cockpit": null,
+    "source": null
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<MALFORMED>_ID",
+    "name": "malformed",
+    "path": "<TMP>/malformed"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "trust_relative/execution.preflight:plain": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [],
+   "configuration": {
+    "authority": {
+     "fields": [],
+     "status": "no_findings"
+    },
+    "directory": "<TMP>/plain",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": "<TMP>/plain/kriya.yaml",
+    "fingerprint": "29f228760c58c6e231fe1b0b4837bc91730284d676f24d2d6ddb410b8e820f05",
+    "source": "auto_discovered_cwd",
+    "status": "loaded"
+   },
+   "interaction": {
+    "approvals": "change_review",
+    "autonomy_mode": "human-in-the-loop",
+    "knowledge_policy": "strict",
+    "note": "A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you."
+   },
+   "model": {
+    "context_window": 32768,
+    "endpoint": "http://localhost:11434/v1",
+    "fallback_chain": [
+     "qwen3.6:35b-a3b-q4_K_M"
+    ],
+    "model": "qwen3-coder:30b",
+    "provider": "openai",
+    "role_overrides": {}
+   },
+   "ready": true,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": "<TMP>/outside/state",
+    "observable_by_cockpit": true,
+    "source": "env"
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<PLAIN>_ID",
+    "name": "plain",
+    "path": "<TMP>/plain"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "trust_relative/execution.preflight:protected": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [
+    {
+     "code": "CONFIG_LOAD_FAILED",
+     "message": "TrustPathInsideWorkspaceError: trust-artifact path 'trust.json' resolves inside the workspace root '<TMP>/protected' - a trust artifact must live outside the workspace a repository/checkout can populate; see kriya/config/authority_approval.py's module docstring fo"
+    }
+   ],
+   "configuration": {
+    "authority": {
+     "fields": [],
+     "status": "failed"
+    },
+    "directory": "<TMP>/protected",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": "<TMP>/protected/kriya.yaml",
+    "fingerprint": null,
+    "source": "auto_discovered_cwd",
+    "status": "failed"
+   },
+   "interaction": {
+    "approvals": "unknown",
+    "autonomy_mode": null,
+    "knowledge_policy": "strict",
+    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "model": null,
+   "ready": false,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": null,
+    "observable_by_cockpit": null,
+    "source": null
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<PROTECTED>_ID",
+    "name": "protected",
+    "path": "<TMP>/protected"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "trust_relative/execution.preflight:refused": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [
+    {
+     "code": "CONFIG_LOAD_FAILED",
+     "message": "TrustPathInsideWorkspaceError: trust-artifact path 'trust.json' resolves inside the workspace root '<TMP>/refused' - a trust artifact must live outside the workspace a repository/checkout can populate; see kriya/config/authority_approval.py's module docstring for "
+    }
+   ],
+   "configuration": {
+    "authority": {
+     "fields": [],
+     "status": "failed"
+    },
+    "directory": "<TMP>/refused",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": "<TMP>/refused/kriya.yaml",
+    "fingerprint": null,
+    "source": "auto_discovered_cwd",
+    "status": "failed"
+   },
+   "interaction": {
+    "approvals": "unknown",
+    "autonomy_mode": null,
+    "knowledge_policy": "strict",
+    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "model": null,
+   "ready": false,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": null,
+    "observable_by_cockpit": null,
+    "source": null
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<REFUSED>_ID",
+    "name": "refused",
+    "path": "<TMP>/refused"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ },
+ "trust_relative/execution.preflight:state_relative": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "blockers": [
+    {
+     "code": "CONFIG_LOAD_FAILED",
+     "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+    }
+   ],
+   "configuration": {
+    "authority": {
+     "fields": [],
+     "status": "failed"
+    },
+    "directory": "<TMP>/state_relative",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "file": null,
+    "fingerprint": null,
+    "source": "unreadable",
+    "status": "failed"
+   },
+   "interaction": {
+    "approvals": "unknown",
+    "autonomy_mode": null,
+    "knowledge_policy": "strict",
+    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "model": null,
+   "ready": false,
+   "recovery": {
+    "run_active": false,
+    "status": "CLEAN"
+   },
+   "state": {
+    "cockpit_directory": "<TMP>/outside/state",
+    "directory": null,
+    "observable_by_cockpit": null,
+    "source": null
+   },
+   "toolchains": {
+    "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+    "tools": [
+     {
+      "available": true,
+      "checked": "ran --version",
+      "path": "/usr/bin/git",
+      "tool": "git"
+     }
+    ]
+   },
+   "workspace": {
+    "identity": "<STATE_RELATIVE>_ID",
+    "name": "state_relative",
+    "path": "<TMP>/state_relative"
+   }
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "execution.preflight",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<TMP>/outside/state",
+   "trace_database": "<TMP>/outside/state/traces.db"
+  }
+ }
+}

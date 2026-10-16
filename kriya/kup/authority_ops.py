@@ -24,7 +24,7 @@ import os
 import re
 from typing import Any, Dict
 
-from kriya.config.authority_approval import ENV_TRUST_FILE
+from kriya.config.environment import trust_file as environment_trust_file
 from kriya.kup import policy
 from kriya.kup.execution import _CWD_LOCK
 from kriya.kup.inspect import envelope, live_consistency
@@ -53,7 +53,7 @@ def status(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, A
     _requested, workspace = validated_workspace(request)
     with _CWD_LOCK:
         state = _resolve_locked(workspace)
-    trust_file = os.environ.get(ENV_TRUST_FILE) or None
+    trust_file = environment_trust_file() or None
     data = client.configuration.approval_status(client.context(workspace_root=workspace, request_id=request_id), workspace, state, trust_file=trust_file)
     return envelope("configuration.approval_status", request_id, data=data, source=None, consistency=live_consistency())
 
@@ -63,7 +63,7 @@ def approve(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, 
     if not isinstance(reviewed, str) or not FINGERPRINT_RE.match(reviewed):
         raise SnapshotError(policy.INVALID_REQUEST, "fingerprint must be the review fingerprint Kriya gave (sha256:<64 hex>)", reason="invalid_fingerprint")
     _requested, workspace = validated_workspace(request)
-    trust_file = os.environ.get(ENV_TRUST_FILE) or None
+    trust_file = environment_trust_file() or None
     with _CWD_LOCK:  # resolve, compare and write under one hold: the working directory cannot change between the comparison and the write
         state = _resolve_locked(workspace)
         data = client.configuration.approve(client.context(workspace_root=workspace, request_id=request_id), state, reviewed, trust_file=trust_file)
