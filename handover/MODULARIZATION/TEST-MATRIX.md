@@ -53,6 +53,16 @@ One parametrized suite per port; implementations register by fixture. Each suite
 
 The three A3 tests copy their fixtures from the evidence directory into `tests/fixtures/scenario04/` (recorded responses, the compile output, the log slice) so the suite never reads `handover/`; the evidence directory itself is never modified (ENGINEERING_RULES §20).
 
+### 3a. Characterization gate register (owner directive 3 #2): CURRENT OBSERVED WRONG BEHAVIOUR is not the contract
+
+Every A3 pin below is a deliberately encoded DEFECT, marked `# CHARACTERIZATION: flips in <slice>` in `tests/integration/test_scenario04_replay.py`. None of it is a permanent API. The owning correction slice must replace/flip the pin, prove the old behaviour is impossible (negative control that fails if the old behaviour returns), and carry its mutants.
+
+| Gate | Current observed behaviour (wrong) | Why it is wrong | Owning slice | Final expected behaviour |
+|---|---|---|---|---|
+| attribution | all 5 recorded analyses, the quoted-compiler control and the real-redirect control resolve to `[Protocol.java]` (a filename mention is treated as a diagnosis and outranks the compiler locator `ProtocolParser.java:10-21`) | model prose outranks a deterministic locator; a mention is not a diagnosis | F4 (typed `Provenance`, expansion rule) | deterministic locator A stays authoritative: target `[ProtocolParser.java]`; advisory B only as read-only context, or as an EXPANSION after A was staged, re-gated and failed with the same normalized signature, inside write scope, with no stronger contradiction; the six F4 controls pass |
+| candidate transaction | real `run_attempt` refuses attempts 3 and 4 as a whole (`INVALID_EDIT_PROTOCOL` / `INDENTATION_STYLE_MISMATCH` on `Protocol.java`); the valid `ProtocolParser.java` edit applies and compiles in isolation but is never staged; `files_written == []` | one invalid sibling discards independent valid work although no dependency joins the files | G4 (per-file proposals, independence proof, per-finding repair, atomic group only when dependent) | an independent valid proposal is staged (reviewed bytes == staged bytes), the invalid sibling is recorded as refused with its finding still open, dependent proposals stay atomic, nothing touches the owner workspace |
+| budget | 673.0 s used of 900, of which 128.5 s human wait; remaining 227.0 s vs 300.0 s required -> fallback pass refused; logged 226.8 s reproduced | human approval wait consumes the active generation budget; the fallback estimate ignores other-model timings | H4 (separate active budget / human wait / wall clock / liveness ceiling / reserves) | active budget 355.5 s remaining >= 300 s -> fallback admitted and completes inside the liveness ceiling; wait advances wall clock only; liveness exhaustion has its own typed reason, different from generation-budget exhaustion |
+
 ## 4. Per-slice targeted commands (Tier 1 / Tier 2)
 
 Conventions: `P=.venv/bin/pytest -q`; Tier 1 is the exact file(s) the slice adds/changes; Tier 2 is the module marker plus `-m architecture`. Static gates for EVERY slice: `.venv/bin/pylint kriya plugins/core_tools tests && .venv/bin/ruff check .` (both must exit 0).
