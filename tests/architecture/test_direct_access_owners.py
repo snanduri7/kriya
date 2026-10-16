@@ -171,8 +171,9 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
     "http_client": {
         # NEW in D2, unavoidable (count +1, row +1): the snapshot store's ``urllib.request.pathname2url`` (the read-only SQLite URI of a
         # snapshot path - a path-to-URI conversion, never an HTTP client) moved with kup/store.py from ADAPTER-KUP (an http owner) to STATE;
-        # replacing it with ``urllib.parse.quote`` would change the URI on Python >= 3.13 for a path starting with '//' (MEASURED: 3.14's
-        # pathname2url adds an empty authority), so the import stays. Owner STATE (control.history); P2 decides the finder rule.
+        # ``urllib.parse.quote`` is not equivalent across the supported Pythons (MEASURED on the venv's 3.14: pathname2url('/a/b') ==
+        # '///a/b', an explicit empty authority for EVERY absolute path, where 3.10-3.12 return '/a/b'), so the import stays and the
+        # URI stays whatever the running Python's pathname2url gives, as before the move. Owner STATE (control.history); P2 decides the rule.
         "kriya.control.history": (1, "P2", _P2 + " (urllib.request.pathname2url: a file-URI conversion moved from kup.store in D2)"),
         "kriya.memory.embedding": (9, "P2", _P2 + " (the embedding client is provider-shaped)"),
         "kriya.tools.resolver": (1, "P2", _P2),
