@@ -386,6 +386,28 @@ def test_a_rejected_stage_2a_dependency_aborts_the_run(tmp_path):
     assert guard.checked == ["Use mylib==1.2.3."]
 
 
+def test_the_post_architect_recomputation_updates_the_control_context_and_the_run_state(tmp_path):
+    """A LOW/LIGHT request whose design plans pom.xml escalates to HIGH/HEAVY before the Developer runs: the stage replaces
+    ``ctx.control`` and records the new route AND process profile on the run state (the run metrics read both). Found by an
+    orchestrator mutant after E3: dropping the ``state.process_profile`` write failed no test."""
+    from kriya.workflow.control_context import WorkflowControlContext
+    from kriya.workflow.process_profile import HEAVY_PROFILE, LIGHT_PROFILE
+    from kriya.workflow.triage import EngineeringRoute, ImpactVector, RiskClass, determine_execution_weight
+
+    route = EngineeringRoute(kind=ChangeKind.TASK, impact=ImpactVector(), initial_risk_class=RiskClass.LOW,
+                             current_risk_class=RiskClass.LOW, max_observed_risk_class=RiskClass.LOW,
+                             execution_weight=determine_execution_weight(ChangeKind.TASK, RiskClass.LOW))
+    control = WorkflowControlContext.for_route(route)
+    assert control.process_profile == LIGHT_PROFILE
+    ctx = _design_ctx(tmp_path, predetermined_design="design", predetermined_architect_files=["calc.py", "pom.xml"],
+                      control=control, engineering_route=route)
+    assert asyncio.run(design_work_unit(ctx, _deps(_engine(tmp_path)))) is None
+    assert ctx.control.engineering_route.max_observed_risk_class == RiskClass.HIGH
+    assert ctx.state.engineering_route.max_observed_risk_class == RiskClass.HIGH
+    assert ctx.state.process_profile == HEAVY_PROFILE
+    assert ctx.control.process_profile == HEAVY_PROFILE
+
+
 # ----------------------------------------------------------------------------- the runner
 
 
