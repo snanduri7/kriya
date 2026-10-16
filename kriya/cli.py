@@ -211,10 +211,12 @@ def launch_decision(launch_id: str, review_id: str, candidate_digest: str, decis
 
     The folder is the working directory (like `generate`). Prints one JSON object on stdout; exit 0 only when the decision was accepted. The waiting
     `generate --launch-id` process records the decision durably and only then continues (kriya/control/launch_approval.py)."""
-    from kriya.control.launch_approval import ApprovalRefused, decide
+    from kriya.application import ApprovalRefused, ApprovalService, ReviewDecisionRequest
+    from kriya.context import RequestContext
 
     try:
-        result = decide(os.getcwd(), launch_id, review_id, candidate_digest, decision, kind)
+        result = ApprovalService().decide(RequestContext.local(os.getcwd(), request_id=f"launch-decision-{launch_id}"),
+                                          ReviewDecisionRequest(launch_id, review_id, candidate_digest, decision, kind))
     except ApprovalRefused as refusal:
         click.echo(json.dumps({"accepted": False, "code": refusal.code, "message": refusal.message}, sort_keys=True))
         sys.exit(2)
@@ -2851,20 +2853,10 @@ def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> N
 
     Best-effort like every other trace write in this codebase - a failure here must
     never block the actual retry from proceeding."""
-    if not run_id:
-        return
-    try:
-        from kriya.core.trace import TraceLogger
-        TraceLogger(trace_db_path(cfg)).log_run(
-            run_id=run_id,
-            goal=goal,
-            duration_sec=0.0,
-            attempts=0,
-            status="in_progress",
-            files_modified=[],
-        )
-    except Exception as trace_ex:
-        logger.warning(f"Failed to mark run '{run_id}' in_progress: {trace_ex}")
+    from kriya.application import RunService
+    from kriya.context import RequestContext
+
+    RunService().mark_in_progress(RequestContext.local(None), cfg, run_id, goal)
 
 
 @main.command()
@@ -2907,9 +2899,13 @@ def _launched_generate(ctx, launch_id, goal, file, yes, knowledge_policy, ack_kn
     the preflight is re-resolved HERE (the host's copy is never trusted), the launch record exists before the workflow starts - so even a
     refused or failing launch is linked to its workspace - and it is sealed whatever happens. Nothing is auto-approved: no -y, knowledge
     policy strict, and an approval prompt finds no terminal and stops the run."""
+    from kriya.application import KNOWLEDGE_POLICY, RunService
+    from kriya.context import RequestContext
     from kriya.context.workspace_identity import canonical_workspace, workspace_identity
     from kriya.control.launch import LaunchRefused, LaunchSession, validate_goal
-    from kriya.kup.execution import KNOWLEDGE_POLICY, build_preflight
+    from kriya.kup import (
+        execution as kup_execution,  # the cwd lock and toolchain probe the preflight is handed (O2: through the client)
+    )
 
     extra = [name for name, value in (("GOAL", goal), ("--file", file), ("--yes", yes), ("--resume", resume), ("--resume-id", resume_id),
                                       ("--from-milestones", from_milestones), ("--acceptance", acceptance), ("--acceptance-approval", acceptance_approval),
@@ -2923,7 +2919,8 @@ def _launched_generate(ctx, launch_id, goal, file, yes, knowledge_policy, ack_kn
         try:
             goal_text = validate_goal(sys.stdin.read(16001))
             workspace = canonical_workspace(os.getcwd())
-            preflight = build_preflight(workspace, None)
+            preflight = RunService().build_preflight(RequestContext.local(workspace, request_id=launch_id), workspace, None,
+                                                     load_in=kup_execution._load_in, tool_visibility=kup_execution.tool_visibility)
             session = LaunchSession(workspace, workspace_identity(workspace), launch_id, goal_text, preflight,
                                     {"knowledge_policy": KNOWLEDGE_POLICY, "interactive": False})
             session.open()
@@ -3174,15 +3171,14 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         click.secho(f"Requirement disposition bound: {dispositions.source_name} sha256 {dispositions.digest[:12]} "
                     f"({listed}; operator {dispositions.operator['identity']}; reported, never satisfied)", dim=True, err=True)
 
-    llm = LLMClient(cfg)
-    kernel = Kernel(config=cfg)
-    we = WorkflowEngine(kernel, llm)
-    we.acceptance = acceptance_artifact
-    we.acceptance_approval = approval_artifact
-    we.requirement_contract = contract_artifact
-    we.requirement_dispositions = dispositions
-    we.verification_authority_bundle = authority_bundle
-    we.verification_authorities = (authority_bundle.authority(),) if authority_bundle is not None else ()
+    from kriya.application import RunArtifacts, RunService, RunServiceDeps
+    from kriya.context import RequestContext
+
+    composed = RunService().start(RequestContext.local(os.getcwd()), cfg,
+                                  RunArtifacts(acceptance=acceptance_artifact, acceptance_approval=approval_artifact, requirement_contract=contract_artifact,
+                                               requirement_dispositions=dispositions, verification_authority_bundle=authority_bundle),
+                                  RunServiceDeps(LLMClient=LLMClient, Kernel=Kernel, WorkflowEngine=WorkflowEngine))  # the patched names, looked up now
+    llm, kernel, we = composed.llm, composed.kernel, composed.engine
     if approval_artifact is not None:
         click.secho(f"Acceptance approval bound: {approval_artifact.source_name} sha256 {approval_artifact.digest[:12]} "
                     f"(human acceptance authority for {', '.join(sorted(approval_artifact.entries))}; not a proof)",

@@ -1,0 +1,28 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "file": "kriya.yaml",
+  "next": "configuration approval is required before a run: review it with configuration.approval_status",
+  "outcome": "created",
+  "profile": "local-models-governed",
+  "summary": {
+   "changes": "held for your approval",
+   "fallback_models": [
+    "qwen3.6:35b-a3b-q4_K_M"
+   ],
+   "model": "qwen3-coder:30b",
+   "web_lookup": "off",
+   "workflow": "enforce"
+  },
+  "workspace": "<TMP>/fresh"
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "project.initialize",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

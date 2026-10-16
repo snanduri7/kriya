@@ -1,0 +1,15 @@
+{
+ "consistency": null,
+ "data": null,
+ "error": {
+  "code": "APPROVAL_STALE",
+  "database_state": null,
+  "message": "The configuration changed after it was reviewed; nothing was approved. Review the current configuration before approving.",
+  "reason": "configuration_changed"
+ },
+ "observed_at": "<volatile>",
+ "operation": "configuration.approve",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

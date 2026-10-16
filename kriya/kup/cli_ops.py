@@ -8,7 +8,8 @@ kernel, plugin or model; ``sys.dont_write_bytecode`` is set by the CLI before th
 Transport only (full modularization B2): request dispatch, argument validation, the envelope, and the 1:1 mapping of an application
 service's typed refusal (``ApplicationRefusal``) onto the KUP error vocabulary. The read use cases are ``kriya.application`` services
 (history, project status, capabilities); snapshot acquisition, listing, verification and pruning stay here until D2 moves the snapshot
-store to ``control.history``.
+store to ``control.history``. The write/run use cases (B3: configuration approval, project create/initialize, change and runtime-command
+reviews, preflight and launch status) are services too; this module hands each operation handler its service.
 """
 from __future__ import annotations
 
@@ -69,25 +70,31 @@ def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli") -> 
         if operation in ("execution.preflight", "launch.status"):
             return _execution(cfg, operation, request, request_id)
         if operation in ("configuration.approval_status", "configuration.approve"):
+            from kriya.application import ConfigurationService
             from kriya.kup import authority_ops
 
-            return (authority_ops.status if operation == "configuration.approval_status" else authority_ops.approve)(cfg, request, request_id)
+            handler = authority_ops.status if operation == "configuration.approval_status" else authority_ops.approve
+            return handler(cfg, request, request_id, ConfigurationService())
         if operation == "project.initialize":
+            from kriya.application import ProjectService
             from kriya.kup import project_init_ops
 
-            return project_init_ops.initialize(cfg, request, request_id)
+            return project_init_ops.initialize(cfg, request, request_id, ProjectService())
         if operation == "change_approval.review":
+            from kriya.application import ReviewService
             from kriya.kup import review_ops
 
-            return review_ops.review(cfg, request, request_id)
+            return review_ops.review(cfg, request, request_id, ReviewService())
         if operation == "runtime_command.review":
+            from kriya.application import ReviewService
             from kriya.kup import runtime_command_ops
 
-            return runtime_command_ops.review(cfg, request, request_id)
+            return runtime_command_ops.review(cfg, request, request_id, ReviewService())
         if operation == "workspace.create":
+            from kriya.application import ProjectService
             from kriya.kup import project_ops
 
-            return project_ops.create(cfg, request, request_id)
+            return project_ops.create(cfg, request, request_id, ProjectService())
         if operation in ("execution.context", "execution.model_probe"):
             from kriya.kup import context_ops
 
@@ -114,10 +121,11 @@ def _evidence(cfg, operation: str, request: Dict[str, Any], request_id: str) -> 
 
 
 def _execution(cfg, operation: str, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+    from kriya.application import RunService
     from kriya.kup import execution
 
     try:
-        return (execution.preflight if operation == "execution.preflight" else execution.launch_status)(cfg, request, request_id)
+        return (execution.preflight if operation == "execution.preflight" else execution.launch_status)(cfg, request, request_id, RunService())
     except StateDirectoryError as error:
         return error_envelope(operation, request_id, policy.CONFIG_LOAD_FAILED, str(error))
 

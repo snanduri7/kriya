@@ -250,9 +250,9 @@ MODULE_TIER_FILES = {
         "test_workflow_recovery_handback.py"
     }),
     "application": frozenset({
-        "test_application_services.py", "test_kup_catalog.py", "test_kup_change_review.py", "test_kup_config_approval.py", "test_kup_execution.py",
-        "test_kup_project_context.py", "test_kup_project_init.py", "test_kup_runtime_command_review.py",
-        "test_kup_workspace.py", "test_launch_approval.py"
+        "test_application_services.py", "test_application_write_services.py", "test_kup_catalog.py", "test_kup_change_review.py",
+        "test_kup_config_approval.py", "test_kup_execution.py", "test_kup_project_context.py", "test_kup_project_init.py",
+        "test_kup_runtime_command_review.py", "test_kup_workspace.py", "test_launch_approval.py", "test_run_service.py"
     }),
     "context": frozenset({
         "test_backend_readiness_004_platform_paths.py", "test_linux_oci_workspace_identity.py",

@@ -1,0 +1,63 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "candidate_digest": "sha256:126b951e448b3c79681b7f034c173ccfeed760f78e20a593632c2256f3243646",
+  "files": [
+   {
+    "additions": 1,
+    "change_type": "modified",
+    "deletions": 0,
+    "diff_sha256": "sha256:cc75bb28056d8d0f46baacb392da08f8a5bd038fcca8dc0d89018a2a7f6133aa",
+    "hunks": [
+     {
+      "header": "@@ -1,2 +1,3 @@",
+      "lines": [
+       {
+        "kind": "context",
+        "new_line": 1,
+        "old_line": 1,
+        "text": "a"
+       },
+       {
+        "kind": "add",
+        "new_line": 2,
+        "old_line": null,
+        "text": "b"
+       },
+       {
+        "kind": "context",
+        "new_line": 3,
+        "old_line": 2,
+        "text": "c"
+       }
+      ],
+      "new_lines": 3,
+      "new_start": 1,
+      "old_lines": 2,
+      "old_start": 1
+     }
+    ],
+    "path": "src/Service.java",
+    "truncated": false
+   }
+  ],
+  "launch_id": "20261010T101010-abcdef01",
+  "policy_note": "Human-in-the-loop review policy\n\nreview",
+  "reason": "Human-in-the-loop review policy\n\nreview",
+  "reason_truncated": false,
+  "review_id": "<REVIEW>",
+  "review_summary": null,
+  "status": "REJECTED",
+  "truncated": false,
+  "verified": true
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "change_approval.review",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

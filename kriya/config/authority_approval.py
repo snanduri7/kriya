@@ -484,7 +484,7 @@ def grant_local_approval(
 ) -> Tuple[ApprovalArtifact, str]:
     """Builds and persists the approval for EXACTLY the violations passed in (computed against ``config_dict``), at ``out_path`` or this
     workspace's default local store. The one write path of an approval: ``kriya authority approve`` and the desktop's
-    ``configuration.approve`` (kriya/kup/authority_ops.py) both call it, so the two clients cannot differ in what they persist. It decides
+    ``configuration.approve`` (kriya/application/configuration.py, via kriya/kup/authority_ops.py) both call it, so the two clients cannot differ in what they persist. It decides
     nothing: the caller has already resolved the configuration fresh and obtained the human confirmation."""
     path = out_path or default_local_approval_path(workspace_root)
     artifact = build_approval_artifact(violations, config_dict, workspace_root)

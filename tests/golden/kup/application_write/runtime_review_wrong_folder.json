@@ -1,0 +1,15 @@
+{
+ "consistency": null,
+ "data": null,
+ "error": {
+  "code": "LAUNCH_NOT_FOUND",
+  "database_state": null,
+  "message": "no launch 20261010T101011-abcdef02 is recorded for this folder",
+  "reason": "not_recorded"
+ },
+ "observed_at": "<volatile>",
+ "operation": "runtime_command.review",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

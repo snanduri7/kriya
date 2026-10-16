@@ -13,11 +13,12 @@ import unicodedata
 
 import pytest
 
+import kriya.application.project as project_service  # B3: the use case and its rules live in the service
+from kriya.application.project import validate_project_name
+from kriya.application.services import ApplicationRefusal
 from kriya.config import AppConfig
-from kriya.kup import policy, project_ops, serve
+from kriya.kup import policy, serve
 from kriya.kup.cli_ops import run_kup_operation
-from kriya.kup.project_ops import validate_project_name
-from kriya.kup.store import SnapshotError
 
 
 def _create(parent, name):
@@ -38,14 +39,14 @@ def test_valid_names_are_accepted(name):
 @pytest.mark.parametrize("name", ["", " lead", "trail ", ".hidden", ".", "..", "a/b", "a\\b", "a:b", "a\x00b", "a\nb", "a\tb", "a\x7fb", "a" * 101, "../escape", "/abs",
                                   "x\u202ey", "a\u200bb"])
 def test_invalid_names_are_refused_with_a_typed_reason(name):
-    with pytest.raises(SnapshotError) as caught:
+    with pytest.raises(ApplicationRefusal) as caught:
         validate_project_name(name)
-    assert caught.value.code == policy.INVALID_REQUEST and caught.value.extra.get("reason") == "invalid_name"
+    assert caught.value.reason_code == policy.INVALID_REQUEST and caught.value.extra.get("reason") == "invalid_name"
 
 
 @pytest.mark.parametrize("bad", [None, 7, ["a"], {"a": 1}, b"abc", True])
 def test_non_text_names_are_refused(bad):
-    with pytest.raises(SnapshotError):
+    with pytest.raises(ApplicationRefusal):
         validate_project_name(bad)
 
 
@@ -154,7 +155,7 @@ def test_create_is_in_the_vocabulary_with_its_exact_arguments():
 def test_the_module_creates_a_folder_with_mkdir_only():
     import ast
 
-    tree = ast.parse(open(project_ops.__file__, encoding="utf-8").read())
+    tree = ast.parse(open(project_service.__file__, encoding="utf-8").read())
     called = {f"{n.func.value.id}.{n.func.attr}" for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)}
     assert "os.mkdir" in called and not ({"os.makedirs", "os.symlink", "os.rename", "os.remove", "os.unlink", "os.rmdir"} & called)
     imports = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names} | {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}

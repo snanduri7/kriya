@@ -1,0 +1,73 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "blockers": [],
+  "configuration": {
+   "authority": {
+    "fields": [],
+    "status": "no_findings"
+   },
+   "directory": "<TMP>/Work Space",
+   "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+   "file": null,
+   "fingerprint": "29f228760c58c6e231fe1b0b4837bc91730284d676f24d2d6ddb410b8e820f05",
+   "source": "packaged_default",
+   "status": "loaded"
+  },
+  "interaction": {
+   "approvals": "change_review",
+   "autonomy_mode": "human-in-the-loop",
+   "knowledge_policy": "strict",
+   "note": "A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you."
+  },
+  "model": {
+   "context_window": 32768,
+   "endpoint": "http://localhost:11434/v1",
+   "fallback_chain": [
+    "qwen3.6:35b-a3b-q4_K_M"
+   ],
+   "model": "qwen3-coder:30b",
+   "provider": "openai",
+   "role_overrides": {}
+  },
+  "ready": true,
+  "recovery": {
+   "run_active": false,
+   "status": "CLEAN"
+  },
+  "state": {
+   "cockpit_directory": "<STATE>",
+   "directory": "<STATE>",
+   "observable_by_cockpit": true,
+   "source": "env"
+  },
+  "toolchains": {
+   "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+   "tools": [
+    {
+     "available": true,
+     "checked": "ran --version",
+     "path": "/usr/bin/git",
+     "tool": "git"
+    }
+   ]
+  },
+  "workspace": {
+   "identity": "<WSID>",
+   "name": "Work Space",
+   "path": "<TMP>/Work Space"
+  }
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "execution.preflight",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": {
+  "state_directory": "<STATE>",
+  "trace_database": "<STATE>/traces.db"
+ }
+}

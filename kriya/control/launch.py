@@ -12,7 +12,7 @@ exists), and a terminal record that does not depend on the host noticing a proce
 - it adds NO second success authority: ``ended`` copies what the workflow itself returned (status, failure category) and says so; the
   RunRecord lifecycle, the evidence store and the trace row remain the sources the cockpit shows as the outcome.
 
-Nothing here decides whether a run may start. The preflight (kriya/kup/execution.py) reports; the workflow's own gates (KnowledgeGuard,
+Nothing here decides whether a run may start. The preflight (kriya/application/run.py, served by kriya/kup/execution.py) reports; the workflow's own gates (KnowledgeGuard,
 planning, verification, SEC-009, the workspace lock, commit-state assessment) decide, unchanged.
 """
 from __future__ import annotations

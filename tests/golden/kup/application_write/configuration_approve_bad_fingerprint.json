@@ -1,0 +1,15 @@
+{
+ "consistency": null,
+ "data": null,
+ "error": {
+  "code": "INVALID_REQUEST",
+  "database_state": null,
+  "message": "fingerprint must be the review fingerprint Kriya gave (sha256:<64 hex>)",
+  "reason": "invalid_fingerprint"
+ },
+ "observed_at": "<volatile>",
+ "operation": "configuration.approve",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

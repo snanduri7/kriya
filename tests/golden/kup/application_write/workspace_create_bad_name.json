@@ -1,0 +1,15 @@
+{
+ "consistency": null,
+ "data": null,
+ "error": {
+  "code": "INVALID_REQUEST",
+  "database_state": null,
+  "message": "the project name is not valid: it must not start with a dot",
+  "reason": "invalid_name"
+ },
+ "observed_at": "<volatile>",
+ "operation": "workspace.create",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

@@ -1,0 +1,21 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "created": true,
+  "git_initialized": false,
+  "identity": "<FRESH_WSID>",
+  "name": "new-project",
+  "note": "An empty folder was created. Nothing else was written: no Git repository, no configuration, no files.",
+  "parent": "<TMP>/parent",
+  "workspace": "<TMP>/parent/new-project"
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "workspace.create",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

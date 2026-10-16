@@ -29,6 +29,16 @@ _EXPORTS = {
     "safe_endpoint": "kriya.application.model",
     "HealthService": "kriya.application.health",
     "Capabilities": "kriya.application.health",
+    "ConfigurationService": "kriya.application.configuration",
+    "ReviewService": "kriya.application.review",
+    "RunService": "kriya.application.run",
+    "RunServiceDeps": "kriya.application.run",
+    "RunArtifacts": "kriya.application.run",
+    "RunHandle": "kriya.application.run",
+    "KNOWLEDGE_POLICY": "kriya.application.run",
+    "ApprovalService": "kriya.application.approval",
+    "ReviewDecisionRequest": "kriya.application.approval",
+    "ApprovalRefused": "kriya.application.approval",
 }
 
 __all__ = sorted(_EXPORTS)

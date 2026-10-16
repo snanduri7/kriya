@@ -1,0 +1,22 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "approval_digest": "<APPROVAL>",
+  "approved_fields": [
+   "llm.base_url"
+  ],
+  "identity": "<GUARDED_WSID>",
+  "outcome": "approved",
+  "scope": "This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.",
+  "workspace": "<TMP>/guarded"
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "configuration.approve",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

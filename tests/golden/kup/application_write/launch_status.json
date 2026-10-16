@@ -1,0 +1,110 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "evidence": {
+   "line_count": null,
+   "sealed": false,
+   "state": "absent"
+  },
+  "launch": {
+   "approval_history": [],
+   "approval_required": null,
+   "declined_decisions": [],
+   "ended": {
+    "at": "<volatile>",
+    "error": null,
+    "exit_code": 1,
+    "failure_category": null,
+    "note": "copied from the workflow's own result; the RunRecord, evidence store and trace row are the outcome authority",
+    "quality_gates_passed": false,
+    "trace_run_id": null,
+    "workflow_status": "failure"
+   },
+   "goal": {
+    "chars": 4,
+    "sha256": "0304523efff53f243d76dc81b7c271f922292543cead846ee714f066c3331e5f"
+   },
+   "history": [
+    {
+     "at": "<volatile>",
+     "phase": "STARTING"
+    },
+    {
+     "at": "<volatile>",
+     "phase": "RUNNING"
+    },
+    {
+     "at": "<volatile>",
+     "phase": "ENDED"
+    }
+   ],
+   "launch_id": "20261010T101010-abcdef01",
+   "options": {},
+   "pending_approval": {
+    "candidate_digest": "sha256:126b951e448b3c79681b7f034c173ccfeed760f78e20a593632c2256f3243646",
+    "decision": {
+     "decided_at": "<volatile>",
+     "decision": "reject",
+     "source": "launch-decision"
+    },
+    "expires_at": "<volatile>",
+    "files": [
+     {
+      "diff_sha256": "sha256:cc75bb28056d8d0f46baacb392da08f8a5bd038fcca8dc0d89018a2a7f6133aa",
+      "filepath": "src/Service.java",
+      "lines_added": 1,
+      "lines_removed": 0
+     }
+    ],
+    "kind": "change_approval",
+    "reason": "Human-in-the-loop review policy\n\nreview",
+    "reason_sha256": "sha256:4cb1bb87e73c70162399e0c15e4c709ac27efbaaf9ae017ecc5ab1135b191bec",
+    "reason_truncated": false,
+    "requested_at": "<volatile>",
+    "review_id": "<REVIEW>",
+    "sequence": 1,
+    "status": "REJECTED"
+   },
+   "phase": "ENDED",
+   "process": {
+    "pid": "<volatile>"
+   },
+   "requested_at": "<volatile>",
+   "run": {
+    "base_revision": null,
+    "run_id": "20261010T101010-abcdef01",
+    "started_at": "<volatile>"
+   },
+   "workspace": {
+    "identity": "<WSID>",
+    "path": "<TMP>/Work Space"
+   }
+  },
+  "liveness": "ended",
+  "liveness_note": "DERIVED from the launch phase and the workspace run lock; a process exit alone is never the outcome",
+  "run_record": {
+   "commit_result": "NOT_COMMITTED",
+   "found": true,
+   "lifecycle_state": "FAILURE",
+   "revision": 2,
+   "terminal_status": "FAILURE",
+   "unreadable": null
+  },
+  "workspace_lock": {
+   "held": false,
+   "held_by_this_launch": false
+  }
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "launch.status",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": {
+  "state_directory": "<STATE>",
+  "trace_database": "<STATE>/traces.db"
+ }
+}

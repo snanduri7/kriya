@@ -12,10 +12,11 @@ import os
 import pytest
 import yaml
 
+import kriya.application.project_init as project_init_ops  # B3: Project Setup is ProjectService.initialize
+from kriya.application.project_init import CONFIG_FILENAMES, recommended_profile
 from kriya.config import AppConfig
-from kriya.kup import policy, project_init_ops, serve
+from kriya.kup import policy, serve
 from kriya.kup.cli_ops import run_kup_operation
-from kriya.kup.project_init_ops import CONFIG_FILENAMES, recommended_profile
 
 
 @pytest.fixture

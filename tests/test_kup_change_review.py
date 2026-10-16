@@ -12,6 +12,7 @@ import os
 import pytest
 
 import kriya.control.launch_approval as approval
+from kriya.application.review import MAX_LINES_TOTAL, parse_unified_diff
 from kriya.config import AppConfig
 from kriya.context.workspace_identity import canonical_workspace, workspace_identity
 from kriya.control import launch as launch_module
@@ -21,7 +22,6 @@ from kriya.control.persistence import launch_review_diff_path, load_launch_recor
 from kriya.control.run_coordinator import begin_mutating_run
 from kriya.kup import policy
 from kriya.kup.cli_ops import run_kup_operation
-from kriya.kup.review_ops import MAX_LINES_TOTAL, parse_unified_diff
 
 LID = "20261010T101010-abcdef01"
 DIFF_A = ("--- a/src/Service.java\n+++ b/src/Service.java\n@@ -10,4 +10,5 @@\n public void delete(Long id) {\n     Driver d = find(id);\n     d.setDeleted(true);\n"
@@ -301,9 +301,9 @@ def test_a_launch_record_that_names_another_workspace_identity_serves_nothing(ws
 
 
 def test_a_diff_larger_than_one_response_can_carry_is_flagged_truncated_so_the_host_withholds_approval(ws, monkeypatch):
-    import kriya.kup.review_ops as review_ops
+    import kriya.application.review as review_service  # B3: the response budget is the ReviewService's
 
-    monkeypatch.setattr(review_ops, "MAX_LINES_TOTAL", 3)
+    monkeypatch.setattr(review_service, "MAX_LINES_TOTAL", 3)
     seen = {}
 
     def scenario(canonical, pending):

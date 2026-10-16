@@ -631,7 +631,7 @@ def test_a_tool_git_working_first_on_path_does_not_block(ws, monkeypatch, tmp_pa
 
 
 def test_preflight_reports_the_configured_autonomy_mode_and_never_changes_it():
-    from kriya.kup.execution import _interaction
+    from kriya.application.run import _interaction
 
     assert _interaction(AppConfig())["approvals"] == "change_review"
     autonomous = AppConfig()

@@ -1,0 +1,26 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "blocking_reason": null,
+  "can_approve": false,
+  "fingerprint": null,
+  "identity": "<WSID>",
+  "note": "Only the names of the settings are shown. Their values are not sent to the application.",
+  "protected_fields": [],
+  "reason": null,
+  "required": false,
+  "scope": "This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.",
+  "status": "not_required",
+  "values_shown": false,
+  "workspace": "<TMP>/Work Space"
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "configuration.approval_status",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

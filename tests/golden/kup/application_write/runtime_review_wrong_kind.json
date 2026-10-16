@@ -1,0 +1,15 @@
+{
+ "consistency": null,
+ "data": null,
+ "error": {
+  "code": "REVIEW_NOT_FOUND",
+  "database_state": null,
+  "message": "review <REVIEW> is not a runtime-command review",
+  "reason": "wrong_kind"
+ },
+ "observed_at": "<volatile>",
+ "operation": "runtime_command.review",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

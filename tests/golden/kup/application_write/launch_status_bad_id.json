@@ -1,0 +1,14 @@
+{
+ "consistency": null,
+ "data": null,
+ "error": {
+  "code": "INVALID_REQUEST",
+  "database_state": null,
+  "message": "launch_id must have the shape YYYYMMDDTHHMMSS-xxxxxxxx"
+ },
+ "observed_at": "<volatile>",
+ "operation": "launch.status",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

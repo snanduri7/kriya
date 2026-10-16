@@ -1,0 +1,14 @@
+{
+ "consistency": null,
+ "data": null,
+ "error": {
+  "code": "INVALID_REQUEST",
+  "database_state": null,
+  "message": "review_id must be a review identity Kriya gave (ra-<24 hex>)"
+ },
+ "observed_at": "<volatile>",
+ "operation": "change_approval.review",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

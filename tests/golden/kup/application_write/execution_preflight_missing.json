@@ -1,0 +1,15 @@
+{
+ "consistency": null,
+ "data": null,
+ "error": {
+  "code": "WORKSPACE_UNAVAILABLE",
+  "database_state": null,
+  "message": "no such folder: <TMP>/Work Space-missing",
+  "reason": "not_found"
+ },
+ "observed_at": "<volatile>",
+ "operation": "execution.preflight",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

@@ -1,0 +1,15 @@
+{
+ "consistency": null,
+ "data": null,
+ "error": {
+  "code": "WORKSPACE_UNAVAILABLE",
+  "database_state": null,
+  "message": "the parent folder does not exist or is not a folder: <TMP>/absent",
+  "reason": "parent_not_found"
+ },
+ "observed_at": "<volatile>",
+ "operation": "workspace.create",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

@@ -1,0 +1,39 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "command_fingerprint": "sha256:0efd1137ca26243ed1eb079520bef7f1cfd5ceee1cb9bacbe3a2846f53a6d668",
+  "commands": [
+   [
+    "javac",
+    "A.java"
+   ],
+   [
+    "java",
+    "A"
+   ]
+  ],
+  "criterion": "prints Hello",
+  "environment_names": [],
+  "expires_at": "<volatile>",
+  "input_channel": "none",
+  "launch_id": "20261010T101011-abcdef02",
+  "requested_at": "<volatile>",
+  "review_id": "<RUNTIME_REVIEW>",
+  "run_id": "20261010T101011-abcdef02",
+  "status": "REJECTED",
+  "stdin_present": false,
+  "unit_id": "s4",
+  "verified": true,
+  "working_directory": "/private/var/kriya/worktrees/run-1",
+  "working_directory_kind": "ISOLATED_WORKTREE"
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "runtime_command.review",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}
