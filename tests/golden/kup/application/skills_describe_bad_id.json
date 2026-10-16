@@ -1,0 +1,14 @@
+{
+ "consistency": null,
+ "data": null,
+ "error": {
+  "code": "INVALID_REQUEST",
+  "database_state": null,
+  "message": "skill_id must be a non-empty string of at most 200 characters without control characters"
+ },
+ "observed_at": "<volatile>",
+ "operation": "skills.describe",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

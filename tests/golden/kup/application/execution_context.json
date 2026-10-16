@@ -1,0 +1,156 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "authority_status": "no_findings",
+  "available": true,
+  "egress": {
+   "policy": "local_only",
+   "web_lookup_enabled": false
+  },
+  "routing": [
+   {
+    "context_window": 32768,
+    "endpoint": "http://localhost:11434/v1",
+    "fallback": [],
+    "model": "llama3",
+    "provider": "openai",
+    "role": "planner",
+    "source": "default"
+   },
+   {
+    "context_window": 32768,
+    "endpoint": "http://localhost:11434/v1",
+    "fallback": [],
+    "model": "llama3",
+    "provider": "openai",
+    "role": "architect",
+    "source": "default"
+   },
+   {
+    "context_window": 32768,
+    "endpoint": "http://localhost:11434/v1",
+    "fallback": [
+     "fallback-model"
+    ],
+    "model": "llama3",
+    "provider": "openai",
+    "role": "developer",
+    "source": "default"
+   },
+   {
+    "context_window": 32768,
+    "endpoint": "http://127.0.0.1:9/v1",
+    "fallback": [],
+    "model": "review-model",
+    "provider": "openai",
+    "role": "reviewer",
+    "source": "override"
+   },
+   {
+    "context_window": 32768,
+    "endpoint": "http://localhost:11434/v1",
+    "fallback": [],
+    "model": "llama3",
+    "provider": "openai",
+    "role": "run_verifier",
+    "source": "default"
+   },
+   {
+    "context_window": 32768,
+    "endpoint": "http://localhost:11434/v1",
+    "fallback": [],
+    "model": "llama3",
+    "provider": "openai",
+    "role": "skill_gap",
+    "source": "default"
+   },
+   {
+    "context_window": 32768,
+    "endpoint": "http://localhost:11434/v1",
+    "fallback": [],
+    "model": "llama3",
+    "provider": "openai",
+    "role": "spec_compliance",
+    "source": "default"
+   }
+  ],
+  "skills": {
+   "items": [
+    {
+     "category": "Framework",
+     "description": "Alpha rules",
+     "example_count": 0,
+     "gap_acknowledged": false,
+     "has_instructions": false,
+     "name": "alpha",
+     "origin": "workspace_or_configured",
+     "rule_count": 2,
+     "staged_rule_count": 0,
+     "supported_versions": "*",
+     "tags": [
+      "a",
+      "b"
+     ],
+     "verified": true,
+     "verified_at": "<volatile>",
+     "verified_context": "ran gate"
+    },
+    {
+     "category": "General",
+     "description": "Beta",
+     "example_count": 0,
+     "gap_acknowledged": false,
+     "has_instructions": false,
+     "name": "beta",
+     "origin": "workspace_or_configured",
+     "rule_count": 0,
+     "staged_rule_count": 0,
+     "supported_versions": "*",
+     "tags": [],
+     "verified": false,
+     "verified_at": null,
+     "verified_context": null
+    }
+   ],
+   "management": "Skills are created, reviewed and promoted with `kriya skills` in a terminal; this application does not change them.",
+   "selection": "automatic",
+   "selection_note": "Kriya selects Skills automatically for each run from the goal and the repository; there is no manual selection. The Skills a run used are recorded with the run.",
+   "total": 2,
+   "truncated": false
+  },
+  "tools": {
+   "health": "not_checked",
+   "health_note": "A server's health is learned only by starting it (`kriya mcp inspect`); opening a folder never starts one.",
+   "management": "Tools, MCP servers and their invocation approvals are operator-managed (configuration and `kriya mcp`); this application shows them and changes nothing.",
+   "mcp_servers": [
+    {
+     "declared_capabilities": {
+      "network": "denied",
+      "workspace_read": true,
+      "workspace_write": false
+     },
+     "name": "files"
+    }
+   ],
+   "plugins": {
+    "directory": "./plugins",
+    "enabled": []
+   }
+  },
+  "unavailable_reason": null,
+  "workspace": {
+   "identity": "<WSID>",
+   "name": "Work Space",
+   "path": "<TMP>/Work Space"
+  }
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "execution.context",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

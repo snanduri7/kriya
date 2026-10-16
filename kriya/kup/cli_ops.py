@@ -4,6 +4,11 @@
 and print ``encode_response(run_kup_operation(...))``. Nothing here bootstraps logging, migrates a schema,
 creates a directory (except acquisition inside the snapshot directory), copies legacy data, or constructs a
 kernel, plugin or model; ``sys.dont_write_bytecode`` is set by the CLI before this module is imported.
+
+Transport only (full modularization B2): request dispatch, argument validation, the envelope, and the 1:1 mapping of an application
+service's typed refusal (``ApplicationRefusal``) onto the KUP error vocabulary. The read use cases are ``kriya.application`` services
+(history, project status, capabilities); snapshot acquisition, listing, verification and pruning stay here until D2 moves the snapshot
+store to ``control.history``.
 """
 from __future__ import annotations
 
@@ -11,16 +16,16 @@ import os
 import time
 from typing import Any, Dict, Optional
 
+from kriya.application import ApplicationRefusal  # the services themselves are imported where used (lazy, as before B2)
+from kriya.context import RequestContext
 from kriya.core.state_paths import StateDirectoryError
 from kriya.kup import evidence_ops, policy
 from kriya.kup.inspect import (
+    SnapshotTrace,
     capabilities,
     envelope,
     error_envelope,
     from_snapshot_error,
-    history_detail,
-    history_list,
-    history_prompt,
     live_consistency,
     not_applicable_consistency,
     snapshot_consistency,
@@ -43,7 +48,10 @@ def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli") -> 
     operation = str(request.get("operation", ""))
     try:
         if operation == "capabilities":
-            return envelope(operation, request_id, data=capabilities(cfg), source=_source(cfg), consistency=not_applicable_consistency())
+            from kriya.application import HealthService
+
+            health = HealthService().capabilities(RequestContext.local(None, request_id=request_id), cfg)
+            return envelope(operation, request_id, data=capabilities(health), source=_source(cfg), consistency=not_applicable_consistency())
         if operation == "snapshot.acquire":
             return _acquire(cfg, request, request_id)
         if operation == "snapshot.list":
@@ -93,6 +101,8 @@ def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli") -> 
         return error_envelope(operation or "unknown", request_id, policy.INVALID_REQUEST, f"unknown operation {operation!r}")
     except SnapshotError as error:
         return from_snapshot_error(operation, request_id, error)
+    except ApplicationRefusal as refusal:  # a service's typed refusal: the same code, message and extra fields on the wire
+        return error_envelope(operation, request_id, refusal.reason_code, refusal.message, None, **refusal.extra)
 
 
 def _evidence(cfg, operation: str, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
@@ -131,18 +141,24 @@ def _history(cfg, operation: str, request: Dict[str, Any], request_id: str) -> D
     if not snapshot_id:
         raise SnapshotError(policy.INVALID_REQUEST, "snapshot_id is required: history is read from a published snapshot only (acquire one, or choose one from snapshot.list)")
     snap = require_snapshot(snapshot_directory(cfg), str(snapshot_id))
+    from kriya.application import HistoryService
+
+    trace, ctx, service = SnapshotTrace(snap), RequestContext.local(None, request_id=request_id), HistoryService()
     if operation == "history.list":
-        if request.get("workspace"):
-            from kriya.kup.workspace_ops import (
-                scoped_history_list,  # GUI M5: only the runs whose evidence manifest records this workspace
-            )
-            data = scoped_history_list(cfg, snap, request.get("limit"), request.get("cursor"), str(request["workspace"]))
+        if request.get("workspace"):  # GUI M5: only the runs whose evidence manifest records this workspace
+            workspace, limit = str(request["workspace"]), request.get("limit")
+            if not os.path.isabs(workspace):
+                raise SnapshotError(policy.INVALID_REQUEST, "workspace must be an absolute path")
+            n = policy.LIST_DEFAULT if limit is None else int(limit)
+            if n < 1 or n > policy.LIST_MAX:
+                raise SnapshotError(policy.INVALID_REQUEST, f"limit must be between 1 and {policy.LIST_MAX}")
+            data = service.list_in_workspace(ctx, cfg, trace, limit=n, cursor=request.get("cursor"), workspace=workspace)
         else:
-            data = history_list(snap, request.get("limit"), request.get("cursor"))
+            data = service.list(ctx, cfg, trace, limit=request.get("limit"), cursor=request.get("cursor"))
     elif operation == "history.detail":
-        data = history_detail(snap, str(request.get("run_id")))
+        data = service.detail(ctx, cfg, trace, str(request.get("run_id")))
     else:
-        data = history_prompt(snap, str(request.get("run_id")))
+        data = service.prompt(ctx, cfg, trace, str(request.get("run_id")))
     return envelope(operation, request_id, data=data, source=_source(cfg, snap), consistency=snapshot_consistency(snap, trace_store_path(cfg)))
 
 
@@ -153,9 +169,9 @@ def _acquire(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
     run_active_check = None
     if workspace:
         def run_active_check() -> Optional[str]:
-            from kriya.control.recovery import assess_recovery  # read-only: never creates, locks or writes
-            assessment = assess_recovery(workspace)
-            return assessment.run_active if getattr(assessment, "run_active", None) else None
+            from kriya.application import ProjectService
+
+            return ProjectService().active_run(RequestContext.local(None, request_id=request_id), workspace)  # read-only: never creates, locks or writes
     result = acquire_snapshot(trace_store_path(cfg), snapshot_directory(cfg), run_active_check=run_active_check)
     snap = result["snapshot"]
     data = {**snapshot_summary(snap, stat_metadata(trace_store_path(cfg))), "orphans_removed": result["orphans_removed"], "pruned": result["pruned"],
@@ -207,15 +223,11 @@ def _prune(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
 
 
 def _workspace_status(request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    from kriya.control.recovery import STATUS_CLEAN, STATUS_RUN_ACTIVE, assess_recovery
-
     workspace = request.get("workspace")
     if not isinstance(workspace, str) or not os.path.isabs(workspace):
         raise SnapshotError(policy.INVALID_REQUEST, "workspace must be an absolute path")
-    assessment = assess_recovery(workspace)
-    status = assessment.status
-    exit_code = 0 if status == STATUS_CLEAN else (3 if status == STATUS_RUN_ACTIVE else 1)  # = kriya runs status's own exit codes
-    data = {"workspace": assessment.workspace_path, "run_active": status == STATUS_RUN_ACTIVE, "status": status, "exit_code": exit_code,
-            "assessment": assessment.to_dict()}
+    from kriya.application import ProjectService
+
+    data = ProjectService().status(RequestContext.local(None, request_id=request_id), workspace)
     # No configuration is loaded on this path (kriya runs skips load_config by design), so source is null (P-24).
     return envelope("workspace.status", request_id, data=data, source=None, consistency=live_consistency())

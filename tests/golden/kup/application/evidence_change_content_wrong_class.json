@@ -1,0 +1,16 @@
+{
+ "consistency": null,
+ "data": null,
+ "error": {
+  "code": "EVIDENCE_CONTENT_POLICY",
+  "content_class": "model_input",
+  "database_state": null,
+  "message": "'messages' is model_input content, which evidence.change_content does not serve",
+  "reason": "class_not_served_here"
+ },
+ "observed_at": "<volatile>",
+ "operation": "evidence.change_content",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

@@ -1,7 +1,8 @@
 """KUP ``skills.*`` and ``tools.*``: the typed, read-only operations the GUI reads Skills and Tools through (Demo V2).
 
-Each is a thin adapter over ``SkillService`` / ``ToolService``: it resolves the folder's configuration exactly as ``execution.context`` does
-(``_load_in``), asks the service, and wraps the answer in the KUP envelope. Nothing here starts a process, makes a network request or writes a file.
+Each is a thin adapter over ``kriya.application.SkillCatalogService`` / ``ToolCatalogService`` (full modularization B2): it validates the arguments,
+resolves the folder's configuration exactly as ``execution.context`` does (``_load_in``), enters the folder (skill discovery still reads the process
+working directory), asks the service, and wraps the answer in the KUP envelope. Nothing here starts a process, makes a network request or writes a file.
 
   skills.list           {workspace}                     -> items (SkillDescriptor), total, truncated
   skills.describe       {workspace, skill_id}           -> found, skill
@@ -17,14 +18,13 @@ from __future__ import annotations
 import os
 from typing import Any, Callable, Dict, Optional
 
-from kriya.context.workspace_identity import workspace_identity
+from kriya.application import SkillCatalogService, ToolCatalogService
+from kriya.context import RequestContext
 from kriya.kup import policy
 from kriya.kup.execution import _CWD_LOCK, _load_in
 from kriya.kup.inspect import envelope, live_consistency
 from kriya.kup.store import SnapshotError
 from kriya.kup.workspace_ops import validated_workspace
-from kriya.skills.service import SkillService
-from kriya.tools.service import ToolService
 
 ID_MAX = 200
 OPERATIONS = ("skills.list", "skills.describe", "tools.list", "tools.describe", "tools.approval_state")
@@ -37,17 +37,19 @@ def _identifier(request: Dict[str, Any], key: str) -> str:
     return value
 
 
-def _base(workspace: str) -> Dict[str, Any]:
-    return {"workspace": {"path": workspace, "name": os.path.basename(workspace.rstrip(os.sep)) or workspace, "identity": workspace_identity(workspace)}}
+def _base(ctx: RequestContext, workspace: str) -> Dict[str, Any]:
+    return {"workspace": {"path": workspace, "name": os.path.basename(workspace.rstrip(os.sep)) or workspace, "identity": ctx.workspace.workspace_id}}
 
 
-def _run(operation: str, request: Dict[str, Any], request_id: str, needs_id: Optional[str], answer: Callable[[Any, str, Optional[str]], Dict[str, Any]],
-         empty: Dict[str, Any]) -> Dict[str, Any]:
-    """Validate, resolve the folder's configuration, and call ``answer(cfg, workspace, identifier)``; an unresolvable configuration is a typed ``available: false``."""
+def _run(operation: str, request: Dict[str, Any], request_id: str, needs_id: Optional[str],
+         answer: Callable[[RequestContext, Any, str, Optional[str]], Dict[str, Any]], empty: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate, resolve the folder's configuration, and call ``answer(ctx, cfg, workspace, identifier)`` (a catalog service) inside the folder;
+    an unresolvable configuration is a typed ``available: false``."""
     identifier = _identifier(request, needs_id) if needs_id else None
     _requested, workspace = validated_workspace(request)
     _state, wcfg, authority, failure = _load_in(workspace)
-    data = {**_base(workspace), "available": wcfg is not None, "unavailable_reason": failure, "authority_status": authority["status"]}
+    ctx = RequestContext.local(workspace, request_id=request_id)
+    data = {**_base(ctx, workspace), "available": wcfg is not None, "unavailable_reason": failure, "authority_status": authority["status"]}
     if wcfg is None:
         data.update(empty)
     else:
@@ -55,48 +57,32 @@ def _run(operation: str, request: Dict[str, Any], request_id: str, needs_id: Opt
             previous = os.getcwd()
             os.chdir(workspace)
             try:
-                data.update(answer(wcfg, workspace, identifier))
+                data.update(answer(ctx, wcfg, workspace, identifier))
             finally:
                 os.chdir(previous)
     return envelope(operation, request_id, data=data, source=None, consistency=live_consistency())
 
 
 def skills_list(_cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    def answer(wcfg, workspace, _identifier_unused):
-        items, total = SkillService(wcfg, workspace).list()
-        return {"items": [d.to_dict() for d in items], "total": total, "truncated": total > len(items)}
-    return _run("skills.list", request, request_id, None, answer, {"items": [], "total": 0, "truncated": False})
+    return _run("skills.list", request, request_id, None, lambda ctx, wcfg, ws, _id: SkillCatalogService().list(ctx, wcfg, ws),
+                {"items": [], "total": 0, "truncated": False})
 
 
 def skills_describe(_cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    def answer(wcfg, workspace, skill_id):
-        descriptor = SkillService(wcfg, workspace).describe(skill_id)
-        return {"found": descriptor is not None, "skill": descriptor.to_dict() if descriptor is not None else None}
-    return _run("skills.describe", request, request_id, "skill_id", answer, {"found": False, "skill": None})
+    return _run("skills.describe", request, request_id, "skill_id", SkillCatalogService().describe, {"found": False, "skill": None})
 
 
 def tools_list(_cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    def answer(wcfg, workspace, _identifier_unused):
-        items = ToolService(wcfg, workspace).list()
-        return {"items": [d.to_dict() for d in items], "total": len(items)}
-    return _run("tools.list", request, request_id, None, answer, {"items": [], "total": 0})
+    return _run("tools.list", request, request_id, None, lambda ctx, wcfg, ws, _id: ToolCatalogService().list(ctx, wcfg, ws), {"items": [], "total": 0})
 
 
 def tools_describe(_cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    def answer(wcfg, workspace, tool_id):
-        descriptor = ToolService(wcfg, workspace).describe(tool_id)
-        return {"found": descriptor is not None, "tool": descriptor.to_dict() if descriptor is not None else None}
-    return _run("tools.describe", request, request_id, "tool_id", answer, {"found": False, "tool": None})
+    return _run("tools.describe", request, request_id, "tool_id", ToolCatalogService().describe, {"found": False, "tool": None})
 
 
 def tools_approval_state(_cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    def answer(wcfg, workspace, tool_id):
-        service = ToolService(wcfg, workspace)
-        descriptor = service.describe(tool_id)
-        state = descriptor.approval if descriptor is not None else service.approval_state(tool_id)
-        return {"found": descriptor is not None, "tool_id": tool_id,
-                "approval": {"state": state.state, "reason": state.reason, "records_on_file": state.records_on_file, "recorded_tool_names": list(state.recorded_tool_names)}}
-    return _run("tools.approval_state", request, request_id, "tool_id", answer, {"found": False, "tool_id": None, "approval": None})
+    return _run("tools.approval_state", request, request_id, "tool_id", ToolCatalogService().approval_state,
+                {"found": False, "tool_id": None, "approval": None})
 
 
 HANDLERS = {"skills.list": skills_list, "skills.describe": skills_describe, "tools.list": tools_list, "tools.describe": tools_describe,

@@ -22,6 +22,8 @@ Resource policy (coherent set, documented here and in ui/docs/D4_STABLE_SNAPSHOT
 """
 from __future__ import annotations
 
+from kriya.foundation.ids import RUN_ID_MAX_CHARS
+
 KUP_SCHEMA_VERSION = 1
 PROTOCOL_IMPLEMENTATION = "kriya-kup/1"
 # Run Cockpit v1.1 (handover/GUI-RUN-COCKPIT-V1_1/04): additive operations, error codes, one consistency kind and feature
@@ -130,7 +132,7 @@ EVIDENCE_ABSENCE_REASONS = ("pruned", "capture_off", "recorder_unavailable", "pr
 LIST_DEFAULT = 50
 LIST_MAX = 200
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
-RUN_ID_MAX = 256
+RUN_ID_MAX = RUN_ID_MAX_CHARS  # the one run-id rule lives in kriya/foundation/ids.py
 CURSOR_MAX = 1024
 EVIDENCE_PAGE_DEFAULT = 200
 EVIDENCE_PAGE_MAX = 1000

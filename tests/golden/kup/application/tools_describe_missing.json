@@ -1,0 +1,24 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "authority_status": "no_findings",
+  "available": true,
+  "found": false,
+  "tool": null,
+  "unavailable_reason": null,
+  "workspace": {
+   "identity": "<WSID>",
+   "name": "Work Space",
+   "path": "<TMP>/Work Space"
+  }
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "tools.describe",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

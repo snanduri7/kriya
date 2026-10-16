@@ -397,16 +397,17 @@ def test_a_path_too_long_for_the_filesystem_is_a_typed_refusal_not_a_crash_and_l
 
 
 def test_many_skills_are_summarised_within_the_cap_and_report_the_true_total(tmp_path, monkeypatch):
-    from kriya.kup import context_ops
+    from kriya.application.model import skills_summary  # B2: the Skills block of execution.context is ModelService's
+    from kriya.skills.service import MAX_SKILLS
 
     skills = tmp_path / "skills"
-    for i in range(context_ops.MAX_SKILLS + 40):
+    for i in range(MAX_SKILLS + 40):
         d = skills / f"s{i:04d}"
         d.mkdir(parents=True)
         (d / "skill.yaml").write_text(f"name: s{i:04d}\ndescription: d\n")
     cfg = AppConfig(paths={"skills": str(skills)}, skills={"load_global": False, "load_cwd": False})
-    summary = context_ops.skills_summary(cfg, str(tmp_path))
-    assert summary["total"] == context_ops.MAX_SKILLS + 40 and len(summary["items"]) == context_ops.MAX_SKILLS and summary["truncated"] is True
+    summary = skills_summary(cfg, str(tmp_path))
+    assert summary["total"] == MAX_SKILLS + 40 and len(summary["items"]) == MAX_SKILLS and summary["truncated"] is True
     assert [s["name"] for s in summary["items"]] == sorted(s["name"] for s in summary["items"])
 
 

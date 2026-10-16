@@ -1,0 +1,46 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "checkout": {
+   "branch": null,
+   "changed_entries": null,
+   "changed_truncated": false,
+   "detached": null,
+   "dirty": null,
+   "head": null,
+   "reason": null,
+   "root": null,
+   "state": "not_a_repository"
+  },
+  "configuration": {
+   "file_in_workspace": true,
+   "note": "The cockpit reads with its own configuration directory (KUP host setting); a kriya.yaml inside the opened folder is not applied to these reads."
+  },
+  "identity": "<WSID>",
+  "kriya_directory_present": false,
+  "name": "Work Space",
+  "recovery": {
+   "run_active": false,
+   "status": "CLEAN"
+  },
+  "requested": "<TMP>/Work Space",
+  "state": {
+   "directory": "<STATE>",
+   "source": "env",
+   "trace_database_present": true
+  },
+  "workspace": "<TMP>/Work Space"
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "workspace.describe",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": {
+  "state_directory": "<STATE>",
+  "trace_database": "<STATE>/traces.db"
+ }
+}

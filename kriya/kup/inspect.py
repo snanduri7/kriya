@@ -8,18 +8,17 @@ returned only by ``history.prompt`` (explicit request), never by list or detail.
 from __future__ import annotations
 
 import base64
+import contextlib
 import datetime as _dt
 import json
 import re
 import sqlite3
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
-from kriya.build_info import version_report
-from kriya.core.attempt_evidence import model as evidence_model
+from kriya.foundation.ids import RUN_ID_RULE, is_valid_run_id
 from kriya.kup import policy
 from kriya.kup.store import Snapshot, SnapshotError, connect_read_only, snapshot_summary, stat_metadata
 
-RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 CURSOR_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+/=_-]*$")
 
 LIST_COLUMNS = ("run_id", "timestamp", "goal", "duration_sec", "attempts", "status", "failure_category", "files_modified",
@@ -103,35 +102,35 @@ def encode_response(env: Dict[str, Any]) -> str:
 
 # ------------------------------------------------------------------ capabilities
 
-def capabilities(cfg=None) -> Dict[str, Any]:
-    report = version_report()
+def capabilities(health) -> Dict[str, Any]:
+    """The KUP wire description of this build: the protocol's own vocabulary (operations, limits, codes, flags) around the Kriya facts
+    ``HealthService.capabilities`` reports (``health``: build identity, the content-visibility decision, the evidence vocabulary)."""
     return {
         "kup_versions": [policy.KUP_SCHEMA_VERSION],
         "operations": list(policy.OPERATIONS),
-        "identity": {"kriya_version": report.get("version"), "commit": report.get("commit"), "build_provenance": report.get("build_provenance"),
+        "identity": {"kriya_version": health.kriya_version, "commit": health.commit, "build_provenance": health.build_provenance,
                      "implementation": policy.PROTOCOL_IMPLEMENTATION, "sqlite_version": sqlite3.sqlite_version},
         "limits": dict(policy.LIMITS),
         "features": {"snapshot": True, "prompt": True, "comparisons": False, "attribution": False, "diagnostics": False, "output": False,
                      "consistency_kinds": list(policy.CONSISTENCY_KINDS), "error_codes": list(policy.ERROR_CODES), "database_states": list(policy.DATABASE_STATES),
-                     **_cockpit_features(cfg)},
+                     **_cockpit_features(health)},
     }
 
 
-def _cockpit_features(cfg=None) -> Dict[str, Any]:
+def _cockpit_features(health) -> Dict[str, Any]:
     """Capability set 1.1 flags: true only for what this build implements (a flag is never advertised before its operation exists)."""
-    # Kriya's own SECURITY_AUTHORITY decision, never a host's: no configuration, or anything but an explicit `on`, is off.
-    content_authorized = getattr(getattr(getattr(cfg, "evidence", None), "attempt_recorder", None), "content_visibility", "off") == "on"
+    content_authorized = health.content_authorized  # Kriya's own SECURITY_AUTHORITY decision (HealthService), never a host's
     return {
         "capability_set": policy.CAPABILITY_SET,
         "evidence": True, "evidence_content": content_authorized, "evidence_content_classes": sorted(set(policy.BLOB_CLASSES.values())) if content_authorized else [],
         "qualification": False, "authority": False,
         "knowledge": False, "tools": False, "experiments": False, "live": False, "actions": False,
         "workspace_create": True, "skills_view": True, "tools_view": True, "model_probe": True, "skills_catalog": True, "tools_catalog": True,
-        "evidence_capture_modes": list(evidence_model.CAPTURE_MODES),
+        "evidence_capture_modes": list(health.evidence_capture_modes),
         "evidence_verification_states": list(policy.EVIDENCE_VERIFICATION_STATES),
-        "evidence_kinds": sorted(evidence_model.KINDS),
-        "evidence_provenances": sorted(evidence_model.PROVENANCES),
-        "diagnosis_evidence_classes": list(evidence_model.EVIDENCE_CLASSES),
+        "evidence_kinds": list(health.evidence_kinds),
+        "evidence_provenances": list(health.evidence_provenances),
+        "diagnosis_evidence_classes": list(health.diagnosis_evidence_classes),
     }
 
 
@@ -159,8 +158,8 @@ def decode_cursor(cursor: str, snapshot_id: str) -> Tuple[Optional[str], str]:
 
 
 def validate_run_id(run_id: Any) -> str:
-    if not isinstance(run_id, str) or not run_id or len(run_id) > policy.RUN_ID_MAX or not RUN_ID_RE.match(run_id):
-        raise SnapshotError(policy.INVALID_REQUEST, "run_id must match [A-Za-z0-9][A-Za-z0-9._:-]* and be at most 256 characters")
+    if not is_valid_run_id(run_id):
+        raise SnapshotError(policy.INVALID_REQUEST, RUN_ID_RULE)
     return run_id
 
 
@@ -292,11 +291,7 @@ def history_detail(snapshot: Snapshot, run_id: str) -> Dict[str, Any]:
     for col in JSON_TEXT_COLUMNS:
         parsed, present = _parsed_json_text(row[col])
         detail[col] = _section(parsed, f"runs.{col}", present, None if present else "column is NULL in the stored row")
-    # PRODUCT-UX-COMPLETION: a read-only projection of the recorded runtime-gate execution (never a guess; see kriya/kup/application_outcome.py).
-    from kriya.kup.application_outcome import application_outcome
-
-    gates = detail["gate_outcomes"]
-    detail["application_outcome"] = _section(application_outcome(gates["data"] if gates["availability"] == "recorded" else None), "derived:runs.gate_outcomes")
+    # The derived ``application_outcome`` section is added by HistoryService.detail (kriya/application/history.py), not by the reader.
     # Not persisted by this Kriya version (P-30, D-5): honest, never reconstructed.
     for name, reason in (("context", "the trace row persists context only inside run_events (context.* events); no context record is stored"),
                          ("attribution", "the baseline persists failure categories, not causal attribution"),
@@ -323,6 +318,46 @@ def run_events_of(snapshot: Snapshot, run_id: str) -> Tuple[bool, Optional[Any]]
         return False, None
     parsed, present = _parsed_json_text(row[0])
     return True, parsed if present and not isinstance(parsed, str) else None
+
+
+def _events_by_run(conn: sqlite3.Connection, run_ids: List[str]) -> Dict[str, Any]:
+    """``runs.run_events`` (verbatim text) of several rows at once (moved from kriya/kup/workspace_ops.py in B2)."""
+    marks = ",".join("?" for _ in run_ids)
+    return {row[0]: row[1] for row in conn.execute(f"SELECT run_id, run_events FROM runs WHERE run_id IN ({marks})", run_ids)}
+
+
+class SnapshotTrace:
+    """The trace history of ONE published snapshot, as the application history/evidence services read it
+    (``kriya.application.services.TraceHistory``). Every method is the existing read-only query above; D2 moves this reader
+    to ``control.history`` (HistoryStore)."""
+
+    def __init__(self, snapshot: Snapshot) -> None:
+        self.snapshot = snapshot
+        self.snapshot_id = snapshot.snapshot_id
+
+    def page(self, limit: Optional[int], cursor: Optional[str]) -> Dict[str, Any]:
+        return history_list(self.snapshot, limit, cursor)
+
+    def detail(self, run_id: str) -> Dict[str, Any]:
+        return history_detail(self.snapshot, run_id)
+
+    def prompt(self, run_id: str) -> Dict[str, Any]:
+        return history_prompt(self.snapshot, run_id)
+
+    def run_events(self, run_id: Any) -> Tuple[bool, Optional[Any]]:
+        return run_events_of(self.snapshot, run_id)
+
+    def cursor_after(self, timestamp: Optional[str], run_id: str) -> str:
+        return encode_cursor(self.snapshot_id, timestamp, run_id)
+
+    @contextlib.contextmanager
+    def events_reader(self) -> Iterator[Callable[[List[str]], Dict[str, Any]]]:
+        """One read-only connection for a batch of ``run_events`` lookups, opened now and closed when the batch ends."""
+        conn = connect_read_only(self.snapshot.db_path)
+        try:
+            yield lambda run_ids: _events_by_run(conn, run_ids)
+        finally:
+            conn.close()
 
 
 def history_prompt(snapshot: Snapshot, run_id: str) -> Dict[str, Any]:

@@ -1,0 +1,14 @@
+{
+ "consistency": null,
+ "data": null,
+ "error": {
+  "code": "INVALID_REQUEST",
+  "database_state": null,
+  "message": "workspace must be an absolute path"
+ },
+ "observed_at": "<volatile>",
+ "operation": "workspace.status",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

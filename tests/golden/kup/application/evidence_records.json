@@ -1,0 +1,137 @@
+{
+ "consistency": {
+  "head_digest": "<volatile>",
+  "kind": "sealed_store",
+  "live_stream": false
+ },
+ "data": {
+  "filters_applied": {},
+  "head_digest": "<volatile>",
+  "next_cursor": "<volatile>",
+  "records": [
+   {
+    "attempt_number": null,
+    "blobs": {},
+    "call_seq": null,
+    "content_digests": {},
+    "invocation_seq": null,
+    "kind": "run.opened",
+    "payload": {
+     "goal_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "phase": null,
+    "phase_provenance": null,
+    "prev": "<volatile>",
+    "provenance": "OBSERVED",
+    "role": null,
+    "run_id": "ev-rich",
+    "schema": "kriya.attempt_evidence/1",
+    "seq": 1,
+    "t_mono_ms": "<volatile>",
+    "t_wall": "<volatile>",
+    "unit_id": null,
+    "unit_kind": null,
+    "wire_seq": null
+   },
+   {
+    "attempt_number": null,
+    "blobs": {
+     "messages": "sha256:1087dba377d644bdcbb90a2e0b912348fedadce9b5b6fd6c5eaeb6cc93754d8d"
+    },
+    "call_seq": 1,
+    "content_digests": {
+     "messages": {
+      "bytes": 11,
+      "digest": "<volatile>"
+     }
+    },
+    "invocation_seq": null,
+    "kind": "model.request",
+    "payload": {
+     "n": 1
+    },
+    "phase": "planning",
+    "phase_provenance": "derived_from_role",
+    "prev": "<volatile>",
+    "provenance": "OBSERVED",
+    "role": "planner",
+    "run_id": "ev-rich",
+    "schema": "kriya.attempt_evidence/1",
+    "seq": 2,
+    "t_mono_ms": "<volatile>",
+    "t_wall": "<volatile>",
+    "unit_id": null,
+    "unit_kind": null,
+    "wire_seq": null
+   },
+   {
+    "attempt_number": null,
+    "blobs": {
+     "wire_body": "sha256:64879f7d6b960a01909762d911a32d4582c20010c5641ee90278b644a9e3b525"
+    },
+    "call_seq": 1,
+    "content_digests": {
+     "wire_body": {
+      "bytes": 4,
+      "digest": "<volatile>"
+     }
+    },
+    "invocation_seq": null,
+    "kind": "model.response",
+    "payload": {
+     "n": 1
+    },
+    "phase": "planning",
+    "phase_provenance": "derived_from_role",
+    "prev": "<volatile>",
+    "provenance": "OBSERVED",
+    "role": "planner",
+    "run_id": "ev-rich",
+    "schema": "kriya.attempt_evidence/1",
+    "seq": 3,
+    "t_mono_ms": "<volatile>",
+    "t_wall": "<volatile>",
+    "unit_id": null,
+    "unit_kind": null,
+    "wire_seq": null
+   },
+   {
+    "attempt_number": null,
+    "blobs": {},
+    "call_seq": null,
+    "content_digests": {},
+    "invocation_seq": 1,
+    "kind": "unit.opened",
+    "payload": {
+     "unit_id": "u1"
+    },
+    "phase": null,
+    "phase_provenance": null,
+    "prev": "<volatile>",
+    "provenance": "OBSERVED",
+    "role": null,
+    "run_id": "ev-rich",
+    "schema": "kriya.attempt_evidence/1",
+    "seq": 4,
+    "t_mono_ms": "<volatile>",
+    "t_wall": "<volatile>",
+    "unit_id": "u1",
+    "unit_kind": "task",
+    "wire_seq": null
+   }
+  ],
+  "run_id": "ev-rich",
+  "truncated": false,
+  "truncated_tail": false
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "evidence.records",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": {
+  "evidence_directory": "<STATE>/attempt-evidence",
+  "state_directory": "<STATE>",
+  "trace_database": "<STATE>/traces.db"
+ }
+}

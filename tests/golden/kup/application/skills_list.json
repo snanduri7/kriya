@@ -1,0 +1,93 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "authority_status": "no_findings",
+  "available": true,
+  "items": [
+   {
+    "category": "Framework",
+    "description": "Alpha rules",
+    "digest": "<volatile>",
+    "example_count": 0,
+    "has_instructions": false,
+    "id": "alpha",
+    "name": "alpha",
+    "origin": "workspace_or_configured",
+    "provenance": {
+     "sources": [],
+     "sources_truncated": false,
+     "state": "NONE_RECORDED",
+     "tracked_rule_count": 0,
+     "untracked_rule_count": 2,
+     "verified_tracked_count": 0
+    },
+    "rule_count": 2,
+    "scope": "workspace",
+    "skill_version": null,
+    "source": "local_directory",
+    "staged_rule_count": 0,
+    "supported_versions": "*",
+    "tags": [
+     "a",
+     "b"
+    ],
+    "unknown_fields": [
+     "skill_version"
+    ],
+    "verification_gap_acknowledged": false,
+    "verified": true,
+    "verified_at": "<volatile>",
+    "verified_context": "ran gate"
+   },
+   {
+    "category": "General",
+    "description": "Beta",
+    "digest": "<volatile>",
+    "example_count": 0,
+    "has_instructions": false,
+    "id": "beta",
+    "name": "beta",
+    "origin": "workspace_or_configured",
+    "provenance": {
+     "sources": [],
+     "sources_truncated": false,
+     "state": "NONE_RECORDED",
+     "tracked_rule_count": 0,
+     "untracked_rule_count": 0,
+     "verified_tracked_count": 0
+    },
+    "rule_count": 0,
+    "scope": "workspace",
+    "skill_version": null,
+    "source": "local_directory",
+    "staged_rule_count": 0,
+    "supported_versions": "*",
+    "tags": [],
+    "unknown_fields": [
+     "skill_version"
+    ],
+    "verification_gap_acknowledged": false,
+    "verified": false,
+    "verified_at": null,
+    "verified_context": null
+   }
+  ],
+  "total": 2,
+  "truncated": false,
+  "unavailable_reason": null,
+  "workspace": {
+   "identity": "<WSID>",
+   "name": "Work Space",
+   "path": "<TMP>/Work Space"
+  }
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "skills.list",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

@@ -1,0 +1,55 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "absence": null,
+  "blob_file_count": 6,
+  "bytes_on_disk": "<volatile>",
+  "line_count": 15,
+  "link": {
+   "evidence_run_id": "ev-rich",
+   "recorded_event": {
+    "path": "/recorded/path",
+    "run_id": "ev-rich",
+    "status": "CLOSED"
+   },
+   "resolved_from": "history.detail run_events[evidence.attempt_store]",
+   "trace_run_id": "t-gate"
+  },
+  "manifest": {
+   "capture": "full",
+   "redaction_policy_version": "1",
+   "run_id": "ev-rich",
+   "schema": "kriya.attempt_evidence/1",
+   "workspace_name": "fixture",
+   "writer_version": "1"
+  },
+  "run_id": "ev-rich",
+  "seal": {
+   "blob_count": 6,
+   "closed_reason": "run_closed",
+   "complete": true,
+   "degraded": [],
+   "final_seq": 15,
+   "gaps": 0,
+   "head_digest": "<volatile>",
+   "record_count": 15,
+   "schema": "kriya.attempt_evidence/1"
+  },
+  "store": "present"
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "evidence.manifest",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": {
+  "evidence_directory": "<STATE>/attempt-evidence",
+  "snapshot_directory": "<STATE>/kup-snapshots/<SNAPSHOT>",
+  "snapshot_id": "<SNAPSHOT>",
+  "state_directory": "<STATE>",
+  "trace_database": "<STATE>/traces.db"
+ }
+}

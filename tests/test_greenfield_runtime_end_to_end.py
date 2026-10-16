@@ -15,9 +15,9 @@ from test_greenfield_runtime_verification_dropped import GOAL, JUDGE, MAIN, POM,
 from test_launch_approval import LID, _session
 
 import kriya.control.launch_approval as approval
+from kriya.application.history import STATUS_EXECUTED, application_outcome
 from kriya.control import launch as launch_module
 from kriya.control.persistence import load_launch_record
-from kriya.kup.application_outcome import STATUS_EXECUTED, application_outcome
 from kriya.workflow.runtime_command_approval import TypedApprovalCallback
 
 UNITS = {"s1": (POM, "<project/>\n"),

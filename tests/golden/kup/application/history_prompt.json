@@ -1,0 +1,42 @@
+{
+ "consistency": {
+  "acquisition_completed_at": "<volatile>",
+  "acquisition_started_at": "<volatile>",
+  "kind": "snapshot_copy",
+  "live_stream": false,
+  "snapshot_id": "<SNAPSHOT>",
+  "source_metadata_at_acquisition": {
+   "inode": "<volatile>",
+   "journal_size": null,
+   "mtime_ns": "<volatile>",
+   "shm_size": null,
+   "size": "<volatile>",
+   "wal_size": null
+  },
+  "source_metadata_changed": true,
+  "source_metadata_now": {
+   "inode": "<volatile>",
+   "journal_size": null,
+   "mtime_ns": "<volatile>",
+   "shm_size": "<volatile>",
+   "size": "<volatile>",
+   "wal_size": "<volatile>"
+  }
+ },
+ "data": {
+  "prompt_rendered": "the prompt",
+  "role": "planner",
+  "scope": "plan_prompt (one stored prompt per run; not every Developer request)"
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "history.prompt",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": {
+  "snapshot_directory": "<STATE>/kup-snapshots/<SNAPSHOT>",
+  "snapshot_id": "<SNAPSHOT>",
+  "state_directory": "<STATE>",
+  "trace_database": "<STATE>/traces.db"
+ }
+}

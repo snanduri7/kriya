@@ -1,0 +1,14 @@
+{
+ "consistency": null,
+ "data": null,
+ "error": {
+  "code": "INVALID_REQUEST",
+  "database_state": null,
+  "message": "record 4 of run ev-call is not a model.request record"
+ },
+ "observed_at": "<volatile>",
+ "operation": "evidence.call_content",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

@@ -1,0 +1,32 @@
+{
+ "consistency": {
+  "head_digest": "<volatile>",
+  "kind": "sealed_store",
+  "live_stream": false
+ },
+ "data": {
+  "attempt": 1,
+  "bytes_total": 110,
+  "call_seq": 1,
+  "content": "[{\"content\":\"You are the developer.\",\"role\":\"system\"},{\"content\":\"Add clamp() to NumberUtils.\",\"role\":\"user\"}]",
+  "content_class": "model_input",
+  "digest_ok": true,
+  "encoding": "utf-8",
+  "head_digest": "<volatile>",
+  "part": "messages",
+  "ref": "sha256:e99bee7abdf295ab80c14e5568d001308aac6fbb09acdeb49c99dc1fb8ccf949",
+  "role": "developer",
+  "run_id": "ev-call",
+  "seq": 1
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "evidence.call_content",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": {
+  "evidence_directory": "<STATE>/attempt-evidence",
+  "state_directory": "<STATE>",
+  "trace_database": "<STATE>/traces.db"
+ }
+}

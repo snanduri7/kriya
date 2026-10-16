@@ -1,0 +1,64 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "authority_status": "no_findings",
+  "available": true,
+  "egress_policy": "local_only",
+  "endpoints": [
+   {
+    "endpoint": "http://127.0.0.1:8/v1",
+    "model_count": 1,
+    "reason": null,
+    "state": "reachable"
+   },
+   {
+    "endpoint": "http://127.0.0.1:9/v1",
+    "model_count": 1,
+    "reason": null,
+    "state": "reachable"
+   },
+   {
+    "endpoint": "http://localhost:11434/v1",
+    "model_count": 1,
+    "reason": null,
+    "state": "reachable"
+   }
+  ],
+  "note": "A single bounded GET /models per distinct local endpoint, made now. It proves the server answered and lists the models it serves; it does not prove a model can complete a request.",
+  "roles": [
+   {
+    "available": false,
+    "endpoint": "http://localhost:11434/v1",
+    "for": "default",
+    "model": "llama3",
+    "state": "model_missing"
+   },
+   {
+    "available": false,
+    "endpoint": "http://127.0.0.1:9/v1",
+    "for": "reviewer",
+    "model": "review-model",
+    "state": "model_missing"
+   },
+   {
+    "available": true,
+    "endpoint": "http://127.0.0.1:8/v1",
+    "for": "fallback",
+    "model": "fallback-model",
+    "state": "model_present"
+   }
+  ],
+  "timeout_seconds": 4.0,
+  "truncated": false,
+  "unavailable_reason": null
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "execution.model_probe",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

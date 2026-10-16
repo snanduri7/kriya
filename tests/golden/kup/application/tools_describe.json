@@ -1,0 +1,56 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "authority_status": "no_findings",
+  "available": true,
+  "found": true,
+  "tool": {
+   "approval": {
+    "reason": "NO_RECORDS_FOR_SERVER",
+    "recorded_tool_names": [],
+    "records_on_file": 0,
+    "state": "NOT_APPROVED"
+   },
+   "declared_capabilities": {
+    "network": "denied",
+    "network_hosts": [],
+    "workspace_read": true,
+    "workspace_write": false
+   },
+   "health": "NOT_CHECKED",
+   "id": "mcp:files",
+   "kind": "mcp_server",
+   "name": "files",
+   "provider": "configured_mcp",
+   "reference": {
+    "argument_count": 2,
+    "environment_variable_names": [
+     "TOKEN"
+    ],
+    "executable": "server"
+   },
+   "scope": null,
+   "status": "CONFIGURED",
+   "unknown_fields": [
+    "version",
+    "scope"
+   ],
+   "version": null
+  },
+  "unavailable_reason": null,
+  "workspace": {
+   "identity": "<WSID>",
+   "name": "Work Space",
+   "path": "<TMP>/Work Space"
+  }
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "tools.describe",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

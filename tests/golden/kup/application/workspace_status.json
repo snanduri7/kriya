@@ -1,0 +1,27 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "assessment": {
+   "evidence": [],
+   "evidence_error": null,
+   "records": [],
+   "run_active": null,
+   "status": "CLEAN",
+   "unreadable_records": [],
+   "workspace_path": "<TMP>/Work Space"
+  },
+  "exit_code": 0,
+  "run_active": false,
+  "status": "CLEAN",
+  "workspace": "<TMP>/Work Space"
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "workspace.status",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

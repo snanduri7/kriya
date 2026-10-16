@@ -1,0 +1,35 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "absence": {
+   "derived_from": "history.detail run_events[evidence.attempt_store]",
+   "detail": "run ev-none is not in snapshot <SNAPSHOT>",
+   "reason": "unknown",
+   "recorded_event": null,
+   "snapshot_id": "<SNAPSHOT>"
+  },
+  "blob_file_count": null,
+  "bytes_on_disk": null,
+  "line_count": null,
+  "link": null,
+  "manifest": null,
+  "run_id": "ev-none",
+  "seal": null,
+  "store": "absent"
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "evidence.manifest",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": {
+  "evidence_directory": "<STATE>/attempt-evidence",
+  "snapshot_directory": "<STATE>/kup-snapshots/<SNAPSHOT>",
+  "snapshot_id": "<SNAPSHOT>",
+  "state_directory": "<STATE>",
+  "trace_database": "<STATE>/traces.db"
+ }
+}

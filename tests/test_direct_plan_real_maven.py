@@ -25,11 +25,11 @@ from test_greenfield_direct_plan_runtime import GOAL, MARKDOWN_PLAN, _succeeded
 from test_greenfield_runtime_end_to_end import Person, _callback, _fast  # noqa: F401 - _fast is an autouse fixture
 from test_launch_approval import _session
 
+from kriya.application.history import STATUS_EXECUTED, application_outcome
 from kriya.config import AppConfig
 from kriya.core import model_runtime
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.kup.application_outcome import STATUS_EXECUTED, application_outcome
 from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.state import GenerationState
 from kriya.workflow.workflow import WorkflowEngine

@@ -1,0 +1,31 @@
+{
+ "consistency": {
+  "head_digest": "<volatile>",
+  "kind": "sealed_store",
+  "live_stream": false
+ },
+ "data": {
+  "attempt": 1,
+  "bytes_total": 11,
+  "content": "class B {}\n",
+  "content_class": "candidate_content",
+  "digest_ok": true,
+  "encoding": "utf-8",
+  "head_digest": "<volatile>",
+  "part": "proposed",
+  "path": "src/B.java",
+  "ref": "sha256:18ba722e8c0cbb2aa3d7d5a8c79f0e65b50318e1391aae91b462444b6cb39f60",
+  "run_id": "ev-cand",
+  "seq": 3
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "evidence.change_content",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": {
+  "evidence_directory": "<STATE>/attempt-evidence",
+  "state_directory": "<STATE>",
+  "trace_database": "<STATE>/traces.db"
+ }
+}

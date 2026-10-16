@@ -255,13 +255,15 @@ def test_paging_through_a_scoped_list_never_repeats_or_skips_a_run(tmp_path):
 
 
 def test_the_scan_is_bounded_and_says_so(tmp_path, monkeypatch):
-    from kriya.kup import workspace_ops
+    from kriya.application import (
+        history as history_service,  # B2: the workspace scope of history.list is HistoryService's
+    )
     a = tmp_path / "a"
     a.mkdir()
     for i in range(6):
         seed_trace_run(f"t-x{i}", None, with_event=False)
-    monkeypatch.setattr(workspace_ops, "MAX_SCANNED_RUNS", 3)
-    monkeypatch.setattr(workspace_ops, "SCAN_PAGE", 2)
+    monkeypatch.setattr(history_service, "MAX_SCANNED_RUNS", 3)
+    monkeypatch.setattr(history_service, "SCAN_PAGE", 2)
     data = _list(acquire_snapshot_id(), a)
     assert data["workspace_scope"]["truncated"] is True and data["next_cursor"] is not None and data["workspace_scope"]["scanned"] <= 4
 

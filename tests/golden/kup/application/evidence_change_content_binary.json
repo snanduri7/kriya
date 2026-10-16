@@ -1,0 +1,31 @@
+{
+ "consistency": {
+  "head_digest": "<volatile>",
+  "kind": "sealed_store",
+  "live_stream": false
+ },
+ "data": {
+  "attempt": 1,
+  "bytes_total": 9,
+  "content": "//4AYmluYXJ5",
+  "content_class": "candidate_content",
+  "digest_ok": true,
+  "encoding": "base64",
+  "head_digest": "<volatile>",
+  "part": "after",
+  "path": "img.bin",
+  "ref": "sha256:7558fff372a1af85660fee0328c00bbde492dd07e83a8ef18d7f0a5ba199e6c3",
+  "run_id": "ev-cand",
+  "seq": 5
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "evidence.change_content",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": {
+  "evidence_directory": "<STATE>/attempt-evidence",
+  "state_directory": "<STATE>",
+  "trace_database": "<STATE>/traces.db"
+ }
+}

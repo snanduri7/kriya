@@ -1,0 +1,31 @@
+{
+ "consistency": {
+  "head_digest": "<volatile>",
+  "kind": "sealed_store",
+  "live_stream": false
+ },
+ "data": {
+  "attempt": 1,
+  "bytes_total": 70,
+  "content": "--- a/src/A.java\n+++ b/src/A.java\n@@ -1 +1,2 @@\n class A {}\n+// added\n",
+  "content_class": "candidate_content",
+  "digest_ok": true,
+  "encoding": "utf-8",
+  "head_digest": "<volatile>",
+  "part": "diff",
+  "path": "src/A.java",
+  "ref": "sha256:9c3e2c062ae4494f61ae5709bd93fff88e0156171bf0be7440e19ead0f61f6bd",
+  "run_id": "ev-cand",
+  "seq": 2
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "evidence.change_content",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": {
+  "evidence_directory": "<STATE>/attempt-evidence",
+  "state_directory": "<STATE>",
+  "trace_database": "<STATE>/traces.db"
+ }
+}

@@ -1,0 +1,95 @@
+{
+ "consistency": {
+  "head_digest": "<volatile>",
+  "kind": "sealed_store",
+  "live_stream": false
+ },
+ "data": {
+  "filters_applied": {
+   "kind": [
+    "model.request",
+    "model.response"
+   ],
+   "role": "developer"
+  },
+  "head_digest": "<volatile>",
+  "next_cursor": null,
+  "records": [
+   {
+    "attempt_number": 1,
+    "blobs": {
+     "messages": "sha256:7a23fafd4a295c29c8e7415a805720a0edd20c96fcc77c008496f13a9a8e8bfd"
+    },
+    "call_seq": 2,
+    "content_digests": {
+     "messages": {
+      "bytes": 10,
+      "digest": "<volatile>"
+     }
+    },
+    "invocation_seq": 1,
+    "kind": "model.request",
+    "payload": {
+     "n": 2
+    },
+    "phase": "attempt",
+    "phase_provenance": "derived_from_attempt_scope",
+    "prev": "<volatile>",
+    "provenance": "OBSERVED",
+    "role": "developer",
+    "run_id": "ev-rich",
+    "schema": "kriya.attempt_evidence/1",
+    "seq": 6,
+    "t_mono_ms": "<volatile>",
+    "t_wall": "<volatile>",
+    "unit_id": "u1",
+    "unit_kind": "task",
+    "wire_seq": null
+   },
+   {
+    "attempt_number": 1,
+    "blobs": {
+     "wire_body": "sha256:5694d08a2e53ffcae0c3103e5ad6f6076abd960eb1f8a56577040bc1028f702b"
+    },
+    "call_seq": 2,
+    "content_digests": {
+     "wire_body": {
+      "bytes": 4,
+      "digest": "<volatile>"
+     }
+    },
+    "invocation_seq": 1,
+    "kind": "model.response",
+    "payload": {
+     "n": 2
+    },
+    "phase": "attempt",
+    "phase_provenance": "derived_from_attempt_scope",
+    "prev": "<volatile>",
+    "provenance": "OBSERVED",
+    "role": "developer",
+    "run_id": "ev-rich",
+    "schema": "kriya.attempt_evidence/1",
+    "seq": 7,
+    "t_mono_ms": "<volatile>",
+    "t_wall": "<volatile>",
+    "unit_id": "u1",
+    "unit_kind": "task",
+    "wire_seq": null
+   }
+  ],
+  "run_id": "ev-rich",
+  "truncated": false,
+  "truncated_tail": false
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "evidence.records",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": {
+  "evidence_directory": "<STATE>/attempt-evidence",
+  "state_directory": "<STATE>",
+  "trace_database": "<STATE>/traces.db"
+ }
+}

@@ -34,7 +34,7 @@ SLICES = frozenset(
     + [f"D{i}" for i in range(1, 4)] + [f"E{i}" for i in range(1, 15)] + [f"F{i}" for i in range(1, 6)]
     + [f"G{i}" for i in range(1, 6)] + [f"H{i}" for i in range(1, 6)] + [f"I{i}" for i in range(1, 5)]
     + ["J1", "J2", "K1", "K2", "L1", "L2", "M1", "M2", "M3", "N1", "N2", "O1", "O2", "O3", "P1", "P2", "Q1", "Q2"])
-DONE_SLICES = frozenset({"A1", "A2", "A3", "B1"})
+DONE_SLICES = frozenset({"A1", "A2", "A3", "B1", "B2"})
 
 # CURRENT-DEPENDENCY-MAP.md §3, the back-edges into kriya/workflow that close
 # the big cycle (TRACED to the import line there; MEASURED here): (source,
@@ -67,7 +67,6 @@ BACK_EDGES: Tuple[Tuple[str, str, bool], ...] = (
     ("kriya.static_analysis.scope", "kriya.workflow.file_integrity", False),
     ("kriya.static_analysis.service", "kriya.workflow.terminal_commit", True),
     ("kriya.kup.runtime_command_ops", "kriya.workflow.runtime_command_approval", False),
-    ("kriya.kup.application_outcome", "kriya.workflow.verification_authority", False),
     ("kriya.kup.execution", "kriya.workflow.checkpoint", True),
     ("kriya.knowledge.staging", "kriya.workflow.skill_extraction", False),
     ("kriya.core.model_qualification", "kriya.workflow.file_integrity", True),
@@ -82,7 +81,9 @@ _C3 = "approval helpers move to policy.approval / egress takes the client identi
 _M1 = "file write/commit mechanism moves to REPOSITORY"
 _D2 = "checkpoint/trace/history owned by STATE; kernel inputs passed as parameters"
 _D3 = "env/home/state-path resolution through config.environment / ConfigService"
-_B2 = "read-side use case moves into an APPLICATION service"
+_B2_KUP = ("B2 moved the read use case into an APPLICATION service; until the KriyaClient boundary exists the KUP adapter calls the "
+           "service directly (B4: run_kup_operation dispatches through LocalKriyaClient; O1: every kup/*_ops.py maps over the client)")
+_B2_MOVED = "moved with the B2 use case from kup into APPLICATION (count-neutral); the target is not on its module's public surface"
 _B3 = "run/approval/review use case moves into an APPLICATION service"
 _H2 = "deadline arrives in the request, not read from the run lease"
 _J1 = "skill extraction moves to SKILLS (public registry names)"
@@ -103,6 +104,11 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.analyzer.analyzer", "kriya.skills.skill"): ("P2", _P2),  # direction RETRIEVAL -> SKILLS
     ("kriya.analyzer.analyzer", "kriya.workflow.checkpoint"): ("D2", _D2),  # direction RETRIEVAL -> KERNEL
     ("kriya.analyzer.graph", "kriya.core.db"): ("P2", _P2),  # non-public FOUNDATION module
+    ("kriya.application.catalog", "kriya.tools.service"): ("K1", _B2_MOVED + " (K1: tools/service.py becomes toolbox.catalog)"),  # non-public TOOLBOX module (was kup.catalog_ops, O1)
+    ("kriya.application.history", "kriya.policy.telemetry"): ("P2", _B2_MOVED),  # non-public AUTHORITY module (was kup.application_outcome, O1)
+    ("kriya.application.history", "kriya.workflow.verification_authority"): ("P2", _B2_MOVED),  # non-public KERNEL module (was kup.application_outcome, B2)
+    ("kriya.application.project", "kriya.control.recovery"): ("P2", _B2_MOVED),  # non-public STATE module (was kup.cli_ops + kup.workspace_ops, O1)
+    ("kriya.application.project", "kriya.tools.git_metadata"): ("M2", _B2_MOVED + " (M2: git_metadata moves to kriya/repository)"),  # non-public EXECUTION module (was kup.workspace_ops, O1)
     ("kriya.capabilities.gradle", "kriya.workflow.jvm_module_ownership"): ("L1", _L1),  # direction EXECUTION -> KERNEL
     ("kriya.cli", "kriya.agents"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.cli", "kriya.agents.response_protocol"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
@@ -242,18 +248,13 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.knowledge.channels.repo_manifest", "kriya.skills.skill"): ("P2", _P2),  # non-public SKILLS module
     ("kriya.knowledge.staging", "kriya.skills.skill"): ("P2", _P2),  # non-public SKILLS module
     ("kriya.knowledge.staging", "kriya.workflow.skill_extraction"): ("J1", _J1),  # direction KNOWLEDGE -> KERNEL
-    ("kriya.kup.application_outcome", "kriya.policy.telemetry"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY
-    ("kriya.kup.application_outcome", "kriya.workflow.verification_authority"): ("B2", _B2),  # direction ADAPTER-KUP -> KERNEL
     ("kriya.kup.authority_ops", "kriya.config.authority_approval"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY
-    ("kriya.kup.catalog_ops", "kriya.skills.service"): ("O1", _O1),  # direction ADAPTER-KUP -> SKILLS
-    ("kriya.kup.catalog_ops", "kriya.tools.service"): ("O1", _O1),  # direction ADAPTER-KUP -> TOOLBOX
-    ("kriya.kup.cli_ops", "kriya.control.recovery"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
+    ("kriya.kup.catalog_ops", "kriya.application"): ("O1", _B2_KUP),  # direction ADAPTER-KUP -> APPLICATION (new in B2)
+    ("kriya.kup.cli_ops", "kriya.application"): ("B4", _B2_KUP),  # direction ADAPTER-KUP -> APPLICATION (new in B2)
     ("kriya.kup.cli_ops", "kriya.core.state_paths"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
+    ("kriya.kup.context_ops", "kriya.application"): ("O1", _B2_KUP),  # direction ADAPTER-KUP -> APPLICATION (new in B2)
     ("kriya.kup.context_ops", "kriya.core.llm"): ("O1", _O1),  # direction ADAPTER-KUP -> PROVIDER
-    ("kriya.kup.context_ops", "kriya.skills.service"): ("O1", _O1),  # direction ADAPTER-KUP -> SKILLS
-    ("kriya.kup.evidence_ops", "kriya.core.attempt_evidence.model"): ("O1", _O1),  # direction ADAPTER-KUP -> EVIDENCE
-    ("kriya.kup.evidence_ops", "kriya.core.attempt_evidence.reader"): ("O1", _O1),  # direction ADAPTER-KUP -> EVIDENCE
-    ("kriya.kup.evidence_ops", "kriya.core.state_paths"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
+    ("kriya.kup.evidence_ops", "kriya.application"): ("O1", _B2_KUP),  # direction ADAPTER-KUP -> APPLICATION (new in B2)
     ("kriya.kup.execution", "kriya.config.authority"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY
     ("kriya.kup.execution", "kriya.control.launch"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.execution", "kriya.control.persistence"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
@@ -262,8 +263,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.kup.execution", "kriya.core.state_paths"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.execution", "kriya.platform.toolchain_locator"): ("O1", _O1),  # non-public PLATFORM module
     ("kriya.kup.execution", "kriya.workflow.checkpoint"): ("B3", _B3),  # direction ADAPTER-KUP -> KERNEL
-    ("kriya.kup.inspect", "kriya.build_info"): ("P1", _P1),  # non-public FOUNDATION module
-    ("kriya.kup.inspect", "kriya.core.attempt_evidence.model"): ("O1", _O1),  # direction ADAPTER-KUP -> EVIDENCE
     ("kriya.kup.project_init_ops", "kriya.core.model_runtime"): ("O1", _O1),  # direction ADAPTER-KUP -> PROVIDER
     ("kriya.kup.review_ops", "kriya.control.launch"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.review_ops", "kriya.control.launch_approval"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY
@@ -275,9 +274,7 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.kup.serve", "kriya.config.authority"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY
     ("kriya.kup.store", "kriya.core.db"): ("O1", _O1),  # non-public FOUNDATION module
     ("kriya.kup.store", "kriya.core.state_paths"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
-    ("kriya.kup.workspace_ops", "kriya.control.recovery"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
-    ("kriya.kup.workspace_ops", "kriya.core.state_paths"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
-    ("kriya.kup.workspace_ops", "kriya.tools.git_metadata"): ("O1", _O1),  # direction ADAPTER-KUP -> EXECUTION
+    ("kriya.kup.workspace_ops", "kriya.application"): ("O1", _B2_KUP),  # direction ADAPTER-KUP -> APPLICATION (new in B2)
     ("kriya.mcp.containment_adapter", "kriya.mcp.capability"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.mcp.lifecycle", "kriya.tools.sandbox"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.mcp.mcp", "kriya.core.kernel"): ("P2", _P2),  # direction TOOLBOX -> KERNEL

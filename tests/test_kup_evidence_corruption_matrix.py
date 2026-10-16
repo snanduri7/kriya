@@ -240,7 +240,7 @@ def test_call_content_has_a_healthy_control_and_is_refused_from_every_damaged_mo
 
 
 def test_a_store_copied_under_another_name_attributes_nothing_in_the_workspace_scope_or_the_launch_summary():
-    from kriya.kup.evidence_ops import recorded_workspace_identity, store_summary
+    from kriya.application.evidence import recorded_workspace_identity, store_summary
     directory, _seqs = candidate_store("scope-orig")
     shutil.copytree(directory, os.path.join(os.path.dirname(directory), "scope-copy"))
     cfg = _cfg()

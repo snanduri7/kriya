@@ -23,12 +23,12 @@ from test_greenfield_runtime_end_to_end import Person, _callback, _fast  # noqa:
 from test_launch_approval import LID, _session
 
 import kriya.control.launch_approval as approval
+from kriya.application.history import STATUS_EXECUTED, application_outcome
 from kriya.config import AppConfig
 from kriya.control.persistence import load_launch_record
 from kriya.core import model_runtime
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.kup.application_outcome import STATUS_EXECUTED, application_outcome
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
 from kriya.workflow.state import GenerationState
 from kriya.workflow.workflow import WorkflowEngine

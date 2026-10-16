@@ -1,0 +1,66 @@
+{
+ "consistency": {
+  "acquisition_completed_at": "<volatile>",
+  "acquisition_started_at": "<volatile>",
+  "kind": "snapshot_copy",
+  "live_stream": false,
+  "snapshot_id": "<SNAPSHOT>",
+  "source_metadata_at_acquisition": {
+   "inode": "<volatile>",
+   "journal_size": null,
+   "mtime_ns": "<volatile>",
+   "shm_size": null,
+   "size": "<volatile>",
+   "wal_size": null
+  },
+  "source_metadata_changed": true,
+  "source_metadata_now": {
+   "inode": "<volatile>",
+   "journal_size": null,
+   "mtime_ns": "<volatile>",
+   "shm_size": "<volatile>",
+   "size": "<volatile>",
+   "wal_size": "<volatile>"
+  }
+ },
+ "data": {
+  "next_cursor": null,
+  "runs": [
+   {
+    "attempts": 1,
+    "display_goal": "linked goal",
+    "display_goal_source": "own",
+    "duration_sec": 2.0,
+    "failure_category": null,
+    "files_modified": "a.py",
+    "goal": "linked goal",
+    "milestone_group_id": null,
+    "milestone_index": null,
+    "milestone_total": null,
+    "run_id": "t-linked",
+    "status": "SUCCESS",
+    "timestamp": "2026-01-02 10:00:00"
+   }
+  ],
+  "workspace_scope": {
+   "basis": "evidence manifest workspace_identity",
+   "matched": 1,
+   "other": 1,
+   "scanned": 4,
+   "truncated": false,
+   "unattributed": 2,
+   "workspace_identity": "<WSID>"
+  }
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "history.list",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": {
+  "snapshot_directory": "<STATE>/kup-snapshots/<SNAPSHOT>",
+  "snapshot_id": "<SNAPSHOT>",
+  "state_directory": "<STATE>",
+  "trace_database": "<STATE>/traces.db"
+ }
+}

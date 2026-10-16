@@ -1,0 +1,57 @@
+{
+ "consistency": {
+  "acquisition_completed_at": "<volatile>",
+  "acquisition_started_at": "<volatile>",
+  "kind": "snapshot_copy",
+  "live_stream": false,
+  "snapshot_id": "<SNAPSHOT>",
+  "source_metadata_at_acquisition": {
+   "inode": "<volatile>",
+   "journal_size": null,
+   "mtime_ns": "<volatile>",
+   "shm_size": null,
+   "size": "<volatile>",
+   "wal_size": null
+  },
+  "source_metadata_changed": true,
+  "source_metadata_now": {
+   "inode": "<volatile>",
+   "journal_size": null,
+   "mtime_ns": "<volatile>",
+   "shm_size": "<volatile>",
+   "size": "<volatile>",
+   "wal_size": "<volatile>"
+  }
+ },
+ "data": {
+  "next_cursor": "<volatile>",
+  "runs": [
+   {
+    "attempts": 1,
+    "display_goal": "other goal",
+    "display_goal_source": "own",
+    "duration_sec": 4.0,
+    "failure_category": "quality_gate_failed",
+    "files_modified": "",
+    "goal": "other goal",
+    "milestone_group_id": null,
+    "milestone_index": null,
+    "milestone_total": null,
+    "run_id": "t-other",
+    "status": "FAILURE",
+    "timestamp": "2026-01-04 10:00:00"
+   }
+  ]
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "history.list",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": {
+  "snapshot_directory": "<STATE>/kup-snapshots/<SNAPSHOT>",
+  "snapshot_id": "<SNAPSHOT>",
+  "state_directory": "<STATE>",
+  "trace_database": "<STATE>/traces.db"
+ }
+}

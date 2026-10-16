@@ -204,7 +204,7 @@ def test_serve_refuses_a_foreign_argument_on_a_catalog_operation():
 def test_the_catalog_modules_do_not_directly_import_process_network_or_mcp_runtime_modules():
     # DIRECT imports only: kriya/mcp/__init__.py imports kriya.mcp.mcp, so the transitive set is larger. Nothing starts at import; the no-start guarantee is proven at runtime (tests/test_tool_service.py).
     forbidden = {"subprocess", "socket", "urllib.request", "http", "asyncio", "kriya.mcp.mcp", "kriya.core.kernel", "kriya.tools.process"}
-    for relative in ("kriya/kup/catalog_ops.py", "kriya/skills/service.py", "kriya/tools/service.py"):
+    for relative in ("kriya/kup/catalog_ops.py", "kriya/application/catalog.py", "kriya/skills/service.py", "kriya/tools/service.py"):
         tree = ast.parse((Path(__file__).resolve().parent.parent / relative).read_text(encoding="utf-8"))
         imports = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names} | {n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
         assert not any(i == f or i.startswith(f + ".") for i in imports for f in forbidden), (relative, sorted(imports))

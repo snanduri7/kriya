@@ -1,0 +1,30 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "approval": {
+   "reason": "TOOL_NOT_FOUND",
+   "recorded_tool_names": [],
+   "records_on_file": null,
+   "state": "UNKNOWN"
+  },
+  "authority_status": "no_findings",
+  "available": true,
+  "found": false,
+  "tool_id": "mcp:nope",
+  "unavailable_reason": null,
+  "workspace": {
+   "identity": "<WSID>",
+   "name": "Work Space",
+   "path": "<TMP>/Work Space"
+  }
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "tools.approval_state",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

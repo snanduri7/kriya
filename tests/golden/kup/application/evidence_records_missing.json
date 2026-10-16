@@ -1,0 +1,14 @@
+{
+ "consistency": null,
+ "data": null,
+ "error": {
+  "code": "EVIDENCE_STORE_NOT_FOUND",
+  "database_state": null,
+  "message": "no attempt-evidence store for run ev-none"
+ },
+ "observed_at": "<volatile>",
+ "operation": "evidence.records",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

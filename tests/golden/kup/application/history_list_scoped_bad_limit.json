@@ -1,0 +1,14 @@
+{
+ "consistency": null,
+ "data": null,
+ "error": {
+  "code": "INVALID_REQUEST",
+  "database_state": null,
+  "message": "limit must be between 1 and 200"
+ },
+ "observed_at": "<volatile>",
+ "operation": "history.list",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": null
+}

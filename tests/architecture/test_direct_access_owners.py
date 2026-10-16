@@ -29,7 +29,7 @@ Removal slices (SLICE-PLAN.md, by the slice whose goal names the site; P2
 where no slice claims it): subprocess L2 (ProcessPort/ExecutionPort), M1
 (snapshot/commit mechanism), M2 (worktree, checkpoint git helpers,
 git_metadata), M3 (RepositoryPort for every remaining git call); env/home D3
-(one environment reader); cwd D3/J1; sqlite D2 (history store), O1, B2;
+(one environment reader); cwd D3/J1; sqlite D2 (history store), O1 (the B2 site moved to kup.inspect);
 http I2; provider words I3; skill directory reads J2; tool registry K1/K2;
 `.kriya` paths D2/D3/M2.
 """
@@ -164,9 +164,10 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
     "sqlite": {
         "kriya.core.role_metrics": (1, "P2", _P2),
         "kriya.kup.acquire": (5, "D2", "snapshot acquisition moves to control.history (HistoryStore)"),
-        "kriya.kup.inspect": (12, "O1", "KUP reaches history/traces through KriyaClient only"),
+        "kriya.kup.inspect": (13, "O1", "KUP reaches history/traces through KriyaClient only (13 = 12 + the batched run_events query "
+                                          "moved here from kup.workspace_ops in B2: APPLICATION owns no sqlite, so HistoryService reads it "
+                                          "through the TraceHistory port this module implements)"),
         "kriya.kup.store": (1, "D2", "snapshot store moves to control.history (HistoryStore)"),
-        "kriya.kup.workspace_ops": (1, "B2", "HistoryService (read side) takes the events query"),
         "kriya.metrics.evidence": (2, "P2", _P2),
         "kriya.production_doctor": (2, "P2", _P2),
         "kriya.workflow.context_certification": (2, "P2", _P2),
@@ -200,7 +201,6 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         "kriya.core.logging_setup": (1, "D3", _D3),
         "kriya.core.model_certification": (1, "D3", _D3),
         "kriya.core.model_qualification": (1, "D3", _D3),
-        "kriya.kup.workspace_ops": (1, "P2", _P2),
         "kriya.mcp.invocation_approval": (2, "D3", _D3),
         "kriya.metrics.adjudication": (1, "D3", _D3),
         "kriya.policy.approved_sources": (1, "P2", _P2),

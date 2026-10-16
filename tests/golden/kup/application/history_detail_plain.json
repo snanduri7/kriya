@@ -1,0 +1,197 @@
+{
+ "consistency": {
+  "acquisition_completed_at": "<volatile>",
+  "acquisition_started_at": "<volatile>",
+  "kind": "snapshot_copy",
+  "live_stream": false,
+  "snapshot_id": "<SNAPSHOT>",
+  "source_metadata_at_acquisition": {
+   "inode": "<volatile>",
+   "journal_size": null,
+   "mtime_ns": "<volatile>",
+   "shm_size": null,
+   "size": "<volatile>",
+   "wal_size": null
+  },
+  "source_metadata_changed": true,
+  "source_metadata_now": {
+   "inode": "<volatile>",
+   "journal_size": null,
+   "mtime_ns": "<volatile>",
+   "shm_size": "<volatile>",
+   "size": "<volatile>",
+   "wal_size": "<volatile>"
+  }
+ },
+ "data": {
+  "application_outcome": {
+   "availability": "recorded",
+   "data": {
+    "reason": "no_runtime_execution_recorded",
+    "status": "NOT_APPLICABLE"
+   },
+   "provenance": "derived:runs.gate_outcomes",
+   "reason": null
+  },
+  "attribution": {
+   "availability": "not_recorded",
+   "data": null,
+   "provenance": "not_persisted",
+   "reason": "the baseline persists failure categories, not causal attribution"
+  },
+  "comparisons": {
+   "availability": "not_recorded",
+   "data": null,
+   "provenance": "not_persisted",
+   "reason": "the trace row stores modified paths, not before/after text"
+  },
+  "context": {
+   "availability": "not_recorded",
+   "data": null,
+   "provenance": "not_persisted",
+   "reason": "the trace row persists context only inside run_events (context.* events); no context record is stored"
+  },
+  "diagnostics": {
+   "availability": "not_recorded",
+   "data": null,
+   "provenance": "not_persisted",
+   "reason": "no diagnostics record is persisted"
+  },
+  "evidence_records": {
+   "availability": "recorded",
+   "data": [],
+   "provenance": "runs.evidence_records",
+   "reason": null
+  },
+  "failure_report": {
+   "availability": "recorded",
+   "data": [],
+   "provenance": "runs.failure_report",
+   "reason": null
+  },
+  "fields": {
+   "active_skills": {
+    "availability": "recorded",
+    "data": "",
+    "provenance": "runs.active_skills",
+    "reason": null
+   },
+   "evidence_records": {
+    "availability": "recorded",
+    "data": "[]",
+    "provenance": "runs.evidence_records",
+    "reason": null
+   },
+   "failure_report": {
+    "availability": "recorded",
+    "data": "[]",
+    "provenance": "runs.failure_report",
+    "reason": null
+   },
+   "gate_outcomes": {
+    "availability": "recorded",
+    "data": "[]",
+    "provenance": "runs.gate_outcomes",
+    "reason": null
+   },
+   "generation_metrics": {
+    "availability": "recorded",
+    "data": "{}",
+    "provenance": "runs.generation_metrics",
+    "reason": null
+   },
+   "model_hops": {
+    "availability": "recorded",
+    "data": "[]",
+    "provenance": "runs.model_hops",
+    "reason": null
+   },
+   "retrieved_chunks": {
+    "availability": "recorded",
+    "data": "[]",
+    "provenance": "runs.retrieved_chunks",
+    "reason": null
+   },
+   "run_events": {
+    "availability": "recorded",
+    "data": "[{\"kind\": \"egress.authority\", \"attempt\": 0, \"source\": \"workflow\", \"authority\": \"auxiliary\", \"message\": \"x\", \"failure_type\": null, \"operation\": null, \"details\": {}, \"created_at\": 1.0}]",
+    "provenance": "runs.run_events",
+    "reason": null
+   }
+  },
+  "gate_outcomes": {
+   "availability": "recorded",
+   "data": [],
+   "provenance": "runs.gate_outcomes",
+   "reason": null
+  },
+  "generation_metrics": {
+   "availability": "recorded",
+   "data": {},
+   "provenance": "runs.generation_metrics",
+   "reason": null
+  },
+  "model_hops": {
+   "availability": "recorded",
+   "data": [],
+   "provenance": "runs.model_hops",
+   "reason": null
+  },
+  "output": {
+   "availability": "not_recorded",
+   "data": null,
+   "provenance": "not_persisted",
+   "reason": "Developer output is not persisted"
+  },
+  "retrieved_chunks": {
+   "availability": "recorded",
+   "data": [],
+   "provenance": "runs.retrieved_chunks",
+   "reason": null
+  },
+  "run": {
+   "attempts": 1,
+   "display_goal": "old goal",
+   "display_goal_source": "own",
+   "duration_sec": 1.0,
+   "failure_category": null,
+   "files_modified": "",
+   "goal": "old goal",
+   "milestone_group_id": null,
+   "milestone_index": null,
+   "milestone_total": null,
+   "run_id": "t-old",
+   "status": "SUCCESS",
+   "timestamp": "2026-01-01 10:00:00"
+  },
+  "run_events": {
+   "availability": "recorded",
+   "data": [
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "created_at": "<volatile>",
+     "details": {},
+     "failure_type": null,
+     "kind": "egress.authority",
+     "message": "x",
+     "operation": null,
+     "source": "workflow"
+    }
+   ],
+   "provenance": "runs.run_events",
+   "reason": null
+  }
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "history.detail",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": {
+  "snapshot_directory": "<STATE>/kup-snapshots/<SNAPSHOT>",
+  "snapshot_id": "<SNAPSHOT>",
+  "state_directory": "<STATE>",
+  "trace_database": "<STATE>/traces.db"
+ }
+}

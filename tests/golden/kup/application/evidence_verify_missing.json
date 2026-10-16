@@ -1,0 +1,28 @@
+{
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "blob_problems": [],
+  "broken_seq": null,
+  "detail": "no store for this run",
+  "head_digest": null,
+  "record_count": 0,
+  "run_id": "ev-none",
+  "seal": null,
+  "sealed": false,
+  "status": "NOT_FOUND",
+  "verified_at": "<volatile>"
+ },
+ "error": null,
+ "observed_at": "<volatile>",
+ "operation": "evidence.verify",
+ "request_id": "golden",
+ "schema_version": 1,
+ "source": {
+  "evidence_directory": "<STATE>/attempt-evidence",
+  "state_directory": "<STATE>",
+  "trace_database": "<STATE>/traces.db"
+ }
+}

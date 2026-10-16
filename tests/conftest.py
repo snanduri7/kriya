@@ -250,7 +250,7 @@ MODULE_TIER_FILES = {
         "test_workflow_recovery_handback.py"
     }),
     "application": frozenset({
-        "test_kup_catalog.py", "test_kup_change_review.py", "test_kup_config_approval.py", "test_kup_execution.py",
+        "test_application_services.py", "test_kup_catalog.py", "test_kup_change_review.py", "test_kup_config_approval.py", "test_kup_execution.py",
         "test_kup_project_context.py", "test_kup_project_init.py", "test_kup_runtime_command_review.py",
         "test_kup_workspace.py", "test_launch_approval.py"
     }),

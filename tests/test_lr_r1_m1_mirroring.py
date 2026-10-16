@@ -162,8 +162,9 @@ def test_no_production_code_reads_the_store():
                # The doctor's evidence.attempt_recorder row (read-only diagnostics, outside the
                # workflow/control/policy/agents/tools/core packages design §9.1 forbids).
                "kriya/production_doctor.py",
-               # Run Cockpit v1.1 slice 1A-1: the UI read facade (KUP evidence operations), read-only over the reader API.
-               "kriya/kup/evidence_ops.py"}
+               # Run Cockpit v1.1 slice 1A-1: the UI read facade, read-only over the reader API (the KUP evidence operations'
+               # use cases, owned by the application EvidenceService since full-modularization B2).
+               "kriya/application/evidence.py"}
     for path in (ROOT / "kriya").rglob("*.py"):
         rel = path.relative_to(ROOT).as_posix()
         if rel in allowed:
