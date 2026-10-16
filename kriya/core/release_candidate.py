@@ -50,7 +50,7 @@ def production_config_identity(config_path: str) -> Dict[str, Any]:
     values after profile expansion."""
     from kriya.config.authority_approval import build_security_field_records, compute_set_digest
     from kriya.config.config import resolve_config_state
-    from kriya.control.workspace_identity import workspace_identity
+    from kriya.context.workspace_identity import workspace_identity
 
     with open(config_path, "rb") as handle:
         content_sha256 = hashlib.sha256(handle.read()).hexdigest()

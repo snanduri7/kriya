@@ -29,12 +29,12 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from kriya.context.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.contracts import ContractRegistry, ContractRegistryCorruptError, ContractRegistryTransitionError
 from kriya.control.control_store import write_control_file
 from kriya.control.run_record import RunRecord
 from kriya.control.state import ControlState
-from kriya.control.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
 from kriya.workflow.edit_safety import content_revision, read_file_revision
 from kriya.workflow.file_integrity import raw_digest
 

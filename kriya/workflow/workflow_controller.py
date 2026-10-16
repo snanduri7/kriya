@@ -90,6 +90,7 @@ from kriya.agents.contracts import (
     parse_planner_structured_output,
 )
 from kriya.analyzer.graph import DependencyGraph
+from kriya.context.workspace_identity import json_document_is_ownerless
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.commit_state import assess_workspace_commit_state
 from kriya.control.contracts import ContractRegistry, ContractRegistryCorruptError
@@ -122,7 +123,6 @@ from kriya.control.run_coordinator import (
 )
 from kriya.control.run_record import RunLifecycle
 from kriya.control.state import ControlState
-from kriya.control.workspace_identity import json_document_is_ownerless
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.llm import InferenceDeadlineError
 from kriya.policy.filesystem import WriteScopeMode

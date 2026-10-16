@@ -21,11 +21,11 @@ from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
 
+from kriya.context.workspace_identity import workspace_identity
 from kriya.control.commit_state import UncertainWorkspaceStateError, assess_workspace_commit_state
 from kriya.control.persistence import load_run_record, save_run_record
 from kriya.control.run_ownership import acquire_run_lock
 from kriya.control.run_record import IllegalRunTransitionError, RunLifecycle, RunRecord
-from kriya.control.workspace_identity import workspace_identity
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.logging_setup import run_log
 
@@ -80,7 +80,7 @@ _ACTIVE_RUN: ContextVar[Optional[RunContext]] = ContextVar(
 
 
 def _canonical_workspace(workspace_path: str) -> str:
-    from kriya.control.workspace_identity import canonical_workspace  # PLAT-017: one canonical form everywhere
+    from kriya.context.workspace_identity import canonical_workspace  # PLAT-017: one canonical form everywhere
 
     return canonical_workspace(workspace_path)
 

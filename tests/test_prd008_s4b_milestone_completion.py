@@ -38,6 +38,7 @@ from _milestone_proof_harness import (  # shared harness, see its docstring
 
 import kriya.workflow.workflow_controller as workflow_controller_module
 from kriya.agents.contracts import MilestoneV2
+from kriya.context.workspace_identity import ownership_metadata
 from kriya.control.commit_state import UncertainWorkspaceStateError
 from kriya.control.persistence import load_run_record, run_record_path, save_run_record, scan_run_records
 from kriya.control.recovery import (
@@ -50,7 +51,6 @@ from kriya.control.recovery import (
 from kriya.control.retention import prune_run_state
 from kriya.control.run_coordinator import begin_mutating_run
 from kriya.control.run_record import RunLifecycle, RunRecord
-from kriya.control.workspace_identity import ownership_metadata
 from kriya.workflow.edit_safety import commit_evidence_dir
 from kriya.workflow.milestone_completion import (
     COMMIT_EVIDENCE_MISSING,

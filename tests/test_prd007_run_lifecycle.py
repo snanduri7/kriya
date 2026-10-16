@@ -23,6 +23,7 @@ from _strict_doubles import strict_config, strict_kernel
 
 import kriya.control.persistence as persistence_module
 import kriya.control.run_coordinator as run_coordinator_module
+from kriya.context.workspace_identity import ownership_metadata
 from kriya.control.persistence import (
     UnreadableRunRecordError,
     list_run_records,
@@ -46,7 +47,6 @@ from kriya.control.run_record import (
     RunRecord,
     UnsupportedRunRecordError,
 )
-from kriya.control.workspace_identity import ownership_metadata
 from kriya.workflow.checkpoint import compute_config_fingerprint
 from kriya.workflow.edit_safety import (
     CommitState,

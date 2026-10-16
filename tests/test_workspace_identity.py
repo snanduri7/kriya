@@ -2,10 +2,10 @@ import json
 
 import pytest
 
+from kriya.context.workspace_identity import WorkspaceOwnershipError, workspace_identity
 from kriya.control.decisions import load_decision_ledger
 from kriya.control.persistence import load_control_state, save_control_state
 from kriya.control.state import ControlState
-from kriya.control.workspace_identity import WorkspaceOwnershipError, workspace_identity
 from kriya.workflow.workflow_controller import _migrate_legacy_controller_ownership
 
 

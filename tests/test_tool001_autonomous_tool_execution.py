@@ -36,7 +36,7 @@ from _plugin_test_support import load_core_tools_module
 from _strict_doubles import strict_kernel
 
 from kriya.config.config import AppConfig, AutonomyConfig, MCPLifecycleConfig
-from kriya.control.workspace_identity import workspace_identity
+from kriya.context.workspace_identity import workspace_identity
 from kriya.core.kernel import Kernel
 from kriya.core.registry import ComponentRegistryError
 from kriya.mcp.capability import compute_mcp_capability_profile_digest, resolve_mcp_capability_profile

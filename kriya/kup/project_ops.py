@@ -18,7 +18,7 @@ import os
 import unicodedata
 from typing import Any, Dict
 
-from kriya.control.workspace_identity import canonical_workspace, workspace_identity
+from kriya.context.workspace_identity import canonical_workspace, workspace_identity
 from kriya.kup import policy
 from kriya.kup.inspect import envelope, live_consistency
 from kriya.kup.store import SnapshotError

@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import Milestone, MilestoneMode, MilestoneV2
+from kriya.context.workspace_identity import ownership_metadata, validate_ownership
 from kriya.control.contracts import (
     ContractRegistryCorruptError,
     ContractState,
@@ -46,7 +47,6 @@ from kriya.control.persistence import (
 )
 from kriya.control.run_coordinator import annotate_run, coordinated_mutation, owning_run_commits
 from kriya.control.run_record import COMMIT_COMMITTED
-from kriya.control.workspace_identity import ownership_metadata, validate_ownership
 from kriya.workflow.attempt import _build_python_runtime_grounding
 from kriya.workflow.checkpoint import compute_registry_hash, delete_checkpoint, list_checkpoints
 from kriya.workflow.context_projection import (

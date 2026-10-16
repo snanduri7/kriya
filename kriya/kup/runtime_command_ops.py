@@ -14,10 +14,10 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from kriya.context.workspace_identity import workspace_identity
 from kriya.control.launch import valid_launch_id
 from kriya.control.launch_approval import KIND_RUNTIME, REVIEW_ID_RE, WORKING_DIRECTORY_KIND
 from kriya.control.persistence import UnreadableRunRecordError, load_launch_record
-from kriya.control.workspace_identity import workspace_identity
 from kriya.kup import policy
 from kriya.kup.inspect import envelope, live_consistency
 from kriya.kup.review_ops import _find_review

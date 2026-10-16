@@ -19,10 +19,10 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from kriya.context.workspace_identity import workspace_identity
 from kriya.control.launch import valid_launch_id
 from kriya.control.launch_approval import _sha, candidate_digest, split_reason
 from kriya.control.persistence import UnreadableRunRecordError, load_launch_record, load_launch_review_diff
-from kriya.control.workspace_identity import workspace_identity
 from kriya.kup import policy
 from kriya.kup.inspect import envelope, live_consistency
 from kriya.kup.store import SnapshotError

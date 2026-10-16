@@ -21,7 +21,7 @@ const available = existsSync(KRIYA) && existsSync(PYTHON);
 
 const WORKSPACES = `
 import os, subprocess, sys
-from kriya.control.workspace_identity import workspace_identity
+from kriya.context.workspace_identity import workspace_identity
 from kriya.core.attempt_evidence.writer import AttemptEvidenceWriter
 from kriya.core.trace import TraceLogger
 state, base = os.environ['KRIYA_STATE_DIR'], sys.argv[1]

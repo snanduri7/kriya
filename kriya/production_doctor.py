@@ -486,8 +486,8 @@ def _check_core_plugins(ctx: _Context) -> DoctorCheck:
 
 def _check_identity_lock(ctx: _Context) -> DoctorCheck:
     """Read-only: the lock is probed, never taken, and its file never created."""
+    from kriya.context.workspace_identity import workspace_identity
     from kriya.control.run_ownership import _lock_path, probe_run_lock
-    from kriya.control.workspace_identity import workspace_identity
 
     remediation = "Use a writable POSIX workspace and wait for the current mutating Kriya run to finish."
     from kriya.platform.capabilities import CapabilityStatus

@@ -629,9 +629,9 @@ def contract_registry_fingerprint(workspace_path: str) -> Fingerprint:
     through the strict loader. An absent registry is the valid empty
     registry (so a checkpoint that recorded a non-empty one reads CHANGED);
     an unreadable one is UNAVAILABLE, which never matches (fail closed)."""
+    from kriya.context.workspace_identity import WorkspaceOwnershipError
     from kriya.control.contracts import CONTRACT_REGISTRY_SCHEMA_VERSION, ContractRegistryCorruptError
     from kriya.control.persistence import load_contract_registry
-    from kriya.control.workspace_identity import WorkspaceOwnershipError
 
     try:
         registry = load_contract_registry(workspace_path)

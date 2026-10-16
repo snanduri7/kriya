@@ -13,10 +13,10 @@ from test_launch_approval import FILES, LID, REASON, _session, _wait_pending
 import kriya.cli as cli
 import kriya.control.launch_approval as approval
 from kriya.cli import main
+from kriya.context.workspace_identity import workspace_identity
 from kriya.control import launch as launch_module
 from kriya.control.persistence import launch_review_decision_path, load_launch_record
 from kriya.control.run_coordinator import begin_mutating_run
-from kriya.control.workspace_identity import workspace_identity
 from kriya.workflow.runtime_command_approval import RuntimeCommandDecision, build_subject
 
 CWD = "/private/var/kriya/worktrees/run-1"

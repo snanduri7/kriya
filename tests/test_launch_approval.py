@@ -16,11 +16,11 @@ from click.testing import CliRunner
 import kriya.control.launch_approval as approval
 from kriya.cli import main
 from kriya.config import AppConfig
+from kriya.context.workspace_identity import canonical_workspace, workspace_identity
 from kriya.control import launch as launch_module
 from kriya.control.launch import LaunchSession
 from kriya.control.persistence import launch_review_decision_path, load_launch_record
 from kriya.control.run_coordinator import begin_mutating_run
-from kriya.control.workspace_identity import canonical_workspace, workspace_identity
 from kriya.kup.cli_ops import run_kup_operation
 
 LID = "20261010T101010-abcdef01"

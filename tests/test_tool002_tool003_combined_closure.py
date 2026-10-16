@@ -43,7 +43,7 @@ import threading
 import pytest
 
 from kriya.config.config import AppConfig, AutonomyConfig, MCPLifecycleConfig
-from kriya.control.workspace_identity import workspace_identity
+from kriya.context.workspace_identity import workspace_identity
 from kriya.core.kernel import Kernel
 from kriya.mcp.capability import compute_mcp_capability_profile_digest, resolve_mcp_capability_profile
 from kriya.mcp.invocation_approval import (

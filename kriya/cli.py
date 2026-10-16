@@ -334,12 +334,12 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
     click.echo("\nChecking workspace/control plane:")
     workspace_path = os.getcwd()
     try:
+        from kriya.context.workspace_identity import workspace_identity
         from kriya.control.persistence import (
             load_artifact_registry,
             load_contract_registry,
             load_control_state,
         )
-        from kriya.control.workspace_identity import workspace_identity
         from kriya.core.llm import is_local_url
         from kriya.workflow.checkpoint import compute_base_commit, compute_tree_hash
 
@@ -2073,7 +2073,7 @@ def mcp_inspect(ctx: click.Context) -> None:
         click.echo("No MCP servers configured.")
         return
 
-    from kriya.control.workspace_identity import workspace_identity
+    from kriya.context.workspace_identity import workspace_identity
     from kriya.mcp.invocation_approval import (
         is_tool_approved,
         load_approval_artifact,
@@ -2134,7 +2134,7 @@ def mcp_approve(ctx: click.Context, tool_name: str, confirm: bool) -> None:
         click.secho("No MCP servers configured - nothing to approve.", fg="yellow")
         return
 
-    from kriya.control.workspace_identity import workspace_identity
+    from kriya.context.workspace_identity import workspace_identity
     from kriya.mcp.invocation_approval import (
         add_approval,
         empty_artifact,
@@ -2907,8 +2907,8 @@ def _launched_generate(ctx, launch_id, goal, file, yes, knowledge_policy, ack_kn
     the preflight is re-resolved HERE (the host's copy is never trusted), the launch record exists before the workflow starts - so even a
     refused or failing launch is linked to its workspace - and it is sealed whatever happens. Nothing is auto-approved: no -y, knowledge
     policy strict, and an approval prompt finds no terminal and stops the run."""
+    from kriya.context.workspace_identity import canonical_workspace, workspace_identity
     from kriya.control.launch import LaunchRefused, LaunchSession, validate_goal
-    from kriya.control.workspace_identity import canonical_workspace, workspace_identity
     from kriya.kup.execution import KNOWLEDGE_POLICY, build_preflight
 
     extra = [name for name, value in (("GOAL", goal), ("--file", file), ("--yes", yes), ("--resume", resume), ("--resume-id", resume_id),

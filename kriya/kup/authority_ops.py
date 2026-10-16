@@ -32,7 +32,7 @@ from kriya.config.authority_approval import (
     review_fingerprint,
     validate_trust_path_outside_workspace,
 )
-from kriya.control.workspace_identity import workspace_identity
+from kriya.context.workspace_identity import workspace_identity
 from kriya.kup import policy
 from kriya.kup.execution import _CWD_LOCK
 from kriya.kup.inspect import envelope, live_consistency

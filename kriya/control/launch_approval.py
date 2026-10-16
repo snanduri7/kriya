@@ -25,6 +25,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from kriya.context.workspace_identity import canonical_workspace, workspace_identity
 from kriya.control.persistence import (
     UnreadableRunRecordError,
     load_launch_record,
@@ -32,7 +33,6 @@ from kriya.control.persistence import (
     save_launch_review_decision,
 )
 from kriya.control.run_ownership import probe_run_lock
-from kriya.control.workspace_identity import canonical_workspace, workspace_identity
 from kriya.workflow.edit_safety import FileRevisionConflict
 
 logger = logging.getLogger(__name__)

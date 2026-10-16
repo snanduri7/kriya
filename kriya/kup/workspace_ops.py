@@ -1,7 +1,7 @@
 """KUP workspace operations (GUI M5): ``workspace.describe`` and the workspace scope of ``history.list``.
 
 Kriya is the only interpreter of a folder. The desktop host picks a path; everything it may show about that path comes from here:
-the canonical spelling and identity Kriya itself uses (kriya/control/workspace_identity.py), what Git reports, the recovery
+the canonical spelling and identity Kriya itself uses (kriya/context/workspace_identity.py), what Git reports, the recovery
 assessment, and which state directory Kriya resolves. Read-only: nothing is created, locked, written or executed from the folder
 (``describe_checkout`` disables fsmonitor and optional locks). A folder is never classified as greenfield or brownfield: an empty
 directory, a Git checkout, a plain project and a modified repository are all reported by the same fields.
@@ -17,8 +17,8 @@ import os
 import sqlite3
 from typing import Any, Dict, Iterable, List, Optional
 
+from kriya.context.workspace_identity import canonical_workspace, workspace_identities, workspace_identity
 from kriya.control.recovery import STATUS_RUN_ACTIVE, assess_recovery
-from kriya.control.workspace_identity import canonical_workspace, workspace_identities, workspace_identity
 from kriya.core.state_paths import resolve_state_directory
 from kriya.kup import policy
 from kriya.kup.evidence_ops import _recorded_evidence_id, recorded_workspace_identity

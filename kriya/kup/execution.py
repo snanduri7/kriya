@@ -17,11 +17,11 @@ import os
 import threading
 from typing import Any, Dict, List, Optional
 
+from kriya.context.workspace_identity import workspace_identity
 from kriya.control.launch import PHASE_ENDED, PHASE_STARTING, valid_launch_id
 from kriya.control.persistence import UnreadableRunRecordError, load_launch_record, load_run_record
 from kriya.control.recovery import STATUS_CLEAN, STATUS_RUN_ACTIVE, assess_recovery
 from kriya.control.run_ownership import probe_run_lock
-from kriya.control.workspace_identity import workspace_identity
 from kriya.core.state_paths import StateDirectoryError, resolve_state_directory
 from kriya.kup import evidence_ops, policy
 from kriya.kup.inspect import envelope, live_consistency, source_block

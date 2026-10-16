@@ -257,7 +257,7 @@ def test_representative_operations_give_equal_typed_results_through_both_transpo
     rich_store("par-rich")
     ws = tmp_path / "ws"
     ws.mkdir()
-    writer = AttemptEvidenceWriter(state_dir(), "par-ev", capture=model.CAPTURE_FULL, manifest={"workspace_identity": __import__("kriya.control.workspace_identity", fromlist=["x"]).workspace_identity(str(ws)), "workspace_path": str(ws)})
+    writer = AttemptEvidenceWriter(state_dir(), "par-ev", capture=model.CAPTURE_FULL, manifest={"workspace_identity": __import__("kriya.context.workspace_identity", fromlist=["x"]).workspace_identity(str(ws)), "workspace_path": str(ws)})
     writer.append("run.opened", {})
     writer.seal("run_closed")
     seed_trace_run("par-trace", {"run_id": "par-ev", "status": "OPEN", "capture": "full"})

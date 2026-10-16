@@ -17,12 +17,12 @@ from click.testing import CliRunner
 
 from kriya.cli import main
 from kriya.config import AppConfig
+from kriya.context.workspace_identity import canonical_workspace, workspace_identity
 from kriya.control import launch as launch_module
 from kriya.control.launch import GOAL_MAX_CHARS, LaunchRefused, LaunchSession, goal_digest, valid_launch_id
 from kriya.control.persistence import launch_record_path, load_launch_record, load_run_record
 from kriya.control.run_coordinator import begin_mutating_run, coordinated_mutation
 from kriya.control.run_ownership import acquire_run_lock
-from kriya.control.workspace_identity import canonical_workspace, workspace_identity
 from kriya.kup import policy, serve
 from kriya.kup.cli_ops import run_kup_operation
 

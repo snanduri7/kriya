@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from kriya.analyzer.analyzer import chunk_file_syntactically
 from kriya.analyzer.graph import DependencyGraph
 from kriya.analyzer.java_members import JavaMember, extract_java_members
-from kriya.control.workspace_identity import workspace_identity
+from kriya.context.workspace_identity import workspace_identity
 from kriya.workflow.checkpoint import compute_workspace_fingerprint
 from kriya.workflow.proposal_binding import EvidenceBinding, bind_evidence, sha256_file
 from kriya.workflow.semantic_region_authority import stable_member_key

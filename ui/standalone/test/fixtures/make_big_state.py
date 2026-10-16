@@ -13,7 +13,7 @@ import time
 
 os.environ.setdefault("KRIYA_MODEL_RUNTIME_PROBE", "0")
 
-from kriya.control.workspace_identity import canonical_workspace, workspace_identity  # noqa: E402
+from kriya.context.workspace_identity import canonical_workspace, workspace_identity  # noqa: E402
 from kriya.core.attempt_evidence import model  # noqa: E402
 from kriya.core.attempt_evidence.writer import AttemptEvidenceWriter  # noqa: E402
 from kriya.core.trace import TraceLogger  # noqa: E402

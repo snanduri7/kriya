@@ -16,7 +16,7 @@ from pathlib import Path
 from _kup_evidence_fixtures import seed_trace_run, state_dir
 
 from kriya.config import AppConfig
-from kriya.control.workspace_identity import workspace_identity
+from kriya.context.workspace_identity import workspace_identity
 from kriya.core.attempt_evidence import model
 from kriya.core.attempt_evidence.writer import AttemptEvidenceWriter
 from kriya.core.state_paths import trace_db_path

@@ -63,7 +63,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.config.authority import ConfigAuthorityViolation, get_field_value
-from kriya.control.workspace_identity import workspace_identity
+from kriya.context.workspace_identity import workspace_identity
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 AUTHORITY_SCHEMA_VERSION = 1

@@ -251,10 +251,10 @@ def test_every_error_code_is_producible():
             produced.add(run_kup_operation(AppConfig(), {"operation": "configuration.approve", "workspace": folder, "fingerprint": reviewed})["error"]["code"])  # APPROVAL_UNAVAILABLE
     # change_approval.review: a review that is not there, one whose diff was never stored, and one whose stored diff does not match its digests
     with tempfile.TemporaryDirectory() as scratch:
+        from kriya.context.workspace_identity import canonical_workspace, workspace_identity
         from kriya.control.launch import LaunchSession
         from kriya.control.launch_approval import build_pending
         from kriya.control.persistence import load_launch_record, save_launch_record, save_launch_review_diff
-        from kriya.control.workspace_identity import canonical_workspace, workspace_identity
         folder = os.path.join(scratch, "proj")
         os.mkdir(folder)
         canonical = canonical_workspace(folder)

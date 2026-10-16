@@ -45,7 +45,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional, Tuple
 
-from kriya.control.workspace_identity import workspace_identity
+from kriya.context.workspace_identity import workspace_identity
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.policy.model import MCPCapabilityProfileIdentity, MCPToolIdentity
 

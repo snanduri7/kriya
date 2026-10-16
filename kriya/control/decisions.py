@@ -25,9 +25,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
+from kriya.context.workspace_identity import WorkspaceOwnershipError, workspace_identity
 from kriya.control.control_store import write_control_file
 from kriya.control.persistence import decision_ledger_path
-from kriya.control.workspace_identity import WorkspaceOwnershipError, workspace_identity
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.workflow.edit_safety import read_file_revision
 

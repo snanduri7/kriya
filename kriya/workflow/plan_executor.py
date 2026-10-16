@@ -289,7 +289,7 @@ def select_work_unit_checkpoint(
     }
     if resume_id and single_unit_plan:
         return False, resume_id, dict(base, code=CHECKPOINT_SELECTED, checkpoint=resume_id, explicit=True)
-    from kriya.control.workspace_identity import WorkspaceOwnershipError
+    from kriya.context.workspace_identity import WorkspaceOwnershipError
     from kriya.workflow.checkpoint import list_checkpoints
 
     try:

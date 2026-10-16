@@ -256,8 +256,8 @@ MODULE_TIER_FILES = {
     }),
     "context": frozenset({
         "test_backend_readiness_004_platform_paths.py", "test_linux_oci_workspace_identity.py",
-        "test_plat002_outside_workspace_identity.py", "test_state001_checkpoint_workspace_identity.py",
-        "test_workspace_identity.py"
+        "test_plat002_outside_workspace_identity.py", "test_request_context.py",
+        "test_state001_checkpoint_workspace_identity.py", "test_workspace_identity.py"
     }),
     "authority": frozenset({
         "test_architecture_regression_index.py", "test_authority_cli_refusal.py",

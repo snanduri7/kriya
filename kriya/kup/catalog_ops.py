@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 from typing import Any, Callable, Dict, Optional
 
-from kriya.control.workspace_identity import workspace_identity
+from kriya.context.workspace_identity import workspace_identity
 from kriya.kup import policy
 from kriya.kup.execution import _CWD_LOCK, _load_in
 from kriya.kup.inspect import envelope, live_consistency

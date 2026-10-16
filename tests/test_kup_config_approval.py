@@ -25,7 +25,7 @@ from click.testing import CliRunner
 from kriya.cli import main
 from kriya.config import AppConfig
 from kriya.config import authority_approval as aa
-from kriya.control.workspace_identity import canonical_workspace
+from kriya.context.workspace_identity import canonical_workspace
 from kriya.kup import policy, serve
 from kriya.kup.cli_ops import run_kup_operation
 

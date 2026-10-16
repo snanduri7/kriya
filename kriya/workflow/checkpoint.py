@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
-from kriya.control.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
+from kriya.context.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
 from kriya.workflow.resume_fingerprints import (
     CHECKPOINT_KEY as RESUME_FINGERPRINTS_KEY,
 )

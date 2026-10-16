@@ -103,8 +103,8 @@ _EVIDENCE_TO_CYCLE = {
 
 def canonical_workspace(workspace_path: str) -> str:
     """The same canonical form begin_mutating_run locks and records (PLAT-017:
-    kriya/control/workspace_identity.canonical_workspace)."""
-    from kriya.control.workspace_identity import canonical_workspace as _canonical
+    kriya/context/workspace_identity.canonical_workspace)."""
+    from kriya.context.workspace_identity import canonical_workspace as _canonical
 
     return _canonical(workspace_path)
 

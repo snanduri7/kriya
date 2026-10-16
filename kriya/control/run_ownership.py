@@ -26,7 +26,7 @@ Identity / worktree semantics:
     so any alias reaching the same real directory - a symlink, a relative
     path, a different cwd - opens the identical inode and contends for the
     identical lock automatically, with no canonicalization step required for
-    correctness. `workspace_identity()` (kriya.control.workspace_identity,
+    correctness. `workspace_identity()` (kriya.context.workspace_identity,
     the same primitive `checkpoint.py` already uses) is still recorded in the
     diagnostic content purely so a contention error can name the canonical
     workspace - not a second identity model.
@@ -60,7 +60,7 @@ import uuid
 from contextlib import contextmanager
 from typing import Iterator, Optional
 
-from kriya.control.workspace_identity import ownership_metadata
+from kriya.context.workspace_identity import ownership_metadata
 from kriya.platform.services import platform_services
 
 _LOCK_RELPATH = os.path.join(".kriya", "run.lock")

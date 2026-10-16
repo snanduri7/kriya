@@ -17,7 +17,7 @@ import os
 
 import pytest
 
-from kriya.control.workspace_identity import workspace_identity
+from kriya.context.workspace_identity import workspace_identity
 from kriya.mcp.invocation_approval import (
     MCPApprovalArtifactError,
     MCPTrustPathInsideWorkspaceError,

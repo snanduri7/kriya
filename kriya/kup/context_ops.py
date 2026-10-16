@@ -22,7 +22,7 @@ import urllib.request
 from typing import Any, Dict, List
 from urllib.parse import urlsplit, urlunsplit
 
-from kriya.control.workspace_identity import workspace_identity
+from kriya.context.workspace_identity import workspace_identity
 from kriya.core.llm import is_local_url
 from kriya.kup.execution import _CWD_LOCK, _load_in
 from kriya.kup.inspect import envelope, live_consistency

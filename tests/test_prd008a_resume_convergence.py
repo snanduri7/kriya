@@ -26,8 +26,8 @@ from test_prd008a_plan_executor import (  # noqa: F401 - pytest fixture
 )
 
 from kriya.agents.contracts import AcceptanceCriterion
+from kriya.context.workspace_identity import WorkspaceOwnershipError, ownership_metadata
 from kriya.control.persistence import scan_run_records
-from kriya.control.workspace_identity import WorkspaceOwnershipError, ownership_metadata
 from kriya.workflow.checkpoint import checkpoint_path, list_checkpoints, save_checkpoint
 from kriya.workflow.plan_adapters import direct_execution_plan, work_unit_record
 from kriya.workflow.plan_executor import (

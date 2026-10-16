@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.config.authority_approval import validate_trust_path_outside_workspace
-from kriya.control.workspace_identity import workspace_identity
+from kriya.context.workspace_identity import workspace_identity
 from kriya.static_analysis.model import (
     WAIVER_DIGEST_INVALID,
     WAIVER_EXPIRED,

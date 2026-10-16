@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from kriya.analyzer.java_members import JavaMember
-from kriya.control.workspace_identity import workspace_identity
+from kriya.context.workspace_identity import workspace_identity
 from kriya.workflow.checkpoint import compute_workspace_fingerprint
 from kriya.workflow.semantic_region_authority import (
     AuthorizedSemanticRegion,

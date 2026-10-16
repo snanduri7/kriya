@@ -13,7 +13,7 @@ from _kup_evidence_fixtures import acquire_snapshot_id, seed_trace_run, state_di
 from _strict_doubles import strict_config
 
 from kriya.config import AppConfig
-from kriya.control.workspace_identity import workspace_identity
+from kriya.context.workspace_identity import workspace_identity
 from kriya.core.attempt_evidence import model
 from kriya.core.attempt_evidence.writer import AttemptEvidenceWriter
 from kriya.kup import policy

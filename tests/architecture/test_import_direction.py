@@ -34,7 +34,7 @@ SLICES = frozenset(
     + [f"D{i}" for i in range(1, 4)] + [f"E{i}" for i in range(1, 15)] + [f"F{i}" for i in range(1, 6)]
     + [f"G{i}" for i in range(1, 6)] + [f"H{i}" for i in range(1, 6)] + [f"I{i}" for i in range(1, 5)]
     + ["J1", "J2", "K1", "K2", "L1", "L2", "M1", "M2", "M3", "N1", "N2", "O1", "O2", "O3", "P1", "P2", "Q1", "Q2"])
-DONE_SLICES = frozenset({"A1", "A2", "A3"})
+DONE_SLICES = frozenset({"A1", "A2", "A3", "B1"})
 
 # CURRENT-DEPENDENCY-MAP.md §3, the back-edges into kriya/workflow that close
 # the big cycle (TRACED to the import line there; MEASURED here): (source,
@@ -77,7 +77,6 @@ BACK_EDGES: Tuple[Tuple[str, str, bool], ...] = (
 
 # (source module, target module) -> (removal slice, reason). Generated from
 # the measured violations at slice A1 and edited only by deleting entries.
-_B1 = "workspace identity moves to CONTEXT (context.workspace_identity)"
 _C2 = "risk/route vocabulary moves to policy.risk"
 _C3 = "approval helpers move to policy.approval / egress takes the client identity"
 _M1 = "file write/commit mechanism moves to REPOSITORY"
@@ -122,7 +121,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.cli", "kriya.control.run_coordinator"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     ("kriya.cli", "kriya.control.run_ownership"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     ("kriya.cli", "kriya.control.run_record"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
-    ("kriya.cli", "kriya.control.workspace_identity"): ("B1", _B1),  # direction ADAPTER-CLI -> STATE
     ("kriya.cli", "kriya.core"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.cli", "kriya.core.attempt_evidence.candidate_export"): ("O2", _O2),  # direction ADAPTER-CLI -> EVIDENCE
     ("kriya.cli", "kriya.core.attempt_evidence.explain"): ("O2", _O2),  # direction ADAPTER-CLI -> EVIDENCE
@@ -185,7 +183,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.cli", "kriya.workflow.workflow_controller"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.cli", "kriya.workflow.worktree"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.code_intel.store", "kriya.core.db"): ("P2", _P2),  # non-public FOUNDATION module
-    ("kriya.config.authority_approval", "kriya.control.workspace_identity"): ("B1", _B1),  # direction AUTHORITY -> STATE
     ("kriya.config.config", "kriya.config.authority_approval"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.config.config", "kriya.core.state_paths"): ("D3", _D3),  # direction CONFIG -> STATE
     ("kriya.config.config", "kriya.static_analysis.registry"): ("D3", _D3),  # direction CONFIG -> EXECUTION
@@ -196,7 +193,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.control.launch", "kriya.control.launch_approval"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.control.launch_approval", "kriya.control.launch"): ("P2", _P2),  # direction AUTHORITY -> STATE
     ("kriya.control.launch_approval", "kriya.control.run_ownership"): ("P2", _P2),  # direction AUTHORITY -> STATE
-    ("kriya.control.launch_approval", "kriya.control.workspace_identity"): ("B1", _B1),  # direction AUTHORITY -> STATE
     ("kriya.control.launch_approval", "kriya.workflow.edit_safety"): ("M1", _M1),  # direction AUTHORITY -> KERNEL
     ("kriya.control.persistence", "kriya.workflow.edit_safety"): ("M1", _M1),  # direction STATE -> KERNEL
     ("kriya.control.persistence", "kriya.workflow.file_integrity"): ("M1", _M1),  # direction STATE -> KERNEL
@@ -237,7 +233,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.core.model_runtime", "kriya.core.state_paths"): ("P2", _P2),  # direction PROVIDER -> STATE
     ("kriya.core.qualification_identity", "kriya.core.model_runtime"): ("P2", _P2),  # non-public PROVIDER module
     ("kriya.core.release_candidate", "kriya.config.authority_approval"): ("P2", _P2),  # non-public AUTHORITY module
-    ("kriya.core.release_candidate", "kriya.control.workspace_identity"): ("B1", _B1),  # non-public STATE module
     ("kriya.core.release_candidate", "kriya.core.execution_environment"): ("P2", _P2),  # non-public PROVIDER module
     ("kriya.core.release_candidate", "kriya.core.inference_settings"): ("P2", _P2),  # non-public PROVIDER module
     ("kriya.core.release_candidate", "kriya.core.model_runtime"): ("P2", _P2),  # non-public PROVIDER module
@@ -250,13 +245,10 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.kup.application_outcome", "kriya.policy.telemetry"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY
     ("kriya.kup.application_outcome", "kriya.workflow.verification_authority"): ("B2", _B2),  # direction ADAPTER-KUP -> KERNEL
     ("kriya.kup.authority_ops", "kriya.config.authority_approval"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY
-    ("kriya.kup.authority_ops", "kriya.control.workspace_identity"): ("B1", _B1),  # direction ADAPTER-KUP -> STATE
-    ("kriya.kup.catalog_ops", "kriya.control.workspace_identity"): ("B1", _B1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.catalog_ops", "kriya.skills.service"): ("O1", _O1),  # direction ADAPTER-KUP -> SKILLS
     ("kriya.kup.catalog_ops", "kriya.tools.service"): ("O1", _O1),  # direction ADAPTER-KUP -> TOOLBOX
     ("kriya.kup.cli_ops", "kriya.control.recovery"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.cli_ops", "kriya.core.state_paths"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
-    ("kriya.kup.context_ops", "kriya.control.workspace_identity"): ("B1", _B1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.context_ops", "kriya.core.llm"): ("O1", _O1),  # direction ADAPTER-KUP -> PROVIDER
     ("kriya.kup.context_ops", "kriya.skills.service"): ("O1", _O1),  # direction ADAPTER-KUP -> SKILLS
     ("kriya.kup.evidence_ops", "kriya.core.attempt_evidence.model"): ("O1", _O1),  # direction ADAPTER-KUP -> EVIDENCE
@@ -267,32 +259,26 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.kup.execution", "kriya.control.persistence"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.execution", "kriya.control.recovery"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.execution", "kriya.control.run_ownership"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
-    ("kriya.kup.execution", "kriya.control.workspace_identity"): ("B1", _B1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.execution", "kriya.core.state_paths"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.execution", "kriya.platform.toolchain_locator"): ("O1", _O1),  # non-public PLATFORM module
     ("kriya.kup.execution", "kriya.workflow.checkpoint"): ("B3", _B3),  # direction ADAPTER-KUP -> KERNEL
     ("kriya.kup.inspect", "kriya.build_info"): ("P1", _P1),  # non-public FOUNDATION module
     ("kriya.kup.inspect", "kriya.core.attempt_evidence.model"): ("O1", _O1),  # direction ADAPTER-KUP -> EVIDENCE
     ("kriya.kup.project_init_ops", "kriya.core.model_runtime"): ("O1", _O1),  # direction ADAPTER-KUP -> PROVIDER
-    ("kriya.kup.project_ops", "kriya.control.workspace_identity"): ("B1", _B1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.review_ops", "kriya.control.launch"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.review_ops", "kriya.control.launch_approval"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY
     ("kriya.kup.review_ops", "kriya.control.persistence"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
-    ("kriya.kup.review_ops", "kriya.control.workspace_identity"): ("B1", _B1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.runtime_command_ops", "kriya.control.launch"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.runtime_command_ops", "kriya.control.launch_approval"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY
     ("kriya.kup.runtime_command_ops", "kriya.control.persistence"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
-    ("kriya.kup.runtime_command_ops", "kriya.control.workspace_identity"): ("B1", _B1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.runtime_command_ops", "kriya.workflow.runtime_command_approval"): ("B3", _B3),  # direction ADAPTER-KUP -> AUTHORITY
     ("kriya.kup.serve", "kriya.config.authority"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY
     ("kriya.kup.store", "kriya.core.db"): ("O1", _O1),  # non-public FOUNDATION module
     ("kriya.kup.store", "kriya.core.state_paths"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.workspace_ops", "kriya.control.recovery"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
-    ("kriya.kup.workspace_ops", "kriya.control.workspace_identity"): ("B1", _B1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.workspace_ops", "kriya.core.state_paths"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.workspace_ops", "kriya.tools.git_metadata"): ("O1", _O1),  # direction ADAPTER-KUP -> EXECUTION
     ("kriya.mcp.containment_adapter", "kriya.mcp.capability"): ("P2", _P2),  # non-public AUTHORITY module
-    ("kriya.mcp.invocation_approval", "kriya.control.workspace_identity"): ("B1", _B1),  # direction AUTHORITY -> STATE
     ("kriya.mcp.lifecycle", "kriya.tools.sandbox"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.mcp.mcp", "kriya.core.kernel"): ("P2", _P2),  # direction TOOLBOX -> KERNEL
     ("kriya.mcp.mcp", "kriya.mcp.capability"): ("P2", _P2),  # non-public AUTHORITY module
@@ -313,7 +299,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.production_doctor", "kriya.agents.response_protocol"): ("N1", _N1),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.production_doctor", "kriya.analyzer.analyzer"): ("N1", _N1),  # direction ADAPTER-CLI -> RETRIEVAL
     ("kriya.production_doctor", "kriya.control.run_ownership"): ("N1", _N1),  # direction ADAPTER-CLI -> STATE
-    ("kriya.production_doctor", "kriya.control.workspace_identity"): ("B1", _B1),  # direction ADAPTER-CLI -> STATE
     ("kriya.production_doctor", "kriya.core.attempt_evidence.reader"): ("N1", _N1),  # direction ADAPTER-CLI -> EVIDENCE
     ("kriya.production_doctor", "kriya.core.attempt_evidence.writer"): ("N1", _N1),  # direction ADAPTER-CLI -> EVIDENCE
     ("kriya.production_doctor", "kriya.core.inference_runtime"): ("N1", _N1),  # direction ADAPTER-CLI -> PROVIDER
@@ -348,7 +333,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.static_analysis.service", "kriya.core.state_paths"): ("P2", _P2),  # direction EXECUTION -> STATE
     ("kriya.static_analysis.service", "kriya.workflow.terminal_commit"): ("M1", _M1),  # direction EXECUTION -> KERNEL
     ("kriya.static_analysis.waivers", "kriya.config.authority_approval"): ("P2", _P2),  # non-public AUTHORITY module
-    ("kriya.static_analysis.waivers", "kriya.control.workspace_identity"): ("B1", _B1),  # direction EXECUTION -> STATE
     ("kriya.tools", "kriya.tools.tool"): ("P2", _P2),  # direction EXECUTION -> TOOLBOX
     ("kriya.tools.service", "kriya.mcp.invocation_approval"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.tools.toolchain_identity", "kriya.core.tomlcompat"): ("P1", _P1),  # non-public FOUNDATION module
@@ -393,7 +377,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.workflow.authority_request", "kriya.workflow.requirement_scopes"): ("P2", _P2),  # direction AUTHORITY -> KERNEL
     ("kriya.workflow.authority_request", "kriya.workflow.requirements"): ("P2", _P2),  # direction AUTHORITY -> KERNEL
     ("kriya.workflow.baseline_policy", "kriya.tools.toolchain_identity"): ("P2", _P2),  # non-public EXECUTION module
-    ("kriya.workflow.checkpoint", "kriya.control.workspace_identity"): ("B1", _B1),  # non-public STATE module
     ("kriya.workflow.commit_service", "kriya.static_analysis.service"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.workflow.context_budget", "kriya.code_intel.parsing"): ("P2", _P2),  # non-public RETRIEVAL module
     ("kriya.workflow.context_budget", "kriya.core.inference_settings"): ("P2", _P2),  # non-public PROVIDER module
@@ -440,7 +423,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.workflow.lsp_integration", "kriya.tools.lsp"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.workflow.milestone_completion", "kriya.control.recovery"): ("P2", _P2),  # non-public STATE module
     ("kriya.workflow.milestones", "kriya.control.contracts"): ("P2", _P2),  # non-public STATE module
-    ("kriya.workflow.milestones", "kriya.control.workspace_identity"): ("B1", _B1),  # non-public STATE module
     ("kriya.workflow.milestones", "kriya.core.trace"): ("P2", _P2),  # non-public STATE module
     ("kriya.workflow.model_transition", "kriya.core.inference_settings"): ("P2", _P2),  # non-public PROVIDER module
     ("kriya.workflow.model_transition", "kriya.core.model_capabilities"): ("P2", _P2),  # non-public PROVIDER module
@@ -449,18 +431,14 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.workflow.named_test_oracle", "kriya.core.tomlcompat"): ("P1", _P1),  # non-public FOUNDATION module
     ("kriya.workflow.named_test_oracle", "kriya.tools.test_execution"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.workflow.ownership_findings", "kriya.analyzer.graph"): ("P2", _P2),  # non-public RETRIEVAL module
-    ("kriya.workflow.plan_executor", "kriya.control.workspace_identity"): ("B1", _B1),  # non-public STATE module
     ("kriya.workflow.planner_repair", "kriya.core.role_metrics"): ("P2", _P2),  # non-public PROVIDER module
-    ("kriya.workflow.planning_diagnostics", "kriya.control.workspace_identity"): ("B1", _B1),  # non-public STATE module
     ("kriya.workflow.proposal_binding", "kriya.analyzer.java_members"): ("P2", _P2),  # non-public RETRIEVAL module
-    ("kriya.workflow.proposal_binding", "kriya.control.workspace_identity"): ("B1", _B1),  # non-public STATE module
     ("kriya.workflow.recovery_coordinator", "kriya.core.token_budget"): ("P2", _P2),  # non-public PROVIDER module
     ("kriya.workflow.recovery_coordinator", "kriya.policy.errors"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.workflow.relocalization", "kriya.code_intel.locate"): ("P2", _P2),  # non-public RETRIEVAL module
     ("kriya.workflow.requirements", "kriya.tools.test_execution"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.workflow.resume_fingerprints", "kriya"): ("P1", _P1),  # non-public FOUNDATION module
     ("kriya.workflow.resume_fingerprints", "kriya.control.contracts"): ("P2", _P2),  # non-public STATE module
-    ("kriya.workflow.resume_fingerprints", "kriya.control.workspace_identity"): ("B1", _B1),  # non-public STATE module
     ("kriya.workflow.resume_fingerprints", "kriya.core.inference_settings"): ("P2", _P2),  # non-public PROVIDER module
     ("kriya.workflow.resume_fingerprints", "kriya.core.model_qualification"): ("P2", _P2),  # direction KERNEL -> QUALIFICATION
     ("kriya.workflow.resume_fingerprints", "kriya.core.model_runtime"): ("P2", _P2),  # non-public PROVIDER module
@@ -471,7 +449,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.workflow.retry_strategy", "kriya.tools.lsp"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.workflow.review_context", "kriya.analyzer.graph"): ("P2", _P2),  # non-public RETRIEVAL module
     ("kriya.workflow.review_context", "kriya.analyzer.java_members"): ("P2", _P2),  # non-public RETRIEVAL module
-    ("kriya.workflow.review_context", "kriya.control.workspace_identity"): ("B1", _B1),  # non-public STATE module
     ("kriya.workflow.run_trace", "kriya.core.role_metrics"): ("P2", _P2),  # non-public PROVIDER module
     ("kriya.workflow.run_trace", "kriya.core.trace"): ("P2", _P2),  # non-public STATE module
     ("kriya.workflow.self_correction", "kriya.policy.errors"): ("P2", _P2),  # non-public AUTHORITY module
@@ -533,7 +510,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.workflow.workflow_controller", "kriya.control.contracts"): ("P2", _P2),  # non-public STATE module
     ("kriya.workflow.workflow_controller", "kriya.control.decisions"): ("P2", _P2),  # non-public STATE module
     ("kriya.workflow.workflow_controller", "kriya.control.state"): ("P2", _P2),  # non-public STATE module
-    ("kriya.workflow.workflow_controller", "kriya.control.workspace_identity"): ("B1", _B1),  # non-public STATE module
     ("kriya.workflow.workflow_controller", "kriya.skills.skill"): ("P2", _P2),  # non-public SKILLS module
     ("kriya.workflow.workflow_controller", "kriya.static_analysis.service"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.workflow.workflow_controller", "kriya.tools.knowledge"): ("P2", _P2),  # non-public KNOWLEDGE module

@@ -14,7 +14,7 @@ import re
 
 import pytest
 
-from kriya.control import workspace_identity as wi
+from kriya.context import workspace_identity as wi
 from kriya.platform.filesystem_semantics import PathRelation, canonical_spelling, path_relation
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -22,7 +22,7 @@ _IDIOM = re.compile(r"startswith\([^)]*os\.sep|os\.path\.commonpath\(|os\.path\.
 # Lexical by design: '..' escape checks on model-supplied RELATIVE path strings, and the legacy identity kept readable.
 _ALLOWED = {
     "kriya/tools/lsp.py", "kriya/workflow/acceptance_oracle.py", "kriya/workflow/retry_strategy.py",
-    "kriya/workflow/file_resolution.py", "kriya/control/workspace_identity.py",
+    "kriya/workflow/file_resolution.py", "kriya/context/workspace_identity.py",
 }
 
 
@@ -38,7 +38,7 @@ def test_01_no_lexical_containment_idiom_outside_the_platform_package():
             offenders[rel] = hits
     assert offenders == {}, f"lexical containment idiom outside kriya/platform (use path_relation / path_identity): {offenders}"
     # the allow-listed sites are exactly the relative-string escape checks (plus the legacy identity)
-    for rel in _ALLOWED - {"kriya/control/workspace_identity.py"}:
+    for rel in _ALLOWED - {"kriya/context/workspace_identity.py"}:
         text = (ROOT / rel).read_text()
         assert "os.pardir" in text or '".."' in text or "f\"..{os.sep}\"" in text, rel
 

@@ -12,8 +12,8 @@ import os
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
+from kriya.context.workspace_identity import workspace_identity
 from kriya.control.control_store import write_control_file
-from kriya.control.workspace_identity import workspace_identity
 from kriya.workflow.edit_safety import read_file_revision
 from kriya.workflow.plan_schema import EngineeringPlan
 
