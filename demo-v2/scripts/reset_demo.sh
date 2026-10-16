@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Return ONE scenario (or all of them) to its pristine starting point inside the work area. Never writes to a fixture source or to the repository. Idempotent: running it twice leaves the same state.
-# Usage: reset_demo.sh --scenario 00|01|02|03|all     (or: reset_demo.sh all)
+# Usage: reset_demo.sh --scenario 00|01|02|03|04|all     (or: reset_demo.sh all)
 # 00 : the GREENFIELD start: a brand-new EMPTY project folder, exactly what New Project creates - no git repository, no file, no kriya.yaml (Project Setup creates it in the app),
 #      no Kriya state, no approval.
-#   all : resets 00, 01, 02 and 03 through their own implementations below, then stops every demo service (scripted stub, recording proxy, the optional search container)
+# 04 : the GREENFIELD start with its knowledge: a brand-new EMPTY project folder (no git repository, no source; prepare_demo.sh then places only kriya.yaml) and a fresh COPY of the verified
+#      ignite-java17 skill as the skills directory (its digest is checked). The reference candidate in fixtures/spring-ignite-protocol/reference is NEVER copied into the workspace.
+#   all : resets 00, 01, 02, 03 and 04 through their own implementations below, then stops every demo service (scripted stub, recording proxy, the optional search container)
 #         and revokes the operator approvals. Nothing is left running; nothing is started.
 # 02 : a fresh workspace from the fixture and a fresh copy of the PRESERVED GOVERNED ACQUISITION SNAPSHOT as the skills directory (its digest is checked). The per-run directories of
 #      scripts/scenario02_run.sh (c1-*, c2-*, final-*) are scratch evidence copies and are left alone: they do not affect the next run.
@@ -27,7 +29,7 @@ if [ "$SCENARIO" = "all" ]; then
   # Fail before changing anything if scenario 01's fixture source is missing (it is the only fixture not vendored in the repository).
   load_env_file "$DEMO_V2_DIR/fixtures/brownfield-spring/fixture.env"
   [ -d "${DEMO_V2_BASELINE_SRC:-$FIXTURE_SOURCE_DEFAULT}/.git" ] || die "scenario 01's fixture source ${DEMO_V2_BASELINE_SRC:-$FIXTURE_SOURCE_DEFAULT} is not a git repository (set DEMO_V2_BASELINE_SRC)"
-  for s in 00 01 02 03; do "${BASH_SOURCE[0]}" --scenario "$s"; done
+  for s in 00 01 02 03 04; do "${BASH_SOURCE[0]}" --scenario "$s"; done
   echo "=== services ==="
   stop_demo_listeners
   stop_searxng
@@ -36,7 +38,7 @@ if [ "$SCENARIO" = "all" ]; then
 fi
 
 SC_DIR="$(scenario_dir "$SCENARIO")"
-case "$SCENARIO" in 00|01|02|03) ;; *) die "unknown scenario $SCENARIO" ;; esac
+case "$SCENARIO" in 00|01|02|03|04) ;; *) die "unknown scenario $SCENARIO" ;; esac
 
 WORK="$(scenario_work "$SCENARIO")"
 WS="$WORK/workspace"
@@ -45,7 +47,7 @@ echo "=== demo-v2 reset: scenario $SCENARIO ==="
 rm -rf "$WS"
 mkdir -p "$WORK"
 
-if [ "$SCENARIO" = "00" ]; then
+if [ "$SCENARIO" = "00" ] || [ "$SCENARIO" = "04" ]; then
   mkdir -p "$WS"   # a brand-new EMPTY folder: nothing in it, not even a git repository (a plain empty folder is a supported greenfield workspace)
 elif [ "$SCENARIO" = "01" ]; then
   load_env_file "$DEMO_V2_DIR/fixtures/brownfield-spring/fixture.env"
@@ -66,7 +68,7 @@ else
   git -C "$WS" -c user.email=demo@kriya.local -c user.name="Kriya demo" commit -q -m "fixture: $FIXTURE_ID"
   WS_SHA="$(git -C "$WS" rev-parse HEAD)"
 fi
-if [ "$SCENARIO" != "00" ]; then
+if [ "$SCENARIO" != "00" ] && [ "$SCENARIO" != "04" ]; then
   [ -z "$(git -C "$WS" status --short)" ] || die "workspace is not clean after creation"
   TARGET_HASH="$(sha256_of "$WS/$FIXTURE_TARGET_FILE")"
   [ "$TARGET_HASH" = "$FIXTURE_TARGET_SHA256" ] || die "target file hash $TARGET_HASH != expected $FIXTURE_TARGET_SHA256"
@@ -102,9 +104,25 @@ if [ "$SCENARIO" = "02" ]; then
   echo "skills:      $WORK/skills (copy of the preserved snapshot, digest $SNAPSHOT_DIGEST)"
 fi
 
+if [ "$SCENARIO" = "04" ]; then
+  # The skills directory is a fresh COPY of the repository's verified skill, never the repository copy itself: the one thing a run writes there (the skill-gap acknowledgement flag in skill.yaml)
+  # must not reach the repository. The digest proves the copy is the skill the model-free qualification measured.
+  load_env_file "$DEMO_V2_DIR/fixtures/spring-ignite-protocol/fixture.env"
+  SKILL_SRC="$REPO_ROOT/$SKILL_SOURCE_DIR"
+  [ -d "$SKILL_SRC" ] || die "the skill $SKILL_SOURCE_DIR is missing from this checkout"
+  [ "$(dir_digest "$SKILL_SRC")" = "$SKILL_DIGEST" ] || die "the skill in the repository does not have its recorded digest ($SKILL_DIGEST): it was edited (re-qualify, then update fixture.env) or the checkout is damaged"
+  rm -rf "$WORK/skills"
+  mkdir -p "$WORK/skills"
+  cp -R "$SKILL_SRC" "$WORK/skills/$SKILL_NAME"
+  [ "$(dir_digest "$WORK/skills/$SKILL_NAME")" = "$SKILL_DIGEST" ] || die "the skills copy does not match the skill digest"
+  echo "skills:      $WORK/skills/$SKILL_NAME (copy of $SKILL_SOURCE_DIR, digest $SKILL_DIGEST)"
+fi
+
 echo "workspace:   $WS"
 if [ "$SCENARIO" = "00" ]; then
   echo "contents:    empty (a new project folder: no git repository, no kriya.yaml)"
+elif [ "$SCENARIO" = "04" ]; then
+  echo "contents:    empty (a new project folder: no git repository, no source; prepare_demo.sh places only kriya.yaml)"
 else
   echo "commit:      $WS_SHA"
   echo "target sha:  $TARGET_HASH"

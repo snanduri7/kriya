@@ -46,6 +46,15 @@ scenarios:
     fixtures: [controlled-repair]
     expected: null
     controlled: true   # CONTROLLED / SCRIPTED: must be labelled as such wherever it is shown
+  - id: 04-spring-ignite-protocol
+    title: Spring XML + Apache Ignite 2.18.0 + Protocol greenfield (specialised verified skill, JUnit, embedded cache round trip)
+    dir: scenarios/04-spring-ignite-protocol
+    status: NOT_YET_REHEARSED   # model-free qualification PASS (scripts/qualify_spring_ignite.sh); no live model has run this goal
+    model: live_local
+    network: none
+    fixtures: [spring-ignite-protocol]
+    expected: expected/scenario-04.md
+    controlled: false
 fixtures:
   - id: brownfield-spring
     dir: fixtures/brownfield-spring
@@ -55,6 +64,10 @@ fixtures:
     dir: fixtures/controlled-repair
     identity_file: fixtures/controlled-repair/fixture.env
     in_git: true       # self-authored for Demo V2
+  - id: spring-ignite-protocol
+    dir: fixtures/spring-ignite-protocol
+    identity_file: fixtures/spring-ignite-protocol/fixture.env
+    in_git: true       # scenario 04: the model-free REFERENCE candidate (never copied into the workspace) + the identity (digest) of the verified ignite-java17 skill that ships in skills/
   - id: knowledge-skill
     dir: fixtures/knowledge-skill
     identity_file: fixtures/knowledge-skill/fixture.env
@@ -71,4 +84,5 @@ scripts:
   scenario02_run: scripts/scenario02_run.sh   # scenario 02: ONE terminal run of the isolated task (noskill | skill | acquire), real local model behind a recording proxy
   launch_gui: scripts/launch_gui.sh   # the owner launcher: the PRODUCT desktop app for one scenario, with its own state directory
   capture_skills_page: scripts/capture_skills_page.sh   # scenario 02: screenshots of the populated Skills page for a scenario02_run.sh run
+  qualify_spring_ignite: scripts/qualify_spring_ignite.sh   # scenario 04: MODEL-FREE environment qualification (offline Maven, JUnit, Spring XML, Ignite 2.18.0, Protocol/ProtocolParser, cache put/get, clean exit; optional OCI leg)
   rehearse_gui: scripts/rehearse_gui.sh   # drives the evidence-packaged app: 01 LIVE (real model), 03 CONTROLLED (scripted stub)

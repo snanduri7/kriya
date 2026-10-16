@@ -16,6 +16,7 @@ claim production readiness.
 | `01-normal-coding` | Normal GUI coding flow (brownfield bug fix) | live local model | none | **REHEARSED ONCE, PASS** (live, 2026-10-14) |
 | `02-knowledge-skill` | Terminal acquisition, GUI skill view, offline task run (terminal) | live local model | acquisition step only | **Rehearsed once from empty state: pass, with caveats** (acquired content varies; see `handover/DEMO-V2/FINDINGS.md` F11, F12) |
 | `03-controlled-repair` | Controlled repair of a wrong model candidate | **scripted stub (CONTROLLED)** | none | **REHEARSED, PASS, REPRODUCIBLE** (2026-10-14) |
+| `04-spring-ignite-protocol` | Greenfield Spring XML + Apache Ignite 2.18.0 + Protocol (verified skill, JUnit, cache round trip) | live local model | none | **NOT YET REHEARSED**; model-free qualification PASS (`scripts/qualify_spring_ignite.sh`) |
 
 The status column is the truth. A scenario is only "validated" after the checks in its own `SUCCESS CRITERIA` were measured
 on a recorded run; nothing here is validated by having been written down.

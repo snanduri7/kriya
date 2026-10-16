@@ -2,7 +2,7 @@
 # Verify DETERMINISTIC facts about a scenario: the hand-off state (idle), prerequisites before a run (pre) and outcomes after one (post).
 # It never starts a model, never retries, and never turns model variance into an assertion: a post check reports what
 # the run produced; it does not make a run succeed.
-# Usage: verify_demo.sh --scenario 00|01|02|03|all --phase idle|pre|post
+# Usage: verify_demo.sh --scenario 00|01|02|03|04|all --phase idle|pre|post
 #   00 (greenfield): idle = a brand-new EMPTY folder (no files, no git, no kriya.yaml), no Kriya state, Kriya reports it runnable on the defaults, no approval; pre = + model server and Java/Maven; post = the project the run created, re-checked independently
 #   idle : the OWNER START STATE after `prepare_demo.sh all`: workspaces pristine, NO operator approval, nothing running (no stub, no proxy, no search container), the 02 snapshot intact.
 #   pre  : ready to run NOW (operator approval granted; scenario 03: the stub running at script position 0).
@@ -27,7 +27,7 @@ assert_work_outside_repo
 
 if [ "$SCENARIO" = "all" ]; then
   RC=0
-  for s in 00 01 02 03; do "${BASH_SOURCE[0]}" --scenario "$s" --phase "$PHASE" || RC=1; done
+  for s in 00 01 02 03 04; do "${BASH_SOURCE[0]}" --scenario "$s" --phase "$PHASE" || RC=1; done
   echo "=== demo-v2 verify: global services, phase $PHASE ==="
   GFAILS=0
   gcheck() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then echo "PASS  $label"; else echo "FAIL  $label"; GFAILS=$((GFAILS+1)); fi; }
@@ -64,7 +64,7 @@ else
 fi
 check "product tracked tree is clean (evidence binds to an exact revision)" test -z "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
 
-case "$SCENARIO" in 00|01|02|03) ;; *) die "unknown scenario $SCENARIO" ;; esac
+case "$SCENARIO" in 00|01|02|03|04) ;; *) die "unknown scenario $SCENARIO" ;; esac
 
 # ---- scenario 00: GREENFIELD HELLO WORLD (an empty folder; everything else is created by the run) ----
 if [ "$SCENARIO" = "00" ]; then
@@ -104,6 +104,7 @@ if [ "$SCENARIO" = "00" ]; then
   finish
 fi
 
+
 case "$SCENARIO" in 01) load_env_file "$DEMO_V2_DIR/fixtures/brownfield-spring/fixture.env" ;; 02) load_env_file "$DEMO_V2_DIR/fixtures/knowledge-skill/fixture.env" ;; 03) load_env_file "$DEMO_V2_DIR/fixtures/controlled-repair/fixture.env" ;; esac
 WORK="$(scenario_work "$SCENARIO")"
 WS="$WORK/workspace"
@@ -140,6 +141,85 @@ model_server_check() {
   tags="$(curl -s -m 5 http://localhost:11434/api/tags 2>/dev/null || true)"
   case "$tags" in *'"qwen3-coder:30b"'*'"qwen3.6:35b-a3b-q4_K_M"'*|*'"qwen3.6:35b-a3b-q4_K_M"'*'"qwen3-coder:30b"'*) pass "the local model server lists qwen3-coder:30b and the fallback qwen3.6:35b-a3b-q4_K_M (no model is called)" ;; *) fail "the local model server at localhost:11434 does not list qwen3-coder:30b and qwen3.6:35b-a3b-q4_K_M (start Ollama)" ;; esac
 }
+
+# ---- scenario 04: SPRING XML + APACHE IGNITE + PROTOCOL (greenfield; an empty folder holding only kriya.yaml; everything else is created by the run) ----
+if [ "$SCENARIO" = "04" ]; then
+  load_env_file "$DEMO_V2_DIR/fixtures/spring-ignite-protocol/fixture.env"
+  W04="$(scenario_work 04)"; S04="$W04/workspace"
+  K_PY="${KRIYA_PY:-$REPO_ROOT/.venv/bin/python}"; K_BIN="${KRIYA_BIN:-$REPO_ROOT/.venv/bin/kriya}"
+  APP_PATH="/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"   # the desktop app's fixed PATH (ui/standalone/src/main/child_env.ts)
+  check "goal file present and non-empty" test -s "$SC_DIR/goal.md"
+  check "the goal names the technologies and the success line, and no tool command, flag, skill or internal term (static)" bash -c "
+    grep -q 'Apache Ignite 2.18.0' '$SC_DIR/goal.md' && grep -q 'Spring XML' '$SC_DIR/goal.md' && grep -q 'Java 17' '$SC_DIR/goal.md' && grep -q 'JUnit' '$SC_DIR/goal.md' && grep -q '\[RESULT\]' '$SC_DIR/goal.md' &&
+    ! grep -n -i -E 'mvn|exec:|add-opens|--add|exec-maven|surefire|skill|knowledge|kriya|IgniteSpringBean|Ignition\.start|getBean|classifier|ConfigurableApplicationContext' '$SC_DIR/goal.md'"
+  check "the verified skill in the repository has its recorded digest (it is what the qualification measured)" bash -c "[ \"\$(. '$DEMO_V2_DIR/scripts/_common.sh'; dir_digest '$REPO_ROOT/$SKILL_SOURCE_DIR')\" = '$SKILL_DIGEST' ]"
+  check "the reference candidate has its recorded digest" bash -c "[ \"\$(. '$DEMO_V2_DIR/scripts/_common.sh'; dir_digest '$DEMO_V2_DIR/$REFERENCE_DIR')\" = '$REFERENCE_DIGEST' ]"
+  check "workspace folder exists" test -d "$S04"
+  check "the skills directory is the verified skill (digest $SKILL_DIGEST)" bash -c "[ \"\$(. '$DEMO_V2_DIR/scripts/_common.sh'; dir_digest '$W04/skills/$SKILL_NAME')\" = '$SKILL_DIGEST' ] && [ \"\$(ls '$W04/skills')\" = '$SKILL_NAME' ]"
+  check "rendered configuration present and validates against this product's AppConfig" bash -c "test -s '$W04/config/kriya.yaml' && '$K_PY' -I -c \"
+import yaml
+from kriya.config.config import AppConfig
+AppConfig.model_validate(yaml.safe_load(open('$W04/config/kriya.yaml')))\""
+  check "the configuration: public lookup off, no search endpoint, offline knowledge mode, the scenario skills directory, desktop human-in-the-loop, the standard local model" "$K_PY" -I -c "
+import yaml
+c = yaml.safe_load(open('$W04/config/kriya.yaml'))
+assert c['autonomy']['web_lookup_enabled'] is False and c['autonomy']['web_lookup_auto_approve'] is False and c['search']['base_url'] == ''
+assert c['autonomy']['mode'] == 'human-in-the-loop' and c['autonomy']['generation_time_budget_seconds'] == 900
+assert c['knowledge']['offline_mode'] is True and c['knowledge'].get('check_enabled', True) is True
+assert c['paths']['skills'] == '$W04/skills' and c['skills']['load_global'] is False and c['skills']['load_cwd'] is False
+assert c['workflow_controller'] == {'enabled': True, 'mode': 'enforce'}
+assert c['llm']['model'] == 'qwen3-coder:30b' and 'localhost:11434' in c['llm']['base_url']"
+  if [ "$PHASE" = idle ]; then
+    LISTING="$(cd "$S04" 2>/dev/null && ls -A | tr '\n' ' ')"
+    [ "$LISTING" = "kriya.yaml " ] && pass "the project folder holds ONLY kriya.yaml: no source, no pom.xml, no test, no git repository, no generated file" || fail "the project folder is not 'kriya.yaml' only: $LISTING"
+    [ -z "$(ls -A "$W04/state" 2>/dev/null)" ] && pass "no Kriya state from an earlier run" || fail "Kriya state from an earlier run is present in $W04/state"
+    preflight_absent_check_04() {
+      local blockers
+      blockers="$(PYTHONDONTWRITEBYTECODE=1 "$K_BIN" traces --json --execution-preflight "$S04" 2>/dev/null | "$K_PY" -I -c 'import sys,json; e=json.load(sys.stdin); d=e.get("data"); print("NO_PREFLIGHT_DATA" if not d else ",".join(b["code"] for b in d.get("blockers",[])))' 2>/dev/null || echo PREFLIGHT_UNREADABLE)"
+      case ",$blockers," in
+        *,CONFIG_AUTHORITY_REFUSED,*) pass "no operator approval is in place (Kriya refuses the configuration until the owner approves it)" ;;
+        *) fail "a stale operator approval may exist: Kriya's preflight does not refuse the configuration ($blockers)" ;;
+      esac
+    }
+    preflight_absent_check_04
+  fi
+  if [ "$PHASE" = pre ]; then
+    "$DEMO_V2_DIR/scripts/greenfield_prereqs.sh" >/dev/null 2>&1 && pass "Java 17+ and Maven are on the app's fixed PATH" || fail "Java 17+ / Maven are not available to the desktop app (scripts/greenfield_prereqs.sh)"
+    M2="${HOME}/.m2/repository"
+    for jar in "org/apache/ignite/ignite-core/2.18.0/ignite-core-2.18.0.jar" "org/apache/ignite/ignite-spring/2.18.0/ignite-spring-2.18.0.jar" "org/junit/jupiter/junit-jupiter/5.8.2/junit-jupiter-5.8.2.pom" "org/codehaus/mojo/exec-maven-plugin/3.1.0/exec-maven-plugin-3.1.0.jar"; do
+      [ -s "$M2/$jar" ] && pass "offline Maven repository holds $jar" || fail "offline Maven repository is missing $jar"
+    done
+    preflight_check
+    model_server_check
+  fi
+  if [ "$PHASE" = post ]; then
+    [ -s "$S04/pom.xml" ] && pass "pom.xml was created" || fail "no pom.xml in the project"
+    grep -q '2\.18\.0' "$S04/pom.xml" 2>/dev/null && grep -q 'ignite-spring' "$S04/pom.xml" 2>/dev/null && pass "pom.xml names Apache Ignite 2.18.0 and ignite-spring" || fail "pom.xml does not name Ignite 2.18.0 and ignite-spring"
+    for f in Protocol ProtocolParser; do
+      [ -n "$(find "$S04/src/main/java" -name "$f.java" 2>/dev/null | head -1 || true)" ] && pass "$f.java was created" || fail "no $f.java under src/main/java"
+    done
+    XMLN="$(find "$S04/src/main/resources" -name '*.xml' 2>/dev/null | wc -l | tr -d ' ' || true)"
+    [ "$XMLN" -ge 1 ] && pass "$XMLN Spring XML file(s) under src/main/resources" || fail "no Spring XML under src/main/resources"
+    TESTS="$(find "$S04/src/test/java" -name '*.java' 2>/dev/null | wc -l | tr -d ' ' || true)"
+    [ "$TESTS" -ge 1 ] && pass "$TESTS test file(s) were created" || fail "no test under src/test/java"
+    # Independent re-check, OUTSIDE Kriya's own gates, under the desktop app's own PATH: offline Maven test run, then the application through Maven and the exact expected line.
+    if ( cd "$S04" && PATH="$APP_PATH" mvn -o -B clean test >"$W04/evidence/post-test.log" 2>&1 ); then
+      N="$(sed -n 's/^\[INFO\] Tests run: \([0-9]*\), Failures: 0, Errors: 0.*/\1/p' "$W04/evidence/post-test.log" | tail -1)"
+      [ -n "$N" ] && [ "$N" -ge 1 ] && pass "independent offline 'mvn test' passes with $N test(s) executed (never 0)" || fail "independent offline 'mvn test' passed but executed no tests (see $W04/evidence/post-test.log)"
+    else fail "independent offline 'mvn test' failed (see $W04/evidence/post-test.log)"; fi
+    MAINS="$(grep -rl 'public static void main' "$S04/src/main/java" 2>/dev/null | head -1 || true)"
+    if [ -n "$MAINS" ]; then
+      PKG="$(sed -n 's/^package \([A-Za-z0-9_.]*\);.*/\1/p' "$MAINS" | head -1)"; CLS="$(basename "$MAINS" .java)"; FQN="${PKG:+$PKG.}$CLS"
+      if ( cd "$S04" && PATH="$APP_PATH" mvn -o -B -q compile exec:exec -Dexec.mainClass="$FQN" >"$W04/evidence/post-run.log" 2>&1 ); then
+        grep -qxF "$EXPECTED_RESULT_LINE" "$W04/evidence/post-run.log" && pass "the application printed exactly: $EXPECTED_RESULT_LINE" || fail "the application did not print the expected line (see $W04/evidence/post-run.log)"
+        pass "the application exited 0 by itself (mvn compile exec:exec -Dexec.mainClass=$FQN)"
+      else fail "the application did not run and exit 0 through 'mvn -o compile exec:exec -Dexec.mainClass=$FQN' (see $W04/evidence/post-run.log)"; fi
+    else fail "no class with public static void main under src/main/java"; fi
+    rm -rf "$S04/ignite"   # Ignite's work directory is runtime state written by the independent re-check above, not part of the project
+    check "Kriya recorded state for the run" test -n "$(ls -A "$W04/state" 2>/dev/null)"
+  fi
+  finish
+fi
 
 if [ "$PHASE" = pre ] || [ "$PHASE" = idle ]; then
   check "kriya executable and python are present" test -x "$KRIYA_PY" -a -x "$KRIYA_BIN"

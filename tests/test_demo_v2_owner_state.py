@@ -80,7 +80,7 @@ def test_reset_all_is_idempotent_and_leaves_no_service(tmp_path: Path) -> None:
     first = _run("reset_demo.sh", work, "all")
     assert first.returncode == 0, first.stderr + first.stdout
     state_one = _fingerprint(work)
-    assert sorted(state_one["trees"]) == ["scenario-00/workspace", "scenario-01/workspace", "scenario-02/workspace", "scenario-03/workspace"]
+    assert sorted(state_one["trees"]) == ["scenario-00/workspace", "scenario-01/workspace", "scenario-02/workspace", "scenario-03/workspace", "scenario-04/workspace"]
     assert state_one["trees"]["scenario-00/workspace"] == ("not a repository", ""), "scenario 00 must be a brand-new EMPTY folder"
     second = _run("reset_demo.sh", work, "all")
     assert second.returncode == 0, second.stderr + second.stdout

@@ -66,7 +66,7 @@ def test_manifest_matches_the_files_and_the_scenario_status_text() -> None:
     assert "BACKEND SOLVER READINESS: FAIL" in manifest["solver_readiness_statement"]
     assert "SOLVER REPEATABILITY: NOT ESTABLISHED" in manifest["solver_readiness_statement"]
     ids = [s["id"] for s in manifest["scenarios"]]
-    assert ids == ["00-greenfield-hello-world", "01-normal-coding", "02-knowledge-skill", "03-controlled-repair"]
+    assert ids == ["00-greenfield-hello-world", "01-normal-coding", "02-knowledge-skill", "03-controlled-repair", "04-spring-ignite-protocol"]
     for scenario in manifest["scenarios"]:
         directory = DEMO_V2 / scenario["dir"]
         assert directory.is_dir() and directory.name == scenario["id"]
@@ -147,9 +147,9 @@ def test_verify_refuses_a_work_area_inside_the_repository(tmp_path: Path) -> Non
 
 
 def test_an_unknown_scenario_refuses_to_prepare_or_reset(tmp_path: Path) -> None:
-    # a temp work area: scenario 02 is a real, resettable scenario now, so nothing here may default to the owner's work area
+    # a temp work area: scenarios 00-04 are real, resettable scenarios now, so nothing here may default to the owner's work area
     for script in ("prepare_demo.sh", "reset_demo.sh"):
-        result = subprocess.run(["bash", str(DEMO_V2 / "scripts" / script), "--scenario", "04"], capture_output=True, text=True, check=False, timeout=60,
+        result = subprocess.run(["bash", str(DEMO_V2 / "scripts" / script), "--scenario", "99"], capture_output=True, text=True, check=False, timeout=60,
                                 env={**os.environ, "DEMO_V2_WORK": str(tmp_path / "work")})
         assert result.returncode != 0, script
         assert "unknown scenario" in result.stderr

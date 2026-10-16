@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Materialise a scenario's fixture into the work area and render its configuration. Starts no model and makes no network call (scenario 03 starts its LOCAL scripted stub).
-# Usage: prepare_demo.sh --scenario 00|01|02|03|all [--check-build] [--no-services]
+# Usage: prepare_demo.sh --scenario 00|01|02|03|04|all [--check-build] [--no-services]
 #   00              the GREENFIELD start: resets to a brand-new EMPTY folder and places NOTHING in it (no kriya.yaml: Project Setup creates it in the app). --check-build: checks Java 17+ and Maven only
 #   --check-build   01: also run the fixture's own offline Maven compile + tests (deterministic, no model) and require the baseline count
 #                   02: also run the fixture's own pytest and require the measured baseline (7 failed, 1 passed)
 #                   03: also run the fixture's own pytest and require the measured baseline (2 failed, 1 passed)
+#   04              the GREENFIELD start with knowledge: an EMPTY project folder holding only kriya.yaml (rendered from config/kriya.template.yaml, needs the operator's approval) and the verified ignite-java17 skill in $DEMO_V2_WORK/scenario-04/skills.
+#                   --check-build: also runs the model-free qualification (scripts/qualify_spring_ignite.sh): offline Maven, JUnit, Spring XML, Ignite 2.18.0, Protocol/ProtocolParser, cache put/get, clean exit
 #   --no-services   03: do not start the scripted stub (start it yourself with scripts/stub_ctl.sh start when you begin scenario 03)
 #   all             00, 01, 02 and 03 prepared one after the other with --no-services: the owner start state, nothing running
 set -euo pipefail
@@ -27,12 +29,12 @@ ensure_work_area
 if [ "$SCENARIO" = "all" ]; then
   stop_demo_listeners; stop_searxng   # nothing from an earlier session may be running while the owner start state is built
   EXTRA=(--no-services); [ "$CHECK_BUILD" = 1 ] && EXTRA+=(--check-build)
-  for s in 00 01 02 03; do "${BASH_SOURCE[0]}" --scenario "$s" "${EXTRA[@]}"; done   # each one resets its scenario first (workspace, state, approval)
+  for s in 00 01 02 03 04; do "${BASH_SOURCE[0]}" --scenario "$s" "${EXTRA[@]}"; done   # each one resets its scenario first (workspace, state, approval)
   echo "=== prepare complete (all scenarios): workspaces and configurations are in place, NOTHING is running, no operator approval is granted ==="
   exit 0
 fi
 SC_DIR="$(scenario_dir "$SCENARIO")"
-case "$SCENARIO" in 00|01|02|03) ;; *) die "unknown scenario $SCENARIO" ;; esac
+case "$SCENARIO" in 00|01|02|03|04) ;; *) die "unknown scenario $SCENARIO" ;; esac
 
 "$DEMO_V2_DIR/scripts/reset_demo.sh" --scenario "$SCENARIO"
 
@@ -56,7 +58,7 @@ if [ "$SCENARIO" = "02" ]; then
   load_env_file "$DEMO_V2_DIR/fixtures/knowledge-skill/fixture.env"
   TEMPLATE="$SC_DIR/config/offline.template.yaml"
 else
-  TEMPLATE="$SC_DIR/config/kriya.template.yaml"
+  TEMPLATE="$SC_DIR/config/kriya.template.yaml"   # 03 and 04 render their own template; 04 also has its skills in $WORK/skills (reset_demo.sh)
 fi
 sed -e "s#@WORK@#$WORK#g" -e "s#@STUB_PORT@#$STUB_PORT#g" "$TEMPLATE" > "$WORK/config/kriya.yaml"
 echo "rendered config: $WORK/config/kriya.yaml (sha256 $(sha256_of "$WORK/config/kriya.yaml"))"
@@ -88,5 +90,8 @@ fi
 # security-authority fields stay UNAPPROVED until an operator approves them: see SCENARIO.md, RESET step 2.
 cp "$WORK/config/kriya.yaml" "$WS/kriya.yaml"
 echo "placed config:   $WS/kriya.yaml (needs operator approval: approve it in the app with Review & Approve, or cd the workspace && kriya authority approve)"
+if [ "$SCENARIO" = "04" ] && [ "$CHECK_BUILD" = 1 ]; then
+  "$DEMO_V2_DIR/scripts/qualify_spring_ignite.sh" || die "the model-free qualification failed (see above)"
+fi
 if [ "$SCENARIO" = "03" ] && [ "$NO_SERVICES" = 0 ]; then "$DEMO_V2_DIR/scripts/stub_ctl.sh" start; fi
 echo "=== prepare complete (scenario $SCENARIO) ==="
