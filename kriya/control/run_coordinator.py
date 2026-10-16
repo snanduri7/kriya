@@ -475,7 +475,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 def _config_fingerprint(arguments: dict) -> Optional[str]:
     """The resume checkpoint's own config fingerprint, from the entry
     point's engine (``self.kernel``/``self.workflow_engine.kernel``/``we``)."""
-    from kriya.workflow.checkpoint import compute_config_fingerprint
+    from kriya.control.checkpoint import compute_config_fingerprint
 
     for value in arguments.values():
         for owner in (value, getattr(value, "workflow_engine", None)):

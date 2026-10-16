@@ -309,3 +309,6 @@ replace; staged read-only asset copies and the candidate export inside a scratch
 ## Direct-write audit addendum (GUI final, 2026-10-11)
 
 `kriya/control/persistence.py` gains one counted site: `os.unlink(staging)` in `save_launch_review_decision`. Classification: Kriya CONTROL state only (`<workspace>/.kriya/control/launches/`), never a target-repository source file and never model/tool content. The decision document is staged complete through the ownership-stamped control writer (`_save_json_document` -> `write_control_file`), then `os.link`ed to its final name (atomic and exclusive: a second writer gets `FileExistsError`) and the staging name is removed. Count: `kriya/control/persistence.py` 1 -> 2.
+
+**Full modularization D2 (checkpoint store moved, count-neutral).** The checkpoint store moved from `kriya/workflow/checkpoint.py` to its STATE owner `kriya/control/checkpoint.py` with its three counted sites unchanged (`save_checkpoint`'s temp-file write and `os.replace`, `delete_checkpoint`'s `os.remove`; all inside `<workspace>/.kriya/checkpoints/`, SAFE_NON_SOURCE as before). `kriya/workflow/checkpoint.py` keeps one site, the scratch-index removal of `compute_workspace_content_hash` (a Kriya temp file). Counts: `kriya/workflow/checkpoint.py` 4 -> 1, `kriya/control/checkpoint.py` 0 -> 3.
+

@@ -515,7 +515,7 @@ def _store_check(check_id: str, path: str) -> DoctorCheck:
 
 
 def _check_checkpoints(ctx: _Context) -> DoctorCheck:
-    from kriya.workflow.checkpoint import CHECKPOINT_DIR
+    from kriya.control.checkpoint import CHECKPOINT_DIR
 
     return _store_check("persistence.checkpoints", os.path.join(ctx.workspace, CHECKPOINT_DIR))
 

@@ -3133,7 +3133,7 @@ class WorkflowEngine:
         # mandatory requirement must have a deterministic closer; a goal that
         # cannot be verified is refused here, naming what and why.
         if verification_contract is not None and _requirement_policy_blocks(self.kernel.config.autonomy):
-            from kriya.core.trace import TraceLogger
+            from kriya.control.trace import TraceLogger
 
             admission = verification_contract.refusal()
             if admission is not None:
@@ -3216,7 +3216,7 @@ class WorkflowEngine:
             # model call; a baseline that already satisfies every mandatory
             # claim is NO_MUTATION_REQUIRED (a success without a model).
             if verification_contract.authorities and verification_contract.refusal() is None:
-                from kriya.core.trace import TraceLogger
+                from kriya.control.trace import TraceLogger
                 from kriya.workflow.contract_baseline import BaselineAuthorityReport, NoMutationRequired
 
                 try:
@@ -3314,7 +3314,7 @@ class WorkflowEngine:
             if step_callback:
                 step_callback("knowledge_gap", gap_report.format_report())
             try:
-                from kriya.core.trace import TraceLogger
+                from kriya.control.trace import TraceLogger
                 trace_db = trace_db_path(self.kernel.config)
                 trace_logger = TraceLogger(trace_db)
                 trace_logger.log_run(
@@ -4332,7 +4332,7 @@ class WorkflowEngine:
             if step_callback:
                 step_callback(status, plan_issue)
             try:
-                from kriya.core.trace import TraceLogger
+                from kriya.control.trace import TraceLogger
                 trace_db = trace_db_path(self.kernel.config)
                 trace_logger = TraceLogger(trace_db)
                 trace_logger.log_run(
@@ -4474,7 +4474,7 @@ class WorkflowEngine:
                 if step_callback:
                     step_callback(status, plan_issue)
                 try:
-                    from kriya.core.trace import TraceLogger
+                    from kriya.control.trace import TraceLogger
                     TraceLogger(trace_db_path(self.kernel.config)).log_run(
                         run_id=trace_id, goal=goal, duration_sec=time.time() - start_time, attempts=0,
                         status=status, files_modified=[], failure_category=status,
@@ -5101,7 +5101,7 @@ class WorkflowEngine:
             # returns just above in this same method.
             logger.error(f"Brownfield validation baseline REQUIRED but indeterminate: {baseline_capture.hard_stop_reason}")
             try:
-                from kriya.core.trace import TraceLogger
+                from kriya.control.trace import TraceLogger
                 trace_db = trace_db_path(self.kernel.config)
                 TraceLogger(trace_db).log_run(
                     run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
@@ -5142,7 +5142,7 @@ class WorkflowEngine:
             logger.error(f"Worktree sync refused: {sync_error}")
             category = sync_error.reason_code.lower()
             try:
-                from kriya.core.trace import TraceLogger
+                from kriya.control.trace import TraceLogger
                 TraceLogger(trace_db_path(self.kernel.config)).log_run(
                     run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
                     attempts=0, status="failure", files_modified=[], failure_category=category,
@@ -5914,7 +5914,7 @@ class WorkflowEngine:
                                 os.remove(actual_file)
                     delete_checkpoint(workspace_path, run_id)
                     try:
-                        from kriya.core.trace import TraceLogger
+                        from kriya.control.trace import TraceLogger
                         trace_db = trace_db_path(self.kernel.config)
                         trace_logger = TraceLogger(trace_db)
                         # Same derivation the terminal success/failure path uses below
@@ -6978,7 +6978,7 @@ class WorkflowEngine:
         # Reviewer never finishes, this checkpoint is what survives, already
         # carrying the same gate_outcomes/model_hops a post-mortem needs.
         try:
-            from kriya.core.trace import TraceLogger
+            from kriya.control.trace import TraceLogger
             trace_db = trace_db_path(self.kernel.config)
             trace_logger = TraceLogger(trace_db)
             trace_logger.log_run(
@@ -7376,7 +7376,7 @@ class WorkflowEngine:
 
         # Write persistent trace log
         try:
-            from kriya.core.trace import TraceLogger
+            from kriya.control.trace import TraceLogger
             trace_db = trace_db_path(self.kernel.config)
             trace_logger = TraceLogger(trace_db)
             duration = time.time() - start_time

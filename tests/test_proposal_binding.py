@@ -507,7 +507,7 @@ def test_dynamic_zero_write_proof_write_capable_components_never_invoked(tmp_pat
     with patch("kriya.policy.filesystem.AuthorizedFileWriter.commit_file", side_effect=_raise), \
          patch("kriya.agents.agent.DeveloperAgent.run_generation", side_effect=_raise), \
          patch("kriya.workflow.workflow.WorkflowEngine.run_generation_workflow", side_effect=_raise), \
-         patch("kriya.workflow.checkpoint.save_checkpoint", side_effect=_raise):
+         patch("kriya.control.checkpoint.save_checkpoint", side_effect=_raise):
         proposal = _built_proposal(str(tmp_path))
         verify_proposal_bindings(proposal, str(tmp_path))
         proposal_to_authorized_semantic_regions(proposal)

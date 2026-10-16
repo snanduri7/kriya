@@ -51,12 +51,16 @@ from kriya.control.contracts import (
     ContractChangeConflictError,
     ContractNotFoundError,
     ContractRegistry,
-    ContractRegistryTransitionError,
     ContractState,
     ContractStateError,
     compute_shape_hash,
     registry_digest,
 )
+from kriya.control.persistence import TRANSITION_ALREADY_APPLIED as TRANSITION_ALREADY_APPLIED
+from kriya.control.persistence import TRANSITION_DISCARDED as TRANSITION_DISCARDED
+from kriya.control.persistence import TRANSITION_NEEDS_REVIEW as TRANSITION_NEEDS_REVIEW
+from kriya.control.persistence import TRANSITION_PROMOTED as TRANSITION_PROMOTED
+from kriya.control.persistence import complete_contract_transition as complete_contract_transition
 
 CONTRACT_CONSUMER_VERIFICATION_MISSING = "CONTRACT_CONSUMER_VERIFICATION_MISSING"
 CONTRACT_REGISTRY_TRANSITION_INCOMPLETE = "CONTRACT_REGISTRY_TRANSITION_INCOMPLETE"
@@ -74,11 +78,8 @@ INVALIDATED_BY_STALE_CONTRACT = "CONTRACT_STALE"
 CONSUMER_PROVENANCE_NAME_SCAN = "name_reference_scan"
 DOWNSTREAM_VERIFIED_BY = "terminal_full_regression"
 
-# Recovery outcomes.
-TRANSITION_PROMOTED = "PROMOTED"
-TRANSITION_ALREADY_APPLIED = "ALREADY_APPLIED"
-TRANSITION_DISCARDED = "DISCARDED"
-TRANSITION_NEEDS_REVIEW = "NEEDS_REVIEW"
+# Recovery outcomes and ``complete_contract_transition`` (recovery's half of the transaction): owned by STATE since D2
+# (kriya/control/persistence.py), re-exported here for their importers. Removed in P1.
 
 _SCAN_IGNORED_DIRS = frozenset({".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"})
 
@@ -329,38 +330,3 @@ def derive_contract_transition(
         invalidated_consumers=tuple(invalidated),
         downstream_verification=verification,
     )
-
-
-def complete_contract_transition(workspace_path: str, transaction_id: str, intent: Mapping[str, Any], *,
-                                 committed: bool) -> str:
-    """Recovery's half of the transaction, from the cycle's proven result.
-    A committed cycle's transition is promoted exactly (or found already
-    applied); an uncommitted cycle's staged transition is discarded while
-    the live registry must still be the before-state; anything else is
-    NEEDS_REVIEW, never forced."""
-    from kriya.control.persistence import (
-        discard_pending_contract_registry,
-        load_contract_registry,
-        promote_pending_contract_registry,
-    )
-
-    try:
-        current = load_contract_registry(workspace_path).digest()
-    except Exception:
-        return TRANSITION_NEEDS_REVIEW
-    if committed:
-        if current == intent.get("after_digest"):
-            discard_pending_contract_registry(workspace_path, transaction_id)
-            return TRANSITION_ALREADY_APPLIED
-        try:
-            promote_pending_contract_registry(
-                workspace_path, transaction_id,
-                before_digest=intent.get("before_digest"), after_digest=intent.get("after_digest"),
-            )
-        except (ContractRegistryTransitionError, OSError, ValueError):
-            return TRANSITION_NEEDS_REVIEW
-        return TRANSITION_PROMOTED
-    if current != intent.get("before_digest"):
-        return TRANSITION_NEEDS_REVIEW
-    discard_pending_contract_registry(workspace_path, transaction_id)
-    return TRANSITION_DISCARDED

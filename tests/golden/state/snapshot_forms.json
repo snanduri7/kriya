@@ -1,0 +1,566 @@
+{
+ "acquire": {
+  "consistency": {
+   "acquisition_completed_at": "<volatile>",
+   "acquisition_started_at": "<volatile>",
+   "kind": "snapshot_copy",
+   "live_stream": false,
+   "snapshot_id": "<snap-1>",
+   "source_metadata_at_acquisition": {
+    "inode": "<volatile>",
+    "journal_size": null,
+    "mtime_ns": "<volatile>",
+    "shm_size": null,
+    "size": "<volatile>",
+    "wal_size": null
+   },
+   "source_metadata_changed": true,
+   "source_metadata_now": {
+    "inode": "<volatile>",
+    "journal_size": null,
+    "mtime_ns": "<volatile>",
+    "shm_size": "<volatile>",
+    "size": "<volatile>",
+    "wal_size": "<volatile>"
+   }
+  },
+  "data": {
+   "acquisition_completed_at": "<volatile>",
+   "acquisition_started_at": "<volatile>",
+   "backup_steps": "<volatile>",
+   "duration_ms": "<volatile>",
+   "orphans_removed": [],
+   "pruned": [],
+   "rows": 5,
+   "size": "<volatile>",
+   "snapshot_id": "<snap-1>",
+   "source": "<state>/traces.db",
+   "source_metadata_at_acquisition": {
+    "inode": "<volatile>",
+    "journal_size": null,
+    "mtime_ns": "<volatile>",
+    "shm_size": null,
+    "size": "<volatile>",
+    "wal_size": null
+   },
+   "source_metadata_changed": true,
+   "source_metadata_now": {
+    "inode": "<volatile>",
+    "journal_size": null,
+    "mtime_ns": "<volatile>",
+    "shm_size": "<volatile>",
+    "size": "<volatile>",
+    "wal_size": "<volatile>"
+   },
+   "sqlite_version": "<volatile>"
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "snapshot.acquire",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "snapshot_directory": "<state>/kup-snapshots/<snap-1>",
+   "snapshot_id": "<snap-1>",
+   "state_directory": "<state>",
+   "trace_database": "<state>/traces.db"
+  }
+ },
+ "acquire_again": {
+  "consistency": {
+   "acquisition_completed_at": "<volatile>",
+   "acquisition_started_at": "<volatile>",
+   "kind": "snapshot_copy",
+   "live_stream": false,
+   "snapshot_id": "<snap-2>",
+   "source_metadata_at_acquisition": {
+    "inode": "<volatile>",
+    "journal_size": null,
+    "mtime_ns": "<volatile>",
+    "shm_size": "<volatile>",
+    "size": "<volatile>",
+    "wal_size": "<volatile>"
+   },
+   "source_metadata_changed": false,
+   "source_metadata_now": {
+    "inode": "<volatile>",
+    "journal_size": null,
+    "mtime_ns": "<volatile>",
+    "shm_size": "<volatile>",
+    "size": "<volatile>",
+    "wal_size": "<volatile>"
+   }
+  },
+  "data": {
+   "acquisition_completed_at": "<volatile>",
+   "acquisition_started_at": "<volatile>",
+   "backup_steps": "<volatile>",
+   "duration_ms": "<volatile>",
+   "orphans_removed": [],
+   "pruned": [],
+   "rows": 5,
+   "size": "<volatile>",
+   "snapshot_id": "<snap-2>",
+   "source": "<state>/traces.db",
+   "source_metadata_at_acquisition": {
+    "inode": "<volatile>",
+    "journal_size": null,
+    "mtime_ns": "<volatile>",
+    "shm_size": "<volatile>",
+    "size": "<volatile>",
+    "wal_size": "<volatile>"
+   },
+   "source_metadata_changed": false,
+   "source_metadata_now": {
+    "inode": "<volatile>",
+    "journal_size": null,
+    "mtime_ns": "<volatile>",
+    "shm_size": "<volatile>",
+    "size": "<volatile>",
+    "wal_size": "<volatile>"
+   },
+   "sqlite_version": "<volatile>"
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "snapshot.acquire",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "snapshot_directory": "<state>/kup-snapshots/<snap-2>",
+   "snapshot_id": "<snap-2>",
+   "state_directory": "<state>",
+   "trace_database": "<state>/traces.db"
+  }
+ },
+ "acquire_without_a_store": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "READ_ONLY_UNAVAILABLE",
+   "database_state": "missing",
+   "message": "no trace database exists at the resolved store path"
+  },
+  "observed_at": "<volatile>",
+  "operation": "snapshot.acquire",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "history_corrupt": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "SNAPSHOT_CORRUPT",
+   "database_state": null,
+   "message": "snapshot file size or mtime differs from its manifest",
+   "snapshot_id": "<snap-2>"
+  },
+  "observed_at": "<volatile>",
+  "operation": "history.list",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "history_unknown_snapshot": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "SNAPSHOT_UNAVAILABLE",
+   "database_state": null,
+   "message": "snapshot <snap-3> is not published (pruned or never existed)",
+   "snapshot_id": "<snap-3>"
+  },
+  "observed_at": "<volatile>",
+  "operation": "history.list",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "layout": [
+  ".acquire.lock 0o600",
+  "<snap-1> 0o700/",
+  "<snap-1>/manifest.json 0o400",
+  "<snap-1>/traces.snapshot.db 0o400",
+  "<snap-2> 0o700/",
+  "<snap-2>/manifest.json 0o400",
+  "<snap-2>/traces.snapshot.db 0o400"
+ ],
+ "layout_after_prune": [
+  ".acquire.lock 0o600",
+  "<snap-2> 0o700/",
+  "<snap-2>/manifest.json 0o400",
+  "<snap-2>/traces.snapshot.db 0o400"
+ ],
+ "list": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "retain": 3,
+   "snapshot_directory": "<state>/kup-snapshots",
+   "snapshots": [
+    {
+     "acquisition_completed_at": "<volatile>",
+     "acquisition_started_at": "<volatile>",
+     "rows": 5,
+     "size": "<volatile>",
+     "snapshot_id": "<snap-2>",
+     "source": "<state>/traces.db",
+     "source_metadata_at_acquisition": {
+      "inode": "<volatile>",
+      "journal_size": null,
+      "mtime_ns": "<volatile>",
+      "shm_size": "<volatile>",
+      "size": "<volatile>",
+      "wal_size": "<volatile>"
+     },
+     "source_metadata_changed": false,
+     "source_metadata_now": {
+      "inode": "<volatile>",
+      "journal_size": null,
+      "mtime_ns": "<volatile>",
+      "shm_size": "<volatile>",
+      "size": "<volatile>",
+      "wal_size": "<volatile>"
+     },
+     "sqlite_version": "<volatile>"
+    },
+    {
+     "acquisition_completed_at": "<volatile>",
+     "acquisition_started_at": "<volatile>",
+     "rows": 5,
+     "size": "<volatile>",
+     "snapshot_id": "<snap-1>",
+     "source": "<state>/traces.db",
+     "source_metadata_at_acquisition": {
+      "inode": "<volatile>",
+      "journal_size": null,
+      "mtime_ns": "<volatile>",
+      "shm_size": null,
+      "size": "<volatile>",
+      "wal_size": null
+     },
+     "source_metadata_changed": true,
+     "source_metadata_now": {
+      "inode": "<volatile>",
+      "journal_size": null,
+      "mtime_ns": "<volatile>",
+      "shm_size": "<volatile>",
+      "size": "<volatile>",
+      "wal_size": "<volatile>"
+     },
+     "sqlite_version": "<volatile>"
+    }
+   ]
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "snapshot.list",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<state>",
+   "trace_database": "<state>/traces.db"
+  }
+ },
+ "list_after_prune_all": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "retain": 3,
+   "snapshot_directory": "<state>/kup-snapshots",
+   "snapshots": []
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "snapshot.list",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<state>",
+   "trace_database": "<state>/traces.db"
+  }
+ },
+ "list_verified": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "retain": 3,
+   "snapshot_directory": "<state>/kup-snapshots",
+   "snapshots": [
+    {
+     "acquisition_completed_at": "<volatile>",
+     "acquisition_started_at": "<volatile>",
+     "digest_verified": true,
+     "rows": 5,
+     "size": "<volatile>",
+     "snapshot_id": "<snap-2>",
+     "source": "<state>/traces.db",
+     "source_metadata_at_acquisition": {
+      "inode": "<volatile>",
+      "journal_size": null,
+      "mtime_ns": "<volatile>",
+      "shm_size": "<volatile>",
+      "size": "<volatile>",
+      "wal_size": "<volatile>"
+     },
+     "source_metadata_changed": false,
+     "source_metadata_now": {
+      "inode": "<volatile>",
+      "journal_size": null,
+      "mtime_ns": "<volatile>",
+      "shm_size": "<volatile>",
+      "size": "<volatile>",
+      "wal_size": "<volatile>"
+     },
+     "sqlite_version": "<volatile>"
+    },
+    {
+     "acquisition_completed_at": "<volatile>",
+     "acquisition_started_at": "<volatile>",
+     "digest_verified": true,
+     "rows": 5,
+     "size": "<volatile>",
+     "snapshot_id": "<snap-1>",
+     "source": "<state>/traces.db",
+     "source_metadata_at_acquisition": {
+      "inode": "<volatile>",
+      "journal_size": null,
+      "mtime_ns": "<volatile>",
+      "shm_size": null,
+      "size": "<volatile>",
+      "wal_size": null
+     },
+     "source_metadata_changed": true,
+     "source_metadata_now": {
+      "inode": "<volatile>",
+      "journal_size": null,
+      "mtime_ns": "<volatile>",
+      "shm_size": "<volatile>",
+      "size": "<volatile>",
+      "wal_size": "<volatile>"
+     },
+     "sqlite_version": "<volatile>"
+    }
+   ]
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "snapshot.list",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<state>",
+   "trace_database": "<state>/traces.db"
+  }
+ },
+ "list_without_snapshots": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "retain": 3,
+   "snapshot_directory": "<state>/kup-snapshots",
+   "snapshots": []
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "snapshot.list",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<state>",
+   "trace_database": "<state>/traces.db"
+  }
+ },
+ "manifest_keys": [
+  "acquisition_completed_at",
+  "acquisition_started_at",
+  "backup_steps",
+  "duration_ms",
+  "implementation",
+  "manifest_version",
+  "quick_check",
+  "rows",
+  "snapshot_file",
+  "snapshot_id",
+  "source",
+  "source_journal_mode",
+  "source_metadata_after_backup",
+  "source_metadata_at_acquisition",
+  "source_page_count",
+  "source_page_size",
+  "sqlite_version"
+ ],
+ "prune_all": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "kept": [],
+   "orphans_removed": [],
+   "removed": [
+    "<snap-2>"
+   ]
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "snapshot.prune",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<state>",
+   "trace_database": "<state>/traces.db"
+  }
+ },
+ "prune_bad_keep": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "INVALID_REQUEST",
+   "database_state": null,
+   "message": "keep must be >= 0"
+  },
+  "observed_at": "<volatile>",
+  "operation": "snapshot.prune",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "prune_keep_one": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "kept": [
+    "<snap-2>"
+   ],
+   "orphans_removed": [],
+   "removed": [
+    "<snap-1>"
+   ]
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "snapshot.prune",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<state>",
+   "trace_database": "<state>/traces.db"
+  }
+ },
+ "prune_without_a_directory": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "kept": [],
+   "orphans_removed": [],
+   "removed": []
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "snapshot.prune",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "state_directory": "<state>",
+   "trace_database": "<state>/traces.db"
+  }
+ },
+ "verify": {
+  "consistency": {
+   "kind": "live_observation",
+   "live_stream": false
+  },
+  "data": {
+   "digest_verified": true,
+   "duration_ms": "<volatile>",
+   "guarantee": "digest verified at this request; size and mtime are checked on every later query",
+   "sha256": "<volatile>",
+   "size": "<volatile>",
+   "snapshot_id": "<snap-1>",
+   "verified_at": "<volatile>"
+  },
+  "error": null,
+  "observed_at": "<volatile>",
+  "operation": "snapshot.verify",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": {
+   "snapshot_directory": "<state>/kup-snapshots/<snap-1>",
+   "snapshot_id": "<snap-1>",
+   "state_directory": "<state>",
+   "trace_database": "<state>/traces.db"
+  }
+ },
+ "verify_bad_id": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "INVALID_REQUEST",
+   "database_state": null,
+   "message": "snapshot_id has an unexpected form"
+  },
+  "observed_at": "<volatile>",
+  "operation": "snapshot.verify",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "verify_corrupt": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "SNAPSHOT_CORRUPT",
+   "database_state": null,
+   "message": "snapshot file size or mtime differs from its manifest",
+   "snapshot_id": "<snap-2>"
+  },
+  "observed_at": "<volatile>",
+  "operation": "snapshot.verify",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "verify_no_id": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "INVALID_REQUEST",
+   "database_state": null,
+   "message": "snapshot_id is required for snapshot.verify"
+  },
+  "observed_at": "<volatile>",
+  "operation": "snapshot.verify",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ },
+ "verify_unknown": {
+  "consistency": null,
+  "data": null,
+  "error": {
+   "code": "SNAPSHOT_UNAVAILABLE",
+   "database_state": null,
+   "message": "snapshot <snap-3> is not published (pruned or never existed)",
+   "snapshot_id": "<snap-3>"
+  },
+  "observed_at": "<volatile>",
+  "operation": "snapshot.verify",
+  "request_id": "golden",
+  "schema_version": 1,
+  "source": null
+ }
+}

@@ -48,7 +48,12 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya import __version__
-from kriya.control.persistence import save_run_record, scan_run_records
+from kriya.control.persistence import (
+    TRANSITION_NEEDS_REVIEW,
+    complete_contract_transition,
+    save_run_record,
+    scan_run_records,
+)
 from kriya.control.run_ownership import acquire_run_lock, probe_run_lock
 from kriya.control.run_record import (
     COMMIT_COMMITTED,
@@ -667,8 +672,6 @@ def _complete_contract_transitions(
     workspace: str, record: RunRecord, proven: Dict[str, str], report: RecoveryReport,
 ) -> bool:
     """False when a transition needs review (the record then stays open)."""
-    from kriya.workflow.contract_lifecycle import TRANSITION_NEEDS_REVIEW, complete_contract_transition
-
     complete = True
     for cycle in record.open_commit_cycles:
         intent = cycle.get("contract_registry")

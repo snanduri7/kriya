@@ -67,7 +67,7 @@ def write_outcome_trace(
     for event in run_events:  # LR-R1-M1: outcome-row events are mirrored too
         attempt_evidence_scope.mirror_event(event)
     try:
-        from kriya.core.trace import TraceLogger
+        from kriya.control.trace import TraceLogger
 
         TraceLogger(trace_db).log_run(
             run_id=run_id, goal=goal,

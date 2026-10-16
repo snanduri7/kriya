@@ -36,7 +36,7 @@ from kriya.control.contracts import (
     register_provided_capabilities,
     wire_contract_consumers,
 )
-from kriya.control.control_store import write_control_file
+from kriya.control.control_store import MILESTONE_SIDECAR_RELATIVE_DIR, write_control_file
 from kriya.control.persistence import (
     load_artifact_registry,
     load_contract_registry,
@@ -63,7 +63,6 @@ from kriya.workflow.milestone_completion import (
     LOOP_FAILED,
     LOOP_PASSED,
     MILESTONE_COMPLETION_SCHEMA_VERSION,
-    MILESTONE_SIDECAR_RELATIVE_DIR,
     ORIGIN_RUN,
     MilestoneReuseAssessment,
     MilestoneReuseDecision,
@@ -813,7 +812,7 @@ def _log_milestone_plan_telemetry(
     site in kriya/workflow/workflow.py."""
     if not trace_db:
         return
-    from kriya.core.trace import TraceLogger
+    from kriya.control.trace import TraceLogger
 
     structure = plan_structure_telemetry(milestones)
     trace_logger = TraceLogger(trace_db)

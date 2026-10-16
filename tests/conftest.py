@@ -312,7 +312,7 @@ MODULE_TIER_FILES = {
         "test_ver004_pyproject_dependency_evidence.py", "contracts/test_evidence_state_stores_contract.py"
     }),
     "state": frozenset({
-        "test_checkpoint_control_plane_hashes.py", "test_control_artifact_persistence.py",
+        "test_checkpoint_control_plane_hashes.py", "test_checkpoint_store.py", "test_control_artifact_persistence.py",
         "test_control_artifacts.py", "test_control_context.py", "test_control_contract_persistence.py",
         "test_control_contracts.py", "test_control_decisions.py", "test_control_persistence.py",
         "test_control_plane_end_to_end.py", "test_control_state.py", "test_control_telemetry.py",
@@ -324,7 +324,7 @@ MODULE_TIER_FILES = {
         "test_prd008a_plan_executor.py", "test_prd008a_resume_convergence.py",
         "test_prd019_milestone_route_resume.py", "test_reopened_project_history.py", "test_resume_integrity.py",
         "test_run_record.py", "test_state001_checkpoint_workspace_identity.py", "test_state_location.py",
-        "test_subtask_checkpoint.py", "test_traces_command.py"
+        "test_subtask_checkpoint.py", "test_traces_command.py", "contracts/test_evidence_state_stores_contract.py"
     }),
     "config": frozenset({
         "test_autonomy_config_registry_hosts.py", "test_code_intel_config.py", "test_config.py",

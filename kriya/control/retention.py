@@ -30,19 +30,20 @@ unknown. The caller must hold the workspace run lock.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass, field
 from typing import Iterable, List, Optional, Set
 
+from kriya.control.checkpoint import list_checkpoint_run_references
+from kriya.control.control_store import MILESTONE_SIDECAR_RELATIVE_DIR
 from kriya.control.persistence import (
     load_control_state_run_reference,
     run_record_path,
     scan_run_records,
 )
-from kriya.workflow.checkpoint import list_checkpoint_run_references
 from kriya.workflow.edit_safety import CommitState, list_commit_evidence
-from kriya.workflow.milestone_completion import milestone_ledger_run_references
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +133,30 @@ def prune_run_state(
     for path in evidence_to_prune:
         _unlink(path)
     return report
+
+
+# Moved verbatim from kriya/workflow/milestone_completion.py in D2 (a read of STATE files; its only caller is retention).
+def milestone_ledger_run_references(workspace_path: str) -> List[str]:
+    """Run ids the milestone sidecars' commit ledgers reference (retention
+    protects them, or every completed milestone would silently become
+    UNVERIFIED once its record aged out). An unreadable sidecar's proofs are
+    unusable anyway, so it contributes nothing."""
+    directory = os.path.join(workspace_path, MILESTONE_SIDECAR_RELATIVE_DIR)
+    try:
+        names = sorted(name for name in os.listdir(directory) if name.endswith(".json"))
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+    references: Set[str] = set()
+    for name in names:
+        try:
+            with open(os.path.join(directory, name), "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            for raw in payload.get("commit_ledger", []) or []:
+                if isinstance(raw, dict) and isinstance(raw.get("run_id"), str):
+                    references.add(raw["run_id"])
+        except Exception:
+            continue
+    return sorted(references)
 
 
 def workspace_run_references(workspace_path: str) -> Set[str]:

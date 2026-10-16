@@ -110,7 +110,7 @@ def build_preflight(workspace: str, cockpit_state_directory: Optional[str], *, l
     runtime_state: Dict[str, Any] = {"directory": None, "source": None, "cockpit_directory": cockpit_state_directory, "observable_by_cockpit": None}
     model: Optional[Dict[str, Any]] = None
     if cfg is not None:
-        from kriya.workflow.checkpoint import compute_config_fingerprint
+        from kriya.control.checkpoint import compute_config_fingerprint
 
         configuration["fingerprint"] = compute_config_fingerprint(cfg.model_dump())
         model = _model_identity(cfg)
@@ -258,7 +258,7 @@ class RunService:
         if not run_id:
             return
         try:
-            from kriya.core.trace import TraceLogger
+            from kriya.control.trace import TraceLogger
             TraceLogger(trace_db_path(cfg)).log_run(
                 run_id=run_id,
                 goal=goal,

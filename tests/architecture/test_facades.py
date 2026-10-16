@@ -42,6 +42,8 @@ FACADES: Dict[str, Facade] = {
     "kriya/workflow/runtime_command_approval.py": Facade(
         "kriya.policy.approval", "P1",
         "C3: runtime-command subject/fingerprint/decision owned by AUTHORITY; 9 test files import the old path"),
+    "kriya/core/trace.py": Facade("kriya.control.trace", "P1",
+                                  "D2: the run trace store (TraceLogger) owned by STATE; 17 test files and fixtures import the old path"),
 }
 
 
@@ -66,6 +68,18 @@ PARTIAL_FACADES: Dict[str, PartialFacade] = {
          "ApprovalRefused", "RuntimeCommandReviewPort", "_sha", "candidate_digest", "split_reason"), "P1",
         "C3: review kinds/codes, ApprovalRefused, candidate digest and split_reason owned by AUTHORITY's approval module (plus the review "
         "port the record and wait take as a parameter); the review record, wait and decide stay"),
+    "kriya/workflow/checkpoint.py": PartialFacade(
+        "kriya.control.checkpoint",
+        ("CHECKPOINT_DIR", "OBSERVATIONAL_CONFIG_SECTIONS", "checkpoint_path", "compute_config_fingerprint", "compute_registry_hash",
+         "delete_checkpoint", "find_latest_checkpoint", "list_checkpoint_run_references", "list_checkpoints", "load_checkpoint", "new_run_id",
+         "save_checkpoint", "without_observational_config"), "P1",
+        "D2: the checkpoint store owned by STATE; the git/working-tree fingerprints (M2) and the resume validation (kernel) stay; "
+        "24 test files and the engine (save_checkpoint/delete_checkpoint, patched on workflow.workflow) import the old path"),
+    "kriya/workflow/contract_lifecycle.py": PartialFacade(
+        "kriya.control.persistence",
+        ("TRANSITION_ALREADY_APPLIED", "TRANSITION_DISCARDED", "TRANSITION_NEEDS_REVIEW", "TRANSITION_PROMOTED", "complete_contract_transition"),
+        "P1", "D2: recovery's half of the contract-registry transaction (a read/settle of STATE's registry files) owned by STATE, so "
+        "control.recovery no longer imports the kernel; derive_contract_transition stays; test_prd029_contract_lifecycle uses the old path"),
     "kriya/core/llm.py": PartialFacade(
         "kriya.policy.egress", ("is_local_url",), "P1",
         "C3: the local/private-address definition owned by AUTHORITY (policy.execution no longer imports the provider back); "

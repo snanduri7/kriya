@@ -27,7 +27,7 @@ import logging
 import os
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from kriya.context.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
 from kriya.control.artifacts import ArtifactRegistry
@@ -497,6 +497,44 @@ def discard_pending_contract_registry(workspace_path: str, transaction_id: str) 
         return False
     os.remove(path)
     return True
+
+
+# Contract-registry recovery (PRD-029): moved verbatim from kriya/workflow/contract_lifecycle.py in D2 - it reads and settles only
+# the registry files this module owns, so recovery (kriya/control/recovery.py) no longer imports the kernel.
+# Recovery outcomes.
+TRANSITION_PROMOTED = "PROMOTED"
+TRANSITION_ALREADY_APPLIED = "ALREADY_APPLIED"
+TRANSITION_DISCARDED = "DISCARDED"
+TRANSITION_NEEDS_REVIEW = "NEEDS_REVIEW"
+
+
+def complete_contract_transition(workspace_path: str, transaction_id: str, intent: Mapping[str, Any], *,
+                                 committed: bool) -> str:
+    """Recovery's half of the transaction, from the cycle's proven result.
+    A committed cycle's transition is promoted exactly (or found already
+    applied); an uncommitted cycle's staged transition is discarded while
+    the live registry must still be the before-state; anything else is
+    NEEDS_REVIEW, never forced."""
+    try:
+        current = load_contract_registry(workspace_path).digest()
+    except Exception:
+        return TRANSITION_NEEDS_REVIEW
+    if committed:
+        if current == intent.get("after_digest"):
+            discard_pending_contract_registry(workspace_path, transaction_id)
+            return TRANSITION_ALREADY_APPLIED
+        try:
+            promote_pending_contract_registry(
+                workspace_path, transaction_id,
+                before_digest=intent.get("before_digest"), after_digest=intent.get("after_digest"),
+            )
+        except (ContractRegistryTransitionError, OSError, ValueError):
+            return TRANSITION_NEEDS_REVIEW
+        return TRANSITION_PROMOTED
+    if current != intent.get("before_digest"):
+        return TRANSITION_NEEDS_REVIEW
+    discard_pending_contract_registry(workspace_path, transaction_id)
+    return TRANSITION_DISCARDED
 
 
 def save_artifact_registry(workspace_path: str, registry: ArtifactRegistry) -> None:

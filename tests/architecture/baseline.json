@@ -1,6 +1,6 @@
 {
- "files": 367,
- "edges": 1523,
+ "files": 369,
+ "edges": 1522,
  "top_level_sccs": [
   [
    "kriya.tools.containment",
@@ -12,36 +12,64 @@
   ]
  ],
  "all_import_scc_sizes": [
-  125,
+  67,
+  8,
+  7,
   6,
+  4,
+  3,
+  3,
+  2,
+  2,
   2,
   2
  ],
  "all_import_scc_members_per_package": [
   {
-   "kriya(top)": 3,
    "kriya.agents": 2,
    "kriya.analyzer": 1,
-   "kriya.capabilities": 3,
-   "kriya.config": 1,
-   "kriya.control": 9,
-   "kriya.core": 12,
+   "kriya.core": 9,
    "kriya.knowledge": 2,
-   "kriya.mcp": 1,
    "kriya.memory": 2,
    "kriya.skills": 1,
-   "kriya.static_analysis": 1,
+   "kriya.workflow": 50
+  },
+  {
+   "kriya.control": 7,
+   "kriya.core": 1
+  },
+  {
+   "kriya(top)": 1,
+   "kriya.capabilities": 3,
    "kriya.tools": 2,
-   "kriya.workflow": 85
+   "kriya.workflow": 1
   },
   {
    "kriya.tools": 6
+  },
+  {
+   "kriya.workflow": 4
+  },
+  {
+   "kriya(top)": 1,
+   "kriya.core": 1,
+   "kriya.mcp": 1
+  },
+  {
+   "kriya.workflow": 3
   },
   {
    "kriya(top)": 2
   },
   {
    "kriya.code_intel": 2
+  },
+  {
+   "kriya.static_analysis": 1,
+   "kriya.workflow": 1
+  },
+  {
+   "kriya.workflow": 2
   }
  ],
  "all_import_sccs": [
@@ -49,86 +77,43 @@
    "kriya.agents.agent",
    "kriya.agents.extractor",
    "kriya.analyzer.analyzer",
-   "kriya.capabilities",
-   "kriya.capabilities.gradle",
-   "kriya.capabilities.maven",
-   "kriya.capabilities.pip",
-   "kriya.config",
-   "kriya.config.config",
-   "kriya.control.commit_state",
-   "kriya.control.decisions",
-   "kriya.control.launch",
-   "kriya.control.launch_approval",
-   "kriya.control.persistence",
-   "kriya.control.recovery",
-   "kriya.control.retention",
-   "kriya.control.run_coordinator",
-   "kriya.control.telemetry",
    "kriya.core.inference_runtime",
    "kriya.core.inference_settings",
-   "kriya.core.kernel",
    "kriya.core.llm",
-   "kriya.core.logging_setup",
    "kriya.core.model_capabilities",
    "kriya.core.model_qualification",
    "kriya.core.model_routing",
    "kriya.core.model_runtime",
    "kriya.core.qualification_identity",
    "kriya.core.role_metrics",
-   "kriya.core.trace",
    "kriya.knowledge.channels.live_failure",
    "kriya.knowledge.staging",
-   "kriya.mcp",
-   "kriya.mcp.mcp",
    "kriya.memory.embedding",
    "kriya.memory.vector",
    "kriya.skills.skill",
-   "kriya.static_analysis.service",
-   "kriya.tools.test_execution",
-   "kriya.tools.validate",
-   "kriya.workflow.acceptance_approval",
-   "kriya.workflow.acceptance_jvm",
-   "kriya.workflow.acceptance_oracle",
-   "kriya.workflow.api_preservation",
    "kriya.workflow.attempt",
    "kriya.workflow.attribution",
-   "kriya.workflow.authority_bundle",
    "kriya.workflow.authority_escalation",
-   "kriya.workflow.authority_request",
    "kriya.workflow.baseline_policy",
    "kriya.workflow.best_of_n",
    "kriya.workflow.checkpoint",
    "kriya.workflow.commit_service",
-   "kriya.workflow.compile_regression",
    "kriya.workflow.context_budget",
    "kriya.workflow.context_orchestrator",
    "kriya.workflow.context_projection",
    "kriya.workflow.context_source",
-   "kriya.workflow.contract_baseline",
-   "kriya.workflow.contract_closers",
-   "kriya.workflow.contract_compilation",
-   "kriya.workflow.contract_feedback",
-   "kriya.workflow.contract_lifecycle",
-   "kriya.workflow.contract_relevance",
-   "kriya.workflow.deterministic_failure_diagnostic",
    "kriya.workflow.edit_capability",
    "kriya.workflow.edit_feasibility",
    "kriya.workflow.egress_authority",
-   "kriya.workflow.example_oracle",
-   "kriya.workflow.example_oracle_java",
-   "kriya.workflow.exception_masking",
-   "kriya.workflow.goal_example_forms",
    "kriya.workflow.goal_facts",
    "kriya.workflow.graph_retrieval",
    "kriya.workflow.insertion_locus",
    "kriya.workflow.investigation",
-   "kriya.workflow.jvm_module_ownership",
    "kriya.workflow.language_adapters",
    "kriya.workflow.localization_decision",
    "kriya.workflow.milestone_completion",
    "kriya.workflow.milestones",
    "kriya.workflow.model_transition",
-   "kriya.workflow.named_test_oracle",
    "kriya.workflow.operations",
    "kriya.workflow.ownership_findings",
    "kriya.workflow.plan_adapters",
@@ -138,13 +123,7 @@
    "kriya.workflow.planner_repair",
    "kriya.workflow.prompt_composition",
    "kriya.workflow.proposal_binding",
-   "kriya.workflow.pytest_stability",
    "kriya.workflow.recovery_coordinator",
-   "kriya.workflow.regression_attribution",
-   "kriya.workflow.requirement_contract",
-   "kriya.workflow.requirement_disposition",
-   "kriya.workflow.requirement_scopes",
-   "kriya.workflow.requirements",
    "kriya.workflow.resume_fingerprints",
    "kriya.workflow.retry_package",
    "kriya.workflow.retry_prompts",
@@ -155,22 +134,32 @@
    "kriya.workflow.skill_extraction",
    "kriya.workflow.state",
    "kriya.workflow.subtask_checkpoint",
-   "kriya.workflow.subtask_executor",
    "kriya.workflow.subtask_telemetry",
    "kriya.workflow.suite_attribution",
-   "kriya.workflow.terminal_commit",
    "kriya.workflow.terminal_gate_service",
-   "kriya.workflow.test_delta",
-   "kriya.workflow.toolchain",
-   "kriya.workflow.validation_baseline",
-   "kriya.workflow.verification_coordinator",
-   "kriya.workflow.verification_report",
    "kriya.workflow.verified_no_change",
    "kriya.workflow.verifier_evidence",
    "kriya.workflow.workflow",
-   "kriya.workflow.workflow_controller",
-   "kriya.workflow.workflow_types",
-   "kriya.workflow.worktree"
+   "kriya.workflow.workflow_controller"
+  ],
+  [
+   "kriya.control.checkpoint",
+   "kriya.control.commit_state",
+   "kriya.control.launch",
+   "kriya.control.launch_approval",
+   "kriya.control.persistence",
+   "kriya.control.retention",
+   "kriya.control.run_coordinator",
+   "kriya.core.logging_setup"
+  ],
+  [
+   "kriya.capabilities",
+   "kriya.capabilities.gradle",
+   "kriya.capabilities.maven",
+   "kriya.capabilities.pip",
+   "kriya.tools.test_execution",
+   "kriya.tools.validate",
+   "kriya.workflow.jvm_module_ownership"
   ],
   [
    "kriya.tools.containment",
@@ -181,12 +170,36 @@
    "kriya.tools.toolchain_identity"
   ],
   [
+   "kriya.workflow.authority_request",
+   "kriya.workflow.contract_compilation",
+   "kriya.workflow.requirement_scopes",
+   "kriya.workflow.requirements"
+  ],
+  [
+   "kriya.core.kernel",
+   "kriya.mcp",
+   "kriya.mcp.mcp"
+  ],
+  [
+   "kriya.workflow.acceptance_approval",
+   "kriya.workflow.acceptance_jvm",
+   "kriya.workflow.acceptance_oracle"
+  ],
+  [
    "kriya.cli",
    "kriya.repl"
   ],
   [
    "kriya.code_intel.config_parsing",
    "kriya.code_intel.parsing"
+  ],
+  [
+   "kriya.static_analysis.service",
+   "kriya.workflow.terminal_commit"
+  ],
+  [
+   "kriya.workflow.example_oracle_java",
+   "kriya.workflow.goal_example_forms"
   ]
  ]
 }

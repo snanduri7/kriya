@@ -21,13 +21,27 @@ both in one call), same as any other DecisionLedger usage.
 """
 
 from collections import Counter
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Protocol, Sequence
 
 from kriya.control.artifacts import ArtifactRecord, ArtifactValidationResult
 from kriya.control.contracts import ContractChange, ContractRecord
 from kriya.control.decisions import Decision, DecisionLedger
-from kriya.workflow.checkpoint import ResumeValidationResult
-from kriya.workflow.context_package import ContextPackage
+
+
+# The kernel-owned inputs these records summarize, as the structural shapes read here (full modularization D2: STATE never imports the
+# kernel). ``kriya.workflow.context_package.ContextPackage`` and ``kriya.workflow.checkpoint.ResumeValidationResult`` satisfy them.
+class ContextPackageSummary(Protocol):
+    package_hash: str
+    token_count: int
+    relevant_files: Sequence[Any]   # each item has ``source_type``
+    contract_entries: Sequence[Any]
+    artifact_entries: Sequence[Any]
+    omitted: Sequence[Any]
+
+
+class ResumeValidationSummary(Protocol):
+    status: Any                     # an enum member: ``.value`` is recorded
+    mismatches: Sequence[str]
 
 
 def record_contract_access(ledger: DecisionLedger, record: ContractRecord, access: str) -> Decision:
@@ -80,7 +94,7 @@ def record_artifact_drift(ledger: DecisionLedger, result: ArtifactValidationResu
     )
 
 
-def _context_package_summary_fields(package: ContextPackage) -> Dict[str, Any]:
+def _context_package_summary_fields(package: ContextPackageSummary) -> Dict[str, Any]:
     """"context package size" + "context provenance" together - a
     per-source_type count breakdown, never any item's real content.
     Pure (no ledger side effect) so a caller that wants these fields under
@@ -98,11 +112,11 @@ def _context_package_summary_fields(package: ContextPackage) -> Dict[str, Any]:
     }
 
 
-def record_context_package_summary(ledger: DecisionLedger, package: ContextPackage) -> Decision:
+def record_context_package_summary(ledger: DecisionLedger, package: ContextPackageSummary) -> Decision:
     return ledger.record("context_package_built", **_context_package_summary_fields(package))
 
 
-def record_omitted_context(ledger: DecisionLedger, package: ContextPackage) -> Decision:
+def record_omitted_context(ledger: DecisionLedger, package: ContextPackageSummary) -> Decision:
     """One record per build listing what was left out and why (section
     27's own path/rank/reason/estimated_tokens shape, unchanged) - never
     silently absent from telemetry just because it was already silently
@@ -126,7 +140,7 @@ def record_registry_hashes(
     )
 
 
-def record_resume_validation(ledger: DecisionLedger, result: ResumeValidationResult) -> Decision:
+def record_resume_validation(ledger: DecisionLedger, result: ResumeValidationSummary) -> Decision:
     return ledger.record(
         "resume_validation", status=result.status.value, mismatch_count=len(result.mismatches),
         mismatches=list(result.mismatches),
