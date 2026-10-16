@@ -378,7 +378,8 @@ MODULE_TIER_FILES = {
         "test_ver006_distrust_containment.py"
     }),
     "repository": frozenset({
-        "test_backend_final_closure_005_git_metadata.py", "test_backend_readiness_v2_terminal_masking_gate.py",
+        "test_atomic_write.py", "test_backend_final_closure_005_git_metadata.py",
+        "test_backend_readiness_v2_terminal_masking_gate.py", "test_commit_mechanism.py",
         "test_d8_terminal_toolchain_authority.py", "test_edit_safety_policy_audit.py",
         "test_file_integrity_contract_001.py", "test_file_integrity_contract_001b.py",
         "test_prd004_commit_failure.py", "test_prd005_commit_transactions.py", "test_prd008_commit_state_gate.py",
