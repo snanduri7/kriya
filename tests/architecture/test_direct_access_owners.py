@@ -79,7 +79,7 @@ TABLES: Dict[str, Table] = {
     "skill_dir_reads": Table(sites.skill_dir_read_sites, frozenset({"SKILLS"}), frozenset(), ()),
     "tool_registry": Table(sites.tool_registry_sites, frozenset({"TOOLBOX"}),
                            frozenset({"kriya.workflow.subtask_executor"}), ()),
-    "kriya_dir": Table(sites.kriya_dir_sites, frozenset({"STATE", "REPOSITORY"}), frozenset(), ()),
+    "kriya_dir": Table(sites.kriya_dir_sites, frozenset({"STATE", "REPOSITORY"}), frozenset({"kriya.config.environment"}), ()),
 }
 
 ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
@@ -165,7 +165,6 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         "kriya.capabilities.python": (1, "P2", _P2),
         "kriya.cli": (4, "P2", _P2),
         "kriya.config.authority_approval": (1, "P2", _P2 + " (error-message prose naming the default ~/.kriya home; no path is built from it since D3: the home is kriya.config.environment's; P2 refines the finder or the message)"),
-        "kriya.config.environment": (1, "P2", "NEW in D3, unavoidable (count +1, rows -5 net -4): KRIYA_DIRECTORY_NAME, the one '.kriya' literal the ~/.kriya homes (authority, MCP approvals, waivers, qualifications, certifications, adjudications, state, logs: 8 joins in 7 modules before D3) and CONFIG's paths.state rule are built from; P2 decides whether CONFIG's environment reader is declared an owner of the user-home ~/.kriya (DEPENDENCY-RULES §2 lists only STATE/REPOSITORY for workspace .kriya paths)"),
         "kriya.core.attempt_evidence.leak_check": (1, "P2", _P2 + " (re-tagged in D3: '.kriya/authority' is a leak-detection MARKER string searched for in model-facing blobs, not a path construction; P2 refines the finder)"),
         "kriya.mcp.invocation_approval": (1, "P2", _P2 + " (error-message prose naming the default ~/.kriya home; no path is built from it since D3: the home is kriya.config.environment's; P2 refines the finder or the message)"),
         "kriya.policy.approved_sources": (1, "P2", _P2),
