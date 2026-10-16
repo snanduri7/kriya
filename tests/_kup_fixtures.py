@@ -11,8 +11,8 @@ import sys
 import time
 from typing import Iterable, List, Optional
 
+from kriya.control.history import RAW_CONNECT
 from kriya.core.trace import TraceLogger
-from kriya.kup.store import RAW_CONNECT
 
 RUN_COLUMNS = (
     "run_id, timestamp, goal, duration_sec, attempts, status, files_modified, retrieved_chunks, active_skills, "

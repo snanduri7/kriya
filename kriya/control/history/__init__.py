@@ -1,0 +1,457 @@
+"""The trace-history snapshot store (full modularization D2; MODULE-CONTRACTS §6 ``HistoryStore``): STATE owns the published
+snapshots of ``<state dir>/traces.db`` under ``<state dir>/kup-snapshots`` - their paths, manifests, listing, integrity checks and the
+write-free queries of one snapshot (``SnapshotTrace``) - and, in ``kriya/control/history/acquire.py`` (the only module of the store that
+writes; imported only when a snapshot is acquired or pruned), acquisition, retention and cleanup.
+
+Moved from ``kriya/kup/store.py``, ``kriya/kup/acquire.py`` and the query half of ``kriya/kup/inspect.py`` with their bodies unchanged
+(``policy.X`` references became this module's own constants, pinned equal to the KUP vocabulary). History stays scoped to the active
+Kriya state directory (``trace_db_path(cfg)``); it is never reconstructed from a project's ``.kriya/control/runs``. The application's
+``HistoryService`` reads it; the KUP adapter reaches it only through the client.
+
+Every query here opens ONLY ``<snapshot>/traces.snapshot.db`` through ``connect_read_only`` (``mode=ro``, ``temp_store=MEMORY``, no other
+pragma). Stored values are returned verbatim: timestamps exactly as stored (no timezone), ``files_modified`` as the raw comma-joined
+string, JSON TEXT columns as text. ``prompt_rendered`` is returned only by ``history_prompt`` (explicit request), never by list or detail.
+"""
+from __future__ import annotations
+
+import base64
+import contextlib
+import hashlib
+import json
+import os
+import re
+import sqlite3
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
+from urllib.request import pathname2url
+
+from kriya.core import db as _db
+from kriya.core.state_paths import resolve_state_directory
+from kriya.foundation.ids import RUN_ID_RULE, is_valid_run_id
+
+# The store's own vocabulary. Every value is IDENTICAL to the KUP wire vocabulary (kriya/kup/policy.py), which reports these bounds
+# and codes to hosts; tests/test_history_store.py fails if the two ever differ (STATE may not import the adapter).
+INVALID_REQUEST = "INVALID_REQUEST"
+READ_ONLY_UNAVAILABLE = "READ_ONLY_UNAVAILABLE"
+SNAPSHOT_MISSING = "SNAPSHOT_MISSING"          # no published snapshot exists at all
+SNAPSHOT_UNAVAILABLE = "SNAPSHOT_UNAVAILABLE"  # the requested snapshot id is not published (pruned, never existed)
+SNAPSHOT_CORRUPT = "SNAPSHOT_CORRUPT"
+DB_STATE_UNREADABLE = "unreadable"
+BUSY_TIMEOUT_SECONDS = 2.0
+SNAPSHOT_DIRNAME = "kup-snapshots"
+SNAPSHOT_FILENAME = "traces.snapshot.db"
+MANIFEST_FILENAME = "manifest.json"
+MANIFEST_VERSION = 1
+RETAIN_SNAPSHOTS = 3
+LIST_DEFAULT = 50
+LIST_MAX = 200
+CURSOR_MAX = 1024
+COMPILED_GOAL_HEADER = "=== Authoritative Goal ==="
+DISPLAY_GOAL_OWN = "own"
+DISPLAY_GOAL_ENFORCE_ROW = "enforce_row"
+DISPLAY_GOAL_UNAVAILABLE = "unavailable"
+
+# kriya/core/db.py monkey-patches sqlite3.connect with a WAL pragma (a write) for every caller in the process. KUP
+# never uses the patched function: the inspector must not even attempt a write, and the acquisition source
+# connection must not change the source's journal mode (gate).
+RAW_CONNECT = _db._orig_connect  # pylint: disable=protected-access
+
+SNAPSHOT_ID_RE = re.compile(r"^\d{8}T\d{6}\d{6}Z-[0-9a-f]{8}$")
+
+
+def read_only_uri(path: str) -> str:
+    return "file:" + pathname2url(os.path.abspath(path)) + "?mode=ro"
+
+
+def connect_read_only(path: str, timeout: float = BUSY_TIMEOUT_SECONDS) -> sqlite3.Connection:
+    """A read-only connection with NO write-capable pragma. ``temp_store=MEMORY`` is connection-local and keeps
+    SQLite's scratch storage off the filesystem (measured A1)."""
+    conn = RAW_CONNECT(read_only_uri(path), uri=True, timeout=timeout)
+    conn.execute("PRAGMA temp_store=MEMORY")
+    return conn
+
+
+def snapshot_directory(cfg) -> str:
+    """``<state dir>/kup-snapshots`` - see kriya/kup/__init__.py for the authority trace."""
+    return os.path.join(resolve_state_directory(cfg)[0], SNAPSHOT_DIRNAME)
+
+
+def trace_store_path(cfg) -> str:
+    return os.path.join(resolve_state_directory(cfg)[0], "traces.db")
+
+
+def stat_metadata(path: str) -> Optional[Dict[str, Any]]:
+    """Source metadata by ``stat`` only (no open, no lock): size, mtime_ns, inode, side-file sizes. None when absent."""
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        return {"error": f"{type(error).__name__}: {error}"}
+    out: Dict[str, Any] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns, "inode": st.st_ino}
+    for suffix in ("-wal", "-shm", "-journal"):
+        try:
+            out[f"{suffix[1:]}_size"] = os.stat(path + suffix).st_size
+        except OSError:
+            out[f"{suffix[1:]}_size"] = None
+    return out
+
+
+def metadata_differs(before: Optional[Dict[str, Any]], now: Optional[Dict[str, Any]]) -> Optional[bool]:
+    """True when ANY observed metadata differs. Equality means only that the metadata matches - never that
+    the contents are unchanged (gate C-3)."""
+    if before is None or now is None or "error" in (before or {}) or "error" in (now or {}):
+        return None
+    keys = ("size", "mtime_ns", "inode", "wal_size", "shm_size", "journal_size")
+    return any(before.get(k) != now.get(k) for k in keys)
+
+
+def sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    snapshot_id: str
+    directory: str
+    db_path: str
+    manifest: Dict[str, Any]
+
+
+class SnapshotError(Exception):
+    def __init__(self, code: str, message: str, database_state: Optional[str] = None, **extra: Any) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.database_state = database_state
+        self.extra = extra
+
+
+def _read_manifest(directory: str) -> Optional[Dict[str, Any]]:
+    try:
+        with open(os.path.join(directory, MANIFEST_FILENAME), encoding="utf-8") as f:
+            manifest = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return manifest if isinstance(manifest, dict) and manifest.get("manifest_version") == MANIFEST_VERSION else None
+
+
+def list_snapshots(snapshot_dir: str) -> List[Snapshot]:
+    """Published snapshots, newest first (ids sort chronologically). Staging directories are never listed."""
+    out: List[Snapshot] = []
+    try:
+        names = os.listdir(snapshot_dir)
+    except FileNotFoundError:
+        return out
+    for name in sorted(names, reverse=True):
+        if not SNAPSHOT_ID_RE.match(name):
+            continue
+        directory = os.path.join(snapshot_dir, name)
+        manifest = _read_manifest(directory)
+        if manifest is None:
+            continue
+        out.append(Snapshot(name, directory, os.path.join(directory, SNAPSHOT_FILENAME), manifest))
+    return out
+
+
+def cheap_integrity(snapshot: Snapshot) -> Optional[str]:
+    """Size/mtime/mode of the snapshot file against its manifest (every query). Full digest verification is
+    ``verify_digest`` (acquisition and ``--snapshots --verify``). Returns a reason or None."""
+    try:
+        st = os.stat(snapshot.db_path)
+    except OSError as error:
+        return f"snapshot file unreadable: {error}"
+    want = snapshot.manifest.get("snapshot_file", {})
+    if st.st_size != want.get("size") or st.st_mtime_ns != want.get("mtime_ns"):
+        return "snapshot file size or mtime differs from its manifest"
+    return None
+
+
+def verify_digest(snapshot: Snapshot) -> Optional[str]:
+    want = snapshot.manifest.get("snapshot_file", {}).get("sha256")
+    got = sha256_file(snapshot.db_path)
+    return None if got == want else f"snapshot digest {got[:16]} differs from manifest {str(want)[:16]}"
+
+
+def require_snapshot(snapshot_dir: str, snapshot_id: str) -> Snapshot:
+    """The published snapshot with exactly this id, cheaply integrity-checked. Never substitutes another one."""
+    if not SNAPSHOT_ID_RE.match(snapshot_id or ""):
+        raise SnapshotError(INVALID_REQUEST, "snapshot_id has an unexpected form")
+    published = list_snapshots(snapshot_dir)
+    if not published:
+        raise SnapshotError(SNAPSHOT_MISSING, "no published snapshot exists; acquire one first")
+    for snap in published:
+        if snap.snapshot_id == snapshot_id:
+            reason = cheap_integrity(snap)
+            if reason:
+                raise SnapshotError(SNAPSHOT_CORRUPT, reason, snapshot_id=snapshot_id)
+            return snap
+    raise SnapshotError(SNAPSHOT_UNAVAILABLE, f"snapshot {snapshot_id} is not published (pruned or never existed)", snapshot_id=snapshot_id)
+
+
+def snapshot_summary(snap: Snapshot, source_now: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    m = snap.manifest
+    return {
+        "snapshot_id": snap.snapshot_id,
+        "acquisition_started_at": m.get("acquisition_started_at"),
+        "acquisition_completed_at": m.get("acquisition_completed_at"),
+        "source": m.get("source"),
+        "source_metadata_at_acquisition": m.get("source_metadata_at_acquisition"),
+        "source_metadata_now": source_now,
+        "source_metadata_changed": metadata_differs(m.get("source_metadata_at_acquisition"), source_now),
+        "rows": m.get("rows"),
+        "size": m.get("snapshot_file", {}).get("size"),
+        "sqlite_version": m.get("sqlite_version"),
+    }
+
+
+CURSOR_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+/=_-]*$")
+
+LIST_COLUMNS = ("run_id", "timestamp", "goal", "duration_sec", "attempts", "status", "failure_category", "files_modified",
+                "milestone_group_id", "milestone_index", "milestone_total")
+DETAIL_TEXT_COLUMNS = ("retrieved_chunks", "active_skills", "gate_outcomes", "model_hops", "run_events", "evidence_records",
+                       "generation_metrics", "failure_report")
+JSON_TEXT_COLUMNS = ("retrieved_chunks", "gate_outcomes", "model_hops", "run_events", "evidence_records", "generation_metrics", "failure_report")
+
+
+# ------------------------------------------------------------------ cursors (opaque, bound to a snapshot)
+
+def encode_cursor(snapshot_id: str, timestamp: Optional[str], run_id: str) -> str:
+    raw = json.dumps([snapshot_id, timestamp, run_id], separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def decode_cursor(cursor: str, snapshot_id: str) -> Tuple[Optional[str], str]:
+    if not isinstance(cursor, str) or not cursor or len(cursor) > CURSOR_MAX or not CURSOR_RE.match(cursor):
+        raise SnapshotError(INVALID_REQUEST, "cursor is not an opaque token issued by this protocol")
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        parts = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+        bound, timestamp, run_id = parts
+    except (ValueError, TypeError) as error:
+        raise SnapshotError(INVALID_REQUEST, "cursor does not decode") from error
+    if bound != snapshot_id:
+        raise SnapshotError(INVALID_REQUEST, "cursor was issued for another snapshot; a snapshot switch invalidates cursors", cursor_snapshot_id=bound)
+    if not isinstance(run_id, str) or (timestamp is not None and not isinstance(timestamp, str)):
+        raise SnapshotError(INVALID_REQUEST, "cursor payload has an unexpected shape")
+    return timestamp, run_id
+
+
+def validate_run_id(run_id: Any) -> str:
+    if not is_valid_run_id(run_id):
+        raise SnapshotError(INVALID_REQUEST, RUN_ID_RULE)
+    return run_id
+
+
+# ------------------------------------------------------------------ queries
+
+def _classify_read_error(error: sqlite3.Error, snapshot: Snapshot) -> SnapshotError:
+    name = getattr(error, "sqlite_errorname", "") or type(error).__name__
+    if name in ("SQLITE_NOTADB", "SQLITE_CORRUPT"):
+        return SnapshotError(SNAPSHOT_CORRUPT, f"{name}: {error}", snapshot_id=snapshot.snapshot_id)
+    if name in ("SQLITE_CANTOPEN",):
+        return SnapshotError(SNAPSHOT_UNAVAILABLE, f"snapshot file cannot be opened ({error})", snapshot_id=snapshot.snapshot_id)
+    return SnapshotError(READ_ONLY_UNAVAILABLE, f"{name}: {error}", DB_STATE_UNREADABLE, snapshot_id=snapshot.snapshot_id)
+
+
+def _has_enforce_column(conn: sqlite3.Connection) -> bool:
+    return any(info[1] == "enforce_run_id" for info in conn.execute("PRAGMA table_info(runs)"))
+
+
+_WRAPPER_FIRST_LINE = re.compile(r"^\s*===\s[^\n]*===\s*$")
+
+
+def _is_wrapped(goal: str) -> bool:
+    """A goal that is a Kriya-compiled prompt (the unit-goal header, or any other `=== Title ===` section header as its first line: retry packages, milestone wrappers): never a person's request."""
+    first = goal.lstrip().split("\n", 1)[0]
+    return goal.lstrip().startswith(COMPILED_GOAL_HEADER) or _WRAPPER_FIRST_LINE.match(first) is not None
+
+
+def _display_goal(conn: sqlite3.Connection, row: sqlite3.Row, has_enforce: bool, cache: Dict[str, Optional[str]]) -> Tuple[Optional[str], str]:
+    """The ORIGINAL user request for a row, from structured fields only (never by reading prompt text):
+
+    * a row that names an enforce row through ``enforce_run_id`` (a unit of a run) takes that row's ``goal``, which the workflow stores as the original request;
+    * a row with no such link (the terminal ``<run>.enforce`` row, a plain run) takes its own ``goal``, unless that goal is a compiled unit goal (it starts with
+      the compiled-goal header) - then there is no authoritative request to show and the answer is "unavailable", never a guess."""
+    enforce_id = row["enforce_run_id"] if has_enforce else None
+    if enforce_id:
+        if enforce_id not in cache:
+            found = conn.execute("SELECT goal FROM runs WHERE run_id = ?", (enforce_id,)).fetchone()
+            cache[enforce_id] = found[0] if found and isinstance(found[0], str) and found[0].strip() else None
+        goal = cache[enforce_id]
+        if goal is not None and not _is_wrapped(goal):
+            return goal, DISPLAY_GOAL_ENFORCE_ROW
+        return None, DISPLAY_GOAL_UNAVAILABLE
+    own = row["goal"]
+    if isinstance(own, str) and own.strip() and not _is_wrapped(own):
+        return own, DISPLAY_GOAL_OWN
+    return None, DISPLAY_GOAL_UNAVAILABLE
+
+
+def _row_to_summary(row: sqlite3.Row, display: Optional[Tuple[Optional[str], str]] = None) -> Dict[str, Any]:
+    summary = {k: row[k] for k in LIST_COLUMNS}
+    if display is not None:
+        summary["display_goal"], summary["display_goal_source"] = display
+    return summary
+
+
+def _select_columns(has_enforce: bool, extra: Tuple[str, ...] = ()) -> str:
+    return ", ".join(LIST_COLUMNS + extra + (("enforce_run_id",) if has_enforce else ()))
+
+
+def history_list(snapshot: Snapshot, limit: Optional[int], cursor: Optional[str]) -> Dict[str, Any]:
+    n = LIST_DEFAULT if limit is None else int(limit)
+    if n < 1 or n > LIST_MAX:
+        raise SnapshotError(INVALID_REQUEST, f"limit must be between 1 and {LIST_MAX}")
+    after: Optional[Tuple[Optional[str], str]] = decode_cursor(cursor, snapshot.snapshot_id) if cursor is not None else None
+    try:
+        conn = connect_read_only(snapshot.db_path)
+    except sqlite3.Error as error:
+        raise _classify_read_error(error, snapshot) from error
+    try:
+        conn.row_factory = sqlite3.Row
+        has_enforce = _has_enforce_column(conn)
+        cols = _select_columns(has_enforce)
+        if after is None:
+            rows = conn.execute(f"SELECT {cols} FROM runs ORDER BY timestamp DESC, run_id DESC LIMIT ?", (n + 1,)).fetchall()
+        else:
+            ts, rid = after
+            if ts is None:
+                rows = conn.execute(f"SELECT {cols} FROM runs WHERE timestamp IS NULL AND run_id < ? ORDER BY timestamp DESC, run_id DESC LIMIT ?", (rid, n + 1)).fetchall()
+            else:
+                rows = conn.execute(
+                    f"SELECT {cols} FROM runs WHERE (timestamp < ?) OR (timestamp = ? AND run_id < ?) OR (timestamp IS NULL) "
+                    "ORDER BY timestamp DESC, run_id DESC LIMIT ?", (ts, ts, rid, n + 1)).fetchall()
+        goals: Dict[str, Optional[str]] = {}
+        page = [_row_to_summary(r, _display_goal(conn, r, has_enforce, goals)) for r in rows[:n]]
+    except sqlite3.Error as error:
+        raise _classify_read_error(error, snapshot) from error
+    finally:
+        conn.close()
+    next_cursor = encode_cursor(snapshot.snapshot_id, page[-1]["timestamp"], page[-1]["run_id"]) if len(rows) > n and page else None
+    return {"runs": page, "next_cursor": next_cursor}
+
+
+def _section(data: Any, provenance: str, available: bool = True, reason: Optional[str] = None) -> Dict[str, Any]:
+    if available:
+        return {"availability": "recorded", "provenance": provenance, "reason": None, "data": data}
+    return {"availability": "not_recorded", "provenance": provenance, "reason": reason, "data": None}
+
+
+def _parsed_json_text(text: Optional[str]) -> Tuple[Any, bool]:
+    if text is None:
+        return None, False
+    try:
+        return json.loads(text), True
+    except (TypeError, ValueError):
+        return text, True
+
+
+def history_detail(snapshot: Snapshot, run_id: str) -> Dict[str, Any]:
+    validate_run_id(run_id)
+    try:
+        conn = connect_read_only(snapshot.db_path)
+        conn.row_factory = sqlite3.Row
+        has_enforce = _has_enforce_column(conn)
+        cols = _select_columns(has_enforce, DETAIL_TEXT_COLUMNS)
+        row = conn.execute(f"SELECT {cols} FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        display = _display_goal(conn, row, has_enforce, {}) if row is not None else None
+        conn.close()
+    except sqlite3.Error as error:
+        raise _classify_read_error(error, snapshot) from error
+    if row is None:
+        raise SnapshotError(INVALID_REQUEST, f"no run {run_id} in snapshot {snapshot.snapshot_id}", run_id=run_id)
+    summary = _row_to_summary(row, display)
+    fields = {}
+    for col in DETAIL_TEXT_COLUMNS:
+        raw = row[col]
+        fields[col] = {"availability": "recorded" if raw is not None else "not_recorded", "provenance": f"runs.{col}",
+                       "reason": None if raw is not None else "column is NULL in the stored row", "data": raw}
+    detail: Dict[str, Any] = {"run": summary, "fields": fields}
+    for col in JSON_TEXT_COLUMNS:
+        parsed, present = _parsed_json_text(row[col])
+        detail[col] = _section(parsed, f"runs.{col}", present, None if present else "column is NULL in the stored row")
+    # The derived ``application_outcome`` section is added by HistoryService.detail (kriya/application/history.py), not by the reader.
+    # Not persisted by this Kriya version (P-30, D-5): honest, never reconstructed.
+    for name, reason in (("context", "the trace row persists context only inside run_events (context.* events); no context record is stored"),
+                         ("attribution", "the baseline persists failure categories, not causal attribution"),
+                         ("diagnostics", "no diagnostics record is persisted"),
+                         ("comparisons", "the trace row stores modified paths, not before/after text"),
+                         ("output", "Developer output is not persisted")):
+        detail[name] = _section(None, "not_persisted", False, reason)
+    return detail
+
+
+def run_events_of(snapshot: Snapshot, run_id: str) -> Tuple[bool, Optional[Any]]:
+    """(row_exists, parsed ``runs.run_events`` or None when the column is NULL or not JSON), verbatim and read-only. Nothing else
+    of the row is read: callers that need the events alone (evidence.manifest's absence derivation) never touch the prompt."""
+    validate_run_id(run_id)
+    try:
+        conn = connect_read_only(snapshot.db_path)
+        try:
+            row = conn.execute("SELECT run_events FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error as error:
+        raise _classify_read_error(error, snapshot) from error
+    if row is None:
+        return False, None
+    parsed, present = _parsed_json_text(row[0])
+    return True, parsed if present and not isinstance(parsed, str) else None
+
+
+def _events_by_run(conn: sqlite3.Connection, run_ids: List[str]) -> Dict[str, Any]:
+    """``runs.run_events`` (verbatim text) of several rows at once (moved from kriya/kup/workspace_ops.py in B2)."""
+    marks = ",".join("?" for _ in run_ids)
+    return {row[0]: row[1] for row in conn.execute(f"SELECT run_id, run_events FROM runs WHERE run_id IN ({marks})", run_ids)}
+
+
+class SnapshotTrace:
+    """The trace history of ONE published snapshot, as the application history/evidence services read it
+    (``kriya.application.services.TraceHistory``). Every method is the existing read-only query above (moved here from
+    kriya/kup/inspect.py in D2; ``HistoryStore.trace`` builds it)."""
+
+    def __init__(self, snapshot: Snapshot) -> None:
+        self.snapshot = snapshot
+        self.snapshot_id = snapshot.snapshot_id
+
+    def page(self, limit: Optional[int], cursor: Optional[str]) -> Dict[str, Any]:
+        return history_list(self.snapshot, limit, cursor)
+
+    def detail(self, run_id: str) -> Dict[str, Any]:
+        return history_detail(self.snapshot, run_id)
+
+    def prompt(self, run_id: str) -> Dict[str, Any]:
+        return history_prompt(self.snapshot, run_id)
+
+    def run_events(self, run_id: Any) -> Tuple[bool, Optional[Any]]:
+        return run_events_of(self.snapshot, run_id)
+
+    def cursor_after(self, timestamp: Optional[str], run_id: str) -> str:
+        return encode_cursor(self.snapshot_id, timestamp, run_id)
+
+    @contextlib.contextmanager
+    def events_reader(self) -> Iterator[Callable[[List[str]], Dict[str, Any]]]:
+        """One read-only connection for a batch of ``run_events`` lookups, opened now and closed when the batch ends."""
+        conn = connect_read_only(self.snapshot.db_path)
+        try:
+            yield lambda run_ids: _events_by_run(conn, run_ids)
+        finally:
+            conn.close()
+
+
+def history_prompt(snapshot: Snapshot, run_id: str) -> Dict[str, Any]:
+    validate_run_id(run_id)
+    try:
+        conn = connect_read_only(snapshot.db_path)
+        row = conn.execute("SELECT prompt_rendered FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        conn.close()
+    except sqlite3.Error as error:
+        raise _classify_read_error(error, snapshot) from error
+    if row is None:
+        raise SnapshotError(INVALID_REQUEST, f"no run {run_id} in snapshot {snapshot.snapshot_id}", run_id=run_id)
+    return {"prompt_rendered": row[0], "role": "planner", "scope": "plan_prompt (one stored prompt per run; not every Developer request)"}

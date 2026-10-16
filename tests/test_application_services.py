@@ -246,18 +246,17 @@ def test_a_service_refusal_reaches_the_wire_with_its_code_message_and_extra_fiel
 def test_each_service_answers_exactly_the_data_its_envelope_carries(scenario):
     from kriya.application import EvidenceService, HistoryService, ProjectService
     from kriya.context import RequestContext
-    from kriya.kup.inspect import SnapshotTrace
-    from kriya.kup.store import require_snapshot, snapshot_directory
+    from kriya.control.history import require_snapshot, snapshot_directory
 
     cfg, ws, ctx = AppConfig(), scenario["ws"], RequestContext.local(scenario["ws"], request_id="golden")
     snap = require_snapshot(snapshot_directory(cfg), scenario["snapshot_id"])
     pairs = [
         (ProjectService().describe(ctx, cfg, ws, ws), {"operation": "workspace.describe", "workspace": ws}),
         (ProjectService().status(ctx, ws), {"operation": "workspace.status", "workspace": ws}),
-        (HistoryService().detail(ctx, cfg, SnapshotTrace(snap), "t-gate"), {"operation": "history.detail", "snapshot_id": snap.snapshot_id, "run_id": "t-gate"}),
-        (HistoryService().list_in_workspace(ctx, cfg, SnapshotTrace(snap), limit=5, cursor=None, workspace=ws),
+        (HistoryService().detail(ctx, cfg, snap, "t-gate"), {"operation": "history.detail", "snapshot_id": snap.snapshot_id, "run_id": "t-gate"}),
+        (HistoryService().list_in_workspace(ctx, cfg, snap, limit=5, cursor=None, workspace=ws),
          {"operation": "history.list", "snapshot_id": snap.snapshot_id, "workspace": ws, "limit": 5}),
-        (EvidenceService().manifest(ctx, cfg, "ev-rich", from_trace=False, trace=None), {"operation": "evidence.manifest", "run_id": "ev-rich"}),
+        (EvidenceService().manifest(ctx, cfg, "ev-rich", from_trace=False, snapshot=None), {"operation": "evidence.manifest", "run_id": "ev-rich"}),
     ]
     for data, request in pairs:
         envelope = run_kup_operation(cfg, request, request_id="golden")

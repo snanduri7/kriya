@@ -19,14 +19,13 @@ from kriya.client import RECORD_KINDS
 from kriya.kup import policy
 from kriya.kup.inspect import (
     CURSOR_RE,
-    SnapshotTrace,
     envelope,
     live_consistency,
     source_block,
     utc_now,
     validate_run_id,
 )
-from kriya.kup.store import SnapshotError, require_snapshot, snapshot_directory, trace_store_path
+from kriya.kup.store import SnapshotError
 
 
 def _ctx(client, request_id: str):
@@ -35,7 +34,7 @@ def _ctx(client, request_id: str):
 
 def _source(cfg, client, request_id: str, snapshot=None) -> Dict[str, Any]:
     location = client.evidence.location(_ctx(client, request_id), cfg)
-    block = source_block(location.state_directory, trace_store_path(cfg), snapshot)
+    block = source_block(location.state_directory, client.history.location(_ctx(client, request_id), cfg).trace_database, snapshot)
     block["evidence_directory"] = location.evidence_directory
     return block
 
@@ -50,14 +49,13 @@ def _consistency(answer_verified: bool, head_digest: Optional[str]) -> Dict[str,
 
 def manifest(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     """Store metadata for an evidence run id, or - with ``from_trace`` - for the store a TRACE row recorded (EvidenceService.manifest)."""
-    snapshot = require_snapshot(snapshot_directory(cfg), str(request["snapshot_id"])) if request.get("snapshot_id") else None
+    snapshot = client.history.snapshot(_ctx(client, request_id), cfg, str(request["snapshot_id"])) if request.get("snapshot_id") else None
     from_trace = bool(request.get("from_trace"))
     asked = request.get("run_id")
     validate_run_id(asked)
     if from_trace and snapshot is None:
         raise SnapshotError(policy.INVALID_REQUEST, "from_trace needs the snapshot_id the trace row is read from")
-    data = client.evidence.manifest(_ctx(client, request_id), cfg, asked, from_trace=from_trace,
-                                    trace=SnapshotTrace(snapshot) if snapshot is not None else None)
+    data = client.evidence.manifest(_ctx(client, request_id), cfg, asked, from_trace=from_trace, snapshot=snapshot)
     return envelope("evidence.manifest", request_id, data=data, source=_source(cfg, client, request_id, snapshot), consistency=live_consistency())
 
 

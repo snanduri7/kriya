@@ -15,9 +15,16 @@ import threading
 import pytest
 from _kup_fixtures import GenerationWriter, committed_generations, generation_invariant, seed_store
 
+from kriya.control.history import (
+    RAW_CONNECT,
+    SnapshotError,
+    list_snapshots,
+    require_snapshot,
+    stat_metadata,
+    verify_digest,
+)
+from kriya.control.history.acquire import acquire_snapshot, prune_snapshots
 from kriya.kup import policy
-from kriya.kup.acquire import acquire_snapshot, prune_snapshots
-from kriya.kup.store import RAW_CONNECT, SnapshotError, list_snapshots, require_snapshot, stat_metadata, verify_digest
 
 BIG_ROWS = 400  # enough pages for several backup steps at step_pages=8
 
@@ -244,7 +251,7 @@ def test_interrupted_acquisition_leaves_nothing_published_and_is_cleaned_up_next
     script = f"""
 import os, sys
 sys.path.insert(0, {os.getcwd()!r})
-from kriya.kup.acquire import acquire_snapshot
+from kriya.control.history.acquire import acquire_snapshot
 def hook(p):
     if p['step'] == 1:
         print('MID', flush=True)

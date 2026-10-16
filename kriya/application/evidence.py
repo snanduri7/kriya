@@ -14,7 +14,7 @@ from __future__ import annotations
 import base64
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from kriya.application.services import (
     EVIDENCE_BLOB_TOO_LARGE,
@@ -33,6 +33,9 @@ from kriya.core.attempt_evidence import model as evidence_model
 from kriya.core.attempt_evidence import reader
 from kriya.core.state_paths import resolve_state_directory
 from kriya.foundation.ids import RUN_ID_RULE, is_valid_run_id
+
+if TYPE_CHECKING:  # annotation only: the snapshot reader is imported when a manifest names a snapshot
+    from kriya.control.history import Snapshot
 
 ABSENCE_DERIVED_FROM = "history.detail run_events[evidence.attempt_store]"
 RECORD_KINDS = evidence_model.KINDS  # the record kinds a records filter may name (the evidence schema's own table)
@@ -238,11 +241,20 @@ class EvidenceService:
         state_dir = _state_dir(cfg)
         return EvidenceLocation(state_directory=state_dir, evidence_directory=reader.store_directory(state_dir))
 
-    def manifest(self, ctx: RequestContext, cfg, asked: str, *, from_trace: bool, trace: Optional[TraceHistory]) -> Dict[str, Any]:
+    def manifest(self, ctx: RequestContext, cfg, asked: str, *, from_trace: bool, snapshot: Optional["Snapshot"]) -> Dict[str, Any]:
         """Store metadata for an evidence run id, or - with ``from_trace`` - for the store a TRACE row recorded. The two ids differ in every
         real store (MEASURED): a trace row has its own id and its ``evidence.attempt_store`` event names the evidence run id, so the link
         is that recorded event and is resolved here, on the reading side, never guessed by the host. ``asked`` is already a valid run id
-        (and, with ``from_trace``, ``trace`` is the snapshot it is read from)."""
+        (and, with ``from_trace``, ``snapshot`` is the published snapshot the trace row is read from)."""
+        if snapshot is None:
+            return self._manifest(cfg, asked, from_trace=from_trace, trace=None)
+        from kriya.application.store_refusal import store_refusals
+        from kriya.control.history import SnapshotTrace
+
+        with store_refusals():
+            return self._manifest(cfg, asked, from_trace=from_trace, trace=SnapshotTrace(snapshot))
+
+    def _manifest(self, cfg, asked: str, *, from_trace: bool, trace: Optional[TraceHistory]) -> Dict[str, Any]:
         link: Optional[Dict[str, Any]] = None
         if from_trace:
             state, details = recorded_store_event(trace, asked)

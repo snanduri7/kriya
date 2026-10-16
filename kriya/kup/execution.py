@@ -28,7 +28,7 @@ from kriya.control.launch import valid_launch_id
 from kriya.core.state_paths import resolve_state_directory
 from kriya.kup import policy
 from kriya.kup.inspect import envelope, live_consistency, source_block
-from kriya.kup.store import SnapshotError, trace_store_path
+from kriya.kup.store import SnapshotError
 from kriya.kup.workspace_ops import validated_workspace
 from kriya.platform.toolchain_locator import tool_visibility
 
@@ -73,7 +73,7 @@ def preflight(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str
     _requested, workspace = validated_workspace(request)
     data = client.runs.preflight(client.context(workspace_root=workspace, request_id=request_id), cfg, workspace, load_in=_load_in, tool_visibility=tool_visibility)
     cockpit_state = data["state"]["cockpit_directory"]
-    return envelope("execution.preflight", request_id, data=data, source=source_block(cockpit_state, trace_store_path(cfg), None), consistency=live_consistency())
+    return envelope("execution.preflight", request_id, data=data, source=source_block(cockpit_state, client.history.location(client.context(workspace_root=None, request_id=request_id), cfg).trace_database, None), consistency=live_consistency())
 
 
 def launch_status(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
@@ -83,4 +83,4 @@ def launch_status(cfg, request: Dict[str, Any], request_id: str, client) -> Dict
     _requested, workspace = validated_workspace(request)
     data = client.runs.status(client.context(workspace_root=workspace, request_id=request_id), cfg, workspace, str(launch_id))
     state_dir = resolve_state_directory(cfg)[0]
-    return envelope("launch.status", request_id, data=data, source=source_block(state_dir, trace_store_path(cfg), None), consistency=live_consistency())
+    return envelope("launch.status", request_id, data=data, source=source_block(state_dir, client.history.location(client.context(workspace_root=None, request_id=request_id), cfg).trace_database, None), consistency=live_consistency())

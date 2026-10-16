@@ -6,10 +6,8 @@ property the KUP read path has had since B2 (``kriya/application/__init__.py``).
 takes the ``RequestContext`` and the resolved configuration of that request, so one composition serves every request of the process and
 SECURITY_AUTHORITY is never cached here (``kriya/kup/serve.py`` still reloads the configuration per request).
 
-TEMPORARY until D2 (STATE owns the history store): ``compose()`` cannot build the trace-history reader. The only implementation of the ``TraceHistory``
-port is the KUP snapshot reader (``kriya.kup.inspect.SnapshotTrace``), chosen per request by snapshot id, and APPLICATION may not import
-an adapter; so ``HistoryService``/``EvidenceService`` keep receiving it per call. D2 moves the snapshot store to ``control.history``
-(``HistoryStore``), after which the composition owns it and the methods take a snapshot id.
+Since D2 the history service owns STATE's ``HistoryStore`` (built with the service) and its methods take a published ``Snapshot`` value;
+the per-call ``TraceHistory`` reader parameter is gone.
 """
 from __future__ import annotations
 

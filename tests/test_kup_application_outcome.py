@@ -12,9 +12,8 @@ from kriya.application.history import (
     application_outcome,
 )
 from kriya.context import RequestContext
+from kriya.control.history import Snapshot
 from kriya.core.trace import TraceLogger
-from kriya.kup.inspect import SnapshotTrace
-from kriya.kup.store import Snapshot
 
 
 def gate(success=True, exit_code=0, stdout="Hello from Kriya\n", stderr="", timed_out=False, kind="run_verification", command=None, attempt=1):
@@ -70,7 +69,7 @@ def test_output_is_bounded_and_secret_scrubbed_and_the_command_too():
 
 def history_detail(snapshot, run_id):
     """history.detail as the KUP operation answers it (B2: HistoryService.detail over the snapshot reader adds the derived section)."""
-    return HistoryService().detail(RequestContext.local(None), None, SnapshotTrace(snapshot), run_id)
+    return HistoryService().detail(RequestContext.local(None), None, snapshot, run_id)
 
 
 def test_history_detail_carries_the_projection_as_a_derived_section(tmp_path):

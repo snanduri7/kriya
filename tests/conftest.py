@@ -315,7 +315,7 @@ MODULE_TIER_FILES = {
         "test_checkpoint_control_plane_hashes.py", "test_checkpoint_store.py", "test_control_artifact_persistence.py",
         "test_control_artifacts.py", "test_control_context.py", "test_control_contract_persistence.py",
         "test_control_contracts.py", "test_control_decisions.py", "test_control_persistence.py",
-        "test_control_plane_end_to_end.py", "test_control_state.py", "test_control_telemetry.py",
+        "test_control_plane_end_to_end.py", "test_control_state.py", "test_control_telemetry.py", "test_history_store.py",
         "test_kup_acquisition.py", "test_kup_host_environment.py", "test_lr_r1_m1_retention.py",
         "test_plat039_trusted_control_paths.py", "test_platform_process_control_contract.py",
         "test_prd008_commit_state_gate.py", "test_prd008_recovery.py", "test_prd008_resume_fingerprints.py",

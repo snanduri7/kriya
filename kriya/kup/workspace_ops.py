@@ -12,7 +12,7 @@ from typing import Any, Dict
 from kriya.context.workspace_identity import canonical_workspace
 from kriya.kup import policy
 from kriya.kup.inspect import envelope, live_consistency, source_block
-from kriya.kup.store import SnapshotError, trace_store_path
+from kriya.kup.store import SnapshotError
 
 
 def _workspace_argument(request: Dict[str, Any]) -> str:
@@ -37,5 +37,5 @@ def validated_workspace(request: Dict[str, Any]) -> tuple:
 def describe(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     requested, workspace = validated_workspace(request)
     data = client.projects.describe(client.context(workspace_root=workspace, request_id=request_id), cfg, requested, workspace)
-    block = source_block(data["state"]["directory"], trace_store_path(cfg), None)
+    block = source_block(data["state"]["directory"], client.history.location(client.context(workspace_root=None, request_id=request_id), cfg).trace_database, None)
     return envelope("workspace.describe", request_id, data=data, source=block, consistency=live_consistency())

@@ -10,10 +10,9 @@ import sqlite3
 import pytest
 
 from kriya.agents.contracts import AUTHORITATIVE_GOAL_SECTION_HEADER
+from kriya.control.history import Snapshot, history_detail, history_list
 from kriya.core.trace import TraceLogger
 from kriya.kup import policy
-from kriya.kup.inspect import history_detail, history_list
-from kriya.kup.store import Snapshot
 
 ORIGINAL = "Fix a bug in the existing Spring Boot driver service: `DefaultDriverService.delete(Long driverId)` must persist the soft delete."
 COMPILED = (f"{AUTHORITATIVE_GOAL_SECTION_HEADER}\nThis is the real, unmediated user request - the source of truth for what is actually required.\n\n"

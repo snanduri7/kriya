@@ -34,7 +34,7 @@ SLICES = frozenset(
     + [f"D{i}" for i in range(1, 4)] + [f"E{i}" for i in range(1, 15)] + [f"F{i}" for i in range(1, 6)]
     + [f"G{i}" for i in range(1, 6)] + [f"H{i}" for i in range(1, 6)] + [f"I{i}" for i in range(1, 5)]
     + ["J1", "J2", "K1", "K2", "L1", "L2", "M1", "M2", "M3", "N1", "N2", "O1", "O2", "O3", "P1", "P2", "Q1", "Q2"])
-DONE_SLICES = frozenset({"A1", "A2", "A3", "B1", "B2", "B3", "B4", "C1", "C2", "C3", "D1"})
+DONE_SLICES = frozenset({"A1", "A2", "A3", "B1", "B2", "B3", "B4", "C1", "C2", "C3", "D1", "D2"})
 
 # CURRENT-DEPENDENCY-MAP.md §3, the back-edges into kriya/workflow that close
 # the big cycle (TRACED to the import line there; MEASURED here): (source,
@@ -220,6 +220,7 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.core.release_candidate", "kriya.core.model_runtime"): ("P2", _P2),  # non-public PROVIDER module
     ("kriya.core.release_identity", "kriya.platform.host_properties"): ("P2", _P2),  # non-public PLATFORM module
     ("kriya.core.role_metrics", "kriya.core.model_qualification"): ("P2", _P2),  # direction PROVIDER -> QUALIFICATION
+    ("kriya.control.history", "kriya.core.db"): ("P2", _P2 + " (moved count-neutral in D2 with the snapshot store from kup.store -> core.db: RAW_CONNECT, the unpatched sqlite3.connect)"),  # non-public FOUNDATION module
     ("kriya.control.trace", "kriya.core.db"): ("P2", _P2 + " (moved count-neutral in D2 with core/trace.py -> control/trace.py)"),  # non-public FOUNDATION module
     ("kriya.knowledge.channels.repo_manifest", "kriya.skills.skill"): ("P2", _P2),  # non-public SKILLS module
     ("kriya.knowledge.staging", "kriya.skills.skill"): ("P2", _P2),  # non-public SKILLS module
@@ -233,8 +234,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.kup.execution", "kriya.platform.toolchain_locator"): ("O1", _O1),  # non-public PLATFORM module
     ("kriya.kup.review_ops", "kriya.control.launch"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.serve", "kriya.config.authority"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY
-    ("kriya.kup.store", "kriya.core.db"): ("O1", _O1),  # non-public FOUNDATION module
-    ("kriya.kup.store", "kriya.core.state_paths"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
     ("kriya.mcp.containment_adapter", "kriya.mcp.capability"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.mcp.lifecycle", "kriya.tools.sandbox"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.mcp.mcp", "kriya.core.kernel"): ("P2", _P2),  # direction TOOLBOX -> KERNEL

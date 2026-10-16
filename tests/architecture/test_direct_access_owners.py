@@ -163,16 +163,17 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
     },
     "sqlite": {
         "kriya.core.role_metrics": (1, "P2", _P2),
-        "kriya.kup.acquire": (5, "D2", "snapshot acquisition moves to control.history (HistoryStore)"),
-        "kriya.kup.inspect": (13, "O1", "KUP reaches history/traces through KriyaClient only (13 = 12 + the batched run_events query "
-                                          "moved here from kup.workspace_ops in B2: APPLICATION owns no sqlite, so HistoryService reads it "
-                                          "through the TraceHistory port this module implements)"),
-        "kriya.kup.store": (1, "D2", "snapshot store moves to control.history (HistoryStore)"),
+        "kriya.kup.inspect": (1, "O1", "the capabilities description reports sqlite3.sqlite_version (the 12 snapshot queries + the batched run_events query moved to STATE, kriya/control/history, in D2)"),
         "kriya.metrics.evidence": (2, "P2", _P2),
         "kriya.production_doctor": (2, "P2", _P2),
         "kriya.workflow.context_certification": (2, "P2", _P2),
     },
     "http_client": {
+        # NEW in D2, unavoidable (count +1, row +1): the snapshot store's ``urllib.request.pathname2url`` (the read-only SQLite URI of a
+        # snapshot path - a path-to-URI conversion, never an HTTP client) moved with kup/store.py from ADAPTER-KUP (an http owner) to STATE;
+        # replacing it with ``urllib.parse.quote`` would change the URI on Python >= 3.13 for a path starting with '//' (MEASURED: 3.14's
+        # pathname2url adds an empty authority), so the import stays. Owner STATE (control.history); P2 decides the finder rule.
+        "kriya.control.history": (1, "P2", _P2 + " (urllib.request.pathname2url: a file-URI conversion moved from kup.store in D2)"),
         "kriya.memory.embedding": (9, "P2", _P2 + " (the embedding client is provider-shaped)"),
         "kriya.tools.resolver": (1, "P2", _P2),
         "kriya.tools.service_runtime": (2, "P2", _P2 + " (runtime HTTP probe of the app under test)"),

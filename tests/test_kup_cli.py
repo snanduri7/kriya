@@ -13,9 +13,9 @@ from click.testing import CliRunner
 
 from kriya.cli import main
 from kriya.config import AppConfig
+from kriya.control.history import RAW_CONNECT
 from kriya.core.state_paths import trace_db_path
 from kriya.kup import policy
-from kriya.kup.store import RAW_CONNECT
 
 GOLDEN = os.path.join(os.path.dirname(__file__), "golden", "kup")
 
@@ -182,22 +182,22 @@ def test_every_error_code_is_producible():
     produced.add(_json(["traces", "--json", "--snapshot-id", "20260101T000000000000Z-00000000", "-n", "2"])["error"]["code"])  # SNAPSHOT_UNAVAILABLE
     produced.add(_json(["traces", "--json", "-n", "2"])["error"]["code"])  # INVALID_REQUEST
     produced.add(_json(["runs", "status", "--workspace", os.getcwd(), "--json", "--kup-version", "2"])["error"]["code"])  # UNSUPPORTED_SCHEMA_VERSION
-    with patch("kriya.kup.acquire._free_bytes", return_value=0):
+    with patch("kriya.control.history.acquire._free_bytes", return_value=0):
         produced.add(_json(["traces", "--json", "--snapshot"])["error"]["code"])  # SNAPSHOT_FAILED (insufficient space)
-    with patch("kriya.kup.acquire.acquire_snapshot", side_effect=lambda *a, **k: (_ for _ in ()).throw(__import__("kriya.kup.store", fromlist=["SnapshotError"]).SnapshotError(policy.SNAPSHOT_TOO_LARGE, "too big"))):
+    with patch("kriya.control.history.acquire.acquire_snapshot", side_effect=lambda *a, **k: (_ for _ in ()).throw(__import__("kriya.control.history", fromlist=["SnapshotError"]).SnapshotError(policy.SNAPSHOT_TOO_LARGE, "too big"))):
         produced.add(_json(["traces", "--json", "--snapshot"])["error"]["code"])
-    with patch("kriya.kup.acquire.acquire_snapshot", side_effect=lambda *a, **k: (_ for _ in ()).throw(__import__("kriya.kup.store", fromlist=["SnapshotError"]).SnapshotError(policy.ACQUISITION_IN_PROGRESS, "busy"))):
+    with patch("kriya.control.history.acquire.acquire_snapshot", side_effect=lambda *a, **k: (_ for _ in ()).throw(__import__("kriya.control.history", fromlist=["SnapshotError"]).SnapshotError(policy.ACQUISITION_IN_PROGRESS, "busy"))):
         produced.add(_json(["traces", "--json", "--snapshot"])["error"]["code"])
-    with patch("kriya.kup.acquire.acquire_snapshot", side_effect=lambda *a, **k: (_ for _ in ()).throw(__import__("kriya.kup.store", fromlist=["SnapshotError"]).SnapshotError(policy.ACQUISITION_REFUSED_RUN_ACTIVE, "active"))):
+    with patch("kriya.control.history.acquire.acquire_snapshot", side_effect=lambda *a, **k: (_ for _ in ()).throw(__import__("kriya.control.history", fromlist=["SnapshotError"]).SnapshotError(policy.ACQUISITION_REFUSED_RUN_ACTIVE, "active"))):
         produced.add(_json(["traces", "--json", "--snapshot"])["error"]["code"])
-    with patch("kriya.kup.acquire.acquire_snapshot", side_effect=lambda *a, **k: (_ for _ in ()).throw(__import__("kriya.kup.store", fromlist=["SnapshotError"]).SnapshotError(policy.STORE_BUSY, "hot", policy.DB_STATE_HOT_JOURNAL))):
+    with patch("kriya.control.history.acquire.acquire_snapshot", side_effect=lambda *a, **k: (_ for _ in ()).throw(__import__("kriya.control.history", fromlist=["SnapshotError"]).SnapshotError(policy.STORE_BUSY, "hot", policy.DB_STATE_HOT_JOURNAL))):
         env = _json(["traces", "--json", "--snapshot"])
         produced.add(env["error"]["code"])
         assert env["error"]["database_state"] == "hot_journal"
     os.remove(trace_db_path(AppConfig()))
     produced.add(_json(["traces", "--json", "--snapshot"])["error"]["code"])  # READ_ONLY_UNAVAILABLE / missing
     # corrupt: tamper with the published snapshot
-    from kriya.kup.store import list_snapshots, snapshot_directory
+    from kriya.control.history import list_snapshots, snapshot_directory
     snap = list_snapshots(snapshot_directory(AppConfig()))[0]
     os.chmod(snap.db_path, 0o600)
     with open(snap.db_path, "ab") as f:
@@ -336,7 +336,7 @@ def test_snapshots_list_prune_and_verify():
 def test_snapshot_verify_is_bound_to_the_exact_id_and_catches_a_same_size_same_mtime_tamper():
     """The host verifies the SHA-256 of exactly the snapshot it pins. The per-query check is size/mtime only, so a
     tamper that preserves both is invisible to it (MEASURED below) and must be caught by the explicit verification."""
-    from kriya.kup.store import cheap_integrity, list_snapshots, snapshot_directory
+    from kriya.control.history import cheap_integrity, list_snapshots, snapshot_directory
 
     seed_store(trace_db_path(AppConfig()), 6)
     snapshot_id = _acquire()

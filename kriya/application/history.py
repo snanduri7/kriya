@@ -15,17 +15,26 @@ claim success the record does not carry. ``succeeded`` is true only when the gat
 without timing out. A run whose goal never triggered the gate is ``NOT_APPLICABLE`` - there is no authoritative "how to start it" in
 Kriya, so none is offered. Command and output are passed through the existing secret scrub (kriya/policy/telemetry.py) and bounded.
 
-The trace snapshot is read through the ``TraceHistory`` port (kriya/application/services.py); nothing here opens a database.
+The trace snapshot is read through the ``TraceHistory`` port (kriya/application/services.py), implemented by STATE's snapshot reader
+(``kriya.control.history.SnapshotTrace``); nothing here opens a database. Since D2 the service also owns the snapshot use cases the KUP
+adapter used to run itself (acquire, list, verify, prune) over STATE's ``HistoryStore``, and takes the published ``Snapshot`` value (not a
+reader object) on every history read; a store refusal becomes an ``ApplicationRefusal`` with the same code, message, database state and
+extra fields.
 """
 from __future__ import annotations
 
 import json
+import time
+from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
 from kriya.application.evidence import recorded_evidence_id, recorded_workspace_identity
-from kriya.application.services import TraceHistory
+from kriya.application.services import ApplicationRefusal, TraceHistory
+from kriya.application.store_refusal import store_refusals
 from kriya.context.model import RequestContext
 from kriya.context.workspace_identity import workspace_identities, workspace_identity
+from kriya.control.history import RETAIN_SNAPSHOTS, SNAPSHOT_CORRUPT, Snapshot
+from kriya.control.history.port import HistoryLocation, HistoryStore
 from kriya.policy.authority import scrub_potential_secrets
 
 # ------------------------------------------------------------------ application outcome (moved from kriya/kup/application_outcome.py)
@@ -167,28 +176,107 @@ def scoped_history_list(cfg, trace: TraceHistory, n: int, cursor: Optional[str],
                                 "truncated": truncated}}
 
 
+@dataclass(frozen=True)
+class SnapshotAnswer:
+    """A snapshot use case's answer: the data the adapter serializes and the published snapshot it concerns (its source block)."""
+
+    snapshot: Snapshot
+    data: Dict[str, Any]
+
+
 class HistoryService:
-    """The read side of the run history of one published trace snapshot (``trace``, chosen by the caller per request)."""
+    """The run history of the published trace snapshots of one state directory (STATE's ``HistoryStore``, owned by the composition)."""
 
-    def list(self, ctx: RequestContext, cfg, trace: TraceHistory, *, limit: Optional[int], cursor: Optional[str]) -> Dict[str, Any]:
-        """One page of runs, newest first (the trace reader validates ``limit`` and ``cursor``)."""
-        return trace.page(limit, cursor)
+    def __init__(self, store: Optional[HistoryStore] = None) -> None:
+        self.store = store if store is not None else HistoryStore()
 
-    def list_in_workspace(self, ctx: RequestContext, cfg, trace: TraceHistory, *, limit: int, cursor: Optional[str], workspace: str) -> Dict[str, Any]:
+    # -- snapshots (moved from kriya/kup/cli_ops.py in D2: _acquire, _list_snapshots, _verify, _prune)
+
+    def location(self, ctx: RequestContext, cfg) -> HistoryLocation:
+        """The state directory, trace store and snapshot directory of ``cfg`` (paths only: nothing is opened or created)."""
+        return self.store.location(cfg)
+
+    def snapshot(self, ctx: RequestContext, cfg, snapshot_id: str) -> Snapshot:
+        """The published snapshot with exactly this id, cheaply integrity-checked; never another one."""
+        with store_refusals():
+            return self.store.require(cfg, snapshot_id)
+
+    def summary(self, ctx: RequestContext, cfg, snapshot: Snapshot) -> Dict[str, Any]:
+        """The snapshot's acquisition summary with the source store's metadata observed now (``stat`` only)."""
+        return self.store.summary(cfg, snapshot)
+
+    def acquire(self, ctx: RequestContext, cfg, *, workspace: Optional[str]) -> SnapshotAnswer:
+        """Acquire and publish one consistent snapshot; refused while a run is active for ``workspace`` (when given)."""
+        run_active_check = None
+        if workspace:
+            from kriya.application.project import ProjectService
+
+            def run_active_check() -> Optional[str]:
+                return ProjectService().active_run(ctx, workspace)  # read-only: never creates, locks or writes
+        with store_refusals():
+            result = self.store.acquire(cfg, run_active_check=run_active_check)
+        snap = result["snapshot"]
+        data = {**self.store.summary(cfg, snap), "orphans_removed": result["orphans_removed"], "pruned": result["pruned"],
+                "backup_steps": result["manifest"]["backup_steps"], "duration_ms": result["manifest"]["duration_ms"]}
+        return SnapshotAnswer(snapshot=snap, data=data)
+
+    def snapshots(self, ctx: RequestContext, cfg, *, verify: bool) -> Dict[str, Any]:
+        """Every published snapshot, newest first, each with its summary (and its digest verified when ``verify``)."""
+        location = self.store.location(cfg)
+        now = self.store.source_metadata(cfg)
+        items = []
+        for snap in self.store.published(cfg):
+            entry = self.store.summary_of(snap, now)
+            if verify:
+                entry["digest_verified"] = self.store.verify(snap) is None
+            items.append(entry)
+        return {"snapshot_directory": location.snapshot_directory, "snapshots": items, "retain": RETAIN_SNAPSHOTS}
+
+    def verify_snapshot(self, ctx: RequestContext, cfg, snapshot_id: str) -> SnapshotAnswer:
+        """Digest verification of EXACTLY the requested snapshot. ``data`` lacks only ``verified_at``, which the adapter stamps."""
+        with store_refusals():
+            snap = self.store.require(cfg, snapshot_id)  # typed MISSING / UNAVAILABLE / CORRUPT; never another id
+        started = time.monotonic()
+        reason = self.store.verify(snap)
+        if reason:
+            raise ApplicationRefusal(SNAPSHOT_CORRUPT, reason, snapshot_id=snap.snapshot_id)
+        file_meta = snap.manifest.get("snapshot_file", {})
+        data = {"snapshot_id": snap.snapshot_id, "digest_verified": True, "sha256": file_meta.get("sha256"), "size": file_meta.get("size"),
+                "duration_ms": round((time.monotonic() - started) * 1000.0, 3),
+                "guarantee": "digest verified at this request; size and mtime are checked on every later query"}
+        return SnapshotAnswer(snapshot=snap, data=data)
+
+    def prune(self, ctx: RequestContext, cfg, *, keep: int) -> Dict[str, Any]:
+        """Keep the newest ``keep`` published snapshots (0 removes every one); remove orphaned staging."""
+        with store_refusals():
+            return self.store.prune(cfg, keep=keep)
+
+    # -- history of one published snapshot
+
+    def list(self, ctx: RequestContext, cfg, snapshot: Snapshot, *, limit: Optional[int], cursor: Optional[str]) -> Dict[str, Any]:
+        """One page of runs, newest first (the snapshot reader validates ``limit`` and ``cursor``)."""
+        with store_refusals():
+            return self.store.trace(snapshot).page(limit, cursor)
+
+    def list_in_workspace(self, ctx: RequestContext, cfg, snapshot: Snapshot, *, limit: int, cursor: Optional[str], workspace: str) -> Dict[str, Any]:
         """One page of the runs whose evidence manifest records ``workspace`` (GUI M5)."""
-        return scoped_history_list(cfg, trace, limit, cursor, workspace)
+        with store_refusals():
+            return scoped_history_list(cfg, self.store.trace(snapshot), limit, cursor, workspace)
 
-    def detail(self, ctx: RequestContext, cfg, trace: TraceHistory, run_id: str) -> Dict[str, Any]:
-        """The stored row of one run (``trace.detail``) plus the derived ``application_outcome`` section of its recorded gate outcomes."""
-        detail = trace.detail(run_id)
+    def detail(self, ctx: RequestContext, cfg, snapshot: Snapshot, run_id: str) -> Dict[str, Any]:
+        """The stored row of one run plus the derived ``application_outcome`` section of its recorded gate outcomes."""
+        with store_refusals():
+            detail = self.store.trace(snapshot).detail(run_id)
         gates = detail["gate_outcomes"]
         outcome = application_outcome(gates["data"] if gates["availability"] == "recorded" else None)
         detail["application_outcome"] = {"availability": "recorded", "provenance": APPLICATION_OUTCOME_PROVENANCE, "reason": None, "data": outcome}
         return detail
 
-    def prompt(self, ctx: RequestContext, cfg, trace: TraceHistory, run_id: str) -> Dict[str, Any]:
-        return trace.prompt(run_id)
+    def prompt(self, ctx: RequestContext, cfg, snapshot: Snapshot, run_id: str) -> Dict[str, Any]:
+        with store_refusals():
+            return self.store.trace(snapshot).prompt(run_id)
 
 
 __all__ = ["APPLICATION_OUTCOME_PROVENANCE", "BLOCKED_REASON_CODES", "HistoryService", "MAX_SCANNED_RUNS", "OUTPUT_MAX_CHARS",
-           "SCAN_PAGE", "STATUS_EXECUTED", "STATUS_NOT_APPLICABLE", "STATUS_UNKNOWN", "application_outcome", "scoped_history_list"]
+           "SCAN_PAGE", "STATUS_EXECUTED", "STATUS_NOT_APPLICABLE", "STATUS_UNKNOWN", "SnapshotAnswer", "application_outcome",
+           "scoped_history_list"]

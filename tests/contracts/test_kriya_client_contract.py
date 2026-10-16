@@ -28,7 +28,10 @@ IMPLEMENTATIONS: Dict[str, Callable[[], KriyaClient]] = {"local": local_client}
 DATA_PARAMETERS = frozenset({"ctx", "workspace", "requested", "parent", "name", "launch_id", "review_id", "run_id", "goal", "asked", "skill_id",
                              "tool_id", "skills", "reviewed", "request", "cockpit_state_directory", "from_trace", "filters", "limit", "cursor",
                              "cursor_head", "after_seq", "max_page_bytes", "seq", "part", "record_kind", "content_class", "max_bytes",
-                             "deadline_seconds", "max_endpoints"})
+                             "deadline_seconds", "max_endpoints",
+                             # D2: a published trace snapshot named by id, or by its Snapshot value (id, directory, manifest), and the
+                             # snapshot operations' bounded scalars
+                             "snapshot_id", "snapshot", "verify", "keep"})
 
 
 @pytest.fixture(params=sorted(IMPLEMENTATIONS))

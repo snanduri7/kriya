@@ -9,21 +9,19 @@ Transport only (full modularization B2-B4): request dispatch, argument validatio
 service's typed refusal (``ApplicationRefusal``) onto the KUP error vocabulary. Since B4 every use case is reached through the
 ``KriyaClient`` (``LocalKriyaClient``, kriya/client/): ``client.<service>.<op>(client.context(...), ...)``; no KUP module imports
 ``kriya.application``. The read use cases are ``kriya.application`` services
-(history, project status, capabilities); snapshot acquisition, listing, verification and pruning stay here until D2 moves the snapshot
-store to ``control.history``. The write/run use cases (B3: configuration approval, project create/initialize, change and runtime-command
+(history, project status, capabilities); since D2 snapshot acquisition, listing, verification and pruning are ``HistoryService`` use cases
+over STATE's snapshot store (``kriya/control/history``), and this module keeps only their argument validation and envelopes. The write/run use cases (B3: configuration approval, project create/initialize, change and runtime-command
 reviews, preflight and launch status) are services too; this module hands each operation handler its service.
 """
 from __future__ import annotations
 
 import os
-import time
 from typing import Any, Dict, Optional
 
 from kriya.client import ApplicationRefusal  # the adapter sees the application only through the client boundary (B4)
 from kriya.core.state_paths import StateDirectoryError
 from kriya.kup import evidence_ops, policy
 from kriya.kup.inspect import (
-    SnapshotTrace,
     capabilities,
     envelope,
     error_envelope,
@@ -34,16 +32,7 @@ from kriya.kup.inspect import (
     source_block,
     utc_now,
 )
-from kriya.kup.store import (
-    SnapshotError,
-    list_snapshots,
-    require_snapshot,
-    snapshot_directory,
-    snapshot_summary,
-    stat_metadata,
-    trace_store_path,
-    verify_digest,
-)
+from kriya.kup.store import SnapshotError
 
 
 def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli", client=None) -> Dict[str, Any]:
@@ -57,15 +46,15 @@ def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli", cli
     try:
         if operation == "capabilities":
             health = client.health.capabilities(client.context(workspace_root=None, request_id=request_id), cfg)
-            return envelope(operation, request_id, data=capabilities(health), source=_source(cfg), consistency=not_applicable_consistency())
+            return envelope(operation, request_id, data=capabilities(health), source=_source(cfg, client, request_id), consistency=not_applicable_consistency())
         if operation == "snapshot.acquire":
             return _acquire(cfg, request, request_id, client)
         if operation == "snapshot.list":
-            return _list_snapshots(cfg, request, request_id)
+            return _list_snapshots(cfg, request, request_id, client)
         if operation == "snapshot.prune":
-            return _prune(cfg, request, request_id)
+            return _prune(cfg, request, request_id, client)
         if operation == "snapshot.verify":
-            return _verify(cfg, request, request_id)
+            return _verify(cfg, request, request_id, client)
         if operation in ("history.list", "history.detail", "history.prompt"):
             return _history(cfg, operation, request, request_id, client)
         if operation == "workspace.status":
@@ -107,8 +96,9 @@ def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli", cli
         return error_envelope(operation or "unknown", request_id, policy.INVALID_REQUEST, f"unknown operation {operation!r}")
     except SnapshotError as error:
         return from_snapshot_error(operation, request_id, error)
-    except ApplicationRefusal as refusal:  # a service's typed refusal: the same code, message and extra fields on the wire
-        return error_envelope(operation, request_id, refusal.reason_code, refusal.message, None, **refusal.extra)
+    except ApplicationRefusal as refusal:  # a service's typed refusal: the same code, message, database state and extra fields on the wire
+        extra = dict(refusal.extra)
+        return error_envelope(operation, request_id, refusal.reason_code, refusal.message, extra.pop("database_state", None), **extra)
 
 
 def _evidence(cfg, operation: str, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
@@ -137,17 +127,22 @@ def _workspace_describe(cfg, request: Dict[str, Any], request_id: str, client) -
         return error_envelope("workspace.describe", request_id, policy.CONFIG_LOAD_FAILED, str(error))
 
 
-def _source(cfg, snapshot=None) -> Dict[str, Any]:
-    state_dir = os.path.dirname(trace_store_path(cfg))
-    return source_block(state_dir, trace_store_path(cfg), snapshot)
+def _source(cfg, client, request_id: str, snapshot=None) -> Dict[str, Any]:
+    location = client.history.location(client.context(workspace_root=None, request_id=request_id), cfg)
+    return source_block(location.state_directory, location.trace_database, snapshot)
+
+
+def _consistency(cfg, client, request_id: str, snapshot) -> Dict[str, Any]:
+    summary = client.history.summary(client.context(workspace_root=None, request_id=request_id), cfg, snapshot)
+    return snapshot_consistency(snapshot.snapshot_id, summary)
 
 
 def _history(cfg, operation: str, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     snapshot_id = request.get("snapshot_id")
     if not snapshot_id:
         raise SnapshotError(policy.INVALID_REQUEST, "snapshot_id is required: history is read from a published snapshot only (acquire one, or choose one from snapshot.list)")
-    snap = require_snapshot(snapshot_directory(cfg), str(snapshot_id))
-    trace, ctx, service = SnapshotTrace(snap), client.context(workspace_root=None, request_id=request_id), client.history
+    ctx, service = client.context(workspace_root=None, request_id=request_id), client.history
+    snap = service.snapshot(ctx, cfg, str(snapshot_id))
     if operation == "history.list":
         if request.get("workspace"):  # GUI M5: only the runs whose evidence manifest records this workspace
             workspace, limit = str(request["workspace"]), request.get("limit")
@@ -156,72 +151,48 @@ def _history(cfg, operation: str, request: Dict[str, Any], request_id: str, clie
             n = policy.LIST_DEFAULT if limit is None else int(limit)
             if n < 1 or n > policy.LIST_MAX:
                 raise SnapshotError(policy.INVALID_REQUEST, f"limit must be between 1 and {policy.LIST_MAX}")
-            data = service.list_in_workspace(ctx, cfg, trace, limit=n, cursor=request.get("cursor"), workspace=workspace)
+            data = service.list_in_workspace(ctx, cfg, snap, limit=n, cursor=request.get("cursor"), workspace=workspace)
         else:
-            data = service.list(ctx, cfg, trace, limit=request.get("limit"), cursor=request.get("cursor"))
+            data = service.list(ctx, cfg, snap, limit=request.get("limit"), cursor=request.get("cursor"))
     elif operation == "history.detail":
-        data = service.detail(ctx, cfg, trace, str(request.get("run_id")))
+        data = service.detail(ctx, cfg, snap, str(request.get("run_id")))
     else:
-        data = service.prompt(ctx, cfg, trace, str(request.get("run_id")))
-    return envelope(operation, request_id, data=data, source=_source(cfg, snap), consistency=snapshot_consistency(snap, trace_store_path(cfg)))
+        data = service.prompt(ctx, cfg, snap, str(request.get("run_id")))
+    return envelope(operation, request_id, data=data, source=_source(cfg, client, request_id, snap), consistency=_consistency(cfg, client, request_id, snap))
 
 
 def _acquire(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
-    from kriya.kup.acquire import acquire_snapshot  # the only write-capable module; imported only here
-
     workspace: Optional[str] = request.get("workspace")
-    run_active_check = None
-    if workspace:
-        def run_active_check() -> Optional[str]:
-            return client.projects.active_run(client.context(workspace_root=None, request_id=request_id), workspace)  # read-only: never creates, locks or writes
-    result = acquire_snapshot(trace_store_path(cfg), snapshot_directory(cfg), run_active_check=run_active_check)
-    snap = result["snapshot"]
-    data = {**snapshot_summary(snap, stat_metadata(trace_store_path(cfg))), "orphans_removed": result["orphans_removed"], "pruned": result["pruned"],
-            "backup_steps": result["manifest"]["backup_steps"], "duration_ms": result["manifest"]["duration_ms"]}
-    return envelope("snapshot.acquire", request_id, data=data, source=_source(cfg, snap), consistency=snapshot_consistency(snap, trace_store_path(cfg)))
+    answer = client.history.acquire(client.context(workspace_root=None, request_id=request_id), cfg, workspace=workspace or None)
+    snap = answer.snapshot
+    return envelope("snapshot.acquire", request_id, data=answer.data, source=_source(cfg, client, request_id, snap),
+                    consistency=_consistency(cfg, client, request_id, snap))
 
 
-def _list_snapshots(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    snapdir = snapshot_directory(cfg)
-    now = stat_metadata(trace_store_path(cfg))
-    items = []
-    for snap in list_snapshots(snapdir):
-        entry = snapshot_summary(snap, now)
-        if request.get("verify"):
-            entry["digest_verified"] = verify_digest(snap) is None
-        items.append(entry)
-    return envelope("snapshot.list", request_id, data={"snapshot_directory": snapdir, "snapshots": items, "retain": policy.RETAIN_SNAPSHOTS},
-                    source=_source(cfg), consistency=live_consistency())
+def _list_snapshots(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
+    data = client.history.snapshots(client.context(workspace_root=None, request_id=request_id), cfg, verify=bool(request.get("verify")))
+    return envelope("snapshot.list", request_id, data=data, source=_source(cfg, client, request_id), consistency=live_consistency())
 
 
-def _verify(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+def _verify(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     """Digest verification of EXACTLY the requested snapshot (the host calls this when it pins a snapshot for a
     browsing session). Guarantee, stated precisely: digest verified at pin; metadata (size, mtime) checked per
     query. A later modification that preserves size and mtime is caught only by the next explicit verification."""
     snapshot_id = request.get("snapshot_id")
     if not snapshot_id:
         raise SnapshotError(policy.INVALID_REQUEST, "snapshot_id is required for snapshot.verify")
-    snap = require_snapshot(snapshot_directory(cfg), str(snapshot_id))  # typed MISSING / UNAVAILABLE / CORRUPT; never another id
-    started = time.monotonic()
-    reason = verify_digest(snap)
-    if reason:
-        raise SnapshotError(policy.SNAPSHOT_CORRUPT, reason, snapshot_id=snap.snapshot_id)
-    file_meta = snap.manifest.get("snapshot_file", {})
-    data = {"snapshot_id": snap.snapshot_id, "digest_verified": True, "sha256": file_meta.get("sha256"), "size": file_meta.get("size"),
-            "verified_at": utc_now(), "duration_ms": round((time.monotonic() - started) * 1000.0, 3),
-            "guarantee": "digest verified at this request; size and mtime are checked on every later query"}
-    return envelope("snapshot.verify", request_id, data=data, source=_source(cfg, snap), consistency=live_consistency())
+    answer = client.history.verify_snapshot(client.context(workspace_root=None, request_id=request_id), cfg, str(snapshot_id))
+    data = {**answer.data, "verified_at": utc_now()}
+    return envelope("snapshot.verify", request_id, data=data, source=_source(cfg, client, request_id, answer.snapshot), consistency=live_consistency())
 
 
-def _prune(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    from kriya.kup.acquire import prune_snapshots
-
+def _prune(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     keep = request.get("keep")
     keep = policy.RETAIN_SNAPSHOTS if keep is None else int(keep)
     if keep < 0:
         raise SnapshotError(policy.INVALID_REQUEST, "keep must be >= 0")
-    result = prune_snapshots(snapshot_directory(cfg), keep=keep)
-    return envelope("snapshot.prune", request_id, data=result, source=_source(cfg), consistency=live_consistency())
+    result = client.history.prune(client.context(workspace_root=None, request_id=request_id), cfg, keep=keep)
+    return envelope("snapshot.prune", request_id, data=result, source=_source(cfg, client, request_id), consistency=live_consistency())
 
 
 def _workspace_status(request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:

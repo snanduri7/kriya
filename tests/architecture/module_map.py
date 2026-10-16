@@ -84,7 +84,8 @@ MODULES: Dict[str, Module] = {
                 "kriya.control.checkpoint", "kriya.core.state_paths",
                 # D2 (the slice that defines STATE's public surface): the trace store moved here, the recovery assessment, the run
                 # lock probe and the launch records/phases are the STATE answers APPLICATION and the KERNEL read.
-                "kriya.control.trace", "kriya.control.recovery", "kriya.control.run_ownership", "kriya.control.launch"),
+                "kriya.control.trace", "kriya.control.recovery", "kriya.control.run_ownership", "kriya.control.launch",
+                "kriya.control.history.port"),
         layer=2),
     "EVIDENCE": Module(
         owner_paths=("kriya/core/attempt_evidence/",),

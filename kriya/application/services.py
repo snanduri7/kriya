@@ -4,9 +4,9 @@
 table whose strings are IDENTICAL to the KUP error vocabulary (``kriya/kup/policy.py``): the adapter maps a refusal 1:1 onto its
 error envelope (code, message, extra fields), so a client sees exactly what the operation body answered before the extraction.
 
-``TraceHistory`` is the port the history and evidence services read a published trace-history snapshot through. The only
-implementation today is the KUP snapshot reader (``kriya.kup.inspect.SnapshotTrace``, passed per call because the snapshot is
-chosen per request); D2 moves it to ``control.history`` (HistoryStore). The services never open the trace database themselves:
+``TraceHistory`` is the port the history and evidence services read a published trace-history snapshot through. Its implementation
+is STATE's snapshot reader (``kriya.control.history.SnapshotTrace``, moved from KUP in D2), built by the services from the published
+``Snapshot`` value a request names. The services never open the trace database themselves:
 APPLICATION owns no sqlite, http, environment, home or working-directory access (tests/architecture/test_direct_access_owners.py).
 """
 from __future__ import annotations
@@ -33,11 +33,22 @@ REVIEW_DIFF_UNVERIFIED = "REVIEW_DIFF_UNVERIFIED"
 REVIEW_COMMAND_UNVERIFIED = "REVIEW_COMMAND_UNVERIFIED"
 APPROVAL_STALE = "APPROVAL_STALE"
 APPROVAL_UNAVAILABLE = "APPROVAL_UNAVAILABLE"
+# D2 (the trace-history snapshot store moved to STATE): the store's refusals, unchanged on the wire.
+READ_ONLY_UNAVAILABLE = "READ_ONLY_UNAVAILABLE"
+STORE_BUSY = "STORE_BUSY"
+SNAPSHOT_MISSING = "SNAPSHOT_MISSING"
+SNAPSHOT_UNAVAILABLE = "SNAPSHOT_UNAVAILABLE"
+SNAPSHOT_FAILED = "SNAPSHOT_FAILED"
+SNAPSHOT_TOO_LARGE = "SNAPSHOT_TOO_LARGE"
+SNAPSHOT_CORRUPT = "SNAPSHOT_CORRUPT"
+ACQUISITION_IN_PROGRESS = "ACQUISITION_IN_PROGRESS"
+ACQUISITION_REFUSED_RUN_ACTIVE = "ACQUISITION_REFUSED_RUN_ACTIVE"
 REFUSAL_CODES: FrozenSet[str] = frozenset({
     INVALID_REQUEST, EVIDENCE_STORE_UNREADABLE, EVIDENCE_SCHEMA_UNSUPPORTED, EVIDENCE_STORE_NOT_FOUND, EVIDENCE_VERIFY_FAILED,
     EVIDENCE_HEAD_CHANGED, EVIDENCE_CONTENT_UNAVAILABLE, EVIDENCE_BLOB_TOO_LARGE, CONFIG_LOAD_FAILED, WORKSPACE_UNAVAILABLE,
     LAUNCH_NOT_FOUND, REVIEW_NOT_FOUND, REVIEW_DIFF_UNAVAILABLE, REVIEW_DIFF_UNVERIFIED, REVIEW_COMMAND_UNVERIFIED, APPROVAL_STALE,
-    APPROVAL_UNAVAILABLE})
+    APPROVAL_UNAVAILABLE, READ_ONLY_UNAVAILABLE, STORE_BUSY, SNAPSHOT_MISSING, SNAPSHOT_UNAVAILABLE, SNAPSHOT_FAILED, SNAPSHOT_TOO_LARGE,
+    SNAPSHOT_CORRUPT, ACQUISITION_IN_PROGRESS, ACQUISITION_REFUSED_RUN_ACTIVE})
 
 
 class ApplicationRefusal(KriyaError):
@@ -69,8 +80,9 @@ class TraceHistory(Protocol):
     def events_reader(self) -> ContextManager[Callable[[List[str]], Dict[str, Any]]]: ...
 
 
-__all__ = ["APPROVAL_STALE", "APPROVAL_UNAVAILABLE", "ApplicationRefusal", "CONFIG_LOAD_FAILED", "EVIDENCE_BLOB_TOO_LARGE",
+__all__ = ["ACQUISITION_IN_PROGRESS", "ACQUISITION_REFUSED_RUN_ACTIVE", "APPROVAL_STALE", "APPROVAL_UNAVAILABLE", "ApplicationRefusal", "CONFIG_LOAD_FAILED", "EVIDENCE_BLOB_TOO_LARGE",
            "EVIDENCE_CONTENT_UNAVAILABLE", "EVIDENCE_HEAD_CHANGED", "EVIDENCE_SCHEMA_UNSUPPORTED", "EVIDENCE_STORE_NOT_FOUND",
-           "EVIDENCE_STORE_UNREADABLE", "EVIDENCE_VERIFY_FAILED", "INVALID_REQUEST", "LAUNCH_NOT_FOUND", "REFUSAL_CODES",
-           "REVIEW_COMMAND_UNVERIFIED", "REVIEW_DIFF_UNAVAILABLE", "REVIEW_DIFF_UNVERIFIED", "REVIEW_NOT_FOUND", "TraceHistory",
+           "EVIDENCE_STORE_UNREADABLE", "EVIDENCE_VERIFY_FAILED", "INVALID_REQUEST", "LAUNCH_NOT_FOUND", "READ_ONLY_UNAVAILABLE", "REFUSAL_CODES",
+           "REVIEW_COMMAND_UNVERIFIED", "REVIEW_DIFF_UNAVAILABLE", "REVIEW_DIFF_UNVERIFIED", "REVIEW_NOT_FOUND", "SNAPSHOT_CORRUPT", "SNAPSHOT_FAILED", "SNAPSHOT_MISSING",
+           "SNAPSHOT_TOO_LARGE", "SNAPSHOT_UNAVAILABLE", "STORE_BUSY", "TraceHistory",
            "WORKSPACE_UNAVAILABLE"]

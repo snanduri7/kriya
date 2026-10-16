@@ -1,4 +1,5 @@
-"""Snapshot acquisition, retention and cleanup (gate C-1, C-2, C-4): the only module under kriya/kup that writes.
+"""Snapshot acquisition, retention and cleanup (gate C-1, C-2, C-4): the only module of the history store that writes (moved unchanged
+from kriya/kup/acquire.py in full modularization D2).
 
 Writes, all inside ``<state dir>/kup-snapshots`` (owned by acquisition) plus SQLite's own ``-wal``/``-shm`` of the
 source (permitted by the gate; a side effect of opening a WAL store, never a page of the main file):
@@ -23,9 +24,16 @@ import time
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
-from kriya.kup import policy
-from kriya.kup.store import (
+from kriya.control.history import (
+    BUSY_TIMEOUT_SECONDS,
+    DB_STATE_UNREADABLE,
+    MANIFEST_FILENAME,
+    MANIFEST_VERSION,
     RAW_CONNECT,
+    READ_ONLY_UNAVAILABLE,
+    RETAIN_SNAPSHOTS,
+    SNAPSHOT_CORRUPT,
+    SNAPSHOT_FILENAME,
     Snapshot,
     SnapshotError,
     list_snapshots,
@@ -35,6 +43,25 @@ from kriya.kup.store import (
     verify_digest,
 )
 from kriya.platform.services import platform_services
+
+# Acquisition's own bounds and codes (identical to kriya/kup/policy.py; tests/test_history_store.py pins them).
+PROTOCOL_IMPLEMENTATION = "kriya-kup/1"   # recorded in every snapshot manifest as ``implementation``
+STORE_BUSY = "STORE_BUSY"
+SNAPSHOT_FAILED = "SNAPSHOT_FAILED"
+SNAPSHOT_TOO_LARGE = "SNAPSHOT_TOO_LARGE"
+ACQUISITION_IN_PROGRESS = "ACQUISITION_IN_PROGRESS"
+ACQUISITION_REFUSED_RUN_ACTIVE = "ACQUISITION_REFUSED_RUN_ACTIVE"
+DB_STATE_MISSING = "missing"
+DB_STATE_HOT_JOURNAL = "hot_journal"
+DB_STATE_LOCKED = "locked"
+DB_STATE_READONLY_DIRECTORY = "readonly_directory"
+DB_STATE_NOT_A_DATABASE = "not_a_database"
+MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024
+FREE_SPACE_MARGIN_BYTES = 64 * 1024 * 1024
+ACQUISITION_DEADLINE_SECONDS = 45.0
+BACKUP_STEP_PAGES = 256
+STAGING_PREFIX = "staging-"
+LOCK_FILENAME = ".acquire.lock"
 
 StepHook = Optional[Callable[[Dict[str, Any]], None]]
 
@@ -54,12 +81,12 @@ def acquisition_lock(snapshot_dir: str) -> Iterator[None]:
         os.chmod(snapshot_dir, 0o700)
     except OSError:
         pass
-    lock_path = os.path.join(snapshot_dir, policy.LOCK_FILENAME)
+    lock_path = os.path.join(snapshot_dir, LOCK_FILENAME)
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     lock = platform_services().workspace_lock
     try:
         if not lock.try_exclusive(fd):
-            raise SnapshotError(policy.ACQUISITION_IN_PROGRESS, "another acquisition or prune holds the snapshot directory")
+            raise SnapshotError(ACQUISITION_IN_PROGRESS, "another acquisition or prune holds the snapshot directory")
         try:
             yield
         finally:
@@ -72,7 +99,7 @@ def _remove_orphaned_staging(snapshot_dir: str) -> List[str]:
     """Under the lock: every staging directory belongs to a dead acquirer. Only our own prefix, inside our own dir."""
     removed = []
     for name in sorted(os.listdir(snapshot_dir)):
-        if name.startswith(policy.STAGING_PREFIX):
+        if name.startswith(STAGING_PREFIX):
             shutil.rmtree(os.path.join(snapshot_dir, name), ignore_errors=True)
             removed.append(name)
     return removed
@@ -81,16 +108,16 @@ def _remove_orphaned_staging(snapshot_dir: str) -> List[str]:
 def _classify_open_error(error: sqlite3.Error, source: str) -> SnapshotError:
     name = getattr(error, "sqlite_errorname", "") or ""
     if not os.path.exists(source):
-        return SnapshotError(policy.READ_ONLY_UNAVAILABLE, "no trace database exists at the resolved store path", policy.DB_STATE_MISSING)
+        return SnapshotError(READ_ONLY_UNAVAILABLE, "no trace database exists at the resolved store path", DB_STATE_MISSING)
     if name == "SQLITE_READONLY_ROLLBACK":
-        return SnapshotError(policy.STORE_BUSY, "the store has a hot rollback journal; acquisition never recovers another writer's transaction", policy.DB_STATE_HOT_JOURNAL)
+        return SnapshotError(STORE_BUSY, "the store has a hot rollback journal; acquisition never recovers another writer's transaction", DB_STATE_HOT_JOURNAL)
     if name in ("SQLITE_BUSY", "SQLITE_LOCKED"):
-        return SnapshotError(policy.STORE_BUSY, f"the store is locked ({name}) beyond the {policy.BUSY_TIMEOUT_SECONDS}s busy timeout", policy.DB_STATE_LOCKED)
+        return SnapshotError(STORE_BUSY, f"the store is locked ({name}) beyond the {BUSY_TIMEOUT_SECONDS}s busy timeout", DB_STATE_LOCKED)
     if name in ("SQLITE_READONLY_DIRECTORY", "SQLITE_CANTOPEN"):
-        return SnapshotError(policy.READ_ONLY_UNAVAILABLE, f"the store cannot be opened read-only ({name}: {error})", policy.DB_STATE_READONLY_DIRECTORY if name == "SQLITE_READONLY_DIRECTORY" else policy.DB_STATE_UNREADABLE)
+        return SnapshotError(READ_ONLY_UNAVAILABLE, f"the store cannot be opened read-only ({name}: {error})", DB_STATE_READONLY_DIRECTORY if name == "SQLITE_READONLY_DIRECTORY" else DB_STATE_UNREADABLE)
     if name == "SQLITE_NOTADB":
-        return SnapshotError(policy.READ_ONLY_UNAVAILABLE, "the file at the store path is not a SQLite database", policy.DB_STATE_NOT_A_DATABASE)
-    return SnapshotError(policy.READ_ONLY_UNAVAILABLE, f"{name or type(error).__name__}: {error}", policy.DB_STATE_UNREADABLE)
+        return SnapshotError(READ_ONLY_UNAVAILABLE, "the file at the store path is not a SQLite database", DB_STATE_NOT_A_DATABASE)
+    return SnapshotError(READ_ONLY_UNAVAILABLE, f"{name or type(error).__name__}: {error}", DB_STATE_UNREADABLE)
 
 
 def _free_bytes(path: str) -> int:
@@ -99,10 +126,10 @@ def _free_bytes(path: str) -> int:
 
 
 def acquire_snapshot(source: str, snapshot_dir: str, *, step_hook: StepHook = None,
-                     deadline_seconds: float = policy.ACQUISITION_DEADLINE_SECONDS,
-                     max_bytes: int = policy.MAX_SNAPSHOT_BYTES, retain: int = policy.RETAIN_SNAPSHOTS,
+                     deadline_seconds: float = ACQUISITION_DEADLINE_SECONDS,
+                     max_bytes: int = MAX_SNAPSHOT_BYTES, retain: int = RETAIN_SNAPSHOTS,
                      run_active_check: Optional[Callable[[], Optional[str]]] = None,
-                     step_pages: int = policy.BACKUP_STEP_PAGES) -> Dict[str, Any]:
+                     step_pages: int = BACKUP_STEP_PAGES) -> Dict[str, Any]:
     """Acquire one consistent snapshot of ``source`` into ``snapshot_dir`` and publish it. Returns the summary.
 
     ``step_hook`` (tests only) is called after every backup step with progress; production passes None.
@@ -113,25 +140,25 @@ def acquire_snapshot(source: str, snapshot_dir: str, *, step_hook: StepHook = No
     if run_active_check is not None:
         active = run_active_check()
         if active:
-            raise SnapshotError(policy.ACQUISITION_REFUSED_RUN_ACTIVE, f"a run is active for the selected workspace ({active}); acquisition is refused by policy")
+            raise SnapshotError(ACQUISITION_REFUSED_RUN_ACTIVE, f"a run is active for the selected workspace ({active}); acquisition is refused by policy")
     # A missing store is refused BEFORE the snapshot directory or the lock file exist: nothing is created for a
     # store that cannot be acquired.
     if stat_metadata(source) is None:
-        raise SnapshotError(policy.READ_ONLY_UNAVAILABLE, "no trace database exists at the resolved store path", policy.DB_STATE_MISSING)
+        raise SnapshotError(READ_ONLY_UNAVAILABLE, "no trace database exists at the resolved store path", DB_STATE_MISSING)
     with acquisition_lock(snapshot_dir):
         orphans = _remove_orphaned_staging(snapshot_dir)
         source_before = stat_metadata(source)
         if source_before is None:
-            raise SnapshotError(policy.READ_ONLY_UNAVAILABLE, "no trace database exists at the resolved store path", policy.DB_STATE_MISSING)
+            raise SnapshotError(READ_ONLY_UNAVAILABLE, "no trace database exists at the resolved store path", DB_STATE_MISSING)
         snapshot_id = _new_snapshot_id()
-        staging = os.path.join(snapshot_dir, policy.STAGING_PREFIX + snapshot_id)
+        staging = os.path.join(snapshot_dir, STAGING_PREFIX + snapshot_id)
         final_dir = os.path.join(snapshot_dir, snapshot_id)
-        dest_path = os.path.join(staging, policy.SNAPSHOT_FILENAME)
+        dest_path = os.path.join(staging, SNAPSHOT_FILENAME)
         os.mkdir(staging, 0o700)
         src = dst = None
         try:
             try:
-                src = RAW_CONNECT(read_only_uri(source), uri=True, timeout=policy.BUSY_TIMEOUT_SECONDS)
+                src = RAW_CONNECT(read_only_uri(source), uri=True, timeout=BUSY_TIMEOUT_SECONDS)
                 src.setconfig(sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, True)
                 src.execute("PRAGMA wal_autocheckpoint=0")
                 src.execute("PRAGMA temp_store=MEMORY")
@@ -145,10 +172,10 @@ def acquire_snapshot(source: str, snapshot_dir: str, *, step_hook: StepHook = No
                 raise _classify_open_error(error, source) from error
             expected = int(page_count) * int(page_size)
             if expected > max_bytes:
-                raise SnapshotError(policy.SNAPSHOT_TOO_LARGE, f"the store image is {expected} bytes; the per-snapshot bound is {max_bytes} bytes", expected_bytes=expected)
+                raise SnapshotError(SNAPSHOT_TOO_LARGE, f"the store image is {expected} bytes; the per-snapshot bound is {max_bytes} bytes", expected_bytes=expected)
             free = _free_bytes(snapshot_dir)
-            if free < expected + policy.FREE_SPACE_MARGIN_BYTES:
-                raise SnapshotError(policy.SNAPSHOT_FAILED, f"insufficient free space: {free} bytes available, {expected + policy.FREE_SPACE_MARGIN_BYTES} needed", reason="insufficient_space")
+            if free < expected + FREE_SPACE_MARGIN_BYTES:
+                raise SnapshotError(SNAPSHOT_FAILED, f"insufficient free space: {free} bytes available, {expected + FREE_SPACE_MARGIN_BYTES} needed", reason="insufficient_space")
             dst = RAW_CONNECT(dest_path)
             progress = _StepGuard(dest_path, max_bytes, expected, deadline_seconds, t0, step_hook)
             # Python's Connection.backup loops over sqlite3_backup_step(pages) and calls ``progress`` after every
@@ -167,14 +194,14 @@ def acquire_snapshot(source: str, snapshot_dir: str, *, step_hook: StepHook = No
             src.close()
             src = None
             if journal_dest.lower() != "delete":
-                raise SnapshotError(policy.SNAPSHOT_FAILED, f"destination journal mode is {journal_dest!r}, not delete", reason="journal_mode")
+                raise SnapshotError(SNAPSHOT_FAILED, f"destination journal mode is {journal_dest!r}, not delete", reason="journal_mode")
             if quick != "ok":
-                raise SnapshotError(policy.SNAPSHOT_CORRUPT, f"quick_check on the copy: {quick}")
+                raise SnapshotError(SNAPSHOT_CORRUPT, f"quick_check on the copy: {quick}")
             digest = sha256_file(dest_path)
             os.chmod(dest_path, 0o400)
             st = os.stat(dest_path)
             manifest = {
-                "manifest_version": policy.MANIFEST_VERSION,
+                "manifest_version": MANIFEST_VERSION,
                 "snapshot_id": snapshot_id,
                 "acquisition_started_at": started_at,
                 "acquisition_completed_at": _utc_now(),
@@ -184,14 +211,14 @@ def acquire_snapshot(source: str, snapshot_dir: str, *, step_hook: StepHook = No
                 "source_journal_mode": journal_mode,
                 "source_page_count": int(page_count), "source_page_size": int(page_size),
                 "backup_steps": steps,
-                "snapshot_file": {"name": policy.SNAPSHOT_FILENAME, "size": st.st_size, "mtime_ns": st.st_mtime_ns, "sha256": digest},
+                "snapshot_file": {"name": SNAPSHOT_FILENAME, "size": st.st_size, "mtime_ns": st.st_mtime_ns, "sha256": digest},
                 "rows": rows,
                 "quick_check": quick,
                 "sqlite_version": sqlite3.sqlite_version,
-                "implementation": policy.PROTOCOL_IMPLEMENTATION,
+                "implementation": PROTOCOL_IMPLEMENTATION,
                 "duration_ms": round((time.monotonic() - t0) * 1000, 1),
             }
-            manifest_path = os.path.join(staging, policy.MANIFEST_FILENAME)
+            manifest_path = os.path.join(staging, MANIFEST_FILENAME)
             with open(manifest_path, "w", encoding="utf-8") as f:
                 json.dump(manifest, f, indent=1, sort_keys=True)
                 f.flush()
@@ -213,10 +240,10 @@ def acquire_snapshot(source: str, snapshot_dir: str, *, step_hook: StepHook = No
             shutil.rmtree(staging, ignore_errors=True)
             raise
         pruned = _retain(snapshot_dir, retain)
-    published = Snapshot(snapshot_id, final_dir, os.path.join(final_dir, policy.SNAPSHOT_FILENAME), manifest)
+    published = Snapshot(snapshot_id, final_dir, os.path.join(final_dir, SNAPSHOT_FILENAME), manifest)
     bad = verify_digest(published)
     if bad:
-        raise SnapshotError(policy.SNAPSHOT_CORRUPT, bad, snapshot_id=snapshot_id)
+        raise SnapshotError(SNAPSHOT_CORRUPT, bad, snapshot_id=snapshot_id)
     return {"snapshot": published, "orphans_removed": orphans, "pruned": pruned, "manifest": manifest}
 
 
@@ -231,9 +258,9 @@ class _StepGuard:
         self.steps += 1
         grown = os.path.getsize(self.dest_path) if os.path.exists(self.dest_path) else 0
         if grown > self.max_bytes:
-            raise SnapshotError(policy.SNAPSHOT_TOO_LARGE, f"destination grew to {grown} bytes (bound {self.max_bytes})", expected_bytes=self.expected)
+            raise SnapshotError(SNAPSHOT_TOO_LARGE, f"destination grew to {grown} bytes (bound {self.max_bytes})", expected_bytes=self.expected)
         if time.monotonic() - self.t0 > self.deadline_seconds:
-            raise SnapshotError(policy.SNAPSHOT_FAILED, f"acquisition exceeded its {self.deadline_seconds}s deadline", reason="deadline_exceeded")
+            raise SnapshotError(SNAPSHOT_FAILED, f"acquisition exceeded its {self.deadline_seconds}s deadline", reason="deadline_exceeded")
         if self.step_hook is not None:
             self.step_hook({"step": self.steps, "remaining_pages": remaining, "total_pages": total, "destination_bytes": grown})
 
@@ -248,7 +275,7 @@ def _retain(snapshot_dir: str, retain: int) -> List[str]:
 
 
 def _remove_snapshot_dir(directory: str) -> None:
-    for name in (policy.SNAPSHOT_FILENAME, policy.MANIFEST_FILENAME):
+    for name in (SNAPSHOT_FILENAME, MANIFEST_FILENAME):
         p = os.path.join(directory, name)
         try:
             os.chmod(p, 0o600)
@@ -257,7 +284,7 @@ def _remove_snapshot_dir(directory: str) -> None:
     shutil.rmtree(directory, ignore_errors=True)
 
 
-def prune_snapshots(snapshot_dir: str, keep: int = policy.RETAIN_SNAPSHOTS) -> Dict[str, Any]:
+def prune_snapshots(snapshot_dir: str, keep: int = RETAIN_SNAPSHOTS) -> Dict[str, Any]:
     """Explicit prune: keep the newest ``keep`` (0 removes every snapshot, e.g. to delete duplicated prompts),
     remove orphaned staging. Runs under the same lock as acquisition, so it never races one."""
     if not os.path.isdir(snapshot_dir):

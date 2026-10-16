@@ -111,3 +111,95 @@ def test_the_snapshot_golden_is_not_vacuous():
     assert golden["verify_corrupt"]["error"]["code"] == "SNAPSHOT_CORRUPT"
     assert golden["prune_keep_one"]["data"]["removed"] == ["<snap-1>"]
     assert any(line.endswith("traces.snapshot.db 0o400") for line in golden["layout"])
+
+
+# ------------------------------------------------------------------ the store owned by STATE (D2)
+
+def _git_workspace(path: Path) -> str:
+    import subprocess
+
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    (path / "a.txt").write_text("v1\n")
+    subprocess.run(["git", "add", "a.txt"], cwd=path, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"], cwd=path, check=True)
+    return str(path)
+
+
+def test_history_is_scoped_to_the_state_directory_and_not_reconstructed_from_control_runs(tmp_path):
+    """MODULE-CONTRACTS §6 invariant: a project's ``.kriya/control/runs`` RunRecords never become history; only the trace store of the
+    active state directory (``trace_db_path(cfg)``) does, through a published snapshot."""
+    from kriya.application.history import HistoryService
+    from kriya.context.model import RequestContext
+    from kriya.control.persistence import scan_run_records
+    from kriya.control.run_coordinator import begin_mutating_run
+
+    cfg = AppConfig()
+    workspace = _git_workspace(tmp_path / "project")
+    with begin_mutating_run(workspace) as context:
+        control_run = context.run_id
+    assert [r.run_id for r in scan_run_records(workspace).records] == [control_run]  # the project has a recorded run
+    seed_store(trace_db_path(cfg), 2)
+    service, ctx = HistoryService(), RequestContext.local(workspace)
+    assert service.location(ctx, cfg).trace_database == trace_db_path(cfg)
+    assert os.path.commonpath([service.location(ctx, cfg).snapshot_directory, resolve_state_directory(cfg)[0]]) == resolve_state_directory(cfg)[0]
+    snapshot = service.acquire(ctx, cfg, workspace=None).snapshot
+    listed = [row["run_id"] for row in service.list(ctx, cfg, snapshot, limit=50, cursor=None)["runs"]]
+    assert listed == ["run-0001", "run-0000"] and control_run not in listed
+    assert not os.path.exists(os.path.join(workspace, ".kriya", "kup-snapshots"))
+
+
+def test_the_store_vocabulary_equals_the_kup_wire_vocabulary():
+    """STATE may not import the adapter, so the store keeps its own constants; every one the KUP vocabulary also names is identical."""
+    from kriya.control import history
+    from kriya.control.history import acquire
+    from kriya.kup import policy
+
+    shared = 0
+    for module in (history, acquire):
+        for name in dir(module):
+            if name.isupper() and not name.startswith("_") and hasattr(policy, name) and isinstance(getattr(module, name), (str, int, float)):
+                assert getattr(module, name) == getattr(policy, name), name
+                shared += 1
+    assert shared >= 30
+
+
+def test_the_read_side_never_imports_the_write_capable_module():
+    """The KUP read path (history, list, verify) never loads acquisition: only HistoryStore.acquire/prune import it."""
+    import ast
+
+    root = Path(__file__).resolve().parents[1] / "kriya" / "control" / "history"
+    for name in ("__init__.py",):
+        tree = ast.parse((root / name).read_text(encoding="utf-8"))
+        assert not [n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and (n.module or "").endswith("history.acquire")]
+    port = ast.parse((root / "port.py").read_text(encoding="utf-8"))
+    top = [n for n in port.body if isinstance(n, (ast.Import, ast.ImportFrom))]
+    assert not [n for n in top if any(alias.name == "acquire" for alias in n.names)]
+
+
+def test_a_store_refusal_reaches_the_client_as_the_same_typed_refusal(tmp_path):
+    import pytest
+
+    from kriya.application.history import HistoryService
+    from kriya.application.services import ApplicationRefusal
+    from kriya.context.model import RequestContext
+
+    with pytest.raises(ApplicationRefusal) as refused:
+        HistoryService().acquire(RequestContext.local(None), AppConfig(), workspace=None)
+    assert refused.value.reason_code == "READ_ONLY_UNAVAILABLE" and refused.value.extra == {"database_state": "missing"}
+
+
+def test_acquisition_for_a_workspace_with_a_live_run_is_refused_through_the_kup_path(tmp_path):
+    """The ``workspace`` argument of ``snapshot.acquire`` reaches the store's run-active refusal (HistoryService -> ProjectService.active_run):
+    nothing is acquired while the workspace's run lock is held."""
+    from kriya.control.run_coordinator import begin_mutating_run
+
+    cfg = AppConfig()
+    seed_store(trace_db_path(cfg), 1)
+    workspace = _git_workspace(tmp_path / "busy")
+    with begin_mutating_run(workspace):
+        refused = _op({"operation": "snapshot.acquire", "workspace": workspace})
+    assert refused["error"]["code"] == "ACQUISITION_REFUSED_RUN_ACTIVE", refused
+    assert not os.path.isdir(os.path.join(resolve_state_directory(cfg)[0], "kup-snapshots"))
+    admitted = _op({"operation": "snapshot.acquire", "workspace": workspace})
+    assert admitted["error"] is None and admitted["data"]["rows"] == 1

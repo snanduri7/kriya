@@ -8,7 +8,8 @@ workspace and the request identity: nothing behind the contract may infer them f
 Each service port below is typed parameter for parameter with the application service that implements it
 (tests/contracts/test_kriya_client_contract.py compares the signatures). Refusals are ``ApplicationRefusal(reason_code)`` with codes from
 ``kriya.application.services.REFUSAL_CODES``, the KUP error vocabulary one to one; the launch decision keeps AUTHORITY's own
-``ApprovalRefused`` (code, message) unchanged.
+``ApprovalRefused`` (code, message) unchanged. The history and evidence ports name a published trace snapshot by its ``Snapshot`` value
+(id, directory, manifest: plain data, STATE's ``kriya.control.history``), returned by ``history.snapshot`` (D2; it was a live reader object).
 
 TEMPORARY local-only parameters. Some ports still take a mechanism or a live object that cannot cross a transport, because the domain
 module that will own it does not exist yet. They are listed in ``LOCAL_ONLY_PARAMETERS`` with the slice that removes each (the contract
@@ -16,7 +17,7 @@ suite fails on any callable/object parameter that is not listed), so a RemoteKri
 the folder's configuration resolved with the folder as working directory (``load_in``, ``state``: D3 ``ConfigService.resolve(ctx)``),
 the trust-file path read from the environment (``trust_file``: D3) (the approval writer ``grant`` is gone since C1: the service reaches it through ``AuthorityPort``),
 the toolchain probe (``tool_visibility``: L1 ``ExecutionPort``), the model-endpoint probe (``probe``: I2 ``InferenceRuntimePort.health``),
-the per-request trace snapshot (``trace``: D2 ``HistoryStore``), the run composition (``deps``/``artifacts`` of ``runs.start``: O2,
+the run composition (``deps``/``artifacts`` of ``runs.start``: O2,
 which moves ``kriya generate`` onto the client) and the resolved configuration object itself (``cfg``: D3 ``ResolvedConfiguration``).
 """
 from __future__ import annotations
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
         Capabilities,
         EvidenceAnswer,
         EvidenceLocation,
+        HistoryLocation,
         LoadIn,
         ProbeEndpoint,
         RecordsPage,
@@ -35,9 +37,10 @@ if TYPE_CHECKING:
         RunArtifacts,
         RunHandle,
         RunServiceDeps,
+        Snapshot,
+        SnapshotAnswer,
         ToolVisibility,
     )
-    from kriya.application.services import TraceHistory
     from kriya.config import AppConfig
     from kriya.config.config import ConfigResolutionState
     from kriya.context import RequestContext
@@ -97,7 +100,7 @@ class ToolsPort(Protocol):
 class EvidencePort(Protocol):
     def location(self, ctx: "RequestContext", cfg: "AppConfig") -> "EvidenceLocation": ...
     def manifest(self, ctx: "RequestContext", cfg: "AppConfig", asked: str, *, from_trace: bool,
-                 trace: Optional["TraceHistory"]) -> Dict[str, Any]: ...
+                 snapshot: Optional["Snapshot"]) -> Dict[str, Any]: ...
     def verify(self, ctx: "RequestContext", cfg: "AppConfig", run_id: Any) -> "EvidenceAnswer": ...
     def records(self, ctx: "RequestContext", cfg: "AppConfig", run_id: str, *, filters: Dict[str, Any], limit: int,
                 cursor_head: Optional[str], after_seq: int, max_page_bytes: int) -> "RecordsPage": ...
@@ -107,12 +110,19 @@ class EvidencePort(Protocol):
 
 
 class HistoryPort(Protocol):
-    def list(self, ctx: "RequestContext", cfg: "AppConfig", trace: "TraceHistory", *, limit: Optional[int],
+    def location(self, ctx: "RequestContext", cfg: "AppConfig") -> "HistoryLocation": ...
+    def snapshot(self, ctx: "RequestContext", cfg: "AppConfig", snapshot_id: str) -> "Snapshot": ...
+    def summary(self, ctx: "RequestContext", cfg: "AppConfig", snapshot: "Snapshot") -> Dict[str, Any]: ...
+    def acquire(self, ctx: "RequestContext", cfg: "AppConfig", *, workspace: Optional[str]) -> "SnapshotAnswer": ...
+    def snapshots(self, ctx: "RequestContext", cfg: "AppConfig", *, verify: bool) -> Dict[str, Any]: ...
+    def verify_snapshot(self, ctx: "RequestContext", cfg: "AppConfig", snapshot_id: str) -> "SnapshotAnswer": ...
+    def prune(self, ctx: "RequestContext", cfg: "AppConfig", *, keep: int) -> Dict[str, Any]: ...
+    def list(self, ctx: "RequestContext", cfg: "AppConfig", snapshot: "Snapshot", *, limit: Optional[int],
              cursor: Optional[str]) -> Dict[str, Any]: ...
-    def list_in_workspace(self, ctx: "RequestContext", cfg: "AppConfig", trace: "TraceHistory", *, limit: int, cursor: Optional[str],
+    def list_in_workspace(self, ctx: "RequestContext", cfg: "AppConfig", snapshot: "Snapshot", *, limit: int, cursor: Optional[str],
                           workspace: str) -> Dict[str, Any]: ...
-    def detail(self, ctx: "RequestContext", cfg: "AppConfig", trace: "TraceHistory", run_id: str) -> Dict[str, Any]: ...
-    def prompt(self, ctx: "RequestContext", cfg: "AppConfig", trace: "TraceHistory", run_id: str) -> Dict[str, Any]: ...
+    def detail(self, ctx: "RequestContext", cfg: "AppConfig", snapshot: "Snapshot", run_id: str) -> Dict[str, Any]: ...
+    def prompt(self, ctx: "RequestContext", cfg: "AppConfig", snapshot: "Snapshot", run_id: str) -> Dict[str, Any]: ...
 
 
 class HealthPort(Protocol):
@@ -131,15 +141,14 @@ LOCAL_ONLY_PARAMETERS: Mapping[Tuple[str, str, str], str] = {
         ("projects", ("describe",)), ("runs", ("preflight", "status", "start", "mark_in_progress")),
         ("models", ("skills", "context", "probe")), ("skills", ("list", "describe")), ("tools", ("list", "describe", "approval_state")),
         ("evidence", ("location", "manifest", "verify", "records", "content", "store_summary")),
-        ("history", ("list", "list_in_workspace", "detail", "prompt")), ("health", ("capabilities",))) for method in methods},
+        ("history", ("location", "snapshot", "summary", "acquire", "snapshots", "verify_snapshot", "prune", "list", "list_in_workspace",
+                     "detail", "prompt")), ("health", ("capabilities",))) for method in methods},
     ("runs", "preflight", "load_in"): "D3", ("runs", "build_preflight", "load_in"): "D3",
     ("runs", "preflight", "tool_visibility"): "L1", ("runs", "build_preflight", "tool_visibility"): "L1",
     ("runs", "start", "artifacts"): "O2", ("runs", "start", "deps"): "O2",
     ("configuration", "approval_status", "state"): "D3", ("configuration", "approve", "state"): "D3",
     ("configuration", "approval_status", "trust_file"): "D3", ("configuration", "approve", "trust_file"): "D3",
     ("models", "probe", "probe"): "I2",
-    ("evidence", "manifest", "trace"): "D2",
-    **{("history", method, "trace"): "D2" for method in ("list", "list_in_workspace", "detail", "prompt")},
 }
 
 
