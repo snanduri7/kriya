@@ -434,7 +434,7 @@ def test_the_collector_uses_the_same_retrieval_limits_as_the_unit_run():
     from pathlib import Path
 
     root = Path(__file__).resolve().parent.parent / "kriya" / "workflow"
-    assert _LIMITS in (root / "workflow.py").read_text(encoding="utf-8")
+    assert _LIMITS in (root / "stage_analysis.py").read_text(encoding="utf-8")   # the unit run's Graph RAG (E3: from workflow.py)
     assert _LIMITS in (root / "edit_feasibility.py").read_text(encoding="utf-8")
 
 

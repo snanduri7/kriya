@@ -175,7 +175,9 @@ NOT_REACHED: Dict[Tuple[str, str], str] = {
     (W, "_ensure_repository_indexed"): "repository indexing: the scripted runs have no index stage",
     (W, "_run_contract_acceptance"): "explicit-contract acceptance: needs a requirement contract",
     (W, "classify_ownership_violations"): "architect ownership choice: needs a brownfield ownership violation",
-    (W, "include_response_construction_owners"): "JVM response-construction owners: the scripted projects are Python",
+    (W, "include_response_construction_owners"): "JVM response-construction owners: the scripted projects are Python (E3: "
+                                                 "tests/test_work_unit_stages.py drives the moved architecture stage "
+                                                 "through this patch point)",
     (W, "logger"): "a Logger object, not a callable seam (E2 guard: StageDeps.logger, proven by "
                    "tests/test_outcome.py::test_the_moved_lifecycle_code_logs_through_the_engines_patched_logger)",
     (W, "resolve_future_owner_verification_deferral"): "milestone future-owner verification deferral",

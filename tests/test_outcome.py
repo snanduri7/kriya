@@ -332,10 +332,12 @@ def test_the_trace_row_counts_the_candidates_best_of_n_discarded_as_attempts():
     assert log_run.call_args.kwargs["attempts"] == 3
 
 
-def test_the_moved_lifecycle_code_logs_through_the_engines_patched_logger():
+def test_the_moved_lifecycle_code_logs_through_the_engines_patched_logger(tmp_path):
     """The E2 guard for ``kriya.workflow.workflow.logger`` (2 suite patches): the facade hands its logger to the moved
     code at call time (``WorkflowEngine._stage_deps`` and the ``_record_run_exception`` forwarder), so a patch of the
-    facade's logger still sees what the moved run-lifecycle code logs."""
+    facade's logger still sees what the moved run-lifecycle code logs. E3: the same for the moved design stages
+    (``WorkflowEngine._work_unit_deps``): the KnowledgeGuard stage's trace-write warning reaches the patched logger."""
+    import asyncio
     import dataclasses
 
     from kriya.config import AppConfig
@@ -343,14 +345,23 @@ def test_the_moved_lifecycle_code_logs_through_the_engines_patched_logger():
     from kriya.core.llm import LLMClient
     from kriya.workflow import workflow as workflow_module
     from kriya.workflow.run_lifecycle import RunTrace, TraceDetail, persist_run_trace
+    from kriya.workflow.stage_context import StageContext
+    from kriya.workflow.stage_knowledge_guard import check_knowledge_guard
 
     cfg = AppConfig()
+    cfg.knowledge.offline_mode = True        # a versioned library with no skill is a gap, decided without a network
+    cfg.paths.skills, cfg.paths.memory = str(tmp_path / "skills"), str(tmp_path / "memory")
     engine = workflow_module.WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
     with patch("kriya.workflow.workflow.logger") as facade_logger:
         deps = dataclasses.replace(engine._stage_deps(), trace_events=lambda _state: [])
         with patch("kriya.control.trace.TraceLogger.log_run", side_effect=OSError("disk full")):
             persist_run_trace(deps, _state(), RunTrace("t", "g", 0.0), TraceDetail([], [], ""), status="failure")
         workflow_module._record_run_exception(object(), {"trace_id": "t"}, RuntimeError("boom"))
+        stage_deps = dataclasses.replace(engine._work_unit_deps(), trace_events=lambda _state: [])
+        stage = StageContext(goal="Use mylib==1.2.3.", workspace_path=str(tmp_path), state=_state(), trace_id="t")
+        with patch("kriya.control.trace.TraceLogger.log_run", side_effect=OSError("stage disk full")):
+            stop = asyncio.run(check_knowledge_guard(stage, stage_deps))
     messages = [call.args[0] for call in facade_logger.warning.call_args_list]
     assert messages[0] == "Failed to write run trace: disk full"
     assert messages[1] == "No traces.db for the failed run %s: %s"
+    assert stop["status"] == "knowledge_gap" and messages[2] == "Failed to write run trace: stage disk full"

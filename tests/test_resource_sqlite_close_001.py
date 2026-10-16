@@ -96,12 +96,13 @@ def test_indexed_embedding_dimensions_closes_its_read_only_connection(tmp_path, 
 
 
 def test_the_workflow_closes_its_graph_rag_vector_store():
-    """The vector store run_generation_workflow opens for Graph RAG is used
-    for one retrieve_graph_context call and closed in a finally."""
+    """The vector store the analysis stage opens for Graph RAG (moved out of
+    run_generation_workflow in E3) is used for one retrieve_graph_context
+    call and closed in a finally."""
     import ast
     import pathlib
 
-    source = (pathlib.Path(__file__).resolve().parents[1] / "kriya" / "workflow" / "workflow.py").read_text()
+    source = (pathlib.Path(__file__).resolve().parents[1] / "kriya" / "workflow" / "stage_analysis.py").read_text()
     tree = ast.parse(source)
     guarded = False
     for node in ast.walk(tree):

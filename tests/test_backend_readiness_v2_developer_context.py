@@ -145,12 +145,13 @@ def test_developer_goal_facts_equal_the_planner_block_and_ignore_the_planners_ow
 
 
 def test_the_developer_request_builder_injects_the_facts_block():
-    """Structural wiring: run_generation_workflow appends the block to the Developer's convention prompt."""
+    """Structural wiring: the analysis stage (moved out of run_generation_workflow in E3) appends the block to the
+    Developer's convention prompt."""
     import inspect
 
-    from kriya.workflow import workflow
+    from kriya.workflow import stage_analysis
 
-    source = inspect.getsource(workflow.WorkflowEngine.run_generation_workflow)
+    source = inspect.getsource(stage_analysis.analyze_work_unit)
     assert "developer_goal_facts(" in source and "convention_prompt += goal_facts_text" in source
 
 

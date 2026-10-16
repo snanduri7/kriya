@@ -88,11 +88,15 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (W, 'delete_checkpoint'): P(2, 'kriya.control.checkpoint', ((W, 2),), ()),
     (W, 'derive_contract_transition'): P(4, 'kriya.workflow.contract_lifecycle', ((W, 1),), ()),
     (W, 'handle_attempt_failure'): P(2, 'kriya.workflow.retry_strategy', ((W, 1),), ()),
-    (W, 'include_response_construction_owners'): P(1, 'kriya.workflow.file_resolution', ((W, 1),), ()),
+    # E3: +1 site (tests/test_work_unit_stages.py proves the moved architecture stage calls the facade name).
+    (W, 'include_response_construction_owners'): P(2, 'kriya.workflow.file_resolution', ((W, 1),), ()),
     # E2: +1 site (test_outcome proves the moved run-lifecycle code logs through it); 151 -> 145 lookups: 8 moved
     # logger calls now reach run_lifecycle/outcome as StageDeps.logger / the forwarder's logger= argument, both
     # resolved here at call time (+2: WorkflowEngine._stage_deps, _record_run_exception).
-    (W, 'logger'): P(3, W, ((W, 145),), ()),
+    # E3: 145 -> 90 lookups: the 55 logger loads of stages 0-3 moved to the stage modules, which bind
+    # StageDeps.logger (WorkflowEngine._work_unit_deps -> _stage_deps, resolved here at call time; proven by the
+    # same test_outcome logger test, extended to the KnowledgeGuard stage).
+    (W, 'logger'): P(3, W, ((W, 90),), ()),
     (W, 'resolve_future_owner_verification_deferral'): P(1, 'kriya.workflow.attribution', ((W, 1),), ()),
     # E3 characterization: +1 site (the legacy_stage_context_success golden scripts the retrieval through it).
     (W, 'retrieve_graph_context'): P(2, 'kriya.workflow.graph_retrieval', ((W, 1),), ()),
@@ -216,8 +220,9 @@ def test_every_kernel_patch_target_is_pinned_and_still_reaches_what_it_patched(m
 
 def test_the_table_totals_are_the_measured_e1_baseline():
     totals = {module: sum(row.sites for (owner, _t), row in PATCH_POINTS.items() if owner == module) for module in ps.KERNEL_MODULES}
-    # E1 baseline 87/69/268; E2 +1 W.logger site (test_outcome); E3 +1 W.retrieve_graph_context site (golden scenario)
-    assert totals == {A: 87, W: 71, C: 268}
+    # E1 baseline 87/69/268; E2 +1 W.logger site (test_outcome); E3 +1 W.retrieve_graph_context site (golden
+    # scenario) and +1 W.include_response_construction_owners site (test_work_unit_stages)
+    assert totals == {A: 87, W: 72, C: 268}
     assert len(PATCH_POINTS) == 83
 
 
@@ -226,7 +231,11 @@ def test_the_table_totals_are_the_measured_e1_baseline():
 # Modules W4 extracted from the three kernel facades. They reach the facades' patched names through an injected
 # ``*Deps`` (``kriya/workflow/stage_context.py``) and never import a facade (a facade import would bind the
 # originals and silently defeat the suite's patches) nor the CLI. E-slices add their modules here.
-KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_lifecycle", "kriya.workflow.outcome")
+KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_lifecycle", "kriya.workflow.outcome",
+                        # E3: the design stages and their runner
+                        "kriya.workflow.work_unit_runner", "kriya.workflow.stage_knowledge_guard",
+                        "kriya.workflow.stage_analysis", "kriya.workflow.stage_planning",
+                        "kriya.workflow.stage_architecture")
 FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
 
 

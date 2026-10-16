@@ -154,7 +154,8 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
     },
     "tool_registry": {
         "kriya.cli": (5, "K2", "ToolRegistry.execute / catalog (cli tools list/execute)"),
-        "kriya.workflow.workflow": (1, "K1", "available tool names through ToolRegistry"),
+        # moved count-neutral in E3 (kriya.workflow.workflow -> stage_planning, with the Planner prompt's tool catalog)
+        "kriya.workflow.stage_planning": (1, "K1", "available tool names through ToolRegistry"),
         "kriya.workflow.workflow_controller": (2, "K1", "available tool names through ToolRegistry"),
     },
     "kriya_dir": {
