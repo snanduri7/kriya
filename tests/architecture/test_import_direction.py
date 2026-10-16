@@ -105,9 +105,9 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.analyzer.analyzer", "kriya.workflow.checkpoint"): ("D2", _D2),  # direction RETRIEVAL -> KERNEL
     ("kriya.analyzer.graph", "kriya.core.db"): ("P2", _P2),  # non-public FOUNDATION module
     ("kriya.application.catalog", "kriya.tools.service"): ("K1", _B2_MOVED + " (K1: tools/service.py becomes toolbox.catalog)"),  # non-public TOOLBOX module (was kup.catalog_ops, O1)
-    ("kriya.application.history", "kriya.policy.telemetry"): ("P2", _B2_MOVED),  # non-public AUTHORITY module (was kup.application_outcome, O1)
-    ("kriya.application.history", "kriya.workflow.verification_authority"): ("P2", _B2_MOVED),  # non-public KERNEL module (was kup.application_outcome, B2)
-    ("kriya.application.project", "kriya.control.recovery"): ("P2", _B2_MOVED),  # non-public STATE module (was kup.cli_ops + kup.workspace_ops, O1)
+    ("kriya.application.history", "kriya.policy.telemetry"): ("C1", _B2_MOVED + " (ASSIGNED to C1, which creates kriya/policy/authority.py, the first public AUTHORITY facade; work item not in C1's text: re-export scrub_potential_secrets from it)"),  # non-public AUTHORITY module (was kup.application_outcome, O1)
+    ("kriya.application.history", "kriya.workflow.verification_authority"): ("E9", _B2_MOVED + " (ASSIGNED to E9, the runtime-verification seam that consumes deterministic_sequence_kind; work item not in E9's text: put that classification on the KERNEL public surface)"),  # non-public KERNEL module (was kup.application_outcome, B2)
+    ("kriya.application.project", "kriya.control.recovery"): ("D2", _B2_MOVED + " (ASSIGNED to D2, the slice that defines STATE's public surface (control.history/checkpoint; recovery takes kernel inputs as parameters); work item not in D2's text: expose assess_recovery there)"),  # non-public STATE module (was kup.cli_ops + kup.workspace_ops, O1)
     ("kriya.application.project", "kriya.tools.git_metadata"): ("M2", _B2_MOVED + " (M2: git_metadata moves to kriya/repository)"),  # non-public EXECUTION module (was kup.workspace_ops, O1)
     ("kriya.capabilities.gradle", "kriya.workflow.jvm_module_ownership"): ("L1", _L1),  # direction EXECUTION -> KERNEL
     ("kriya.cli", "kriya.agents"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
