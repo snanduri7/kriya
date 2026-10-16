@@ -195,3 +195,12 @@ def test_the_client_contract_no_longer_carries_the_resolution_mechanisms():
     assert not any(param in ("load_in", "state", "trust_file") for (_port, _method, param) in LOCAL_ONLY_PARAMETERS)
     assert "D3" not in set(LOCAL_ONLY_PARAMETERS.values())
     assert {LOCAL_ONLY_PARAMETERS[("runs", "start", "cfg")], LOCAL_ONLY_PARAMETERS[("history", "list", "cfg")]} == {"O2", "O1"}
+
+
+def test_the_members_still_to_come_name_real_open_slices():
+    from kriya.config.service import ARRIVES_LATER
+    from tests.architecture.test_import_direction import DONE_SLICES, SLICES
+
+    assert set(ARRIVES_LATER) == {"fingerprint", "state_dir"}
+    assert all(slice_id in SLICES and slice_id not in DONE_SLICES for slice_id in ARRIVES_LATER.values())
+    assert not any(hasattr(ResolvedConfiguration, name) for name in ARRIVES_LATER), "a member arriving later must not exist as a stub"
