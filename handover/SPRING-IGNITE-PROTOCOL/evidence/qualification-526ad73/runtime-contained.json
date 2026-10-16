@@ -1,0 +1,36 @@
+{
+ "mode": "contained",
+ "witness": false,
+ "checks": {
+  "gate_success": true,
+  "exit_code_0": true,
+  "not_timed_out": true,
+  "ignite_node_started": true,
+  "ignite_node_stopped": true,
+  "expected_result_line_exact": true,
+  "verification_pass_marker": true,
+  "protocol_class_registered_with_ignite_marshaller": true
+ },
+ "elapsed_seconds": 9.0,
+ "runtime_artifacts": [
+  "ignite/README.txt",
+  "ignite/work/db/marshaller/-165319811.classname0"
+ ],
+ "only_ignite_runtime_state": true,
+ "egress": {
+  "capability": "denied",
+  "network_authority": "denied",
+  "destinations": [],
+  "authority_source": "containment profile (no network)",
+  "backend": "OCIContainmentBackend"
+ },
+ "toolchain": {
+  "runtime_version": "17",
+  "build_tool_version": "3.9",
+  "containment_image": "maven:3.9-eclipse-temurin-17",
+  "observed_runtime_version": "17",
+  "observed_build_tool_version": "3.9.16"
+ },
+ "result_line_lines_before_it": 49,
+ "ok": true
+}

@@ -1,0 +1,6 @@
+app_java=openjdk version "21.0.12.1" 2026-08-18 LTS
+app_mvn=Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5) Java version: 26.0.1, vendor: Homebrew, runtime: /opt/homebrew/Cellar/openjdk/26.0.1/libexec/openjdk.jdk/Contents/Home 
+shell_java=openjdk version "17.0.10" 2024-01-16
+shell_java_home=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home
+git_head=526ad73f39674f88e67e34f8800adab1213facd6
+git_tracked_status=

@@ -1,0 +1,45 @@
+{
+ "extracted": [
+  [
+   "org.apache.ignite:ignite-core",
+   "2.18.0"
+  ]
+ ],
+ "cases": {
+  "default_online_guard_with_skill": {
+   "has_gaps": true,
+   "gaps": [
+    [
+     "org.apache.ignite:ignite-core",
+     "2.18.0",
+     "MEDIUM"
+    ]
+   ]
+  },
+  "default_online_guard_without_skill": {
+   "has_gaps": true,
+   "gaps": [
+    [
+     "org.apache.ignite:ignite-core",
+     "2.18.0",
+     "HIGH"
+    ]
+   ]
+  },
+  "offline_mode_with_skill": {
+   "has_gaps": false,
+   "gaps": []
+  },
+  "offline_mode_without_skill": {
+   "has_gaps": true,
+   "gaps": [
+    [
+     "org.apache.ignite:ignite-core",
+     "2.18.0",
+     "MEDIUM"
+    ]
+   ]
+  }
+ },
+ "ok": true
+}

@@ -1,0 +1,54 @@
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::arrayBaseOffset has been called by org.apache.ignite.internal.util.GridUnsafe (file:/Users/sriramnanduri/.m2/repository/org/apache/ignite/ignite-core/2.18.0/ignite-core-2.18.0.jar)
+WARNING: Please consider reporting this to the maintainers of class org.apache.ignite.internal.util.GridUnsafe
+WARNING: sun.misc.Unsafe::arrayBaseOffset will be removed in a future release
+Oct 16, 2026 8:25:05 AM org.apache.ignite.logger.java.JavaLogger warning
+WARNING: Failed to resolve default logging config file: config/java.util.logging.properties
+[08:25:05]    __________  ________________ 
+[08:25:05]   /  _/ ___/ |/ /  _/_  __/ __/ 
+[08:25:05]  _/ // (7 7    // /  / / / _/   
+[08:25:05] /___/\___/_/|_/___/ /_/ /x___/  
+[08:25:05] 
+[08:25:05] ver. 2.18.0#20260423-sha1:d49adada
+[08:25:05] 2026 Copyright(C) Apache Software Foundation
+[08:25:05] 
+[08:25:05] Ignite documentation: https://ignite.apache.org
+[08:25:05] 
+[08:25:05] Quiet mode.
+[08:25:05]   ^-- Logging by 'JavaLogger [quiet=true, config=null]'
+[08:25:05]   ^-- To see **FULL** console log here add -DIGNITE_QUIET=false or "-v" to ignite.{sh|bat}
+[08:25:05] 
+[08:25:05] OS: Mac OS X 27.0.1 aarch64
+[08:25:05] VM information: OpenJDK Runtime Environment 26.0.1 Homebrew OpenJDK 64-Bit Server VM 26.0.1
+[08:25:05] Please set system property '-Djava.net.preferIPv4Stack=true' to avoid possible problems in mixed environments.
+[08:25:05] Configured plugins:
+[08:25:05]   ^-- None
+[08:25:05] 
+[08:25:05] Configured failure handler: [hnd=StopNodeOrHaltFailureHandler [tryStop=false, timeout=0, super=AbstractFailureHandler [ignoredFailureTypes=UnmodifiableSet [SYSTEM_WORKER_BLOCKED, SYSTEM_CRITICAL_OPERATION_TIMEOUT]]]]
+[08:25:05] Initial heap size is 8MB (should be no less than 512MB, use -Xms512m -Xmx512m).
+WARNING: Final field selectedKeys in class sun.nio.ch.SelectorImpl has been mutated reflectively by class org.apache.ignite.internal.util.nio.GridNioServer$AbstractNioClientWorker in unnamed module @53e25b76 (file:/Users/sriramnanduri/.m2/repository/org/apache/ignite/ignite-core/2.18.0/ignite-core-2.18.0.jar)
+WARNING: Use --enable-final-field-mutation=ALL-UNNAMED to avoid a warning
+WARNING: Mutating final fields will be blocked in a future release unless final field mutation is enabled
+[08:25:05] Message queue limit is set to 0 which may lead to potential OOMEs when running cache operations in FULL_ASYNC or PRIMARY_SYNC modes due to message queues growth on sender and receiver sides.
+[08:25:08] Data Regions Started: 3
+[08:25:08] 
+[08:25:08]     ^--   sysMemPlc region [type=internal, persistence=false, lazyAlloc=false,
+[08:25:08]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=40MB]
+[08:25:08]     ^--   default region [type=default, persistence=false, lazyAlloc=true,
+[08:25:08]       ...  initCfg=256MB, maxCfg=13107MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+[08:25:08]     ^--   volatileDsMemPlc region [type=user, persistence=false, lazyAlloc=true,
+[08:25:08]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+[08:25:09] Security status [authentication=off, sandbox=off, tls/ssl=off]
+[08:25:09] Performance suggestions for grid 'ignite-server-node' (fix if possible)
+[08:25:09] To disable, set -DIGNITE_PERFORMANCE_SUGGESTIONS_DISABLED=true
+[08:25:09]   ^-- Specify JVM heap max size (add '-Xmx<size>[g|G|m|M|k|K]' to JVM options)
+[08:25:09]   ^-- Set max direct memory size if getting 'OOME: Direct buffer memory' (add '-XX:MaxDirectMemorySize=<size>[g|G|m|M|k|K]' to JVM options)
+[08:25:09] Refer to this page for more performance suggestions: https://ignite.apache.org/docs/latest/perf-and-troubleshooting/memory-tuning
+[08:25:09] 
+[08:25:09] 
+[08:25:09] Ignite node started OK (id=703e382e, instance name=ignite-server-node)
+[08:25:09] Topology snapshot [ver=1, locNode=703e382e, servers=1, clients=0, state=ACTIVE, CPUs=10, offheap=13.0GB, heap=16.0GB]
+[08:25:09]   ^-- Baseline [id=0, size=1, online=1, offline=0]
+[RESULT] protocolVersion=1, softwareVersion=2, dataLength=15, time=1700000000, bodyLength=15, equals=true
+[VERIFICATION] PASS
+[08:25:09] Ignite node stopped OK [name=ignite-server-node, uptime=00:00:00.225]

@@ -1,0 +1,47 @@
+{
+ "cases": {
+  "unmutated_reference": {
+   "junit_passes": true,
+   "witness_leg_ok": true,
+   "killed": false,
+   "killed_by": []
+  },
+  "get_result_discarded": {
+   "junit_passes": false,
+   "witness_leg_ok": false,
+   "killed": true,
+   "killed_by": [
+    "junit",
+    "witness_leg"
+   ]
+  },
+  "get_replaced_by_a_local_copy": {
+   "junit_passes": false,
+   "witness_leg_ok": false,
+   "killed": true,
+   "killed_by": [
+    "junit",
+    "witness_leg"
+   ]
+  },
+  "main_prints_the_original_not_the_retrieved": {
+   "junit_passes": true,
+   "witness_leg_ok": false,
+   "killed": true,
+   "killed_by": [
+    "witness_leg"
+   ]
+  },
+  "main_bypasses_the_cache_round_trip": {
+   "junit_passes": true,
+   "witness_leg_ok": false,
+   "killed": true,
+   "killed_by": [
+    "witness_leg"
+   ]
+  }
+ },
+ "control_passes": true,
+ "surviving_mutants": [],
+ "ok": true
+}
