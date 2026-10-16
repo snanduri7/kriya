@@ -46,7 +46,7 @@ from kriya.policy.approval import RuntimeCommandReviewPort as RuntimeCommandRevi
 from kriya.policy.approval import _sha as _sha
 from kriya.policy.approval import candidate_digest as candidate_digest
 from kriya.policy.approval import split_reason as split_reason
-from kriya.workflow.edit_safety import FileRevisionConflict
+from kriya.repository.commit import FileRevisionConflict
 
 logger = logging.getLogger(__name__)
 

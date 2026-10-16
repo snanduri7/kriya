@@ -50,7 +50,7 @@ KERNEL_MECHANISM_ALLOWLIST: Dict[str, Dict[str, str]] = {
     # D3: the kernel's env/home reads (acceptance_jvm/checkpoint/milestone_completion/workflow) go through kriya.config.environment.
     "os_environ": {},
     "home": {},
-    "subprocess": {"kriya.workflow.checkpoint": "M2", "kriya.workflow.file_integrity": "M1",
+    "subprocess": {"kriya.workflow.checkpoint": "M2",  # M1: file_integrity's untracked_repository_paths moved to repository.snapshot
                    "kriya.workflow.milestone_completion": "M3", "kriya.workflow.named_test_oracle": "L2",
                    "kriya.workflow.worktree": "M2"},
 }

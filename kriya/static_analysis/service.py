@@ -345,8 +345,8 @@ class StaticAnalysisService:
         )
         if candidate.in_place and candidate.originals is None:
             return self.evaluate(request)
-        # Imported here: terminal_commit imports this module (its guard type).
-        from kriya.workflow.terminal_commit import CandidateMaterializationError
+        # Function-local as before M1 (it was imported from kriya/workflow/terminal_commit.py, which imports this module).
+        from kriya.repository.commit import CandidateMaterializationError
 
         try:
             writes = candidate.materialize()

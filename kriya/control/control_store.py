@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
-from kriya.workflow.edit_safety import commit_revision_grounded_file
+from kriya.repository.commit import commit_revision_grounded_file
 
 CONTROL_DIRECTORY = ".kriya"
 # The milestone sidecars (kriya/workflow/milestones.py writes them; retention reads their commit ledgers): moved here from

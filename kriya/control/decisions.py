@@ -29,7 +29,7 @@ from kriya.context.workspace_identity import WorkspaceOwnershipError, workspace_
 from kriya.control.control_store import write_control_file
 from kriya.control.persistence import decision_ledger_path
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
-from kriya.workflow.edit_safety import read_file_revision
+from kriya.repository.commit import read_file_revision
 
 logger = logging.getLogger(__name__)
 

@@ -34,26 +34,13 @@ SLICES = frozenset(
     + [f"D{i}" for i in range(1, 4)] + [f"E{i}" for i in range(1, 15)] + [f"F{i}" for i in range(1, 6)]
     + [f"G{i}" for i in range(1, 6)] + [f"H{i}" for i in range(1, 6)] + [f"I{i}" for i in range(1, 5)]
     + ["J1", "J2", "K1", "K2", "L1", "L2", "M1", "M2", "M3", "N1", "N2", "O1", "O2", "O3", "P1", "P2", "Q1", "Q2"])
-DONE_SLICES = frozenset({"A1", "A2", "A3", "B1", "B2", "B3", "B4", "C1", "C2", "C3", "D1", "D2", "D3"})
+DONE_SLICES = frozenset({"A1", "A2", "A3", "B1", "B2", "B3", "B4", "C1", "C2", "C3", "D1", "D2", "D3", "M1"})
 
 # CURRENT-DEPENDENCY-MAP.md §3, the back-edges into kriya/workflow that close
 # the big cycle (TRACED to the import line there; MEASURED here): (source,
 # target, lazy). While an edge exists it must be intra-module by declaration
 # or allowlisted; a removed edge must be deleted from this table (shrink-only).
 BACK_EDGES: Tuple[Tuple[str, str, bool], ...] = (
-    ("kriya.control.persistence", "kriya.workflow.edit_safety", False),
-    ("kriya.control.persistence", "kriya.workflow.file_integrity", False),
-    ("kriya.control.control_store", "kriya.workflow.edit_safety", False),
-    ("kriya.control.decisions", "kriya.workflow.edit_safety", False),
-    ("kriya.control.commit_state", "kriya.workflow.edit_safety", False),
-    ("kriya.control.recovery", "kriya.workflow.edit_safety", False),
-    ("kriya.control.retention", "kriya.workflow.edit_safety", False),
-    ("kriya.control.launch_approval", "kriya.workflow.edit_safety", False),
-    ("kriya.policy.filesystem", "kriya.workflow.edit_safety", False),
-    ("kriya.static_analysis.operator_scan", "kriya.workflow.edit_safety", False),
-    ("kriya.static_analysis.operator_scan", "kriya.workflow.file_integrity", False),
-    ("kriya.static_analysis.scope", "kriya.workflow.file_integrity", False),
-    ("kriya.static_analysis.service", "kriya.workflow.terminal_commit", True),
     ("kriya.knowledge.staging", "kriya.workflow.skill_extraction", False),
     ("kriya.core.model_qualification", "kriya.workflow.file_integrity", True),
     ("kriya.analyzer.analyzer", "kriya.workflow.checkpoint", True),
@@ -181,18 +168,10 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     # the registry's validation surface, or the provider settings models moved into CONFIG).
     ("kriya.config.config", "kriya.static_analysis.registry"): ("P2", _P2 + " (SECURITY_AUTHORITY provider validation at schema construction; re-tagged in D3)"),  # direction CONFIG -> EXECUTION
     ("kriya.control.artifacts", "kriya.core.tomlcompat"): ("P1", _P1),  # non-public FOUNDATION module
-    ("kriya.control.commit_state", "kriya.workflow.edit_safety"): ("M1", _M1),  # direction STATE -> KERNEL
-    ("kriya.control.control_store", "kriya.workflow.edit_safety"): ("M1", _M1),  # direction STATE -> KERNEL
-    ("kriya.control.decisions", "kriya.workflow.edit_safety"): ("M1", _M1),  # direction STATE -> KERNEL
     ("kriya.control.launch", "kriya.control.launch_approval"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.control.launch_approval", "kriya.control.launch"): ("P2", _P2),  # direction AUTHORITY -> STATE
     ("kriya.control.launch_approval", "kriya.control.run_ownership"): ("P2", _P2),  # direction AUTHORITY -> STATE
-    ("kriya.control.launch_approval", "kriya.workflow.edit_safety"): ("M1", _M1),  # direction AUTHORITY -> KERNEL
-    ("kriya.control.persistence", "kriya.workflow.edit_safety"): ("M1", _M1),  # direction STATE -> KERNEL
-    ("kriya.control.persistence", "kriya.workflow.file_integrity"): ("M1", _M1),  # direction STATE -> KERNEL
     ("kriya.control.recovery", "kriya"): ("P1", _P1),  # non-public FOUNDATION module
-    ("kriya.control.recovery", "kriya.workflow.edit_safety"): ("M1", _M1),  # direction STATE -> KERNEL
-    ("kriya.control.retention", "kriya.workflow.edit_safety"): ("M1", _M1),  # direction STATE -> KERNEL
     ("kriya.control.run_coordinator", "kriya.core.logging_setup"): ("P2", _P2),  # non-public CONFIG module
     ("kriya.core", "kriya.core.registry"): ("P2", _P2),  # non-public TOOLBOX module
     ("kriya.core.execution_environment", "kriya.platform.host_properties"): ("P2", _P2),  # non-public PLATFORM module
@@ -246,7 +225,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.memory.vector", "kriya.core.db"): ("P2", _P2),  # non-public FOUNDATION module
     ("kriya.metrics.thresholds", "kriya.config.authority_approval"): ("P2", _P2),  # direction METRICS -> AUTHORITY
     ("kriya.plugins.plugin", "kriya.core.kernel"): ("P2", _P2),  # direction TOOLBOX -> KERNEL
-    ("kriya.policy.filesystem", "kriya.workflow.edit_safety"): ("M1", _M1),  # direction AUTHORITY -> KERNEL
     ("kriya.production_doctor", "kriya.agents.response_protocol"): ("N1", _N1),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.production_doctor", "kriya.analyzer.analyzer"): ("N1", _N1),  # direction ADAPTER-CLI -> RETRIEVAL
     ("kriya.production_doctor", "kriya.control.run_ownership"): ("N1", _N1),  # direction ADAPTER-CLI -> STATE
@@ -275,14 +253,11 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.production_doctor", "kriya.workflow.language_adapters"): ("N1", _N1),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.production_doctor", "kriya.workflow.semantic_region_authority"): ("N1", _N1),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.production_doctor", "kriya.workflow.worktree"): ("N1", _N1),  # direction ADAPTER-CLI -> KERNEL
+    ("kriya.repository.atomic_write", "kriya.policy.model"): ("P2", _P2 + " (moved count-neutral in M1 with _audit_write_file from workflow.edit_safety)"),  # non-public AUTHORITY module
     ("kriya.repl", "kriya"): ("P1", _P1),  # non-public FOUNDATION module
     ("kriya.routing", "kriya.memory.embedding"): ("O2", _O2),  # direction ADAPTER-CLI -> RETRIEVAL
     ("kriya.routing", "kriya.memory.vector"): ("O2", _O2),  # direction ADAPTER-CLI -> RETRIEVAL
-    ("kriya.static_analysis.operator_scan", "kriya.workflow.edit_safety"): ("M1", _M1),  # direction EXECUTION -> KERNEL
-    ("kriya.static_analysis.operator_scan", "kriya.workflow.file_integrity"): ("M1", _M1),  # direction EXECUTION -> KERNEL
-    ("kriya.static_analysis.scope", "kriya.workflow.file_integrity"): ("M1", _M1),  # direction EXECUTION -> KERNEL
     ("kriya.static_analysis.service", "kriya.core.state_paths"): ("P2", _P2),  # direction EXECUTION -> STATE
-    ("kriya.static_analysis.service", "kriya.workflow.terminal_commit"): ("M1", _M1),  # direction EXECUTION -> KERNEL
     ("kriya.static_analysis.waivers", "kriya.config.authority_approval"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.tools", "kriya.tools.tool"): ("P2", _P2),  # direction EXECUTION -> TOOLBOX
     ("kriya.tools.service", "kriya.mcp.invocation_approval"): ("P2", _P2),  # non-public AUTHORITY module
@@ -320,7 +295,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.workflow.authority_bundle", "kriya.workflow.obligations"): ("P2", _P2),  # direction AUTHORITY -> KERNEL
     ("kriya.workflow.authority_bundle", "kriya.workflow.requirements"): ("P2", _P2),  # direction AUTHORITY -> KERNEL
     ("kriya.workflow.authority_escalation", "kriya.workflow.context_source"): ("P2", _P2),  # direction AUTHORITY -> KERNEL
-    ("kriya.workflow.authority_escalation", "kriya.workflow.edit_safety"): ("M1", _M1),  # direction AUTHORITY -> KERNEL
     ("kriya.workflow.authority_escalation", "kriya.workflow.language_adapters"): ("P2", _P2),  # direction AUTHORITY -> KERNEL
     ("kriya.workflow.authority_request", "kriya.core.state_paths"): ("P2", _P2),  # direction AUTHORITY -> STATE
     ("kriya.workflow.authority_request", "kriya.workflow.contract_compilation"): ("P2", _P2),  # direction AUTHORITY -> KERNEL
@@ -355,7 +329,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.workflow.contract_relevance", "kriya.code_intel.delegation"): ("P2", _P2),  # non-public RETRIEVAL module
     ("kriya.workflow.contract_relevance", "kriya.code_intel.model"): ("P2", _P2),  # non-public RETRIEVAL module
     ("kriya.workflow.contract_relevance", "kriya.code_intel.parsing"): ("P2", _P2),  # non-public RETRIEVAL module
-    ("kriya.workflow.edit_safety", "kriya.policy.model"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.workflow.egress_authority", "kriya.tools.knowledge"): ("P2", _P2),  # non-public KNOWLEDGE module
     ("kriya.workflow.goal_facts", "kriya.code_intel.delegation"): ("P2", _P2),  # non-public RETRIEVAL module
     ("kriya.workflow.goal_facts", "kriya.code_intel.locate"): ("P2", _P2),  # non-public RETRIEVAL module

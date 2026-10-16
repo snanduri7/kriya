@@ -14,13 +14,15 @@ owner (``workflow/triage.py`` keeps ``EngineeringTriageService``, its moved
 vocabulary lives in ``policy/risk.py``). For such a module the moved names, and
 only those, must be top-level ``from <owner> import X as X`` lines, each the
 owner's object, never also defined locally; the source names its removal slice.
-P1 empties it together with ``FACADES``.
+P1 empties it together with ``FACADES``. A module whose moved names come from SEVERAL owner modules (M1:
+``workflow/edit_safety.py`` re-exports from ``repository.atomic_write`` and ``repository.commit``) maps to a tuple of
+``PartialFacade``, one per owner; each owner's import lines are policed against that owner's own name list.
 """
 from __future__ import annotations
 
 import ast
 import importlib
-from typing import Dict, List, Mapping, NamedTuple, Tuple
+from typing import Dict, List, Mapping, NamedTuple, Tuple, Union
 
 import pytest
 
@@ -54,7 +56,7 @@ class PartialFacade(NamedTuple):
     reason: str
 
 
-PARTIAL_FACADES: Dict[str, PartialFacade] = {
+PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
     "kriya/config/config.py": PartialFacade(
         "kriya.config.resolution",
         ("ConfigResolutionState", "PRODUCTION_FIXED_RUNTIME_GUARANTEES", "PRODUCTION_GENERATION_TIME_BUDGET_SECONDS", "REMOVED_LOGGING_FILE_MESSAGE",
@@ -95,7 +97,43 @@ PARTIAL_FACADES: Dict[str, PartialFacade] = {
         "kriya.policy.egress", ("is_local_url",), "P1",
         "C3: the local/private-address definition owned by AUTHORITY (policy.execution no longer imports the provider back); "
         "8 production modules (cli, kup.context_ops, production_doctor, core.model_runtime, core.model_qualification, memory.embedding, workflow.attempt, workflow.egress_authority) and the regression index use the old path"),
+    "kriya/workflow/edit_safety.py": (
+        PartialFacade(
+            "kriya.repository.atomic_write", ("_execution_policy", "atomic_write_file"), "P1",
+            "M1: the atomic write of one file owned by REPOSITORY; the audit policy instance stays reachable for the 4 "
+            "monkeypatches of its evaluate (test_edit_safety_policy_audit); the edit engine stays (GENERATION)"),
+        PartialFacade(
+            "kriya.repository.commit",
+            ("BatchCommitError", "BatchCommitResult", "CandidateMaterializationError", "CommitEvidence", "CommitState",
+             "FileRevisionConflict", "StagedFileWrite", "UncertainCommitError", "candidate_digest", "candidate_digest_of_entries",
+             "commit_evidence_dir", "commit_revision_grounded_batch", "commit_revision_grounded_file", "commit_state_for_transaction",
+             "content_revision", "find_uncertain_commit_evidence", "list_commit_evidence", "load_commit_evidence", "read_file_revision",
+             "settle_recovered_commit_evidence", "stage_file_prefix"), "P1",
+            "M1: the revision-grounded commit and its evidence owned by REPOSITORY; ~40 test files and 20 kernel modules import the "
+            "old path; the privates (_persist_commit_evidence, _stage_content, _atomic_write_bytes) are deliberately NOT re-exported so a "
+            "patch on the facade fails loudly instead of silently missing the mechanism (6 patch sites retargeted)"),
+    ),
+    "kriya/workflow/file_integrity.py": PartialFacade(
+        "kriya.repository.snapshot",
+        ("CRLF", "LF", "MIXED", "MIXED_NEWLINE_UNSUPPORTED", "NO_NEWLINE", "SOURCE_CHANGED_SINCE_AUTHORIZATION", "SYMLINK_TARGET_UNSUPPORTED",
+         "UNSUPPORTED_TEXT_ENCODING", "UTF8_BOM", "FileIntegrityError", "FileSnapshot", "_content_identity", "_stat_identity",
+         "display_text", "file_raw_digest", "load_snapshot", "newline_style", "raw_digest", "read_shown_text", "require_unchanged",
+         "untracked_repository_paths"), "P1",
+        "M1: snapshots and raw-byte revision identity owned by REPOSITORY; the edit engine (GENERATION) and VerificationTreeBinding "
+        "(AUTHORITY, which looks up the identities and untracked_repository_paths here) stay"),
+    "kriya/workflow/terminal_commit.py": PartialFacade(
+        "kriya.repository.commit", ("CandidateMaterializationError",), "P1",
+        "M1: the materialization error owned by repository.commit (static_analysis.service imports it there, which removes the "
+        "static_analysis.service <-> workflow.terminal_commit cycle); the terminal commit seam stays (kernel)"),
 }
+
+
+def partial_facade_entries() -> List[Tuple[str, PartialFacade]]:
+    """(path, facade) per owner: a path with several owners contributes one entry per owner."""
+    entries = []
+    for path, value in sorted(PARTIAL_FACADES.items()):
+        entries.extend((path, facade) for facade in ((value,) if isinstance(value, PartialFacade) else value))
+    return entries
 
 
 def partial_facade_problems(path: str, tree: ast.Module, source: str, facade: PartialFacade) -> List[str]:
@@ -201,9 +239,8 @@ def test_the_facade_check_detects_every_forbidden_form():
     assert pure_reexport_modules(planted) == ["good.py", "noslice.py", "other.py"]
 
 
-@pytest.mark.parametrize("path", sorted(PARTIAL_FACADES))
-def test_a_partial_facade_reexports_exactly_its_moved_names_from_the_owner(path):
-    facade = PARTIAL_FACADES[path]
+@pytest.mark.parametrize("path,facade", partial_facade_entries(), ids=[f"{p}<-{f.owner}" for p, f in partial_facade_entries()])
+def test_a_partial_facade_reexports_exactly_its_moved_names_from_the_owner(path, facade):
     source = (mm.REPO / path).read_text(encoding="utf-8")
     assert partial_facade_problems(path, mm.trees()[path], source, facade) == []
     assert facade.removal_slice in SLICES and facade.removal_slice not in DONE_SLICES and facade.reason
@@ -234,3 +271,23 @@ def test_the_partial_facade_check_detects_every_forbidden_form():
         "missing.py": ["missing.py: a is not re-exported exactly once"],
         "noslice.py": ["noslice.py: the source does not name removal slice P1"],
     }
+
+
+def test_the_partial_facade_check_polices_every_owner_of_a_multi_owner_facade():
+    owners = (PartialFacade("kriya.foundation.x", ("a",), "P1", "r"), PartialFacade("kriya.foundation.y", ("b",), "P1", "r"))
+    sources = {
+        "good.py": "# Removed in P1\nfrom kriya.foundation.x import a as a\nfrom kriya.foundation.y import b as b\n",
+        "wrong_owner.py": "# Removed in P1\nfrom kriya.foundation.x import a as a\nfrom kriya.foundation.y import b as b\n"
+                          "from kriya.foundation.y import a as a\n",
+        "second_missing.py": "# Removed in P1\nfrom kriya.foundation.x import a as a\n",
+    }
+    trees = mm.parse_sources(sources)
+    found = {name: [problem for facade in owners for problem in partial_facade_problems(name, trees[name], sources[name], facade)]
+             for name in sources}
+    assert found == {
+        "good.py": [],
+        "wrong_owner.py": ["wrong_owner.py: line 4: a is imported from the owner but not listed"],
+        "second_missing.py": ["second_missing.py: b is not re-exported exactly once"],
+    }
+    assert [facade.owner for _path, facade in partial_facade_entries() if _path == "kriya/workflow/edit_safety.py"] == [
+        "kriya.repository.atomic_write", "kriya.repository.commit"]

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from kriya.control.persistence import scan_run_records
-from kriya.workflow.edit_safety import find_uncertain_commit_evidence
+from kriya.repository.commit import find_uncertain_commit_evidence
 
 RECOVERY_COMMAND = "kriya runs recover"
 

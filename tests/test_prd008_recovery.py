@@ -28,7 +28,7 @@ import yaml
 from _fake_static_analysis import DISABLED_STATIC_ANALYSIS
 from click.testing import CliRunner
 
-import kriya.workflow.edit_safety as edit_safety_module
+import kriya.repository.commit as commit_module  # M1: the mechanism's own module (patch targets resolve there)
 from kriya.cli import main as cli_main
 from kriya.control.commit_state import UncertainWorkspaceStateError, assess_workspace_commit_state
 from kriya.control.persistence import load_run_record, run_record_path, scan_run_records
@@ -412,7 +412,7 @@ def _interrupted_commit(tmp_path, monkeypatch, *, rollback_fails=False):
                                expected_base_exists=exists, content_bytes=data, mode=0o644)
 
     if rollback_fails:
-        monkeypatch.setattr(edit_safety_module, "_atomic_write_bytes",
+        monkeypatch.setattr(commit_module, "_atomic_write_bytes",
                             lambda *_: (_ for _ in ()).throw(OSError("restore failed")))
     with pytest.raises(KeyboardInterrupt):
         with begin_mutating_run(workspace) as context:

@@ -519,5 +519,43 @@ def test_a_stale_base_never_reaches_the_target(tmp_path, stale):
     name = "preflight_stale_base" if stale == "preflight" else "batch_base_changed_during_commit"
     setup, body, fault = scenarios()[name]
     out = _scenario(tmp_path / "s", setup, body, fault)
-    assert out["error"]["class"] in ("FileRevisionConflict", "BatchCommitError")
     assert not any(c[0] == "replace" and c[2].endswith("ws/modified.txt") for c in out["calls"])
+    if stale == "preflight":
+        # refused by the whole-batch preflight itself: no evidence and no staged byte (the in-apply re-check must not
+        # be what catches it - that one runs only after IN_PROGRESS evidence and staging)
+        assert out["error"]["class"] == "FileRevisionConflict"
+        assert not any(c[0] == "mkstemp" for c in out["calls"])
+    else:
+        assert out["error"]["class"] == "BatchCommitError" and out["error"]["cause"][0] == "FileRevisionConflict"
+
+
+# ---------------------------------------------------------------- after M1: ownership and the legacy patch points
+
+def test_the_old_import_paths_are_the_repository_owners_objects():
+    from kriya.repository import atomic_write, commit, snapshot
+    from kriya.workflow import terminal_commit
+
+    assert es.commit_revision_grounded_batch is commit.commit_revision_grounded_batch
+    assert es.atomic_write_file is atomic_write.atomic_write_file and es._execution_policy is atomic_write._execution_policy
+    assert fi.load_snapshot is snapshot.load_snapshot and fi.FileIntegrityError is snapshot.FileIntegrityError
+    assert terminal_commit.CandidateMaterializationError is commit.CandidateMaterializationError is es.CandidateMaterializationError
+    # the privates are NOT on the facade: a patch aimed there fails loudly instead of silently missing the mechanism
+    assert not any(hasattr(es, name) for name in ("_persist_commit_evidence", "_stage_content", "_atomic_write_bytes"))
+    # the audit logger keeps its pre-move name (run logs carry %(name)s)
+    assert atomic_write.logger.name == "kriya.workflow.edit_safety"
+
+
+def test_the_legacy_os_patch_points_on_the_facade_still_reach_the_moved_mechanism(tmp_path):
+    """patch("kriya.workflow.edit_safety.os.replace") (7 sites) and edit_safety.tempfile.mkstemp patch the SHARED os /
+    tempfile module objects, so they bite inside kriya/repository/commit.py."""
+    from unittest.mock import patch
+
+    target = _write(tmp_path / "a.txt", b"old\n")
+    write = es.StagedFileWrite(str(target), "new\n", str(target), _rev(b"old\n"))
+    with patch("kriya.workflow.edit_safety.os.replace", side_effect=OSError("facade os patch")), \
+            pytest.raises(es.BatchCommitError, match="facade os patch"):
+        es.commit_revision_grounded_batch([write], None)
+    with patch("kriya.workflow.edit_safety.tempfile.mkstemp", side_effect=OSError("facade tempfile patch")), \
+            pytest.raises(es.BatchCommitError, match="facade tempfile patch"):
+        es.commit_revision_grounded_batch([write], None)
+    assert target.read_bytes() == b"old\n"

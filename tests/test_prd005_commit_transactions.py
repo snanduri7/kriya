@@ -227,7 +227,7 @@ def test_commit_evidence_contains_no_source_bytes(tmp_path):
 
 # --- PRD-005 reopening: faults at every boundary, byte/mode fidelity -------
 
-import kriya.workflow.edit_safety as edit_safety_module  # noqa: E402
+import kriya.repository.commit as commit_module  # M1: the mechanism's own module (patch targets resolve there)  # noqa: E402
 
 
 def _stage_files(root: Path):
@@ -244,7 +244,7 @@ def _source_snapshot(root: Path):
 def test_intent_persistence_failure_changes_nothing_and_leaves_no_trace(tmp_path):
     created, modified, deleted, writes = _mixed_batch(tmp_path)
     before = _source_snapshot(tmp_path)
-    with patch.object(edit_safety_module, "_persist_commit_evidence",
+    with patch.object(commit_module, "_persist_commit_evidence",
                       side_effect=OSError("control dir read-only")):
         with pytest.raises(BatchCommitError, match="intent could not be persisted"):
             commit_revision_grounded_batch(
@@ -258,7 +258,7 @@ def test_intent_persistence_failure_changes_nothing_and_leaves_no_trace(tmp_path
 def test_staging_failure_removes_every_staged_file_and_records_rolled_back(tmp_path):
     created, modified, deleted, writes = _mixed_batch(tmp_path)
     before = _source_snapshot(tmp_path)
-    real_stage = edit_safety_module._stage_content
+    real_stage = commit_module._stage_content
     calls = []
 
     def stage_then_fail(item, transaction_id, index):
@@ -267,7 +267,7 @@ def test_staging_failure_removes_every_staged_file_and_records_rolled_back(tmp_p
             raise OSError("disk full while staging")
         return real_stage(item, transaction_id, index)
 
-    with patch.object(edit_safety_module, "_stage_content", side_effect=stage_then_fail):
+    with patch.object(commit_module, "_stage_content", side_effect=stage_then_fail):
         with pytest.raises(BatchCommitError, match="staging failed before mutation"):
             commit_revision_grounded_batch(
                 writes, workspace_path=str(tmp_path), transaction_id="stage-fault",
@@ -305,7 +305,7 @@ def test_rollback_failure_is_uncertain_not_an_ordinary_failure(tmp_path):
         return os.remove(target)
 
     with patch("kriya.workflow.edit_safety.os.unlink", side_effect=unlink_fails_for_delete), \
-            patch.object(edit_safety_module, "_atomic_write_bytes",
+            patch.object(commit_module, "_atomic_write_bytes",
                          side_effect=OSError("cannot restore modified.txt")):
         with pytest.raises(UncertainCommitError, match="rollback also failed"):
             commit_revision_grounded_batch(
@@ -318,7 +318,7 @@ def test_rollback_failure_is_uncertain_not_an_ordinary_failure(tmp_path):
 
 def test_rolled_back_evidence_write_failure_is_uncertain(tmp_path):
     created, modified, deleted, writes = _mixed_batch(tmp_path)
-    real_persist = edit_safety_module._persist_commit_evidence
+    real_persist = commit_module._persist_commit_evidence
     real_replace = os.replace
 
     def persist_only_in_progress(workspace, evidence):
@@ -332,7 +332,7 @@ def test_rolled_back_evidence_write_failure_is_uncertain(tmp_path):
             raise OSError("fault")
         return real_replace(source, target)
 
-    with patch.object(edit_safety_module, "_persist_commit_evidence",
+    with patch.object(commit_module, "_persist_commit_evidence",
                       side_effect=persist_only_in_progress), \
             patch("kriya.workflow.edit_safety.os.replace", side_effect=fail_modified):
         with pytest.raises(UncertainCommitError, match="rolled-back evidence could not be persisted"):
@@ -360,7 +360,7 @@ def test_committed_bytes_equal_verified_bytes_and_new_file_mode_is_kept(tmp_path
     raw = b"caf\xe9 latin-1 \x00 bytes\r\n"
     writes = [
         StagedFileWrite(
-            str(crlf), "new\n", str(crlf), edit_safety_module.read_file_revision(str(crlf)),
+            str(crlf), "new\n", str(crlf), commit_module.read_file_revision(str(crlf)),
             expected_base_exists=True, content_bytes=b"new\r\n",
         ),
         StagedFileWrite(

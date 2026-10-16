@@ -62,7 +62,7 @@ from kriya.control.run_record import (
     RunRecord,
 )
 from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, path_identity, path_relation
-from kriya.workflow.edit_safety import (
+from kriya.repository.commit import (
     CommitEvidence,
     CommitState,
     candidate_digest_of_entries,

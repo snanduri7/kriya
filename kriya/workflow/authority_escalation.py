@@ -38,7 +38,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Optional, Tuple
 
-from kriya.workflow.edit_safety import content_revision
+from kriya.repository.commit import content_revision
 from kriya.workflow.language_adapters import Capability, CapabilityStatus, adapter_for
 
 GRANTED = "GRANTED"

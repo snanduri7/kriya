@@ -36,8 +36,8 @@ from kriya.control.control_store import write_control_file
 from kriya.control.run_record import RunRecord
 from kriya.control.state import ControlState
 from kriya.foundation.ids import CONTROL_ID_CHARS, is_control_id
-from kriya.workflow.edit_safety import content_revision, read_file_revision
-from kriya.workflow.file_integrity import raw_digest
+from kriya.repository.commit import content_revision, read_file_revision
+from kriya.repository.snapshot import raw_digest
 
 logger = logging.getLogger(__name__)
 

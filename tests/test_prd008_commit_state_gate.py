@@ -30,7 +30,7 @@ from _strict_doubles import strict_engine
 from click.testing import CliRunner
 
 import kriya.control.run_coordinator as run_coordinator_module
-import kriya.workflow.edit_safety as edit_safety_module
+import kriya.repository.commit as commit_module  # M1: the mechanism's own module (patch targets resolve there)
 from kriya.cli import main as cli_main
 from kriya.config.config import AppConfig
 from kriya.control.commit_state import (
@@ -363,7 +363,7 @@ def test_run_record_intent_and_in_progress_evidence_precede_the_first_workspace_
     candidate.mkdir()
     (workspace / "app.py").write_text("v0\n")
     (candidate / "app.py").write_text("v1\n")
-    real_stage = edit_safety_module._stage_content
+    real_stage = commit_module._stage_content
     observed = []
 
     def checking_stage(item, transaction_id, index):
@@ -383,7 +383,7 @@ def test_run_record_intent_and_in_progress_evidence_precede_the_first_workspace_
         writes = materialize_candidate(str(candidate), str(workspace), [
             CandidateFile("app.py", read_file_revision(str(workspace / "app.py"))),
         ])
-        with patch.object(edit_safety_module, "_stage_content", checking_stage):
+        with patch.object(commit_module, "_stage_content", checking_stage):
             outcome = commit_terminal_candidate(writes, workspace_path=str(workspace), verified_candidate=bind_candidate(writes, str(workspace)), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="ordered")
     assert outcome.committed
     assert observed == [(CommitState.IN_PROGRESS, True, RunLifecycle.COMMIT_ELIGIBLE, None, "v0\n")]

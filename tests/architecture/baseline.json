@@ -1,6 +1,6 @@
 {
- "files": 376,
- "edges": 1562,
+ "files": 380,
+ "edges": 1568,
  "top_level_sccs": [
   [
    "kriya.tools.containment",
@@ -19,7 +19,6 @@
   4,
   3,
   3,
-  2,
   2,
   2,
   2
@@ -62,10 +61,6 @@
   },
   {
    "kriya.code_intel": 2
-  },
-  {
-   "kriya.static_analysis": 1,
-   "kriya.workflow": 1
   },
   {
    "kriya.workflow": 2
@@ -190,10 +185,6 @@
   [
    "kriya.code_intel.config_parsing",
    "kriya.code_intel.parsing"
-  ],
-  [
-   "kriya.static_analysis.service",
-   "kriya.workflow.terminal_commit"
   ],
   [
    "kriya.workflow.example_oracle_java",

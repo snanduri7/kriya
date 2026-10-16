@@ -62,7 +62,7 @@ from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, fold
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
-from kriya.workflow.edit_safety import (
+from kriya.repository.commit import (
     StagedFileWrite,
     commit_revision_grounded_batch,
     commit_revision_grounded_file,

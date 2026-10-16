@@ -42,6 +42,9 @@ from kriya.control.run_record import (
     COMMIT_UNCERTAIN,
 )
 from kriya.policy.filesystem import is_trusted_control_path
+from kriya.repository.commit import (  # M1: owned by kriya/repository/commit.py, re-exported (PARTIAL_FACADES); Removed in P1
+    CandidateMaterializationError as CandidateMaterializationError,
+)
 from kriya.static_analysis.service import StaticAnalysisCommitGuard
 from kriya.workflow.edit_safety import (
     BatchCommitError,
@@ -53,9 +56,6 @@ from kriya.workflow.edit_safety import (
     candidate_digest,
     commit_revision_grounded_batch,
     commit_state_for_transaction,
-)
-from kriya.workflow.edit_safety import (
-    CandidateMaterializationError as CandidateMaterializationError,
 )
 from kriya.workflow.exception_masking import find_masking_against_workspace
 from kriya.workflow.file_integrity import display_text, file_raw_digest, raw_digest

@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Set, Tuple
 
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
+from kriya.repository.snapshot import raw_digest
 from kriya.static_analysis.coverage import language_of
 from kriya.static_analysis.model import (
     BASELINE_IDENTITY_MISMATCH,
@@ -36,7 +37,6 @@ from kriya.static_analysis.model import (
     Side,
     bytes_digest,
 )
-from kriya.workflow.file_integrity import raw_digest
 
 # Build descriptors marking a module root (provider-neutral; the markers
 # kriya/tools/validate.py's stack detection uses, plus common others).

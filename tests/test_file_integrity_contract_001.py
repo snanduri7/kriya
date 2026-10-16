@@ -908,7 +908,12 @@ _AUDITED_WRITE_SITES = {
 }
 # The writer modules themselves: their sites ARE the staged writer and the
 # sandbox manager (counted separately so a change there is still visible).
-_WRITER_MODULES = {"kriya/workflow/edit_safety.py", "kriya/workflow/worktree.py", "kriya/workflow/file_integrity.py"}
+# M1: the staged writer moved from kriya/workflow/edit_safety.py (18 sites, now 0: a facade) to
+# kriya/repository/atomic_write.py (8) + kriya/repository/commit.py (10); the writer set's total is unchanged (33).
+_WRITER_MODULES = {"kriya/repository/atomic_write.py", "kriya/repository/commit.py", "kriya/workflow/worktree.py",
+                   "kriya/workflow/file_integrity.py"}
+_WRITER_MODULE_SITES = {"kriya/repository/atomic_write.py": 8, "kriya/repository/commit.py": 10,
+                        "kriya/workflow/worktree.py": 13, "kriya/workflow/file_integrity.py": 2}
 
 
 def _write_site_counts():
@@ -929,6 +934,11 @@ def test_every_filesystem_write_site_is_audited():
     assert not unaudited, f"new filesystem write sites - classify them in the FILE-INTEGRITY audit: {unaudited}"
 
 
+def test_the_writer_modules_hold_exactly_their_counted_sites():
+    counts = _write_site_counts()
+    assert {rel: counts.get(rel, 0) for rel in _WRITER_MODULES} == _WRITER_MODULE_SITES
+
+
 def test_the_attempt_and_toolchain_never_write_files_directly():
     for rel in ("kriya/workflow/attempt.py", "kriya/workflow/toolchain.py", "kriya/workflow/file_resolution.py",
                 "kriya/workflow/self_correction.py", "kriya/agents/agent.py"):
@@ -937,13 +947,16 @@ def test_the_attempt_and_toolchain_never_write_files_directly():
 
 
 def test_no_lossy_decoding_in_mutation_or_revision_authority():
-    for rel in ("kriya/workflow/edit_safety.py", "kriya/workflow/terminal_commit.py",
-                "kriya/workflow/self_correction.py", "kriya/workflow/worktree.py", "kriya/agents/response_protocol.py"):
+    for rel in ("kriya/workflow/edit_safety.py", "kriya/repository/atomic_write.py", "kriya/repository/commit.py",
+                "kriya/workflow/terminal_commit.py", "kriya/workflow/self_correction.py", "kriya/workflow/worktree.py",
+                "kriya/agents/response_protocol.py"):
         assert 'errors="replace"' not in (ROOT / rel).read_text(), rel
-    tree = ast.parse((ROOT / "kriya/workflow/file_integrity.py").read_text())
-    lossy = [node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
-             and 'errors="replace"' in ast.get_source_segment((ROOT / "kriya/workflow/file_integrity.py").read_text(), node)]
-    assert lossy == ["display_text"]
+    # M1: display_text (the one lossy view) moved with the snapshot primitives to kriya/repository/snapshot.py
+    for rel, expected in (("kriya/repository/snapshot.py", ["display_text"]), ("kriya/workflow/file_integrity.py", [])):
+        source = (ROOT / rel).read_text()
+        lossy = [node.name for node in ast.walk(ast.parse(source)) if isinstance(node, ast.FunctionDef)
+                 and 'errors="replace"' in ast.get_source_segment(source, node)]
+        assert lossy == expected, rel
 
 
 def test_no_payload_sanitizer_or_substring_anchor_remains():

@@ -52,9 +52,10 @@ from kriya.control.commit_state import UncertainWorkspaceStateError
 from kriya.control.persistence import scan_run_records
 from kriya.control.recovery import recover_workspace
 from kriya.control.run_record import RunLifecycle
+from kriya.repository.commit import _persist_commit_evidence  # M1: private to the mechanism's own module
 from kriya.workflow import resume_fingerprints
 from kriya.workflow.checkpoint import save_checkpoint
-from kriya.workflow.edit_safety import _persist_commit_evidence, commit_evidence_dir, load_commit_evidence
+from kriya.workflow.edit_safety import commit_evidence_dir, load_commit_evidence
 from kriya.workflow.milestone_completion import (
     ACCEPTANCE_COVERAGE_INCOMPLETE,
     ACCEPTANCE_COVERAGE_UNAVAILABLE,
