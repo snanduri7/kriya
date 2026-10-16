@@ -34,7 +34,7 @@ SLICES = frozenset(
     + [f"D{i}" for i in range(1, 4)] + [f"E{i}" for i in range(1, 15)] + [f"F{i}" for i in range(1, 6)]
     + [f"G{i}" for i in range(1, 6)] + [f"H{i}" for i in range(1, 6)] + [f"I{i}" for i in range(1, 5)]
     + ["J1", "J2", "K1", "K2", "L1", "L2", "M1", "M2", "M3", "N1", "N2", "O1", "O2", "O3", "P1", "P2", "Q1", "Q2"])
-DONE_SLICES = frozenset({"A1", "A2", "A3", "B1", "B2", "B3"})
+DONE_SLICES = frozenset({"A1", "A2", "A3", "B1", "B2", "B3", "B4"})
 
 # CURRENT-DEPENDENCY-MAP.md §3, the back-edges into kriya/workflow that close
 # the big cycle (TRACED to the import line there; MEASURED here): (source,
@@ -79,8 +79,6 @@ _C3 = "approval helpers move to policy.approval / egress takes the client identi
 _M1 = "file write/commit mechanism moves to REPOSITORY"
 _D2 = "checkpoint/trace/history owned by STATE; kernel inputs passed as parameters"
 _D3 = "env/home/state-path resolution through config.environment / ConfigService"
-_B2_KUP = ("B2 moved the read use case into an APPLICATION service; until the KriyaClient boundary exists the KUP adapter calls the "
-           "service directly (B4: run_kup_operation dispatches through LocalKriyaClient; O1: every kup/*_ops.py maps over the client)")
 _B2_MOVED = "moved with the B2 use case from kup into APPLICATION (count-neutral); the target is not on its module's public surface"
 _B3 = "run/approval/review use case moves into an APPLICATION service"
 _B3_MOVED = "moved with the B3 use case from kup/cli into APPLICATION (count-neutral); the target is not on its module's public surface"
@@ -258,12 +256,8 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.knowledge.staging", "kriya.skills.skill"): ("P2", _P2),  # non-public SKILLS module
     ("kriya.knowledge.staging", "kriya.workflow.skill_extraction"): ("J1", _J1),  # direction KNOWLEDGE -> KERNEL
     ("kriya.kup.authority_ops", "kriya.config.authority_approval"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY
-    ("kriya.kup.catalog_ops", "kriya.application"): ("O1", _B2_KUP),  # direction ADAPTER-KUP -> APPLICATION (new in B2)
-    ("kriya.kup.cli_ops", "kriya.application"): ("B4", _B2_KUP),  # direction ADAPTER-KUP -> APPLICATION (new in B2)
     ("kriya.kup.cli_ops", "kriya.core.state_paths"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
-    ("kriya.kup.context_ops", "kriya.application"): ("O1", _B2_KUP),  # direction ADAPTER-KUP -> APPLICATION (new in B2)
     ("kriya.kup.context_ops", "kriya.core.llm"): ("O1", _O1),  # direction ADAPTER-KUP -> PROVIDER
-    ("kriya.kup.evidence_ops", "kriya.application"): ("O1", _B2_KUP),  # direction ADAPTER-KUP -> APPLICATION (new in B2)
     ("kriya.kup.execution", "kriya.config.authority"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY
     ("kriya.kup.execution", "kriya.control.launch"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.execution", "kriya.core.state_paths"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
@@ -272,7 +266,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.kup.serve", "kriya.config.authority"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY
     ("kriya.kup.store", "kriya.core.db"): ("O1", _O1),  # non-public FOUNDATION module
     ("kriya.kup.store", "kriya.core.state_paths"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
-    ("kriya.kup.workspace_ops", "kriya.application"): ("O1", _B2_KUP),  # direction ADAPTER-KUP -> APPLICATION (new in B2)
     ("kriya.mcp.containment_adapter", "kriya.mcp.capability"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.mcp.lifecycle", "kriya.tools.sandbox"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.mcp.mcp", "kriya.core.kernel"): ("P2", _P2),  # direction TOOLBOX -> KERNEL

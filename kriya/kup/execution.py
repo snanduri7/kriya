@@ -3,7 +3,7 @@
 Transport only (full modularization B3): argument validation, the envelope, and the two mechanisms the use case is handed - ``_load_in``
 (the folder's configuration resolved with the folder as the process working directory, under ``_CWD_LOCK``, which every KUP operation that
 enters a folder shares) and ``tool_visibility`` (looked up here at call time: the documented patch point). The use cases are
-``kriya.application.RunService.preflight`` / ``.status`` (handed in as ``service``; kriya/application/run.py); what follows describes them.
+``kriya.application.RunService.preflight`` / ``.status`` (``client.runs`` through the ``KriyaClient``; kriya/application/run.py); what follows describes them.
 The launched process itself (``kriya generate --launch-id``) re-resolves the same document through ``RunService.build_preflight`` with
 these two mechanisms.
 
@@ -24,7 +24,6 @@ import os
 import threading
 from typing import Any, Dict
 
-from kriya.context import RequestContext
 from kriya.control.launch import valid_launch_id
 from kriya.core.state_paths import resolve_state_directory
 from kriya.kup import policy
@@ -70,18 +69,18 @@ def _load_in(workspace: str):
             os.chdir(previous)
 
 
-def preflight(cfg, request: Dict[str, Any], request_id: str, service) -> Dict[str, Any]:
+def preflight(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     _requested, workspace = validated_workspace(request)
-    data = service.preflight(RequestContext.local(workspace, request_id=request_id), cfg, workspace, load_in=_load_in, tool_visibility=tool_visibility)
+    data = client.runs.preflight(client.context(workspace_root=workspace, request_id=request_id), cfg, workspace, load_in=_load_in, tool_visibility=tool_visibility)
     cockpit_state = data["state"]["cockpit_directory"]
     return envelope("execution.preflight", request_id, data=data, source=source_block(cockpit_state, trace_store_path(cfg), None), consistency=live_consistency())
 
 
-def launch_status(cfg, request: Dict[str, Any], request_id: str, service) -> Dict[str, Any]:
+def launch_status(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     launch_id = request.get("launch_id")
     if not valid_launch_id(launch_id):
         raise SnapshotError(policy.INVALID_REQUEST, "launch_id must have the shape YYYYMMDDTHHMMSS-xxxxxxxx")
     _requested, workspace = validated_workspace(request)
-    data = service.status(RequestContext.local(workspace, request_id=request_id), cfg, workspace, str(launch_id))
+    data = client.runs.status(client.context(workspace_root=workspace, request_id=request_id), cfg, workspace, str(launch_id))
     state_dir = resolve_state_directory(cfg)[0]
     return envelope("launch.status", request_id, data=data, source=source_block(state_dir, trace_store_path(cfg), None), consistency=live_consistency())

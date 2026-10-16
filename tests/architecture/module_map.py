@@ -141,7 +141,7 @@ MODULES: Dict[str, Module] = {
         layer=4),
     "APPLICATION": Module(
         owner_paths=("kriya/application/",),
-        public=("kriya.application", "kriya.application.services"),
+        public=("kriya.application", "kriya.application.services", "kriya.application.compose"),  # compose: the B4 composition entry
         layer=4),
     "CLIENT": Module(
         owner_paths=("kriya/client/",),

@@ -18,7 +18,6 @@ from __future__ import annotations
 import os
 from typing import Any, Callable, Dict, Optional
 
-from kriya.application import SkillCatalogService, ToolCatalogService
 from kriya.context import RequestContext
 from kriya.kup import policy
 from kriya.kup.execution import _CWD_LOCK, _load_in
@@ -41,14 +40,14 @@ def _base(ctx: RequestContext, workspace: str) -> Dict[str, Any]:
     return {"workspace": {"path": workspace, "name": os.path.basename(workspace.rstrip(os.sep)) or workspace, "identity": ctx.workspace.workspace_id}}
 
 
-def _run(operation: str, request: Dict[str, Any], request_id: str, needs_id: Optional[str],
+def _run(operation: str, request: Dict[str, Any], request_id: str, client, needs_id: Optional[str],
          answer: Callable[[RequestContext, Any, str, Optional[str]], Dict[str, Any]], empty: Dict[str, Any]) -> Dict[str, Any]:
     """Validate, resolve the folder's configuration, and call ``answer(ctx, cfg, workspace, identifier)`` (a catalog service) inside the folder;
     an unresolvable configuration is a typed ``available: false``."""
     identifier = _identifier(request, needs_id) if needs_id else None
     _requested, workspace = validated_workspace(request)
     _state, wcfg, authority, failure = _load_in(workspace)
-    ctx = RequestContext.local(workspace, request_id=request_id)
+    ctx = client.context(workspace_root=workspace, request_id=request_id)
     data = {**_base(ctx, workspace), "available": wcfg is not None, "unavailable_reason": failure, "authority_status": authority["status"]}
     if wcfg is None:
         data.update(empty)
@@ -63,25 +62,25 @@ def _run(operation: str, request: Dict[str, Any], request_id: str, needs_id: Opt
     return envelope(operation, request_id, data=data, source=None, consistency=live_consistency())
 
 
-def skills_list(_cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    return _run("skills.list", request, request_id, None, lambda ctx, wcfg, ws, _id: SkillCatalogService().list(ctx, wcfg, ws),
+def skills_list(_cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
+    return _run("skills.list", request, request_id, client, None, lambda ctx, wcfg, ws, _id: client.skills.list(ctx, wcfg, ws),
                 {"items": [], "total": 0, "truncated": False})
 
 
-def skills_describe(_cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    return _run("skills.describe", request, request_id, "skill_id", SkillCatalogService().describe, {"found": False, "skill": None})
+def skills_describe(_cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
+    return _run("skills.describe", request, request_id, client, "skill_id", client.skills.describe, {"found": False, "skill": None})
 
 
-def tools_list(_cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    return _run("tools.list", request, request_id, None, lambda ctx, wcfg, ws, _id: ToolCatalogService().list(ctx, wcfg, ws), {"items": [], "total": 0})
+def tools_list(_cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
+    return _run("tools.list", request, request_id, client, None, lambda ctx, wcfg, ws, _id: client.tools.list(ctx, wcfg, ws), {"items": [], "total": 0})
 
 
-def tools_describe(_cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    return _run("tools.describe", request, request_id, "tool_id", ToolCatalogService().describe, {"found": False, "tool": None})
+def tools_describe(_cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
+    return _run("tools.describe", request, request_id, client, "tool_id", client.tools.describe, {"found": False, "tool": None})
 
 
-def tools_approval_state(_cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    return _run("tools.approval_state", request, request_id, "tool_id", ToolCatalogService().approval_state,
+def tools_approval_state(_cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
+    return _run("tools.approval_state", request, request_id, client, "tool_id", client.tools.approval_state,
                 {"found": False, "tool_id": None, "approval": None})
 
 

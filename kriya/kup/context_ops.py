@@ -18,8 +18,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict
 
-from kriya.application import ModelService, safe_endpoint
-from kriya.context import RequestContext
+from kriya.client import safe_endpoint
 from kriya.core.llm import is_local_url
 from kriya.kup.execution import _CWD_LOCK, _load_in
 from kriya.kup.inspect import envelope, live_consistency
@@ -32,10 +31,10 @@ PROBE_MAX_BYTES = 1024 * 1024
 MAX_PROBED_MODELS_LISTED = 200
 
 
-def context(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+def context(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     _requested, workspace = validated_workspace(request)
     _state, wcfg, authority, failure = _load_in(workspace)
-    ctx = RequestContext.local(workspace, request_id=request_id)
+    ctx = client.context(workspace_root=workspace, request_id=request_id)
     data: Dict[str, Any] = {"workspace": {"path": workspace, "name": os.path.basename(workspace.rstrip(os.sep)) or workspace, "identity": ctx.workspace.workspace_id},
                             "available": wcfg is not None, "unavailable_reason": failure, "authority_status": authority["status"]}
     if wcfg is None:
@@ -45,10 +44,10 @@ def context(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
             previous = os.getcwd()
             os.chdir(workspace)
             try:
-                skills = ModelService().skills(ctx, wcfg, workspace)
+                skills = client.models.skills(ctx, wcfg, workspace)
             finally:
                 os.chdir(previous)
-        data.update(ModelService().context(ctx, wcfg, skills))
+        data.update(client.models.context(ctx, wcfg, skills))
     return envelope("execution.context", request_id, data=data, source=None, consistency=live_consistency())
 
 
@@ -85,14 +84,14 @@ def _probe(endpoint_url: str, api_key: str, egress_policy: str) -> Dict[str, Any
         return {"endpoint": safe, "state": "unreadable", "reason": f"{type(error).__name__}", "models": []}
 
 
-def model_probe(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+def model_probe(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     _requested, workspace = validated_workspace(request)
     _state, wcfg, authority, failure = _load_in(workspace)
     if wcfg is None:
         return envelope("execution.model_probe", request_id, data={"available": False, "unavailable_reason": failure, "authority_status": authority["status"], "endpoints": [], "roles": []},
                         source=None, consistency=live_consistency())
     # _probe, PROBE_DEADLINE_SECONDS and PROBE_MAX_ENDPOINTS are read here, at call time (the transport's bounds; tests patch them on this module)
-    data = ModelService().probe(RequestContext.local(workspace, request_id=request_id), wcfg, probe=_probe, deadline_seconds=PROBE_DEADLINE_SECONDS,
-                                max_endpoints=PROBE_MAX_ENDPOINTS)
+    data = client.models.probe(client.context(workspace_root=workspace, request_id=request_id), wcfg, probe=_probe, deadline_seconds=PROBE_DEADLINE_SECONDS,
+                               max_endpoints=PROBE_MAX_ENDPOINTS)
     data["authority_status"] = authority["status"]
     return envelope("execution.model_probe", request_id, data=data, source=None, consistency=live_consistency())

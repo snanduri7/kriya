@@ -1,7 +1,7 @@
 """KUP workspace operations (GUI M5): ``workspace.describe`` and the admission rule for a ``workspace`` argument.
 
 Transport only (full modularization B2): the folder argument is validated here (``validated_workspace``: the one admission rule every
-KUP operation that opens a folder applies) and the answer is ``kriya.application.ProjectService.describe`` wrapped in the envelope. The
+KUP operation that opens a folder applies) and the answer is ``client.projects.describe`` (``kriya.application.ProjectService``, through the ``KriyaClient``) wrapped in the envelope. The
 workspace scope of ``history.list`` is ``kriya.application.HistoryService.list_in_workspace``.
 """
 from __future__ import annotations
@@ -9,8 +9,6 @@ from __future__ import annotations
 import os
 from typing import Any, Dict
 
-from kriya.application import ProjectService
-from kriya.context import RequestContext
 from kriya.context.workspace_identity import canonical_workspace
 from kriya.kup import policy
 from kriya.kup.inspect import envelope, live_consistency, source_block
@@ -36,8 +34,8 @@ def validated_workspace(request: Dict[str, Any]) -> tuple:
     return requested, canonical_workspace(requested)
 
 
-def describe(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+def describe(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     requested, workspace = validated_workspace(request)
-    data = ProjectService().describe(RequestContext.local(workspace, request_id=request_id), cfg, requested, workspace)
+    data = client.projects.describe(client.context(workspace_root=workspace, request_id=request_id), cfg, requested, workspace)
     block = source_block(data["state"]["directory"], trace_store_path(cfg), None)
     return envelope("workspace.describe", request_id, data=data, source=block, consistency=live_consistency())

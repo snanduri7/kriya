@@ -252,7 +252,8 @@ MODULE_TIER_FILES = {
     "application": frozenset({
         "test_application_services.py", "test_application_write_services.py", "test_kup_catalog.py", "test_kup_change_review.py",
         "test_kup_config_approval.py", "test_kup_execution.py", "test_kup_project_context.py", "test_kup_project_init.py",
-        "test_kup_runtime_command_review.py", "test_kup_workspace.py", "test_launch_approval.py", "test_run_service.py"
+        "test_kup_runtime_command_review.py", "test_kup_workspace.py", "test_launch_approval.py", "test_run_service.py",
+        "contracts/test_kriya_client_contract.py"
     }),
     "context": frozenset({
         "test_backend_readiness_004_platform_paths.py", "test_linux_oci_workspace_identity.py",
@@ -437,6 +438,8 @@ def _module_markers(path):
     if directory == _TESTS_DIR:
         return _MODULE_MARKERS_BY_FILE.get(name, [])
     parent, sub = os.path.split(directory)
+    if parent == _TESTS_DIR and sub == "contracts":  # one shared suite per port: each file belongs to its port's module tier
+        return _MODULE_MARKERS_BY_FILE.get(f"contracts/{name}", [])
     return [MODULE_TIER_DIRECTORIES[sub]] if parent == _TESTS_DIR and sub in MODULE_TIER_DIRECTORIES else []
 
 

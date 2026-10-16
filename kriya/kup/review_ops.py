@@ -1,8 +1,8 @@
 """KUP ``change_approval.review``: the EXACT proposed change a review asks the person to approve (PRODUCT-UX-COMPLETION).
 
 Transport only (full modularization B3): the launch and review identities are validated and the folder admitted here, and the answer is the
-envelope. The use case (what is served and the three proofs below) is ``kriya.application.ReviewService.change_review`` (handed in as
-``service``; kriya/application/review.py, which also owns the diff rendering and ``MAX_LINES_TOTAL``).
+envelope. The use case (what is served and the three proofs below) is ``kriya.application.ReviewService.change_review`` (``client.reviews``
+through the ``KriyaClient``; kriya/application/review.py, which also owns the diff rendering and ``MAX_LINES_TOTAL``).
 
 Invariant this exists for: Kriya never asks a human to approve a source mutation without making that exact mutation reviewable.
 
@@ -23,7 +23,6 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Tuple
 
-from kriya.context import RequestContext
 from kriya.control.launch import valid_launch_id
 from kriya.kup import policy
 from kriya.kup.inspect import envelope, live_consistency
@@ -44,7 +43,7 @@ def validated_review(request: Dict[str, Any]) -> Tuple[str, str, str]:
     return launch_id, review_id, workspace
 
 
-def review(cfg: Any, request: Dict[str, Any], request_id: str, service) -> Dict[str, Any]:  # noqa: ARG001 - the operation table passes the configuration to every handler
+def review(cfg: Any, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:  # noqa: ARG001 - the operation table passes the configuration to every handler
     launch_id, review_id, workspace = validated_review(request)
-    data = service.change_review(RequestContext.local(workspace, request_id=request_id), workspace, launch_id, review_id)
+    data = client.reviews.change_review(client.context(workspace_root=workspace, request_id=request_id), workspace, launch_id, review_id)
     return envelope("change_approval.review", request_id, data=data, source=None, consistency=live_consistency())

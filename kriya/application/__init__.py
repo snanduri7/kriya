@@ -1,7 +1,7 @@
 """APPLICATION (full modularization, W2; MODULE-CONTRACTS §15): the use-case services the client boundary calls.
 
 Built ONCE from the existing operation bodies (B2: the read side extracted from the KUP operations; B3: the write/run side; B4:
-``application.compose()`` and ``LocalKriyaClient``). A service orchestrates domain modules and owns no transport and no mechanism:
+``application.compose()`` and ``LocalKriyaClient``, kriya/client/). A service orchestrates domain modules and owns no transport and no mechanism:
 every method takes the ``RequestContext`` and the resolved configuration first, returns the data the adapter serializes, and refuses
 with ``ApplicationRefusal(reason_code)`` (kriya/application/services.py). APPLICATION reads no environment, home directory or working
 directory and opens no database or network connection (tests/architecture/test_direct_access_owners.py).
@@ -39,7 +39,15 @@ _EXPORTS = {
     "ApprovalService": "kriya.application.approval",
     "ReviewDecisionRequest": "kriya.application.approval",
     "ApprovalRefused": "kriya.application.approval",
+    "LoadIn": "kriya.application.run",
+    "ToolVisibility": "kriya.application.run",
+    "ProbeEndpoint": "kriya.application.model",
+    "EvidenceAnswer": "kriya.application.evidence",
+    "EvidenceLocation": "kriya.application.evidence",
+    "RecordsPage": "kriya.application.evidence",
 }
+# ``kriya.application.compose`` (the composition: ``compose()``, ``ApplicationServices``) is imported as a module, never through this table:
+# importing a submodule binds its name on the package, so a lazy ``compose`` export here would be shadowed by the module itself.
 
 __all__ = sorted(_EXPORTS)
 

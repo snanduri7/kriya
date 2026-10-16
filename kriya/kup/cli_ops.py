@@ -5,8 +5,10 @@ and print ``encode_response(run_kup_operation(...))``. Nothing here bootstraps l
 creates a directory (except acquisition inside the snapshot directory), copies legacy data, or constructs a
 kernel, plugin or model; ``sys.dont_write_bytecode`` is set by the CLI before this module is imported.
 
-Transport only (full modularization B2): request dispatch, argument validation, the envelope, and the 1:1 mapping of an application
-service's typed refusal (``ApplicationRefusal``) onto the KUP error vocabulary. The read use cases are ``kriya.application`` services
+Transport only (full modularization B2-B4): request dispatch, argument validation, the envelope, and the 1:1 mapping of an application
+service's typed refusal (``ApplicationRefusal``) onto the KUP error vocabulary. Since B4 every use case is reached through the
+``KriyaClient`` (``LocalKriyaClient``, kriya/client/): ``client.<service>.<op>(client.context(...), ...)``; no KUP module imports
+``kriya.application``. The read use cases are ``kriya.application`` services
 (history, project status, capabilities); snapshot acquisition, listing, verification and pruning stay here until D2 moves the snapshot
 store to ``control.history``. The write/run use cases (B3: configuration approval, project create/initialize, change and runtime-command
 reviews, preflight and launch status) are services too; this module hands each operation handler its service.
@@ -17,8 +19,7 @@ import os
 import time
 from typing import Any, Dict, Optional
 
-from kriya.application import ApplicationRefusal  # the services themselves are imported where used (lazy, as before B2)
-from kriya.context import RequestContext
+from kriya.client import ApplicationRefusal  # the adapter sees the application only through the client boundary (B4)
 from kriya.core.state_paths import StateDirectoryError
 from kriya.kup import evidence_ops, policy
 from kriya.kup.inspect import (
@@ -45,16 +46,20 @@ from kriya.kup.store import (
 )
 
 
-def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli") -> Dict[str, Any]:
+def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli", client=None) -> Dict[str, Any]:
+    """One KUP operation: the request is validated and translated into ONE call of the ``KriyaClient`` (``client.<service>.<op>(ctx, ...)``)
+    and its answer, or its typed refusal, into the envelope. ``client`` defaults to a ``LocalKriyaClient`` over a fresh composition, built
+    for this request (``kup-stdio`` therefore gets one per request, exactly like the configuration)."""
+    from kriya.client import local_client
+
+    client = local_client() if client is None else client
     operation = str(request.get("operation", ""))
     try:
         if operation == "capabilities":
-            from kriya.application import HealthService
-
-            health = HealthService().capabilities(RequestContext.local(None, request_id=request_id), cfg)
+            health = client.health.capabilities(client.context(workspace_root=None, request_id=request_id), cfg)
             return envelope(operation, request_id, data=capabilities(health), source=_source(cfg), consistency=not_applicable_consistency())
         if operation == "snapshot.acquire":
-            return _acquire(cfg, request, request_id)
+            return _acquire(cfg, request, request_id, client)
         if operation == "snapshot.list":
             return _list_snapshots(cfg, request, request_id)
         if operation == "snapshot.prune":
@@ -62,49 +67,43 @@ def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli") -> 
         if operation == "snapshot.verify":
             return _verify(cfg, request, request_id)
         if operation in ("history.list", "history.detail", "history.prompt"):
-            return _history(cfg, operation, request, request_id)
+            return _history(cfg, operation, request, request_id, client)
         if operation == "workspace.status":
-            return _workspace_status(request, request_id)
+            return _workspace_status(request, request_id, client)
         if operation == "workspace.describe":
-            return _workspace_describe(cfg, request, request_id)
+            return _workspace_describe(cfg, request, request_id, client)
         if operation in ("execution.preflight", "launch.status"):
-            return _execution(cfg, operation, request, request_id)
+            return _execution(cfg, operation, request, request_id, client)
         if operation in ("configuration.approval_status", "configuration.approve"):
-            from kriya.application import ConfigurationService
             from kriya.kup import authority_ops
 
-            handler = authority_ops.status if operation == "configuration.approval_status" else authority_ops.approve
-            return handler(cfg, request, request_id, ConfigurationService())
+            return (authority_ops.status if operation == "configuration.approval_status" else authority_ops.approve)(cfg, request, request_id, client)
         if operation == "project.initialize":
-            from kriya.application import ProjectService
             from kriya.kup import project_init_ops
 
-            return project_init_ops.initialize(cfg, request, request_id, ProjectService())
+            return project_init_ops.initialize(cfg, request, request_id, client)
         if operation == "change_approval.review":
-            from kriya.application import ReviewService
             from kriya.kup import review_ops
 
-            return review_ops.review(cfg, request, request_id, ReviewService())
+            return review_ops.review(cfg, request, request_id, client)
         if operation == "runtime_command.review":
-            from kriya.application import ReviewService
             from kriya.kup import runtime_command_ops
 
-            return runtime_command_ops.review(cfg, request, request_id, ReviewService())
+            return runtime_command_ops.review(cfg, request, request_id, client)
         if operation == "workspace.create":
-            from kriya.application import ProjectService
             from kriya.kup import project_ops
 
-            return project_ops.create(cfg, request, request_id, ProjectService())
+            return project_ops.create(cfg, request, request_id, client)
         if operation in ("execution.context", "execution.model_probe"):
             from kriya.kup import context_ops
 
-            return (context_ops.context if operation == "execution.context" else context_ops.model_probe)(cfg, request, request_id)
+            return (context_ops.context if operation == "execution.context" else context_ops.model_probe)(cfg, request, request_id, client)
         if operation in ("skills.list", "skills.describe", "tools.list", "tools.describe", "tools.approval_state"):
             from kriya.kup import catalog_ops
 
-            return catalog_ops.HANDLERS[operation](cfg, request, request_id)
+            return catalog_ops.HANDLERS[operation](cfg, request, request_id, client)
         if operation in ("evidence.manifest", "evidence.verify", "evidence.records", "evidence.change_content", "evidence.call_content"):
-            return _evidence(cfg, operation, request, request_id)
+            return _evidence(cfg, operation, request, request_id, client)
         return error_envelope(operation or "unknown", request_id, policy.INVALID_REQUEST, f"unknown operation {operation!r}")
     except SnapshotError as error:
         return from_snapshot_error(operation, request_id, error)
@@ -112,29 +111,28 @@ def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli") -> 
         return error_envelope(operation, request_id, refusal.reason_code, refusal.message, None, **refusal.extra)
 
 
-def _evidence(cfg, operation: str, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+def _evidence(cfg, operation: str, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     handler = {"evidence.manifest": evidence_ops.manifest, "evidence.verify": evidence_ops.verify, "evidence.records": evidence_ops.records, "evidence.change_content": evidence_ops.change_content, "evidence.call_content": evidence_ops.call_content}[operation]
     try:
-        return handler(cfg, request, request_id)
+        return handler(cfg, request, request_id, client)
     except StateDirectoryError as error:  # the configured state directory is unusable: a configuration failure, typed
         return error_envelope(operation, request_id, policy.CONFIG_LOAD_FAILED, str(error))
 
 
-def _execution(cfg, operation: str, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    from kriya.application import RunService
+def _execution(cfg, operation: str, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     from kriya.kup import execution
 
     try:
-        return (execution.preflight if operation == "execution.preflight" else execution.launch_status)(cfg, request, request_id, RunService())
+        return (execution.preflight if operation == "execution.preflight" else execution.launch_status)(cfg, request, request_id, client)
     except StateDirectoryError as error:
         return error_envelope(operation, request_id, policy.CONFIG_LOAD_FAILED, str(error))
 
 
-def _workspace_describe(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+def _workspace_describe(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     from kriya.kup import workspace_ops
 
     try:
-        return workspace_ops.describe(cfg, request, request_id)
+        return workspace_ops.describe(cfg, request, request_id, client)
     except StateDirectoryError as error:  # the configured state directory is unusable: a configuration failure, typed
         return error_envelope("workspace.describe", request_id, policy.CONFIG_LOAD_FAILED, str(error))
 
@@ -144,14 +142,12 @@ def _source(cfg, snapshot=None) -> Dict[str, Any]:
     return source_block(state_dir, trace_store_path(cfg), snapshot)
 
 
-def _history(cfg, operation: str, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+def _history(cfg, operation: str, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     snapshot_id = request.get("snapshot_id")
     if not snapshot_id:
         raise SnapshotError(policy.INVALID_REQUEST, "snapshot_id is required: history is read from a published snapshot only (acquire one, or choose one from snapshot.list)")
     snap = require_snapshot(snapshot_directory(cfg), str(snapshot_id))
-    from kriya.application import HistoryService
-
-    trace, ctx, service = SnapshotTrace(snap), RequestContext.local(None, request_id=request_id), HistoryService()
+    trace, ctx, service = SnapshotTrace(snap), client.context(workspace_root=None, request_id=request_id), client.history
     if operation == "history.list":
         if request.get("workspace"):  # GUI M5: only the runs whose evidence manifest records this workspace
             workspace, limit = str(request["workspace"]), request.get("limit")
@@ -170,16 +166,14 @@ def _history(cfg, operation: str, request: Dict[str, Any], request_id: str) -> D
     return envelope(operation, request_id, data=data, source=_source(cfg, snap), consistency=snapshot_consistency(snap, trace_store_path(cfg)))
 
 
-def _acquire(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+def _acquire(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     from kriya.kup.acquire import acquire_snapshot  # the only write-capable module; imported only here
 
     workspace: Optional[str] = request.get("workspace")
     run_active_check = None
     if workspace:
         def run_active_check() -> Optional[str]:
-            from kriya.application import ProjectService
-
-            return ProjectService().active_run(RequestContext.local(None, request_id=request_id), workspace)  # read-only: never creates, locks or writes
+            return client.projects.active_run(client.context(workspace_root=None, request_id=request_id), workspace)  # read-only: never creates, locks or writes
     result = acquire_snapshot(trace_store_path(cfg), snapshot_directory(cfg), run_active_check=run_active_check)
     snap = result["snapshot"]
     data = {**snapshot_summary(snap, stat_metadata(trace_store_path(cfg))), "orphans_removed": result["orphans_removed"], "pruned": result["pruned"],
@@ -230,12 +224,10 @@ def _prune(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
     return envelope("snapshot.prune", request_id, data=result, source=_source(cfg), consistency=live_consistency())
 
 
-def _workspace_status(request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+def _workspace_status(request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     workspace = request.get("workspace")
     if not isinstance(workspace, str) or not os.path.isabs(workspace):
         raise SnapshotError(policy.INVALID_REQUEST, "workspace must be an absolute path")
-    from kriya.application import ProjectService
-
-    data = ProjectService().status(RequestContext.local(None, request_id=request_id), workspace)
+    data = client.projects.status(client.context(workspace_root=None, request_id=request_id), workspace)
     # No configuration is loaded on this path (kriya runs skips load_config by design), so source is null (P-24).
     return envelope("workspace.status", request_id, data=data, source=None, consistency=live_consistency())

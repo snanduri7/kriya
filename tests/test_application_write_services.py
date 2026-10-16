@@ -4,7 +4,8 @@ The goldens in ``tests/golden/kup/application_write/`` were WRITTEN FROM THE PRE
 of them delegated to ``kriya.application``) and are compared byte for byte after normalization, exactly like the B2 read side
 (tests/test_application_services.py): every operation the B3 services now answer must produce exactly the envelope it produced before,
 on success and on every refusal path exercised. Normalization replaces only values that differ between two runs of the SAME code
-(temporary paths, the identities derived from them, wall-clock times, generated review ids and the digests that cover them).
+(temporary paths, the identities derived from them, wall-clock times, generated review ids, and the configuration review fingerprint and
+approval digest, which are salted per process / per approval by design: kriya/config/authority_approval.py).
 Regenerate (only from a commit whose envelopes are known good) with ``KRIYA_WRITE_KUP_GOLDEN=1``.
 """
 from __future__ import annotations
@@ -100,7 +101,7 @@ def scenario(tmp_path, monkeypatch):
     state = {"ws": str(ws), "tmp": str(tmp_path), "wsid": workspace_identity(canonical),
             "review": review, "runtime_review": runtime_review,
             "guarded_wsid": workspace_identity(str(guarded)), "refused_wsid": workspace_identity(str(refused)), "fresh_wsid": workspace_identity(str(tmp_path / "parent" / "new-project"))}
-    state["fingerprint"] = _fingerprint(state)  # bound to the folder's path: a per-run value, replaced by a token
+    state["fingerprint"] = _fingerprint(state)  # salted per PROCESS by design (authority_approval._REVIEW_FINGERPRINT_SALT): replaced by a token
     return state
 
 
@@ -167,7 +168,7 @@ def answer(request: Dict[str, Any], s: Dict[str, Any]) -> str:
         request = {**request, "fingerprint": _fingerprint(s)}
     encoded = encode_response(run_kup_operation(AppConfig(), request, request_id="golden"))
     artifact = aa.load_approval_artifact(aa.default_local_approval_path(canonical_workspace(os.path.join(s["tmp"], "guarded"))))
-    if artifact is not None:  # the approval digest covers the folder's path: replaced by a token once the approval exists
+    if artifact is not None:  # the approval digest covers the artifact's own random salt: replaced by a token once the approval exists
         s["approval"] = artifact.set_digest[:16]
     return json.dumps(normalize(json.loads(encoded), s), indent=1, sort_keys=True, ensure_ascii=False) + "\n"
 

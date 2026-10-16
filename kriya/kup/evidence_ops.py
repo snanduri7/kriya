@@ -15,8 +15,7 @@ import json
 import re
 from typing import Any, Dict, Optional, Tuple
 
-from kriya.application import RECORD_KINDS, EvidenceService
-from kriya.context import RequestContext
+from kriya.client import RECORD_KINDS
 from kriya.kup import policy
 from kriya.kup.inspect import (
     CURSOR_RE,
@@ -30,12 +29,12 @@ from kriya.kup.inspect import (
 from kriya.kup.store import SnapshotError, require_snapshot, snapshot_directory, trace_store_path
 
 
-def _ctx(request_id: str) -> RequestContext:
-    return RequestContext.local(None, request_id=request_id)
+def _ctx(client, request_id: str):
+    return client.context(workspace_root=None, request_id=request_id)
 
 
-def _source(cfg, request_id: str, snapshot=None) -> Dict[str, Any]:
-    location = EvidenceService().location(_ctx(request_id), cfg)
+def _source(cfg, client, request_id: str, snapshot=None) -> Dict[str, Any]:
+    location = client.evidence.location(_ctx(client, request_id), cfg)
     block = source_block(location.state_directory, trace_store_path(cfg), snapshot)
     block["evidence_directory"] = location.evidence_directory
     return block
@@ -47,14 +46,9 @@ def _consistency(answer_verified: bool, head_digest: Optional[str]) -> Dict[str,
     return live_consistency()
 
 
-def store_summary(cfg, run_id: str) -> Dict[str, Any]:
-    """{state: absent|open|sealed|unreadable, line_count, sealed} of a run's store, for ``launch.status`` (EvidenceService.store_summary)."""
-    return EvidenceService().store_summary(_ctx("launch.status"), cfg, run_id)
-
-
 # ------------------------------------------------------------------ evidence.manifest
 
-def manifest(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+def manifest(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     """Store metadata for an evidence run id, or - with ``from_trace`` - for the store a TRACE row recorded (EvidenceService.manifest)."""
     snapshot = require_snapshot(snapshot_directory(cfg), str(request["snapshot_id"])) if request.get("snapshot_id") else None
     from_trace = bool(request.get("from_trace"))
@@ -62,17 +56,17 @@ def manifest(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
     validate_run_id(asked)
     if from_trace and snapshot is None:
         raise SnapshotError(policy.INVALID_REQUEST, "from_trace needs the snapshot_id the trace row is read from")
-    data = EvidenceService().manifest(_ctx(request_id), cfg, asked, from_trace=from_trace,
-                                      trace=SnapshotTrace(snapshot) if snapshot is not None else None)
-    return envelope("evidence.manifest", request_id, data=data, source=_source(cfg, request_id, snapshot), consistency=live_consistency())
+    data = client.evidence.manifest(_ctx(client, request_id), cfg, asked, from_trace=from_trace,
+                                    trace=SnapshotTrace(snapshot) if snapshot is not None else None)
+    return envelope("evidence.manifest", request_id, data=data, source=_source(cfg, client, request_id, snapshot), consistency=live_consistency())
 
 
 # ------------------------------------------------------------------ evidence.verify
 
-def verify(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    answer = EvidenceService().verify(_ctx(request_id), cfg, request.get("run_id"))
+def verify(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
+    answer = client.evidence.verify(_ctx(client, request_id), cfg, request.get("run_id"))
     data = {**answer.data, "verified_at": utc_now()}
-    return envelope("evidence.verify", request_id, data=data, source=_source(cfg, request_id), consistency=_consistency(answer.verified, data["head_digest"]))
+    return envelope("evidence.verify", request_id, data=data, source=_source(cfg, client, request_id), consistency=_consistency(answer.verified, data["head_digest"]))
 
 
 # ------------------------------------------------------------------ evidence.records
@@ -139,7 +133,7 @@ def _decode_cursor(cursor: Any, run_id: str, fingerprint: str) -> Tuple[str, int
     return head, seq
 
 
-def records(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+def records(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     run_id = request.get("run_id")
     validate_run_id(run_id)
     limit = _int_param(request, "limit", 1, policy.EVIDENCE_PAGE_MAX) or policy.EVIDENCE_PAGE_DEFAULT
@@ -147,12 +141,12 @@ def records(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
     fingerprint = _fingerprint(filters)
     cursor = request.get("cursor")
     cursor_head, after_seq = _decode_cursor(cursor, run_id, fingerprint) if cursor is not None else (None, 0)
-    page = EvidenceService().records(_ctx(request_id), cfg, run_id, filters=filters, limit=limit, cursor_head=cursor_head, after_seq=after_seq,
-                                     max_page_bytes=policy.EVIDENCE_PAGE_MAX_BYTES)
+    page = client.evidence.records(_ctx(client, request_id), cfg, run_id, filters=filters, limit=limit, cursor_head=cursor_head, after_seq=after_seq,
+                                   max_page_bytes=policy.EVIDENCE_PAGE_MAX_BYTES)
     next_cursor = _encode_cursor(run_id, page.head_digest, page.records[-1]["seq"], fingerprint) if page.records and page.more else None
     data = {"run_id": run_id, "head_digest": page.head_digest, "records": page.records, "next_cursor": next_cursor, "filters_applied": filters,
             "truncated": page.truncated, "truncated_tail": page.truncated_tail}
-    return envelope("evidence.records", request_id, data=data, source=_source(cfg, request_id), consistency=_consistency(page.verified, page.head_digest))
+    return envelope("evidence.records", request_id, data=data, source=_source(cfg, client, request_id), consistency=_consistency(page.verified, page.head_digest))
 
 
 # ------------------------------------------------------------------ evidence.change_content
@@ -160,17 +154,17 @@ def records(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
 _PART_RE = re.compile(r"^[a-z_]{1,32}$")
 
 
-def change_content(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+def change_content(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     """ONE part of ONE recorded candidate change (class candidate_content), when Kriya authorizes content."""
-    return _serve_part(cfg, request, request_id, operation="evidence.change_content", record_kind="candidate.change", served_class=policy.CONTENT_CLASS_CANDIDATE)
+    return _serve_part(cfg, request, request_id, client, operation="evidence.change_content", record_kind="candidate.change", served_class=policy.CONTENT_CLASS_CANDIDATE)
 
 
-def call_content(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+def call_content(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     """ONE part (messages, tools, wire body) of ONE recorded model request (class model_input), when Kriya authorizes content."""
-    return _serve_part(cfg, request, request_id, operation="evidence.call_content", record_kind="model.request", served_class=policy.CONTENT_CLASS_MODEL_INPUT)
+    return _serve_part(cfg, request, request_id, client, operation="evidence.call_content", record_kind="model.request", served_class=policy.CONTENT_CLASS_MODEL_INPUT)
 
 
-def _serve_part(cfg, request: Dict[str, Any], request_id: str, *, operation: str, record_kind: str, served_class: str) -> Dict[str, Any]:
+def _serve_part(cfg, request: Dict[str, Any], request_id: str, client, *, operation: str, record_kind: str, served_class: str) -> Dict[str, Any]:
     """Order is fail-closed: (1) parameters, (2) the content class of the requested key (a key of another class, or an unlisted key, is refused here)
     and Kriya's visibility setting - before any store access, so a refusal reveals nothing about a store, then EvidenceService.content:
     (3) store verification, (4) the record and what it kept, (5) the recorded size against the cap, (6) the bytes, re-hashed on read."""
@@ -192,6 +186,6 @@ def _serve_part(cfg, request: Dict[str, Any], request_id: str, *, operation: str
     if visibility != "on":
         raise SnapshotError(policy.EVIDENCE_CONTENT_POLICY, "Kriya's content visibility policy (evidence.attempt_recorder.content_visibility) is off",
                             content_class=content_class, reason="content_visibility_off")
-    answer = EvidenceService().content(_ctx(request_id), cfg, run_id, seq=seq, part=part, record_kind=record_kind, content_class=content_class,
-                                       max_bytes=policy.EVIDENCE_BLOB_MAX_BYTES)
-    return envelope(operation, request_id, data=answer.data, source=_source(cfg, request_id), consistency=_consistency(answer.verified, answer.data["head_digest"]))
+    answer = client.evidence.content(_ctx(client, request_id), cfg, run_id, seq=seq, part=part, record_kind=record_kind, content_class=content_class,
+                                     max_bytes=policy.EVIDENCE_BLOB_MAX_BYTES)
+    return envelope(operation, request_id, data=answer.data, source=_source(cfg, client, request_id), consistency=_consistency(answer.verified, answer.data["head_digest"]))

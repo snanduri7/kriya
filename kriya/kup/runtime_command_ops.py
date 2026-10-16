@@ -5,7 +5,7 @@ did not record.
 
 Transport only (full modularization B3): the launch and review identities are validated and the folder admitted here (the change review's own
 validation, ``review_ops.validated_review``), and the answer is the envelope. The use case is
-``kriya.application.ReviewService.runtime_command_review`` (handed in as ``service``; kriya/application/review.py). It serves ONLY what the launch process stored for that one review (``kriya/control/launch_approval.py`` ``build_pending_runtime``), after re-proving it:
+``kriya.application.ReviewService.runtime_command_review`` (``client.reviews`` through the ``KriyaClient``; kriya/application/review.py). It serves ONLY what the launch process stored for that one review (``kriya/control/launch_approval.py`` ``build_pending_runtime``), after re-proving it:
 
 1. the review exists in the launch record (pending, or decided/expired history), for this workspace identity, and is a RUNTIME-COMMAND review (a change review is not served here);
 2. its recorded command fingerprint is the digest the decision must carry (``candidate_digest``) AND re-computes from the recorded working directory, commands in order, input channel and
@@ -18,12 +18,11 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from kriya.context import RequestContext
 from kriya.kup.inspect import envelope, live_consistency
 from kriya.kup.review_ops import validated_review
 
 
-def review(cfg: Any, request: Dict[str, Any], request_id: str, service) -> Dict[str, Any]:  # noqa: ARG001 - the operation table passes the configuration to every handler
+def review(cfg: Any, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:  # noqa: ARG001 - the operation table passes the configuration to every handler
     launch_id, review_id, workspace = validated_review(request)
-    data = service.runtime_command_review(RequestContext.local(workspace, request_id=request_id), workspace, launch_id, review_id)
+    data = client.reviews.runtime_command_review(client.context(workspace_root=workspace, request_id=request_id), workspace, launch_id, review_id)
     return envelope("runtime_command.review", request_id, data=data, source=None, consistency=live_consistency())
