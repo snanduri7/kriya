@@ -1,0 +1,43 @@
+{
+ "attempt": 0,
+ "repair_prompt_lines_added_vs_recorded": null,
+ "repair_prompt_lines_removed_vs_recorded": null,
+ "replayed_errors": [
+  "subtask(s) ['s1', 's2', 's3', 's4', 's6'] receive no relevant_global_invariants"
+ ],
+ "replayed_reason_codes": [
+  "SUBTASK_GLOBAL_INVARIANTS_MISSING"
+ ],
+ "same_errors_as_recorded": true,
+ "same_reason_codes_as_recorded": true,
+ "same_repair_prompt_as_recorded": true
+}
+{
+ "attempt": 1,
+ "repair_prompt_lines_added_vs_recorded": null,
+ "repair_prompt_lines_removed_vs_recorded": null,
+ "replayed_errors": [
+  "subtask(s) ['s1', 's2', 's3', 's4', 's6'] receive no relevant_global_invariants"
+ ],
+ "replayed_reason_codes": [
+  "SUBTASK_GLOBAL_INVARIANTS_MISSING"
+ ],
+ "same_errors_as_recorded": true,
+ "same_reason_codes_as_recorded": true,
+ "same_repair_prompt_as_recorded": true
+}
+{
+ "attempt": 2,
+ "repair_prompt_lines_added_vs_recorded": null,
+ "repair_prompt_lines_removed_vs_recorded": null,
+ "replayed_errors": [
+  "subtask(s) ['s1', 's2', 's3', 's4', 's6'] receive no relevant_global_invariants"
+ ],
+ "replayed_reason_codes": [
+  "SUBTASK_GLOBAL_INVARIANTS_MISSING"
+ ],
+ "same_errors_as_recorded": true,
+ "same_reason_codes_as_recorded": true,
+ "same_repair_prompt_as_recorded": null
+}
+REPLAY REPRODUCES THE RECORDED VALIDATION FAILURE (errors and reason codes identical)

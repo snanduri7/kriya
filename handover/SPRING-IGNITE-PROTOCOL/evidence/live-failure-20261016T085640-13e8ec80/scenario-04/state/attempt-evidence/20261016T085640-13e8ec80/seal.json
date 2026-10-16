@@ -1,0 +1,11 @@
+{
+ "blob_count": 17,
+ "closed_reason": "run.closed",
+ "complete": true,
+ "degraded": [],
+ "final_seq": 21,
+ "gaps": 0,
+ "head_digest": "sha256:ed709b169bba7b9a50fe8db0ca56ae54601431f8ff5712cd934db13e8d0cefa7",
+ "record_count": 21,
+ "schema": "kriya.attempt_evidence/1"
+}

@@ -1,0 +1,39 @@
+2026-10-16 08:56:41,426 INFO kriya.core.kernel: Starting Kriya Kernel...
+2026-10-16 08:56:41,427 INFO kriya.core.kernel: Kriya Kernel started successfully.
+2026-10-16 08:56:41,429 INFO kriya.workflow.workflow: 
+======================================================================
+                           REQUEST ANALYSIS                           
+======================================================================
+2026-10-16 08:56:41,430 INFO kriya.workflow.workflow_controller: Run route: kind=MILESTONE risk=LOW weight=STANDARD
+2026-10-16 08:56:41,430 INFO kriya.workflow.workflow: 
+======================================================================
+                           KNOWLEDGE GUARD                            
+======================================================================
+2026-10-16 08:56:41,433 INFO kriya.workflow.workflow_controller: Knowledge resolution: cleared
+2026-10-16 08:56:41,434 INFO kriya.skills.skill: Loaded skill 'ignite-java17' from /Users/sriramnanduri/kriya-demo-v2-work/scenario-04/skills/ignite-java17
+2026-10-16 08:56:41,469 INFO kriya.workflow.workflow: 
+======================================================================
+                         STRUCTURED PLANNING                          
+======================================================================
+2026-10-16 08:56:41,469 INFO kriya.workflow.workflow_controller: Generating validated EngineeringPlan (planner_model=qwen3-coder:30b)...
+2026-10-16 08:56:41,477 INFO kriya.core.model_capabilities: Model capability profile resolved [Model: qwen3-coder:30b, Source: explicit_primary, native_tool_calls=True, json_mode=True, reliable_multiline_json=False, preferred_edit_protocol=small_native_tools]
+2026-10-16 08:56:41,654 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b, Stream: False, JSON Mode: True, Reasoning: False]
+2026-10-16 08:57:18,056 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-10-16 08:57:18,067 INFO kriya.core.llm: Prompt to qwen3-coder:30b: 14360 chars, 0 shared with the previous request to it (first difference: first_request); prefill unreported ms.
+2026-10-16 08:57:18,076 INFO kriya.workflow.workflow: 
+======================================================================
+                           PLAN VALIDATION                            
+======================================================================
+2026-10-16 08:57:18,086 WARNING kriya.workflow.workflow_controller: WorkflowController enforce run '20261016T085640-13e8ec80': structured plan validation failed (attempt=0, reason_codes=['SUBTASK_GLOBAL_INVARIANTS_MISSING'], invalid_subtask_ids=[])
+2026-10-16 08:57:18,100 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b, Stream: False, JSON Mode: True, Reasoning: False]
+2026-10-16 08:57:51,152 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-10-16 08:57:51,155 INFO kriya.core.llm: Prompt to qwen3-coder:30b: 24522 chars, 7076 shared with the previous request to it (first difference: user); prefill unreported ms.
+2026-10-16 08:57:51,172 WARNING kriya.workflow.workflow_controller: WorkflowController enforce run '20261016T085640-13e8ec80': structured plan validation failed (attempt=1, reason_codes=['SUBTASK_GLOBAL_INVARIANTS_MISSING'], invalid_subtask_ids=[])
+2026-10-16 08:57:51,185 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b, Stream: False, JSON Mode: True, Reasoning: False]
+2026-10-16 08:58:21,172 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-10-16 08:58:21,175 INFO kriya.core.llm: Prompt to qwen3-coder:30b: 24522 chars, 17528 shared with the previous request to it (first difference: user); prefill unreported ms.
+2026-10-16 08:58:21,193 WARNING kriya.workflow.workflow_controller: WorkflowController enforce run '20261016T085640-13e8ec80': structured plan validation failed (attempt=2, reason_codes=['SUBTASK_GLOBAL_INVARIANTS_MISSING'], invalid_subtask_ids=[])
+2026-10-16 08:58:21,193 ERROR kriya.workflow.workflow_controller: WorkflowController enforce run '20261016T085640-13e8ec80': unsafe structured plan: structured plan remained unsafe after two bounded repair attempts
+2026-10-16 08:58:21,203 INFO kriya.core.kernel: Stopping Kriya Kernel...
+2026-10-16 08:58:21,203 INFO kriya.core.kernel: Stopping MCP servers...
+2026-10-16 08:58:21,203 INFO kriya.core.kernel: Kriya Kernel stopped.

@@ -67,6 +67,16 @@ ENVIRONMENT_DEPENDENCY_RULE = (
     "declare it in planned_files[].environment_requirements, not in requires_capabilities or in subtask requires/provides."
 )
 
+# The ONE statement of the global-invariant projection the plan validator enforces (plan_validation.py: SUBTASK_GLOBAL_INVARIANTS_MISSING). Defined once; every independently generated
+# Planner contract (the structured Planner system prompt, its user-message protocol and the Planner agent's own system prompt) includes this exact sentence. Before it existed the
+# validator rejected a plan the contract had never told the Planner how to write. Deliberately generic: no technology, language, scenario or goal text is named.
+GLOBAL_INVARIANT_PROJECTION_RULE = (
+    "In a plan with more than one subtask, every subtask must list at least one declared global invariant id in relevant_global_invariant_ids; an empty list is rejected. "
+    "Give each subtask the declared id(s) whose statement actually constrains what it builds; if none of the declared invariants constrains a stage, declare the constraint "
+    "the original request states that does (a language or runtime level, a required format, packaging, resource handling or exit behavior, for example) and reference it - "
+    "never invent a constraint the request does not state."
+)
+
 AUTHORITATIVE_GOAL_SECTION_HEADER = "=== Authoritative Goal ==="
 PLANNED_IMPLEMENTATION_SECTION_HEADER = "=== Planned Implementation Strategy ==="
 

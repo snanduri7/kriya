@@ -1,0 +1,1 @@
+{"repair_attempt":1,"results":[],"run_id":"20261016T085640-13e8ec80","timestamp":"2026-10-16T03:27:51.166261+00:00","type":"structured_plan_edit_feasibility"}

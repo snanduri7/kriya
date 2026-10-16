@@ -1,0 +1,1 @@
+{"invalid_subtask_ids":[],"reason_codes":["SUBTASK_GLOBAL_INVARIANTS_MISSING"],"repair_attempt":1,"run_id":"20261016T085640-13e8ec80","timestamp":"2026-10-16T03:27:18.086511+00:00","type":"structured_plan_repair_requested"}

@@ -85,6 +85,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 from kriya.agents.contracts import (
     AUTHORITATIVE_GOAL_SECTION_HEADER,
     ENVIRONMENT_DEPENDENCY_RULE,
+    GLOBAL_INVARIANT_PROJECTION_RULE,
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
     parse_planner_structured_output,
 )
@@ -712,6 +713,7 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     "still references the whole invariant's id, it does not invent a new id or a partial "
     "statement. Never reference an id that isn't declared in global_invariants, and never invent "
     "one on a subtask that wasn't first declared in global_invariants. "
+    + GLOBAL_INVARIANT_PROJECTION_RULE + " "
     "Every model subtask has an execution_role: implementation or verification. An implementation "
     "subtask must own every file it may change in planned_files. A verification subtask (e.g. "
     "\"run the regression suite and confirm existing behavior is preserved\") MUST set "
@@ -1118,6 +1120,7 @@ def build_authoritative_planner_request(
         "human-readable statement, plus per-subtask relevant_global_invariant_ids referencing "
         "only those ids (never restating or paraphrasing the statement text on the subtask), "
         "provides, requires, and complete depends_on edges.\n"
+        "- " + GLOBAL_INVARIANT_PROJECTION_RULE + "\n"
         "- Each requires string must exactly match one provides string from exactly one upstream "
         "subtask, and that provider must appear in depends_on.\n"
         "- Every verification entry must be an object with type, description, verifier_kind, and "

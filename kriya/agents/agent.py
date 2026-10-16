@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 from kriya.agents.contracts import (
     AUTHORITATIVE_GOAL_SECTION_HEADER,
     ENVIRONMENT_DEPENDENCY_RULE,
+    GLOBAL_INVARIANT_PROJECTION_RULE,
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
     REPOSITORY_PRECEDENT_REUSE_GUIDANCE,
     MilestoneV2,
@@ -559,7 +560,8 @@ class PlannerAgent(BaseAgent):
             "relevant_global_invariant_ids - never restate or paraphrase the statement text on the "
             "subtask, and never invent an id that wasn't first declared in global_invariants. A "
             "subtask relevant to only part of a compound invariant still references that invariant's "
-            "whole id. If a stage's entrypoint may terminate the process and another stage's tests "
+            "whole id. " + GLOBAL_INVARIANT_PROJECTION_RULE + " "
+            "If a stage's entrypoint may terminate the process and another stage's tests "
             "are expected to exercise it directly, keep the process-terminating call separate from "
             "the directly-tested logic (a thin wrapper performs termination; tests target the "
             "underlying logic that returns a result instead of terminating) - applies to any "

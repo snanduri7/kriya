@@ -275,6 +275,49 @@ def format_unprovided_capability_feedback(facts: List[Dict[str, str]]) -> str:
     return "".join(lines)
 
 
+def missing_invariant_projection_facts(previous_plan_text: str) -> Dict[str, Any]:
+    """Typed facts about the global-invariant projection of the previous plan, read deterministically from the plan itself (never from error text or the model's explanation): the ids of the
+    subtasks whose ``relevant_global_invariant_ids`` is empty and the invariants the plan declares. Only a plan with more than one subtask is subject to the projection rule
+    (plan_validation.py), so a single-subtask plan reports nothing. Returns empty facts when the text is not a parsable structured plan."""
+    from kriya.agents.contracts import parse_planner_structured_output
+
+    empty: Dict[str, Any] = {"subtask_ids": [], "declared": []}
+    output, _issue = parse_planner_structured_output(previous_plan_text)
+    if output is None or len(output.subtasks) < 2:
+        return empty
+    return {
+        "subtask_ids": [subtask.id for subtask in output.subtasks if not subtask.relevant_global_invariant_ids],
+        "declared": [{"id": invariant.id, "statement": invariant.statement} for invariant in output.global_invariants],
+    }
+
+
+def format_missing_invariant_projection_feedback(facts: Dict[str, Any]) -> str:
+    """The repair-prompt block for :func:`missing_invariant_projection_facts`: the rule, the typed facts and the valid repairs. Generic by construction: the only specific text is each subtask
+    id and invariant taken from the plan itself. It does not choose a branch for the Planner and does not widen the plan."""
+    if not facts.get("subtask_ids"):
+        return ""
+    declared = facts.get("declared") or []
+    lines = [
+        "- SUBTASK_GLOBAL_INVARIANTS_MISSING: in a plan with more than one subtask every subtask must list at least one declared global invariant id in relevant_global_invariant_ids; "
+        "an empty list is rejected.\n",
+        f"  subtasks whose relevant_global_invariant_ids is empty: {', '.join(facts['subtask_ids'])}\n",
+    ]
+    if declared:
+        lines.append("  declared global invariants (keep every existing id and statement unchanged):\n")
+        lines.extend(f'    {item["id"]}: {item["statement"]}\n' for item in declared)
+    else:
+        lines.append("  no global invariant is declared in the previous draft.\n")
+    lines.append(
+        "  Choose the valid repair that is true for each subtask named above:\n"
+        "  1. list the declared id(s) whose statement actually constrains what that subtask builds (a subtask relevant to only part of a compound invariant references its whole id);\n"
+        "  2. if no declared invariant constrains it, add a global_invariants entry (a new unique id and a statement) for a constraint the original request states that applies to that stage "
+        "(for example a language or runtime level, a required format, packaging, resource handling or exit behavior), and list that new id on the subtask.\n"
+        "  Do not invent a constraint the request does not state, do not restate a statement as an id, and do not change anything else in the plan. "
+        "Leaving the list empty is not a repair: it is rejected again.\n"
+    )
+    return "".join(lines)
+
+
 def build_structured_plan_repair_prompt(
     goal: str,
     previous_plan_text: str,
@@ -449,6 +492,8 @@ def build_structured_plan_repair_prompt(
             )
     if "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED" in reason_codes or "SUBTASK_REQUIREMENT_UNPROVIDED" in reason_codes:
         targeted_correction += format_unprovided_capability_feedback(unprovided_capability_facts(previous_plan_text))
+    if "SUBTASK_GLOBAL_INVARIANTS_MISSING" in reason_codes:
+        targeted_correction += format_missing_invariant_projection_feedback(missing_invariant_projection_facts(previous_plan_text))
     if "SUBTASK_REQUIREMENT_UNPROVIDED" in reason_codes:
         targeted_correction += (
             "- Replace each unprovided requires value with the exact, character-for-character "

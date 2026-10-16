@@ -1,0 +1,72 @@
+# Scenario 04 first live run: planner forensic closure (run `20261016T085640-13e8ec80`, 2026-10-16)
+
+Branch `demo/spring-ignite-protocol`, analysed from HEAD `b09a335`. No model was run for this analysis. The scenario state was not reset and the owner goal was not changed. Preserved evidence (copies; the originals are untouched): `evidence/live-failure-20261016T085640-13e8ec80/` (scenario-04/state with the attempt-evidence recorder, `workspace-dot-kriya` with RunRecord, launch status and planning diagnostics, the per-run log, the extracted model requests/responses, `replay_planner_failure.py` and its outputs).
+Evidence words as in `handover/ENGINEERING_RULES.md`: MEASURED (read from a record or a command), TRACED (read in the code that produced it), INFERRED, CONFIRMED.
+
+## 1. Owner-visible result and what was recorded (MEASURED)
+- Outcome: failed during planning, 1:39 elapsed. RunRecord: `commit_result NOT_COMMITTED`, `lifecycle FAILURE`; attempt-evidence seal: **3 model calls, 0 unit invocations**. Terminal event `planning.failed` with reason codes `SUBTASK_GLOBAL_INVARIANTS_MISSING, STRUCTURED_PLAN_REPAIR_EXHAUSTED, PLAN_REPAIR_NON_CONVERGENCE`.
+- Planner model for all three calls: **`qwen3-coder:30b`** (Ollama, `temperature 0.7`, `max_tokens 8192`, JSON mode, `finish_reason stop`; runtime fingerprint `8687fd28...`). The fallback model in `llm_chain` was not used (the failure is a validation outcome, not a model-call failure).
+
+| Call | Elapsed | Prompt tokens | Completion tokens | Purpose |
+|---|---|---|---|---|
+| 1 | 36.4 s | 2927 | 1530 | initial structured plan |
+| 2 | 33.1 s | 5328 | 1530 | PLAN_REPAIR attempt 1 |
+| 3 | 30.0 s | 5328 | 1530 | PLAN_REPAIR attempt 2 |
+
+## 2. The exact planner sequence
+**Request 1.** System prompt (7076 chars, the structured-Planner contract) + user message (7284 chars): the goal verbatim, the structured-plan protocol, `Existing local workspace paths ... []`, and the five `REQ-n` requirements. It contained **no skill, no Ignite knowledge, no KnowledgeGuard text** (no occurrence of `ignite-java17`, `add-opens`, `exec:exec` or "Engineering Skill" in any of the three requests). Decoded plan (7 subtasks, 1 invariant, 1 acceptance criterion):
+
+| id | role | owns | depends_on | provides / requires | invariant ids | verification |
+|---|---|---|---|---|---|---|
+| s1 | implementation | `pom.xml` | - | maven_project_structure | **[]** | compile |
+| s2 | implementation | `.../Protocol.java` | - | protocol_class | **[]** | compile |
+| s3 | implementation | `.../ProtocolParser.java` | s2 | protocol_parser / protocol_class | **[]** | compile |
+| s4 | implementation | `src/main/resources/ignite-config.xml` | s1 | ignite_config_xml / maven_project_structure | **[]** | compile |
+| s5 | implementation | `.../MainApplication.java` | s3, s4 | main_application / protocol_parser, ignite_config_xml | `gi1` | compile |
+| s6 | implementation | `.../ProtocolParserTest.java` | s3 | protocol_parser_test / protocol_parser | **[]** | test |
+| s7 | verification | (none) | s5 | - / main_application | `gi1` | judgment, `application_runtime`, runtime=true |
+`global_invariants = [gi1: "All application resources including Spring and Ignite must be properly closed to ensure normal application exit"]`. Safety/validation result: **everything else validated** (file ownership, dependencies, provides/requires, verification kinds, requirement ids); the single finding is `SUBTASK_GLOBAL_INVARIANTS_MISSING`: *"subtask(s) ['s1', 's2', 's3', 's4', 's6'] receive no relevant_global_invariants"*.
+
+**Request 2** (repair attempt 1). The repair prompt (17446 chars of user text) carried: the original request, `Deterministic reason codes: ["SUBTASK_GLOBAL_INVARIANTS_MISSING"]`, a 12-item MUST PRESERVE list (all correct), the finding above, the generic correction rules, and the previous draft. It asked the Planner to "preserve or add goal-derived global_invariants and per-subtask relevant_global_invariant_ids referencing those ids". It did not state the rule, did not say an empty list is rejected, and did not say what a valid repair is (reference a declared id, or declare another). Planner answer: **byte-identical to request 1's** (sha256 `1f2f7bed...`). Result: the same single finding. The original problem was not fixed and no new problem appeared.
+
+**Request 3** (repair attempt 2). The same repair prompt, differing only in the label "(repair attempt 2)" (the previous draft was unchanged). Planner answer: again byte-identical. Same finding. Terminal stop: bounded repair exhausted (`STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS`), non-convergence (the reason-code set did not change, so not oscillation).
+
+## 3. What "unsafe" meant (the exact rule)
+Not a security or authority violation. The log text "unsafe structured plan" is the generic name of the exception `_UnsafeStructuredPlan` for *any* plan that stays invalid after repair. The rule is `kriya/workflow/plan_validation.py:484-493` (TRACED): in an authoritative plan with **more than one subtask**, every subtask must carry a non-empty `relevant_global_invariant_ids`. It exists so each work unit's Developer request is given the plan's global constraints (the projection). The plan broke it for 5 of 7 subtasks because it declared one narrow invariant ("resources are closed") and referenced it only from the entrypoint and the run-check stage. No command was attempted, no write scope was wrong, no tool step was used.
+
+## 4. First wrong decision and ownership
+**Replay (CONFIRMED, no model).** `replay_planner_failure.py` feeds the recorded response through Kriya's own `parse_planner_structured_output -> build_engineering_plan_from_planner_output -> canonicalize/coalesce/redirect/derive/scope -> validate_plan -> build_structured_plan_repair_prompt` (the controller's chain and flags): it reproduces the recorded errors, the recorded reason codes and **the recorded repair prompt byte for byte** (`replay-prefix-b09a335.txt`). Production behaviour is therefore as recorded; the evidence path is not hiding another defect.
+
+**Classification.**
+- Request 1's plan is **not wrong under the contract the Planner was given**. The rule it broke appears nowhere the Planner could see it: the system prompt and the user protocol say only "include goal-derived global_invariants ... plus per-subtask relevant_global_invariant_ids referencing only those ids", and the system prompt even blesses partial relevance ("a subtask relevant to only PART of a compound invariant still references the whole invariant's id"). The legacy Planner agent prompt hints at the intent ("reference the relevant ones by id in each subtask") and at the kinds of invariants to derive (runtime, platform, format ...); the authoritative one does not.
+- The repair feedback is the second place the rule could have been learned and was not: `build_structured_plan_repair_prompt` has a targeted correction block for `UNKNOWN_GLOBAL_INVARIANT` and `SUBTASK_SEMANTIC_CONTRACT_MISSING` but **none for `SUBTASK_GLOBAL_INVARIANTS_MISSING`** (TRACED, `planner_repair.py` before this change). This is the same pattern `docs/design.md` records for PRV-06 ("the repair prompt had no targeted correction block for this reason code at all").
+- The Planner then returned an identical plan twice. That is model-owned non-convergence: the finding did name the five subtasks. A different run (Demo V2 F2/scenario 02) did repair this same code on attempt 2 (`FINDINGS.md`), so the model can follow the feedback; here it copied its draft.
+
+**First wrong decision: KRIYA_REPAIR_FEEDBACK_GAP, rooted in an incomplete planner contract (the validator enforced a rule the Planner was never told, and the repair feedback did not teach it).** Secondary, model-owned and independent: MODEL_PLANNER_FAILURE (non-convergence, three byte-identical plans). Not the cause: false-positive safety rule (the rule is deliberate and CONFIRMED correct: giving the 5 subtasks `gi1` makes the recorded plan valid, `validate_plan` otherwise accepts it), plan decoder (the decode is faithful), knowledge-to-planner (see 5), routing/config (the planner model is the configured primary), history (see 8).
+Classes considered and rejected: C (false positive), F (schema/protocol defect), G (config/routing), E (knowledge at planning, see 5).
+
+## 5. Knowledge delivery (separately)
+1. Skill selected? In this run the skill engine loaded it (`Loaded skill 'ignite-java17' from .../scenario-04/skills`, MEASURED in the log); selection for a work unit happens later, in the per-unit generation workflow, which was never reached. Selection through `SkillService` is qualified separately.
+2. Loaded? Yes (log, 08:56:41).
+3. In the PLANNER request? **No.** The three planner requests contain no skill text (MEASURED). The controller's planner request builder has no skill input at all (TRACED; the skill engine is created for subtask runs, `workflow_controller.py:3665-3669`).
+4. Only later for the Developer? Yes: skill conventions are injected by the generation workflow (`workflow.py` "Engineering Skill Conventions"). Not reached here.
+5. Did KnowledgeGuard affect the planner prompt? No. The log says `Knowledge resolution: cleared`; the guard's warning text goes only into the Developer's convention prompt (TRACED, `workflow.py:3401-3408`).
+6. Did `offline_mode` remove context the planner needed? No: the planner never receives guard output in either mode. The failure is independent of `knowledge.offline_mode`. (Observation, not a defect here: the planner does not see technology-specific skill rules, so e.g. the `application_runtime` verifier is planned without knowing the exec plugin shape; that is by design.)
+
+## 6. Plan granularity
+Seven units for a six-file application: one file per unit, correct dependency chain (pom -> config; Protocol -> Parser -> Test; Parser + config -> entrypoint), a separate verification unit for the runtime check (`application_runtime`), compile/test verifiers on every implementation unit, no tool subtasks, no build or run steps inside a source unit. This is an appropriate decomposition, not one giant unit, and it passed every structural check. `requirement_ids` were left empty on every subtask (not a validator finding; a quality note). Nothing in the schema or prompt pushed the model toward a shape the validator then rejects: the only mismatch is the unstated projection rule. No Ignite-specific decomposition rule was added or is needed.
+
+## 7. Defect found and the generic fix (case B)
+The validator is unchanged (zero diff in `plan_validation.py`) and still refuses the same plans. Changes, all generic:
+1. `kriya/agents/contracts.py::GLOBAL_INVARIANT_PROJECTION_RULE`, one shared sentence included once in each of the three independently generated Planner contracts (structured system prompt, structured user protocol, legacy Planner agent prompt).
+2. `kriya/workflow/planner_repair.py`: `missing_invariant_projection_facts` (typed facts from the previous plan: the subtasks with an empty list and the declared invariants) and `format_missing_invariant_projection_feedback`, emitted for `SUBTASK_GLOBAL_INVARIANTS_MISSING`. It states the rule, names the subtasks and the declared invariants, lists two valid repairs (reference a declared id that constrains the subtask; or declare a constraint the request states), and says an empty list is not a repair. It does not choose a branch, widen scope, or name any technology.
+Tests: `tests/test_plan_global_invariant_projection_001.py` (15 tests, written first: collection failed on the missing symbols), replaying the RECORDED answer from `tests/fixtures/plan_global_invariant_projection_001.json`: rejection reproduced; discrimination (adding the declared id to the five subtasks makes the plan valid); the undeclared-id and single-subtask boundaries; the old repair prompt demonstrably lacked the instruction; the new block's content; negative controls; the rule present exactly once in each contract and free of technology words. 11 mutants of the new logic (gate removed, facts wrong, guard removed, rule missing from each of the three contracts, technology named, empty-list statement dropped, option 2 renamed, warning dropped) all killed; the no-op control passes. 2044 adjacent planner, plan-validation, repair, prompt, contract and controller tests pass. `ruff` and `pylint` clean.
+**Not proven (INFERRED):** that this model follows the new feedback. No live run was made. The change makes the rule and the repair explicit; it cannot make a model comply.
+
+## 8. Recent runs message
+Not a cause. The window read `/Users/sriramnanduri/kriya-demo-v2-work/scenario-04/state` (the scenario's own) and showed "No runs yet ... as of its last history snapshot": exactly the known `HISTORY-SNAPSHOT-STALE-ON-REOPEN-001`. The failed run is in that state directory (`traces.db`, attempt evidence). No new history defect found.
+
+## 9. Observations for the owner (not acted on)
+- The repair loop re-asks the same primary model; it did not escalate to the configured fallback (`llm_chain`) after a non-converging repair. A product decision, not changed.
+- Planner temperature is the configured `0.7` for structured JSON; the three answers were byte-identical anyway (the model copied its draft).
+- The model choice cannot be judged from one run. Options for the owner, if the second run fails the same way: run once more with the fixed contract (justified only by the review below); or route the planner role to the fallback model for scenario 04 (a configuration decision, not made here).

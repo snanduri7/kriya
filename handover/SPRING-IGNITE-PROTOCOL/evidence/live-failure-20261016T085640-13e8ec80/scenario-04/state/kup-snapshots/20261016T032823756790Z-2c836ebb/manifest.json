@@ -1,0 +1,38 @@
+{
+ "acquisition_completed_at": "2026-10-16T03:28:23.759382Z",
+ "acquisition_started_at": "2026-10-16T03:28:23.755525Z",
+ "backup_steps": 1,
+ "duration_ms": 3.9,
+ "implementation": "kriya-kup/1",
+ "manifest_version": 1,
+ "quick_check": "ok",
+ "rows": 1,
+ "snapshot_file": {
+  "mtime_ns": 1792121303759023746,
+  "name": "traces.snapshot.db",
+  "sha256": "cc9707613933df8537e5252652ab533ec6d2a027a3f5fea952c7b7feaf50a59f",
+  "size": 20480
+ },
+ "snapshot_id": "20261016T032823756790Z-2c836ebb",
+ "source": "/Users/sriramnanduri/kriya-demo-v2-work/scenario-04/state/traces.db",
+ "source_journal_mode": "wal",
+ "source_metadata_after_backup": {
+  "inode": 351126487,
+  "journal_size": null,
+  "mtime_ns": 1792121301199140926,
+  "shm_size": 32768,
+  "size": 20480,
+  "wal_size": 0
+ },
+ "source_metadata_at_acquisition": {
+  "inode": 351126487,
+  "journal_size": null,
+  "mtime_ns": 1792121301199140926,
+  "shm_size": null,
+  "size": 20480,
+  "wal_size": null
+ },
+ "source_page_count": 5,
+ "source_page_size": 4096,
+ "sqlite_version": "3.53.4"
+}

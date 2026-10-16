@@ -1,0 +1,61 @@
+{
+ "attempt": 0,
+ "repair_prompt_lines_added_vs_recorded": [
+  "- SUBTASK_GLOBAL_INVARIANTS_MISSING: in a plan with more than one subtask every subtask must list at least one declared global invariant id in relevant_global_invariant_ids; an empty list is rejected.",
+  "  subtasks whose relevant_global_invariant_ids is empty: s1, s2, s3, s4, s6",
+  "  declared global invariants (keep every existing id and statement unchanged):",
+  "    gi1: All application resources including Spring and Ignite must be properly closed to ensure normal application exit",
+  "  Choose the valid repair that is true for each subtask named above:",
+  "  1. list the declared id(s) whose statement actually constrains what that subtask builds (a subtask relevant to only part of a compound invariant references its whole id);",
+  "  2. if no declared invariant constrains it, add a global_invariants entry (a new unique id and a statement) for a constraint the original request states that applies to that stage (for example a language or runtime level, a required format, packaging, resource handling or exit behavior), and list that new id on the subtask.",
+  "  Do not invent a constraint the request does not state, do not restate a statement as an id, and do not change anything else in the plan. Leaving the list empty is not a repair: it is rejected again."
+ ],
+ "repair_prompt_lines_removed_vs_recorded": [],
+ "replayed_errors": [
+  "subtask(s) ['s1', 's2', 's3', 's4', 's6'] receive no relevant_global_invariants"
+ ],
+ "replayed_reason_codes": [
+  "SUBTASK_GLOBAL_INVARIANTS_MISSING"
+ ],
+ "same_errors_as_recorded": true,
+ "same_reason_codes_as_recorded": true,
+ "same_repair_prompt_as_recorded": false
+}
+{
+ "attempt": 1,
+ "repair_prompt_lines_added_vs_recorded": [
+  "- SUBTASK_GLOBAL_INVARIANTS_MISSING: in a plan with more than one subtask every subtask must list at least one declared global invariant id in relevant_global_invariant_ids; an empty list is rejected.",
+  "  subtasks whose relevant_global_invariant_ids is empty: s1, s2, s3, s4, s6",
+  "  declared global invariants (keep every existing id and statement unchanged):",
+  "    gi1: All application resources including Spring and Ignite must be properly closed to ensure normal application exit",
+  "  Choose the valid repair that is true for each subtask named above:",
+  "  1. list the declared id(s) whose statement actually constrains what that subtask builds (a subtask relevant to only part of a compound invariant references its whole id);",
+  "  2. if no declared invariant constrains it, add a global_invariants entry (a new unique id and a statement) for a constraint the original request states that applies to that stage (for example a language or runtime level, a required format, packaging, resource handling or exit behavior), and list that new id on the subtask.",
+  "  Do not invent a constraint the request does not state, do not restate a statement as an id, and do not change anything else in the plan. Leaving the list empty is not a repair: it is rejected again."
+ ],
+ "repair_prompt_lines_removed_vs_recorded": [],
+ "replayed_errors": [
+  "subtask(s) ['s1', 's2', 's3', 's4', 's6'] receive no relevant_global_invariants"
+ ],
+ "replayed_reason_codes": [
+  "SUBTASK_GLOBAL_INVARIANTS_MISSING"
+ ],
+ "same_errors_as_recorded": true,
+ "same_reason_codes_as_recorded": true,
+ "same_repair_prompt_as_recorded": false
+}
+{
+ "attempt": 2,
+ "repair_prompt_lines_added_vs_recorded": null,
+ "repair_prompt_lines_removed_vs_recorded": null,
+ "replayed_errors": [
+  "subtask(s) ['s1', 's2', 's3', 's4', 's6'] receive no relevant_global_invariants"
+ ],
+ "replayed_reason_codes": [
+  "SUBTASK_GLOBAL_INVARIANTS_MISSING"
+ ],
+ "same_errors_as_recorded": true,
+ "same_reason_codes_as_recorded": true,
+ "same_repair_prompt_as_recorded": null
+}
+REPLAY REPRODUCES THE RECORDED VALIDATION FAILURE (errors and reason codes identical)

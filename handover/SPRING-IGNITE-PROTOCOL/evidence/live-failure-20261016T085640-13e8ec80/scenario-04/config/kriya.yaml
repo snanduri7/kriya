@@ -1,0 +1,67 @@
+# Scenario 04 - Spring XML + Apache Ignite + Protocol (greenfield). Rendered by scripts/prepare_demo.sh (placeholders: /Users/sriramnanduri/kriya-demo-v2-work/scenario-04). Real local model; the standard Demo V2 model block (same as scenarios 01 and 02).
+# Development profile on purpose (no runtime_profile: production), like every other Demo V2 scenario: Maven and the generated application run on the host, not in a container.
+# Desktop human-in-the-loop stays on: the source review, the runtime-command review and the native confirmations are not configurable here and are not touched.
+workflow_controller:
+  enabled: true
+  mode: enforce
+
+autonomy:
+  mode: "human-in-the-loop"
+  web_lookup_enabled: false
+  web_lookup_auto_approve: false
+  run_verification_enabled: true
+  self_correction_loop_enabled: false
+  # Unchanged from the other scenarios. The one historical Ignite run (three units) took 356 s; no measurement justifies a larger budget.
+  generation_time_budget_seconds: 900
+
+search:
+  base_url: ""
+
+# MEASURED prerequisite (handover/SPRING-IGNITE-PROTOCOL/QUALIFICATION.md, section 3): a desktop launch is always knowledge-policy STRICT and cannot acknowledge a KnowledgeGuard gap.
+# The goal names "Apache Ignite 2.18.0", a version released after the model's training cutoff, so with the default (online) guard the run would stop at the KnowledgeGuard stage before any model call.
+# offline_mode = no public release-date lookup (also what "no public network for this scenario" means). With the verified ignite-java17 skill present the guard then reports no gap; WITHOUT the skill it still
+# reports one (measured), so this is not a blanket bypass. Consequence stated plainly: the guard's post-cutoff WARNING is not injected into the Developer prompt; the verified skill supplies the Ignite 2.18.0 facts instead.
+knowledge:
+  offline_mode: true
+
+skills:
+  load_global: false
+  load_cwd: false
+
+paths:
+  skills: "/Users/sriramnanduri/kriya-demo-v2-work/scenario-04/skills"
+  state: "/Users/sriramnanduri/kriya-demo-v2-work/scenario-04/state"
+  memory: "/Users/sriramnanduri/kriya-demo-v2-work/scenario-04/memory"
+
+llm:
+  provider: "openai"
+  model: "qwen3-coder:30b"
+  api_key: "local-key"
+  base_url: "http://localhost:11434/v1"
+  temperature: 0.7
+  reviewer_temperature: 0.7
+  max_tokens: 16384
+  capabilities:
+    native_tool_calls: true
+    json_mode: true
+    reliable_multiline_json: false
+    streaming: true
+    max_tool_argument_chars: 8192
+    preferred_edit_protocol: "small_native_tools"
+  extra_body:
+    options:
+      num_ctx: 32768
+      top_p: 0.8
+      top_k: 20
+
+llm_chain:
+  - model: "qwen3.6:35b-a3b-q4_K_M"
+    base_url: "http://localhost:11434/v1"
+    api_key: "local-key"
+    reasoning: false
+    context_window: 32768
+    temperature: 0.2
+
+embedding:
+  model: "nomic-embed-text:latest"
+  base_url: "http://localhost:11434/v1"
