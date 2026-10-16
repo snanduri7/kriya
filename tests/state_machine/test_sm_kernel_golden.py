@@ -64,6 +64,16 @@ EXPECTED = {
     "milestone_chain_completed": ("dict", None, None, "success", ["SUCCESS"], False),
     "milestone_rerun_reuses_completed": ("dict", None, None, "success", ["SUCCESS", "SUCCESS"], False),
     "milestone_resume_after_recovered_crash": ("dict", None, None, "success", ["RECOVERED", "SUCCESS"], False),
+    # E3 characterization of stages 0-3 (written from bd3c6d8, before the stages moved): the early exits return the
+    # engine's dict as legacy_result (no failure_category in it; the traces.db row carries it, see the golden's extra)
+    "legacy_knowledge_gap": ("WorkflowResult", None, None, "knowledge_gap", ["FAILURE"], False),
+    "legacy_knowledge_gap_confirmed": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
+    "legacy_stage_context_success": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
+    "legacy_planner_output_incomplete": ("WorkflowResult", None, None, "planner_output_incomplete", ["FAILURE"], False),
+    "legacy_planner_unauthorized_path": ("WorkflowResult", None, None, "planner_output_unauthorized_path", ["FAILURE"], False),
+    "legacy_planner_schema_invalid": ("WorkflowResult", None, None, "planner_output_schema_invalid", ["FAILURE"], False),
+    "legacy_architect_file_list_rejected": ("WorkflowResult", None, None, "architect_file_list_rejected", ["FAILURE"], False),
+    "legacy_stage2a_dependency_rejected": ("dict", None, None, None, ["FAILURE"], False),
 }
 
 
@@ -73,7 +83,7 @@ def test_every_golden_shows_its_terminal_path_and_real_evidence():
         golden = json.loads((kg.GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
         values = golden["result"]["legacy_result"]["values"]
         assert golden["_scenario"]["terminal_path"] == kg.TERMINAL_PATHS[name], name
-        assert golden["_scenario"]["generated_from"] == kg.GENERATED_FROM, name
+        assert golden["_scenario"]["generated_from"] == kg.generated_from(name), name
         assert (golden["result"]["type"], values.get("quality_gates_passed"), values.get("failure_category"),
                 values.get("status")) == (kind, passed, category, status), name
         assert [record["lifecycle_state"] for record in golden["run_records"]] == lifecycles, name

@@ -94,7 +94,8 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # resolved here at call time (+2: WorkflowEngine._stage_deps, _record_run_exception).
     (W, 'logger'): P(3, W, ((W, 145),), ()),
     (W, 'resolve_future_owner_verification_deferral'): P(1, 'kriya.workflow.attribution', ((W, 1),), ()),
-    (W, 'retrieve_graph_context'): P(1, 'kriya.workflow.graph_retrieval', ((W, 1),), ()),
+    # E3 characterization: +1 site (the legacy_stage_context_success golden scripts the retrieval through it).
+    (W, 'retrieve_graph_context'): P(2, 'kriya.workflow.graph_retrieval', ((W, 1),), ()),
     (W, 'run_attempt'): P(1, A, ((W, 1),), ()),
     (W, 'save_checkpoint'): P(6, 'kriya.control.checkpoint', ((W, 1),), ()),
     # kriya.workflow.workflow_controller
@@ -215,7 +216,8 @@ def test_every_kernel_patch_target_is_pinned_and_still_reaches_what_it_patched(m
 
 def test_the_table_totals_are_the_measured_e1_baseline():
     totals = {module: sum(row.sites for (owner, _t), row in PATCH_POINTS.items() if owner == module) for module in ps.KERNEL_MODULES}
-    assert totals == {A: 87, W: 70, C: 268}   # E1 baseline 87/69/268; E2 +1 W.logger site (test_outcome)
+    # E1 baseline 87/69/268; E2 +1 W.logger site (test_outcome); E3 +1 W.retrieve_graph_context site (golden scenario)
+    assert totals == {A: 87, W: 71, C: 268}
     assert len(PATCH_POINTS) == 83
 
 

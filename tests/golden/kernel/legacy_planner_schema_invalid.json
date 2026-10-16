@@ -1,0 +1,848 @@
+{
+ "_scenario": {
+  "doc": "Stage 2: a schema-invalid structured plan, still invalid after every bounded repair: planner_output_schema_invalid with the repair events.",
+  "generated_from": "bd3c6d8",
+  "name": "legacy_planner_schema_invalid",
+  "normalized": "run ids, uuid/transaction ids, ISO times, tmp/state/workspace paths and workspace identity, trace row ids -> first-appearance tokens; CLOCK_KEYS -> <clock>; timing-derived digests (VOLATILE_DIGEST_KEYS, progress vector, junit file, prompt segments) -> <vdigest>; pytest and junit gate output reduced to collected/outcome/FAILED lines; free text -> digests",
+  "terminal_path": "stage 2 stop: planner_output_schema_invalid after the bounded structured-plan repairs"
+ },
+ "evidence": [
+  {
+   "records": [
+    {
+     "attempt": null,
+     "kind": "run.opened",
+     "payload": "sha256:3fda938cf9609ca4",
+     "payload_keys": [
+      "base_revision",
+      "base_tree_hash",
+      "kriya_build",
+      "workspace_identity",
+      "workspace_path"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
+     "content": {
+      "goal": "sha256:0f3c92131d8b5897"
+     },
+     "kind": "unit.opened",
+     "payload": "sha256:aad29e8eea551a52",
+     "payload_keys": [
+      "authorized_write_scope",
+      "current_subtask_id",
+      "invocation_seq",
+      "milestone_group_id",
+      "milestone_index",
+      "plan_fingerprint",
+      "plan_id",
+      "planned_source_files",
+      "resume",
+      "resume_id",
+      "unit_id",
+      "unit_kind",
+      "write_scope_mode"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "goal": "sha256:0f3c92131d8b5897"
+     },
+     "kind": "unit.opened",
+     "payload": "sha256:4af4d8963b61a1fa",
+     "payload_keys": [
+      "authorized_write_scope",
+      "current_subtask_id",
+      "invocation_seq",
+      "milestone_group_id",
+      "milestone_index",
+      "plan_fingerprint",
+      "plan_id",
+      "planned_source_files",
+      "resume",
+      "resume_id",
+      "unit_id",
+      "unit_kind",
+      "write_scope_mode"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:0bd2c5d09bc018be"
+     },
+     "event": "egress.authority",
+     "kind": "mirror.event",
+     "payload": "sha256:ad83cb73627e8bd8",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:b8d89986afaa0136"
+     },
+     "event": "evidence.attempt_store",
+     "kind": "mirror.event",
+     "payload": "sha256:6a59c13934b413a5",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:4ee911c6721f9d81"
+     },
+     "event": "model.runtime",
+     "kind": "mirror.event",
+     "payload": "sha256:6eb65ce1ab77f257",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:93c80a464497eeab"
+     },
+     "event": "model.role_independence",
+     "kind": "mirror.event",
+     "payload": "sha256:cb6d658abeb32638",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:2d49c6b5eab9558e"
+     },
+     "event": "requirement.derived",
+     "kind": "mirror.event",
+     "payload": "sha256:64d1510f667f2463",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:32ca5c7fc1f2d029"
+     },
+     "event": "verification_contract.compiled",
+     "kind": "mirror.event",
+     "payload": "sha256:c4496da9371fbc20",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:81564c21128f8c4c"
+     },
+     "event": "verification_contract.sealed",
+     "kind": "mirror.event",
+     "payload": "sha256:e6c4d0baf6fac7ec",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:e7222cfd8508bae2"
+     },
+     "event": "structured_plan_validation",
+     "kind": "mirror.event",
+     "payload": "sha256:e4ed115b130dec35",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:d8fd5cbaa25af2b1"
+     },
+     "event": "structured_plan_repair_requested",
+     "kind": "mirror.event",
+     "payload": "sha256:ef019ba4b0d9f2b0",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:618ab2dbf166f1fe"
+     },
+     "event": "structured_plan_repair_result",
+     "kind": "mirror.event",
+     "payload": "sha256:a207543d09e51755",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:16b07340525acae4"
+     },
+     "event": "structured_plan_validation",
+     "kind": "mirror.event",
+     "payload": "sha256:e4ed115b130dec35",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:bfbce88e87c09afa"
+     },
+     "event": "structured_plan_repair_requested",
+     "kind": "mirror.event",
+     "payload": "sha256:ef019ba4b0d9f2b0",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:2d198d7b24bea407"
+     },
+     "event": "structured_plan_repair_result",
+     "kind": "mirror.event",
+     "payload": "sha256:a207543d09e51755",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:1f7ba27d75e5b670"
+     },
+     "event": "model.role_metrics",
+     "kind": "mirror.event",
+     "payload": "sha256:97835d272bd7f279",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "kind": "unit.closed",
+     "payload": "sha256:dd7166f0c62576b1",
+     "payload_keys": [
+      "failure_category",
+      "outcome",
+      "quality_gates_passed",
+      "status"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "kind": "unit.closed",
+     "payload": "sha256:dd7166f0c62576b1",
+     "payload_keys": [
+      "failure_category",
+      "outcome",
+      "quality_gates_passed",
+      "status"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "kind": "run.closed",
+     "payload": "sha256:da9631b6e6816792",
+     "payload_keys": [
+      "commit_result",
+      "lifecycle_state",
+      "model_calls",
+      "record_revision",
+      "terminal_status",
+      "unit_invocations"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": null
+    }
+   ],
+   "run": "<run:1>",
+   "sealed": true,
+   "verification": "VERIFIED"
+  }
+ ],
+ "extra": {
+  "checkpoints": [
+   {
+    "keys": [
+     "_run_record",
+     "_workspace",
+     "config_fingerprint",
+     "goal_fingerprint",
+     "had_authorized_semantic_regions",
+     "milestone_group_id",
+     "milestone_index",
+     "model_routes",
+     "plan",
+     "resume_fingerprints",
+     "run_id",
+     "saved_at",
+     "stage",
+     "validation_baseline_full_regression",
+     "validation_baseline_pytest_stability",
+     "validation_baseline_targeted",
+     "work_unit",
+     "workspace_content_hash",
+     "workspace_fingerprint"
+    ],
+    "stage": "plan"
+   }
+  ],
+  "model_calls": {
+   "architect": 0,
+   "developer": 0,
+   "planner": 3
+  },
+  "prompts": {
+   "architect": [],
+   "developer": [],
+   "planner": [
+    {
+     "chars": 701,
+     "text": "sha256:865e7d7962dc4370"
+    },
+    {
+     "chars": 5382,
+     "text": "sha256:172d4de7b210bdcc"
+    },
+    {
+     "chars": 5382,
+     "text": "sha256:24492a589147ca81"
+    }
+   ]
+  },
+  "steps": [
+   [
+    "planner_output_schema_invalid",
+    {
+     "chars": 364,
+     "text": "sha256:fbfbfa894f0999da"
+    }
+   ]
+  ],
+  "trace_rows": [
+   {
+    "attempts": 0,
+    "failure_category": "planner_output_schema_invalid",
+    "files_modified": "",
+    "status": "planner_output_schema_invalid"
+   }
+  ]
+ },
+ "result": {
+  "control_state": {
+   "acceptance_approval_digest": null,
+   "base_commit": null,
+   "created_at": "<clock>",
+   "current_artifact_registry_hash": null,
+   "current_contract_hash": null,
+   "current_milestone_id": null,
+   "current_plan_hash": null,
+   "engineering_route": {
+    "current_risk_class": 1,
+    "deterministic_signals": {
+     "creation_language": false,
+     "dependency_graph_available": false,
+     "dependency_terms": false,
+     "enhancement_language": false,
+     "known_files_count": 0,
+     "migration_language": false,
+     "multi_part_structure": false,
+     "repo_appears_empty": false,
+     "repro_shape": false,
+     "scope_language": "none",
+     "security_terms": false
+    },
+    "execution_weight": "light",
+    "impact": {
+     "build_system_change": false,
+     "configuration_change": false,
+     "dependency_change": false,
+     "downstream_references": 0,
+     "files_touched": 0,
+     "persistence_change": false,
+     "public_contract_change": false,
+     "security_boundary_change": false,
+     "shared_entrypoint_change": false,
+     "symbols_impacted": 0
+    },
+    "initial_execution_weight": "light",
+    "initial_impact": {
+     "build_system_change": false,
+     "configuration_change": false,
+     "dependency_change": false,
+     "downstream_references": 0,
+     "files_touched": 0,
+     "persistence_change": false,
+     "public_contract_change": false,
+     "security_boundary_change": false,
+     "shared_entrypoint_change": false,
+     "symbols_impacted": 0
+    },
+    "initial_risk_class": 1,
+    "kind": "task",
+    "max_observed_risk_class": 1,
+    "reason_codes": [
+     "no_signals_fired_defaulted_to_task"
+    ],
+    "router_confidence": null,
+    "router_used": false
+   },
+   "last_verified_checkpoint": null,
+   "milestone_group_id": null,
+   "milestone_states": {},
+   "patch_hash": null,
+   "process_profile": {
+    "auto_merge_allowed": true,
+    "context_depth": "narrow",
+    "contract_analysis_required": false,
+    "execution_weight": "light",
+    "full_test_suite_required": false,
+    "human_review_required": false,
+    "impact_revalidation_required": false,
+    "planning_required": false,
+    "structured_subtasks_required": false,
+    "verification_tier": "light"
+   },
+   "requirement_contract_digest": null,
+   "run_id": "<run:1>",
+   "schema_version": 1,
+   "subtask_completion_scope": null,
+   "subtask_states": {},
+   "subtask_written_files": {},
+   "tree_hash": null,
+   "updated_at": "<time>",
+   "verification_contract_digest": null,
+   "workspace_content_hash": null
+  },
+  "decisions": [],
+  "fields": [
+   "run_id",
+   "control_state",
+   "route",
+   "legacy_result",
+   "subtask_results",
+   "decisions",
+   "verification_report"
+  ],
+  "legacy_result": {
+   "keys": [
+    "goal",
+    "plan",
+    "reason",
+    "run_id",
+    "status",
+    "workspace_path"
+   ],
+   "values": {
+    "goal": {
+     "chars": 52,
+     "text": "sha256:0f3c92131d8b5897"
+    },
+    "plan": {
+     "chars": 917,
+     "text": "sha256:c78ee4598519080a"
+    },
+    "reason": {
+     "chars": 364,
+     "text": "sha256:fbfbfa894f0999da"
+    },
+    "run_id": "<trace:1>",
+    "status": "planner_output_schema_invalid",
+    "workspace_path": "<workspace:1>"
+   }
+  },
+  "route": {
+   "current_risk_class": 1,
+   "deterministic_signals": {
+    "creation_language": false,
+    "dependency_graph_available": false,
+    "dependency_terms": false,
+    "enhancement_language": false,
+    "known_files_count": 0,
+    "migration_language": false,
+    "multi_part_structure": false,
+    "repo_appears_empty": false,
+    "repro_shape": false,
+    "scope_language": "none",
+    "security_terms": false
+   },
+   "execution_weight": "light",
+   "impact": {
+    "build_system_change": false,
+    "configuration_change": false,
+    "dependency_change": false,
+    "downstream_references": 0,
+    "files_touched": 0,
+    "persistence_change": false,
+    "public_contract_change": false,
+    "security_boundary_change": false,
+    "shared_entrypoint_change": false,
+    "symbols_impacted": 0
+   },
+   "initial_execution_weight": "light",
+   "initial_impact": {
+    "build_system_change": false,
+    "configuration_change": false,
+    "dependency_change": false,
+    "downstream_references": 0,
+    "files_touched": 0,
+    "persistence_change": false,
+    "public_contract_change": false,
+    "security_boundary_change": false,
+    "shared_entrypoint_change": false,
+    "symbols_impacted": 0
+   },
+   "initial_risk_class": 1,
+   "kind": "task",
+   "max_observed_risk_class": 1,
+   "reason_codes": [
+    "no_signals_fired_defaulted_to_task"
+   ],
+   "router_confidence": null,
+   "router_used": false
+  },
+  "run_id": "<run:1>",
+  "subtask_results": [],
+  "type": "WorkflowResult",
+  "verification_report": null
+ },
+ "run_events": [
+  {
+   "events": [
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:0f2f3c9f35e0b6bc",
+     "kind": "egress.authority",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:dcb4d47ac26afa2c",
+     "kind": "evidence.attempt_store",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:7d651dc9bf442516",
+     "kind": "model.runtime",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:ce2159ab4ad8660b",
+     "kind": "model.role_independence",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:a18a7b57c698f386",
+     "kind": "requirement.derived",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:89844e8375dd5fea",
+     "kind": "verification_contract.compiled",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "authoritative",
+     "details": "sha256:857f7c253ea81b16",
+     "kind": "verification_contract.sealed",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "advisory",
+     "details": "sha256:c3402a234962ca57",
+     "kind": "structured_plan_validation",
+     "source": "workflow.legacy_planner_repair"
+    },
+    {
+     "attempt": 0,
+     "authority": "advisory",
+     "details": "sha256:6322b91362528e1c",
+     "kind": "structured_plan_repair_requested",
+     "source": "workflow.legacy_planner_repair"
+    },
+    {
+     "attempt": 0,
+     "authority": "advisory",
+     "details": "sha256:fdf46e9aa69c8b2d",
+     "kind": "structured_plan_repair_result",
+     "source": "workflow.legacy_planner_repair"
+    },
+    {
+     "attempt": 0,
+     "authority": "advisory",
+     "details": "sha256:56a7cab55b11ecf2",
+     "kind": "structured_plan_validation",
+     "source": "workflow.legacy_planner_repair"
+    },
+    {
+     "attempt": 0,
+     "authority": "advisory",
+     "details": "sha256:df1e345ef8e17a1d",
+     "kind": "structured_plan_repair_requested",
+     "source": "workflow.legacy_planner_repair"
+    },
+    {
+     "attempt": 0,
+     "authority": "advisory",
+     "details": "sha256:4dec08b98a00cec3",
+     "kind": "structured_plan_repair_result",
+     "source": "workflow.legacy_planner_repair"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:e52d8bf9ad3f2cf0",
+     "kind": "model.role_metrics",
+     "source": "workflow"
+    }
+   ],
+   "run": "<trace:1>",
+   "status": "planner_output_schema_invalid"
+  }
+ ],
+ "run_records": [
+  {
+   "active_work_unit": null,
+   "approved_plan_hash": null,
+   "base_source_revision": "8cbaf223b56502224788ff90b18262130ca53ebc",
+   "base_tree_hash": "9805afc31ed2dc0dd48bd9cf8eb585340b2f0b28",
+   "candidate_hash": null,
+   "commit_intent": null,
+   "commit_result": "NOT_COMMITTED",
+   "commit_transaction_id": null,
+   "commits": [],
+   "created_at": "<clock>",
+   "effective_config_fingerprint": "<vdigest>",
+   "execution_plan": {
+    "commit_strategy": "incremental_work_unit",
+    "fingerprint": "4e1f0d6216887b277a2ea6a9dd288f5ed4cbfdf950ea32d497f1042c2b806596",
+    "plan_id": "<run:1>",
+    "provenance": {},
+    "schema": 1,
+    "source_kind": "direct",
+    "terminal_phases": [],
+    "work_units": [
+     {
+      "acceptance_criteria": [],
+      "consumes": [],
+      "definition_digest": "0f3c92131d8b5897a3682f7534bdf1adb583e55e2eb989b06ceda5a1ada06d46",
+      "depends_on": [],
+      "goal": "Add a function mul(a, b) returning a * b to calc.py.",
+      "id": "direct",
+      "obligation_refs": [],
+      "provenance": {},
+      "provides": [],
+      "role": "primary",
+      "verification_requirements": []
+     }
+    ]
+   },
+   "goal_hash": "0f3c92131d8b5897a3682f7534bdf1adb583e55e2eb989b06ceda5a1ada06d46",
+   "lifecycle_state": "FAILURE",
+   "milestone_reuse": null,
+   "model_runtime_fingerprint_ids": [],
+   "obligation_ledger_hash": null,
+   "obligation_ledger_revision": null,
+   "recovery": null,
+   "resume_decision": null,
+   "retry_counters": {},
+   "retry_state_reference": null,
+   "revision": 10,
+   "run_id": "<run:1>",
+   "schema_version": 3,
+   "terminal_status": "FAILURE",
+   "updated_at": "<time>",
+   "verification_evidence_ids": [],
+   "work_unit_states": {
+    "direct": {
+     "blocked_by": [],
+     "reason_codes": [
+      "WORK_UNIT_FAILED",
+      "STATUS:planner_output_schema_invalid"
+     ],
+     "status": "FAILED",
+     "work_unit_id": "direct"
+    }
+   },
+   "workspace_identity": "<workspace_id:1>"
+  }
+ ]
+}

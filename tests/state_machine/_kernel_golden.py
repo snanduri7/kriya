@@ -345,6 +345,9 @@ class Outcome:
     extra: Dict[str, Any] = dataclasses.field(default_factory=dict)
     # Keys MEASURED to be volatile in THIS scenario only (e.g. a config fingerprint over a config that names tmp paths).
     volatile_keys: tuple = ()
+    # Values MEASURED to be volatile in THIS scenario only, replaced like the paths (value -> token prefix): an early
+    # exit's result run_id is the 8-hex traces.db row id, which the run_events form tokenizes as "trace".
+    literals: Dict[str, str] = dataclasses.field(default_factory=dict)
 
 
 # Every scenario's terminal path, as the golden header states it (test_sm_kernel_golden checks each golden agrees).
@@ -366,8 +369,28 @@ TERMINAL_PATHS: Dict[str, str] = {
     "milestone_chain_completed": "milestone DAG success (FakeEngine; real commits)",
     "milestone_rerun_reuses_completed": "milestone rerun: completed milestones reused (MATCH)",
     "milestone_resume_after_recovered_crash": "milestone resume after a crash mid-commit and --complete-partial recovery",
+    # E3 characterization (stages 0-3), before the stages left run_generation_workflow
+    "legacy_knowledge_gap": "stage 0 stop: knowledge_gap (unconfirmed KnowledgeGuard gap, before any model call)",
+    "legacy_knowledge_gap_confirmed": "stage 0 gap confirmed: the safety constraints reach the prompts, success",
+    "legacy_stage_context_success": "stage 1 context: a skill rule, a Graph RAG context and a learned reference reach the prompts, success",
+    "legacy_planner_output_incomplete": "stage 2 stop: planner_output_incomplete (empty plan)",
+    "legacy_planner_unauthorized_path": "stage 2 stop: planner_output_unauthorized_path (a planned path outside the workspace)",
+    "legacy_planner_schema_invalid": "stage 2 stop: planner_output_schema_invalid after the bounded structured-plan repairs",
+    "legacy_architect_file_list_rejected": "stage 3 stop: architect_file_list_rejected (every file-list entry escapes)",
+    "legacy_stage2a_dependency_rejected": "stage 2A: a new design dependency rejected by the human raises ValueError",
 }
 GENERATED_FROM = "4eaf610"
+# Scenarios added after E1 name the commit their golden was written from (every E1 golden stays GENERATED_FROM).
+GENERATED_FROM_BY_SCENARIO: Dict[str, str] = {
+    name: "bd3c6d8" for name in (
+        "legacy_knowledge_gap", "legacy_knowledge_gap_confirmed", "legacy_stage_context_success",
+        "legacy_planner_output_incomplete", "legacy_planner_unauthorized_path", "legacy_planner_schema_invalid",
+        "legacy_architect_file_list_rejected", "legacy_stage2a_dependency_rejected")
+}
+
+
+def generated_from(name: str) -> str:
+    return GENERATED_FROM_BY_SCENARIO.get(name, GENERATED_FROM)
 
 
 def capture(outcome: Outcome, tmp_path: Path, name: str = "") -> Dict[str, Any]:
@@ -380,13 +403,14 @@ def capture(outcome: Outcome, tmp_path: Path, name: str = "") -> Dict[str, Any]:
         workspace_identity(outcome.workspace): "workspace_id",
         os.path.realpath(state_dir): "state_dir", state_dir: "state_dir",
         os.path.realpath(str(tmp_path)): "tmp", str(tmp_path): "tmp",
+        **outcome.literals,
     }
     norm = Normalizer(literals, outcome.volatile_keys)
     doc = (SCENARIOS[name].__doc__ or "").strip() if name in SCENARIOS else ""
     form = {
         "_scenario": {
             "name": name, "terminal_path": TERMINAL_PATHS.get(name, ""), "doc": " ".join(doc.split()),
-            "generated_from": GENERATED_FROM,
+            "generated_from": generated_from(name),
             "normalized": "run ids, uuid/transaction ids, ISO times, tmp/state/workspace paths and workspace identity, "
                           "trace row ids -> first-appearance tokens; CLOCK_KEYS -> <clock>; timing-derived digests "
                           "(VOLATILE_DIGEST_KEYS, progress vector, junit file, prompt segments) -> <vdigest>; pytest "
@@ -703,3 +727,209 @@ def milestone_resume_after_recovered_crash(tmp_path: Path) -> Outcome:
         return dict(result, engine_calls=list(engine.calls), recovery_rolled_forward=report.rolled_forward,
                     recovery_errors=list(report.errors)), state
     return _milestones(tmp_path, drive)
+
+
+# ----------------------------------------------------------------------------- stages 0-3 (E3 characterization)
+# Written before E3 moved KnowledgeGuard/analysis/planning/architecture out of run_generation_workflow, from the commit
+# in GENERATED_FROM_BY_SCENARIO. Each run is ISOLATED from the repository's ./skills and ./memory (the E1 scenarios use
+# the AppConfig defaults, so they read them) and runs the KnowledgeGuard offline: its verdict, the skill set and the
+# graph context are then a function of the scenario alone.
+
+STAGE_LIBRARY_GOAL = GOAL + " Use mylib==1.2.3 for it."   # a versioned library with no skill: an offline KnowledgeGuard gap
+STAGE_SKILL = "calc-conventions"
+STAGE_SKILL_RULE = "Name every arithmetic helper with a verb."
+STAGE_GRAPH_CONTEXT = "\n\n=== Scripted Graph RAG Context ===\ncalc.py: def add(a, b), def sub(a, b)\n"
+STAGE_REFERENCE = "Learned: calc helpers return plain numbers."
+
+
+def _escaping_plan() -> str:
+    """A complete structured plan whose one planned file escapes the workspace (PlannedFile path authority)."""
+    structured = {
+        "global_invariants": [{"id": "gi1", "statement": "keep calc.py small"}],
+        "subtasks": [{"id": "s1", "description": "add mul", "execution_method": "model",
+                      "execution_role": "implementation", "depends_on": [],
+                      "planned_files": [{"path": "../outside/calc.py", "action": "modify"}],
+                      "provides": ["mul"], "requires": [], "relevant_global_invariant_ids": ["gi1"],
+                      "acceptance_criteria_ids": ["ac1"], "verification": []}],
+        "acceptance_criteria": [{"id": "ac1", "description": "tests pass", "method": "judgment"}],
+        "extension_points": [], "refactor_baseline": None,
+    }
+    return "Plan: add mul\n```json\n" + json.dumps(structured) + "\n```"
+
+
+def _schema_invalid_plan() -> str:
+    """A complete structured plan whose TOOL subtask names no tool_name (the PLANNER-ROBUST-001 G1 shape)."""
+    structured = json.loads(_escaping_plan().split("```json\n", 1)[1].rsplit("\n```", 1)[0])
+    structured["subtasks"][0]["planned_files"] = [{"path": "calc.py", "action": "modify"}]
+    structured["subtasks"].append({
+        "id": "s2", "description": "verify", "execution_method": "tool", "execution_role": "verification",
+        "depends_on": ["s1"], "planned_files": [], "provides": [], "requires": ["mul"],
+        "relevant_global_invariant_ids": ["gi1"], "acceptance_criteria_ids": ["ac1"],
+        "verification": [{"type": "tool", "description": "run tests", "tool_name": "test"}]})
+    return "Plan: add mul\n```json\n" + json.dumps(structured) + "\n```"
+
+
+def _stage_role_script(llm, *, planner: Callable[[int], str], architect: Callable[[int], str]) -> Dict[str, List[str]]:
+    """Answers by ROLE (system prompt): the Planner's and Architect's n-th answers, the Developer always GOOD (the
+    production sentinel protocol), every other role a neutral PASS. Records each role's call count and each
+    request's text (digested by the capture after normalization: the convention prompt the stages built reaches every
+    role's request)."""
+    from _protocol_responses import sentinel, wants_structured
+
+    seen: Dict[str, List[str]] = {"planner": [], "architect": [], "developer": []}
+
+    async def complete(system_prompt, user_prompt, *args, **kwargs):
+        system_prompt = system_prompt or ""
+        if system_prompt.startswith("You are the Kriya Planner Agent"):
+            seen["planner"].append(user_prompt)
+            return planner(len(seen["planner"]))
+        if system_prompt.startswith("You are the Kriya Architect Agent"):
+            seen["architect"].append(user_prompt)
+            return architect(len(seen["architect"]))
+        if not system_prompt.startswith(_scripted_run.DEVELOPER_PROMPTS):
+            return json.dumps({"verdict": "PASS", "requirements": []})
+        seen["developer"].append(user_prompt)
+        if wants_structured(system_prompt):
+            return sentinel("calc.py", analysis="add mul to calc.py", content=GOOD)
+        return json.dumps([{"filepath": "calc.py", "content": GOOD}])
+    llm.complete = complete
+    return seen
+
+
+def _stage_run(tmp_path: Path, *, goal: str = GOAL, planner: Callable[[int], str] = lambda n: "Step 1: add mul",
+               architect: Callable[[int], str] = lambda n: json.dumps({"files": ["calc.py"]}),
+               configure: Optional[Callable[[Any], None]] = None, approve: bool = True, skills: bool = False,
+               run_kwargs: Optional[Dict[str, Any]] = None, patches: Iterable[Any] = ()) -> Outcome:
+    """One controller (legacy) run of the scenario, isolated; ``extra`` records what the result dict and the E1 form do
+    not show: the step callbacks, every traces.db row's status/failure_category/attempts, the stage checkpoints left in
+    the workspace, and the scripted roles' call counts and prompt digests."""
+    import contextlib
+
+    from _scripted_run import engine, git_workspace
+
+    from kriya.control.checkpoint import list_checkpoints
+    from kriya.core.state_paths import trace_db_path
+    from kriya.workflow.workflow_controller import WorkflowController
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    git_workspace(workspace, {"calc.py": BASE, "test_calc.py": TESTS})
+    skills_dir = tmp_path / "skills"
+    if skills:
+        skill = skills_dir / STAGE_SKILL
+        skill.mkdir(parents=True)
+        (skill / "skill.yaml").write_text(f"name: {STAGE_SKILL}\ndescription: calc conventions\nsupported_versions: \"*\"\n"
+                                          "verified: true\ntags:\n  - calc\n")
+        (skill / "rules.txt").write_text(f"{STAGE_SKILL_RULE}\n")
+        (skill / "instructions.md").write_text("Keep calc.py free of I/O.\n")
+
+    def isolated(cfg):
+        cfg.paths.skills = str(skills_dir)
+        cfg.paths.memory = str(tmp_path / "memory")
+        cfg.skills.load_global = False
+        cfg.skills.load_cwd = False
+        cfg.knowledge.offline_mode = True
+        if configure is not None:
+            configure(cfg)
+    eng, llm, cfg = engine(chain=False, configure=isolated)
+    seen = _stage_role_script(llm, planner=planner, architect=architect)
+    steps: List[Any] = []
+    kwargs = dict(goal=goal, workspace_path=str(workspace), approval_callback=MagicMock(return_value=approve),
+                  step_callback=lambda name, text: steps.append([name, str(text)]),
+                  migration_mode="legacy", **(run_kwargs or {}))
+    with contextlib.ExitStack() as stack:
+        for item in patches:
+            stack.enter_context(item)
+        try:
+            result: Any = asyncio.run(WorkflowController(eng).execute(**kwargs))
+        except Exception as error:   # a stage that raises (Stage 2A rejection): the exception IS the outcome
+            result = {"raised": type(error).__name__, "message": str(error)}
+    rows, trace_ids = [], {}
+    if os.path.isfile(trace_db_path(cfg)):
+        conn = sqlite3.connect(trace_db_path(cfg))
+        conn.row_factory = sqlite3.Row
+        try:
+            for r in conn.execute("SELECT * FROM runs ORDER BY timestamp, rowid"):
+                rows.append({"status": r["status"], "failure_category": r["failure_category"], "attempts": r["attempts"],
+                             "files_modified": r["files_modified"]})
+                trace_ids[str(r["run_id"])] = "trace"
+
+        finally:
+            conn.close()
+    checkpoints = [{"stage": c.get("stage"), "keys": sorted(c)} for c in list_checkpoints(str(workspace))]
+    # MEASURED volatile: the RunRecord's config fingerprint (the config names the tmp skills/memory directories) and
+    # the 8-hex traces.db row id an early exit returns as its run_id.
+    return Outcome(result=result, workspace=str(workspace), cfg=cfg, volatile_keys=("effective_config_fingerprint",),
+                   literals=trace_ids,
+                   extra={"steps": steps, "trace_rows": rows, "checkpoints": checkpoints,
+                          "model_calls": {role: len(calls) for role, calls in seen.items()}, "prompts": seen})
+
+
+@scenario("legacy_knowledge_gap")
+def legacy_knowledge_gap(tmp_path: Path) -> Outcome:
+    """Stage 0: an unconfirmed KnowledgeGuard gap (a versioned library with no skill, offline) stops the unit before
+    any model call: status knowledge_gap, a knowledge_gap traces.db row, no checkpoint."""
+    return _stage_run(tmp_path, goal=STAGE_LIBRARY_GOAL)
+
+
+@scenario("legacy_knowledge_gap_confirmed")
+def legacy_knowledge_gap_confirmed(tmp_path: Path) -> Outcome:
+    """Stage 0/1: the same gap confirmed (knowledge_risk_confirmed=True) runs on to success; the KnowledgeGuard safety
+    constraints are in the convention prompt every Planner/Architect/Developer request carries (prompt digests)."""
+    return _stage_run(tmp_path, goal=STAGE_LIBRARY_GOAL, run_kwargs={"knowledge_risk_confirmed": True})
+
+
+@scenario("legacy_stage_context_success")
+def legacy_stage_context_success(tmp_path: Path) -> Outcome:
+    """Stage 1: a relevant skill (its rule), a Graph RAG context (the retrieval scripted through the
+    ``kriya.workflow.workflow.retrieve_graph_context`` patch point, the index file present) and a learned reference
+    all reach the prompts (digests), and the run succeeds; the active_skills evidence names the skill."""
+    from unittest.mock import AsyncMock, patch
+
+    from kriya.workflow.graph_retrieval import GraphRetrievalResult
+
+    retrieval = GraphRetrievalResult(matched=True, matched_files=["calc.py"], graph_rag_context=STAGE_GRAPH_CONTEXT,
+                                     expansion_seed_reason="scripted", expansion_seed_files=["calc.py"])
+
+    def index(cfg):
+        os.makedirs(cfg.paths.memory, exist_ok=True)
+        open(os.path.join(cfg.paths.memory, "vector_index.db"), "wb").close()
+    return _stage_run(tmp_path, skills=True, configure=index,
+                      run_kwargs={"reference_context": STAGE_REFERENCE},
+                      patches=[patch("kriya.workflow.workflow.retrieve_graph_context", AsyncMock(return_value=retrieval))])
+
+
+@scenario("legacy_planner_output_incomplete")
+def legacy_planner_output_incomplete(tmp_path: Path) -> Outcome:
+    """Stage 2: an empty Planner response is incomplete_truncated: planner_output_incomplete before the Architect, a
+    plan checkpoint left behind."""
+    return _stage_run(tmp_path, planner=lambda n: "")
+
+
+@scenario("legacy_planner_unauthorized_path")
+def legacy_planner_unauthorized_path(tmp_path: Path) -> Outcome:
+    """Stage 2: a complete structured plan naming a path outside the workspace: planner_output_unauthorized_path, never
+    repaired."""
+    return _stage_run(tmp_path, planner=lambda n: _escaping_plan())
+
+
+@scenario("legacy_planner_schema_invalid")
+def legacy_planner_schema_invalid(tmp_path: Path) -> Outcome:
+    """Stage 2: a schema-invalid structured plan, still invalid after every bounded repair:
+    planner_output_schema_invalid with the repair events."""
+    return _stage_run(tmp_path, planner=lambda n: _schema_invalid_plan())
+
+
+@scenario("legacy_architect_file_list_rejected")
+def legacy_architect_file_list_rejected(tmp_path: Path) -> Outcome:
+    """Stage 3: every Architect file-list entry escapes the workspace: architect_file_list_rejected before any
+    Developer call, a design checkpoint left behind."""
+    return _stage_run(tmp_path, architect=lambda n: json.dumps({"files": ["../outside/evil.py"]}))
+
+
+@scenario("legacy_stage2a_dependency_rejected")
+def legacy_stage2a_dependency_rejected(tmp_path: Path) -> Outcome:
+    """Stage 2A: the design names a library the goal did not (a new KnowledgeGuard gap) and the human rejects it: the
+    run raises ValueError before any Developer call."""
+    design = "Use mylib==1.2.3 in calc.py.\n```json\n" + json.dumps({"files": ["calc.py"]}) + "\n```"
+    return _stage_run(tmp_path, architect=lambda n: design, approve=False)

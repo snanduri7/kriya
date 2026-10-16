@@ -126,7 +126,7 @@ CALL_THROUGH: Dict[str, Tuple[Tuple[str, str], ...]] = {
         (A, "_maybe_run_developer_investigation"), (A, "_reject_exception_masking"), (A, "_require_qualified_retry_identity"),
         (A, "_resolve_known_target_member_hints"), (A, "_run_developer_generation"), (A, "defer_execution_until_source_review"),
         (A, "extract_target_test"), (A, "find_runnable_test_files"), (A, "normalize_written_filepath"),
-        (W, "_direct_terminal_writes"), (W, "_gate_outcome_proven"), (W, "_migration_identities"), (W, "_run_committed_paths"),
+        (W, "RepositoryAnalyzer"), (W, "_direct_terminal_writes"), (W, "_gate_outcome_proven"), (W, "_migration_identities"), (W, "_run_committed_paths"),
         (W, "_run_static_analysis_gate"), (W, "assert_candidate_unchanged_since_source_review"),
         (W, "capture_brownfield_baselines"), (W, "close_requirements_by_mutation_scope"),
         (W, "close_requirements_with_derived_examples"), (W, "close_requirements_with_named_tests"),
@@ -171,7 +171,6 @@ NOT_REACHED: Dict[Tuple[str, str], str] = {
     (A, "run_attempt"): "reached only through Best-of-N: its own call-through test below",
     (A, "run_managed_service_verification"): "managed-service runtime verification (disabled)",
     (A, "time"): "a module object (attempt's clock), not a callable seam",
-    (W, "RepositoryAnalyzer"): "repository indexing: the scripted runs have no index stage",
     (W, "RepositoryAnalyzer.index_repository"): "repository indexing: the scripted runs have no index stage",
     (W, "_ensure_repository_indexed"): "repository indexing: the scripted runs have no index stage",
     (W, "_run_contract_acceptance"): "explicit-contract acceptance: needs a requirement contract",
@@ -180,7 +179,9 @@ NOT_REACHED: Dict[Tuple[str, str], str] = {
     (W, "logger"): "a Logger object, not a callable seam (E2 guard: StageDeps.logger, proven by "
                    "tests/test_outcome.py::test_the_moved_lifecycle_code_logs_through_the_engines_patched_logger)",
     (W, "resolve_future_owner_verification_deferral"): "milestone future-owner verification deferral",
-    (W, "retrieve_graph_context"): "graph RAG: needs an indexed repository",
+    (W, "retrieve_graph_context"): "graph RAG: needs an indexed repository (the legacy_stage_context_success golden "
+                                   "scripts the retrieval THROUGH this patch point: a vacuous patch drops its graph "
+                                   "context from the Planner and Architect prompts the golden digests)",
     (C, "ArtifactRegistry.derive_from_workspace"): "artifact-registry derivation: brownfield artifacts",
     (C, "StaticAnalysisService.evaluate_candidate"): "enforce-level static analysis: the scripted runs disable it",
     (C, "collect_unit_grounding"): "unit grounding: needs code-intelligence grounding",
