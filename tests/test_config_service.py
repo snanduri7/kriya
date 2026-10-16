@@ -110,6 +110,15 @@ def test_the_injected_environment_supplies_the_trust_file(folders, tmp_path, mon
     assert _resolve(folders["plain"], fake_logs).log_directory() == (os.path.realpath(str(tmp_path / "fake-logs")), "env")
 
 
+def test_an_explicit_trust_file_argument_is_the_one_load_config_consults_even_with_no_environment_trust_file(folders):
+    """Found by the D3 orchestrator mutant (trust_file dropped on the way to load_config survived every test): the argument, not only the
+    environment, must reach the authority check - a trust file inside the folder is refused, the same folder without one is the authority blocker."""
+    inside = os.path.join(folders["protected"], "trust.json")
+    explicit = ConfigService().resolve(RequestContext.local(folders["protected"]), trust_file=inside)
+    assert explicit.failure["code"] == CONFIG_LOAD_FAILED and "TrustPathInsideWorkspaceError" in explicit.failure["message"]
+    assert _resolve(folders["protected"]).failure["code"] == CONFIG_AUTHORITY_REFUSED, "control: no argument and no environment trust file"
+
+
 def test_the_folder_is_entered_only_under_the_one_lock_and_left_afterwards(folders, monkeypatch):
     from kriya.config import config as config_module
     from kriya.kup import execution
