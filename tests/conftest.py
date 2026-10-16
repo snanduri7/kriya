@@ -295,7 +295,7 @@ MODULE_TIER_FILES = {
     }),
     "evidence": frozenset({
         "test_backend_readiness_004_evidence_tools.py", "test_batch6_live_evidence_status.py",
-        "test_d5b_recovery_evidence.py", "test_fs1a_test_execution_evidence.py", "test_kup_evidence_call_content.py",
+        "test_d5b_recovery_evidence.py", "test_decision_records.py", "test_fs1a_test_execution_evidence.py", "test_kup_evidence_call_content.py",
         "test_kup_evidence_change_content.py", "test_kup_evidence_cli.py", "test_kup_evidence_corruption_matrix.py",
         "test_kup_evidence_manifest.py", "test_kup_evidence_records.py", "test_kup_evidence_verify.py",
         "test_lr_r1_m1_0_inventory.py", "test_lr_r1_m1_attempt_iteration.py", "test_lr_r1_m1_authority_parse.py",
@@ -309,7 +309,7 @@ MODULE_TIER_FILES = {
         "test_model_evidence_hardening_001.py", "test_model_evidence_hardening_final.py",
         "test_planner_candidate_evidence.py", "test_prd011_toolchain_evidence.py", "test_prd025_verifier_evidence.py",
         "test_repair_002_d2_structural_evidence.py", "test_sec002_fail_closed_evidence.py",
-        "test_ver004_pyproject_dependency_evidence.py"
+        "test_ver004_pyproject_dependency_evidence.py", "contracts/test_evidence_state_stores_contract.py"
     }),
     "state": frozenset({
         "test_checkpoint_control_plane_hashes.py", "test_control_artifact_persistence.py",

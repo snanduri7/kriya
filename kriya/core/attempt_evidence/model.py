@@ -54,6 +54,8 @@ KINDS = frozenset({
     "diagnosis",
     "recovery.decision",
     "fallback.decision",
+    # Typed decision records (full modularization D1; decisions.py). No producer emits these yet (F5/G5/H5).
+    "attribution.decision", "retry_target.decision", "candidate_transaction.decision", "budget.decision",
     "tool.execution",
     "retry.delta",
     "mirror.event", "mirror.decision", "mirror.evidence",

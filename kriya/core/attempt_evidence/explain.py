@@ -421,6 +421,32 @@ def _integration_obligations(records: List[Mapping[str, Any]],
     return out
 
 
+# Typed decision records (full modularization D1; kriya/core/attempt_evidence/decisions.py): one section per kind, present only when the
+# store holds a record of that kind, so a store without them explains exactly as before. No producer emits them yet (F5/G5/H5).
+DECISION_SECTIONS: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
+    ("attribution_decisions", "attribution.decision",
+     ("decision", "reason_code", "finding_id", "selected", "considered", "ignored_advisory", "precedence_rule", "inputs_digest")),
+    ("retry_target_decisions", "retry_target.decision",
+     ("decision", "origin", "reason_code", "findings", "selected_files", "read_only_context", "ignored_advisory", "rejected_candidates",
+      "authoritative_locator", "scope_filter", "precedence_rule", "inputs_digest")),
+    ("candidate_transactions", "candidate_transaction.decision",
+     ("decision", "reason_code", "transaction_id", "proposals", "independence", "staged", "refused", "atomic_groups", "staged_identity",
+      "inputs_digest")),
+    ("budget_decisions", "budget.decision",
+     ("decision", "action", "phase", "reason_code", "estimate_seconds", "estimate_source", "provider", "model", "file_count", "view",
+      "inputs_digest")),
+)
+
+
+def _decision_sections(records: List[Mapping[str, Any]]) -> Dict[str, Any]:
+    sections: Dict[str, Any] = {}
+    for label, kind, fields in DECISION_SECTIONS:
+        found = _of(records, kind)
+        if found:
+            sections[label] = [_brief(r, *fields) for r in found]
+    return sections
+
+
 def explain_run(state_dir: str, run_id: str) -> Dict[str, Any]:
     """Answers per attempt (Q1-Q8) and for the run (Q9)."""
     run = reader.open_run(state_dir, run_id)
@@ -448,12 +474,16 @@ def explain_run(state_dir: str, run_id: str) -> Dict[str, Any]:
         actions = _of(attempts[key], "tool.execution")
         if actions:
             entry["tool_execution"] = [_brief(r, "tool_name", "status", "error", "reason_codes") for r in actions]
+        entry.update(_decision_sections(attempts[key]))
         result["attempts"].append(entry)
     phases: "OrderedDict[str, int]" = OrderedDict()
     for record in _of(outside, "model.request"):
         phase = record.get("phase") or "unscoped"
         phases[phase] = phases.get(phase, 0) + 1
     result["calls_outside_attempts"] = dict(phases)
+    outside_decisions = _decision_sections(outside)
+    if outside_decisions:
+        result["decisions_outside_attempts"] = outside_decisions
     result["Q9"] = _answer_run(records, verification.seal, run)
     return result
 
