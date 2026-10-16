@@ -262,6 +262,7 @@ MODULE_TIER_FILES = {
     }),
     "authority": frozenset({
         "test_architecture_regression_index.py", "test_authority_cli_refusal.py", "test_authority_invariants.py", "test_authority_port.py",
+        "test_risk_vocabulary_persistence.py",
         "test_backend_readiness_004_authority_request.py", "test_backend_readiness_v2_gradle_regression.py",
         "test_candidate_verification_binding.py", "test_corr016_planner_authority_gate.py",
         "test_d1_operation_mode_authority.py", "test_d2_validator_attribution_authority.py",

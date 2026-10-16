@@ -31,8 +31,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from kriya.policy.risk import ChangeKind
 from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS, PlannerStructuredOutput
-from kriya.workflow.triage import ChangeKind
 
 logger = logging.getLogger(__name__)
 

@@ -44,8 +44,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from kriya.workflow.process_profile import ProcessProfile
-from kriya.workflow.triage import EngineeringRoute
+from kriya.policy.risk import EngineeringRoute, ProcessProfile
 
 CURRENT_SCHEMA_VERSION = 1
 

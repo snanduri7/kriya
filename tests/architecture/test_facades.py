@@ -7,12 +7,20 @@ declared owner module; every re-exported name is the owner's object. Any
 other statement fails. Every pure re-export module of kriya/ must be listed
 (a facade cannot appear silently), and P1 empties ``FACADES`` (an entry may
 only stay with a written justification, DEPENDENCY-RULES §4.9).
+
+``PARTIAL_FACADES`` (added in C2, because the §4.3 rule cannot express it): a
+module that keeps real logic of its own AND re-exports names that moved to an
+owner (``workflow/triage.py`` keeps ``EngineeringTriageService``, its moved
+vocabulary lives in ``policy/risk.py``). For such a module the moved names, and
+only those, must be top-level ``from <owner> import X as X`` lines, each the
+owner's object, never also defined locally; the source names its removal slice.
+P1 empties it together with ``FACADES``.
 """
 from __future__ import annotations
 
 import ast
 import importlib
-from typing import Dict, List, Mapping, NamedTuple
+from typing import Dict, List, Mapping, NamedTuple, Tuple
 
 import pytest
 
@@ -32,6 +40,48 @@ FACADES: Dict[str, Facade] = {
     "kriya/core/tomlcompat.py": Facade("kriya.foundation.tomlcompat", "P1",
                                        "tomllib shim moved to FOUNDATION in A1; old import path kept"),
 }
+
+
+class PartialFacade(NamedTuple):
+    owner: str               # dotted owner module the moved names come from
+    names: Tuple[str, ...]   # exactly the names re-exported for the old import path
+    removal_slice: str
+    reason: str
+
+
+PARTIAL_FACADES: Dict[str, PartialFacade] = {
+    "kriya/workflow/triage.py": PartialFacade(
+        "kriya.policy.risk",
+        ("ChangeKind", "EngineeringRoute", "ExecutionWeight", "ImpactVector", "RiskClass", "determine_execution_weight"), "P1",
+        "C2: risk/route vocabulary owned by AUTHORITY; EngineeringTriageService stays (kernel); 69 test files import the old path"),
+    "kriya/workflow/process_profile.py": PartialFacade(
+        "kriya.policy.risk", ("ContextDepth", "ExecutionWeight", "ProcessProfile", "VerificationTier"), "P1",
+        "C2: profile vocabulary owned by AUTHORITY; the profile table and process_profile_for stay"),
+}
+
+
+def partial_facade_problems(path: str, tree: ast.Module, source: str, facade: PartialFacade) -> List[str]:
+    problems = []
+    reexported: Dict[str, int] = {}
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == facade.owner:
+            for alias in node.names:
+                if alias.name not in facade.names:
+                    problems.append(f"line {node.lineno}: {alias.name} is imported from the owner but not listed")
+                elif alias.asname != alias.name:
+                    problems.append(f"line {node.lineno}: {alias.name} is not re-exported as itself")
+                else:
+                    reexported[alias.name] = reexported.get(alias.name, 0) + 1
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name in facade.names:
+            problems.append(f"line {node.lineno}: {node.name} is defined here although it moved to {facade.owner}")
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            problems.extend(f"line {node.lineno}: {t.id} is rebound here" for t in targets
+                            if isinstance(t, ast.Name) and t.id in facade.names)
+    problems.extend(f"{name} is not re-exported exactly once" for name in facade.names if reexported.get(name) != 1)
+    if f"Removed in {facade.removal_slice}" not in source:
+        problems.append(f"the source does not name removal slice {facade.removal_slice}")
+    return [f"{path}: {problem}" for problem in problems]
 
 
 def _docstring(tree: ast.Module) -> str:
@@ -111,3 +161,38 @@ def test_the_facade_check_detects_every_forbidden_form():
     assert facade_problems("noslice.py", planted["noslice.py"], facade) == [
         "noslice.py: docstring does not name removal slice P1"]
     assert pure_reexport_modules(planted) == ["good.py", "noslice.py", "other.py"]
+
+
+@pytest.mark.parametrize("path", sorted(PARTIAL_FACADES))
+def test_a_partial_facade_reexports_exactly_its_moved_names_from_the_owner(path):
+    facade = PARTIAL_FACADES[path]
+    source = (mm.REPO / path).read_text(encoding="utf-8")
+    assert partial_facade_problems(path, mm.trees()[path], source, facade) == []
+    assert facade.removal_slice in SLICES and facade.removal_slice not in DONE_SLICES and facade.reason
+    module, owner = importlib.import_module(mm.module_name(path)), importlib.import_module(facade.owner)
+    assert all(getattr(module, name) is getattr(owner, name) for name in facade.names)
+    assert path not in FACADES and path not in pure_reexport_modules(mm.trees())   # it keeps real logic: not a pure facade
+
+
+def test_the_partial_facade_check_detects_every_forbidden_form():
+    facade = PartialFacade("kriya.foundation.x", ("a",), "P1", "r")
+    sources = {
+        "good.py": "# Removed in P1\nfrom kriya.foundation.x import a as a\ndef logic():\n    return a\n",
+        "alias.py": "# Removed in P1\nfrom kriya.foundation.x import a\n",
+        "extra.py": "# Removed in P1\nfrom kriya.foundation.x import a as a\nfrom kriya.foundation.x import b as b\n",
+        "redefined.py": "# Removed in P1\nfrom kriya.foundation.x import a as a\nclass a:\n    pass\n",
+        "rebound.py": "# Removed in P1\nfrom kriya.foundation.x import a as a\na = 1\n",
+        "missing.py": "# Removed in P1\nimport os\n",
+        "noslice.py": "from kriya.foundation.x import a as a\n",
+    }
+    trees = mm.parse_sources(sources)
+    found = {name: partial_facade_problems(name, trees[name], sources[name], facade) for name in sources}
+    assert found == {
+        "good.py": [],
+        "alias.py": ["alias.py: line 2: a is not re-exported as itself", "alias.py: a is not re-exported exactly once"],
+        "extra.py": ["extra.py: line 3: b is imported from the owner but not listed"],
+        "redefined.py": ["redefined.py: line 3: a is defined here although it moved to kriya.foundation.x"],
+        "rebound.py": ["rebound.py: line 3: a is rebound here"],
+        "missing.py": ["missing.py: a is not re-exported exactly once"],
+        "noslice.py": ["noslice.py: the source does not name removal slice P1"],
+    }

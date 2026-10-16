@@ -34,7 +34,7 @@ SLICES = frozenset(
     + [f"D{i}" for i in range(1, 4)] + [f"E{i}" for i in range(1, 15)] + [f"F{i}" for i in range(1, 6)]
     + [f"G{i}" for i in range(1, 6)] + [f"H{i}" for i in range(1, 6)] + [f"I{i}" for i in range(1, 5)]
     + ["J1", "J2", "K1", "K2", "L1", "L2", "M1", "M2", "M3", "N1", "N2", "O1", "O2", "O3", "P1", "P2", "Q1", "Q2"])
-DONE_SLICES = frozenset({"A1", "A2", "A3", "B1", "B2", "B3", "B4", "C1"})
+DONE_SLICES = frozenset({"A1", "A2", "A3", "B1", "B2", "B3", "B4", "C1", "C2"})
 
 # CURRENT-DEPENDENCY-MAP.md §3, the back-edges into kriya/workflow that close
 # the big cycle (TRACED to the import line there; MEASURED here): (source,
@@ -53,15 +53,10 @@ BACK_EDGES: Tuple[Tuple[str, str, bool], ...] = (
     ("kriya.control.retention", "kriya.workflow.milestone_completion", False),
     ("kriya.control.launch_approval", "kriya.workflow.edit_safety", False),
     ("kriya.control.launch_approval", "kriya.workflow.runtime_command_approval", True),
-    ("kriya.control.state", "kriya.workflow.process_profile", False),
-    ("kriya.control.state", "kriya.workflow.triage", False),
     ("kriya.control.telemetry", "kriya.workflow.checkpoint", False),
     ("kriya.control.telemetry", "kriya.workflow.context_package", False),
     ("kriya.control.run_coordinator", "kriya.workflow.checkpoint", True),
     ("kriya.policy.filesystem", "kriya.workflow.edit_safety", False),
-    ("kriya.policy.model", "kriya.workflow.process_profile", False),
-    ("kriya.policy.model", "kriya.workflow.triage", False),
-    ("kriya.policy.execution", "kriya.workflow.triage", False),
     ("kriya.static_analysis.operator_scan", "kriya.workflow.edit_safety", False),
     ("kriya.static_analysis.operator_scan", "kriya.workflow.file_integrity", False),
     ("kriya.static_analysis.scope", "kriya.workflow.file_integrity", False),
@@ -74,7 +69,6 @@ BACK_EDGES: Tuple[Tuple[str, str, bool], ...] = (
 
 # (source module, target module) -> (removal slice, reason). Generated from
 # the measured violations at slice A1 and edited only by deleting entries.
-_C2 = "risk/route vocabulary moves to policy.risk"
 _C3 = "approval helpers move to policy.approval / egress takes the client identity"
 _M1 = "file write/commit mechanism moves to REPOSITORY"
 _D2 = "checkpoint/trace/history owned by STATE; kernel inputs passed as parameters"
@@ -215,8 +209,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.control.retention", "kriya.workflow.milestone_completion"): ("D2", _D2),  # direction STATE -> KERNEL
     ("kriya.control.run_coordinator", "kriya.core.logging_setup"): ("P2", _P2),  # non-public CONFIG module
     ("kriya.control.run_coordinator", "kriya.workflow.checkpoint"): ("D2", _D2),  # direction STATE -> KERNEL
-    ("kriya.control.state", "kriya.workflow.process_profile"): ("C2", _C2),  # direction STATE -> KERNEL
-    ("kriya.control.state", "kriya.workflow.triage"): ("C2", _C2),  # direction STATE -> KERNEL
     ("kriya.control.telemetry", "kriya.workflow.checkpoint"): ("D2", _D2),  # direction STATE -> KERNEL
     ("kriya.control.telemetry", "kriya.workflow.context_package"): ("D2", _D2),  # direction STATE -> KERNEL
     ("kriya.core", "kriya.core.registry"): ("P2", _P2),  # non-public TOOLBOX module
@@ -278,10 +270,7 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.metrics.thresholds", "kriya.config.authority_approval"): ("P2", _P2),  # direction METRICS -> AUTHORITY
     ("kriya.plugins.plugin", "kriya.core.kernel"): ("P2", _P2),  # direction TOOLBOX -> KERNEL
     ("kriya.policy.execution", "kriya.core.llm"): ("C3", _C3),  # direction AUTHORITY -> PROVIDER
-    ("kriya.policy.execution", "kriya.workflow.triage"): ("C2", _C2),  # direction AUTHORITY -> KERNEL
     ("kriya.policy.filesystem", "kriya.workflow.edit_safety"): ("M1", _M1),  # direction AUTHORITY -> KERNEL
-    ("kriya.policy.model", "kriya.workflow.process_profile"): ("C2", _C2),  # direction AUTHORITY -> KERNEL
-    ("kriya.policy.model", "kriya.workflow.triage"): ("C2", _C2),  # direction AUTHORITY -> KERNEL
     ("kriya.production_doctor", "kriya.agents.response_protocol"): ("N1", _N1),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.production_doctor", "kriya.analyzer.analyzer"): ("N1", _N1),  # direction ADAPTER-CLI -> RETRIEVAL
     ("kriya.production_doctor", "kriya.control.run_ownership"): ("N1", _N1),  # direction ADAPTER-CLI -> STATE

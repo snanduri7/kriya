@@ -6,8 +6,8 @@ vocabulary, and the two frozen request/result dataclasses that carry facts
 between a call site and ExecutionPolicy.evaluate() (MA4.2, not yet added in
 this module). No engine, no rules, no wiring into any real call site, no
 behavior change - this module is pure data, importable with zero side
-effects and zero new dependencies beyond kriya.workflow.triage and
-kriya.workflow.process_profile's own existing domain types.
+effects and zero new dependencies beyond the risk/route/profile domain types
+(kriya/policy/risk.py since C2; kriya.workflow.triage/process_profile before).
 """
 
 import hashlib
@@ -16,8 +16,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping, Optional, Tuple
 
-from kriya.workflow.process_profile import ProcessProfile
-from kriya.workflow.triage import EngineeringRoute
+from kriya.policy.risk import EngineeringRoute, ProcessProfile
 
 
 class PolicyDecision(str, Enum):

@@ -75,7 +75,7 @@ MODULES: Dict[str, Module] = {
                      "kriya/workflow/authority_escalation.py", "kriya/mcp/invocation_approval.py",
                      "kriya/mcp/capability.py"),
         public=("kriya.policy", "kriya.policy.authority", "kriya.policy.execution", "kriya.policy.filesystem",
-                "kriya.policy.egress", "kriya.policy.approval", "kriya.config.authority"),
+                "kriya.policy.egress", "kriya.policy.approval", "kriya.policy.risk", "kriya.config.authority"),
         layer=2),
     "STATE": Module(
         owner_paths=("kriya/control/", "kriya/core/state_paths.py", "kriya/core/trace.py"),

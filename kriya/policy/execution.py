@@ -73,7 +73,7 @@ from kriya.policy.model import (
     PolicyDecision,
     PolicyResult,
 )
-from kriya.workflow.triage import ExecutionWeight, RiskClass
+from kriya.policy.risk import ExecutionWeight, RiskClass
 
 # MA4.4 - deliberately small starter allowlist (design doc section 18: "start
 # small... do not try to support every shell command in MA4"). Matched by

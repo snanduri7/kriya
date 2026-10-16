@@ -7,7 +7,8 @@ MA2.1 scope only: the domain model and one pure resolver,
 process_profile_for(execution_weight). No wiring into WorkflowEngine yet
 (that starts at MA2.3) - this module has no dependency on workflow.py,
 kernel, config, or anything else in this run's plumbing. It depends on
-nothing but kriya.workflow.triage.ExecutionWeight.
+nothing but kriya.policy.risk (ExecutionWeight; and, since C2, its own three
+types, which moved there).
 
 Architectural guardrail, load-bearing for every later MA2 task: this
 resolver takes ONLY execution_weight, never `kind`. Context breadth,
@@ -29,79 +30,12 @@ ProcessProfile must never claim a capability Kriya doesn't actually have yet
 before.
 """
 
-from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Dict
-
-from kriya.workflow.triage import ExecutionWeight
-
-
-class ContextDepth(str, Enum):
-    """How far context retrieval reaches - not where it starts (that's a
-    `kind`/strategy question, handled entirely within triage.py and, later,
-    the retrieval code itself - see this module's own guardrail above)."""
-
-    NARROW = "narrow"
-    DEPENDENCY_AWARE = "dependency_aware"
-    IMPACT_WIDE = "impact_wide"
-
-
-class VerificationTier(str, Enum):
-    """Recorded on every profile regardless of whether Kriya's verification
-    machinery can actually act on the distinction yet - see MA2.7's own
-    scope note (session history): HEAVY is telemetry-true before it's
-    behavior-true, and that gap must stay visible, never silently
-    papered over by claiming a tier of rigor that isn't real yet."""
-
-    LIGHT = "light"
-    STANDARD = "standard"
-    HEAVY = "heavy"
-
-
-@dataclass(frozen=True)
-class ProcessProfile:
-    """Immutable - one execution_weight always resolves to exactly the same
-    ProcessProfile (process_profile_for is a pure lookup, not a stateful
-    decision), so two callers holding the same weight can never disagree
-    about what it implies."""
-
-    execution_weight: ExecutionWeight
-
-    context_depth: ContextDepth
-
-    planning_required: bool
-    structured_subtasks_required: bool
-    impact_revalidation_required: bool
-    contract_analysis_required: bool
-
-    full_test_suite_required: bool
-    human_review_required: bool
-    auto_merge_allowed: bool
-
-    verification_tier: VerificationTier
-
-    def to_dict(self) -> Dict[str, Any]:
-        """MA2.6b - content-free telemetry shape, same convention as
-        EngineeringRoute.to_dict() (kriya/workflow/triage.py). Always
-        includes heavy_extended_checks_not_yet_available, computed here
-        rather than left to each call site to remember - "HEAVY records
-        which future extended checks are not yet available" (MA2.6b's own
-        Definition-of-Done line) is guaranteed by construction, not by
-        convention."""
-        return {
-            "execution_weight": self.execution_weight.value,
-            "context_depth": self.context_depth.value,
-            "planning_required": self.planning_required,
-            "structured_subtasks_required": self.structured_subtasks_required,
-            "impact_revalidation_required": self.impact_revalidation_required,
-            "contract_analysis_required": self.contract_analysis_required,
-            "full_test_suite_required": self.full_test_suite_required,
-            "human_review_required": self.human_review_required,
-            "auto_merge_allowed": self.auto_merge_allowed,
-            "verification_tier": self.verification_tier.value,
-            "heavy_extended_checks_not_yet_available": self.verification_tier == VerificationTier.HEAVY,
-        }
-
+# C2 (full modularization): ContextDepth, VerificationTier and ProcessProfile are owned by kriya/policy/risk.py and re-exported
+# here unchanged (the same objects); the profile table and its resolver stay. Removed in P1.
+from kriya.policy.risk import ContextDepth as ContextDepth
+from kriya.policy.risk import ExecutionWeight as ExecutionWeight
+from kriya.policy.risk import ProcessProfile as ProcessProfile
+from kriya.policy.risk import VerificationTier as VerificationTier
 
 LIGHT_PROFILE = ProcessProfile(
     execution_weight=ExecutionWeight.LIGHT,
