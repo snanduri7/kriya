@@ -173,6 +173,7 @@ STATE_MACHINE_TIER_FILES = frozenset({
     "test_retry_policy.py", "test_prd026_retry_progress.py", "test_workflow_recovery_handback.py",
     "test_failure_signature_run_noise.py", "test_prd031_coordinators.py", "test_best_of_n.py",
     "test_prd017_fallback_transition.py",
+    "test_attempt_lifecycle.py",  # E5: the Developer loop's typed attempt plan and iteration lifecycle
     # resume / invalidation
     "test_prd008_resume_fingerprints.py", "test_prd008a_resume_convergence.py", "test_resume_integrity.py",
     "test_prd008_recovery.py",
@@ -220,6 +221,7 @@ MODULE_TIER_FILES = {
         "test_work_unit_stages.py",  # E3: the design stages (0-3) and their runner; E4: the review/apply/lesson stages
         "test_early_exit_traces.py",  # E4: the run-opening early exits and their short traces.db rows (OI-32)
         "test_development_loop.py",  # E5: the Developer + Quality Gates loop (stage 4) and its seam
+        "test_attempt_lifecycle.py",  # E5: the attempt plan (== retry_policy.decide_for_state) and the iteration lifecycle
         "test_p2_compile_regression_attribution.py", "test_p2_regression_attribution_reproducer.py",
         "test_p3c_prose_candidate_delta.py", "test_plan_edit_feasibility_001.py", "test_plan_executability.py",
         "test_plan_external_package_capability_001.py", "test_plan_global_invariant_projection_001.py",

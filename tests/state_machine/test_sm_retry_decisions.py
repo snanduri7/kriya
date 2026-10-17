@@ -30,6 +30,10 @@ R10 the fallback's allowance in the ceiling belongs to the fallback
     retry_count 1, which every recorded failure reaches) - and only
     after the recovery rules; with the allowance used, or no fallback, or
     capacity above it, the ordinary rules decide.
+R11 the Developer loop's head plan (attempt_lifecycle.plan_attempt, E5) IS
+    the loop decision on every state - continue/stop, action and reserved
+    fallback - and its mode is the decided family (VERIFICATION_ONLY for a
+    verification-only unit) whenever the loop continues, None when it stops.
 """
 import itertools
 from types import SimpleNamespace
@@ -181,6 +185,28 @@ def test_the_attempt_mode_is_the_loop_decision_whenever_the_loop_continues():
             state.attempt_number += 1  # run_attempt increments before deciding its mode
             mode = decide_attempt_mode(state, **policy)
             assert (mode.action, mode.reserved_fallback) == (loop.action, loop.reserved_fallback), s
+
+
+def test_the_loop_head_plan_is_the_loop_decision_on_every_state():
+    """R11, from run state, over the whole domain (every stop included)."""
+    from kriya.workflow.attempt_lifecycle import AttemptMode, plan_attempt
+
+    checked = 0
+    for s in _domain():
+        state = _state(s)
+        policy = dict(max_retries=M, targeted_max_retries=T, has_fallback_model=s["has_fallback_model"])
+        loop = decide_for_state(state, **policy)
+        for verification_only in (False, True):
+            plan = plan_attempt(state, **policy, verification_only=verification_only, best_of_n=1, sandboxed=True)
+            assert plan.decision == loop and plan.should_continue is loop.should_continue, s
+            if not loop.should_continue:
+                assert plan.mode is None, s
+            elif verification_only:
+                assert plan.mode is AttemptMode.VERIFICATION_ONLY, s
+            else:
+                assert plan.mode.value == loop.action.value and plan.reserved_fallback is loop.reserved_fallback, s
+            checked += 1
+    assert checked == 2 * 41_472
 
 
 # --- bookkeeping -----------------------------------------------------------------------

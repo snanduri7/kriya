@@ -8,10 +8,11 @@ Moved verbatim from ``WorkflowEngine.run_generation_workflow`` (``kriya/workflow
   FILE-INTEGRITY-CONTRACT-001 sync refusal, the run's obligation ledger (resume restore, requirement seeds, contract
   non-claims and dispositions, ownership findings), its deterministic-failure diagnostics store and the
   loop-invariant ``AttemptContext``;
-- ``run_attempt_loop``: the retry loop - ``retry_policy.decide_for_state`` decides every continue/stop, each
-  iteration resets the per-candidate state, runs one attempt (Best-of-N on the first one when configured) inside the
-  LR-R1-M1 attempt-evidence iteration scope, and routes a failed attempt (``RecoveryPhaseAdvanced``, a Best-of-N
-  recorded failure, any other failure to ``retry_strategy.handle_attempt_failure``);
+- ``run_attempt_loop``: the retry loop - its head's typed ``AttemptPlan`` (``attempt_lifecycle.plan_attempt``:
+  ``retry_policy.decide_for_state`` decides every continue/stop) and one ``attempt_lifecycle.run_iteration`` per
+  admitted attempt (the per-candidate resets, the LR-R1-M1 attempt-evidence iteration scope, one attempt - Best-of-N on
+  the first one when configured -, the candidate's acceptance, and a failed attempt's routing: ``RecoveryPhaseAdvanced``,
+  a Best-of-N recorded failure, any other failure to ``retry_strategy.handle_attempt_failure``);
 - ``accept_candidate``: the attempt's candidate through the pre-apply success boundary up to the terminal apply and
   the lessons (the review, approval/apply and lesson bodies themselves are ``stage_review`` / ``stage_apply``, E4);
 - ``run_terminal_regression``: the terminal gate (full regression with the baselines' attribution, the future-owner
@@ -39,12 +40,12 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 from kriya.control.run_coordinator import mark_run_stage
 from kriya.control.run_record import RunLifecycle
-from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.state_paths import trace_db_path
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.tools.validate import PolymorphicValidator, execution_evidence
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
 from kriya.workflow.architectural_choice import architecture_choice_invalidated_message
+from kriya.workflow.attempt_lifecycle import IterationEnd, plan_attempt, run_iteration
 from kriya.workflow.banners import log_quality_gate_banner
 from kriya.workflow.compile_regression import attribute_compile_regression
 from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
@@ -73,6 +74,7 @@ from kriya.workflow.validation_baseline import (
     regression_unattributed_diagnosis,
     render_blocking_regression_evidence,
 )
+from kriya.workflow.verification_coordinator import is_verification_only_unit
 from kriya.workflow.worktree import WorktreeSyncError
 
 RunState = Any   # kriya.workflow.state.GenerationState (kriya/workflow/stage_context.py says why it is not imported)
@@ -574,95 +576,36 @@ async def prepare_development(ctx: StageContext, deps: StageDeps) -> Union[Dict[
 
 
 async def run_attempt_loop(ctx: StageContext, deps: StageDeps, run: DevelopmentRun) -> Optional[Dict[str, Any]]:
-    """Stage 4's retry loop: while ``retry_policy.decide_for_state`` admits another attempt, one Developer + Quality
-    Gates attempt (Best-of-N on the first one when configured) and, when it passes, ``accept_candidate``; a failed
-    attempt goes to ``retry_strategy.handle_attempt_failure``. A dict is the run's result (the approval gate's abort);
-    None = the loop ended (applied, or every budget spent)."""
+    """Stage 4's retry loop: while the loop head's ``AttemptPlan`` (``attempt_lifecycle.plan_attempt``: the
+    ``retry_policy.decide_for_state`` decision, typed) admits another attempt, one iteration
+    (``attempt_lifecycle.run_iteration``): the planned Developer + Quality Gates attempt (Best-of-N on the first one when
+    configured) and, when it passes, ``accept_candidate``; a failed attempt goes to
+    ``retry_strategy.handle_attempt_failure``. A dict is the run's result (the approval gate's abort); None = the loop
+    ended (applied, or every budget spent)."""
     logger = deps.logger
     state, workspace_path = ctx.state, ctx.workspace_path
     attempt_ctx, worktree_path, chain = run.attempt_ctx, run.worktree_path, run.chain
     max_retries, TARGETED_MAX_RETRIES = run.max_retries, run.targeted_max_retries
     fallback_routing_for_state = deps.load_fallback_routing()
-    from kriya.workflow.retry_policy import decide_for_state
-    while decide_for_state(
+    while (plan := plan_attempt(
         state, max_retries=max_retries,
         targeted_max_retries=TARGETED_MAX_RETRIES,
         has_fallback_model=fallback_routing_for_state(state, deps.config, chain, worktree_path).available,
-    ).should_continue:
-        # Reset once per loop iteration, unconditionally - NOT just inside the "4.5"
-        # section below. Independent review (2026-08-15) found the narrower reset
-        # placement genuinely insufficient: run_attempt() (called just below) raises
-        # QualityGateFailure directly from many sites (compile-check, targeted-test,
-        # anchored-edit failures) that jump straight to this loop's `except` handler,
-        # skipping "4.5" entirely for that iteration. If THAT failure is what
-        # ultimately ends the loop (an immediate environment_failure break, or
-        # ordinary retry-budget exhaustion), a stale review from an EARLIER,
-        # now-superseded attempt that DID reach "4.5" would otherwise survive and get
-        # returned as if it described the final (failing) attempt's content - a
-        # concretely reproduced bug, not a theoretical one. Resetting here, before
-        # run_attempt() is even called, guarantees no exception path can skip it.
-        state.pre_approval_review = None
-        state.verified_candidate_binding = None
-        attempt_ctx.deferred_executing_gates = None
-        attempt_ctx.post_source_review_guard = None
-        # LR-R1-M1: the whole iteration is the attempt's evidence identity
-        # (observational; reset in this try's finally).
-        attempt_evidence_token = attempt_evidence_scope.enter_attempt_iteration(lambda: state.attempt_number)
-        try:
-            # Best-of-N only ever applies to the very first attempt of a run
-            # (state.attempt_number == 0 going in - resumed checkpoints also
-            # start here, but short-circuit to a trivial success on the first
-            # call, so they're unaffected), and only when a real isolated
-            # worktree sandbox actually exists (worktree_path != workspace_path)
-            # - without one, "discarding a candidate" has nothing to reset and
-            # would leave that candidate's files on the real project.
-            best_of_n = deps.config.autonomy.best_of_n_first_attempt
-            if state.attempt_number == 0 and best_of_n > 1 and worktree_path != workspace_path:
-                run_attempt_with_best_of_n = deps.load_best_of_n()
-                await run_attempt_with_best_of_n(state, attempt_ctx, n=best_of_n)
-            else:
-                await deps.run_attempt(state, attempt_ctx)
-            # Stages 4.x-7 on the candidate this attempt produced (accept_candidate below): None = applied, the loop
-            # ends; a dict = the run stops here with that result (the approval gate's abort).
-            approval_stop = await accept_candidate(ctx, deps, run)
-            if approval_stop is not None:
-                return approval_stop
+        verification_only=is_verification_only_unit(attempt_ctx.write_scope_mode, attempt_ctx.required_verification),
+        best_of_n=deps.config.autonomy.best_of_n_first_attempt, sandboxed=worktree_path != workspace_path,
+    )).should_continue:
+        outcome = await run_iteration(
+            plan, state, attempt_ctx, run_attempt=deps.run_attempt, load_best_of_n=deps.load_best_of_n,
+            # Stages 4.x-7 on the candidate this attempt produced: None = applied, the loop ends; a dict = the run
+            # stops here with that result (the approval gate's abort).
+            accept=lambda: accept_candidate(ctx, deps, run),
+            handle_attempt_failure=deps.handle_attempt_failure, phase_advanced=deps.RecoveryPhaseAdvanced,
+            best_of_n_recorded=deps.BestOfNFailureRecorded, logger=logger,
+        )
+        if outcome.end is IterationEnd.RESULT:
+            return outcome.result
+        if outcome.end is not IterationEnd.RETRY:
             break
-
-        except deps.RecoveryPhaseAdvanced as transition:
-            # A verified state-machine transition is progress, not a failed
-            # quality-gate attempt. It still consumes the dedicated model
-            # attempt budget, but must not enter generic failure routing or
-            # append a historical FAILED outcome.
-            state.budgets.api_contract_recovery_count += 1
-            state.record_event(RunEvent(
-                kind="api_contract_recovery.phase_advanced",
-                attempt=state.attempt_number,
-                source="ownership_gate",
-                authority=EventAuthority.AUTHORITATIVE,
-                message=str(transition),
-                details={
-                    "source_phase": transition.source,
-                    "target_phase": transition.target,
-                    "passed": True,
-                },
-            ))
-            logger.info(
-                "API_CONTRACT_RECOVERY TRANSITION PASSED - Attempt %d: %s",
-                state.attempt_number, transition,
-            )
-            continue
-        except deps.BestOfNFailureRecorded as recorded:
-            # Already recorded by best-of-N (STATE-BEST-OF-N-HANDOFF-001):
-            # act on its decision, never record the failure again.
-            if recorded.stop_loop:
-                break
-        except Exception as e:
-            if await deps.handle_attempt_failure(state, attempt_ctx, e):
-                break
-        finally:
-            attempt_evidence_scope.exit_attempt_iteration(
-                attempt_evidence_token, succeeded=state.overall_attempt_succeeded)
     return None
 
 

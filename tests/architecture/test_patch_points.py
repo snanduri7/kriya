@@ -266,8 +266,8 @@ KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_life
                         "kriya.workflow.stage_architecture",
                         # E4: the review, approval/apply and lesson stages and the requirement closers
                         "kriya.workflow.stage_review", "kriya.workflow.stage_apply", "kriya.workflow.requirement_closers",
-                        # E5: the Developer loop (stage 4)
-                        "kriya.workflow.development_loop")
+                        # E5: the Developer loop (stage 4) and one iteration's typed lifecycle
+                        "kriya.workflow.development_loop", "kriya.workflow.attempt_lifecycle")
 FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
 
 
