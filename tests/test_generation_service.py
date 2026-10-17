@@ -363,6 +363,24 @@ def test_the_graph_section_rebuilds_without_the_excluded_paths(tmp_path):
     assert section.kind == "graph_context" and "ONLY-IN-GRAPH" in rebuilt and "SHOWN-ELSEWHERE" not in rebuilt
 
 
+def test_the_graph_section_rebuilds_from_the_matched_and_the_related_candidates_each_in_its_own_place(tmp_path):
+    """DEVELOPER-PROMPT-FIT-001 (orchestrator, after E6; orchestrator mutant g3 survived): the rebuilt graph section
+    passes the matched candidates and the related candidates to the code-context builder in that order, so a file only
+    the related list names appears in the rebuilt text exactly as it does when the section is first built."""
+    from types import SimpleNamespace
+
+    from kriya.workflow import attempt
+    from kriya.workflow.context_source import SourceDerivationCache
+
+    (tmp_path / "m.py").write_text("def matched_fn():\n    return 'MATCHED-MARK'\n")
+    (tmp_path / "r.py").write_text("def related_fn():\n    return 'RELATED-MARK'\n")
+    ctx = SimpleNamespace(planned_source_files=(), worktree_path=str(tmp_path), source_cache=SourceDerivationCache(),
+                          matched_files=["m.py"], related_files=["r.py"])
+    (section,) = attempt._developer_optional_sections(ctx, "graph context text", set(), "")
+    rebuilt = section.rebuild(4000)
+    assert "MATCHED-MARK" in rebuilt and "RELATED-MARK" in rebuilt
+
+
 def test_the_investigation_gets_the_failure_grounded_member_hints_and_its_events_are_recorded(tmp_path, monkeypatch):
     """DEV-INV-001 (written at dd8a980; pre-move mutants I05, I09 and I11 survived): the loop is told which member the
     last failure grounds in each declared target (SOURCE 2, _resolve_retry_member_hints) and only the turns this
