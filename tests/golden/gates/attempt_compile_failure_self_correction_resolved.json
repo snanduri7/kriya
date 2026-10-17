@@ -1,0 +1,132 @@
+{
+ "events": [
+  {
+   "attempt": 1,
+   "authority": "auxiliary",
+   "details": {},
+   "failure_type": "edit_refused",
+   "kind": "auxiliary.failed",
+   "message": "one turn refused",
+   "operation": "repair_with_patch",
+   "source": "self_correction"
+  },
+  {
+   "attempt": 1,
+   "authority": "authoritative",
+   "details": {
+    "passed": true,
+    "terminal": false
+   },
+   "failure_type": null,
+   "kind": "candidate_gates.passed",
+   "message": "",
+   "operation": null,
+   "source": "workflow"
+  }
+ ],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "output": "fixed output: 3 passed",
+   "self_corrected": true,
+   "self_correction_transcript": [
+    {
+     "action": "patched calc.py",
+     "turn": 1
+    }
+   ],
+   "self_correction_turns": 2,
+   "success": true,
+   "type": "compile"
+  }
+ ],
+ "outcome": "returned",
+ "seams": [
+  {
+   "active_code_context": "ACTIVE CODE CONTEXT",
+   "authorized_semantic_regions": [
+    {
+     "member_key": "calc.py::mul",
+     "relpath": "calc.py"
+    }
+   ],
+   "baseline_contents": {
+    "calc.py": "def add(a, b):\n    return a + b\n"
+   },
+   "compile_error_output": "Syntax error in calc.py line 4: invalid syntax\nsrc/Sibling.java:[3,1] error: cannot find symbol\nGhost.java:[9,5] error: cannot find symbol\n",
+   "files_in_scope": [
+    "calc.py",
+    "lib.py"
+   ],
+   "llm_is_the_developers": true,
+   "max_turns": 3,
+   "request_capacity": {
+    "bytes_per_token": null,
+    "non_ascii_bytes_per_token": null,
+    "tokenizer_digest": null,
+    "tokens": 28384
+   },
+   "seam": "run_self_correction_loop",
+   "strict_existing_java_files": true,
+   "validator": 0,
+   "worktree_path": "<wt:1>",
+   "writable_files": [
+    "calc.py",
+    "lib.py"
+   ]
+  }
+ ],
+ "state": {
+  "api_contract_recovery": null,
+  "cached_run_verification_basis_hash": false,
+  "cached_run_verification_judgment": null,
+  "candidate_gates_succeeded": true,
+  "java_home_override": null,
+  "ledger": null,
+  "plan_scope_conflict": null,
+  "toolchain_checked": true,
+  "toolchain_warning": null,
+  "validated_file_revisions": {
+   "calc.py": "0825f76e4924c2e610b2ac94d5f2cc4d708272ee7bded5f40955d62e19b18871"
+  },
+  "validator_timings": [
+   [
+    "compile",
+    false,
+    true
+   ]
+  ]
+ },
+ "validators": [
+  {
+   "authorized_dependency_removals": [],
+   "autonomy_cfg": "the kernel's",
+   "call": "construct",
+   "java_home_override": null,
+   "original_workspace_path": "<ws:1>",
+   "toolchain_declaration_mutable": true,
+   "validator": 0,
+   "workspace_path": "<wt:1>"
+  },
+  {
+   "call": "set_java_home_override",
+   "validator": 0,
+   "value": null
+  },
+  {
+   "args": [],
+   "call": "tree_binding.check",
+   "name": "pre_compile"
+  },
+  {
+   "call": "compile",
+   "files": [
+    "calc.py",
+    "lib.py"
+   ],
+   "java_home_override": null,
+   "tree_binding": "the attempt's",
+   "validator": 0
+  }
+ ]
+}

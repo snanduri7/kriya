@@ -1,0 +1,166 @@
+{
+ "events": [
+  {
+   "attempt": 1,
+   "authority": "auxiliary",
+   "details": {},
+   "failure_type": "edit_refused",
+   "kind": "auxiliary.failed",
+   "message": "one turn refused",
+   "operation": "repair_with_patch",
+   "source": "self_correction"
+  }
+ ],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "output": "compile ok: 3 passed",
+   "success": true,
+   "toolchain_identity": {
+    "image": "scripted-compile"
+   },
+   "type": "compile"
+  },
+  {
+   "attempt": 1,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "TEST_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [],
+   "failed_content": {},
+   "file_locations": [],
+   "likely_files": [],
+   "milestone_id": null,
+   "mode": null,
+   "output": "FAILED test_calc.py::test_add - assert 4 == 3\n1 failed in <t>s",
+   "plan_id": null,
+   "planned_files": [],
+   "self_correction_attempt": {
+    "final_validation_output": "fixed output: 3 passed",
+    "transcript": [
+     {
+      "action": "patched calc.py",
+      "turn": 1
+     }
+    ],
+    "turns_used": 2
+   },
+   "subtask_id": null,
+   "success": false,
+   "type": "targeted_test",
+   "verification_target": null
+  }
+ ],
+ "outcome": {
+  "authoritative_files": [],
+  "diagnostics": null,
+  "likely_files": [],
+  "message": "TARGETED TEST FAILURE:\nFAILED test_calc.py::test_add - assert 4 == 3\n1 failed in <t>s",
+  "raised": "QualityGateFailure",
+  "raw_output": "FAILED test_calc.py::test_add - assert 4 == 3\n1 failed in <t>s",
+  "self_correction_attempt": {
+   "final_validation_output": "fixed output: 3 passed",
+   "transcript": [
+    {
+     "action": "patched calc.py",
+     "turn": 1
+    }
+   ],
+   "turns_used": 2
+  },
+  "type": "targeted_test"
+ },
+ "seams": [
+  {
+   "active_code_context": "ACTIVE CODE CONTEXT",
+   "compile_error_output": "FAILED test_calc.py::test_add - assert 4 == 3\n1 failed in <t>s",
+   "failure_type": "targeted_test",
+   "files_in_scope": [
+    "calc.py",
+    "test_mul.py"
+   ],
+   "llm_is_the_developers": true,
+   "max_turns": 3,
+   "seam": "run_repair_loop",
+   "target_test": "test_mul.py",
+   "validator": 0,
+   "worktree_path": "<wt:1>",
+   "writable_files": []
+  }
+ ],
+ "state": {
+  "api_contract_recovery": null,
+  "cached_run_verification_basis_hash": false,
+  "cached_run_verification_judgment": null,
+  "candidate_gates_succeeded": false,
+  "java_home_override": null,
+  "ledger": null,
+  "plan_scope_conflict": {
+   "allowed_files": [],
+   "attribution_tier": "self_correction",
+   "classification": "PLAN_SCOPE_DEFECT",
+   "failure_type": "targeted_test",
+   "grounded_owner_files": [],
+   "reason": "self-correction diagnosis requires a readable file outside approved write scope",
+   "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+   "required_files": [
+    "outside.py"
+   ]
+  },
+  "toolchain_checked": true,
+  "toolchain_warning": null,
+  "validated_file_revisions": {
+   "calc.py": "0825f76e4924c2e610b2ac94d5f2cc4d708272ee7bded5f40955d62e19b18871",
+   "test_mul.py": "a0cf251c10d7cf86df6f2255ab7a365881f72b89f76f3b29a0a41e38599a8baa"
+  },
+  "validator_timings": [
+   [
+    "compile",
+    true,
+    true
+   ]
+  ]
+ },
+ "validators": [
+  {
+   "authorized_dependency_removals": [],
+   "autonomy_cfg": "the kernel's",
+   "call": "construct",
+   "java_home_override": null,
+   "original_workspace_path": "<ws:1>",
+   "toolchain_declaration_mutable": false,
+   "validator": 0,
+   "workspace_path": "<wt:1>"
+  },
+  {
+   "call": "set_java_home_override",
+   "validator": 0,
+   "value": null
+  },
+  {
+   "args": [],
+   "call": "tree_binding.check",
+   "name": "pre_compile"
+  },
+  {
+   "call": "compile",
+   "files": [
+    "calc.py",
+    "lib.py",
+    "test_mul.py"
+   ],
+   "java_home_override": null,
+   "tree_binding": "the attempt's",
+   "validator": 0
+  },
+  {
+   "call": "tests",
+   "java_home_override": null,
+   "target_test": "test_mul.py",
+   "tree_binding": "the attempt's",
+   "validator": 0
+  }
+ ]
+}

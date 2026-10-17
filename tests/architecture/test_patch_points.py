@@ -38,6 +38,9 @@ class P(NamedTuple):
 
 PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # kriya.workflow.attempt
+    # E8 characterization: +1 site (tests/test_gate_orchestrator.py records what the candidate gates hand to the
+    # runtime-verification seam - E9's code - through this name).
+    (A, '_approve_and_execute_runtime_verification'): P(1, A, ((A, 1),), ()),
     (A, '_approve_runtime_commands'): P(1, A, ((A, 2),), ()),
     # E7: unchanged - still the retry_prompts function attempt.py imports, looked up by run_attempt's two targeted
     # branches (which stay in attempt.py); retry_prompts.py stays its only definition.
@@ -53,7 +56,11 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # RepairDeps._developer_request_profile (one load in attempt._repair_deps).
     (A, '_developer_request_profile'): P(1, A, ((A, 3),), ()),
     (A, '_ensure_generation_time_budget'): P(2, A, ((A, 1),), ()),
+    # E8 characterization: +1 site (tests/test_gate_orchestrator.py: the managed-service early return of the gates).
+    (A, '_execute_managed_service_verification'): P(1, A, ((A, 2),), ()),
     (A, '_enter_developer_model'): P(1, A, ((A, 1),), ()),
+    # E8 characterization: +1 site (tests/test_gate_orchestrator.py records the scope every suite judgment is asked for).
+    (A, '_judge_candidate_suite'): P(1, A, ((A, 4),), ()),
     (A, '_maybe_run_developer_investigation'): P(1, A, ((A, 1),), ()),
     (A, '_prepare_finite_command_runtime_artifacts'): P(1, A, ((A, 3),), ()),
     (A, '_reject_exception_masking'): P(1, A, ((A, 2),), ()),
@@ -272,9 +279,10 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # (test_work_unit_stages: the moved late stages and closers log through the patched facade logger); E5 +1 W.logger and
     # +1 W.create_git_worktree, +1 W.handle_attempt_failure, +1 W.capture_brownfield_baselines and +10 W.run_attempt sites
     # (test_development_loop: stage 4's characterization and dynamic proofs, written before the move); E6 +1
-    # A._developer_request_profile site (test_fallback_decision: the profiles a fallback decision resolves)
-    assert totals == {A: 88, W: 88, C: 268}
-    assert len(PATCH_POINTS) == 84
+    # A._developer_request_profile site (test_fallback_decision: the profiles a fallback decision resolves); E8 +3 A
+    # sites, 3 new rows (test_gate_orchestrator: the runtime-verification and managed-service seams, the suite judgment)
+    assert totals == {A: 91, W: 88, C: 268}
+    assert len(PATCH_POINTS) == 87
 
 
 # ----------------------------------------------------------------------------- owner modules (DEPENDENCY-RULES)

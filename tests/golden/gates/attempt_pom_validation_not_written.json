@@ -1,0 +1,20 @@
+{
+ "events": [],
+ "gate_outcomes": [],
+ "outcome": "returned",
+ "seams": [],
+ "state": {
+  "api_contract_recovery": null,
+  "cached_run_verification_basis_hash": false,
+  "cached_run_verification_judgment": null,
+  "candidate_gates_succeeded": false,
+  "java_home_override": null,
+  "ledger": null,
+  "plan_scope_conflict": null,
+  "toolchain_checked": false,
+  "toolchain_warning": null,
+  "validated_file_revisions": {},
+  "validator_timings": []
+ },
+ "validators": []
+}

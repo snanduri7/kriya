@@ -34,6 +34,7 @@ import _kernel_golden as kg  # noqa: E402 - needs the sys.path entry above  # py
 A, W, C = "kriya.workflow.attempt", "kriya.workflow.workflow", "kriya.workflow.workflow_controller"
 
 KINDS: Dict[Tuple[str, str], str] = {
+    (A, '_approve_and_execute_runtime_verification'): 'async function',
     (A, '_approve_runtime_commands'): 'async function',
     (A, '_build_targeted_retry_prompt'): 'function',
     (A, '_check_java_toolchain_mismatch'): 'function',
@@ -41,6 +42,8 @@ KINDS: Dict[Tuple[str, str], str] = {
     (A, '_developer_request_profile'): 'function',
     (A, '_ensure_generation_time_budget'): 'function',
     (A, '_enter_developer_model'): 'function',
+    (A, '_execute_managed_service_verification'): 'async function',
+    (A, '_judge_candidate_suite'): 'function',
     (A, '_maybe_run_developer_investigation'): 'async function',
     (A, '_prepare_finite_command_runtime_artifacts'): 'function',
     (A, '_reject_exception_masking'): 'function',
@@ -160,8 +163,15 @@ CLASS_CALL_THROUGH: Dict[str, Tuple[Tuple[str, str], ...]] = {
 HARNESS_PATCHED = ((C, "parse_planner_structured_output"), (C, "build_engineering_plan_from_planner_output"))
 
 NOT_REACHED: Dict[Tuple[str, str], str] = {
+    (A, "_approve_and_execute_runtime_verification"): "runtime verification (disabled in the scripted runs; E8: "
+                                                       "tests/test_gate_orchestrator.py drives the candidate gates "
+                                                       "THROUGH this patch point)",
     (A, "_approve_runtime_commands"): "runtime-command approval: the scripted harnesses run with run_verification_enabled=False",
     (A, "_code_intelligence_for"): "code-intelligence retry localization (T0): no index in a scripted workspace",
+    (A, "_execute_managed_service_verification"): "managed-service runtime verification (disabled; E8: "
+                                                   "tests/test_gate_orchestrator.py drives it through this patch point)",
+    (A, "_judge_candidate_suite"): "a candidate gate running the repository suite: no scripted kernel run writes a test "
+                                   "module (E8: tests/test_gate_orchestrator.py records each judgment's scope through it)",
     (A, "_prepare_finite_command_runtime_artifacts"): "finite-command runtime verification (disabled in the scripted runs)",
     (A, "_resolve_java_home_override"): "JVM toolchain resolution: the scripted projects are Python",
     (A, "_resolve_run_command"): "runtime verification command resolution (disabled in the scripted runs)",

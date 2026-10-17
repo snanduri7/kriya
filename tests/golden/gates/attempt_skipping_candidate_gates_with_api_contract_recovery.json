@@ -1,0 +1,34 @@
+{
+ "events": [
+  {
+   "attempt": 1,
+   "authority": "authoritative",
+   "details": {
+    "passed": true,
+    "terminal": false
+   },
+   "failure_type": null,
+   "kind": "candidate_gates.passed",
+   "message": "",
+   "operation": null,
+   "source": "workflow"
+  }
+ ],
+ "gate_outcomes": [],
+ "outcome": "returned",
+ "seams": [],
+ "state": {
+  "api_contract_recovery": "AWAIT_TERMINAL_SUCCESS",
+  "cached_run_verification_basis_hash": false,
+  "cached_run_verification_judgment": null,
+  "candidate_gates_succeeded": true,
+  "java_home_override": null,
+  "ledger": null,
+  "plan_scope_conflict": null,
+  "toolchain_checked": false,
+  "toolchain_warning": null,
+  "validated_file_revisions": {},
+  "validator_timings": []
+ },
+ "validators": []
+}

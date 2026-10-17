@@ -1,0 +1,137 @@
+{
+ "events": [
+  {
+   "attempt": 1,
+   "authority": "authoritative",
+   "details": {
+    "passed": true,
+    "terminal": false
+   },
+   "failure_type": null,
+   "kind": "candidate_gates.passed",
+   "message": "",
+   "operation": null,
+   "source": "workflow"
+  }
+ ],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "output": "compile ok: 3 passed",
+   "success": true,
+   "toolchain_identity": {
+    "image": "scripted-compile"
+   },
+   "type": "compile"
+  }
+ ],
+ "outcome": "returned",
+ "seams": [
+  {
+   "active_code_context": "ACTIVE CODE CONTEXT",
+   "autonomy_cfg_is_the_kernels": true,
+   "judgment": {
+    "command_source": "inferred",
+    "run_commands": [
+     [
+      "javac",
+      "-d",
+      ".kriya/runtime-verification/classes",
+      "Main.java",
+      "Util.java"
+     ],
+     [
+      "java",
+      "-cp",
+      ".kriya/runtime-verification/classes",
+      "Main"
+     ]
+    ],
+    "should_run": true,
+    "success_criteria": "prints 6"
+   },
+   "same_ctx": true,
+   "same_state": true,
+   "seam": "_approve_and_execute_runtime_verification",
+   "validator": 0
+  }
+ ],
+ "state": {
+  "api_contract_recovery": null,
+  "cached_run_verification_basis_hash": true,
+  "cached_run_verification_judgment": {
+   "command_source": "inferred",
+   "run_commands": [
+    [
+     "java",
+     "Main"
+    ]
+   ],
+   "should_run": true,
+   "success_criteria": "prints 6"
+  },
+  "candidate_gates_succeeded": true,
+  "java_home_override": null,
+  "ledger": null,
+  "plan_scope_conflict": null,
+  "toolchain_checked": true,
+  "toolchain_warning": null,
+  "validated_file_revisions": {
+   "Main.java": "3a09f528697001f75713b0a896e3b8fe7254a48249f182e8e33d80d906ffd8b1"
+  },
+  "validator_timings": [
+   [
+    "compile",
+    true,
+    true
+   ]
+  ]
+ },
+ "validators": [
+  {
+   "authorized_dependency_removals": [],
+   "autonomy_cfg": "the kernel's",
+   "call": "construct",
+   "java_home_override": null,
+   "original_workspace_path": "<ws:1>",
+   "toolchain_declaration_mutable": true,
+   "validator": 0,
+   "workspace_path": "<wt:1>"
+  },
+  {
+   "call": "set_java_home_override",
+   "validator": 0,
+   "value": null
+  },
+  {
+   "args": [],
+   "call": "tree_binding.check",
+   "name": "pre_compile"
+  },
+  {
+   "call": "compile",
+   "files": [
+    "Main.java",
+    "Util.java"
+   ],
+   "java_home_override": null,
+   "tree_binding": "the attempt's",
+   "validator": 0
+  },
+  {
+   "call": "judge_calls",
+   "count": 1,
+   "kwargs": [
+    {
+     "build_file_content": null,
+     "design": "Design: calc.py gains mul",
+     "files_written": [
+      "Main.java",
+      "Util.java"
+     ],
+     "goal": "Add mul(a, b) to calc.py."
+    }
+   ]
+  }
+ ]
+}

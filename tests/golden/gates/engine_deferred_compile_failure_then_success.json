@@ -1,0 +1,182 @@
+{
+ "result": {
+  "candidate_gates_passed": true,
+  "failure_category": null,
+  "overall_attempt_passed": true,
+  "quality_gates_passed": true,
+  "terminal_regression_passed": true,
+  "toolchain_warning": null
+ },
+ "sequence": [
+  {
+   "store": "<run:1>"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:34f8d30fab39c7b0",
+   "event": "attempt.started",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.opened",
+   "payload": "sha256:9fe95055761d2fb0"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:b6d0210db6f56db9",
+   "event": "generation.completed",
+   "source": "developer"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:dc57f3753c7d284d",
+   "kind": "mirror.gate_outcome",
+   "payload": "sha256:68f8c7305f899023",
+   "success": false,
+   "type": "brownfield_public_api_changed"
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.closed",
+   "payload": "sha256:184eb3e4d7debf75"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:41f75502cef73496",
+   "event": "attempt.failed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "decision": "REFUSED",
+   "kind": "candidate.change",
+   "path": "calc.py",
+   "payload": "sha256:578aadc8a5b78b98",
+   "unchanged": null
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.concluded",
+   "payload": "sha256:3ca37bc4847d9e6f"
+  },
+  {
+   "attempt": 2,
+   "content": "sha256:4b9dd089b891e5fd",
+   "event": "attempt.started",
+   "source": "workflow"
+  },
+  {
+   "attempt": 2,
+   "kind": "attempt.opened",
+   "payload": "sha256:9e06a225c652b922"
+  },
+  {
+   "attempt": 2,
+   "kind": "attempt.closed",
+   "payload": "sha256:e760f7320e62773c"
+  },
+  {
+   "attempt": 2,
+   "kind": "attempt.concluded",
+   "payload": "sha256:3ca37bc4847d9e6f"
+  },
+  {
+   "attempt": 3,
+   "content": "sha256:427ecaee514b0b57",
+   "event": "attempt.started",
+   "source": "workflow"
+  },
+  {
+   "attempt": 3,
+   "kind": "attempt.opened",
+   "payload": "sha256:90f45892d23dfd17"
+  },
+  {
+   "attempt": 3,
+   "content": "sha256:07ce618baced9ea2",
+   "event": "generation.completed",
+   "source": "developer"
+  },
+  {
+   "attempt": 3,
+   "decision": "STAGED",
+   "kind": "candidate.change",
+   "path": "calc.py",
+   "payload": "sha256:6622f4d8a026e7fd",
+   "unchanged": false
+  },
+  {
+   "attempt": 3,
+   "kind": "attempt.closed",
+   "payload": "sha256:d3cbe7c23490c25c"
+  },
+  {
+   "attempt": 3,
+   "content": "sha256:831b0e0bcd9bdba5",
+   "event": "static_analysis.result",
+   "source": "static_analysis_gate"
+  },
+  {
+   "attempt": 3,
+   "content": "sha256:f6ad0c07c860c772",
+   "event": "approval.decision",
+   "source": "workflow.approval_gate"
+  },
+  {
+   "attempt": 3,
+   "gate": "compile",
+   "kind": "gate.result",
+   "payload": "sha256:3f8a7e12fcf24481",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "attempt": 3,
+   "content": "sha256:053818cbfa496eec",
+   "kind": "mirror.gate_outcome",
+   "payload": "sha256:ff3bb4e959e10502",
+   "success": true,
+   "type": "compile"
+  },
+  {
+   "attempt": 3,
+   "content": "sha256:05ca863195c566ee",
+   "event": "candidate_gates.passed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 3,
+   "gate": "tests",
+   "kind": "gate.result",
+   "payload": "sha256:096b063da6d437fb",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "attempt": 3,
+   "content": "sha256:84ff02cdf6c2df06",
+   "kind": "mirror.gate_outcome",
+   "payload": "sha256:4d71d95b1a3c7ecb",
+   "success": true,
+   "type": "regression_test"
+  },
+  {
+   "attempt": 3,
+   "content": "sha256:9ac1b10aeabd9043",
+   "event": "terminal_regression.passed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 3,
+   "content": "sha256:1f9144f7217f09fe",
+   "event": "attempt.passed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 3,
+   "kind": "attempt.concluded",
+   "payload": "sha256:da5e1b38f4db3320"
+  }
+ ]
+}

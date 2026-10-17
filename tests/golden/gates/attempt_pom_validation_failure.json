@@ -1,0 +1,81 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "SOURCE_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [],
+   "failed_content": {
+    "pom.xml": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>org.example</groupId>\n  <artifactId>app</artifactId>\n  <version>1.1</version>\n</project>\n"
+   },
+   "file_locations": [
+    {
+     "col": null,
+     "filepath": "pom.xml",
+     "line": null
+    }
+   ],
+   "likely_files": [
+    "pom.xml"
+   ],
+   "milestone_id": null,
+   "mode": null,
+   "output": "[ERROR] Non-parseable POM: unexpected <plugin>",
+   "plan_id": null,
+   "planned_files": [],
+   "self_correction_attempt": null,
+   "subtask_id": null,
+   "success": false,
+   "type": "pom_semantic_validation",
+   "verification_target": null
+  }
+ ],
+ "outcome": {
+  "authoritative_files": [],
+  "diagnostics": null,
+  "likely_files": [
+   "pom.xml"
+  ],
+  "message": "POM VALIDATION FAILED for pom.xml: [ERROR] Non-parseable POM: unexpected <plugin>",
+  "raised": "QualityGateFailure",
+  "raw_output": "[ERROR] Non-parseable POM: unexpected <plugin>",
+  "self_correction_attempt": null,
+  "type": "pom_semantic_validation"
+ },
+ "seams": [],
+ "state": {
+  "api_contract_recovery": null,
+  "cached_run_verification_basis_hash": false,
+  "cached_run_verification_judgment": null,
+  "candidate_gates_succeeded": false,
+  "java_home_override": null,
+  "ledger": null,
+  "plan_scope_conflict": null,
+  "toolchain_checked": false,
+  "toolchain_warning": null,
+  "validated_file_revisions": {},
+  "validator_timings": []
+ },
+ "validators": [
+  {
+   "authorized_dependency_removals": [],
+   "autonomy_cfg": "the kernel's",
+   "call": "construct",
+   "java_home_override": null,
+   "original_workspace_path": null,
+   "toolchain_declaration_mutable": false,
+   "validator": 0,
+   "workspace_path": "<wt:1>"
+  },
+  {
+   "call": "pom",
+   "java_home_override": null,
+   "tree_binding": "the attempt's",
+   "validator": 0
+  }
+ ]
+}

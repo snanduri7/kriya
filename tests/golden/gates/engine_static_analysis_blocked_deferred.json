@@ -1,0 +1,70 @@
+{
+ "result": {
+  "candidate_gates_passed": false,
+  "failure_category": "static_analysis_blocked",
+  "overall_attempt_passed": false,
+  "quality_gates_passed": false,
+  "terminal_regression_passed": false,
+  "toolchain_warning": null
+ },
+ "sequence": [
+  {
+   "store": "<run:1>"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:34f8d30fab39c7b0",
+   "event": "attempt.started",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.opened",
+   "payload": "sha256:9fe95055761d2fb0"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:b6d0210db6f56db9",
+   "event": "generation.completed",
+   "source": "developer"
+  },
+  {
+   "attempt": 1,
+   "decision": "STAGED",
+   "kind": "candidate.change",
+   "path": "calc.py",
+   "payload": "sha256:9d7146ab8c303260",
+   "unchanged": false
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.closed",
+   "payload": "sha256:d3cbe7c23490c25c"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:95b026cbe8d67609",
+   "event": "static_analysis.result",
+   "source": "static_analysis_gate"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:db6bdac78d9f6d5e",
+   "kind": "mirror.gate_outcome",
+   "payload": "sha256:2d4b74f77cf9ab60",
+   "success": false,
+   "type": "static_analysis_blocked"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:87d9f964b8ef147a",
+   "event": "attempt.failed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.concluded",
+   "payload": "sha256:3ca37bc4847d9e6f"
+  }
+ ]
+}

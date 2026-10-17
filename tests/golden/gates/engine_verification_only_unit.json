@@ -1,0 +1,308 @@
+{
+ "builds": [
+  [
+   "compile",
+   null
+  ],
+  [
+   "tests",
+   null
+  ],
+  [
+   "compile",
+   null
+  ],
+  [
+   "tests",
+   null
+  ]
+ ],
+ "events": [
+  [
+   "attempt.started",
+   1,
+   "workflow"
+  ],
+  [
+   "generation.completed",
+   1,
+   "developer"
+  ],
+  [
+   "static_analysis.result",
+   1,
+   "static_analysis_gate"
+  ],
+  [
+   "approval.decision",
+   1,
+   "workflow.approval_gate"
+  ],
+  [
+   "candidate_gates.passed",
+   1,
+   "workflow"
+  ],
+  [
+   "terminal_regression.passed",
+   1,
+   "workflow"
+  ],
+  [
+   "attempt.passed",
+   1,
+   "workflow"
+  ],
+  [
+   "candidate_gates.passed",
+   1,
+   "workflow"
+  ],
+  [
+   "static_analysis.result",
+   1,
+   "static_analysis_gate"
+  ],
+  [
+   "terminal_regression.passed",
+   1,
+   "workflow"
+  ],
+  [
+   "attempt.passed",
+   1,
+   "workflow"
+  ]
+ ],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "output": "ok",
+   "success": true,
+   "type": "compile"
+  },
+  {
+   "attempt": 1,
+   "output": "tests/test_shop.py .\n1 passed in <t>s",
+   "success": true,
+   "type": "regression_test"
+  },
+  {
+   "attempt": 1,
+   "output": "ok",
+   "success": true,
+   "type": "compile"
+  },
+  {
+   "attempt": 1,
+   "output": "tests/test_shop.py .\n1 passed in <t>s",
+   "success": true,
+   "type": "regression_test"
+  }
+ ],
+ "sequence": [
+  {
+   "store": "<run:1>"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:34f8d30fab39c7b0",
+   "event": "attempt.started",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.opened",
+   "payload": "sha256:9fe95055761d2fb0"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:1036a2172fe34fc8",
+   "event": "generation.completed",
+   "source": "developer"
+  },
+  {
+   "attempt": 1,
+   "decision": "STAGED",
+   "kind": "candidate.change",
+   "path": "shop/service.py",
+   "payload": "sha256:f0fab2aac02ff91e",
+   "unchanged": false
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.closed",
+   "payload": "sha256:d3cbe7c23490c25c"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:e50d666e42e7cc2a",
+   "event": "static_analysis.result",
+   "source": "static_analysis_gate"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:a854589a8f87845f",
+   "event": "approval.decision",
+   "source": "workflow.approval_gate"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:68564910c0901919",
+   "kind": "mirror.gate_outcome",
+   "payload": "sha256:ebadd8f3cf4ea0cc",
+   "success": true,
+   "type": "compile"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:2bdd326ad7bc0dc4",
+   "event": "candidate_gates.passed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:ecbbc235e93645b6",
+   "kind": "mirror.gate_outcome",
+   "payload": "sha256:685900c659ee570c",
+   "success": true,
+   "type": "regression_test"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:e4c044b04688c1cb",
+   "event": "terminal_regression.passed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:3e6c7ebc9683af37",
+   "event": "attempt.passed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.concluded",
+   "payload": "sha256:da5e1b38f4db3320"
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.opened",
+   "payload": "sha256:6e2f30288b6c93be"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:68564910c0901919",
+   "kind": "mirror.gate_outcome",
+   "payload": "sha256:ebadd8f3cf4ea0cc",
+   "success": true,
+   "type": "compile"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:1966987dc8ebcfe5",
+   "event": "candidate_gates.passed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.closed",
+   "payload": "sha256:ddc2cbdf30ec3760"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:e50d666e42e7cc2a",
+   "event": "static_analysis.result",
+   "source": "static_analysis_gate"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:ecbbc235e93645b6",
+   "kind": "mirror.gate_outcome",
+   "payload": "sha256:685900c659ee570c",
+   "success": true,
+   "type": "regression_test"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:e4c044b04688c1cb",
+   "event": "terminal_regression.passed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:3e6c7ebc9683af37",
+   "event": "attempt.passed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.concluded",
+   "payload": "sha256:da5e1b38f4db3320"
+  },
+  {
+   "attempt": null,
+   "gate": "migration",
+   "kind": "gate.result",
+   "payload": "sha256:c98e9da29ca764be",
+   "stage": "terminal",
+   "success": true
+  },
+  {
+   "attempt": null,
+   "gate": "stack_contract",
+   "kind": "gate.result",
+   "payload": "sha256:df402825bcf73ca9",
+   "stage": "terminal",
+   "success": true
+  },
+  {
+   "attempt": null,
+   "gate": "preserved_references",
+   "kind": "gate.result",
+   "payload": "sha256:1da63a65b525b47a",
+   "stage": "terminal",
+   "success": true
+  },
+  {
+   "attempt": null,
+   "gate": "static_analysis",
+   "kind": "gate.result",
+   "payload": "sha256:6cf63100a5de4fb5",
+   "stage": "terminal",
+   "success": true
+  },
+  {
+   "attempt": null,
+   "gate": "semantic_safety",
+   "kind": "gate.result",
+   "payload": "sha256:e2cbd59dcfe0341b",
+   "stage": "terminal",
+   "success": true
+  },
+  {
+   "attempt": null,
+   "gate": "terminal_obligations",
+   "kind": "gate.result",
+   "payload": "sha256:26b531dd1746a3ff",
+   "stage": "terminal",
+   "success": true
+  },
+  {
+   "attempt": null,
+   "gate": "original_requirements",
+   "kind": "gate.result",
+   "payload": "sha256:7d507f467396ce97",
+   "stage": "terminal",
+   "success": true
+  },
+  {
+   "attempt": null,
+   "gate": "artifact_registry",
+   "kind": "gate.result",
+   "payload": "sha256:86ec0ff78c186106",
+   "stage": "terminal",
+   "success": true
+  }
+ ]
+}

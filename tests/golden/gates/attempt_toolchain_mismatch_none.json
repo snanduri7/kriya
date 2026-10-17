@@ -1,0 +1,138 @@
+{
+ "events": [
+  {
+   "attempt": 1,
+   "authority": "authoritative",
+   "details": {
+    "passed": true,
+    "terminal": false
+   },
+   "failure_type": null,
+   "kind": "candidate_gates.passed",
+   "message": "",
+   "operation": null,
+   "source": "workflow"
+  },
+  {
+   "attempt": 2,
+   "authority": "authoritative",
+   "details": {
+    "passed": true,
+    "terminal": false
+   },
+   "failure_type": null,
+   "kind": "candidate_gates.passed",
+   "message": "",
+   "operation": null,
+   "source": "workflow"
+  }
+ ],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "output": "compile ok: 3 passed",
+   "success": true,
+   "toolchain_identity": {
+    "image": "scripted-compile"
+   },
+   "type": "compile"
+  },
+  {
+   "attempt": 2,
+   "output": "compile ok: 3 passed",
+   "success": true,
+   "toolchain_identity": {
+    "image": "scripted-compile"
+   },
+   "type": "compile"
+  }
+ ],
+ "outcome": "returned",
+ "seams": [],
+ "state": {
+  "api_contract_recovery": null,
+  "cached_run_verification_basis_hash": false,
+  "cached_run_verification_judgment": null,
+  "candidate_gates_succeeded": true,
+  "java_home_override": null,
+  "ledger": null,
+  "plan_scope_conflict": null,
+  "toolchain_checked": true,
+  "toolchain_warning": "'java' resolves to JDK 17 but 'mvn' will build/run against JDK 26 - a JVM startup flag correct for one may be invalid or fatal under the other. Run `kriya doctor` for details.",
+  "validated_file_revisions": {
+   "src/main/java/org/example/App.java": "28332c34a2ae63d8ae476d582c1e1968f17ca62431a403d56af94c82caa1db18"
+  },
+  "validator_timings": [
+   [
+    "compile",
+    true,
+    true
+   ],
+   [
+    "compile",
+    true,
+    true
+   ]
+  ]
+ },
+ "validators": [
+  {
+   "authorized_dependency_removals": [],
+   "autonomy_cfg": "the kernel's",
+   "call": "construct",
+   "java_home_override": null,
+   "original_workspace_path": "<ws:1>",
+   "toolchain_declaration_mutable": true,
+   "validator": 0,
+   "workspace_path": "<wt:1>"
+  },
+  {
+   "call": "set_java_home_override",
+   "validator": 0,
+   "value": null
+  },
+  {
+   "args": [],
+   "call": "tree_binding.check",
+   "name": "pre_compile"
+  },
+  {
+   "call": "compile",
+   "files": [
+    "src/main/java/org/example/App.java"
+   ],
+   "java_home_override": null,
+   "tree_binding": "the attempt's",
+   "validator": 0
+  },
+  {
+   "authorized_dependency_removals": [],
+   "autonomy_cfg": "the kernel's",
+   "call": "construct",
+   "java_home_override": null,
+   "original_workspace_path": "<ws:1>",
+   "toolchain_declaration_mutable": true,
+   "validator": 1,
+   "workspace_path": "<wt:1>"
+  },
+  {
+   "call": "set_java_home_override",
+   "validator": 1,
+   "value": null
+  },
+  {
+   "args": [],
+   "call": "tree_binding.check",
+   "name": "pre_compile"
+  },
+  {
+   "call": "compile",
+   "files": [
+    "src/main/java/org/example/App.java"
+   ],
+   "java_home_override": null,
+   "tree_binding": "the attempt's",
+   "validator": 1
+  }
+ ]
+}

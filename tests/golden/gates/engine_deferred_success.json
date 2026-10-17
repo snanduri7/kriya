@@ -1,0 +1,112 @@
+{
+ "result": {
+  "candidate_gates_passed": true,
+  "failure_category": null,
+  "overall_attempt_passed": true,
+  "quality_gates_passed": true,
+  "terminal_regression_passed": true,
+  "toolchain_warning": null
+ },
+ "sequence": [
+  {
+   "store": "<run:1>"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:34f8d30fab39c7b0",
+   "event": "attempt.started",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.opened",
+   "payload": "sha256:9fe95055761d2fb0"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:b6d0210db6f56db9",
+   "event": "generation.completed",
+   "source": "developer"
+  },
+  {
+   "attempt": 1,
+   "decision": "STAGED",
+   "kind": "candidate.change",
+   "path": "calc.py",
+   "payload": "sha256:6622f4d8a026e7fd",
+   "unchanged": false
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.closed",
+   "payload": "sha256:d3cbe7c23490c25c"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:e50d666e42e7cc2a",
+   "event": "static_analysis.result",
+   "source": "static_analysis_gate"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:a854589a8f87845f",
+   "event": "approval.decision",
+   "source": "workflow.approval_gate"
+  },
+  {
+   "attempt": 1,
+   "gate": "compile",
+   "kind": "gate.result",
+   "payload": "sha256:3f8a7e12fcf24481",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:5e67473172badc50",
+   "kind": "mirror.gate_outcome",
+   "payload": "sha256:ebadd8f3cf4ea0cc",
+   "success": true,
+   "type": "compile"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:2bdd326ad7bc0dc4",
+   "event": "candidate_gates.passed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "gate": "tests",
+   "kind": "gate.result",
+   "payload": "sha256:096b063da6d437fb",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:5fb1ea8ed0257fc2",
+   "kind": "mirror.gate_outcome",
+   "payload": "sha256:685900c659ee570c",
+   "success": true,
+   "type": "regression_test"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:e4c044b04688c1cb",
+   "event": "terminal_regression.passed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:3e6c7ebc9683af37",
+   "event": "attempt.passed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.concluded",
+   "payload": "sha256:da5e1b38f4db3320"
+  }
+ ]
+}

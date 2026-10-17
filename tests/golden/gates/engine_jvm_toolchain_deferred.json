@@ -1,0 +1,221 @@
+{
+ "homes": [
+  "17"
+ ],
+ "maven": [
+  {
+   "broken": true,
+   "goals": [
+    "clean",
+    "compile",
+    "-Dmaven.compiler.showWarnings=true",
+    "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked"
+   ],
+   "java_home_override": "/opt/jdk-17",
+   "stack": "java"
+  },
+  {
+   "broken": false,
+   "goals": [
+    "clean",
+    "compile",
+    "-Dmaven.compiler.showWarnings=true",
+    "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked"
+   ],
+   "java_home_override": "/opt/jdk-17",
+   "stack": "java"
+  },
+  {
+   "broken": false,
+   "goals": [
+    "test"
+   ],
+   "java_home_override": "/opt/jdk-17",
+   "stack": "java"
+  }
+ ],
+ "probes": [
+  "check_java_toolchain",
+  "check_java_toolchain",
+  "check_java_toolchain"
+ ],
+ "result": {
+  "candidate_gates_passed": true,
+  "failure_category": null,
+  "overall_attempt_passed": true,
+  "quality_gates_passed": true,
+  "terminal_regression_passed": true,
+  "toolchain_warning": "'java' resolves to JDK 17 but 'mvn' will build/run against JDK 26 - a JVM startup flag correct for one may be invalid or fatal under the other. Run `kriya doctor` for details."
+ },
+ "sequence": [
+  {
+   "store": "<run:1>"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:34f8d30fab39c7b0",
+   "event": "attempt.started",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.opened",
+   "payload": "sha256:9fe95055761d2fb0"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:b6d0210db6f56db9",
+   "event": "generation.completed",
+   "source": "developer"
+  },
+  {
+   "attempt": 1,
+   "decision": "STAGED",
+   "kind": "candidate.change",
+   "path": "src/main/java/org/example/App.java",
+   "payload": "sha256:74ae7c9a65b26fd4",
+   "unchanged": false
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.closed",
+   "payload": "sha256:d3cbe7c23490c25c"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:e50d666e42e7cc2a",
+   "event": "static_analysis.result",
+   "source": "static_analysis_gate"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:a854589a8f87845f",
+   "event": "approval.decision",
+   "source": "workflow.approval_gate"
+  },
+  {
+   "attempt": 1,
+   "gate": "compile",
+   "kind": "gate.result",
+   "payload": "sha256:ba1ade9860d35813",
+   "stage": "validator",
+   "success": false
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:c3f60754b356267e",
+   "kind": "mirror.gate_outcome",
+   "payload": "sha256:3cca75888021620b",
+   "success": false,
+   "type": "compile"
+  },
+  {
+   "attempt": 1,
+   "content": "sha256:c9409d0ee2192ae9",
+   "event": "attempt.failed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 1,
+   "kind": "attempt.concluded",
+   "payload": "sha256:3ca37bc4847d9e6f"
+  },
+  {
+   "attempt": 2,
+   "content": "sha256:2bd29021bf089108",
+   "event": "attempt.started",
+   "source": "workflow"
+  },
+  {
+   "attempt": 2,
+   "kind": "attempt.opened",
+   "payload": "sha256:b12c6a102c495e1d"
+  },
+  {
+   "attempt": 2,
+   "content": "sha256:5b261d8826d44e9f",
+   "event": "generation.completed",
+   "source": "developer"
+  },
+  {
+   "attempt": 2,
+   "decision": "STAGED",
+   "kind": "candidate.change",
+   "path": "src/main/java/org/example/App.java",
+   "payload": "sha256:d3253f8355d5e930",
+   "unchanged": false
+  },
+  {
+   "attempt": 2,
+   "kind": "attempt.closed",
+   "payload": "sha256:d3cbe7c23490c25c"
+  },
+  {
+   "attempt": 2,
+   "content": "sha256:457265799d111bf6",
+   "event": "static_analysis.result",
+   "source": "static_analysis_gate"
+  },
+  {
+   "attempt": 2,
+   "content": "sha256:434afc026796c162",
+   "event": "approval.decision",
+   "source": "workflow.approval_gate"
+  },
+  {
+   "attempt": 2,
+   "gate": "compile",
+   "kind": "gate.result",
+   "payload": "sha256:3f8a7e12fcf24481",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "attempt": 2,
+   "content": "sha256:29bace22bf188ca2",
+   "kind": "mirror.gate_outcome",
+   "payload": "sha256:c0caa21b579582a2",
+   "success": true,
+   "type": "compile"
+  },
+  {
+   "attempt": 2,
+   "content": "sha256:7edb77b393a9660d",
+   "event": "candidate_gates.passed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 2,
+   "gate": "tests",
+   "kind": "gate.result",
+   "payload": "sha256:b0b0b72191e529c1",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "attempt": 2,
+   "content": "sha256:116cc04a0f644b1e",
+   "kind": "mirror.gate_outcome",
+   "payload": "sha256:041483e34747a61e",
+   "success": true,
+   "type": "regression_test"
+  },
+  {
+   "attempt": 2,
+   "content": "sha256:903491064408b9f1",
+   "event": "terminal_regression.passed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 2,
+   "content": "sha256:11dcd2dd3028f028",
+   "event": "attempt.passed",
+   "source": "workflow"
+  },
+  {
+   "attempt": 2,
+   "kind": "attempt.concluded",
+   "payload": "sha256:da5e1b38f4db3320"
+  }
+ ]
+}

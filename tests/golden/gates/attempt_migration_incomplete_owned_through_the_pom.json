@@ -1,0 +1,124 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "output": "compile ok: 3 passed",
+   "success": true,
+   "toolchain_identity": {
+    "image": "scripted-compile"
+   },
+   "type": "compile"
+  },
+  {
+   "attempt": 1,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "SOURCE_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [
+    "src/main/java/com/example/JsonService.java",
+    "pom.xml"
+   ],
+   "failed_content": {
+    "pom.xml": "sha256:4c06077089ac1b55+306",
+    "src/main/java/com/example/JsonService.java": "package com.example;\nimport com.google.gson.Gson;\npublic class JsonService {\n private final Gson gson=new Gson();\n public String serialize(Object c){ return gson.toJson(c); }\n}\n"
+   },
+   "file_locations": [],
+   "likely_files": [
+    "src/main/java/com/example/JsonService.java",
+    "pom.xml"
+   ],
+   "milestone_id": null,
+   "mode": null,
+   "output": "sha256:7c10bbf8285ea7cc+273",
+   "plan_id": null,
+   "planned_files": [],
+   "self_correction_attempt": null,
+   "subtask_id": null,
+   "success": false,
+   "type": "migration_incomplete",
+   "verification_target": null
+  }
+ ],
+ "outcome": {
+  "authoritative_files": [
+   "src/main/java/com/example/JsonService.java",
+   "pom.xml"
+  ],
+  "diagnostics": {
+   "pending_reason_codes": [],
+   "reason_code": "MIGRATION_INCOMPLETE",
+   "reason_codes": [
+    "SOURCE_DEPENDENCY_REMAINS",
+    "SOURCE_USAGE_REMAINS",
+    "TARGET_NOT_USED_BY_GROUNDED_OWNER"
+   ]
+  },
+  "likely_files": [
+   "src/main/java/com/example/JsonService.java",
+   "pom.xml"
+  ],
+  "message": "sha256:7c10bbf8285ea7cc+273",
+  "raised": "QualityGateFailure",
+  "raw_output": "sha256:7c10bbf8285ea7cc+273",
+  "self_correction_attempt": null,
+  "type": "migration_incomplete"
+ },
+ "seams": [],
+ "state": {
+  "api_contract_recovery": null,
+  "cached_run_verification_basis_hash": false,
+  "cached_run_verification_judgment": null,
+  "candidate_gates_succeeded": false,
+  "java_home_override": null,
+  "ledger": null,
+  "plan_scope_conflict": null,
+  "toolchain_checked": true,
+  "toolchain_warning": null,
+  "validated_file_revisions": {
+   "pom.xml": "4c06077089ac1b55bb39f011cd40ed0d4299a28758d30a20eaf724956e39b959"
+  },
+  "validator_timings": [
+   [
+    "compile",
+    true,
+    true
+   ]
+  ]
+ },
+ "validators": [
+  {
+   "authorized_dependency_removals": [
+    "com.google.code.gson:gson"
+   ],
+   "autonomy_cfg": "the kernel's",
+   "call": "construct",
+   "java_home_override": null,
+   "original_workspace_path": "<ws:1>",
+   "toolchain_declaration_mutable": true,
+   "validator": 0,
+   "workspace_path": "<wt:1>"
+  },
+  {
+   "call": "set_java_home_override",
+   "validator": 0,
+   "value": null
+  },
+  {
+   "args": [],
+   "call": "tree_binding.check",
+   "name": "pre_compile"
+  },
+  {
+   "call": "compile",
+   "files": [
+    "pom.xml"
+   ],
+   "java_home_override": null,
+   "tree_binding": "the attempt's",
+   "validator": 0
+  }
+ ]
+}

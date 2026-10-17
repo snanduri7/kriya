@@ -1,0 +1,174 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "output": "compile ok: 3 passed",
+   "success": true,
+   "toolchain_identity": {
+    "image": "scripted-compile"
+   },
+   "type": "compile"
+  },
+  {
+   "attempt": 1,
+   "output": "collected 0 items\n\nno tests ran in <t>s",
+   "recovered_by": "full_suite",
+   "success": false,
+   "target_test": "test_mul.py",
+   "type": "test_selection"
+  },
+  {
+   "attempt": 1,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "TEST_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [],
+   "failed_content": {},
+   "file_locations": [],
+   "likely_files": [],
+   "milestone_id": null,
+   "mode": null,
+   "output": "[ERROR] ExecutionException The forked VM terminated without properly saying goodbye. VM crash or System.exit called?\n",
+   "plan_id": null,
+   "planned_files": [],
+   "self_correction_attempt": null,
+   "subtask_id": null,
+   "success": false,
+   "type": "test_process_terminated",
+   "verification_target": null
+  }
+ ],
+ "outcome": {
+  "authoritative_files": [],
+  "diagnostics": {},
+  "likely_files": [],
+  "message": "sha256:9cd8e7dba0519c16+929",
+  "raised": "QualityGateFailure",
+  "raw_output": "[ERROR] ExecutionException The forked VM terminated without properly saying goodbye. VM crash or System.exit called?\n",
+  "self_correction_attempt": null,
+  "type": "test_process_terminated"
+ },
+ "seams": [
+  {
+   "result": {
+    "output": "[ERROR] ExecutionException The forked VM terminated without properly saying goodbye. VM crash or System.exit called?\n",
+    "success": false
+   },
+   "scope": "candidate_gate",
+   "seam": "_judge_candidate_suite"
+  }
+ ],
+ "state": {
+  "api_contract_recovery": null,
+  "cached_run_verification_basis_hash": false,
+  "cached_run_verification_judgment": null,
+  "candidate_gates_succeeded": false,
+  "java_home_override": null,
+  "ledger": {
+   "history": [
+    [
+     "attempt.subtask.s1.process_boundary_compatibility",
+     [
+      {
+       "authority": "deterministic",
+       "description": "prior",
+       "evidence": {},
+       "id": "attempt.subtask.s1.process_boundary_compatibility",
+       "kind": "process_boundary_compatibility",
+       "owner_subtask_id": "s1",
+       "repair_scope": [],
+       "revision": 1,
+       "source": "test",
+       "status": "violated",
+       "terminal_required": false
+      },
+      {
+       "authority": "deterministic",
+       "description": "subtask's test execution must not trigger process/fork termination in already-written production code invoked in-process by a test",
+       "evidence": {
+        "current_attempt": 1,
+        "detected_via": "test_selection_fallback",
+        "prior_violation_attempt": 1,
+        "raw_output": "[ERROR] ExecutionException The forked VM terminated without properly saying goodbye. VM crash or System.exit called?\n",
+        "recurrence": true
+       },
+       "id": "attempt.subtask.s1.process_boundary_compatibility",
+       "kind": "process_boundary_compatibility",
+       "owner_subtask_id": "s1",
+       "repair_scope": [],
+       "revision": 1,
+       "source": "attempt.run_attempt",
+       "status": "violated",
+       "terminal_required": false
+      }
+     ]
+    ]
+   ],
+   "schema_version": 1
+  },
+  "plan_scope_conflict": null,
+  "toolchain_checked": true,
+  "toolchain_warning": null,
+  "validated_file_revisions": {
+   "calc.py": "0825f76e4924c2e610b2ac94d5f2cc4d708272ee7bded5f40955d62e19b18871",
+   "test_mul.py": "a0cf251c10d7cf86df6f2255ab7a365881f72b89f76f3b29a0a41e38599a8baa"
+  },
+  "validator_timings": [
+   [
+    "compile",
+    true,
+    true
+   ]
+  ]
+ },
+ "validators": [
+  {
+   "authorized_dependency_removals": [],
+   "autonomy_cfg": "the kernel's",
+   "call": "construct",
+   "java_home_override": null,
+   "original_workspace_path": "<ws:1>",
+   "toolchain_declaration_mutable": true,
+   "validator": 0,
+   "workspace_path": "<wt:1>"
+  },
+  {
+   "call": "set_java_home_override",
+   "validator": 0,
+   "value": null
+  },
+  {
+   "args": [],
+   "call": "tree_binding.check",
+   "name": "pre_compile"
+  },
+  {
+   "call": "compile",
+   "files": [
+    "calc.py",
+    "lib.py",
+    "test_mul.py"
+   ],
+   "java_home_override": null,
+   "tree_binding": "the attempt's",
+   "validator": 0
+  },
+  {
+   "call": "tests",
+   "java_home_override": null,
+   "target_test": "test_mul.py",
+   "tree_binding": "the attempt's",
+   "validator": 0
+  },
+  {
+   "call": "tests",
+   "java_home_override": null,
+   "target_test": null,
+   "tree_binding": "the attempt's",
+   "validator": 0
+  }
+ ]
+}
