@@ -33,8 +33,9 @@ attempt.py defines (its helpers, the moved siblings' forwarders), every name tes
 ``_check_java_toolchain_mismatch``, ``_resolve_java_home_override``, ``_judge_candidate_suite``, the runtime and
 managed-service seams), attempt.py's ``logger`` and ``time``, and the names of the kernel's all-import cycle
 (``suite_attribution``'s scopes, ``context_budget.request_capacity``; ``self_correction`` and ``retry_strategy``
-through loaders called where the bodies imported them). Names of modules outside every import cycle that no test
-patches on ``kriya.workflow.attempt`` are imported here directly. ``PolymorphicValidator`` stays a function-local
+through loaders called where the bodies imported them). Names of modules outside that cycle (none of them reaches
+this module: ``kriya.tools.validate`` sits in the separate EXECUTION cycle with ``capabilities``) that no test patches
+on ``kriya.workflow.attempt`` are imported here directly. ``PolymorphicValidator`` stays a function-local
 import of ``kriya.tools.validate`` (tests patch the class there). This module never imports
 ``kriya.workflow.attempt``, ``workflow``, ``workflow_controller`` or ``kriya.cli``, nor any all-import-cycle module.
 
