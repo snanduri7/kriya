@@ -1270,6 +1270,22 @@ def test_the_verification_tree_binding_refuses_bytes_the_writer_did_not_stage(tm
     assert [o["type"] for o in state.gate_outcomes] == ["internal_framework_error"]
 
 
+def test_a_refused_candidate_emits_no_candidate_change_evidence(tmp_path):
+    """The worktree check comes BEFORE the candidate.change record: bytes the writer did not stage are refused
+    without the evidence stream ever describing them as the frozen candidate (capture on, so a swapped order shows)."""
+    workspace, worktree = _trees(tmp_path, {"calc.py": CALC}, {"calc.py": CALC_NEW})
+    state = _state("calc.py")
+    state.candidate_digests = {"calc.py": raw_digest(b"something else\n")}
+    ctx = _ctx(workspace, worktree, _config())
+    emitted = []
+    with patch("kriya.core.attempt_evidence.scope.capture_mode", return_value="full"), \
+            patch("kriya.core.attempt_evidence.scope.emit",
+                  side_effect=lambda kind, payload, content=None: emitted.append(kind)), \
+            pytest.raises(QualityGateFailure):
+        attempt._bind_verification_tree(state, ctx)
+    assert emitted == []
+
+
 def test_a_staged_candidate_file_missing_from_the_worktree_is_refused(tmp_path):
     workspace, worktree = _trees(tmp_path, {"calc.py": CALC}, {"calc.py": CALC_NEW})
     state = _state("calc.py", "gone.py")
