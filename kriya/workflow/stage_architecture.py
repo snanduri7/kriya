@@ -16,7 +16,6 @@ import time
 from typing import Any, Dict, List, Optional
 
 from kriya.agents.contracts import partition_file_list_escapes
-from kriya.core.state_paths import trace_db_path
 from kriya.workflow.file_resolution import (
     _resolve_file_paths_from_design,
     artifact_resolution_scope,
@@ -28,6 +27,7 @@ from kriya.workflow.file_resolution import (
 from kriya.workflow.live_lookup import _extract_first_usable, _resolve_via_web_lookup
 from kriya.workflow.requirements import requirements_prompt_block
 from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.run_lifecycle import persist_early_exit_trace, stage_run_trace
 from kriya.workflow.stage_context import StageContext, StageDeps
 from kriya.workflow.triage import ChangeKind
 from kriya.workflow.untrusted_context import outside_untrusted_reference
@@ -45,8 +45,6 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
     run_id, stream_callback, skills_prompt = ctx.run_id, ctx.stream_callback, ctx.skills_prompt
     graph_rag_context, reference_context = ctx.graph_rag_context, ctx.reference_context
     graph_retrieval_result, step_callback, trace_id = ctx.graph_retrieval_result, ctx.step_callback, ctx.trace_id
-    start_time, milestone_group_id, milestone_index = ctx.start_time, ctx.milestone_group_id, ctx.milestone_index
-    milestone_total, enforce_run_id = ctx.milestone_total, ctx.enforce_run_id
     engineering_route, control, write_scope_mode = ctx.engineering_route, ctx.control, ctx.write_scope_mode
     allowed_write_relpaths, structured_plan = ctx.allowed_write_relpaths, ctx.structured_plan
     current_subtask_id, knowledge_config, guard = ctx.current_subtask_id, ctx.knowledge_config, ctx.guard
@@ -175,17 +173,7 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
             logger.warning(f"Architect file list rejected ({status}): {plan_issue}")
             if step_callback:
                 step_callback(status, plan_issue)
-            try:
-                from kriya.control.trace import TraceLogger
-                TraceLogger(trace_db_path(deps.config)).log_run(
-                    run_id=trace_id, goal=goal, duration_sec=time.time() - start_time, attempts=0,
-                    status=status, files_modified=[], failure_category=status,
-                    milestone_group_id=milestone_group_id, milestone_index=milestone_index,
-                    milestone_total=milestone_total, enforce_run_id=enforce_run_id,
-                    run_events=deps.trace_events(state),
-                )
-            except Exception as trace_ex:
-                logger.warning(f"Failed to write run trace: {trace_ex}")
+            persist_early_exit_trace(deps, state, stage_run_trace(ctx), status=status, failure_category=status)
             return {
                 "status": status, "reason": plan_issue, "plan": plan, "design": design, "goal": goal,
                 "workspace_path": workspace_path, "run_id": trace_id,

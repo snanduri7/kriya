@@ -15,10 +15,10 @@ import time
 from typing import Any, Dict, Optional
 
 from kriya.agents.contracts import parse_planner_structured_output
-from kriya.core.state_paths import trace_db_path
 from kriya.workflow.file_resolution import classify_plan_completeness
 from kriya.workflow.requirements import requirements_prompt_block
 from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.run_lifecycle import persist_early_exit_trace, stage_run_trace
 from kriya.workflow.stage_context import StageContext, StageDeps
 from kriya.workflow.triage import ChangeKind
 from kriya.workflow.untrusted_context import outside_untrusted_reference
@@ -35,9 +35,7 @@ async def plan_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[st
     resume_state, run_id, stream_callback = ctx.resume_state, ctx.run_id, ctx.stream_callback
     skills_prompt, graph_rag_context = ctx.skills_prompt, ctx.graph_rag_context
     reference_context, graph_retrieval_result = ctx.reference_context, ctx.graph_retrieval_result
-    step_callback, trace_id, start_time = ctx.step_callback, ctx.trace_id, ctx.start_time
-    milestone_group_id, milestone_index = ctx.milestone_group_id, ctx.milestone_index
-    milestone_total, enforce_run_id = ctx.milestone_total, ctx.enforce_run_id
+    step_callback, trace_id = ctx.step_callback, ctx.trace_id
     _save_stage_checkpoint, _record_requirement_lineage = ctx.save_stage_checkpoint, ctx.record_requirement_lineage
     logger, grounded_owner_candidates = deps.logger, deps.grounded_owner_candidates
     owner_candidates_prompt_block, _log_phase_banner = deps.owner_candidates_prompt_block, deps._log_phase_banner
@@ -378,26 +376,8 @@ async def plan_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[st
         logger.warning(f"Planner output rejected before Architect ({status}): {plan_issue}")
         if step_callback:
             step_callback(status, plan_issue)
-        try:
-            from kriya.control.trace import TraceLogger
-            trace_db = trace_db_path(deps.config)
-            trace_logger = TraceLogger(trace_db)
-            trace_logger.log_run(
-                run_id=trace_id,
-                goal=goal,
-                duration_sec=time.time() - start_time,
-                attempts=0,
-                status=status,
-                files_modified=[],
-                failure_category=status,
-                milestone_group_id=milestone_group_id,
-                milestone_index=milestone_index,
-                milestone_total=milestone_total, enforce_run_id=enforce_run_id,
-                # The Planner's calls and outcomes survive the rejection.
-                run_events=deps.trace_events(state),
-            )
-        except Exception as trace_ex:
-            logger.warning(f"Failed to write run trace: {trace_ex}")
+        # The Planner's calls and outcomes survive the rejection (the SHORT row, kriya/workflow/run_lifecycle.py).
+        persist_early_exit_trace(deps, state, stage_run_trace(ctx), status=status, failure_category=status)
         return {
             "status": status,
             "reason": plan_issue,

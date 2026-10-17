@@ -9,10 +9,9 @@ architecture stage (Stage 2A's post-design scan). Collaborators arrive in ``Stag
 """
 from __future__ import annotations
 
-import time
 from typing import Any, Dict, Optional
 
-from kriya.core.state_paths import trace_db_path
+from kriya.workflow.run_lifecycle import persist_early_exit_trace, stage_run_trace
 from kriya.workflow.stage_context import StageContext, StageDeps
 
 
@@ -23,9 +22,7 @@ async def check_knowledge_guard(ctx: StageContext, deps: StageDeps) -> Optional[
     goal, workspace_path, state, step_callback = ctx.goal, ctx.workspace_path, ctx.state, ctx.step_callback
     knowledge_risk_confirmed = ctx.knowledge_risk_confirmed
     resolved_knowledge_coordinates, resume_state = ctx.resolved_knowledge_coordinates, ctx.resume_state
-    trace_id, start_time, milestone_group_id = ctx.trace_id, ctx.start_time, ctx.milestone_group_id
-    milestone_index, milestone_total, enforce_run_id = ctx.milestone_index, ctx.milestone_total, ctx.enforce_run_id
-    logger, KnowledgeGuard = deps.logger, deps.KnowledgeGuard
+    trace_id, KnowledgeGuard = ctx.trace_id, deps.KnowledgeGuard
     unresolved_knowledge_report = deps.unresolved_knowledge_report
 
     # 0. KnowledgeGuard Stage 0 Check
@@ -58,27 +55,10 @@ async def check_knowledge_guard(ctx: StageContext, deps: StageDeps) -> Optional[
     if gap_report.has_gaps and not knowledge_gate_confirmed:
         if step_callback:
             step_callback("knowledge_gap", gap_report.format_report())
-        try:
-            from kriya.control.trace import TraceLogger
-            trace_db = trace_db_path(deps.config)
-            trace_logger = TraceLogger(trace_db)
-            trace_logger.log_run(
-                run_id=trace_id,
-                goal=goal,
-                duration_sec=time.time() - start_time,
-                attempts=0,
-                status="knowledge_gap",
-                files_modified=[],
-                failure_category="knowledge_gap",
-                milestone_group_id=milestone_group_id,
-                milestone_index=milestone_index,
-                milestone_total=milestone_total, enforce_run_id=enforce_run_id,
-                # MODEL-EVIDENCE-HARDENING-001: every early exit carries
-                # the run's events, including its role metrics.
-                run_events=deps.trace_events(state),
-            )
-        except Exception as trace_ex:
-            logger.warning(f"Failed to write run trace: {trace_ex}")
+        # MODEL-EVIDENCE-HARDENING-001: every early exit carries the run's events, including its role metrics (the
+        # SHORT row, kriya/workflow/run_lifecycle.py; E5, OI-32).
+        persist_early_exit_trace(deps, state, stage_run_trace(ctx), status="knowledge_gap",
+                                 failure_category="knowledge_gap")
         return {
             "status": "knowledge_gap",
             "gap_report": gap_report.to_dict(),

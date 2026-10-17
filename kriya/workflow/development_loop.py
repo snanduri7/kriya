@@ -34,13 +34,11 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import os
-import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from kriya.control.run_coordinator import mark_run_stage
 from kriya.control.run_record import RunLifecycle
-from kriya.core.state_paths import trace_db_path
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.tools.validate import PolymorphicValidator, execution_evidence
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
@@ -60,6 +58,7 @@ from kriya.workflow.pytest_stability import decision_summary as pytest_decision_
 from kriya.workflow.requirement_closers import SUITE_BASELINE_FROM_RUN
 from kriya.workflow.requirements import REQUIREMENTS_UNRESOLVED, blocking_requirements, seed_requirement_obligations
 from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.run_lifecycle import persist_early_exit_trace, stage_run_trace
 from kriya.workflow.semantic_region_authority import find_unauthorized_semantic_changes
 from kriya.workflow.stage_apply import apply_terminal_candidate, approval_gate, extract_lessons, prepare_lessons
 from kriya.workflow.stage_context import StageContext, StageDeps
@@ -108,9 +107,8 @@ async def prepare_development(ctx: StageContext, deps: StageDeps) -> Union[Dict[
     and diagnostics store, and the loop-invariant ``AttemptContext``. A dict is the run's result (it stops here)."""
     logger = deps.logger
     state, goal, workspace_path, run_id = ctx.state, ctx.goal, ctx.workspace_path, ctx.run_id
-    trace_id, start_time, resume_state = ctx.trace_id, ctx.start_time, ctx.resume_state
-    milestone_group_id, milestone_index, milestone_total = ctx.milestone_group_id, ctx.milestone_index, ctx.milestone_total
-    enforce_run_id, stream_callback, approval_callback = ctx.enforce_run_id, ctx.stream_callback, ctx.approval_callback
+    trace_id, resume_state, milestone_group_id = ctx.trace_id, ctx.resume_state, ctx.milestone_group_id
+    stream_callback, approval_callback = ctx.stream_callback, ctx.approval_callback
     web_lookup_query_callback, requirement_set = ctx.web_lookup_query_callback, ctx.requirement_set
     verification_contract, resume_plan = ctx.verification_contract, ctx.resume_plan
     resume_restored_ledger, protected_relpath = ctx.resume_restored_ledger, ctx.protected_relpath
@@ -341,19 +339,8 @@ async def prepare_development(ctx: StageContext, deps: StageDeps) -> Union[Dict[
         # as the existing knowledge_gap/planner_output_incomplete early
         # returns just above in this same method.
         logger.error(f"Brownfield validation baseline REQUIRED but indeterminate: {baseline_capture.hard_stop_reason}")
-        try:
-            from kriya.control.trace import TraceLogger
-            trace_db = trace_db_path(deps.config)
-            TraceLogger(trace_db).log_run(
-                run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
-                attempts=0, status="baseline_indeterminate", files_modified=[],
-                failure_category="baseline_indeterminate",
-                milestone_group_id=milestone_group_id, milestone_index=milestone_index,
-                milestone_total=milestone_total, enforce_run_id=enforce_run_id,
-                run_events=deps.trace_events(state),
-            )
-        except Exception as trace_ex:
-            logger.warning(f"Failed to write run trace: {trace_ex}")
+        persist_early_exit_trace(deps, state, stage_run_trace(ctx), status="baseline_indeterminate",
+                                 failure_category="baseline_indeterminate")
         return {
             "status": "baseline_indeterminate",
             "reason": baseline_capture.hard_stop_reason,
@@ -382,16 +369,7 @@ async def prepare_development(ctx: StageContext, deps: StageDeps) -> Union[Dict[
         # generic sandbox error and never verified against.
         logger.error(f"Worktree sync refused: {sync_error}")
         category = sync_error.reason_code.lower()
-        try:
-            from kriya.control.trace import TraceLogger
-            TraceLogger(trace_db_path(deps.config)).log_run(
-                run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
-                attempts=0, status="failure", files_modified=[], failure_category=category,
-                milestone_group_id=milestone_group_id, milestone_index=milestone_index,
-                milestone_total=milestone_total, enforce_run_id=enforce_run_id, run_events=deps.trace_events(state),
-            )
-        except Exception as trace_ex:
-            logger.warning(f"Failed to write run trace: {trace_ex}")
+        persist_early_exit_trace(deps, state, stage_run_trace(ctx), status="failure", failure_category=category)
         return {
             "status": "failure", "failure_category": category, "reason_codes": [sync_error.reason_code],
             "error": str(sync_error), "plan": plan, "design": design, "goal": goal,

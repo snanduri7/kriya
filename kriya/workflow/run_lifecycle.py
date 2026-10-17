@@ -8,7 +8,8 @@ its collaborators in through ``StageDeps``):
   primary model runtime, role independence, applied routes);
 - ``trace_run_events``: the run's events for a traces.db row (budget expansions drained in, PRD-018 role metrics);
 - ``persist_run_trace``: the run's traces.db row for the pre-Reviewer checkpoint and the terminal (stage 8) write;
-- ``persist_early_exit_trace``: the short row of a run that stops before its Developer loop (E4, OI-32);
+- ``persist_early_exit_trace``: the short row of a run that stops before its first attempt (E4, OI-32): the
+  run-opening exits, the design-stage exits and the stage-4 prelude stops (E5, OI-39), each with ``stage_run_trace``;
 - ``record_run_exception``: the ``<trace_id>.exception`` row of a run that raises (MODEL-EVIDENCE-HARDENING-001).
 
 This module never imports the engine facade, the controller or the CLI (``tests/test_outcome.py``).
@@ -23,7 +24,7 @@ from kriya.control.run_coordinator import claim_run_generation_clock
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.state_paths import trace_db_path
 from kriya.workflow.run_events import EventAuthority, RunEvent
-from kriya.workflow.stage_context import RunState, StageDeps
+from kriya.workflow.stage_context import RunState, StageContext, StageDeps
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,14 @@ class RunTrace:
     milestone_index: Optional[int] = None
     milestone_total: Optional[int] = None
     enforce_run_id: Optional[str] = None
+
+
+def stage_run_trace(ctx: StageContext) -> RunTrace:
+    """The traces.db identity a stage's early exit writes under: the run's trace id, goal, start and milestone/enforce
+    linkage from its StageContext (the values the engine's own RunTrace is built from)."""
+    return RunTrace(trace_id=ctx.trace_id, goal=ctx.goal, started_at=ctx.start_time,
+                    milestone_group_id=ctx.milestone_group_id, milestone_index=ctx.milestone_index,
+                    milestone_total=ctx.milestone_total, enforce_run_id=ctx.enforce_run_id)
 
 
 class TraceDetail(NamedTuple):
@@ -197,7 +206,7 @@ _NO_CATEGORY = object()
 def persist_early_exit_trace(
     deps: StageDeps, state: RunState, trace: RunTrace, *, status: str, failure_category: Any = _NO_CATEGORY,
 ) -> None:
-    """The SHORT traces.db row of a run that stops before its Developer loop (OI-32): ``attempts=0``, no files, the
+    """The SHORT traces.db row of a run that stops before its first attempt (OI-32): ``attempts=0``, no files, the
     run's events and nothing else; ``failure_category`` is omitted (the store's default) when not given, as for
     NO_MUTATION_REQUIRED. Never raises: a trace failure is logged. The store is opened before ``trace_events`` drains
     the budget expansions and records the role metrics, as the inline writes did."""
@@ -250,4 +259,4 @@ def record_run_exception(
 
 
 __all__ = ["RunTrace", "TerminalTrace", "TraceDetail", "open_run_state", "persist_early_exit_trace", "persist_run_trace",
-           "record_run_exception", "trace_run_events"]
+           "record_run_exception", "stage_run_trace", "trace_run_events"]
