@@ -42,6 +42,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (A, '_build_targeted_retry_prompt'): P(2, 'kriya.workflow.retry_prompts', ((A, 2),), ()),
     (A, '_check_java_toolchain_mismatch'): P(2, 'kriya.workflow.toolchain', ((A, 2),), ()),
     (A, '_code_intelligence_for'): P(2, A, ((A, 2),), ()),
+    # E6 characterization: +1 site (tests/test_fallback_decision.py records which request profiles a fallback decision
+    # resolves, through this name: the selection, the call-time substitution and the model entry look it up here).
+    (A, '_developer_request_profile'): P(1, A, ((A, 4),), ()),
     (A, '_ensure_generation_time_budget'): P(2, A, ((A, 1),), ()),
     (A, '_enter_developer_model'): P(1, A, ((A, 1),), ()),
     (A, '_maybe_run_developer_investigation'): P(1, A, ((A, 1),), ()),
@@ -249,9 +252,10 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # scenario) and +1 W.include_response_construction_owners site (test_work_unit_stages); E4 +2 W.logger sites
     # (test_work_unit_stages: the moved late stages and closers log through the patched facade logger); E5 +1 W.logger and
     # +1 W.create_git_worktree, +1 W.handle_attempt_failure, +1 W.capture_brownfield_baselines and +10 W.run_attempt sites
-    # (test_development_loop: stage 4's characterization and dynamic proofs, written before the move)
-    assert totals == {A: 87, W: 88, C: 268}
-    assert len(PATCH_POINTS) == 83
+    # (test_development_loop: stage 4's characterization and dynamic proofs, written before the move); E6 +1
+    # A._developer_request_profile site (test_fallback_decision: the profiles a fallback decision resolves)
+    assert totals == {A: 88, W: 88, C: 268}
+    assert len(PATCH_POINTS) == 84
 
 
 # ----------------------------------------------------------------------------- owner modules (DEPENDENCY-RULES)

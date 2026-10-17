@@ -38,6 +38,7 @@ KINDS: Dict[Tuple[str, str], str] = {
     (A, '_build_targeted_retry_prompt'): 'function',
     (A, '_check_java_toolchain_mismatch'): 'function',
     (A, '_code_intelligence_for'): 'function',
+    (A, '_developer_request_profile'): 'function',
     (A, '_ensure_generation_time_budget'): 'function',
     (A, '_enter_developer_model'): 'function',
     (A, '_maybe_run_developer_investigation'): 'async function',
@@ -122,7 +123,8 @@ KINDS: Dict[Tuple[str, str], str] = {
 # scenario -> the module-attribute patch targets its run must call through the patched module
 CALL_THROUGH: Dict[str, Tuple[Tuple[str, str], ...]] = {
     "legacy_success": (
-        (A, "_check_java_toolchain_mismatch"), (A, "_ensure_generation_time_budget"), (A, "_enter_developer_model"),
+        (A, "_check_java_toolchain_mismatch"), (A, "_developer_request_profile"), (A, "_ensure_generation_time_budget"),
+        (A, "_enter_developer_model"),
         (A, "_maybe_run_developer_investigation"), (A, "_reject_exception_masking"), (A, "_require_qualified_retry_identity"),
         (A, "_resolve_known_target_member_hints"), (A, "_run_developer_generation"), (A, "defer_execution_until_source_review"),
         (A, "extract_target_test"), (A, "find_runnable_test_files"), (A, "normalize_written_filepath"),

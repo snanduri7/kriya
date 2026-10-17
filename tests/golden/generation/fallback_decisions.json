@@ -1,0 +1,1556 @@
+{
+ "compatible_is_never_reordered": {
+  "decisions": [
+   {
+    "newly_rejected": [],
+    "patch_rejected": [],
+    "phase": "escalation",
+    "previously_rejected": [],
+    "requested": "fallback-small:8b",
+    "retry_count": 1,
+    "selected": "fallback-small:8b"
+   }
+  ],
+  "events": [],
+  "incompatible_fallbacks": {},
+  "model_hops": [],
+  "profiles_resolved": [
+   "fallback-small:8b"
+  ],
+  "returned": {
+   "base_url": "http://localhost:11434/v1",
+   "binding": "fallback-small:8b"
+  }
+ },
+ "every_fallback_incompatible_is_terminal": {
+  "decisions": [
+   {
+    "newly_rejected": [
+     {
+      "model": "fallback-small:8b",
+      "profile_digest": "5757c1f21d1121b5f0fdf61115dc965c09e294da655c9885cb4aedd69c8680d1",
+      "reasons": [
+       "qualification of runtime 51df42578bd4 failed Developer case(s): anchored_edit_protocol",
+       "the production runtime profile requires a QUALIFIED Developer runtime; fallback-small:8b is NOT_QUALIFIED"
+      ]
+     },
+     {
+      "model": "fallback-second:14b",
+      "profile_digest": "92c70dd5c32a27ef3ea0eeb27c8a9b9c89b59a46581d37bbbd56453bbc207d90",
+      "reasons": [
+       "the production runtime profile requires a QUALIFIED Developer runtime; fallback-second:14b is MISSING"
+      ]
+     }
+    ],
+    "patch_rejected": [],
+    "phase": "escalation",
+    "previously_rejected": [],
+    "requested": "fallback-small:8b",
+    "retry_count": 1,
+    "selected": null
+   }
+  ],
+  "events": [
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "phase": "escalation",
+     "primary_route": false,
+     "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+     "rejected": [
+      {
+       "model": "fallback-small:8b",
+       "profile_digest": "5757c1f21d1121b5f0fdf61115dc965c09e294da655c9885cb4aedd69c8680d1",
+       "reasons": [
+        "qualification of runtime 51df42578bd4 failed Developer case(s): anchored_edit_protocol",
+        "the production runtime profile requires a QUALIFIED Developer runtime; fallback-small:8b is NOT_QUALIFIED"
+       ]
+      },
+      {
+       "model": "fallback-second:14b",
+       "profile_digest": "92c70dd5c32a27ef3ea0eeb27c8a9b9c89b59a46581d37bbbd56453bbc207d90",
+       "reasons": [
+        "the production runtime profile requires a QUALIFIED Developer runtime; fallback-second:14b is MISSING"
+       ]
+      }
+     ],
+     "requested": "fallback-small:8b",
+     "selected": null
+    },
+    "kind": "model.fallback_selection",
+    "message": "Fallback fallback-small:8b skipped (fallback-small:8b, fallback-second:14b incompatible); no configured fallback remains",
+    "source": "attempt.fallback_selection"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "model": "fallback-small:8b",
+     "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+     "reasons": [
+      "qualification of runtime 51df42578bd4 failed Developer case(s): anchored_edit_protocol",
+      "the production runtime profile requires a QUALIFIED Developer runtime; fallback-small:8b is NOT_QUALIFIED",
+      "the production runtime profile requires a QUALIFIED Developer runtime; fallback-second:14b is MISSING"
+     ],
+     "rejected": [
+      {
+       "model": "fallback-small:8b",
+       "profile_digest": "5757c1f21d1121b5f0fdf61115dc965c09e294da655c9885cb4aedd69c8680d1",
+       "reasons": [
+        "qualification of runtime 51df42578bd4 failed Developer case(s): anchored_edit_protocol",
+        "the production runtime profile requires a QUALIFIED Developer runtime; fallback-small:8b is NOT_QUALIFIED"
+       ]
+      },
+      {
+       "model": "fallback-second:14b",
+       "profile_digest": "92c70dd5c32a27ef3ea0eeb27c8a9b9c89b59a46581d37bbbd56453bbc207d90",
+       "reasons": [
+        "the production runtime profile requires a QUALIFIED Developer runtime; fallback-second:14b is MISSING"
+       ]
+      }
+     ]
+    },
+    "kind": "model.fallback_incompatible",
+    "message": "FALLBACK_MODEL_INCOMPATIBLE: no remaining configured fallback from fallback-small:8b can serve this attempt - fallback-small:8b: qualification of runtime 51df42578bd4 failed Developer case(s): anchored_edit_protocol; the production runtime profile requires a QUALIFIED Developer runtime; fallback-small:8b is NOT_QUALIFIED; fallback-second:14b: the production runtime profile requires a QUALIFIED Developer runtime; fallback-second:14b is MISSING",
+    "source": "attempt.fallback_selection"
+   }
+  ],
+  "failure": {
+   "attempt": 2,
+   "diagnostics": {
+    "model": "fallback-small:8b",
+    "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+    "reasons": [
+     "qualification of runtime 51df42578bd4 failed Developer case(s): anchored_edit_protocol",
+     "the production runtime profile requires a QUALIFIED Developer runtime; fallback-small:8b is NOT_QUALIFIED",
+     "the production runtime profile requires a QUALIFIED Developer runtime; fallback-second:14b is MISSING"
+    ],
+    "rejected": [
+     {
+      "model": "fallback-small:8b",
+      "profile_digest": "5757c1f21d1121b5f0fdf61115dc965c09e294da655c9885cb4aedd69c8680d1",
+      "reasons": [
+       "qualification of runtime 51df42578bd4 failed Developer case(s): anchored_edit_protocol",
+       "the production runtime profile requires a QUALIFIED Developer runtime; fallback-small:8b is NOT_QUALIFIED"
+      ]
+     },
+     {
+      "model": "fallback-second:14b",
+      "profile_digest": "92c70dd5c32a27ef3ea0eeb27c8a9b9c89b59a46581d37bbbd56453bbc207d90",
+      "reasons": [
+       "the production runtime profile requires a QUALIFIED Developer runtime; fallback-second:14b is MISSING"
+      ]
+     }
+    ]
+   },
+   "message": "FALLBACK_MODEL_INCOMPATIBLE: no remaining configured fallback from fallback-small:8b can serve this attempt - fallback-small:8b: qualification of runtime 51df42578bd4 failed Developer case(s): anchored_edit_protocol; the production runtime profile requires a QUALIFIED Developer runtime; fallback-small:8b is NOT_QUALIFIED; fallback-second:14b: the production runtime profile requires a QUALIFIED Developer runtime; fallback-second:14b is MISSING",
+   "source": "orchestrator",
+   "type": "fallback_incompatible"
+  },
+  "incompatible_fallbacks": {
+   "fallback-second:14b": [
+    "the production runtime profile requires a QUALIFIED Developer runtime; fallback-second:14b is MISSING"
+   ],
+   "fallback-small:8b": [
+    "qualification of runtime 51df42578bd4 failed Developer case(s): anchored_edit_protocol",
+    "the production runtime profile requires a QUALIFIED Developer runtime; fallback-small:8b is NOT_QUALIFIED"
+   ]
+  },
+  "model_hops": [],
+  "profiles_resolved": [
+   "fallback-small:8b",
+   "fallback-second:14b"
+  ]
+ },
+ "incompatible_first_is_skipped_then_remembered": {
+  "decisions": [
+   {
+    "newly_rejected": [
+     {
+      "model": "fallback-small:8b",
+      "profile_digest": "0a019040693de65cd8cb9e8d0f3f7846d7fbeeacb7dec2547cab66bd7ecc14d8",
+      "reasons": [
+       "qualification of runtime 51df42578bd4 failed Developer case(s): full_file_raw_content"
+      ]
+     }
+    ],
+    "patch_rejected": [],
+    "phase": "escalation",
+    "previously_rejected": [],
+    "requested": "fallback-small:8b",
+    "retry_count": 1,
+    "selected": "fallback-second:14b"
+   },
+   {
+    "newly_rejected": [],
+    "patch_rejected": [],
+    "phase": "escalation",
+    "previously_rejected": [
+     "fallback-small:8b"
+    ],
+    "requested": "fallback-second:14b",
+    "retry_count": 2,
+    "selected": "fallback-second:14b"
+   },
+   {
+    "newly_rejected": [],
+    "patch_rejected": [],
+    "phase": "escalation",
+    "previously_rejected": [
+     "fallback-small:8b"
+    ],
+    "requested": "fallback-small:8b",
+    "retry_count": 1,
+    "selected": "fallback-second:14b"
+   }
+  ],
+  "events": [
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "phase": "escalation",
+     "primary_route": false,
+     "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+     "rejected": [
+      {
+       "model": "fallback-small:8b",
+       "profile_digest": "0a019040693de65cd8cb9e8d0f3f7846d7fbeeacb7dec2547cab66bd7ecc14d8",
+       "reasons": [
+        "qualification of runtime 51df42578bd4 failed Developer case(s): full_file_raw_content"
+       ]
+      }
+     ],
+     "requested": "fallback-small:8b",
+     "selected": "fallback-second:14b"
+    },
+    "kind": "model.fallback_selection",
+    "message": "Fallback fallback-small:8b skipped (fallback-small:8b incompatible); fallback-second:14b selected",
+    "source": "attempt.fallback_selection"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "phase": "escalation",
+     "primary_route": false,
+     "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+     "rejected": [
+      {
+       "model": "fallback-small:8b",
+       "reasons": [
+        "qualification of runtime 51df42578bd4 failed Developer case(s): full_file_raw_content"
+       ]
+      }
+     ],
+     "requested": "fallback-small:8b",
+     "selected": "fallback-second:14b"
+    },
+    "kind": "model.fallback_selection",
+    "message": "Fallback fallback-small:8b skipped (fallback-small:8b incompatible); fallback-second:14b selected",
+    "source": "attempt.fallback_selection"
+   }
+  ],
+  "incompatible_fallbacks": {
+   "fallback-small:8b": [
+    "qualification of runtime 51df42578bd4 failed Developer case(s): full_file_raw_content"
+   ]
+  },
+  "model_hops": [],
+  "profiles_resolved": [
+   "fallback-small:8b",
+   "fallback-second:14b",
+   "fallback-second:14b",
+   "fallback-second:14b"
+  ],
+  "returned": [
+   {
+    "returned": {
+     "base_url": "http://localhost:11434/v1",
+     "binding": "fallback-second:14b"
+    }
+   },
+   {
+    "returned": {
+     "base_url": "http://localhost:11434/v1",
+     "binding": "fallback-second:14b"
+    }
+   },
+   {
+    "returned": {
+     "base_url": "http://localhost:11434/v1",
+     "binding": "fallback-second:14b"
+    }
+   }
+  ]
+ },
+ "no_retry_and_past_the_chain": {
+  "decisions": [
+   {
+    "newly_rejected": [],
+    "patch_rejected": [],
+    "phase": "escalation",
+    "previously_rejected": [],
+    "requested": "fallback-second:14b",
+    "retry_count": 7,
+    "selected": "fallback-second:14b"
+   }
+  ],
+  "events": [],
+  "incompatible_fallbacks": {},
+  "model_hops": [],
+  "profiles_resolved": [
+   "fallback-second:14b"
+  ],
+  "returned": [
+   {
+    "returned": null
+   },
+   {
+    "returned": {
+     "base_url": "http://localhost:11434/v1",
+     "binding": "fallback-second:14b"
+    }
+   }
+  ]
+ },
+ "patch_only_targets_skip_for_this_attempt": {
+  "decisions": [
+   {
+    "newly_rejected": [],
+    "patch_rejected": [
+     {
+      "model": "whole-only:8b",
+      "patch_only_files": [
+       "Big.java"
+      ],
+      "profile_digest": "581a6d5211273840fea25f040bc9234b245cb6da3c68801b39de00e288f4f8d0",
+      "reasons": [
+       "the attempt may only patch Big.java (no complete current source was shown), but whole-only:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+      ]
+     }
+    ],
+    "phase": "escalation",
+    "previously_rejected": [],
+    "requested": "whole-only:8b",
+    "retry_count": 1,
+    "selected": "patch-capable:14b"
+   },
+   {
+    "newly_rejected": [],
+    "patch_rejected": [],
+    "phase": "escalation",
+    "previously_rejected": [],
+    "requested": "patch-capable:14b",
+    "retry_count": 2,
+    "selected": "patch-capable:14b"
+   }
+  ],
+  "events": [
+   {
+    "attempt": 0,
+    "authority": "advisory",
+    "details": {
+     "phase": "escalation",
+     "primary_route": false,
+     "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+     "rejected": [
+      {
+       "model": "whole-only:8b",
+       "patch_only_files": [
+        "Big.java"
+       ],
+       "profile_digest": "581a6d5211273840fea25f040bc9234b245cb6da3c68801b39de00e288f4f8d0",
+       "reasons": [
+        "the attempt may only patch Big.java (no complete current source was shown), but whole-only:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+       ]
+      }
+     ],
+     "requested": "whole-only:8b",
+     "selected": "patch-capable:14b"
+    },
+    "kind": "model.fallback_selection",
+    "message": "Fallback whole-only:8b skipped (whole-only:8b incompatible); patch-capable:14b selected",
+    "source": "attempt.fallback_selection"
+   }
+  ],
+  "incompatible_fallbacks": {},
+  "model_hops": [],
+  "profiles_resolved": [
+   "whole-only:8b",
+   "patch-capable:14b",
+   "patch-capable:14b"
+  ],
+  "returned": [
+   {
+    "returned": {
+     "base_url": "http://localhost:11434/v1",
+     "binding": "patch-capable:14b"
+    }
+   },
+   {
+    "returned": {
+     "base_url": "http://localhost:11434/v1",
+     "binding": "patch-capable:14b"
+    }
+   }
+  ]
+ },
+ "patch_only_with_only_whole_file_fallbacks": {
+  "routes": [
+   {
+    "decisions": [
+     {
+      "newly_rejected": [],
+      "patch_rejected": [
+       {
+        "model": "whole-only:8b",
+        "patch_only_files": [
+         "Big.java"
+        ],
+        "profile_digest": "581a6d5211273840fea25f040bc9234b245cb6da3c68801b39de00e288f4f8d0",
+        "reasons": [
+         "the attempt may only patch Big.java (no complete current source was shown), but whole-only:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+        ]
+       }
+      ],
+      "phase": "escalation",
+      "previously_rejected": [],
+      "requested": "whole-only:8b",
+      "retry_count": 1,
+      "selected": null
+     }
+    ],
+    "events": [
+     {
+      "attempt": 3,
+      "authority": "advisory",
+      "details": {
+       "phase": "escalation",
+       "primary_route": true,
+       "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+       "rejected": [
+        {
+         "model": "whole-only:8b",
+         "patch_only_files": [
+          "Big.java"
+         ],
+         "profile_digest": "581a6d5211273840fea25f040bc9234b245cb6da3c68801b39de00e288f4f8d0",
+         "reasons": [
+          "the attempt may only patch Big.java (no complete current source was shown), but whole-only:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+         ]
+        }
+       ],
+       "requested": "whole-only:8b",
+       "selected": null
+      },
+      "kind": "model.fallback_selection",
+      "message": "Fallback whole-only:8b skipped (whole-only:8b incompatible); the full-set attempt stays on the primary",
+      "source": "attempt.fallback_selection"
+     }
+    ],
+    "incompatible_fallbacks": {},
+    "model_hops": [],
+    "profiles_resolved": [
+     "whole-only:8b"
+    ],
+    "returned": null
+   },
+   {
+    "decisions": [
+     {
+      "newly_rejected": [],
+      "patch_rejected": [
+       {
+        "model": "whole-only:8b",
+        "patch_only_files": [
+         "Big.java"
+        ],
+        "profile_digest": "581a6d5211273840fea25f040bc9234b245cb6da3c68801b39de00e288f4f8d0",
+        "reasons": [
+         "the attempt may only patch Big.java (no complete current source was shown), but whole-only:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+        ]
+       }
+      ],
+      "phase": "escalation",
+      "previously_rejected": [],
+      "requested": "whole-only:8b",
+      "retry_count": 1,
+      "selected": null
+     }
+    ],
+    "events": [
+     {
+      "attempt": 3,
+      "authority": "advisory",
+      "details": {
+       "phase": "escalation",
+       "primary_route": false,
+       "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+       "rejected": [
+        {
+         "model": "whole-only:8b",
+         "patch_only_files": [
+          "Big.java"
+         ],
+         "profile_digest": "581a6d5211273840fea25f040bc9234b245cb6da3c68801b39de00e288f4f8d0",
+         "reasons": [
+          "the attempt may only patch Big.java (no complete current source was shown), but whole-only:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+         ]
+        }
+       ],
+       "requested": "whole-only:8b",
+       "selected": null
+      },
+      "kind": "model.fallback_selection",
+      "message": "Fallback whole-only:8b skipped (whole-only:8b incompatible); no configured fallback remains",
+      "source": "attempt.fallback_selection"
+     },
+     {
+      "attempt": 3,
+      "authority": "advisory",
+      "details": {
+       "model": "whole-only:8b",
+       "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+       "reasons": [
+        "the attempt may only patch Big.java (no complete current source was shown), but whole-only:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+       ],
+       "rejected": [
+        {
+         "model": "whole-only:8b",
+         "patch_only_files": [
+          "Big.java"
+         ],
+         "profile_digest": "581a6d5211273840fea25f040bc9234b245cb6da3c68801b39de00e288f4f8d0",
+         "reasons": [
+          "the attempt may only patch Big.java (no complete current source was shown), but whole-only:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+         ]
+        }
+       ]
+      },
+      "kind": "model.fallback_incompatible",
+      "message": "FALLBACK_MODEL_INCOMPATIBLE: no remaining configured fallback from whole-only:8b can serve this attempt - whole-only:8b: the attempt may only patch Big.java (no complete current source was shown), but whole-only:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)",
+      "source": "attempt.fallback_selection"
+     }
+    ],
+    "failure": {
+     "attempt": 3,
+     "diagnostics": {
+      "model": "whole-only:8b",
+      "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+      "reasons": [
+       "the attempt may only patch Big.java (no complete current source was shown), but whole-only:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+      ],
+      "rejected": [
+       {
+        "model": "whole-only:8b",
+        "patch_only_files": [
+         "Big.java"
+        ],
+        "profile_digest": "581a6d5211273840fea25f040bc9234b245cb6da3c68801b39de00e288f4f8d0",
+        "reasons": [
+         "the attempt may only patch Big.java (no complete current source was shown), but whole-only:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+        ]
+       }
+      ]
+     },
+     "message": "FALLBACK_MODEL_INCOMPATIBLE: no remaining configured fallback from whole-only:8b can serve this attempt - whole-only:8b: the attempt may only patch Big.java (no complete current source was shown), but whole-only:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)",
+     "source": "orchestrator",
+     "type": "fallback_incompatible"
+    },
+    "incompatible_fallbacks": {},
+    "model_hops": [],
+    "profiles_resolved": [
+     "whole-only:8b"
+    ]
+   },
+   {
+    "decisions": [
+     {
+      "newly_rejected": [],
+      "patch_rejected": [],
+      "phase": "escalation",
+      "previously_rejected": [],
+      "requested": "whole-only:8b",
+      "retry_count": 1,
+      "selected": "whole-only:8b"
+     }
+    ],
+    "events": [],
+    "incompatible_fallbacks": {},
+    "model_hops": [],
+    "profiles_resolved": [
+     "whole-only:8b"
+    ],
+    "returned": {
+     "base_url": "http://localhost:11434/v1",
+     "binding": "whole-only:8b"
+    }
+   }
+  ]
+ },
+ "required_patch_moves_the_call": {
+  "decisions": [
+   {
+    "fallback": true,
+    "phase": "call",
+    "profile_digest": "92c70dd5c32a27ef3ea0eeb27c8a9b9c89b59a46581d37bbbd56453bbc207d90",
+    "requested": "fallback-small:8b",
+    "requested_profile_digest": "15970e6a49436f6a928aaaeca6b9d3cf640fad6551c9841dc9a67f34908ec35f",
+    "requested_rejection": [
+     "the attempt may only patch Service.java (no complete current source was shown), but fallback-small:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+    ],
+    "selected": "fallback-second:14b"
+   }
+  ],
+  "events": [
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "phase": "call",
+     "primary_route": false,
+     "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+     "rejected": [
+      {
+       "model": "fallback-small:8b",
+       "profile_digest": "15970e6a49436f6a928aaaeca6b9d3cf640fad6551c9841dc9a67f34908ec35f",
+       "reasons": [
+        "the attempt may only patch Service.java (no complete current source was shown), but fallback-small:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+       ]
+      }
+     ],
+     "requested": "fallback-small:8b",
+     "selected": "fallback-second:14b"
+    },
+    "kind": "model.fallback_selection",
+    "message": "Fallback fallback-small:8b skipped (fallback-small:8b incompatible); fallback-second:14b selected",
+    "source": "attempt.fallback_selection"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "changes": {
+      "allocation_window": {
+       "from": null,
+       "to": 8780
+      },
+      "capability_source": {
+       "from": null,
+       "to": "explicit_llm_chain"
+      },
+      "context_policy": {
+       "from": null,
+       "to": "adaptive"
+      },
+      "context_window": {
+       "from": null,
+       "to": 16384
+      },
+      "edit_protocol": {
+       "from": null,
+       "to": "text_markers"
+      },
+      "endpoint": {
+       "from": null,
+       "to": "http://localhost:11434/v1"
+      },
+      "failed_cases": {
+       "from": null,
+       "to": []
+      },
+      "json_mode": {
+       "from": null,
+       "to": false
+      },
+      "model": {
+       "from": null,
+       "to": "fallback-second:14b"
+      },
+      "native_tool_calls": {
+       "from": null,
+       "to": false
+      },
+      "output_tokens": {
+       "from": null,
+       "to": 2048
+      },
+      "qualification": {
+       "from": null,
+       "to": "MISSING"
+      },
+      "reasoning": {
+       "from": null,
+       "to": false
+      },
+      "reliable_multiline_json": {
+       "from": null,
+       "to": false
+      },
+      "retry_inference_settings_digest": {
+       "from": null,
+       "to": null
+      },
+      "retry_qualification": {
+       "from": null,
+       "to": null
+      },
+      "runtime_digest": {
+       "from": null,
+       "to": "d1df50d907392e0ac453716ea0f4a3709600f11074c2557372a98212abe5b2a1"
+      },
+      "runtime_exact": {
+       "from": null,
+       "to": true
+      },
+      "streaming": {
+       "from": null,
+       "to": false
+      }
+     },
+     "fallback": true,
+     "from": null,
+     "initial": true,
+     "to": {
+      "allocation_window": 8780,
+      "capability_source": "explicit_llm_chain",
+      "context_policy": "adaptive",
+      "context_window": 16384,
+      "digest": "92c70dd5c32a27ef3ea0eeb27c8a9b9c89b59a46581d37bbbd56453bbc207d90",
+      "edit_protocol": "text_markers",
+      "endpoint": "http://localhost:11434/v1",
+      "failed_cases": [],
+      "json_mode": false,
+      "model": "fallback-second:14b",
+      "native_tool_calls": false,
+      "output_tokens": 2048,
+      "qualification": "MISSING",
+      "reasoning": false,
+      "reliable_multiline_json": false,
+      "retry_inference_settings_digest": null,
+      "retry_qualification": null,
+      "runtime_digest": "d1df50d907392e0ac453716ea0f4a3709600f11074c2557372a98212abe5b2a1",
+      "runtime_exact": true,
+      "streaming": false
+     }
+    },
+    "kind": "model.transition",
+    "message": "Developer request profile for fallback-second:14b",
+    "source": "attempt._run_developer_generation"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "budget_chars": 4212,
+     "model": "fallback-second:14b",
+     "targets": [
+      {
+       "digest": "df26dff9b0c2b848331d0a1b01992bdc92aa7c8728c31db6d342bac7d0f246a9",
+       "full_file": false,
+       "insertion": null,
+       "level": 0,
+       "loci": [],
+       "operations": [
+        "anchored_edit"
+       ],
+       "path": "Service.java",
+       "revision": "95e07dcd3b036620df77ca112a41bc77689660a1a86f0b6054a0381d4a090305",
+       "spans": [
+        {
+         "end_line": 3,
+         "start_line": 1,
+         "unit": "shown_full"
+        }
+       ],
+       "uncovered_loci": []
+      }
+     ]
+    },
+    "kind": "context.edit_capability",
+    "message": "Mutation operations decided from this invocation's authoritative context.",
+    "source": "attempt._decide_edit_capabilities"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": 15,
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": 0,
+     "skills_tokens": 0,
+     "t0_header_tokens": 0,
+     "t0_member_tokens": 0,
+     "t1_tokens": 0,
+     "t2_tokens": 0,
+     "t3_tokens": 0,
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "duration_seconds": "<t>",
+     "file_count": 1,
+     "model": "fallback-second:14b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   }
+  ],
+  "incompatible_fallbacks": {},
+  "last": [
+   "fallback-second:14b",
+   "http://localhost:11434/v1",
+   "local-key",
+   {
+    "options": {
+     "num_ctx": 16384
+    }
+   },
+   2,
+   "fallback-second:14b"
+  ],
+  "model_hops": [
+   "fallback-second:14b"
+  ],
+  "profiles_resolved": [
+   "fallback-small:8b",
+   "fallback-second:14b"
+  ],
+  "returned": [
+   {
+    "content": "x",
+    "filepath": "Service.java"
+   }
+  ],
+  "sent": {
+   "api_key_override": "local-key",
+   "base_url_override": "http://localhost:11434/v1",
+   "extra_body_override": {
+    "options": {
+     "num_ctx": 16384
+    }
+   },
+   "model_override": "fallback-second:14b"
+  }
+ },
+ "required_patch_moves_the_call_to_the_substitutes_own_endpoint": {
+  "decisions": [
+   {
+    "fallback": true,
+    "phase": "call",
+    "profile_digest": "3cd909d6ce7434732f69406cf6d316b0278c399b60b27c08875cc66245a8c44f",
+    "requested": "fallback-small:8b",
+    "requested_profile_digest": "15970e6a49436f6a928aaaeca6b9d3cf640fad6551c9841dc9a67f34908ec35f",
+    "requested_rejection": [
+     "the attempt may only patch Service.java (no complete current source was shown), but fallback-small:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+    ],
+    "selected": "fallback-second:14b"
+   }
+  ],
+  "events": [
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "phase": "call",
+     "primary_route": false,
+     "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+     "rejected": [
+      {
+       "model": "fallback-small:8b",
+       "profile_digest": "15970e6a49436f6a928aaaeca6b9d3cf640fad6551c9841dc9a67f34908ec35f",
+       "reasons": [
+        "the attempt may only patch Service.java (no complete current source was shown), but fallback-small:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+       ]
+      }
+     ],
+     "requested": "fallback-small:8b",
+     "selected": "fallback-second:14b"
+    },
+    "kind": "model.fallback_selection",
+    "message": "Fallback fallback-small:8b skipped (fallback-small:8b incompatible); fallback-second:14b selected",
+    "source": "attempt.fallback_selection"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "changes": {
+      "allocation_window": {
+       "from": null,
+       "to": 8780
+      },
+      "capability_source": {
+       "from": null,
+       "to": "explicit_llm_chain"
+      },
+      "context_policy": {
+       "from": null,
+       "to": "adaptive"
+      },
+      "context_window": {
+       "from": null,
+       "to": 16384
+      },
+      "edit_protocol": {
+       "from": null,
+       "to": "text_markers"
+      },
+      "endpoint": {
+       "from": null,
+       "to": "http://127.0.0.1:11435/v1"
+      },
+      "failed_cases": {
+       "from": null,
+       "to": []
+      },
+      "json_mode": {
+       "from": null,
+       "to": false
+      },
+      "model": {
+       "from": null,
+       "to": "fallback-second:14b"
+      },
+      "native_tool_calls": {
+       "from": null,
+       "to": false
+      },
+      "output_tokens": {
+       "from": null,
+       "to": 2048
+      },
+      "qualification": {
+       "from": null,
+       "to": "MISSING"
+      },
+      "reasoning": {
+       "from": null,
+       "to": false
+      },
+      "reliable_multiline_json": {
+       "from": null,
+       "to": false
+      },
+      "retry_inference_settings_digest": {
+       "from": null,
+       "to": null
+      },
+      "retry_qualification": {
+       "from": null,
+       "to": null
+      },
+      "runtime_digest": {
+       "from": null,
+       "to": "d1df50d907392e0ac453716ea0f4a3709600f11074c2557372a98212abe5b2a1"
+      },
+      "runtime_exact": {
+       "from": null,
+       "to": true
+      },
+      "streaming": {
+       "from": null,
+       "to": false
+      }
+     },
+     "fallback": true,
+     "from": null,
+     "initial": true,
+     "to": {
+      "allocation_window": 8780,
+      "capability_source": "explicit_llm_chain",
+      "context_policy": "adaptive",
+      "context_window": 16384,
+      "digest": "3cd909d6ce7434732f69406cf6d316b0278c399b60b27c08875cc66245a8c44f",
+      "edit_protocol": "text_markers",
+      "endpoint": "http://127.0.0.1:11435/v1",
+      "failed_cases": [],
+      "json_mode": false,
+      "model": "fallback-second:14b",
+      "native_tool_calls": false,
+      "output_tokens": 2048,
+      "qualification": "MISSING",
+      "reasoning": false,
+      "reliable_multiline_json": false,
+      "retry_inference_settings_digest": null,
+      "retry_qualification": null,
+      "runtime_digest": "d1df50d907392e0ac453716ea0f4a3709600f11074c2557372a98212abe5b2a1",
+      "runtime_exact": true,
+      "streaming": false
+     }
+    },
+    "kind": "model.transition",
+    "message": "Developer request profile for fallback-second:14b",
+    "source": "attempt._run_developer_generation"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "budget_chars": 4212,
+     "model": "fallback-second:14b",
+     "targets": [
+      {
+       "digest": "df26dff9b0c2b848331d0a1b01992bdc92aa7c8728c31db6d342bac7d0f246a9",
+       "full_file": false,
+       "insertion": null,
+       "level": 0,
+       "loci": [],
+       "operations": [
+        "anchored_edit"
+       ],
+       "path": "Service.java",
+       "revision": "95e07dcd3b036620df77ca112a41bc77689660a1a86f0b6054a0381d4a090305",
+       "spans": [
+        {
+         "end_line": 3,
+         "start_line": 1,
+         "unit": "shown_full"
+        }
+       ],
+       "uncovered_loci": []
+      }
+     ]
+    },
+    "kind": "context.edit_capability",
+    "message": "Mutation operations decided from this invocation's authoritative context.",
+    "source": "attempt._decide_edit_capabilities"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": 15,
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": 0,
+     "skills_tokens": 0,
+     "t0_header_tokens": 0,
+     "t0_member_tokens": 0,
+     "t1_tokens": 0,
+     "t2_tokens": 0,
+     "t3_tokens": 0,
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "duration_seconds": "<t>",
+     "file_count": 1,
+     "model": "fallback-second:14b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   }
+  ],
+  "incompatible_fallbacks": {},
+  "last": [
+   "fallback-second:14b",
+   "http://127.0.0.1:11435/v1",
+   "second-key"
+  ],
+  "model_hops": [],
+  "profiles_resolved": [
+   "fallback-small:8b",
+   "fallback-second:14b"
+  ],
+  "returned": [
+   {
+    "content": "x",
+    "filepath": "Service.java"
+   }
+  ],
+  "sent": {
+   "api_key_override": "second-key",
+   "base_url_override": "http://127.0.0.1:11435/v1",
+   "extra_body_override": {
+    "options": {
+     "num_ctx": 16384
+    }
+   },
+   "model_override": "fallback-second:14b"
+  }
+ },
+ "required_patch_skips_every_whole_file_fallback": {
+  "decisions": [
+   {
+    "fallback": true,
+    "phase": "call",
+    "profile_digest": "92c70dd5c32a27ef3ea0eeb27c8a9b9c89b59a46581d37bbbd56453bbc207d90",
+    "requested": "fallback-small:8b",
+    "requested_profile_digest": "15970e6a49436f6a928aaaeca6b9d3cf640fad6551c9841dc9a67f34908ec35f",
+    "requested_rejection": [
+     "the attempt may only patch Service.java (no complete current source was shown), but fallback-small:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+    ],
+    "selected": "fallback-second:14b"
+   }
+  ],
+  "events": [
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "phase": "call",
+     "primary_route": false,
+     "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+     "rejected": [
+      {
+       "model": "fallback-small:8b",
+       "profile_digest": "15970e6a49436f6a928aaaeca6b9d3cf640fad6551c9841dc9a67f34908ec35f",
+       "reasons": [
+        "the attempt may only patch Service.java (no complete current source was shown), but fallback-small:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+       ]
+      },
+      {
+       "model": "fallback-third:7b",
+       "profile_digest": "e62fa8784056a97438ad50bae7997f26516413d02d6862df65169e15c0aee556",
+       "reasons": [
+        "the attempt may only patch Service.java (no complete current source was shown), but fallback-third:7b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+       ]
+      }
+     ],
+     "requested": "fallback-small:8b",
+     "selected": "fallback-second:14b"
+    },
+    "kind": "model.fallback_selection",
+    "message": "Fallback fallback-small:8b skipped (fallback-small:8b, fallback-third:7b incompatible); fallback-second:14b selected",
+    "source": "attempt.fallback_selection"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "changes": {
+      "allocation_window": {
+       "from": null,
+       "to": 8780
+      },
+      "capability_source": {
+       "from": null,
+       "to": "explicit_llm_chain"
+      },
+      "context_policy": {
+       "from": null,
+       "to": "adaptive"
+      },
+      "context_window": {
+       "from": null,
+       "to": 16384
+      },
+      "edit_protocol": {
+       "from": null,
+       "to": "text_markers"
+      },
+      "endpoint": {
+       "from": null,
+       "to": "http://localhost:11434/v1"
+      },
+      "failed_cases": {
+       "from": null,
+       "to": []
+      },
+      "json_mode": {
+       "from": null,
+       "to": false
+      },
+      "model": {
+       "from": null,
+       "to": "fallback-second:14b"
+      },
+      "native_tool_calls": {
+       "from": null,
+       "to": false
+      },
+      "output_tokens": {
+       "from": null,
+       "to": 2048
+      },
+      "qualification": {
+       "from": null,
+       "to": "MISSING"
+      },
+      "reasoning": {
+       "from": null,
+       "to": false
+      },
+      "reliable_multiline_json": {
+       "from": null,
+       "to": false
+      },
+      "retry_inference_settings_digest": {
+       "from": null,
+       "to": null
+      },
+      "retry_qualification": {
+       "from": null,
+       "to": null
+      },
+      "runtime_digest": {
+       "from": null,
+       "to": "d1df50d907392e0ac453716ea0f4a3709600f11074c2557372a98212abe5b2a1"
+      },
+      "runtime_exact": {
+       "from": null,
+       "to": true
+      },
+      "streaming": {
+       "from": null,
+       "to": false
+      }
+     },
+     "fallback": true,
+     "from": null,
+     "initial": true,
+     "to": {
+      "allocation_window": 8780,
+      "capability_source": "explicit_llm_chain",
+      "context_policy": "adaptive",
+      "context_window": 16384,
+      "digest": "92c70dd5c32a27ef3ea0eeb27c8a9b9c89b59a46581d37bbbd56453bbc207d90",
+      "edit_protocol": "text_markers",
+      "endpoint": "http://localhost:11434/v1",
+      "failed_cases": [],
+      "json_mode": false,
+      "model": "fallback-second:14b",
+      "native_tool_calls": false,
+      "output_tokens": 2048,
+      "qualification": "MISSING",
+      "reasoning": false,
+      "reliable_multiline_json": false,
+      "retry_inference_settings_digest": null,
+      "retry_qualification": null,
+      "runtime_digest": "d1df50d907392e0ac453716ea0f4a3709600f11074c2557372a98212abe5b2a1",
+      "runtime_exact": true,
+      "streaming": false
+     }
+    },
+    "kind": "model.transition",
+    "message": "Developer request profile for fallback-second:14b",
+    "source": "attempt._run_developer_generation"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "budget_chars": 4212,
+     "model": "fallback-second:14b",
+     "targets": [
+      {
+       "digest": "df26dff9b0c2b848331d0a1b01992bdc92aa7c8728c31db6d342bac7d0f246a9",
+       "full_file": false,
+       "insertion": null,
+       "level": 0,
+       "loci": [],
+       "operations": [
+        "anchored_edit"
+       ],
+       "path": "Service.java",
+       "revision": "95e07dcd3b036620df77ca112a41bc77689660a1a86f0b6054a0381d4a090305",
+       "spans": [
+        {
+         "end_line": 3,
+         "start_line": 1,
+         "unit": "shown_full"
+        }
+       ],
+       "uncovered_loci": []
+      }
+     ]
+    },
+    "kind": "context.edit_capability",
+    "message": "Mutation operations decided from this invocation's authoritative context.",
+    "source": "attempt._decide_edit_capabilities"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": 15,
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": 0,
+     "skills_tokens": 0,
+     "t0_header_tokens": 0,
+     "t0_member_tokens": 0,
+     "t1_tokens": 0,
+     "t2_tokens": 0,
+     "t3_tokens": 0,
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "duration_seconds": "<t>",
+     "file_count": 1,
+     "model": "fallback-second:14b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   }
+  ],
+  "incompatible_fallbacks": {},
+  "model_hops": [],
+  "profiles_resolved": [
+   "fallback-small:8b",
+   "fallback-third:7b",
+   "fallback-second:14b"
+  ],
+  "returned": [
+   {
+    "content": "x",
+    "filepath": "Service.java"
+   }
+  ],
+  "sent_model": "fallback-second:14b"
+ },
+ "required_patch_with_no_substitute_is_terminal": {
+  "decisions": [
+   {
+    "fallback": true,
+    "phase": "call",
+    "profile_digest": null,
+    "requested": "fallback-small:8b",
+    "requested_profile_digest": "15970e6a49436f6a928aaaeca6b9d3cf640fad6551c9841dc9a67f34908ec35f",
+    "requested_rejection": [
+     "the attempt may only patch Service.java (no complete current source was shown), but fallback-small:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+    ],
+    "selected": null
+   }
+  ],
+  "events": [
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "phase": "call",
+     "primary_route": false,
+     "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+     "rejected": [
+      {
+       "model": "fallback-small:8b",
+       "profile_digest": "15970e6a49436f6a928aaaeca6b9d3cf640fad6551c9841dc9a67f34908ec35f",
+       "reasons": [
+        "the attempt may only patch Service.java (no complete current source was shown), but fallback-small:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+       ]
+      },
+      {
+       "model": "fallback-second:14b",
+       "reasons": [
+        "previously proven incompatible"
+       ]
+      }
+     ],
+     "requested": "fallback-small:8b",
+     "selected": null
+    },
+    "kind": "model.fallback_selection",
+    "message": "Fallback fallback-small:8b skipped (fallback-small:8b, fallback-second:14b incompatible); no configured fallback remains",
+    "source": "attempt.fallback_selection"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "model": "fallback-small:8b",
+     "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+     "reasons": [
+      "the attempt may only patch Service.java (no complete current source was shown), but fallback-small:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)",
+      "previously proven incompatible"
+     ],
+     "rejected": [
+      {
+       "model": "fallback-small:8b",
+       "profile_digest": "15970e6a49436f6a928aaaeca6b9d3cf640fad6551c9841dc9a67f34908ec35f",
+       "reasons": [
+        "the attempt may only patch Service.java (no complete current source was shown), but fallback-small:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+       ]
+      },
+      {
+       "model": "fallback-second:14b",
+       "reasons": [
+        "previously proven incompatible"
+       ]
+      }
+     ]
+    },
+    "kind": "model.fallback_incompatible",
+    "message": "FALLBACK_MODEL_INCOMPATIBLE: no remaining configured fallback from fallback-small:8b can serve this attempt - fallback-small:8b: the attempt may only patch Service.java (no complete current source was shown), but fallback-small:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file); fallback-second:14b: previously proven incompatible",
+    "source": "attempt.fallback_selection"
+   }
+  ],
+  "failure": {
+   "attempt": 2,
+   "diagnostics": {
+    "model": "fallback-small:8b",
+    "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+    "reasons": [
+     "the attempt may only patch Service.java (no complete current source was shown), but fallback-small:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)",
+     "previously proven incompatible"
+    ],
+    "rejected": [
+     {
+      "model": "fallback-small:8b",
+      "profile_digest": "15970e6a49436f6a928aaaeca6b9d3cf640fad6551c9841dc9a67f34908ec35f",
+      "reasons": [
+       "the attempt may only patch Service.java (no complete current source was shown), but fallback-small:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file)"
+      ]
+     },
+     {
+      "model": "fallback-second:14b",
+      "reasons": [
+       "previously proven incompatible"
+      ]
+     }
+    ]
+   },
+   "message": "FALLBACK_MODEL_INCOMPATIBLE: no remaining configured fallback from fallback-small:8b can serve this attempt - fallback-small:8b: the attempt may only patch Service.java (no complete current source was shown), but fallback-small:8b's capability profile (explicit_llm_chain) returns whole files only (edit protocol full_file); fallback-second:14b: previously proven incompatible",
+   "source": "orchestrator",
+   "type": "fallback_incompatible"
+  },
+  "incompatible_fallbacks": {
+   "fallback-second:14b": [
+    "previously proven incompatible"
+   ]
+  },
+  "last_profile": null,
+  "model_hops": [],
+  "profiles_resolved": [
+   "fallback-small:8b"
+  ],
+  "requests_sent": 0
+ },
+ "run_wide_rejection_stays_terminal_on_the_full_set_route": {
+  "decisions": [
+   {
+    "newly_rejected": [
+     {
+      "model": "patch-capable:14b",
+      "profile_digest": "e1e7b630f5c0461d34d682c37f57cbaa02a5fad6cffdef12bc3acee5d4ad136e",
+      "reasons": [
+       "qualification of runtime 169c7aa85ae8 failed Developer case(s): full_file_raw_content"
+      ]
+     }
+    ],
+    "patch_rejected": [],
+    "phase": "escalation",
+    "previously_rejected": [],
+    "requested": "patch-capable:14b",
+    "retry_count": 1,
+    "selected": null
+   }
+  ],
+  "events": [
+   {
+    "attempt": 0,
+    "authority": "advisory",
+    "details": {
+     "phase": "escalation",
+     "primary_route": false,
+     "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+     "rejected": [
+      {
+       "model": "patch-capable:14b",
+       "profile_digest": "e1e7b630f5c0461d34d682c37f57cbaa02a5fad6cffdef12bc3acee5d4ad136e",
+       "reasons": [
+        "qualification of runtime 169c7aa85ae8 failed Developer case(s): full_file_raw_content"
+       ]
+      }
+     ],
+     "requested": "patch-capable:14b",
+     "selected": null
+    },
+    "kind": "model.fallback_selection",
+    "message": "Fallback patch-capable:14b skipped (patch-capable:14b incompatible); no configured fallback remains",
+    "source": "attempt.fallback_selection"
+   },
+   {
+    "attempt": 0,
+    "authority": "advisory",
+    "details": {
+     "model": "patch-capable:14b",
+     "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+     "reasons": [
+      "qualification of runtime 169c7aa85ae8 failed Developer case(s): full_file_raw_content"
+     ],
+     "rejected": [
+      {
+       "model": "patch-capable:14b",
+       "profile_digest": "e1e7b630f5c0461d34d682c37f57cbaa02a5fad6cffdef12bc3acee5d4ad136e",
+       "reasons": [
+        "qualification of runtime 169c7aa85ae8 failed Developer case(s): full_file_raw_content"
+       ]
+      }
+     ]
+    },
+    "kind": "model.fallback_incompatible",
+    "message": "FALLBACK_MODEL_INCOMPATIBLE: no remaining configured fallback from patch-capable:14b can serve this attempt - patch-capable:14b: qualification of runtime 169c7aa85ae8 failed Developer case(s): full_file_raw_content",
+    "source": "attempt.fallback_selection"
+   }
+  ],
+  "failure": {
+   "attempt": 0,
+   "diagnostics": {
+    "model": "patch-capable:14b",
+    "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+    "reasons": [
+     "qualification of runtime 169c7aa85ae8 failed Developer case(s): full_file_raw_content"
+    ],
+    "rejected": [
+     {
+      "model": "patch-capable:14b",
+      "profile_digest": "e1e7b630f5c0461d34d682c37f57cbaa02a5fad6cffdef12bc3acee5d4ad136e",
+      "reasons": [
+       "qualification of runtime 169c7aa85ae8 failed Developer case(s): full_file_raw_content"
+      ]
+     }
+    ]
+   },
+   "message": "FALLBACK_MODEL_INCOMPATIBLE: no remaining configured fallback from patch-capable:14b can serve this attempt - patch-capable:14b: qualification of runtime 169c7aa85ae8 failed Developer case(s): full_file_raw_content",
+   "source": "orchestrator",
+   "type": "fallback_incompatible"
+  },
+  "incompatible_fallbacks": {
+   "patch-capable:14b": [
+    "qualification of runtime 169c7aa85ae8 failed Developer case(s): full_file_raw_content"
+   ]
+  },
+  "model_hops": [],
+  "profiles_resolved": [
+   "patch-capable:14b"
+  ]
+ }
+}

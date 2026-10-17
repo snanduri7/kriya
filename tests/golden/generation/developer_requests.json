@@ -1,0 +1,2102 @@
+{
+ "legacy_strict": {
+  "developer_calls": [
+   {
+    "base_url_override": null,
+    "expected_output_by_file": {
+     "calc.py": [
+      285,
+      "full-file rewrite of calc.py (~27 tokens now)"
+     ]
+    },
+    "fitted_prompts": [
+     "sha256:902bcd0aa62b4b50"
+    ],
+    "keys": [
+     "api_key_override",
+     "base_url_override",
+     "default_operation",
+     "design_context",
+     "edit_operations",
+     "error_source_context",
+     "existing_code_context",
+     "expected_output_by_file",
+     "extra_body_override",
+     "extra_fix_instruction",
+     "files_with_current_content",
+     "implicated_files",
+     "known_target_files",
+     "model_override",
+     "operation_by_file",
+     "prior_error_context",
+     "request_fit",
+     "retry_temperature",
+     "sibling_content_budget",
+     "stream_callback",
+     "task_description"
+    ],
+    "known_target_files": [
+     "calc.py"
+    ],
+    "mode_line": null,
+    "model_override": null,
+    "operation_by_file": {
+     "calc.py": "repair_with_full_file"
+    },
+    "request_fit": {
+     "binding": null,
+     "sections": []
+    },
+    "text": {
+     "default_operation": "sha256:1b6212afafd07453",
+     "design_context": "sha256:9b856f09b860a3e2",
+     "existing_code_context": "sha256:85dce8a838843e70",
+     "extra_fix_instruction": "sha256:c341c332e56ca2e7",
+     "task_description": "sha256:528884707b2150e2"
+    }
+   },
+   {
+    "base_url_override": null,
+    "expected_output_by_file": {
+     "calc.py": [
+      311,
+      "full-file rewrite of calc.py (~50 tokens now)"
+     ]
+    },
+    "fitted_prompts": [
+     "sha256:b80bae87ca34f8dd"
+    ],
+    "keys": [
+     "api_key_override",
+     "base_url_override",
+     "default_operation",
+     "design_context",
+     "edit_operations",
+     "error_source_context",
+     "existing_code_context",
+     "expected_output_by_file",
+     "extra_body_override",
+     "extra_fix_instruction",
+     "files_with_current_content",
+     "implicated_files",
+     "known_target_files",
+     "model_override",
+     "operation_by_file",
+     "prior_error_context",
+     "request_fit",
+     "retry_temperature",
+     "sibling_content_budget",
+     "stream_callback",
+     "task_description"
+    ],
+    "known_target_files": [
+     "calc.py"
+    ],
+    "mode_line": "Targeted retry 1/3: focusing on calc.py.",
+    "model_override": null,
+    "operation_by_file": {
+     "calc.py": "repair_with_patch"
+    },
+    "request_fit": {
+     "binding": null,
+     "sections": []
+    },
+    "text": {
+     "default_operation": "sha256:bdfe25b18a083022",
+     "design_context": "sha256:9b856f09b860a3e2",
+     "existing_code_context": "sha256:72bc770987dae982",
+     "extra_fix_instruction": "sha256:c341c332e56ca2e7",
+     "prior_error_context": "sha256:b9b1cd4ec6725423",
+     "task_description": "sha256:382804fc26d75df7"
+    }
+   },
+   {
+    "base_url_override": null,
+    "expected_output_by_file": {
+     "calc.py": [
+      311,
+      "full-file rewrite of calc.py (~50 tokens now)"
+     ]
+    },
+    "fitted_prompts": [
+     "sha256:b80bae87ca34f8dd"
+    ],
+    "keys": [
+     "api_key_override",
+     "base_url_override",
+     "default_operation",
+     "design_context",
+     "edit_operations",
+     "error_source_context",
+     "existing_code_context",
+     "expected_output_by_file",
+     "extra_body_override",
+     "extra_fix_instruction",
+     "files_with_current_content",
+     "implicated_files",
+     "known_target_files",
+     "model_override",
+     "operation_by_file",
+     "prior_error_context",
+     "request_fit",
+     "retry_temperature",
+     "sibling_content_budget",
+     "stream_callback",
+     "task_description"
+    ],
+    "known_target_files": [
+     "calc.py"
+    ],
+    "mode_line": "Targeted retry 2/3: focusing on calc.py.",
+    "model_override": null,
+    "operation_by_file": {
+     "calc.py": "repair_with_patch"
+    },
+    "request_fit": {
+     "binding": null,
+     "sections": []
+    },
+    "text": {
+     "default_operation": "sha256:bdfe25b18a083022",
+     "design_context": "sha256:9b856f09b860a3e2",
+     "existing_code_context": "sha256:72bc770987dae982",
+     "extra_fix_instruction": "sha256:c341c332e56ca2e7",
+     "prior_error_context": "sha256:b9b1cd4ec6725423",
+     "task_description": "sha256:382804fc26d75df7"
+    }
+   },
+   {
+    "base_url_override": null,
+    "expected_output_by_file": {
+     "calc.py": [
+      311,
+      "full-file rewrite of calc.py (~50 tokens now)"
+     ]
+    },
+    "fitted_prompts": [
+     "sha256:b80bae87ca34f8dd"
+    ],
+    "keys": [
+     "api_key_override",
+     "base_url_override",
+     "default_operation",
+     "design_context",
+     "edit_operations",
+     "error_source_context",
+     "existing_code_context",
+     "expected_output_by_file",
+     "extra_body_override",
+     "extra_fix_instruction",
+     "files_with_current_content",
+     "implicated_files",
+     "known_target_files",
+     "model_override",
+     "operation_by_file",
+     "prior_error_context",
+     "request_fit",
+     "retry_temperature",
+     "sibling_content_budget",
+     "stream_callback",
+     "task_description"
+    ],
+    "known_target_files": [
+     "calc.py"
+    ],
+    "mode_line": "Targeted retry 3/3: focusing on calc.py.",
+    "model_override": null,
+    "operation_by_file": {
+     "calc.py": "repair_with_patch"
+    },
+    "request_fit": {
+     "binding": null,
+     "sections": []
+    },
+    "text": {
+     "default_operation": "sha256:bdfe25b18a083022",
+     "design_context": "sha256:9b856f09b860a3e2",
+     "existing_code_context": "sha256:72bc770987dae982",
+     "extra_fix_instruction": "sha256:c341c332e56ca2e7",
+     "prior_error_context": "sha256:b9b1cd4ec6725423",
+     "task_description": "sha256:382804fc26d75df7"
+    }
+   },
+   {
+    "base_url_override": "http://localhost:11434/v1",
+    "expected_output_by_file": {
+     "calc.py": [
+      311,
+      "full-file rewrite of calc.py (~50 tokens now)"
+     ]
+    },
+    "fitted_prompts": [
+     "sha256:b80bae87ca34f8dd"
+    ],
+    "keys": [
+     "api_key_override",
+     "base_url_override",
+     "default_operation",
+     "design_context",
+     "edit_operations",
+     "error_source_context",
+     "existing_code_context",
+     "expected_output_by_file",
+     "extra_body_override",
+     "extra_fix_instruction",
+     "files_with_current_content",
+     "implicated_files",
+     "known_target_files",
+     "model_override",
+     "operation_by_file",
+     "prior_error_context",
+     "request_fit",
+     "retry_temperature",
+     "sibling_content_budget",
+     "stream_callback",
+     "task_description"
+    ],
+    "known_target_files": [
+     "calc.py"
+    ],
+    "mode_line": "Fallback-targeted retry: focusing on calc.py.",
+    "model_override": "fallback-coder:35b",
+    "operation_by_file": {
+     "calc.py": "repair_with_patch"
+    },
+    "request_fit": {
+     "binding": "fallback-coder:35b",
+     "sections": []
+    },
+    "text": {
+     "api_key_override": "sha256:dba73d3fcb679070",
+     "base_url_override": "sha256:89caf70a6a58a082",
+     "default_operation": "sha256:bdfe25b18a083022",
+     "design_context": "sha256:9b856f09b860a3e2",
+     "existing_code_context": "sha256:72bc770987dae982",
+     "extra_fix_instruction": "sha256:c341c332e56ca2e7",
+     "model_override": "sha256:082949cd58f4d119",
+     "prior_error_context": "sha256:b9b1cd4ec6725423",
+     "task_description": "sha256:382804fc26d75df7"
+    }
+   },
+   {
+    "base_url_override": "http://localhost:11434/v1",
+    "expected_output_by_file": {
+     "calc.py": [
+      311,
+      "full-file rewrite of calc.py (~50 tokens now)"
+     ]
+    },
+    "fitted_prompts": [
+     "sha256:eceb61af9d255cc3"
+    ],
+    "keys": [
+     "api_key_override",
+     "base_url_override",
+     "default_operation",
+     "design_context",
+     "edit_operations",
+     "error_source_context",
+     "existing_code_context",
+     "expected_output_by_file",
+     "extra_body_override",
+     "extra_fix_instruction",
+     "files_with_current_content",
+     "implicated_files",
+     "known_target_files",
+     "model_override",
+     "operation_by_file",
+     "prior_error_context",
+     "request_fit",
+     "retry_temperature",
+     "sibling_content_budget",
+     "stream_callback",
+     "task_description"
+    ],
+    "known_target_files": [
+     "calc.py"
+    ],
+    "mode_line": "Escalating compilation attempt to fallback model: fallback-coder:35b (Limit: 6028 tokens)",
+    "model_override": "fallback-coder:35b",
+    "operation_by_file": {
+     "calc.py": "repair_with_full_file"
+    },
+    "request_fit": {
+     "binding": "fallback-coder:35b",
+     "sections": []
+    },
+    "text": {
+     "api_key_override": "sha256:dba73d3fcb679070",
+     "base_url_override": "sha256:89caf70a6a58a082",
+     "default_operation": "sha256:bca7572567e8162e",
+     "design_context": "sha256:9b856f09b860a3e2",
+     "existing_code_context": "sha256:72bc770987dae982",
+     "extra_fix_instruction": "sha256:c341c332e56ca2e7",
+     "model_override": "sha256:082949cd58f4d119",
+     "prior_error_context": "sha256:b9b1cd4ec6725423",
+     "task_description": "sha256:d31b0ee17a949097"
+    }
+   },
+   {
+    "base_url_override": "http://localhost:11434/v1",
+    "expected_output_by_file": {},
+    "fitted_prompts": [],
+    "keys": [
+     "api_key_override",
+     "base_url_override",
+     "default_operation",
+     "design_context",
+     "edit_operations",
+     "error_source_context",
+     "existing_code_context",
+     "expected_output_by_file",
+     "extra_body_override",
+     "extra_fix_instruction",
+     "files_with_current_content",
+     "implicated_files",
+     "known_target_files",
+     "model_override",
+     "operation_by_file",
+     "prior_error_context",
+     "request_fit",
+     "retry_temperature",
+     "sibling_content_budget",
+     "stream_callback",
+     "task_description"
+    ],
+    "known_target_files": null,
+    "mode_line": "Escalating compilation attempt to fallback model: fallback-coder:35b (Limit: 6028 tokens)",
+    "model_override": "fallback-coder:35b",
+    "operation_by_file": {},
+    "request_fit": {
+     "binding": "fallback-coder:35b",
+     "sections": []
+    },
+    "text": {
+     "api_key_override": "sha256:dba73d3fcb679070",
+     "base_url_override": "sha256:89caf70a6a58a082",
+     "default_operation": "sha256:bca7572567e8162e",
+     "design_context": "sha256:9b856f09b860a3e2",
+     "existing_code_context": "sha256:72bc770987dae982",
+     "extra_fix_instruction": "sha256:c341c332e56ca2e7",
+     "model_override": "sha256:082949cd58f4d119",
+     "prior_error_context": "sha256:b9b1cd4ec6725423",
+     "task_description": "sha256:d31b0ee17a949097"
+    }
+   },
+   {
+    "base_url_override": "http://localhost:11434/v1",
+    "expected_output_by_file": {},
+    "fitted_prompts": [],
+    "keys": [
+     "api_key_override",
+     "base_url_override",
+     "default_operation",
+     "design_context",
+     "edit_operations",
+     "error_source_context",
+     "existing_code_context",
+     "expected_output_by_file",
+     "extra_body_override",
+     "extra_fix_instruction",
+     "files_with_current_content",
+     "implicated_files",
+     "known_target_files",
+     "model_override",
+     "operation_by_file",
+     "prior_error_context",
+     "request_fit",
+     "retry_temperature",
+     "sibling_content_budget",
+     "stream_callback",
+     "task_description"
+    ],
+    "known_target_files": null,
+    "mode_line": "Escalating compilation attempt to fallback model: fallback-coder:35b (Limit: 6028 tokens)",
+    "model_override": "fallback-coder:35b",
+    "operation_by_file": {},
+    "request_fit": {
+     "binding": "fallback-coder:35b",
+     "sections": []
+    },
+    "text": {
+     "api_key_override": "sha256:dba73d3fcb679070",
+     "base_url_override": "sha256:89caf70a6a58a082",
+     "default_operation": "sha256:bca7572567e8162e",
+     "design_context": "sha256:9b856f09b860a3e2",
+     "existing_code_context": "sha256:72bc770987dae982",
+     "extra_fix_instruction": "sha256:c341c332e56ca2e7",
+     "model_override": "sha256:082949cd58f4d119",
+     "prior_error_context": "sha256:b9b1cd4ec6725423",
+     "task_description": "sha256:d31b0ee17a949097"
+    }
+   }
+  ],
+  "fallback_decisions": [
+   {
+    "fallback": false,
+    "phase": "call",
+    "profile_digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+    "requested": "primary-coder:30b",
+    "requested_profile_digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+    "requested_rejection": [],
+    "selected": "primary-coder:30b"
+   },
+   {
+    "fallback": false,
+    "phase": "call",
+    "profile_digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+    "requested": "primary-coder:30b",
+    "requested_profile_digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+    "requested_rejection": [],
+    "selected": "primary-coder:30b"
+   },
+   {
+    "fallback": false,
+    "phase": "call",
+    "profile_digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+    "requested": "primary-coder:30b",
+    "requested_profile_digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+    "requested_rejection": [],
+    "selected": "primary-coder:30b"
+   },
+   {
+    "fallback": false,
+    "phase": "call",
+    "profile_digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+    "requested": "primary-coder:30b",
+    "requested_profile_digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+    "requested_rejection": [],
+    "selected": "primary-coder:30b"
+   },
+   {
+    "newly_rejected": [],
+    "patch_rejected": [],
+    "phase": "escalation",
+    "previously_rejected": [],
+    "requested": "fallback-coder:35b",
+    "retry_count": 1,
+    "selected": "fallback-coder:35b"
+   },
+   {
+    "fallback": true,
+    "phase": "call",
+    "profile_digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+    "requested": "fallback-coder:35b",
+    "requested_profile_digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+    "requested_rejection": [],
+    "selected": "fallback-coder:35b"
+   },
+   {
+    "newly_rejected": [],
+    "patch_rejected": [],
+    "phase": "escalation",
+    "previously_rejected": [],
+    "requested": "fallback-coder:35b",
+    "retry_count": 1,
+    "selected": "fallback-coder:35b"
+   },
+   {
+    "fallback": true,
+    "phase": "call",
+    "profile_digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+    "requested": "fallback-coder:35b",
+    "requested_profile_digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+    "requested_rejection": [],
+    "selected": "fallback-coder:35b"
+   },
+   {
+    "newly_rejected": [],
+    "patch_rejected": [],
+    "phase": "escalation",
+    "previously_rejected": [],
+    "requested": "fallback-coder:35b",
+    "retry_count": 2,
+    "selected": "fallback-coder:35b"
+   },
+   {
+    "fallback": true,
+    "phase": "call",
+    "profile_digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+    "requested": "fallback-coder:35b",
+    "requested_profile_digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+    "requested_rejection": [],
+    "selected": "fallback-coder:35b"
+   },
+   {
+    "newly_rejected": [],
+    "patch_rejected": [],
+    "phase": "escalation",
+    "previously_rejected": [],
+    "requested": "fallback-coder:35b",
+    "retry_count": 3,
+    "selected": "fallback-coder:35b"
+   },
+   {
+    "fallback": true,
+    "phase": "call",
+    "profile_digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+    "requested": "fallback-coder:35b",
+    "requested_profile_digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+    "requested_rejection": [],
+    "selected": "fallback-coder:35b"
+   }
+  ],
+  "mode_lines": [
+   "Targeted retry 1/3: focusing on calc.py.",
+   "Targeted retry 2/3: focusing on calc.py.",
+   "Targeted retry 3/3: focusing on calc.py.",
+   "Fallback-targeted retry: focusing on calc.py.",
+   "Escalating compilation attempt to fallback model: fallback-coder:35b (Limit: 6028 tokens)",
+   "Escalating compilation attempt to fallback model: fallback-coder:35b (Limit: 6028 tokens)",
+   "Escalating compilation attempt to fallback model: fallback-coder:35b (Limit: 6028 tokens)"
+  ],
+  "model_prompts": [
+   [
+    "primary-coder:30b",
+    "sha256:1e965a6c328732f4"
+   ],
+   [
+    "primary-coder:30b",
+    "sha256:543b24189c962f0e"
+   ],
+   [
+    "primary-coder:30b",
+    "sha256:543b24189c962f0e"
+   ],
+   [
+    "primary-coder:30b",
+    "sha256:543b24189c962f0e"
+   ],
+   [
+    "fallback-coder:35b",
+    "sha256:543b24189c962f0e"
+   ],
+   [
+    "fallback-coder:35b",
+    "sha256:074c373e6e3489ae"
+   ],
+   [
+    "fallback-coder:35b",
+    "sha256:e40eefab6a1cd7bc"
+   ],
+   [
+    "fallback-coder:35b",
+    "sha256:e40eefab6a1cd7bc"
+   ]
+  ],
+  "quality_gates_passed": true,
+  "run_events": [
+   {
+    "attempt": 1,
+    "authority": "advisory",
+    "details": {
+     "changes": {
+      "allocation_window": {
+       "from": null,
+       "to": 17740
+      },
+      "capability_source": {
+       "from": null,
+       "to": "unverified_conservative_default"
+      },
+      "context_policy": {
+       "from": null,
+       "to": "adaptive"
+      },
+      "context_window": {
+       "from": null,
+       "to": 32768
+      },
+      "edit_protocol": {
+       "from": null,
+       "to": "full_file"
+      },
+      "endpoint": {
+       "from": null,
+       "to": "http://localhost:11434/v1"
+      },
+      "failed_cases": {
+       "from": null,
+       "to": []
+      },
+      "json_mode": {
+       "from": null,
+       "to": false
+      },
+      "model": {
+       "from": null,
+       "to": "primary-coder:30b"
+      },
+      "native_tool_calls": {
+       "from": null,
+       "to": false
+      },
+      "output_tokens": {
+       "from": null,
+       "to": 4096
+      },
+      "qualification": {
+       "from": null,
+       "to": "RUNTIME_NOT_EXACT"
+      },
+      "reasoning": {
+       "from": null,
+       "to": false
+      },
+      "reliable_multiline_json": {
+       "from": null,
+       "to": false
+      },
+      "retry_inference_settings_digest": {
+       "from": null,
+       "to": null
+      },
+      "retry_qualification": {
+       "from": null,
+       "to": null
+      },
+      "runtime_digest": {
+       "from": null,
+       "to": "unavailable"
+      },
+      "runtime_exact": {
+       "from": null,
+       "to": false
+      },
+      "streaming": {
+       "from": null,
+       "to": true
+      }
+     },
+     "fallback": false,
+     "from": null,
+     "initial": true,
+     "to": {
+      "allocation_window": 17740,
+      "capability_source": "unverified_conservative_default",
+      "context_policy": "adaptive",
+      "context_window": 32768,
+      "digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+      "edit_protocol": "full_file",
+      "endpoint": "http://localhost:11434/v1",
+      "failed_cases": [],
+      "json_mode": false,
+      "model": "primary-coder:30b",
+      "native_tool_calls": false,
+      "output_tokens": 4096,
+      "qualification": "RUNTIME_NOT_EXACT",
+      "reasoning": false,
+      "reliable_multiline_json": false,
+      "retry_inference_settings_digest": null,
+      "retry_qualification": null,
+      "runtime_digest": "unavailable",
+      "runtime_exact": false,
+      "streaming": true
+     }
+    },
+    "kind": "model.transition",
+    "message": "Developer request profile for primary-coder:30b",
+    "source": "attempt._run_developer_generation"
+   },
+   {
+    "attempt": 1,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": "<n>",
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": "<n>",
+     "skills_tokens": "<n>",
+     "t0_header_tokens": "<n>",
+     "t0_member_tokens": "<n>",
+     "t1_tokens": "<n>",
+     "t2_tokens": "<n>",
+     "t3_tokens": "<n>",
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 1,
+    "authority": "advisory",
+    "details": {
+     "file_count": 1,
+     "model": "primary-coder:30b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": "<n>",
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": "<n>",
+     "skills_tokens": "<n>",
+     "t0_header_tokens": "<n>",
+     "t0_member_tokens": "<n>",
+     "t1_tokens": "<n>",
+     "t2_tokens": "<n>",
+     "t3_tokens": "<n>",
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "file_count": 1,
+     "model": "primary-coder:30b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   },
+   {
+    "attempt": 3,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": "<n>",
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": "<n>",
+     "skills_tokens": "<n>",
+     "t0_header_tokens": "<n>",
+     "t0_member_tokens": "<n>",
+     "t1_tokens": "<n>",
+     "t2_tokens": "<n>",
+     "t3_tokens": "<n>",
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 3,
+    "authority": "advisory",
+    "details": {
+     "file_count": 1,
+     "model": "primary-coder:30b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   },
+   {
+    "attempt": 4,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": "<n>",
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": "<n>",
+     "skills_tokens": "<n>",
+     "t0_header_tokens": "<n>",
+     "t0_member_tokens": "<n>",
+     "t1_tokens": "<n>",
+     "t2_tokens": "<n>",
+     "t3_tokens": "<n>",
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 4,
+    "authority": "advisory",
+    "details": {
+     "file_count": 1,
+     "model": "primary-coder:30b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   },
+   {
+    "attempt": 5,
+    "authority": "advisory",
+    "details": {
+     "changes": {
+      "allocation_window": {
+       "from": 17740,
+       "to": 10060
+      },
+      "model": {
+       "from": "primary-coder:30b",
+       "to": "fallback-coder:35b"
+      },
+      "output_tokens": {
+       "from": 4096,
+       "to": 16384
+      }
+     },
+     "fallback": true,
+     "from": {
+      "allocation_window": 17740,
+      "capability_source": "unverified_conservative_default",
+      "context_policy": "adaptive",
+      "context_window": 32768,
+      "digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+      "edit_protocol": "full_file",
+      "endpoint": "http://localhost:11434/v1",
+      "failed_cases": [],
+      "json_mode": false,
+      "model": "primary-coder:30b",
+      "native_tool_calls": false,
+      "output_tokens": 4096,
+      "qualification": "RUNTIME_NOT_EXACT",
+      "reasoning": false,
+      "reliable_multiline_json": false,
+      "retry_inference_settings_digest": null,
+      "retry_qualification": null,
+      "runtime_digest": "unavailable",
+      "runtime_exact": false,
+      "streaming": true
+     },
+     "initial": false,
+     "to": {
+      "allocation_window": 10060,
+      "capability_source": "unverified_conservative_default",
+      "context_policy": "adaptive",
+      "context_window": 32768,
+      "digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+      "edit_protocol": "full_file",
+      "endpoint": "http://localhost:11434/v1",
+      "failed_cases": [],
+      "json_mode": false,
+      "model": "fallback-coder:35b",
+      "native_tool_calls": false,
+      "output_tokens": 16384,
+      "qualification": "RUNTIME_NOT_EXACT",
+      "reasoning": false,
+      "reliable_multiline_json": false,
+      "retry_inference_settings_digest": null,
+      "retry_qualification": null,
+      "runtime_digest": "unavailable",
+      "runtime_exact": false,
+      "streaming": true
+     }
+    },
+    "kind": "model.transition",
+    "message": "Developer request profile for fallback-coder:35b (was primary-coder:30b): allocation_window, model, output_tokens changed",
+    "source": "attempt._run_developer_generation"
+   },
+   {
+    "attempt": 5,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": "<n>",
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": "<n>",
+     "skills_tokens": "<n>",
+     "t0_header_tokens": "<n>",
+     "t0_member_tokens": "<n>",
+     "t1_tokens": "<n>",
+     "t2_tokens": "<n>",
+     "t3_tokens": "<n>",
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 5,
+    "authority": "advisory",
+    "details": {
+     "file_count": 1,
+     "model": "fallback-coder:35b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   },
+   {
+    "attempt": 6,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": "<n>",
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": "<n>",
+     "skills_tokens": "<n>",
+     "t0_header_tokens": "<n>",
+     "t0_member_tokens": "<n>",
+     "t1_tokens": "<n>",
+     "t2_tokens": "<n>",
+     "t3_tokens": "<n>",
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 6,
+    "authority": "advisory",
+    "details": {
+     "file_count": 1,
+     "model": "fallback-coder:35b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   },
+   {
+    "attempt": 7,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": "<n>",
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": "<n>",
+     "skills_tokens": "<n>",
+     "t0_header_tokens": "<n>",
+     "t0_member_tokens": "<n>",
+     "t1_tokens": "<n>",
+     "t2_tokens": "<n>",
+     "t3_tokens": "<n>",
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 7,
+    "authority": "advisory",
+    "details": {
+     "file_count": 1,
+     "model": "fallback-coder:35b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   },
+   {
+    "attempt": 8,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": "<n>",
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": "<n>",
+     "skills_tokens": "<n>",
+     "t0_header_tokens": "<n>",
+     "t0_member_tokens": "<n>",
+     "t1_tokens": "<n>",
+     "t2_tokens": "<n>",
+     "t3_tokens": "<n>",
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 8,
+    "authority": "advisory",
+    "details": {
+     "file_count": 1,
+     "model": "fallback-coder:35b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   }
+  ]
+ },
+ "structured": {
+  "developer_calls": [
+   {
+    "base_url_override": null,
+    "expected_output_by_file": {
+     "calc.py": [
+      285,
+      "full-file rewrite of calc.py (~27 tokens now)"
+     ]
+    },
+    "fitted_prompts": [
+     "sha256:dce63cfff03a5290"
+    ],
+    "keys": [
+     "api_key_override",
+     "base_url_override",
+     "default_operation",
+     "design_context",
+     "edit_operations",
+     "error_source_context",
+     "existing_code_context",
+     "expected_output_by_file",
+     "extra_body_override",
+     "extra_fix_instruction",
+     "files_with_current_content",
+     "implicated_files",
+     "known_target_files",
+     "model_override",
+     "operation_by_file",
+     "prior_error_context",
+     "request_fit",
+     "retry_temperature",
+     "sibling_content_budget",
+     "stream_callback",
+     "task_description"
+    ],
+    "known_target_files": [
+     "calc.py"
+    ],
+    "mode_line": null,
+    "model_override": null,
+    "operation_by_file": {
+     "calc.py": "repair_with_full_file"
+    },
+    "request_fit": {
+     "binding": null,
+     "sections": []
+    },
+    "text": {
+     "default_operation": "sha256:1b6212afafd07453",
+     "design_context": "sha256:9b856f09b860a3e2",
+     "existing_code_context": "sha256:85dce8a838843e70",
+     "extra_fix_instruction": "sha256:c341c332e56ca2e7",
+     "task_description": "sha256:528884707b2150e2"
+    }
+   },
+   {
+    "base_url_override": null,
+    "expected_output_by_file": {
+     "calc.py": [
+      311,
+      "full-file rewrite of calc.py (~50 tokens now)"
+     ]
+    },
+    "fitted_prompts": [
+     "sha256:b62193700facd137"
+    ],
+    "keys": [
+     "api_key_override",
+     "base_url_override",
+     "default_operation",
+     "design_context",
+     "edit_operations",
+     "error_source_context",
+     "existing_code_context",
+     "expected_output_by_file",
+     "extra_body_override",
+     "extra_fix_instruction",
+     "files_with_current_content",
+     "implicated_files",
+     "known_target_files",
+     "model_override",
+     "operation_by_file",
+     "prior_error_context",
+     "request_fit",
+     "retry_temperature",
+     "sibling_content_budget",
+     "stream_callback",
+     "task_description"
+    ],
+    "known_target_files": [
+     "calc.py"
+    ],
+    "mode_line": "Targeted retry 1/3: focusing on calc.py.",
+    "model_override": null,
+    "operation_by_file": {
+     "calc.py": "repair_with_patch"
+    },
+    "request_fit": {
+     "binding": null,
+     "sections": []
+    },
+    "text": {
+     "default_operation": "sha256:bdfe25b18a083022",
+     "design_context": "sha256:9b856f09b860a3e2",
+     "existing_code_context": "sha256:72bc770987dae982",
+     "extra_fix_instruction": "sha256:c341c332e56ca2e7",
+     "prior_error_context": "sha256:b9b1cd4ec6725423",
+     "task_description": "sha256:382804fc26d75df7"
+    }
+   },
+   {
+    "base_url_override": null,
+    "expected_output_by_file": {
+     "calc.py": [
+      311,
+      "full-file rewrite of calc.py (~50 tokens now)"
+     ]
+    },
+    "fitted_prompts": [
+     "sha256:b62193700facd137"
+    ],
+    "keys": [
+     "api_key_override",
+     "base_url_override",
+     "default_operation",
+     "design_context",
+     "edit_operations",
+     "error_source_context",
+     "existing_code_context",
+     "expected_output_by_file",
+     "extra_body_override",
+     "extra_fix_instruction",
+     "files_with_current_content",
+     "implicated_files",
+     "known_target_files",
+     "model_override",
+     "operation_by_file",
+     "prior_error_context",
+     "request_fit",
+     "retry_temperature",
+     "sibling_content_budget",
+     "stream_callback",
+     "task_description"
+    ],
+    "known_target_files": [
+     "calc.py"
+    ],
+    "mode_line": "Targeted retry 2/3: focusing on calc.py.",
+    "model_override": null,
+    "operation_by_file": {
+     "calc.py": "repair_with_patch"
+    },
+    "request_fit": {
+     "binding": null,
+     "sections": []
+    },
+    "text": {
+     "default_operation": "sha256:bdfe25b18a083022",
+     "design_context": "sha256:9b856f09b860a3e2",
+     "existing_code_context": "sha256:72bc770987dae982",
+     "extra_fix_instruction": "sha256:c341c332e56ca2e7",
+     "prior_error_context": "sha256:b9b1cd4ec6725423",
+     "task_description": "sha256:382804fc26d75df7"
+    }
+   },
+   {
+    "base_url_override": null,
+    "expected_output_by_file": {
+     "calc.py": [
+      311,
+      "full-file rewrite of calc.py (~50 tokens now)"
+     ]
+    },
+    "fitted_prompts": [
+     "sha256:b62193700facd137"
+    ],
+    "keys": [
+     "api_key_override",
+     "base_url_override",
+     "default_operation",
+     "design_context",
+     "edit_operations",
+     "error_source_context",
+     "existing_code_context",
+     "expected_output_by_file",
+     "extra_body_override",
+     "extra_fix_instruction",
+     "files_with_current_content",
+     "implicated_files",
+     "known_target_files",
+     "model_override",
+     "operation_by_file",
+     "prior_error_context",
+     "request_fit",
+     "retry_temperature",
+     "sibling_content_budget",
+     "stream_callback",
+     "task_description"
+    ],
+    "known_target_files": [
+     "calc.py"
+    ],
+    "mode_line": "Targeted retry 3/3: focusing on calc.py.",
+    "model_override": null,
+    "operation_by_file": {
+     "calc.py": "repair_with_patch"
+    },
+    "request_fit": {
+     "binding": null,
+     "sections": []
+    },
+    "text": {
+     "default_operation": "sha256:bdfe25b18a083022",
+     "design_context": "sha256:9b856f09b860a3e2",
+     "existing_code_context": "sha256:72bc770987dae982",
+     "extra_fix_instruction": "sha256:c341c332e56ca2e7",
+     "prior_error_context": "sha256:b9b1cd4ec6725423",
+     "task_description": "sha256:382804fc26d75df7"
+    }
+   },
+   {
+    "base_url_override": "http://localhost:11434/v1",
+    "expected_output_by_file": {
+     "calc.py": [
+      311,
+      "full-file rewrite of calc.py (~50 tokens now)"
+     ]
+    },
+    "fitted_prompts": [
+     "sha256:b62193700facd137"
+    ],
+    "keys": [
+     "api_key_override",
+     "base_url_override",
+     "default_operation",
+     "design_context",
+     "edit_operations",
+     "error_source_context",
+     "existing_code_context",
+     "expected_output_by_file",
+     "extra_body_override",
+     "extra_fix_instruction",
+     "files_with_current_content",
+     "implicated_files",
+     "known_target_files",
+     "model_override",
+     "operation_by_file",
+     "prior_error_context",
+     "request_fit",
+     "retry_temperature",
+     "sibling_content_budget",
+     "stream_callback",
+     "task_description"
+    ],
+    "known_target_files": [
+     "calc.py"
+    ],
+    "mode_line": "Fallback-targeted retry: focusing on calc.py.",
+    "model_override": "fallback-coder:35b",
+    "operation_by_file": {
+     "calc.py": "repair_with_patch"
+    },
+    "request_fit": {
+     "binding": "fallback-coder:35b",
+     "sections": []
+    },
+    "text": {
+     "api_key_override": "sha256:dba73d3fcb679070",
+     "base_url_override": "sha256:89caf70a6a58a082",
+     "default_operation": "sha256:bdfe25b18a083022",
+     "design_context": "sha256:9b856f09b860a3e2",
+     "existing_code_context": "sha256:72bc770987dae982",
+     "extra_fix_instruction": "sha256:c341c332e56ca2e7",
+     "model_override": "sha256:082949cd58f4d119",
+     "prior_error_context": "sha256:b9b1cd4ec6725423",
+     "task_description": "sha256:382804fc26d75df7"
+    }
+   },
+   {
+    "base_url_override": "http://localhost:11434/v1",
+    "expected_output_by_file": {
+     "calc.py": [
+      311,
+      "full-file rewrite of calc.py (~50 tokens now)"
+     ]
+    },
+    "fitted_prompts": [
+     "sha256:aa010e3ac710145e"
+    ],
+    "keys": [
+     "api_key_override",
+     "base_url_override",
+     "default_operation",
+     "design_context",
+     "edit_operations",
+     "error_source_context",
+     "existing_code_context",
+     "expected_output_by_file",
+     "extra_body_override",
+     "extra_fix_instruction",
+     "files_with_current_content",
+     "implicated_files",
+     "known_target_files",
+     "model_override",
+     "operation_by_file",
+     "prior_error_context",
+     "request_fit",
+     "retry_temperature",
+     "sibling_content_budget",
+     "stream_callback",
+     "task_description"
+    ],
+    "known_target_files": [
+     "calc.py"
+    ],
+    "mode_line": "Escalating compilation attempt to fallback model: fallback-coder:35b (Limit: 6028 tokens)",
+    "model_override": "fallback-coder:35b",
+    "operation_by_file": {
+     "calc.py": "repair_with_full_file"
+    },
+    "request_fit": {
+     "binding": "fallback-coder:35b",
+     "sections": []
+    },
+    "text": {
+     "api_key_override": "sha256:dba73d3fcb679070",
+     "base_url_override": "sha256:89caf70a6a58a082",
+     "default_operation": "sha256:bca7572567e8162e",
+     "design_context": "sha256:9b856f09b860a3e2",
+     "existing_code_context": "sha256:72bc770987dae982",
+     "extra_fix_instruction": "sha256:c341c332e56ca2e7",
+     "model_override": "sha256:082949cd58f4d119",
+     "prior_error_context": "sha256:b9b1cd4ec6725423",
+     "task_description": "sha256:d31b0ee17a949097"
+    }
+   },
+   {
+    "base_url_override": "http://localhost:11434/v1",
+    "expected_output_by_file": {},
+    "fitted_prompts": [],
+    "keys": [
+     "api_key_override",
+     "base_url_override",
+     "default_operation",
+     "design_context",
+     "edit_operations",
+     "error_source_context",
+     "existing_code_context",
+     "expected_output_by_file",
+     "extra_body_override",
+     "extra_fix_instruction",
+     "files_with_current_content",
+     "implicated_files",
+     "known_target_files",
+     "model_override",
+     "operation_by_file",
+     "prior_error_context",
+     "request_fit",
+     "retry_temperature",
+     "sibling_content_budget",
+     "stream_callback",
+     "task_description"
+    ],
+    "known_target_files": null,
+    "mode_line": "Escalating compilation attempt to fallback model: fallback-coder:35b (Limit: 6028 tokens)",
+    "model_override": "fallback-coder:35b",
+    "operation_by_file": {},
+    "request_fit": {
+     "binding": "fallback-coder:35b",
+     "sections": []
+    },
+    "text": {
+     "api_key_override": "sha256:dba73d3fcb679070",
+     "base_url_override": "sha256:89caf70a6a58a082",
+     "default_operation": "sha256:bca7572567e8162e",
+     "design_context": "sha256:9b856f09b860a3e2",
+     "existing_code_context": "sha256:72bc770987dae982",
+     "extra_fix_instruction": "sha256:c341c332e56ca2e7",
+     "model_override": "sha256:082949cd58f4d119",
+     "prior_error_context": "sha256:b9b1cd4ec6725423",
+     "task_description": "sha256:d31b0ee17a949097"
+    }
+   },
+   {
+    "base_url_override": "http://localhost:11434/v1",
+    "expected_output_by_file": {},
+    "fitted_prompts": [],
+    "keys": [
+     "api_key_override",
+     "base_url_override",
+     "default_operation",
+     "design_context",
+     "edit_operations",
+     "error_source_context",
+     "existing_code_context",
+     "expected_output_by_file",
+     "extra_body_override",
+     "extra_fix_instruction",
+     "files_with_current_content",
+     "implicated_files",
+     "known_target_files",
+     "model_override",
+     "operation_by_file",
+     "prior_error_context",
+     "request_fit",
+     "retry_temperature",
+     "sibling_content_budget",
+     "stream_callback",
+     "task_description"
+    ],
+    "known_target_files": null,
+    "mode_line": "Escalating compilation attempt to fallback model: fallback-coder:35b (Limit: 6028 tokens)",
+    "model_override": "fallback-coder:35b",
+    "operation_by_file": {},
+    "request_fit": {
+     "binding": "fallback-coder:35b",
+     "sections": []
+    },
+    "text": {
+     "api_key_override": "sha256:dba73d3fcb679070",
+     "base_url_override": "sha256:89caf70a6a58a082",
+     "default_operation": "sha256:bca7572567e8162e",
+     "design_context": "sha256:9b856f09b860a3e2",
+     "existing_code_context": "sha256:72bc770987dae982",
+     "extra_fix_instruction": "sha256:c341c332e56ca2e7",
+     "model_override": "sha256:082949cd58f4d119",
+     "prior_error_context": "sha256:b9b1cd4ec6725423",
+     "task_description": "sha256:d31b0ee17a949097"
+    }
+   }
+  ],
+  "fallback_decisions": [
+   {
+    "fallback": false,
+    "phase": "call",
+    "profile_digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+    "requested": "primary-coder:30b",
+    "requested_profile_digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+    "requested_rejection": [],
+    "selected": "primary-coder:30b"
+   },
+   {
+    "fallback": false,
+    "phase": "call",
+    "profile_digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+    "requested": "primary-coder:30b",
+    "requested_profile_digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+    "requested_rejection": [],
+    "selected": "primary-coder:30b"
+   },
+   {
+    "fallback": false,
+    "phase": "call",
+    "profile_digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+    "requested": "primary-coder:30b",
+    "requested_profile_digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+    "requested_rejection": [],
+    "selected": "primary-coder:30b"
+   },
+   {
+    "fallback": false,
+    "phase": "call",
+    "profile_digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+    "requested": "primary-coder:30b",
+    "requested_profile_digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+    "requested_rejection": [],
+    "selected": "primary-coder:30b"
+   },
+   {
+    "newly_rejected": [],
+    "patch_rejected": [],
+    "phase": "escalation",
+    "previously_rejected": [],
+    "requested": "fallback-coder:35b",
+    "retry_count": 1,
+    "selected": "fallback-coder:35b"
+   },
+   {
+    "fallback": true,
+    "phase": "call",
+    "profile_digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+    "requested": "fallback-coder:35b",
+    "requested_profile_digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+    "requested_rejection": [],
+    "selected": "fallback-coder:35b"
+   },
+   {
+    "newly_rejected": [],
+    "patch_rejected": [],
+    "phase": "escalation",
+    "previously_rejected": [],
+    "requested": "fallback-coder:35b",
+    "retry_count": 1,
+    "selected": "fallback-coder:35b"
+   },
+   {
+    "fallback": true,
+    "phase": "call",
+    "profile_digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+    "requested": "fallback-coder:35b",
+    "requested_profile_digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+    "requested_rejection": [],
+    "selected": "fallback-coder:35b"
+   },
+   {
+    "newly_rejected": [],
+    "patch_rejected": [],
+    "phase": "escalation",
+    "previously_rejected": [],
+    "requested": "fallback-coder:35b",
+    "retry_count": 2,
+    "selected": "fallback-coder:35b"
+   },
+   {
+    "fallback": true,
+    "phase": "call",
+    "profile_digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+    "requested": "fallback-coder:35b",
+    "requested_profile_digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+    "requested_rejection": [],
+    "selected": "fallback-coder:35b"
+   },
+   {
+    "newly_rejected": [],
+    "patch_rejected": [],
+    "phase": "escalation",
+    "previously_rejected": [],
+    "requested": "fallback-coder:35b",
+    "retry_count": 3,
+    "selected": "fallback-coder:35b"
+   },
+   {
+    "fallback": true,
+    "phase": "call",
+    "profile_digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+    "requested": "fallback-coder:35b",
+    "requested_profile_digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+    "requested_rejection": [],
+    "selected": "fallback-coder:35b"
+   }
+  ],
+  "mode_lines": [
+   "Targeted retry 1/3: focusing on calc.py.",
+   "Targeted retry 2/3: focusing on calc.py.",
+   "Targeted retry 3/3: focusing on calc.py.",
+   "Fallback-targeted retry: focusing on calc.py.",
+   "Escalating compilation attempt to fallback model: fallback-coder:35b (Limit: 6028 tokens)",
+   "Escalating compilation attempt to fallback model: fallback-coder:35b (Limit: 6028 tokens)",
+   "Escalating compilation attempt to fallback model: fallback-coder:35b (Limit: 6028 tokens)"
+  ],
+  "model_prompts": [
+   [
+    "primary-coder:30b",
+    "sha256:4db0b588c6ff761d"
+   ],
+   [
+    "primary-coder:30b",
+    "sha256:e096e57db8628d82"
+   ],
+   [
+    "primary-coder:30b",
+    "sha256:e096e57db8628d82"
+   ],
+   [
+    "primary-coder:30b",
+    "sha256:e096e57db8628d82"
+   ],
+   [
+    "fallback-coder:35b",
+    "sha256:e096e57db8628d82"
+   ],
+   [
+    "fallback-coder:35b",
+    "sha256:9db59e1a7f93503c"
+   ],
+   [
+    "fallback-coder:35b",
+    "sha256:e40eefab6a1cd7bc"
+   ],
+   [
+    "fallback-coder:35b",
+    "sha256:e40eefab6a1cd7bc"
+   ]
+  ],
+  "quality_gates_passed": true,
+  "run_events": [
+   {
+    "attempt": 1,
+    "authority": "advisory",
+    "details": {
+     "changes": {
+      "allocation_window": {
+       "from": null,
+       "to": 17740
+      },
+      "capability_source": {
+       "from": null,
+       "to": "unverified_conservative_default"
+      },
+      "context_policy": {
+       "from": null,
+       "to": "adaptive"
+      },
+      "context_window": {
+       "from": null,
+       "to": 32768
+      },
+      "edit_protocol": {
+       "from": null,
+       "to": "full_file"
+      },
+      "endpoint": {
+       "from": null,
+       "to": "http://localhost:11434/v1"
+      },
+      "failed_cases": {
+       "from": null,
+       "to": []
+      },
+      "json_mode": {
+       "from": null,
+       "to": false
+      },
+      "model": {
+       "from": null,
+       "to": "primary-coder:30b"
+      },
+      "native_tool_calls": {
+       "from": null,
+       "to": false
+      },
+      "output_tokens": {
+       "from": null,
+       "to": 4096
+      },
+      "qualification": {
+       "from": null,
+       "to": "RUNTIME_NOT_EXACT"
+      },
+      "reasoning": {
+       "from": null,
+       "to": false
+      },
+      "reliable_multiline_json": {
+       "from": null,
+       "to": false
+      },
+      "retry_inference_settings_digest": {
+       "from": null,
+       "to": null
+      },
+      "retry_qualification": {
+       "from": null,
+       "to": null
+      },
+      "runtime_digest": {
+       "from": null,
+       "to": "unavailable"
+      },
+      "runtime_exact": {
+       "from": null,
+       "to": false
+      },
+      "streaming": {
+       "from": null,
+       "to": true
+      }
+     },
+     "fallback": false,
+     "from": null,
+     "initial": true,
+     "to": {
+      "allocation_window": 17740,
+      "capability_source": "unverified_conservative_default",
+      "context_policy": "adaptive",
+      "context_window": 32768,
+      "digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+      "edit_protocol": "full_file",
+      "endpoint": "http://localhost:11434/v1",
+      "failed_cases": [],
+      "json_mode": false,
+      "model": "primary-coder:30b",
+      "native_tool_calls": false,
+      "output_tokens": 4096,
+      "qualification": "RUNTIME_NOT_EXACT",
+      "reasoning": false,
+      "reliable_multiline_json": false,
+      "retry_inference_settings_digest": null,
+      "retry_qualification": null,
+      "runtime_digest": "unavailable",
+      "runtime_exact": false,
+      "streaming": true
+     }
+    },
+    "kind": "model.transition",
+    "message": "Developer request profile for primary-coder:30b",
+    "source": "attempt._run_developer_generation"
+   },
+   {
+    "attempt": 1,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": "<n>",
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": "<n>",
+     "skills_tokens": "<n>",
+     "t0_header_tokens": "<n>",
+     "t0_member_tokens": "<n>",
+     "t1_tokens": "<n>",
+     "t2_tokens": "<n>",
+     "t3_tokens": "<n>",
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 1,
+    "authority": "advisory",
+    "details": {
+     "file_count": 1,
+     "model": "primary-coder:30b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": "<n>",
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": "<n>",
+     "skills_tokens": "<n>",
+     "t0_header_tokens": "<n>",
+     "t0_member_tokens": "<n>",
+     "t1_tokens": "<n>",
+     "t2_tokens": "<n>",
+     "t3_tokens": "<n>",
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 2,
+    "authority": "advisory",
+    "details": {
+     "file_count": 1,
+     "model": "primary-coder:30b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   },
+   {
+    "attempt": 3,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": "<n>",
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": "<n>",
+     "skills_tokens": "<n>",
+     "t0_header_tokens": "<n>",
+     "t0_member_tokens": "<n>",
+     "t1_tokens": "<n>",
+     "t2_tokens": "<n>",
+     "t3_tokens": "<n>",
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 3,
+    "authority": "advisory",
+    "details": {
+     "file_count": 1,
+     "model": "primary-coder:30b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   },
+   {
+    "attempt": 4,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": "<n>",
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": "<n>",
+     "skills_tokens": "<n>",
+     "t0_header_tokens": "<n>",
+     "t0_member_tokens": "<n>",
+     "t1_tokens": "<n>",
+     "t2_tokens": "<n>",
+     "t3_tokens": "<n>",
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 4,
+    "authority": "advisory",
+    "details": {
+     "file_count": 1,
+     "model": "primary-coder:30b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   },
+   {
+    "attempt": 5,
+    "authority": "advisory",
+    "details": {
+     "changes": {
+      "allocation_window": {
+       "from": 17740,
+       "to": 10060
+      },
+      "model": {
+       "from": "primary-coder:30b",
+       "to": "fallback-coder:35b"
+      },
+      "output_tokens": {
+       "from": 4096,
+       "to": 16384
+      }
+     },
+     "fallback": true,
+     "from": {
+      "allocation_window": 17740,
+      "capability_source": "unverified_conservative_default",
+      "context_policy": "adaptive",
+      "context_window": 32768,
+      "digest": "3a7e74671087830f75d78d20dd6de380fe9c526434d471c355524d29b80509e8",
+      "edit_protocol": "full_file",
+      "endpoint": "http://localhost:11434/v1",
+      "failed_cases": [],
+      "json_mode": false,
+      "model": "primary-coder:30b",
+      "native_tool_calls": false,
+      "output_tokens": 4096,
+      "qualification": "RUNTIME_NOT_EXACT",
+      "reasoning": false,
+      "reliable_multiline_json": false,
+      "retry_inference_settings_digest": null,
+      "retry_qualification": null,
+      "runtime_digest": "unavailable",
+      "runtime_exact": false,
+      "streaming": true
+     },
+     "initial": false,
+     "to": {
+      "allocation_window": 10060,
+      "capability_source": "unverified_conservative_default",
+      "context_policy": "adaptive",
+      "context_window": 32768,
+      "digest": "4986db5370e403af203c433d86250bc807b505b78dc2d1067511cc04c4e1e3d6",
+      "edit_protocol": "full_file",
+      "endpoint": "http://localhost:11434/v1",
+      "failed_cases": [],
+      "json_mode": false,
+      "model": "fallback-coder:35b",
+      "native_tool_calls": false,
+      "output_tokens": 16384,
+      "qualification": "RUNTIME_NOT_EXACT",
+      "reasoning": false,
+      "reliable_multiline_json": false,
+      "retry_inference_settings_digest": null,
+      "retry_qualification": null,
+      "runtime_digest": "unavailable",
+      "runtime_exact": false,
+      "streaming": true
+     }
+    },
+    "kind": "model.transition",
+    "message": "Developer request profile for fallback-coder:35b (was primary-coder:30b): allocation_window, model, output_tokens changed",
+    "source": "attempt._run_developer_generation"
+   },
+   {
+    "attempt": 5,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": "<n>",
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": "<n>",
+     "skills_tokens": "<n>",
+     "t0_header_tokens": "<n>",
+     "t0_member_tokens": "<n>",
+     "t1_tokens": "<n>",
+     "t2_tokens": "<n>",
+     "t3_tokens": "<n>",
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 5,
+    "authority": "advisory",
+    "details": {
+     "file_count": 1,
+     "model": "fallback-coder:35b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   },
+   {
+    "attempt": 6,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": "<n>",
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": "<n>",
+     "skills_tokens": "<n>",
+     "t0_header_tokens": "<n>",
+     "t0_member_tokens": "<n>",
+     "t1_tokens": "<n>",
+     "t2_tokens": "<n>",
+     "t3_tokens": "<n>",
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 6,
+    "authority": "advisory",
+    "details": {
+     "file_count": 1,
+     "model": "fallback-coder:35b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   },
+   {
+    "attempt": 7,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": "<n>",
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": "<n>",
+     "skills_tokens": "<n>",
+     "t0_header_tokens": "<n>",
+     "t0_member_tokens": "<n>",
+     "t1_tokens": "<n>",
+     "t2_tokens": "<n>",
+     "t3_tokens": "<n>",
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 7,
+    "authority": "advisory",
+    "details": {
+     "file_count": 1,
+     "model": "fallback-coder:35b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   },
+   {
+    "attempt": 8,
+    "authority": "advisory",
+    "details": {
+     "code_context_tokens": "<n>",
+     "load_seconds": null,
+     "prefill_seconds": null,
+     "prefix_break": null,
+     "prefix_shared_tokens": null,
+     "prompt_tokens_reported": null,
+     "sibling_signatures_tokens": "<n>",
+     "skills_tokens": "<n>",
+     "t0_header_tokens": "<n>",
+     "t0_member_tokens": "<n>",
+     "t1_tokens": "<n>",
+     "t2_tokens": "<n>",
+     "t3_tokens": "<n>",
+     "token_counts": "estimated (len/4) per section; total as reported by the provider"
+    },
+    "kind": "developer.prompt_composition",
+    "message": "Developer prompt composition (estimated per section; provider-reported total).",
+    "source": "developer"
+   },
+   {
+    "attempt": 8,
+    "authority": "advisory",
+    "details": {
+     "file_count": 1,
+     "model": "fallback-coder:35b",
+     "model_use": null
+    },
+    "kind": "generation.completed",
+    "message": "Developer generation completed for 1 file(s) in <t>s.",
+    "source": "developer"
+   }
+  ]
+ }
+}
