@@ -1360,3 +1360,21 @@ def test_the_verification_only_attempt_failure(tmp_path):
         write_scope_mode=WriteScopeMode.DENY_ALL,
         required_verification=[{"type": "tool", "tool_name": "test", "description": "tests"}]))
     _compare("attempt_verification_only_failure", form)
+
+
+# ----------------------------------------------------------------------------- post-move pin (E8 mutant S09)
+
+def test_the_gates_log_through_the_attempt_modules_logger(tmp_path, caplog):
+    """The candidate gates' log records keep the logger they always had (``kriya.workflow.attempt``: log filters and
+    the run log key on it), wherever the gate bodies live. Post-move mutant S09 (the deps builder handing the moved
+    gates another logger) survived every tier before this pin; green at 74f01ac too."""
+    import logging
+
+    async def case(state, ctx, script):
+        await _executing(state, ctx, script)
+    with caplog.at_level(logging.DEBUG):
+        run_gates(tmp_path, case, script=_Script(stack="java"), files={"pom.xml": POM, APP: APP_BASE},
+                  candidate={APP: APP_GOOD}, state=_state(APP), cfg=_config(),
+                  ctx_overrides=dict(goal=JVM_GOAL, established_files=[]))
+    gate_records = [r for r in caplog.records if r.getMessage().startswith(("Quality Gates:", "Toolchain preflight"))]
+    assert gate_records and {r.name for r in gate_records} == {"kriya.workflow.attempt"}
