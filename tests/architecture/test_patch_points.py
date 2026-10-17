@@ -80,7 +80,8 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (W, '_run_contract_acceptance'): P(1, W, ((W, 1),), ()),
     (W, '_run_static_analysis_gate'): P(2, W, ((W, 1),), ()),
     (W, 'assert_candidate_unchanged_since_source_review'): P(2, A, ((W, 3),), ()),
-    (W, 'capture_brownfield_baselines'): P(1, 'kriya.workflow.validation_baseline', ((W, 1),), ()),
+    # E5 characterization: +1 site (tests/test_development_loop.py: a rejected baseline reuse is recorded).
+    (W, 'capture_brownfield_baselines'): P(2, 'kriya.workflow.validation_baseline', ((W, 1),), ()),
     (W, 'classify_ownership_violations'): P(1, 'kriya.workflow.architectural_choice', ((W, 1),), ()),
     (W, 'close_requirements_by_mutation_scope'): P(3, W, (('kriya.workflow.terminal_gate_service', 1), (W, 1)), ()),
     (W, 'close_requirements_with_derived_examples'): P(1, W, (('kriya.workflow.terminal_gate_service', 1), (W, 1)), ()),
@@ -114,8 +115,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E3 characterization: +1 site (the legacy_stage_context_success golden scripts the retrieval through it).
     (W, 'retrieve_graph_context'): P(2, 'kriya.workflow.graph_retrieval', ((W, 1),), ()),
     # E5 characterization: +8 sites (tests/test_development_loop.py drives stage 4 through the facade's run_attempt: the
-    # per-iteration resets, Best-of-N's handed-over stop, the prelude's run-wide decisions, the terminal checks, resume).
-    (W, 'run_attempt'): P(9, A, ((W, 1),), ()),
+    # per-iteration resets, Best-of-N's handed-over stop, the prelude's run-wide decisions, the terminal checks, resume,
+    # the rejected baseline reuse).
+    (W, 'run_attempt'): P(10, A, ((W, 1),), ()),
     (W, 'save_checkpoint'): P(6, 'kriya.control.checkpoint', ((W, 1),), ()),
     # kriya.workflow.workflow_controller
     (C, 'ArtifactRegistry.derive_from_workspace'): P(4, 'kriya.control.artifacts', None, ()),
@@ -238,9 +240,9 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # E1 baseline 87/69/268; E2 +1 W.logger site (test_outcome); E3 +1 W.retrieve_graph_context site (golden
     # scenario) and +1 W.include_response_construction_owners site (test_work_unit_stages); E4 +2 W.logger sites
     # (test_work_unit_stages: the moved late stages and closers log through the patched facade logger); E5 +1 W.logger and
-    # +1 W.create_git_worktree, +1 W.handle_attempt_failure and +8 W.run_attempt sites (test_development_loop: stage 4's
-    # characterization and dynamic proofs, written before the move)
-    assert totals == {A: 87, W: 85, C: 268}
+    # +1 W.create_git_worktree, +1 W.handle_attempt_failure, +1 W.capture_brownfield_baselines and +9 W.run_attempt sites
+    # (test_development_loop: stage 4's characterization and dynamic proofs, written before the move)
+    assert totals == {A: 87, W: 87, C: 268}
     assert len(PATCH_POINTS) == 83
 
 

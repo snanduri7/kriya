@@ -302,3 +302,23 @@ def test_a_plan_scope_reinvocation_keeps_its_grounded_loci_in_the_sandbox(tmp_pa
     with patch(f"{W}.run_attempt", new=capture_and_stop):
         kg._apply_run(tmp_path, controller=False, run_kwargs={"grounded_locations": locations})
     assert seen == [{"calc.py": [2]}]   # the current locus seeded, the stale one dropped
+
+
+def test_a_baseline_the_run_refused_to_reuse_is_recorded_before_the_first_attempt(tmp_path, _git_identity):
+    """VAL-001/REG-R1: every reuse the baseline capture rejected (a checkpointed or prior baseline it re-established)
+    is one validation_baseline.reuse_rejected event, recorded before any Developer attempt."""
+    from kriya.workflow.validation_baseline import BrownfieldBaselineCaptureResult
+
+    def captured(**kwargs):
+        return BrownfieldBaselineCaptureResult(targeted=None, full_regression=None, hard_stop_reason=None,
+                                               full_regression_source=None,
+                                               reuse_rejections=("prior baseline lacks per-test evidence", "stale"))
+    seen = []
+
+    async def capture_and_stop(state, ctx):
+        seen.append([e.details for e in state.run_events if e.kind == "validation_baseline.reuse_rejected"])
+        state.environment_failure = "scripted stop"
+
+    with patch(f"{W}.capture_brownfield_baselines", new=captured), patch(f"{W}.run_attempt", new=capture_and_stop):
+        kg._apply_run(tmp_path, controller=False)
+    assert seen == [[{"reason": "prior baseline lacks per-test evidence"}, {"reason": "stale"}]]
