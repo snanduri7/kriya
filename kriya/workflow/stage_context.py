@@ -1,5 +1,5 @@
 """The explicit dependencies and the shared per-unit context of the kernel's extracted run stages (full modularization
-W4, E2/E3).
+W4, E2-E5).
 
 ``WorkflowEngine.run_generation_workflow`` (``kriya/workflow/workflow.py``) builds one ``StageDeps`` per use, from
 its own module-level names at CALL time, and hands it to the owner modules (``run_lifecycle``, ``outcome``, the
@@ -20,13 +20,16 @@ The E3 design-stage collaborators default to ``NOT_INJECTED`` values that fail o
 ``WorkflowEngine._stage_deps``, a test double) can never silently run a design stage with a missing collaborator;
 ``WorkflowEngine._work_unit_deps`` injects every one of them (pinned by ``tests/test_work_unit_stages.py``). The E4
 review, approval/apply and lesson collaborators (``stage_review``, ``stage_apply``) are a second fail-closed group
-(``late_stage_fields``), injected by ``WorkflowEngine._late_stage_deps``.
+(``late_stage_fields``), injected by ``WorkflowEngine._late_stage_deps``. The E5 Developer loop's collaborators
+(``development_loop``) are a third (``development_stage_fields``), injected by ``WorkflowEngine._development_deps``.
 
 ``StageContext`` is ONE work unit's run-local names shared by the design stages: the run's inputs (the
 ``run_generation_workflow`` arguments the stages read, the run state and trace identity the engine opened) and what
 each stage produces for the next stage and for the engine's Developer loop. It holds exactly the locals the stages
 shared when they were one method, under the same names. E4 adds what the engine's Developer loop hands the late
-stages (the sandbox path, the effective obligation ledger, the grounding goal, the work unit).
+stages (the sandbox path, the effective obligation ledger, the grounding goal, the work unit). E5 adds the
+``run_generation_workflow`` arguments and run-opening decisions the Developer loop reads (the engine sets them, with
+the grounding goal, the work unit and the run's trace identity, when it builds the context; no design stage reads them).
 
 ``RunState`` is the run's ``kriya.workflow.state.GenerationState``. It is spelled ``Any`` here on purpose: an
 import of ``kriya.workflow.state`` (even under ``TYPE_CHECKING``, which the architecture scan counts as a
@@ -38,7 +41,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field, fields
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
 RunState = Any  # kriya.workflow.state.GenerationState (see the module docstring for why it is not imported)
 
@@ -63,7 +66,7 @@ class _NotInjected:
 
     def __init__(self, name: str, group: str = "design") -> None:
         self.name = name
-        self.group = group      # "design": an E3 design-stage field; "late": an E4 review/apply/lesson field
+        self.group = group      # "design": E3 design stages; "late": E4 review/apply/lessons; "development": E5 loop
 
     def __repr__(self) -> str:
         return f"<not injected: {self.name}>"
@@ -88,6 +91,10 @@ def _injected(name: str) -> Any:
 
 def _late(name: str) -> Any:
     return field(default=_NotInjected(name, "late"))
+
+
+def _development(name: str) -> Any:
+    return field(default=_NotInjected(name, "development"))
 
 
 @dataclass(frozen=True)
@@ -212,6 +219,74 @@ class StageDeps:
     commit_guard: Any = _late("commit_guard")
     ContextBudgetUnsatisfiableError: Any = _late("ContextBudgetUnsatisfiableError")
 
+    # ---- E5 Developer loop (stage 4, kriya/workflow/development_loop.py); WorkflowEngine._development_deps injects
+    # every field below (and the E3/E4 fields the loop uses: developer, approve_web_lookup, _log_phase_banner,
+    # parse_ownership_justifications, _terminal_contract_authorizations).
+    # The engine's own collaborators (were ``self.<name>`` in run_generation_workflow).
+    engine: Any = _development("engine")              # the WorkflowEngine, only where a moved call passes it on
+    kernel: Any = _development("kernel")
+    run_verifier: Any = _development("run_verifier")
+    spec_compliance: Any = _development("spec_compliance")
+    late_stage_deps: Any = _development("late_stage_deps")    # WorkflowEngine._late_stage_deps (built per stage call)
+    prior_full_suite_evidence: Any = _development("prior_full_suite_evidence")   # reads _prior_full_suite_evidence
+    # Function-local imports of all-import-cycle modules in the moved loop, as loaders called where it imported them.
+    load_baseline_policy: Any = _development("load_baseline_policy")     # kriya.workflow.baseline_policy
+    load_fallback_routing: Any = _development("load_fallback_routing")   # kriya.workflow.model_transition
+    load_best_of_n: Any = _development("load_best_of_n")                 # kriya.workflow.best_of_n
+    # Names tests patch on kriya.workflow.workflow (resolved there when stage 4 begins). run_attempt is the facade's
+    # import-time binding: a patch of kriya.workflow.attempt.run_attempt never reaches the loop (only Best-of-N).
+    run_attempt: Any = _development("run_attempt")
+    handle_attempt_failure: Any = _development("handle_attempt_failure")
+    create_git_worktree: Any = _development("create_git_worktree")
+    capture_brownfield_baselines: Any = _development("capture_brownfield_baselines")
+    compute_workspace_content_hash: Any = _development("compute_workspace_content_hash")
+    assert_candidate_unchanged_since_source_review: Any = _development("assert_candidate_unchanged_since_source_review")
+    classify_ownership_violations: Any = _development("classify_ownership_violations")
+    resolve_future_owner_verification_deferral: Any = _development("resolve_future_owner_verification_deferral")
+    _run_static_analysis_gate: Any = _development("_run_static_analysis_gate")
+    close_requirements_by_mutation_scope: Any = _development("close_requirements_by_mutation_scope")
+    close_requirements_with_acceptance_tests: Any = _development("close_requirements_with_acceptance_tests")
+    close_requirements_with_authority_bundle_evidence: Any = _development("close_requirements_with_authority_bundle_evidence")
+    close_requirements_with_derived_examples: Any = _development("close_requirements_with_derived_examples")
+    close_requirements_by_api_preservation: Any = _development("close_requirements_by_api_preservation")
+    close_requirements_by_test_addition: Any = _development("close_requirements_by_test_addition")
+    close_requirements_by_documentation: Any = _development("close_requirements_by_documentation")
+    close_requirements_with_named_tests: Any = _development("close_requirements_with_named_tests")
+    close_requirements_by_test_immutability: Any = _development("close_requirements_by_test_immutability")
+    close_requirements_by_file_immutability: Any = _development("close_requirements_by_file_immutability")
+    close_requirements_by_suite_preservation: Any = _development("close_requirements_by_suite_preservation")
+    # kriya.workflow.workflow's own helpers.
+    _seed_grounded_loci: Any = _development("_seed_grounded_loci")
+    build_contract_feedback: Any = _development("build_contract_feedback")
+    _bind_direct_candidate: Any = _development("_bind_direct_candidate")
+    _record_post_generation_ownership_findings: Any = _development("_record_post_generation_ownership_findings")
+    _run_semantic_safety_gate: Any = _development("_run_semantic_safety_gate")
+    _settle_future_owner_verification_obligations: Any = _development("_settle_future_owner_verification_obligations")
+    _record_future_owner_verification_deferred: Any = _development("_record_future_owner_verification_deferred")
+    _settle_no_change_proposal: Any = _development("_settle_no_change_proposal")
+    _stop_unverified_no_change: Any = _development("_stop_unverified_no_change")
+    # All-import-cycle KERNEL modules (attempt, state, best_of_n, retry_prompts, ownership_findings,
+    # resume_fingerprints, suite_attribution) and non-public AUTHORITY/EXECUTION names (acceptance_approval,
+    # tools.test_execution).
+    AttemptContext: Any = _development("AttemptContext")
+    RecoveryPhaseAdvanced: Any = _development("RecoveryPhaseAdvanced")
+    BestOfNFailureRecorded: Any = _development("BestOfNFailureRecorded")
+    _stop_on_environment_gate_result: Any = _development("_stop_on_environment_gate_result")
+    _build_ecosystem_invariant_block: Any = _development("_build_ecosystem_invariant_block")
+    RESOURCE_LIFECYCLE_HEADER: Any = _development("RESOURCE_LIFECYCLE_HEADER")
+    VERIFICATION_CONTRACT_HEADER: Any = _development("VERIFICATION_CONTRACT_HEADER")
+    record_findings: Any = _development("record_findings")
+    CANDIDATE_HASH_KEY: Any = _development("CANDIDATE_HASH_KEY")
+    EFFECTIVE_LEDGER_KEY: Any = _development("EFFECTIVE_LEDGER_KEY")
+    candidate_snapshot_digest: Any = _development("candidate_snapshot_digest")
+    captured_baseline: Any = _development("captured_baseline")
+    attribute_suite_result: Any = _development("attribute_suite_result")
+    post_environment_identity: Any = _development("post_environment_identity")
+    SCOPE_FULL_REGRESSION: Any = _development("SCOPE_FULL_REGRESSION")
+    bound_acceptance: Any = _development("bound_acceptance")
+    bound_approval: Any = _development("bound_approval")
+    test_execution: Any = _development("test_execution")
+
 
 def design_stage_fields() -> Tuple[str, ...]:
     """The E3 collaborator field names (those with a design-stage ``NOT_INJECTED`` default)."""
@@ -221,6 +296,12 @@ def design_stage_fields() -> Tuple[str, ...]:
 def late_stage_fields() -> Tuple[str, ...]:
     """The E4 collaborator field names (the review, approval/apply and lesson stages)."""
     return tuple(f.name for f in fields(StageDeps) if isinstance(f.default, _NotInjected) and f.default.group == "late")
+
+
+def development_stage_fields() -> Tuple[str, ...]:
+    """The E5 collaborator field names (the Developer loop, stage 4)."""
+    return tuple(f.name for f in fields(StageDeps)
+                 if isinstance(f.default, _NotInjected) and f.default.group == "development")
 
 
 def not_injected(deps: StageDeps, names: Optional[Tuple[str, ...]] = None) -> List[str]:
@@ -310,13 +391,33 @@ class StageContext:
     architect_files: Any = None
     active_skill_rules_snapshot: Dict[str, List[str]] = field(default_factory=dict)
     active_skill_manifest: List[Any] = field(default_factory=list)
-    # ---- set by the engine before its Developer loop, read by the E4 review, approval/apply and lesson stages
+    # ---- read by the E4 review, approval/apply and lesson stages: the sandbox path and the effective ledger are set by
+    # the Developer loop's prelude (E5); the trace identity, grounding goal and work unit by the engine at construction
     worktree_path: str = ""
     run_trace: Any = None                  # kriya.workflow.run_lifecycle.RunTrace (the approval abort's trace row)
     resolved_obligation_ledger: Any = None
     grounding_goal: str = ""
     work_unit: Any = None
+    # ---- E5: the run_generation_workflow arguments and run-opening decisions the Developer loop (stage 4) reads
+    verification_contract: Any = None      # VERIFICATION-CONTRACT-003, compiled before any model call
+    resume_plan: Any = None                # PRD-008 S3 (resume_fingerprints.ResumePlan)
+    resume_restored_ledger: Any = None     # the effective ledger a reused candidate was verified against
+    protected_relpath: Optional[str] = None
+    planned_source_files: Optional[Sequence[str]] = None
+    recovery_contract_block: str = ""
+    grounded_locations: Optional[Sequence[Mapping[str, Any]]] = None
+    established_files: Optional[List[str]] = None
+    authorized_semantic_regions: Optional[List[Any]] = None
+    required_verification: Optional[List[Dict[str, Any]]] = None
+    runtime_verification_required: Optional[bool] = None
+    strict_spec_compliance: bool = False
+    execution_scope: str = ""
+    reopened_owner: bool = False
+    migration_resolution: Any = None
+    obligation_ledger: Any = None          # the caller's ledger (None: the loop creates the run's own)
+    completed_subtask_ids: Optional[FrozenSet[str]] = None
+    deterministic_failure_diagnostics: Any = None
 
 
 __all__ = ["RunState", "StageCollaboratorMissing", "StageContext", "StageDeps", "design_stage_fields",
-           "late_stage_fields", "not_injected"]
+           "development_stage_fields", "late_stage_fields", "not_injected"]

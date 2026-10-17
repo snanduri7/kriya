@@ -79,7 +79,10 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (W, '_run_committed_paths'): P(2, W, ((W, 1),), ()),
     (W, '_run_contract_acceptance'): P(1, W, ((W, 1),), ()),
     (W, '_run_static_analysis_gate'): P(2, W, ((W, 1),), ()),
-    (W, 'assert_candidate_unchanged_since_source_review'): P(2, A, ((W, 3),), ()),
+    # E5: 3 -> 1 lookup: the three loads moved with the Developer loop to development_loop, which binds
+    # StageDeps.assert_candidate_unchanged_since_source_review (one load in WorkflowEngine._development_deps, resolved
+    # here when stage 4 begins; the two patch sites drive the moved loop and are the dynamic proof).
+    (W, 'assert_candidate_unchanged_since_source_review'): P(2, A, ((W, 1),), ()),
     # E5 characterization: +1 site (tests/test_development_loop.py: a rejected baseline reuse is recorded).
     (W, 'capture_brownfield_baselines'): P(2, 'kriya.workflow.validation_baseline', ((W, 1),), ()),
     (W, 'classify_ownership_violations'): P(1, 'kriya.workflow.architectural_choice', ((W, 1),), ()),
@@ -87,7 +90,10 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (W, 'close_requirements_with_derived_examples'): P(1, W, (('kriya.workflow.terminal_gate_service', 1), (W, 1)), ()),
     (W, 'close_requirements_with_named_tests'): P(1, W, (('kriya.workflow.terminal_gate_service', 1), (W, 1)), ()),
     (W, 'commit_terminal_candidate'): P(2, 'kriya.workflow.terminal_commit', ((W, 1),), ()),
-    (W, 'compute_workspace_content_hash'): P(2, 'kriya.workflow.checkpoint', ((W, 5),), ()),
+    # E5: 5 -> 3 lookups: the loop's three loads (auto baseline revision, the baseline capture's revision, the
+    # targeted POST replay) moved to development_loop and bind StageDeps.compute_workspace_content_hash (+1 load in
+    # _development_deps); the checkpoint opening and the run-contract baseline keep theirs.
+    (W, 'compute_workspace_content_hash'): P(2, 'kriya.workflow.checkpoint', ((W, 3),), ()),
     # E5 characterization: +1 site (tests/test_development_loop.py: the prelude's sandbox failure).
     (W, 'create_git_worktree'): P(3, 'kriya.workflow.worktree', ((W, 1),), ()),
     (W, 'delete_checkpoint'): P(2, 'kriya.control.checkpoint', ((W, 2),), ()),
@@ -110,7 +116,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E4 (OI-32): 65 -> 62: the three run-opening early exits' trace-write warnings now log through
     # run_lifecycle.persist_early_exit_trace (StageDeps.logger from _stage_deps, resolved here at call time).
     # E5 characterization: +1 site (tests/test_development_loop.py: stage 4 logs through the patched facade logger).
-    (W, 'logger'): P(6, W, ((W, 62),), ()),
+    # E5: 62 -> 36 lookups: the 26 logger loads of the moved Developer loop bind StageDeps.logger
+    # (_development_deps -> _stage_deps, no new load).
+    (W, 'logger'): P(6, W, ((W, 36),), ()),
     (W, 'resolve_future_owner_verification_deferral'): P(1, 'kriya.workflow.attribution', ((W, 1),), ()),
     # E3 characterization: +1 site (the legacy_stage_context_success golden scripts the retrieval through it).
     (W, 'retrieve_graph_context'): P(2, 'kriya.workflow.graph_retrieval', ((W, 1),), ()),
@@ -257,7 +265,9 @@ KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_life
                         "kriya.workflow.stage_analysis", "kriya.workflow.stage_planning",
                         "kriya.workflow.stage_architecture",
                         # E4: the review, approval/apply and lesson stages and the requirement closers
-                        "kriya.workflow.stage_review", "kriya.workflow.stage_apply", "kriya.workflow.requirement_closers")
+                        "kriya.workflow.stage_review", "kriya.workflow.stage_apply", "kriya.workflow.requirement_closers",
+                        # E5: the Developer loop (stage 4)
+                        "kriya.workflow.development_loop")
 FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
 
 

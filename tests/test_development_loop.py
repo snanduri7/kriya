@@ -1,6 +1,8 @@
-"""Stage 4 of a work unit, the Developer + Quality Gates loop (full modularization W4, E5), characterized from aad9ab1
-BEFORE it moved out of ``WorkflowEngine.run_generation_workflow``: the loop logs through the facade's
-``kriya.workflow.workflow.logger`` (patched by tests), and the prelude's third outcome (no sandbox at all) raises.
+"""Stage 4 of a work unit, the Developer + Quality Gates loop (full modularization W4, E5): moved verbatim out of
+``WorkflowEngine.run_generation_workflow`` into ``kriya/workflow/development_loop.py``, every collaborator in
+``StageDeps`` (``WorkflowEngine._development_deps``). The seam tests (the engine injects every collaborator, a missing one
+fails closed, the loop calls the facade's binding of each patched name) came with the move; every test after them was
+written and green at aad9ab1 BEFORE the move (characterization through the facade's patched names).
 
 The end-to-end preservation proof is the kernel goldens (``tests/state_machine/test_sm_kernel_golden.py``: every
 scenario runs through stage 4; ``legacy_baseline_indeterminate`` and ``legacy_worktree_sync_refused`` were written
@@ -15,13 +17,80 @@ from unittest.mock import patch
 import pytest
 
 from kriya.config import AppConfig
+from kriya.core.kernel import Kernel
+from kriya.core.llm import LLMClient
 from kriya.core.state_paths import trace_db_path
+from kriya.workflow import development_loop
+from kriya.workflow.stage_context import (
+    StageCollaboratorMissing,
+    StageContext,
+    development_stage_fields,
+    not_injected,
+)
+from kriya.workflow.state import GenerationState
+from kriya.workflow.workflow import WorkflowEngine
 
 # The scenario harness lives in tests/state_machine/ (imported by bare name, exactly as the state-machine tier does).
 sys.path.insert(0, str(Path(__file__).resolve().parent / "state_machine"))
 import _kernel_golden as kg  # noqa: E402 - needs the sys.path entry above  # pylint: disable=wrong-import-position
 
 W = "kriya.workflow.workflow"
+
+
+# The E3/E4 collaborators the loop also reads (injected by _development_deps too).
+SHARED = ("developer", "approve_web_lookup", "_log_phase_banner", "parse_ownership_justifications",
+          "_terminal_contract_authorizations")
+
+
+def _engine(tmp_path):
+    cfg = AppConfig()
+    cfg.paths.skills, cfg.paths.memory = str(tmp_path / "skills"), str(tmp_path / "memory")
+    cfg.skills.load_global = cfg.skills.load_cwd = False
+    cfg.knowledge.offline_mode = True
+    return WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+
+
+# ----------------------------------------------------------------------------- the seam (E5 move)
+
+
+def test_the_engine_injects_every_development_collaborator(tmp_path):
+    engine = _engine(tmp_path)
+    deps = engine._development_deps()
+    assert not_injected(deps, development_stage_fields()) == []
+    assert len(development_stage_fields()) == 56
+    assert not_injected(deps, SHARED) == []
+    assert (deps.engine, deps.kernel, deps.developer, deps.run_verifier, deps.spec_compliance) == (
+        engine, engine.kernel, engine.developer, engine.run_verifier, engine.spec_compliance)
+    assert deps.config is engine.kernel.config and deps.late_stage_deps == engine._late_stage_deps
+    engine._prior_full_suite_evidence = {"run_id": "prior"}
+    assert deps.prior_full_suite_evidence() == {"run_id": "prior"}   # read when the baseline is captured, not before
+
+
+def test_the_loop_given_lifecycle_only_deps_fails_closed(tmp_path):
+    """E2's ``_stage_deps()`` carries none of the loop's collaborators: the first use raises, never a silent None."""
+    engine = _engine(tmp_path)
+    assert sorted(not_injected(engine._stage_deps(), development_stage_fields())) == sorted(development_stage_fields())
+    ctx = StageContext(goal="g", workspace_path=str(tmp_path), state=GenerationState(), architect_files=[])
+    with pytest.raises(StageCollaboratorMissing, match=r"StageDeps\._log_phase_banner was not injected"):
+        asyncio.run(development_loop.run_development(ctx, engine._stage_deps()))
+
+
+# Every name a test patches on kriya.workflow.workflow that the moved loop calls (tests/architecture/test_patch_points.py
+# rows; their patch sites drive the moved loop and are the dynamic proofs).
+FACADE_PATCHED = ("run_attempt", "handle_attempt_failure", "create_git_worktree", "capture_brownfield_baselines",
+                  "compute_workspace_content_hash", "assert_candidate_unchanged_since_source_review",
+                  "classify_ownership_violations", "resolve_future_owner_verification_deferral",
+                  "_run_static_analysis_gate", "close_requirements_by_mutation_scope",
+                  "close_requirements_with_derived_examples", "close_requirements_with_named_tests")
+
+
+@pytest.mark.parametrize("name", FACADE_PATCHED)
+def test_the_loop_calls_the_facade_binding_of_each_patched_name(name, tmp_path):
+    """``deps.<name>`` IS the facade's binding when stage 4 begins (``deps.run_attempt`` is
+    ``kriya.workflow.workflow.run_attempt``, never ``kriya.workflow.attempt.run_attempt``'s own binding)."""
+    from kriya.workflow import workflow as workflow_module
+
+    assert getattr(_engine(tmp_path)._development_deps(), name) is getattr(workflow_module, name)
 
 
 @pytest.fixture
