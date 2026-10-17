@@ -534,3 +534,38 @@ def test_the_retry_and_repair_names_keep_their_call_shape_on_attempt():
     import dataclasses
     assert [f.name for f in dataclasses.fields(attempt.RetryContextPreparation)] == [
         "retry_package", "retry_error_context", "member_hints", "member_hint_rendered"]
+
+
+# ----------------------------------------------------------------------------- E8: the candidate-gate names
+
+# Written at 74f01ac, BEFORE kriya/workflow/gate_orchestrator.py exists (E8 moves these bodies there): every name stays
+# importable from kriya.workflow.attempt with the same parameters and the same sync/async kind (run_attempt calls
+# five of them by these names; tests/test_file_integrity_contract_001.py imports two, tests/test_lr_r1_p4_* wraps the
+# verification-only attempt; the goal-spec statuses keep their values). Annotations are not pinned.
+E8_ATTEMPT_CALLABLES = {
+    "_apply_candidate_pom_corrections": "(state, ctx, compile_known_files)",
+    "_bind_verification_tree": "(state, ctx)",
+    "_record_candidate_change": "(state, ctx)",
+    "_require_worktree_matches_candidate": "(state, ctx)",
+    "async _run_verification_only_attempt": "(state, ctx)",
+    "_run_pom_validation_gate": "(state, ctx, tree_binding)",
+    "_new_candidate_validator": "(ctx)",
+    "_resolve_candidate_toolchain": "(state, ctx, validator)",
+    "apply_pre_review_candidate_corrections": "(state, ctx)",
+    "async _run_executing_candidate_gates": "(state, ctx, skipping_candidate_gates, tree_binding, active_code_context)",
+    "async _run_deferred_executing_gates": "(state, ctx, skipping_candidate_gates, tree_binding, active_code_context)",
+}
+
+
+def test_the_candidate_gate_names_keep_their_call_shape_on_attempt():
+    attempt = importlib.import_module(A)
+    found = {}
+    for key in E8_ATTEMPT_CALLABLES:
+        name = key.split(" ")[-1]
+        shape = _unannotated(getattr(attempt, name))
+        found[key] = shape.split(" ", 1)[1] if shape.startswith("async ") else shape
+        assert shape.startswith("async ") == key.startswith("async "), name
+    assert found == E8_ATTEMPT_CALLABLES
+    assert (attempt.SPEC_MODEL_REPORTED_MISSING, attempt.SPEC_MODEL_INDETERMINATE,
+            attempt.SPEC_COMPLIANCE_MODEL_ADVISORY) == ("model_reported_missing", "model_indeterminate",
+                                                        "SPEC_COMPLIANCE_MODEL_ADVISORY")
