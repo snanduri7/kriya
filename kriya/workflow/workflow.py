@@ -334,6 +334,7 @@ from kriya.workflow.run_lifecycle import (
     TerminalTrace,
     TraceDetail,
     open_run_state,
+    persist_early_exit_trace,
     persist_run_trace,
     record_run_exception,
     trace_run_events,
@@ -2683,8 +2684,6 @@ class WorkflowEngine:
         # mandatory requirement must have a deterministic closer; a goal that
         # cannot be verified is refused here, naming what and why.
         if verification_contract is not None and _requirement_policy_blocks(self.kernel.config.autonomy):
-            from kriya.control.trace import TraceLogger
-
             admission = verification_contract.refusal()
             if admission is not None:
                 # VERIFICATION-CONTRACT-003 (D3): GOAL_INSUFFICIENT_FOR_VERIFICATION (the
@@ -2715,16 +2714,8 @@ class WorkflowEngine:
                                  "sealing_error": getattr(admission, "authority_requests_sealing_error", None),
                                  "requests": [r.to_dict() for r in admission.authority_requests]},
                     ))
-                try:
-                    TraceLogger(trace_db_path(self.kernel.config)).log_run(
-                        run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
-                        attempts=0, status="failure", files_modified=[],
-                        failure_category=admission.failure_category,
-                        milestone_group_id=milestone_group_id, milestone_index=milestone_index,
-                        milestone_total=milestone_total, enforce_run_id=enforce_run_id, run_events=self._trace_run_events(state),
-                    )
-                except Exception as trace_ex:
-                    logger.warning(f"Failed to write run trace: {trace_ex}")
+                persist_early_exit_trace(self._stage_deps(), state, run_trace, status="failure",
+                                         failure_category=admission.failure_category)
                 return {
                     "status": "failure", "failure_category": admission.failure_category,
                     "reason_codes": [admission.reason_code], "error": admission.message,
@@ -2766,7 +2757,6 @@ class WorkflowEngine:
             # model call; a baseline that already satisfies every mandatory
             # claim is NO_MUTATION_REQUIRED (a success without a model).
             if verification_contract.authorities and verification_contract.refusal() is None:
-                from kriya.control.trace import TraceLogger
                 from kriya.workflow.contract_baseline import BaselineAuthorityReport, NoMutationRequired
 
                 try:
@@ -2801,15 +2791,8 @@ class WorkflowEngine:
                             authority=EventAuthority.AUTHORITATIVE, message=stop.message[:600],
                             details={"reason_code": stop.reason_code, "unavailable": baseline_report.unavailable_authorities()},
                         ))
-                        try:
-                            TraceLogger(trace_db_path(self.kernel.config)).log_run(
-                                run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
-                                attempts=0, status="failure", files_modified=[], failure_category=stop.failure_category,
-                                milestone_group_id=milestone_group_id, milestone_index=milestone_index,
-                                milestone_total=milestone_total, enforce_run_id=enforce_run_id, run_events=self._trace_run_events(state),
-                            )
-                        except Exception as trace_ex:
-                            logger.warning(f"Failed to write run trace: {trace_ex}")
+                        persist_early_exit_trace(self._stage_deps(), state, run_trace, status="failure",
+                                                 failure_category=stop.failure_category)
                         return {**stop.result(), "goal": goal, "workspace_path": workspace_path, "run_id": trace_id}
                     if baseline_report.no_mutation_required:
                         decision = NoMutationRequired(verification_contract, baseline_report)
@@ -2819,15 +2802,7 @@ class WorkflowEngine:
                             source="workflow.run_generation_workflow", authority=EventAuthority.AUTHORITATIVE,
                             message=str(decision), details=baseline_report.to_dict(),
                         ))
-                        try:
-                            TraceLogger(trace_db_path(self.kernel.config)).log_run(
-                                run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
-                                attempts=0, status="success", files_modified=[],
-                                milestone_group_id=milestone_group_id, milestone_index=milestone_index,
-                                milestone_total=milestone_total, enforce_run_id=enforce_run_id, run_events=self._trace_run_events(state),
-                            )
-                        except Exception as trace_ex:
-                            logger.warning(f"Failed to write run trace: {trace_ex}")
+                        persist_early_exit_trace(self._stage_deps(), state, run_trace, status="success")
                         return {**decision.result(), "goal": goal, "workspace_path": workspace_path, "run_id": trace_id}
 
         protected_relpath = _resolve_protected_relpath(workspace_path, protected_source_file)

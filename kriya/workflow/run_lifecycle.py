@@ -8,6 +8,7 @@ its collaborators in through ``StageDeps``):
   primary model runtime, role independence, applied routes);
 - ``trace_run_events``: the run's events for a traces.db row (budget expansions drained in, PRD-018 role metrics);
 - ``persist_run_trace``: the run's traces.db row for the pre-Reviewer checkpoint and the terminal (stage 8) write;
+- ``persist_early_exit_trace``: the short row of a run that stops before its Developer loop (E4, OI-32);
 - ``record_run_exception``: the ``<trace_id>.exception`` row of a run that raises (MODEL-EVIDENCE-HARDENING-001).
 
 This module never imports the engine facade, the controller or the CLI (``tests/test_outcome.py``).
@@ -190,6 +191,35 @@ def persist_run_trace(
         deps.logger.warning(f"{failure_note}: {trace_ex}")
 
 
+_NO_CATEGORY = object()
+
+
+def persist_early_exit_trace(
+    deps: StageDeps, state: RunState, trace: RunTrace, *, status: str, failure_category: Any = _NO_CATEGORY,
+) -> None:
+    """The SHORT traces.db row of a run that stops before its Developer loop (OI-32): ``attempts=0``, no files, the
+    run's events and nothing else; ``failure_category`` is omitted (the store's default) when not given, as for
+    NO_MUTATION_REQUIRED. Never raises: a trace failure is logged. The store is opened before ``trace_events`` drains
+    the budget expansions and records the role metrics, as the inline writes did."""
+    try:
+        from kriya.control.trace import TraceLogger
+        trace_logger = TraceLogger(trace_db_path(deps.config))
+        row: Dict[str, Any] = dict(
+            run_id=trace.trace_id, goal=trace.goal, duration_sec=deps.wall_clock() - trace.started_at,
+            attempts=0, status=status, files_modified=[],
+        )
+        if failure_category is not _NO_CATEGORY:
+            row["failure_category"] = failure_category
+        row.update(
+            milestone_group_id=trace.milestone_group_id, milestone_index=trace.milestone_index,
+            milestone_total=trace.milestone_total, enforce_run_id=trace.enforce_run_id,
+            run_events=deps.trace_events(state),
+        )
+        trace_logger.log_run(**row)
+    except Exception as trace_ex:
+        deps.logger.warning(f"Failed to write run trace: {trace_ex}")
+
+
 def record_run_exception(
     engine: Any, trace: Dict[str, Any], error: BaseException, *, logger: Any,
     write_outcome_trace: Callable[..., bool],
@@ -219,5 +249,5 @@ def record_run_exception(
     )
 
 
-__all__ = ["RunTrace", "TerminalTrace", "TraceDetail", "open_run_state", "persist_run_trace", "record_run_exception",
-           "trace_run_events"]
+__all__ = ["RunTrace", "TerminalTrace", "TraceDetail", "open_run_state", "persist_early_exit_trace", "persist_run_trace",
+           "record_run_exception", "trace_run_events"]

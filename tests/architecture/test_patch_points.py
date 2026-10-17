@@ -104,7 +104,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # _stage_deps, no new load); both resolved here at call time. +2 sites: the dynamic proofs in
     # tests/test_work_unit_stages.py (the moved lesson extraction's swallowed failure, and the final review stage and a
     # closer forwarder, log through the patched facade logger).
-    (W, 'logger'): P(5, W, ((W, 65),), ()),
+    # E4 (OI-32): 65 -> 62: the three run-opening early exits' trace-write warnings now log through
+    # run_lifecycle.persist_early_exit_trace (StageDeps.logger from _stage_deps, resolved here at call time).
+    (W, 'logger'): P(5, W, ((W, 62),), ()),
     (W, 'resolve_future_owner_verification_deferral'): P(1, 'kriya.workflow.attribution', ((W, 1),), ()),
     # E3 characterization: +1 site (the legacy_stage_context_success golden scripts the retrieval through it).
     (W, 'retrieve_graph_context'): P(2, 'kriya.workflow.graph_retrieval', ((W, 1),), ()),
