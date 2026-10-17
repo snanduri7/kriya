@@ -94,6 +94,10 @@ EXPECTED = {
     "legacy_dependency_skill_accrued": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
     "legacy_workspace_refused": ("WorkflowResult", False, None, "needs_review", [], False),
     "direct_workspace_refused": ("dict", False, None, "needs_review", ["COMMIT_ELIGIBLE"], False),
+    # E5 characterization of the stage-4 prelude (written from aad9ab1, before that code moved; OI-39): both stops
+    # return the engine's dict as legacy_result after the design stages, before any attempt
+    "legacy_baseline_indeterminate": ("WorkflowResult", False, None, "baseline_indeterminate", ["FAILURE"], False),
+    "legacy_worktree_sync_refused": ("WorkflowResult", False, "worktree_sync_failed", "failure", ["FAILURE"], False),
 }
 # PRD-008 refusals: refused before any model call, so no attempt-evidence store exists (the prior run's record is the
 # only RunRecord of the engine scenario; the controller scenario has none).

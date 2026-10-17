@@ -444,6 +444,9 @@ TERMINAL_PATHS: Dict[str, str] = {
     "legacy_dependency_skill_accrued": "stage 7: auto-accrual scaffolds only the suggested dependency the final content uses",
     "legacy_workspace_refused": "PRD-008 refusal (controller): in-progress commit evidence, needs_review before any model call",
     "direct_workspace_refused": "PRD-008 refusal (engine): an unsettled prior commit cycle, needs_review before any model call",
+    # E5 characterization of the stage-4 prelude (OI-39)
+    "legacy_baseline_indeterminate": "stage-4 prelude stop: baseline_indeterminate (a required PRE baseline that cannot be captured)",
+    "legacy_worktree_sync_refused": "stage-4 prelude stop: worktree_sync_failed (the sandbox cannot hold the workspace's uncommitted bytes)",
 }
 GENERATED_FROM = "4eaf610"
 # Scenarios added after E1 name the commit their golden was written from (every E1 golden stays GENERATED_FROM).
@@ -459,6 +462,8 @@ GENERATED_FROM_BY_SCENARIO.update({name: "3e5751c" for name in (
     "legacy_approval_diff_size_trigger", "legacy_commit_revision_conflict", "legacy_final_review_deadline_refused",
     "legacy_rejected_candidate_review", "legacy_lessons_staged", "legacy_dependency_skill_accrued",
     "legacy_workspace_refused", "direct_workspace_refused")})
+GENERATED_FROM_BY_SCENARIO.update({name: "aad9ab1" for name in (
+    "legacy_baseline_indeterminate", "legacy_worktree_sync_refused")})
 
 
 def generated_from(name: str) -> str:
@@ -1123,13 +1128,15 @@ def _apply_run(tmp_path: Path, *, developer: Callable[[str, int, str], str] = la
                lessons: Callable[[int], str] = lambda n: "[]", chain: bool = False,
                configure: Optional[Callable[[Any], None]] = None, approve: Optional[bool] = True,
                on_approval: Optional[Callable[[Path], None]] = None, controller: bool = True,
-               prepare: Optional[Callable[[Path], None]] = None, patches: Iterable[Any] = ()) -> Outcome:
+               prepare: Optional[Callable[[Path], None]] = None, patches: Iterable[Any] = (),
+               run_kwargs: Optional[Dict[str, Any]] = None) -> Outcome:
     """One isolated run (legacy controller, or the engine directly) of the calc scenario for stages 5-7; ``extra``
     records what the result dict and the E1 form do not show: the step callbacks, the streamed progress lines, every
     approval request (its diffs and escalation reason, digested), every traces.db row, the stage checkpoints left
     behind, each scripted role's requests (digested), the workspace files after the run and every file the run staged
     under the (tmp) skills directory. ``approve=None`` runs without an approval callback; ``on_approval`` acts on the
-    workspace while the person is asked; ``prepare`` acts on the workspace before the run."""
+    workspace while the person is asked; ``prepare`` acts on the workspace before the run; ``run_kwargs`` replaces or adds
+    run arguments (E5: tests/test_early_exit_traces.py passes milestone/enforce identities to a direct engine run)."""
     import contextlib
 
     from _scripted_run import engine, git_workspace
@@ -1169,6 +1176,7 @@ def _apply_run(tmp_path: Path, *, developer: Callable[[str, int, str], str] = la
         goal=GOAL, workspace_path=str(workspace), approval_callback=approval_callback if approve is not None else None,
         step_callback=lambda name, text: steps.append([name, str(text)]),
         stream_callback=lambda name, token: streamed.append([name, str(token)]))
+    kwargs.update(run_kwargs or {})
     with contextlib.ExitStack() as stack:
         for item in patches:
             stack.enter_context(item)
@@ -1381,3 +1389,38 @@ def direct_workspace_refused(tmp_path: Path) -> Outcome:
     """PRD-008: an unsettled commit cycle of a prior run: the engine itself refuses the fresh run before any model call
     (WorkflowEngine.workspace_refusal_result)."""
     return _apply_run(tmp_path, prepare=_unsettled_prior_run, controller=False)
+
+
+# ----------------------------------------------------------------------------- E5 characterization (stage-4 prelude)
+# The two stops between the design stages and the first Developer attempt (OPEN-ITEMS OI-39), written from aad9ab1
+# before the stage-4 prelude left run_generation_workflow. Both write the SHORT traces.db row (attempts 0, no files);
+# tests/test_early_exit_traces.py pins its every column and the log_run keyword order.
+
+@scenario("legacy_baseline_indeterminate")
+def legacy_baseline_indeterminate(tmp_path: Path) -> Outcome:
+    """brownfield_full_regression_baseline_policy 'required' and the test runner raises: no trustworthy PRE baseline,
+    a baseline_indeterminate stop after the Architect and before any sandbox or Developer call (the design checkpoint
+    stays behind)."""
+    from unittest.mock import patch
+
+    def required(cfg):
+        cfg.autonomy.brownfield_full_regression_baseline_policy = "required"
+
+    def crashed(self, target_test=None, *args, **kwargs):
+        raise RuntimeError("test runner crashed")
+    return _apply_run(tmp_path, configure=required,
+                      patches=[patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=crashed)])
+
+
+@scenario("legacy_worktree_sync_refused")
+def legacy_worktree_sync_refused(tmp_path: Path) -> Outcome:
+    """An uncommitted workspace file the sandbox sync cannot copy (FILE-INTEGRITY-CONTRACT-001): the typed
+    WORKTREE_SYNC_FAILED stop (failure_category worktree_sync_failed) before any Developer call, nothing applied."""
+    from unittest.mock import patch
+
+    from kriya.workflow import worktree as worktree_module
+
+    def uncommitted(workspace: Path) -> None:
+        (workspace / "notes.txt").write_text("uncommitted work\n")
+    return _apply_run(tmp_path, prepare=uncommitted,
+                      patches=[patch.object(worktree_module.shutil, "copy2", side_effect=OSError("disk full"))])

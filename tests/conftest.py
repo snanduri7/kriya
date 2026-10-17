@@ -219,6 +219,7 @@ MODULE_TIER_FILES = {
         "test_outcome.py",  # E2: run outcome construction (result dict / terminal trace row) per terminal path
         "test_work_unit_stages.py",  # E3: the design stages (0-3) and their runner; E4: the review/apply/lesson stages
         "test_early_exit_traces.py",  # E4: the run-opening early exits and their short traces.db rows (OI-32)
+        "test_development_loop.py",  # E5: the Developer + Quality Gates loop (stage 4) and its seam
         "test_p2_compile_regression_attribution.py", "test_p2_regression_attribution_reproducer.py",
         "test_p3c_prose_candidate_delta.py", "test_plan_edit_feasibility_001.py", "test_plan_executability.py",
         "test_plan_external_package_capability_001.py", "test_plan_global_invariant_projection_001.py",

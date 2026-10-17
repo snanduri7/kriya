@@ -87,10 +87,12 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (W, 'close_requirements_with_named_tests'): P(1, W, (('kriya.workflow.terminal_gate_service', 1), (W, 1)), ()),
     (W, 'commit_terminal_candidate'): P(2, 'kriya.workflow.terminal_commit', ((W, 1),), ()),
     (W, 'compute_workspace_content_hash'): P(2, 'kriya.workflow.checkpoint', ((W, 5),), ()),
-    (W, 'create_git_worktree'): P(2, 'kriya.workflow.worktree', ((W, 1),), ()),
+    # E5 characterization: +1 site (tests/test_development_loop.py: the prelude's sandbox failure).
+    (W, 'create_git_worktree'): P(3, 'kriya.workflow.worktree', ((W, 1),), ()),
     (W, 'delete_checkpoint'): P(2, 'kriya.control.checkpoint', ((W, 2),), ()),
     (W, 'derive_contract_transition'): P(4, 'kriya.workflow.contract_lifecycle', ((W, 1),), ()),
-    (W, 'handle_attempt_failure'): P(2, 'kriya.workflow.retry_strategy', ((W, 1),), ()),
+    # E5 characterization: +1 site (tests/test_development_loop.py: a Best-of-N recorded failure is never handled again).
+    (W, 'handle_attempt_failure'): P(3, 'kriya.workflow.retry_strategy', ((W, 1),), ()),
     # E3: +1 site (tests/test_work_unit_stages.py proves the moved architecture stage calls the facade name).
     (W, 'include_response_construction_owners'): P(2, 'kriya.workflow.file_resolution', ((W, 1),), ()),
     # E2: +1 site (test_outcome proves the moved run-lifecycle code logs through it); 151 -> 145 lookups: 8 moved
@@ -106,11 +108,14 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # closer forwarder, log through the patched facade logger).
     # E4 (OI-32): 65 -> 62: the three run-opening early exits' trace-write warnings now log through
     # run_lifecycle.persist_early_exit_trace (StageDeps.logger from _stage_deps, resolved here at call time).
-    (W, 'logger'): P(5, W, ((W, 62),), ()),
+    # E5 characterization: +1 site (tests/test_development_loop.py: stage 4 logs through the patched facade logger).
+    (W, 'logger'): P(6, W, ((W, 62),), ()),
     (W, 'resolve_future_owner_verification_deferral'): P(1, 'kriya.workflow.attribution', ((W, 1),), ()),
     # E3 characterization: +1 site (the legacy_stage_context_success golden scripts the retrieval through it).
     (W, 'retrieve_graph_context'): P(2, 'kriya.workflow.graph_retrieval', ((W, 1),), ()),
-    (W, 'run_attempt'): P(1, A, ((W, 1),), ()),
+    # E5 characterization: +8 sites (tests/test_development_loop.py drives stage 4 through the facade's run_attempt: the
+    # per-iteration resets, Best-of-N's handed-over stop, the prelude's run-wide decisions, the terminal checks, resume).
+    (W, 'run_attempt'): P(9, A, ((W, 1),), ()),
     (W, 'save_checkpoint'): P(6, 'kriya.control.checkpoint', ((W, 1),), ()),
     # kriya.workflow.workflow_controller
     (C, 'ArtifactRegistry.derive_from_workspace'): P(4, 'kriya.control.artifacts', None, ()),
@@ -232,8 +237,10 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     totals = {module: sum(row.sites for (owner, _t), row in PATCH_POINTS.items() if owner == module) for module in ps.KERNEL_MODULES}
     # E1 baseline 87/69/268; E2 +1 W.logger site (test_outcome); E3 +1 W.retrieve_graph_context site (golden
     # scenario) and +1 W.include_response_construction_owners site (test_work_unit_stages); E4 +2 W.logger sites
-    # (test_work_unit_stages: the moved late stages and closers log through the patched facade logger)
-    assert totals == {A: 87, W: 74, C: 268}
+    # (test_work_unit_stages: the moved late stages and closers log through the patched facade logger); E5 +1 W.logger and
+    # +1 W.create_git_worktree, +1 W.handle_attempt_failure and +8 W.run_attempt sites (test_development_loop: stage 4's
+    # characterization and dynamic proofs, written before the move)
+    assert totals == {A: 87, W: 85, C: 268}
     assert len(PATCH_POINTS) == 83
 
 

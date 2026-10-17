@@ -1,0 +1,819 @@
+{
+ "_scenario": {
+  "doc": "An uncommitted workspace file the sandbox sync cannot copy (FILE-INTEGRITY-CONTRACT-001): the typed WORKTREE_SYNC_FAILED stop (failure_category worktree_sync_failed) before any Developer call, nothing applied.",
+  "generated_from": "aad9ab1",
+  "name": "legacy_worktree_sync_refused",
+  "normalized": "run ids, uuid/transaction ids, ISO times, tmp/state/workspace paths and workspace identity, trace row ids -> first-appearance tokens; CLOCK_KEYS -> <clock>; timing-derived digests (VOLATILE_DIGEST_KEYS, progress vector, junit file, prompt segments) -> <vdigest>; pytest and junit gate output reduced to collected/outcome/FAILED lines; free text -> digests",
+  "terminal_path": "stage-4 prelude stop: worktree_sync_failed (the sandbox cannot hold the workspace's uncommitted bytes)"
+ },
+ "evidence": [
+  {
+   "records": [
+    {
+     "attempt": null,
+     "kind": "run.opened",
+     "payload": "sha256:5e7396bb24e5a60e",
+     "payload_keys": [
+      "base_revision",
+      "base_tree_hash",
+      "kriya_build",
+      "workspace_identity",
+      "workspace_path"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": null
+    },
+    {
+     "attempt": null,
+     "content": {
+      "goal": "sha256:0f3c92131d8b5897"
+     },
+     "kind": "unit.opened",
+     "payload": "sha256:aad29e8eea551a52",
+     "payload_keys": [
+      "authorized_write_scope",
+      "current_subtask_id",
+      "invocation_seq",
+      "milestone_group_id",
+      "milestone_index",
+      "plan_fingerprint",
+      "plan_id",
+      "planned_source_files",
+      "resume",
+      "resume_id",
+      "unit_id",
+      "unit_kind",
+      "write_scope_mode"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "goal": "sha256:0f3c92131d8b5897"
+     },
+     "kind": "unit.opened",
+     "payload": "sha256:4af4d8963b61a1fa",
+     "payload_keys": [
+      "authorized_write_scope",
+      "current_subtask_id",
+      "invocation_seq",
+      "milestone_group_id",
+      "milestone_index",
+      "plan_fingerprint",
+      "plan_id",
+      "planned_source_files",
+      "resume",
+      "resume_id",
+      "unit_id",
+      "unit_kind",
+      "write_scope_mode"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:0bd2c5d09bc018be"
+     },
+     "event": "egress.authority",
+     "kind": "mirror.event",
+     "payload": "sha256:ad83cb73627e8bd8",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:b8d89986afaa0136"
+     },
+     "event": "evidence.attempt_store",
+     "kind": "mirror.event",
+     "payload": "sha256:6a59c13934b413a5",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:4ee911c6721f9d81"
+     },
+     "event": "model.runtime",
+     "kind": "mirror.event",
+     "payload": "sha256:6eb65ce1ab77f257",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:93c80a464497eeab"
+     },
+     "event": "model.role_independence",
+     "kind": "mirror.event",
+     "payload": "sha256:cb6d658abeb32638",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:2d49c6b5eab9558e"
+     },
+     "event": "requirement.derived",
+     "kind": "mirror.event",
+     "payload": "sha256:64d1510f667f2463",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:32ca5c7fc1f2d029"
+     },
+     "event": "verification_contract.compiled",
+     "kind": "mirror.event",
+     "payload": "sha256:c4496da9371fbc20",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:81564c21128f8c4c"
+     },
+     "event": "verification_contract.sealed",
+     "kind": "mirror.event",
+     "payload": "sha256:e6c4d0baf6fac7ec",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:82d834a6d8e2bcc3"
+     },
+     "event": "requirement.lineage",
+     "kind": "mirror.event",
+     "payload": "sha256:52e3dca741811db9",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:97936644f719307c"
+     },
+     "event": "requirement.lineage",
+     "kind": "mirror.event",
+     "payload": "sha256:52e3dca741811db9",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "evidence": "sha256:4c19786b92921d81"
+     },
+     "kind": "mirror.evidence",
+     "payload": "sha256:d4db084723716661",
+     "payload_keys": [
+      "attempt",
+      "kind",
+      "sensitivity",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:7ae216c22c3fbecd"
+     },
+     "event": "validation_baseline.policy",
+     "kind": "mirror.event",
+     "payload": "sha256:cd2866e1984b1c5f",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "content": {
+      "event": "sha256:119f4067590cd8c2"
+     },
+     "event": "model.role_metrics",
+     "kind": "mirror.event",
+     "payload": "sha256:97835d272bd7f279",
+     "payload_keys": [
+      "attempt",
+      "authority",
+      "failure_type",
+      "kind",
+      "operation",
+      "source"
+     ],
+     "phase": null,
+     "provenance": "MIRRORED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "kind": "unit.closed",
+     "payload": "sha256:43d918d9cd583432",
+     "payload_keys": [
+      "failure_category",
+      "outcome",
+      "quality_gates_passed",
+      "status"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "kind": "unit.closed",
+     "payload": "sha256:43d918d9cd583432",
+     "payload_keys": [
+      "failure_category",
+      "outcome",
+      "quality_gates_passed",
+      "status"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": "direct"
+    },
+    {
+     "attempt": null,
+     "kind": "run.closed",
+     "payload": "sha256:da9631b6e6816792",
+     "payload_keys": [
+      "commit_result",
+      "lifecycle_state",
+      "model_calls",
+      "record_revision",
+      "terminal_status",
+      "unit_invocations"
+     ],
+     "phase": null,
+     "provenance": "OBSERVED",
+     "role": null,
+     "unit_kind": null
+    }
+   ],
+   "run": "<run:1>",
+   "sealed": true,
+   "verification": "VERIFIED"
+  }
+ ],
+ "extra": {
+  "approvals": [],
+  "checkpoints": [
+   {
+    "keys": [
+     "_run_record",
+     "_workspace",
+     "architect_files",
+     "config_fingerprint",
+     "design",
+     "goal_fingerprint",
+     "had_authorized_semantic_regions",
+     "milestone_group_id",
+     "milestone_index",
+     "model_routes",
+     "plan",
+     "resume_fingerprints",
+     "run_id",
+     "saved_at",
+     "stage",
+     "validation_baseline_full_regression",
+     "validation_baseline_pytest_stability",
+     "validation_baseline_targeted",
+     "work_unit",
+     "workspace_content_hash",
+     "workspace_fingerprint"
+    ],
+    "stage": "design"
+   }
+  ],
+  "model_calls": {
+   "architect": 1,
+   "developer": 0,
+   "lessons": 0,
+   "planner": 1,
+   "reviewer": 0
+  },
+  "requests": {
+   "architect": [
+    {
+     "chars": 657,
+     "text": "sha256:c72d44930e1fe516"
+    }
+   ],
+   "developer": [],
+   "lessons": [],
+   "planner": [
+    {
+     "chars": 701,
+     "text": "sha256:3ab868a291f7fc91"
+    }
+   ],
+   "reviewer": []
+  },
+  "skills_files": {},
+  "steps": [
+   [
+    "Plan",
+    {
+     "chars": 15,
+     "text": "sha256:fc080ea7506657a2"
+    }
+   ],
+   [
+    "Design",
+    {
+     "chars": 22,
+     "text": "sha256:9b856f09b860a3e2"
+    }
+   ]
+  ],
+  "streamed": [],
+  "trace_rows": [
+   {
+    "attempts": 0,
+    "failure_category": "worktree_sync_failed",
+    "failure_report": {
+     "chars": 2,
+     "text": "sha256:4f53cda18c2baa0c"
+    },
+    "files_modified": "",
+    "status": "failure"
+   }
+  ],
+  "workspace_files": {
+   "calc.py": "sha256:af626eb7a9c3d865",
+   "notes.txt": "sha256:09568118f0e98a9c",
+   "test_calc.py": "sha256:b32b234d219ef07c"
+  }
+ },
+ "result": {
+  "control_state": {
+   "acceptance_approval_digest": null,
+   "base_commit": null,
+   "created_at": "<clock>",
+   "current_artifact_registry_hash": null,
+   "current_contract_hash": null,
+   "current_milestone_id": null,
+   "current_plan_hash": null,
+   "engineering_route": {
+    "current_risk_class": 1,
+    "deterministic_signals": {
+     "creation_language": false,
+     "dependency_graph_available": false,
+     "dependency_terms": false,
+     "enhancement_language": false,
+     "known_files_count": 0,
+     "migration_language": false,
+     "multi_part_structure": false,
+     "repo_appears_empty": false,
+     "repro_shape": false,
+     "scope_language": "none",
+     "security_terms": false
+    },
+    "execution_weight": "light",
+    "impact": {
+     "build_system_change": false,
+     "configuration_change": false,
+     "dependency_change": false,
+     "downstream_references": 0,
+     "files_touched": 0,
+     "persistence_change": false,
+     "public_contract_change": false,
+     "security_boundary_change": false,
+     "shared_entrypoint_change": false,
+     "symbols_impacted": 0
+    },
+    "initial_execution_weight": "light",
+    "initial_impact": {
+     "build_system_change": false,
+     "configuration_change": false,
+     "dependency_change": false,
+     "downstream_references": 0,
+     "files_touched": 0,
+     "persistence_change": false,
+     "public_contract_change": false,
+     "security_boundary_change": false,
+     "shared_entrypoint_change": false,
+     "symbols_impacted": 0
+    },
+    "initial_risk_class": 1,
+    "kind": "task",
+    "max_observed_risk_class": 1,
+    "reason_codes": [
+     "no_signals_fired_defaulted_to_task"
+    ],
+    "router_confidence": null,
+    "router_used": false
+   },
+   "last_verified_checkpoint": null,
+   "milestone_group_id": null,
+   "milestone_states": {},
+   "patch_hash": null,
+   "process_profile": {
+    "auto_merge_allowed": true,
+    "context_depth": "narrow",
+    "contract_analysis_required": false,
+    "execution_weight": "light",
+    "full_test_suite_required": false,
+    "human_review_required": false,
+    "impact_revalidation_required": false,
+    "planning_required": false,
+    "structured_subtasks_required": false,
+    "verification_tier": "light"
+   },
+   "requirement_contract_digest": null,
+   "run_id": "<run:1>",
+   "schema_version": 1,
+   "subtask_completion_scope": null,
+   "subtask_states": {},
+   "subtask_written_files": {},
+   "tree_hash": null,
+   "updated_at": "<time>",
+   "verification_contract_digest": null,
+   "workspace_content_hash": null
+  },
+  "decisions": [],
+  "fields": [
+   "run_id",
+   "control_state",
+   "route",
+   "legacy_result",
+   "subtask_results",
+   "decisions",
+   "verification_report"
+  ],
+  "legacy_result": {
+   "keys": [
+    "design",
+    "error",
+    "failure_category",
+    "files",
+    "goal",
+    "plan",
+    "quality_gates_passed",
+    "reason_codes",
+    "run_id",
+    "status",
+    "workspace_path"
+   ],
+   "values": {
+    "design": {
+     "chars": 22,
+     "text": "sha256:9b856f09b860a3e2"
+    },
+    "error": {
+     "chars": 64,
+     "text": "sha256:6b25e24c1e773699"
+    },
+    "failure_category": "worktree_sync_failed",
+    "files": [],
+    "goal": {
+     "chars": 52,
+     "text": "sha256:0f3c92131d8b5897"
+    },
+    "plan": {
+     "chars": 15,
+     "text": "sha256:fc080ea7506657a2"
+    },
+    "quality_gates_passed": false,
+    "reason_codes": [
+     "WORKTREE_SYNC_FAILED"
+    ],
+    "run_id": "<trace:1>",
+    "status": "failure",
+    "workspace_path": "<workspace:1>"
+   }
+  },
+  "route": {
+   "current_risk_class": 1,
+   "deterministic_signals": {
+    "creation_language": false,
+    "dependency_graph_available": false,
+    "dependency_terms": false,
+    "enhancement_language": false,
+    "known_files_count": 0,
+    "migration_language": false,
+    "multi_part_structure": false,
+    "repo_appears_empty": false,
+    "repro_shape": false,
+    "scope_language": "none",
+    "security_terms": false
+   },
+   "execution_weight": "light",
+   "impact": {
+    "build_system_change": false,
+    "configuration_change": false,
+    "dependency_change": false,
+    "downstream_references": 0,
+    "files_touched": 0,
+    "persistence_change": false,
+    "public_contract_change": false,
+    "security_boundary_change": false,
+    "shared_entrypoint_change": false,
+    "symbols_impacted": 0
+   },
+   "initial_execution_weight": "light",
+   "initial_impact": {
+    "build_system_change": false,
+    "configuration_change": false,
+    "dependency_change": false,
+    "downstream_references": 0,
+    "files_touched": 0,
+    "persistence_change": false,
+    "public_contract_change": false,
+    "security_boundary_change": false,
+    "shared_entrypoint_change": false,
+    "symbols_impacted": 0
+   },
+   "initial_risk_class": 1,
+   "kind": "task",
+   "max_observed_risk_class": 1,
+   "reason_codes": [
+    "no_signals_fired_defaulted_to_task"
+   ],
+   "router_confidence": null,
+   "router_used": false
+  },
+  "run_id": "<run:1>",
+  "subtask_results": [],
+  "type": "WorkflowResult",
+  "verification_report": null
+ },
+ "run_events": [
+  {
+   "events": [
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:0f2f3c9f35e0b6bc",
+     "kind": "egress.authority",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:dcb4d47ac26afa2c",
+     "kind": "evidence.attempt_store",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:7d651dc9bf442516",
+     "kind": "model.runtime",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:ce2159ab4ad8660b",
+     "kind": "model.role_independence",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:a18a7b57c698f386",
+     "kind": "requirement.derived",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:89844e8375dd5fea",
+     "kind": "verification_contract.compiled",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "authoritative",
+     "details": "sha256:857f7c253ea81b16",
+     "kind": "verification_contract.sealed",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:20022ff3adcc229f",
+     "kind": "requirement.lineage",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:8e7824dea38fb59b",
+     "kind": "requirement.lineage",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:baa6ff663d0dc636",
+     "kind": "validation_baseline.policy",
+     "source": "workflow.run_generation_workflow"
+    },
+    {
+     "attempt": 0,
+     "authority": "auxiliary",
+     "details": "sha256:32c64e7b48ef90d8",
+     "kind": "model.role_metrics",
+     "source": "workflow"
+    }
+   ],
+   "run": "<trace:1>",
+   "status": "failure"
+  }
+ ],
+ "run_records": [
+  {
+   "active_work_unit": null,
+   "approved_plan_hash": null,
+   "base_source_revision": "8cbaf223b56502224788ff90b18262130ca53ebc",
+   "base_tree_hash": "9805afc31ed2dc0dd48bd9cf8eb585340b2f0b28",
+   "candidate_hash": null,
+   "commit_intent": null,
+   "commit_result": "NOT_COMMITTED",
+   "commit_transaction_id": null,
+   "commits": [],
+   "created_at": "<clock>",
+   "effective_config_fingerprint": "<vdigest>",
+   "execution_plan": {
+    "commit_strategy": "incremental_work_unit",
+    "fingerprint": "4e1f0d6216887b277a2ea6a9dd288f5ed4cbfdf950ea32d497f1042c2b806596",
+    "plan_id": "<run:1>",
+    "provenance": {},
+    "schema": 1,
+    "source_kind": "direct",
+    "terminal_phases": [],
+    "work_units": [
+     {
+      "acceptance_criteria": [],
+      "consumes": [],
+      "definition_digest": "0f3c92131d8b5897a3682f7534bdf1adb583e55e2eb989b06ceda5a1ada06d46",
+      "depends_on": [],
+      "goal": "Add a function mul(a, b) returning a * b to calc.py.",
+      "id": "direct",
+      "obligation_refs": [],
+      "provenance": {},
+      "provides": [],
+      "role": "primary",
+      "verification_requirements": []
+     }
+    ]
+   },
+   "goal_hash": "0f3c92131d8b5897a3682f7534bdf1adb583e55e2eb989b06ceda5a1ada06d46",
+   "lifecycle_state": "FAILURE",
+   "milestone_reuse": null,
+   "model_runtime_fingerprint_ids": [],
+   "obligation_ledger_hash": null,
+   "obligation_ledger_revision": null,
+   "recovery": null,
+   "resume_decision": null,
+   "retry_counters": {},
+   "retry_state_reference": null,
+   "revision": 10,
+   "run_id": "<run:1>",
+   "schema_version": 3,
+   "terminal_status": "FAILURE",
+   "updated_at": "<time>",
+   "verification_evidence_ids": [],
+   "work_unit_states": {
+    "direct": {
+     "blocked_by": [],
+     "reason_codes": [
+      "WORK_UNIT_FAILED",
+      "STATUS:failure"
+     ],
+     "status": "FAILED",
+     "work_unit_id": "direct"
+    }
+   },
+   "workspace_identity": "<workspace_id:1>"
+  }
+ ]
+}
