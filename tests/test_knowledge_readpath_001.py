@@ -404,6 +404,8 @@ def test_reference_text_is_read_only_where_it_is_shown_to_a_model():
         # E3: the design stages that fence and show it (moved from workflow.py) and the context that carries it
         os.path.join("workflow", "stage_context.py"), os.path.join("workflow", "stage_analysis.py"),
         os.path.join("workflow", "stage_planning.py"), os.path.join("workflow", "stage_architecture.py"),
+        # E5: the Developer loop's prelude hands the learned reference to the AttemptContext (moved from workflow.py)
+        os.path.join("workflow", "development_loop.py"),
     }
 
 
