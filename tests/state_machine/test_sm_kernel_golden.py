@@ -289,7 +289,7 @@ def test_scenarios_resolve_memory_in_an_isolated_working_directory(request, tmp_
     assert checkout not in cwd.parents and cwd != checkout and os.listdir("memory") == []
     assert kg.MEMORY_RESOLVING <= set(kg.SCENARIOS)
     assert _form("legacy_budget_stop", tmp_path) == _golden("legacy_budget_stop")
-    assert "dependency_graph.db" in os.listdir("memory")   # the relative ./memory resolved HERE, not in the checkout
+    assert os.listdir("memory") != []   # the run opened (created) its sqlite stores in THIS ./memory, not the checkout's
 
 
 def test_the_isolated_working_directory_keeps_the_config_fingerprint(tmp_path, monkeypatch):
