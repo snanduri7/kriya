@@ -709,3 +709,48 @@ def test_the_default_plan_carries_only_what_the_adapter_declares():
     with pytest.raises(ProviderContractError) as refused:
         undeclared.enforce(strict=True)
     assert refused.value.reason_code == PROVIDER_SETTING_UNSUPPORTED
+
+
+# --- HX1 (OI-41): the elapsed_request_ms field itself (the kernel goldens hide its value) -------------------
+
+class _Clock:
+    """``time`` for kriya.core.llm with a controlled wall clock: ``time()`` is this clock, everything else
+    (monotonic deadlines, sleep) the real module."""
+
+    def __init__(self, now: float = 1000.0) -> None:
+        self.now = now
+
+    def time(self) -> float:
+        return self.now
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+@pytest.mark.parametrize("interval, low, high", [(0.0, 0, 0), (0.5, 500, 500), (2.25, 2250, 2250), (0.007, 6, 7)])
+@pytest.mark.parametrize("in_run", [True, False])
+def test_elapsed_request_ms_is_the_request_interval(fake, tmp_path, monkeypatch, interval, low, high, in_run):
+    """Every completed call's provider_contract.deadline record carries elapsed_request_ms: a non-negative int that is
+    the wall-clock interval between dispatch and completion (a controlled clock advanced by the provider call), so
+    two different intervals give two different values - never a constant. The kernel goldens replace its VALUE by a
+    placeholder (HX1), so this direct test is what pins the field."""
+    from kriya.core import llm as llm_module
+
+    clock = _Clock()
+    monkeypatch.setattr(llm_module, "time", clock)
+    answer = fake.complete
+
+    async def complete(client, request):
+        clock.now += interval
+        return await answer(client, request)
+    monkeypatch.setattr(fake, "complete", complete)
+    llm = LLMClient(_config(budget=600))
+    if in_run:
+        _in_run(tmp_path, lambda: llm.complete_result("s", "u"))
+    else:
+        asyncio.run(llm.complete_result("s", "u"))
+    record = _deadline(llm)
+    elapsed = record["elapsed_request_ms"]
+    assert isinstance(elapsed, int) and not isinstance(elapsed, bool) and elapsed >= 0
+    assert low <= elapsed <= high
+    assert llm.last_completion.status is CompletionStatus.OK

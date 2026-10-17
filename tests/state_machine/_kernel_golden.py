@@ -22,6 +22,13 @@ Each distinct volatile value becomes a token numbered by first appearance (``<ru
 equality BETWEEN fields stays pinned. Git commit dates are fixed through the environment, so commit ids are
 real values, not tokens. Content whose bytes embed a volatile value is re-digested after the same
 substitution (blob text through ``EvidenceRun.blob``), so the digest stays sensitive and stable.
+
+Portability (HX1, OI-41): the goldens pass at any absolute checkout path and under load. Two typed fields are
+canonicalized (``run.opened`` ``kriya_build.install_path`` and ``provider_contract.deadline.elapsed_request_ms``, see
+``INSTALL_PATH_TOKEN``), and every scenario runs from an isolated working directory (``isolated_working_directory``)
+holding an EMPTY ``./memory``: the E1 scenarios keep the AppConfig default ``paths.memory = ./memory`` (so the RunRecord
+config fingerprint is unchanged) but no longer open or create the checkout's untracked ``./memory``. The goldens were
+re-rendered once by HX1 with ONLY those two leaves changed (the behaviour stays the one of each ``generated_from``).
 """
 from __future__ import annotations
 
@@ -88,6 +95,17 @@ _TRANSACTION = re.compile(r"(<run:\d+>-)([0-9a-f]{12})(?![0-9a-f])")
 # evidence fingerprint, the retry progress vector, the junit report file, a prompt segment): replaced by "<vdigest>".
 # Not numbered: even their equality pattern is MEASURED to vary (two attempts' pytest timings sometimes coincide).
 VOLATILE_DIGEST_KEYS = frozenset({"fingerprint_hash", "last_vector_digest"})
+# HX1 (OI-41) - two TYPED fields, canonicalized at this representation boundary only (production evidence unchanged;
+# handover/modularization/HX1-CHARACTERIZATION.md has the measurements):
+# - run.opened payload -> kriya_build -> install_path is the imported kriya package directory (build_info.PACKAGE_DIR),
+#   i.e. the checkout path: it becomes a first-appearance "<install_path:N>" token, and ONLY when it IS the running
+#   package directory (any other value, or the same key anywhere else, stays raw and breaks the golden).
+# - provider_contract -> deadline -> elapsed_request_ms is the wall clock of the (scripted) request (LLMClient._finish):
+#   a non-negative integer there becomes ELAPSED_REQUEST_PLACEHOLDER; every sibling (deadlines, timeouts, timeout
+#   reason, source) and the same key at any other nesting stay pinned. The field itself is pinned by a direct contract
+#   test (tests/test_provider_contract_001a.py::test_elapsed_request_ms_is_the_request_interval).
+INSTALL_PATH_TOKEN = "install_path"
+ELAPSED_REQUEST_PLACEHOLDER = "<elapsed_ms>"
 # The real pytest gate's own output (OS_TOOLCHAIN, not Kriya): its header names the host platform, Python and plugin
 # versions and its summary the elapsed time. It is reduced to what the kernel's decisions depend on: the collected
 # count, the FAILED/ERROR lines and the outcome counts.
@@ -144,6 +162,17 @@ class Normalizer:
             self._tokens[key] = f"<{prefix}:{self._counts[prefix]}>"
         return self._tokens[key]
 
+    def payload(self, kind: str, payload: Mapping[str, Any]) -> Any:
+        """An evidence record's normalized payload; for ``run.opened`` only, kriya_build.install_path becomes a token
+        when it is the running package directory (HX1)."""
+        from kriya.foundation import build_info
+
+        build = payload.get("kriya_build")
+        installed = build_info.PACKAGE_DIR
+        if kind == "run.opened" and isinstance(build, Mapping) and build.get("install_path") == installed:
+            payload = {**payload, "kriya_build": {**build, "install_path": self._token(INSTALL_PATH_TOKEN, installed)}}
+        return self.value(payload)
+
     def text(self, value: str) -> str:
         if "test session starts" in value:
             value = _reduce_pytest(value)
@@ -179,6 +208,8 @@ class Normalizer:
             return "<size>"
         if key in self._volatile_keys and isinstance(value, str):
             return "<vdigest>"
+        if key == "provider_contract" and isinstance(value, Mapping):
+            value = _without_request_elapsed(value)
         if isinstance(value, Mapping):
             volatile = set()
             if "changed_dimensions" in value:   # the retry progress vector: its digest covers the gate output
@@ -210,6 +241,17 @@ class Normalizer:
         if value is None or isinstance(value, (bool, int)):
             return value
         return self.text(f"<{type(value).__name__}>")
+
+
+def _without_request_elapsed(contract: Mapping[str, Any]) -> Mapping[str, Any]:
+    """A provider_contract record with deadline.elapsed_request_ms (a non-negative int) replaced by the placeholder."""
+    deadline = contract.get("deadline")
+    if not isinstance(deadline, Mapping):
+        return contract
+    elapsed = deadline.get("elapsed_request_ms")
+    if not isinstance(elapsed, int) or isinstance(elapsed, bool) or elapsed < 0:
+        return contract
+    return {**contract, "deadline": {**deadline, "elapsed_request_ms": ELAPSED_REQUEST_PLACEHOLDER}}
 
 
 def digest(data: Any) -> str:
@@ -252,7 +294,7 @@ def _evidence(state_dir: str, norm: Normalizer) -> List[Dict[str, Any]]:
     for _mono, _wall, run_id, run, records in sorted(stores, key=lambda s: (s[1], s[0], s[2])):
         rows = []
         for record in records:
-            payload = norm.value(record.get("payload") or {})
+            payload = norm.payload(record["kind"], record.get("payload") or {})
             norm.contents.append({"seq": record.get("seq"), "kind": record["kind"], "name": "<payload>",
                                   "text": json.dumps(payload, sort_keys=True)})
             row = {
@@ -415,6 +457,24 @@ GENERATED_FROM_BY_SCENARIO.update({name: "3e5751c" for name in (
 
 def generated_from(name: str) -> str:
     return GENERATED_FROM_BY_SCENARIO.get(name, GENERATED_FROM)
+
+
+# HX1 step 0e (MEASURED at ac427ba): the scenarios that resolve the relative default ./memory (the E1 _scripted_run
+# configs) and open/create its sqlite files without any of its content reaching an observable (class B). The other 29
+# never touch the working directory's ./memory (class A); none consumes its content (class C: none).
+MEMORY_RESOLVING = frozenset({
+    "direct_success", "legacy_success", "legacy_fallback_success", "legacy_gates_exhausted", "legacy_budget_stop",
+    "legacy_final_review_refused", "legacy_approval_refused", "legacy_repeated_failure_exhausted", "legacy_no_progress",
+    "legacy_resume_after_failure",
+})
+
+
+def isolated_working_directory(root: Path) -> Path:
+    """A fresh working directory for one scenario, outside its workspace, holding an EMPTY ``./memory``: the relative
+    config paths keep their logical value (the config fingerprint is unchanged) and resolve here, never in the checkout."""
+    cwd = root / "cwd"
+    (cwd / "memory").mkdir(parents=True)
+    return cwd
 
 
 def capture(outcome: Outcome, tmp_path: Path, name: str = "") -> Dict[str, Any]:
