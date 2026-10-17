@@ -160,3 +160,14 @@ editable install) and probes the untracked `kriya/_build_info.json` (absent here
 different interpreter patch release, a local `python setup.py build` that writes `_build_info.json`, or a different
 installed version would change all 34 `run.opened` digests. These are environment identity, not path portability, and HX1
 does not normalize them.
+
+## After HX1 (c569d88) - the original symptoms re-measured
+- (b) again: a git-archive copy of c569d88 at another absolute path, no `./memory`, kriya imported from the copy in the
+  controller and every xdist worker: **52 passed** (39 scenarios + meta + 12 controls). MEASURED.
+- (d) again: `test_request_latency_keeps_the_golden` injects 1.234 s into every scripted request (raw evidence shows
+  elapsed_request_ms >= 1234) and the golden holds. MEASURED.
+- (e) again: the canonical run's audit probe shows zero access to the checkout's `memory/` and its mtime is unchanged;
+  the isolated working directory's `./memory` is where the B scenarios now create their stores. MEASURED.
+- Regeneration: 34 goldens changed in exactly 50 leaves, each mapped (pre-HX1 vs HX1 normalizer over the SAME run, every
+  digest input logged) to inputs differing only at `kriya_build.install_path` (35) or
+  `provider_contract.deadline.elapsed_request_ms` (15); the 5 goldens without either field are byte-identical.
