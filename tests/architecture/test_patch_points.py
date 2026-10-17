@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
-from typing import Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence, Tuple
+from typing import Callable, Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Sequence, Tuple
 
 import pytest
 
@@ -44,7 +44,10 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (A, '_code_intelligence_for'): P(2, A, ((A, 2),), ()),
     # E6 characterization: +1 site (tests/test_fallback_decision.py records which request profiles a fallback decision
     # resolves, through this name: the selection, the call-time substitution and the model entry look it up here).
-    (A, '_developer_request_profile'): P(1, A, ((A, 4),), ()),
+    # E6: 4 -> 3 lookups: the selection's and the substitution's loads moved to fallback_decision and read
+    # FallbackDeps._developer_request_profile (one load in attempt._fallback_deps), the model entry's to generation_service
+    # (one load in attempt._generation_deps); the retry preparation keeps its own. The patch site above is the dynamic proof.
+    (A, '_developer_request_profile'): P(1, A, ((A, 3),), ()),
     (A, '_ensure_generation_time_budget'): P(2, A, ((A, 1),), ()),
     (A, '_enter_developer_model'): P(1, A, ((A, 1),), ()),
     (A, '_maybe_run_developer_investigation'): P(1, A, ((A, 1),), ()),
@@ -67,7 +70,10 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (A, 'normalize_written_filepath'): P(1, 'kriya.workflow.file_resolution', ((A, 1),), ()),
     (A, 'run_attempt'): P(10, A, (('kriya.workflow.best_of_n', 1),), (W,)),
     (A, 'run_managed_service_verification'): P(17, 'kriya.tools.service_runtime', ((A, 1),), ()),
-    (A, 'time'): P(1, 'time', ((A, 9),), ()),
+    # E6: 9 -> 8 lookups: the generation's two time.monotonic() loads moved to generation_service and read
+    # GenerationDeps.time, bound to this module's time by attempt._generation_deps at call time (one new load), so a
+    # patch of kriya.workflow.attempt.time still reaches the generation's duration measurement.
+    (A, 'time'): P(1, 'time', ((A, 8),), ()),
     # kriya.workflow.workflow
     (W, 'RepositoryAnalyzer'): P(3, 'kriya.analyzer.analyzer', ((W, 2),), ()),
     (W, 'RepositoryAnalyzer.index_repository'): P(3, 'kriya.analyzer.analyzer', None, ()),
@@ -271,7 +277,9 @@ KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_life
                         # E4: the review, approval/apply and lesson stages and the requirement closers
                         "kriya.workflow.stage_review", "kriya.workflow.stage_apply", "kriya.workflow.requirement_closers",
                         # E5: the Developer loop (stage 4) and one iteration's typed lifecycle
-                        "kriya.workflow.development_loop", "kriya.workflow.attempt_lifecycle")
+                        "kriya.workflow.development_loop", "kriya.workflow.attempt_lifecycle",
+                        # E6: the Developer request assembly and generation, and the llm_chain fallback decisions
+                        "kriya.workflow.generation_service", "kriya.workflow.fallback_decision")
 FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
 
 
@@ -301,6 +309,31 @@ def test_kernel_owner_modules_never_import_a_facade_or_the_cli():
         path = mm.REPO / (module.replace(".", "/") + ".py")
         trees[module] = ast.parse(path.read_text(encoding="utf-8"))
     assert owner_import_problems(trees) == []
+
+
+def owner_cycle_problems(sccs: Sequence[FrozenSet[str]], owners: Sequence[str]) -> List[str]:
+    """Every owner module that is a member of an import strongly connected component (all imports, function-local
+    included): an owner the facade imports and that reaches back into the facade's cycle silently joins it."""
+    return sorted(f"{owner} is in a {len(scc)}-module import cycle" for owner in owners for scc in sccs if owner in scc)
+
+
+def test_kernel_owner_modules_are_outside_every_import_cycle():
+    """E6 (the OI-46 lesson): the owner modules W4 extracted are imported by their facades, members of the kernel's
+    all-import cycle; an owner that imports anything reaching back into it (top level or function-local) joins it."""
+    from . import test_cycles as cycles
+
+    files = mm.python_files()
+    _top, every = cycles.graphs(mm.scan(), {mm.module_name(path) for path in files})
+    assert owner_cycle_problems(cycles.strongly_connected(every), KERNEL_OWNER_MODULES) == []
+
+
+def test_the_owner_cycle_rule_catches_a_planted_cycle():
+    from . import test_cycles as cycles
+
+    graph = {"facade": {"owner", "other"}, "owner": {"leaf", "cycle_member"}, "cycle_member": {"facade"},
+             "other": {"leaf"}, "leaf": set()}
+    assert owner_cycle_problems(cycles.strongly_connected(graph), ("owner", "other")) == [
+        "owner is in a 3-module import cycle"]
 
 
 def test_the_owner_import_rule_catches_a_planted_facade_import():

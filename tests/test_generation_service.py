@@ -514,3 +514,58 @@ def test_the_investigations_code_search_records_an_unavailable_semantic_leg(tmp_
         "retrieval.semantic_unavailable", 3, "investigation.search_code", "advisory")
     assert event.details == {"reason_code": "EMBEDDING_UNAVAILABLE"}
     assert event.message == "semantic search unavailable (EMBEDDING_UNAVAILABLE); lexical only"
+
+
+# ----------------------------------------------------------------------------- the seam (E6 move)
+
+def _injected_names(deps_class):
+    import dataclasses
+
+    return [f.name for f in dataclasses.fields(deps_class)]
+
+
+def test_every_generation_collaborator_is_attempts_own_binding_resolved_at_call_time():
+    """The moved code reaches each collaborator through kriya.workflow.attempt: every GenerationDeps / FallbackDeps
+    field is the attempt module's object of the same name (a loader field is its ``_load_*`` function), looked up when
+    the builder runs (the dynamic proof that a patch entered after import reaches the moved code is the existing patch
+    sites: tests/test_developer_prompt_fit_001.py, test_context_edit_protocol_001.py, test_backend_readiness_004_
+    relocalization.py, test_known_target_multi_target_starvation_001.py, tests/test_fallback_decision.py, and
+    tests/test_kernel_seams.py's call-through of every patched attempt name in the legacy_success run)."""
+    from kriya.workflow import attempt, fallback_decision, generation_service
+
+    for build, deps_class in ((attempt._generation_deps, generation_service.GenerationDeps),
+                              (attempt._fallback_deps, fallback_decision.FallbackDeps)):
+        deps = build()
+        for name in _injected_names(deps_class):
+            source = "_" + name if name.startswith("load_") else name
+            assert getattr(deps, name) is getattr(attempt, source), name
+    assert len(_injected_names(generation_service.GenerationDeps)) == 45
+    assert len(_injected_names(fallback_decision.FallbackDeps)) == 11
+
+
+def test_the_forwarders_keep_the_attempt_names_and_kinds():
+    """attempt.py keeps every moved name: the patched and called ones as forwarders of the same kind defined in
+    attempt.py, the pure ones and the planned-source constants as the owner's objects (re-exports)."""
+    import inspect
+
+    from kriya.workflow import attempt, fallback_decision, generation_service
+
+    forwarders = {
+        "_maybe_run_developer_investigation": True, "_developer_request_profile": False, "_enter_developer_model": False,
+        "_require_qualified_retry_identity": False, "_planned_source_context": False,
+        "_developer_optional_sections": False, "_target_package_with_goal_member_fallback": False,
+        "_target_package_with_window_reserve": False, "_run_developer_generation": True,
+        "_run_developer_generation_as_developer": True, "_record_fallback_selection": False,
+        "_raise_fallback_incompatible": False, "_select_developer_fallback": False,
+        "_substitute_for_required_patch": False,
+    }
+    for name, is_async in forwarders.items():
+        forwarder = getattr(attempt, name)
+        assert forwarder.__module__ == "kriya.workflow.attempt" and inspect.iscoroutinefunction(forwarder) is is_async
+        owner = generation_service if hasattr(generation_service, name) else fallback_decision
+        assert inspect.iscoroutinefunction(getattr(owner, name)) is is_async
+        assert list(inspect.signature(getattr(owner, name)).parameters)[0] == "deps"
+    assert attempt._chain_binding is generation_service._chain_binding
+    assert attempt._fallback_rejection is fallback_decision._fallback_rejection
+    assert attempt.PLANNED_SOURCE_HEADER is generation_service.PLANNED_SOURCE_HEADER
+    assert attempt._PLANNED_SOURCE_UNBOUNDED_TOKENS is generation_service._PLANNED_SOURCE_UNBOUNDED_TOKENS

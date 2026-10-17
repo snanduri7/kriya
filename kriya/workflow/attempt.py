@@ -68,7 +68,7 @@ from kriya.tools.service_runtime import (
     run_managed_service_verification,
 )
 from kriya.tools.validate import PolymorphicValidator, execution_evidence, get_pom_dependencies
-from kriya.workflow import contract_feedback
+from kriya.workflow import contract_feedback, fallback_decision, generation_service
 from kriya.workflow.acceptance import (
     CANDIDATE_RUNTIME_ENTRYPOINT_INVALID,
     classify_runtime_entrypoint,
@@ -139,6 +139,10 @@ from kriya.workflow.failure_grounding import (
     find_locator_files_outside_known_scope,
     resolve_repository_locator_files,
 )
+
+# E6 re-exports (tests/architecture/test_facades.py PARTIAL_FACADES): moved to fallback_decision / generation_service,
+# importable from here as before. Removed in P1.
+from kriya.workflow.fallback_decision import _fallback_rejection as _fallback_rejection
 from kriya.workflow.file_integrity import (
     DETERMINISTIC_FILE_INTEGRITY_STOPS,
     WORKTREE_CONTENT_MISMATCH,
@@ -179,6 +183,11 @@ from kriya.workflow.file_resolution import (
     python_target_path_is_test_shaped,
     resolve_planned_artifact_owners,
 )
+
+# E6 re-exports (see above). Removed in P1.
+from kriya.workflow.generation_service import _PLANNED_SOURCE_UNBOUNDED_TOKENS as _PLANNED_SOURCE_UNBOUNDED_TOKENS
+from kriya.workflow.generation_service import PLANNED_SOURCE_HEADER as PLANNED_SOURCE_HEADER
+from kriya.workflow.generation_service import _chain_binding as _chain_binding
 from kriya.workflow.migration import (
     MigrationResolution,
     MigrationResolutionStatus,
@@ -1973,177 +1982,10 @@ def _ensure_generation_time_budget(
 async def _maybe_run_developer_investigation(
     state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any], active_model: str,
 ) -> None:
-    """DEV-INV-001 (2026-09-19): opt-in (default OFF via autonomy.
-    developer_investigation_enabled) bounded, read-only pre-pass that lets
-    the Developer request additional repository evidence BEFORE this
-    attempt's real generation call - see kriya/workflow/investigation.py for
-    the full turn-loop/protocol/governance machinery this only wires up.
-
-    Mutates only kwargs["existing_code_context"] (appending rendered
-    evidence text, the same way retrieval-sourced Graph RAG context is
-    already appended in workflow.py) and, for a genuinely member-exact
-    result only, state.known_target_context_items (via the SAME
-    _preserve_member_exact_precision() merge D1's own retry-projection path
-    already uses below - never a second, independently-invented merge rule)
-    - never touches kwargs otherwise, never calls ctx.developer.run_generation
-    itself, never writes to disk. Flag OFF (the default): returns
-    immediately before any of this, byte-identical to pre-DEV-INV-001
-    behavior.
-
-    Available for every brownfield attempt (every call through
-    _run_developer_generation, every attempt/retry) when enabled - the one
-    exception is a workspace with no dependency-graph index at all yet
-    (this module's own `_dependency_graph_db_path` existence check, the
-    same operational "has this workspace ever been indexed" signal
-    workflow.py's own auto_index_missing_dependency_graph gate already
-    uses): with no index, find_symbol/find_callers/search_code can only
-    ever report "nothing found," so running the loop at all would just
-    burn turns for no benefit - retains existing (no-investigation) flow
-    for that case rather than activating on tier/is_exact signals, per the
-    task's own explicit instruction not to gate on those.
-
-    Also computes known_target_member_hints (2026-09-19) - which member_id
-    is CURRENTLY believed relevant, per declared target path - and passes
-    it to run_investigation_loop so its own mutation-readiness check can
-    require member-level relevance, not merely "some exact member in the
-    right file" (see that function's own docstring)."""
-    autonomy_cfg = ctx.kernel.config.autonomy
-    if not autonomy_cfg.developer_investigation_enabled:
-        return
-    db_path = _dependency_graph_db_path(ctx)
-    if not os.path.exists(db_path):
-        return
-    configured_max = max(0, autonomy_cfg.developer_investigation_max_turns)
-    used_so_far = state.investigation_turns_used_by_attempt.get(state.attempt_number, 0)
-    remaining = configured_max - used_so_far
-    if remaining <= 0:
-        return
-
-    from kriya.core.model_capabilities import resolve_model_capability_profile
-    from kriya.workflow.investigation import (
-        InvestigationDependencies,
-        render_investigation_evidence,
-        run_investigation_loop,
-    )
-
-    capability_profile = resolve_model_capability_profile(ctx.kernel.config, active_model)
-
-    async def _search_code(query: str) -> List[Dict[str, Any]]:
-        vector_index_path = os.path.join(ctx.kernel.config.paths.memory, "vector_index.db")
-        if not os.path.exists(vector_index_path):
-            return []
-        from types import SimpleNamespace
-
-        from kriya.memory.embedding import configured_client, run_deadline
-        from kriya.memory.vector import LocalVectorStore
-        from kriya.workflow.graph_retrieval import semantic_query_embedding
-
-        store = LocalVectorStore(vector_index_path)
-        try:
-            # EMBEDDING-CONTRACT-001: an unavailable semantic leg is recorded,
-            # and only the lexical leg answers - never a zero-vector search.
-            availability = SimpleNamespace(semantic_unavailable=None)
-            query_emb, fingerprint = await semantic_query_embedding(
-                configured_client(ctx.kernel.config), store, query, availability,
-                run_deadline(ctx.kernel.config),
-            )
-            if availability.semantic_unavailable:
-                state.record_event(RunEvent(
-                    kind="retrieval.semantic_unavailable", attempt=state.attempt_number,
-                    source="investigation.search_code", authority=EventAuthority.ADVISORY,
-                    message=f"semantic search unavailable ({availability.semantic_unavailable}); lexical only",
-                    details={"reason_code": availability.semantic_unavailable},
-                ))
-            return store.query_hybrid(
-                query, query_emb, top_k=5, model_name=ctx.kernel.config.embedding.model,
-                dimensions=len(query_emb) if query_emb else 0, fingerprint=fingerprint,
-            )
-        finally:
-            store.close()
-
-    deps = InvestigationDependencies(
-        workspace_path=ctx.workspace_path, worktree_path=ctx.worktree_path,
-        dependency_graph_db_path=db_path, search_code=_search_code,
-        source_cache=ctx.source_cache,
-    )
-    # MUTATION_RELEVANCE_GATE for readiness (2026-09-19, VAL-001 G1 follow-
-    # up): "an exact member exists in the right file" is NOT the same claim
-    # as "an exact member exists for the region this attempt actually
-    # cares about" - G1's own add_node/walk_calls shape proved that
-    # distinction matters. run_investigation_loop's own mutation-readiness
-    # check needs to know which member_id(s), if any, are CURRENTLY
-    # believed relevant for each declared target - reuses the SAME two
-    # already-proven resolvers this module's own retry-context preparation
-    # already calls (_resolve_known_target_member_hints for SOURCE 1/
-    # Graph-RAG grounding, _resolve_retry_member_hints for SOURCE 2/3
-    # failure-grounded escalation), never a new resolver or data model.
-    # Both are safe to call unconditionally: _resolve_retry_member_hints
-    # itself returns {} with no state.last_failure yet (attempt 1).
-    known_target_files_list = list(kwargs.get("known_target_files") or [])
-    known_target_member_hints: Dict[str, List[str]] = {}
-    for hints_source in (
-        _resolve_known_target_member_hints(ctx, known_target_files_list),
-        _resolve_retry_member_hints(ctx, state, known_target_files_list),
-    ):
-        for path, member_ids in hints_source.items():
-            existing = known_target_member_hints.setdefault(path, [])
-            for member_id in member_ids:
-                if member_id not in existing:
-                    existing.append(member_id)
-    result = await run_investigation_loop(
-        llm=ctx.developer.llm, capabilities=capability_profile.capabilities, deps=deps,
-        task_description=str(kwargs.get("task_description") or ""),
-        design_context=str(kwargs.get("design_context") or ""),
-        existing_code_context=str(kwargs.get("existing_code_context") or ""),
-        max_turns=remaining,
-        known_target_files=kwargs.get("known_target_files"),
-        known_target_member_hints=known_target_member_hints,
-        model_override=kwargs.get("model_override"),
-        base_url_override=kwargs.get("base_url_override"),
-        api_key_override=kwargs.get("api_key_override"),
-        extra_body_override=kwargs.get("extra_body_override"),
-        attempt_number=state.attempt_number,
-        # DEVELOPER-AUX-LOOP-PROMPT-FIT-001: the same fit the Developer
-        # request gets - the binding it goes to and the optional sections
-        # placed in existing_code_context.
-        request_fit=DeveloperRequestFit(
-            ctx.kernel.config, _chain_binding(ctx, kwargs.get("model_override")),
-            kwargs.get("optional_sections") or (),
-        ),
-    )
-    state.investigation_turns_used_by_attempt[state.attempt_number] = used_so_far + result.turns_used
-    for event in result.events:
-        state.record_event(event)
-    if not result.evidence:
-        return
-    # PRD-028: investigation evidence is always shown (read-only context),
-    # but a member becomes edit authority only through a GRANTED expansion.
-    member_items = {item.path: item for item in result.evidence if item.tier == "member_exact" and item.member_id}
-    _granted, expansions = grant_member_hints(
-        {path: [item.member_id] for path, item in member_items.items()},
-        workspace_path=ctx.workspace_path, worktree_path=ctx.worktree_path,
-        authorized_paths=_escalation_authorized_paths(ctx, list(kwargs.get("known_target_files") or [])),
-        evidence={"source": "developer_investigation", "attempt": state.attempt_number},
-    )
-    _record_authority_expansions(state, expansions)
-    for path in _granted:
-        state.known_target_context_items[path] = _preserve_member_exact_precision(
-            state, path, member_items[path],
-        )
-    rendered = render_investigation_evidence(
-        result.evidence,
-        char_budget=investigation_evidence_char_budget(
-            allocation_window(ctx.kernel.config, _chain_binding(ctx, kwargs.get("model_override"))),
-        ),
-    )
-    if rendered:
-        kwargs["existing_code_context"] = str(kwargs.get("existing_code_context") or "") + rendered
-        # DEVELOPER-PROMPT-FIT-001: optional evidence, re-rendered smaller
-        # when the request does not fit.
-        kwargs["optional_sections"] = tuple(kwargs.get("optional_sections") or ()) + (OptionalSection(
-            "investigation", rendered,
-            lambda budget: render_investigation_evidence(result.evidence, char_budget=budget * 4),
-        ),)
+    """DEV-INV-001: the opt-in read-only investigation pre-pass. The body is
+    kriya/workflow/generation_service.py::_maybe_run_developer_investigation (E6); its collaborators are resolved
+    here, at call time (_generation_deps)."""
+    return await generation_service._maybe_run_developer_investigation(_generation_deps(), state, ctx, kwargs, active_model)
 
 
 # A full-file answer is expected to be about the current file's size plus
@@ -2246,11 +2088,8 @@ async def _as_developer(awaitable: Any) -> Any:
 
 def _developer_request_profile(ctx: "AttemptContext", model_override: Optional[str]) -> Any:
     """PRD-017: the request profile of a Developer call with ``model_override``
-    (None = the primary)."""
-    from kriya.workflow.model_transition import resolve_request_profile
-
-    binding = _chain_binding(ctx, model_override) or ctx.kernel.config.llm
-    return resolve_request_profile(ctx.kernel.config, binding)
+    (None = the primary). The body is kriya/workflow/generation_service.py (E6)."""
+    return generation_service._developer_request_profile(_generation_deps(), ctx, model_override)
 
 
 def _patch_required_files(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> List[str]:
@@ -2270,390 +2109,81 @@ def _patch_required_files(state: GenerationState, ctx: "AttemptContext", kwargs:
     return required
 
 
-def _fallback_rejection(profile: Any, reasons: List[str]) -> Dict[str, Any]:
-    return {"model": profile.model, "reasons": list(reasons), "profile_digest": profile.digest}
-
-
 def _record_fallback_selection(state: GenerationState, *, phase: str, requested: str, selected: Optional[str],
                                rejected: List[Dict[str, Any]], primary_route: bool = False) -> None:
-    """PRD-017: why configured fallbacks were skipped and which one serves
-    the attempt (the model.fallback_selection run event)."""
-    from kriya.workflow.model_transition import FALLBACK_MODEL_INCOMPATIBLE
-
-    state.record_event(RunEvent(
-        kind="model.fallback_selection",
-        attempt=state.attempt_number,
-        source="attempt.fallback_selection",
-        authority=EventAuthority.ADVISORY,
-        message=(
-            f"Fallback {requested} skipped ({', '.join(r['model'] for r in rejected)} incompatible); "
-            + (f"{selected} selected" if selected
-               else "the full-set attempt stays on the primary" if primary_route
-               else "no configured fallback remains")
-        ),
-        details={"phase": phase, "requested": requested, "selected": selected, "rejected": rejected,
-                 "reason_code": FALLBACK_MODEL_INCOMPATIBLE, "primary_route": primary_route},
-    ))
+    """PRD-017: the model.fallback_selection run event. The body is kriya/workflow/fallback_decision.py (E6)."""
+    return fallback_decision._record_fallback_selection(_fallback_deps(), state, phase=phase, requested=requested, selected=selected,
+                                                   rejected=rejected, primary_route=primary_route)
 
 
 def _raise_fallback_incompatible(state: GenerationState, requested: str, rejected: List[Dict[str, Any]]) -> None:
-    """The terminal typed failure: no remaining configured fallback can
-    serve this attempt; every skipped fallback's reasons are carried."""
-    from kriya.workflow.model_transition import FALLBACK_MODEL_INCOMPATIBLE
-
-    detail = "; ".join(f"{r['model']}: {'; '.join(r['reasons'])}" for r in rejected)
-    message = (f"{FALLBACK_MODEL_INCOMPATIBLE}: no remaining configured fallback from {requested} can serve "
-               f"this attempt - {detail}")
-    reasons = [reason for r in rejected for reason in r["reasons"]]
-    state.record_event(RunEvent(
-        kind="model.fallback_incompatible",
-        attempt=state.attempt_number,
-        source="attempt.fallback_selection",
-        authority=EventAuthority.ADVISORY,
-        message=message,
-        details={"reason_code": FALLBACK_MODEL_INCOMPATIBLE, "model": requested, "reasons": reasons,
-                 "rejected": rejected},
-    ))
-    logger.error(message)
-    raise QualityGateFailure(Failure(
-        type="fallback_incompatible",
-        message=message,
-        raw_output=message,
-        source="orchestrator",
-        attempt=state.attempt_number,
-        diagnostics={"reason_code": FALLBACK_MODEL_INCOMPATIBLE, "model": requested, "reasons": reasons,
-                     "rejected": rejected},
-    ))
+    """The terminal typed FALLBACK_MODEL_INCOMPATIBLE failure. The body is kriya/workflow/fallback_decision.py (E6)."""
+    return fallback_decision._raise_fallback_incompatible(_fallback_deps(), state, requested, rejected)
 
 
 def _select_developer_fallback(state: GenerationState, ctx: "AttemptContext", retry_count: int, *,
                               targets: Iterable[str] = (), allow_primary: bool = False) -> Any:
-    """PRD-017: the llm_chain fallback this attempt escalates to, chosen
-    before its prompt is built (the prompt is sized for the chosen model's
-    window). The configured order is kept (resolve_fallback_model); a
-    fallback proven unable to serve the run - a failed Developer
-    qualification case, the production profile without QUALIFIED, no
-    prompt room - is skipped with its reasons (never re-evaluated or sent a
-    request), and the next configured one is taken. None for the primary;
-    the typed terminal failure when no configured fallback remains.
-
-    LR-R1-P1 Option (b): a fallback that cannot serve THIS attempt's
-    ``targets`` because one is patch-only for it (whole-file representation
-    impossible in its request, model_transition.patch_only_files) and it
-    returns whole files only is skipped for this attempt (not a run-wide
-    verdict). When every remaining fallback was skipped for that reason
-    alone and ``allow_primary`` (the full-set route), the attempt stays on
-    the primary (None) instead of ending; a run-wide rejection among them
-    keeps PRD-017's terminal semantics."""
-    from kriya.workflow.model_transition import (
-        existing_target_sizes,
-        fallback_incompatibilities,
-        patch_only_files,
-    )
-
-    if retry_count <= 0 or not ctx.chain:
-        return None
-    start = min(retry_count - 1, len(ctx.chain) - 1)
-    requested = ctx.chain[start]
-    sizes = existing_target_sizes(ctx.worktree_path, targets)
-    newly_rejected: List[Dict[str, Any]] = []
-    patch_rejected: Dict[str, Dict[str, Any]] = {}
-    for binding in ctx.chain[start:]:
-        if binding.model in state.incompatible_fallbacks:
-            continue
-        profile = _developer_request_profile(ctx, binding.model)
-        reasons = fallback_incompatibilities(ctx.kernel.config, profile)
-        if reasons:
-            state.incompatible_fallbacks[binding.model] = reasons
-            newly_rejected.append(_fallback_rejection(profile, reasons))
-            continue
-        files = patch_only_files(ctx.kernel.config, binding, sizes)[0] if sizes else ()
-        patch_reasons = fallback_incompatibilities(ctx.kernel.config, profile, patch_required_files=files) \
-            if files else []
-        if not patch_reasons:
-            break
-        patch_rejected[binding.model] = {**_fallback_rejection(profile, patch_reasons),
-                                         "patch_only_files": list(files)}
-    skipped = {*state.incompatible_fallbacks, *patch_rejected}
-    selected = resolve_fallback_model(retry_count, ctx.chain, skipped)
-    attempt_evidence_scope.record_fallback_decision({
-        "phase": "escalation", "retry_count": retry_count, "requested": requested.model,
-        "selected": selected.model if selected is not None else None,
-        "newly_rejected": newly_rejected, "previously_rejected": sorted(
-            model for model in state.incompatible_fallbacks if model not in {r["model"] for r in newly_rejected}),
-        "patch_rejected": list(patch_rejected.values()),
-    })
-    if selected is requested:
-        return selected
-    evaluated_now = {item["model"]: item for item in newly_rejected}
-    rejected: Dict[str, Dict[str, Any]] = {}
-    for binding in ctx.chain[start:]:
-        if binding.model in patch_rejected:
-            rejected[binding.model] = patch_rejected[binding.model]
-        elif binding.model in state.incompatible_fallbacks and binding.model not in rejected:
-            rejected[binding.model] = evaluated_now.get(binding.model) or {
-                "model": binding.model, "reasons": list(state.incompatible_fallbacks[binding.model]),
-            }
-    rejected = list(rejected.values())
-    stays_on_primary = selected is None and allow_primary and all(r["model"] in patch_rejected for r in rejected)
-    _record_fallback_selection(state, phase="escalation", requested=requested.model,
-                               selected=selected.model if selected is not None else None, rejected=rejected,
-                               primary_route=stays_on_primary)
-    if selected is None and not stays_on_primary:
-        _raise_fallback_incompatible(state, requested.model, rejected)
-    return selected
+    """PRD-017 / LR-R1-P1: the llm_chain fallback this attempt escalates to (None for the primary; the typed terminal
+    failure when no configured fallback remains). The body is kriya/workflow/fallback_decision.py (E6); its
+    collaborators are resolved here, at call time (_fallback_deps)."""
+    return fallback_decision._select_developer_fallback(_fallback_deps(), state, ctx, retry_count, targets=targets,
+                                                   allow_primary=allow_primary)
 
 
 def _substitute_for_required_patch(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any],
                                    profile: Any, reasons: List[str]) -> Tuple[Dict[str, Any], Any]:
-    """PRD-017: the fallback this call goes to cannot return what the
-    attempt may write (an anchored patch the completeness gate requires, a
-    fact of the prompt already built). The next configured fallback after
-    it that can (skipping those already proven incompatible) serves the
-    call instead - no request is sent to the incompatible one; the typed
-    terminal failure when none remains. The prompt was sized for the
-    requested fallback's window; PRD-016's dispatch check still refuses it
-    before inference if it does not fit the substitute's."""
-    from kriya.workflow.model_transition import fallback_incompatibilities
-
-    current = _chain_binding(ctx, kwargs.get("model_override"))
-    patch_files = _patch_required_files(state, ctx, kwargs)
-    rejected = [_fallback_rejection(profile, reasons)]
-    index = next(i for i, binding in enumerate(ctx.chain) if binding is current)
-    for binding in ctx.chain[index + 1:]:
-        if binding.model in state.incompatible_fallbacks:
-            rejected.append({"model": binding.model, "reasons": list(state.incompatible_fallbacks[binding.model])})
-            continue
-        candidate = _developer_request_profile(ctx, binding.model)
-        candidate_reasons = fallback_incompatibilities(ctx.kernel.config, candidate, patch_required_files=patch_files)
-        if candidate_reasons:
-            rejected.append(_fallback_rejection(candidate, candidate_reasons))
-            continue
-        _record_fallback_selection(state, phase="call", requested=current.model, selected=binding.model,
-                                   rejected=rejected)
-        if state.model_hops and state.model_hops[-1] == current.model:
-            state.model_hops[-1] = binding.model
-        substituted = {**kwargs, "model_override": binding.model, "base_url_override": binding.base_url,
-                       "api_key_override": binding.api_key, "extra_body_override": binding.extra_body}
-        return substituted, candidate
-    _record_fallback_selection(state, phase="call", requested=current.model, selected=None, rejected=rejected)
-    _raise_fallback_incompatible(state, current.model, rejected)
-    raise AssertionError("unreachable")
+    """PRD-017: the next configured fallback that can serve this call. The body is
+    kriya/workflow/fallback_decision.py (E6)."""
+    return fallback_decision._substitute_for_required_patch(_fallback_deps(), state, ctx, kwargs, profile, reasons)
 
 
 def _enter_developer_model(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    """PRD-017: resolve the request profile of the model this Developer call
-    goes to and return the call's kwargs. A fallback that cannot serve this
-    call is replaced by the next configured one that can
-    (_substitute_for_required_patch), or the attempt ends with the typed
-    FALLBACK_MODEL_INCOMPATIBLE failure before any request (terminal). A
-    change of profile from the previous call is recorded field by field
-    (the model.transition run event)."""
-    from kriya.workflow.model_transition import fallback_incompatibilities, profile_changes
-
-    model_override = kwargs.get("model_override")
-    profile = _developer_request_profile(ctx, model_override)
-    is_fallback = _chain_binding(ctx, model_override) is not None
-    reasons = fallback_incompatibilities(
-        ctx.kernel.config, profile, patch_required_files=_patch_required_files(state, ctx, kwargs),
-    ) if is_fallback else []
-    requested_model = profile.model
-    requested_digest = profile.digest
-    try:
-        if reasons:
-            kwargs, profile = _substitute_for_required_patch(state, ctx, kwargs, profile, reasons)
-    except BaseException:
-        attempt_evidence_scope.record_fallback_decision({
-            "phase": "call", "fallback": is_fallback, "requested": requested_model,
-            "requested_profile_digest": requested_digest, "requested_rejection": list(reasons),
-            "selected": None, "profile_digest": None})
-        raise
-    attempt_evidence_scope.record_fallback_decision({
-        "phase": "call", "fallback": is_fallback, "requested": requested_model,
-        "requested_profile_digest": requested_digest, "requested_rejection": list(reasons),
-        "selected": profile.model, "profile_digest": profile.digest})
-    previous = state.last_developer_request_profile
-    if previous is None or previous.digest != profile.digest:
-        changes = profile_changes(previous, profile)
-        state.record_event(RunEvent(
-            kind="model.transition",
-            attempt=state.attempt_number,
-            source="attempt._run_developer_generation",
-            authority=EventAuthority.ADVISORY,
-            message=(
-                f"Developer request profile for {profile.model}"
-                + ("" if previous is None else f" (was {previous.model}): {', '.join(sorted(changes))} changed")
-            ),
-            details={
-                "initial": previous is None,
-                "fallback": is_fallback,
-                "from": previous.to_dict() if previous is not None else None,
-                "to": profile.to_dict(),
-                "changes": changes,
-            },
-        ))
-    state.last_developer_request_profile = profile
-    state.last_developer_call_attempt = state.attempt_number
-    # The model this attempt's generation actually went to (read by the
-    # attempt's own bookkeeping and the next attempt's triage).
-    state.last_model_override = kwargs.get("model_override")
-    state.last_base_url_override = kwargs.get("base_url_override")
-    state.last_api_key_override = kwargs.get("api_key_override")
-    state.last_extra_body_override = kwargs.get("extra_body_override")
-    return kwargs
+    """PRD-017: the model this Developer call goes to, its request profile and the call's kwargs. The body is
+    kriya/workflow/generation_service.py (E6); its collaborators are resolved here, at call time."""
+    return generation_service._enter_developer_model(_generation_deps(), state, ctx, kwargs)
 
 
 def _require_qualified_retry_identity(state: GenerationState, ctx: "AttemptContext",
                                       kwargs: Dict[str, Any]) -> None:
-    """MODEL-EVIDENCE-HARDENING-001: a Developer retry carrying a
-    retry_temperature that differs from the called model's own temperature
-    executes a distinct inference identity. Under the production runtime
-    profile that exact identity must be QUALIFIED; otherwise the attempt ends
-    with the typed terminal RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED before any
-    request - it never runs under the normal identity's qualification.
-    Outside production it is recorded (the profile), never refused."""
-    from kriya.core.model_qualification import QUALIFIED
-    from kriya.workflow.model_transition import RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED
-
-    profile = state.last_developer_request_profile
-    config = ctx.kernel.config
-    if (kwargs.get("retry_temperature") is None or profile is None or profile.retry_qualification is None
-            or profile.retry_qualification == QUALIFIED or getattr(config, "runtime_profile", None) != "production"):
-        return
-    message = (f"{RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED}: the production runtime profile requires the Developer "
-               f"retry identity of {profile.model} (retry_temperature {config.llm.retry_temperature}, inference "
-               f"settings {profile.retry_inference_settings_digest}) to be QUALIFIED; it is "
-               f"{profile.retry_qualification}. Qualify it with `kriya model qualify --model {profile.model}`; "
-               "nothing was sent to the model.")
-    details = {"reason_code": RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED, "model": profile.model,
-               "retry_temperature": config.llm.retry_temperature,
-               "retry_inference_settings_digest": profile.retry_inference_settings_digest,
-               "retry_qualification": profile.retry_qualification}
-    state.record_event(RunEvent(
-        kind="model.retry_identity_not_qualified", attempt=state.attempt_number,
-        source="attempt._run_developer_generation", authority=EventAuthority.ADVISORY,
-        message=message, details=details,
-    ))
-    logger.error(message)
-    raise QualityGateFailure(Failure(
-        type="retry_identity_not_qualified", message=message, raw_output=message, source="orchestrator",
-        attempt=state.attempt_number, diagnostics=details,
-    ))
-
-
-def _chain_binding(ctx: "AttemptContext", model_override: Optional[str]) -> Any:
-    """The llm_chain entry a Developer call with ``model_override`` goes to,
-    or None for the primary model."""
-    if not model_override:
-        return None
-    return next((fallback for fallback in ctx.chain if fallback.model == model_override), None)
-
-
-PLANNED_SOURCE_HEADER = "=== Planned File Current Source (this subtask's approved files) ==="
-# The initial rendering keeps every planned file whole whenever it can; the
-# request fit (DEVELOPER-PROMPT-FIT-001) is what decides the real room.
-_PLANNED_SOURCE_UNBOUNDED_TOKENS = 1 << 40
+    """MODEL-EVIDENCE-HARDENING-001: a production retry identity must be QUALIFIED. The body is
+    kriya/workflow/generation_service.py (E6)."""
+    return generation_service._require_qualified_retry_identity(_generation_deps(), state, ctx, kwargs)
 
 
 def _planned_source_context(
     ctx: "AttemptContext", exclude: Any, budget: int = _PLANNED_SOURCE_UNBOUNDED_TOKENS,
 ) -> str:
-    """GRAPHIFY-OVERSIZE-REQUEST-001: the current source of a bounded enforce
-    subtask's planned files (ctx.planned_source_files), through
-    build_code_context's own tiers (full -> skeleton -> signatures, anything
-    left over named as omitted) instead of verbatim mandatory text. A path
-    the attempt already represents through a more authoritative producer
-    (``exclude``: attempt-1 known targets, files written this run) is left
-    out, never shown twice. Registered first among the optional Developer
-    sections, so it stays whole whenever the request fits and degrades
-    rather than making the request unsendable."""
-    paths = _filtered_candidates(ctx.planned_source_files, exclude)
-    if not paths:
-        return ""
-    body = build_code_context(paths, [], ctx.worktree_path, budget, cache=ctx.source_cache)
-    return f"\n\n{PLANNED_SOURCE_HEADER}\n{body}" if body else ""
+    """GRAPHIFY-OVERSIZE-REQUEST-001: the current source of a bounded enforce subtask's planned files. The body is
+    kriya/workflow/generation_service.py (E6)."""
+    return generation_service._planned_source_context(_generation_deps(), ctx, exclude, budget)
 
 
 def _developer_optional_sections(
     ctx: "AttemptContext", graph_context: str, graph_exclude: Any, learned_reference: str,
     planned_source: str = "",
 ) -> Tuple[OptionalSection, ...]:
-    """The optional sections an attempt branch placed in its Developer
-    context (DEVELOPER-PROMPT-FIT-001): the planned files' current source
-    and the graph context, each rebuilt smaller from the same candidates when
-    the request does not fit, and the fenced learned reference, trimmed at
-    whole entries."""
-    sections: List[OptionalSection] = []
-    if planned_source:
-        sections.append(OptionalSection(
-            "planned_source", planned_source, lambda budget: _planned_source_context(ctx, graph_exclude, budget)))
-    if graph_context:
-        sections.append(OptionalSection("graph_context", graph_context, lambda budget: build_code_context(
-            _filtered_candidates(ctx.matched_files, graph_exclude),
-            _filtered_candidates(ctx.related_files, graph_exclude),
-            ctx.worktree_path, budget, cache=ctx.source_cache,
-        )))
-    reference = fenced_reference_section(learned_reference)
-    if reference is not None:
-        sections.append(reference)
-    return tuple(sections)
+    """DEVELOPER-PROMPT-FIT-001: the optional sections an attempt branch placed in its Developer context. The body
+    is kriya/workflow/generation_service.py (E6)."""
+    return generation_service._developer_optional_sections(_generation_deps(), ctx, graph_context, graph_exclude,
+                                                       learned_reference, planned_source)
 
 
 def _target_package_with_goal_member_fallback(
     ctx: "AttemptContext", paths: List[str], limit: int, prompt_window: int, member_hints: Dict[str, List[str]],
 ) -> Tuple[str, Any, Optional[Dict[str, Any]]]:
-    """KNOWN-TARGET-GOAL-NAMED-MEMBER-HINT-001: the attempt-1 package, rebuilt
-    once with the goal's own named members of a target as member hints when -
-    and only when - that target's whole source was omitted as
-    minimum_authority_unfit (its minimum unit, the whole file, exceeds the
-    protected room: P4-T2's Element.java). A target that fits whole, or that
-    already has a hint, is never demoted to a member-only view. Returns
-    (rendered, package, fallback evidence or None)."""
-    rendered, package = _target_package_with_window_reserve(ctx, paths, limit, prompt_window, member_hints)
-    unfit = sorted({
-        entry["path"] for entry in package.omitted
-        if entry.get("reason") == REASON_MINIMUM_AUTHORITY_UNFIT and entry["path"] not in member_hints
-    })
-    if not unfit:
-        return rendered, package, None
-    goal_hints = {path: names for path, names in _goal_named_member_hints(ctx, unfit).items() if names}
-    if not goal_hints:
-        return rendered, package, None
-    merged = {**member_hints, **goal_hints}
-    rendered, package = _target_package_with_window_reserve(ctx, paths, limit, prompt_window, merged)
-    return rendered, package, {"unfit_targets": unfit, "goal_member_hints": goal_hints,
-                               "tiers": [{"path": item.path, "member_id": item.member_id, "tier": item.tier}
-                                         for item in package.relevant_files]}
+    """KNOWN-TARGET-GOAL-NAMED-MEMBER-HINT-001: the attempt-1 known-target package. The body is
+    kriya/workflow/generation_service.py (E6)."""
+    return generation_service._target_package_with_goal_member_fallback(_generation_deps(), ctx, paths, limit, prompt_window,
+                                                                    member_hints)
 
 
 def _target_package_with_window_reserve(
     ctx: "AttemptContext", paths: List[str], limit: int, prompt_window: int, member_hints: Dict[str, List[str]],
 ) -> Tuple[str, Any]:
-    """build_known_target_context at its full budget; when a target is not
-    shown whole and exact there, exact windows may be added to the request
-    (CONTEXT-EDIT-PROTOCOL-001), so it is rebuilt with their reserve held
-    back and the windows never push the request past its capacity."""
-    # Code Intelligence R1 slice 2: T0 (a grounded member's exact current
-    # body) has its own room, computed without skills, learned reference or
-    # optional context - none of them can evict it.
-    exact_member_budget = _reserve_graph_context_budget(prompt_window, ctx.design, ctx.plan)
-    service = _code_intelligence_for(ctx) if member_hints else None
-    try:
-        rendered, package = build_known_target_context(
-            paths, ctx.workspace_path, ctx.worktree_path, limit, member_hints=member_hints, cache=ctx.source_cache,
-            exact_member_budget=exact_member_budget, code_intelligence=service,
-        )
-        shown_whole = {item.path for item in package.relevant_files if item.tier == "full" and item.is_exact}
-        if set(paths) <= shown_whole:
-            return rendered, package
-        return build_known_target_context(
-            paths, ctx.workspace_path, ctx.worktree_path, max(0, limit - exact_window_reserve(prompt_window)),
-            member_hints=member_hints, cache=ctx.source_cache, exact_member_budget=exact_member_budget,
-            code_intelligence=service,
-        )
-    finally:
-        if service is not None:
-            service.close()
+    """CONTEXT-EDIT-PROTOCOL-001: the known-target package with the exact-window reserve held back when needed. The
+    body is kriya/workflow/generation_service.py (E6)."""
+    return generation_service._target_package_with_window_reserve(_generation_deps(), ctx, paths, limit, prompt_window,
+                                                              member_hints)
 
 
 def _code_intelligence_for(ctx: "AttemptContext") -> Any:
@@ -3091,128 +2621,131 @@ async def _run_developer_generation(
     state: GenerationState, ctx: "AttemptContext", **kwargs,
 ) -> List[Dict[str, str]]:
     """Every Developer generation goes through here; its model calls are
-    attributed to the developer role (PRD-018)."""
-    from kriya.core.role_metrics import model_role
-
-    with model_role("developer"):
-        return await _run_developer_generation_as_developer(state, ctx, **kwargs)
+    attributed to the developer role (PRD-018). The body is
+    kriya/workflow/generation_service.py::_run_developer_generation (E6); its collaborators are resolved here, at call
+    time (_generation_deps), so a patch of any of them on this module reaches the moved generation."""
+    return await generation_service._run_developer_generation(_generation_deps(), state, ctx, **kwargs)
 
 
 async def _run_developer_generation_as_developer(
     state: GenerationState, ctx: "AttemptContext", **kwargs,
 ) -> List[Dict[str, str]]:
-    targets = kwargs.get("known_target_files")
-    file_count = len(targets or ctx.expected_files_upfront or state.all_files_written or [None])
-    kwargs = _enter_developer_model(state, ctx, kwargs)
-    _require_qualified_retry_identity(state, ctx, kwargs)
-    active_model = kwargs.get("model_override") or ctx.kernel.config.llm.model
-    _ensure_generation_time_budget(
-        state, ctx, file_count=file_count, active_model=active_model,
+    """The generation itself (inside the developer role). The body is kriya/workflow/generation_service.py (E6)."""
+    return await generation_service._run_developer_generation_as_developer(_generation_deps(), state, ctx, **kwargs)
+
+
+def _load_model_role() -> Any:
+    # E6: generation_service._run_developer_generation's function-local import (core.role_metrics: all-import cycle,
+    # non-public PROVIDER), done where the body imported it; the loaders below likewise.
+    from kriya.core.role_metrics import model_role
+    return model_role
+
+
+def _load_resolve_request_profile() -> Any:
+    from kriya.workflow.model_transition import resolve_request_profile
+    return resolve_request_profile
+
+
+def _load_model_entry() -> Tuple[Any, Any]:
+    from kriya.workflow.model_transition import fallback_incompatibilities, profile_changes
+    return fallback_incompatibilities, profile_changes
+
+
+def _load_retry_identity() -> Tuple[Any, Any]:
+    from kriya.core.model_qualification import QUALIFIED
+    from kriya.workflow.model_transition import RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED
+    return QUALIFIED, RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED
+
+
+def _load_resolve_model_capability_profile() -> Any:
+    from kriya.core.model_capabilities import resolve_model_capability_profile
+    return resolve_model_capability_profile
+
+
+def _load_investigation() -> Tuple[Any, Any, Any]:
+    from kriya.workflow.investigation import (
+        InvestigationDependencies,
+        render_investigation_evidence,
+        run_investigation_loop,
     )
-    await _maybe_run_developer_investigation(state, ctx, kwargs, active_model)
-    capabilities = _decide_edit_capabilities(state, ctx, kwargs)
-    # DEVELOPER-PROMPT-FIT-001: every request is fitted into the capacity of
-    # the binding it is sent to, its optional sections shrinking first.
-    request_fit = kwargs["request_fit"] = DeveloperRequestFit(
-        ctx.kernel.config, _chain_binding(ctx, kwargs.get("model_override")),
-        kwargs.pop("optional_sections", None) or (),
+    return InvestigationDependencies, render_investigation_evidence, run_investigation_loop
+
+
+def _load_investigation_search() -> Tuple[Any, Any, Any, Any]:
+    from kriya.memory.embedding import configured_client, run_deadline
+    from kriya.memory.vector import LocalVectorStore
+    from kriya.workflow.graph_retrieval import semantic_query_embedding
+    return configured_client, run_deadline, LocalVectorStore, semantic_query_embedding
+
+
+def _load_fallback_model_incompatible() -> str:
+    from kriya.workflow.model_transition import FALLBACK_MODEL_INCOMPATIBLE
+    return FALLBACK_MODEL_INCOMPATIBLE
+
+
+def _load_fallback_selection() -> Tuple[Any, Any, Any]:
+    from kriya.workflow.model_transition import (
+        existing_target_sizes,
+        fallback_incompatibilities,
+        patch_only_files,
     )
-    if "expected_output_by_file" not in kwargs:
-        # A target whose capability excludes the full file is always asked
-        # for an anchored patch, to which the Developer applies no
-        # expectation (CONTEXT-EDIT-PROTOCOL-001).
-        kwargs["expected_output_by_file"] = _grounded_output_expectations(
-            ctx, kwargs.get("known_target_files"), _chain_binding(ctx, kwargs.get("model_override")),
-        )
-    started = time.monotonic()
-    succeeded = False
-    try:
-        try:
-            result = await ctx.developer.run_generation(**kwargs)
-        except OutputBudgetUnsatisfiableError as refusal:
-            retry_kwargs = _lower_output_protocol_retry(state, ctx, kwargs, refusal, active_model)
-            if retry_kwargs is None:
-                raise
-            attempt_evidence_scope.record_authority_transition(
-                "output_budget_protocol_fallback",
-                {path: getattr(op, "value", op) for path, op in (retry_kwargs.get("operation_by_file") or {}).items()})
-            result = await ctx.developer.run_generation(**retry_kwargs)
-        succeeded = True
-        return result
-    finally:
-        # P3-A: what this invocation really sent, for the anchor check.
-        for path in capabilities:
-            state.edit_capability_sent[path] = tuple(request_fit.fitted)
-        state.drain_budget_expansions(getattr(ctx.developer, "llm", None))
-        duration = time.monotonic() - started
-        # R1 Deliverable 5 (2026-09-08) - observational only, read AFTER the
-        # await above already returned/raised; never influences kwargs,
-        # result, or control flow. ctx.developer.llm.last_call_metrics
-        # reflects the LAST underlying LLMClient.complete() call
-        # run_generation() made - for the common single-shot batch-JSON
-        # path this is the whole attempt's real usage; for the iterative
-        # per-file fallback path (kriya/agents/agent.py, one completion per
-        # filepath) it is only the FINAL file's usage, not a sum across all
-        # of them - documented as a known undercount in
-        # docs/assurance/KRIYA_PERFORMANCE_TELEMETRY.md rather than silently
-        # presented as exact.
-        call_metrics = getattr(ctx.developer, "llm", None)
-        last_call_metrics = getattr(call_metrics, "last_call_metrics", None) if call_metrics else None
-        state.generation_timings.append({
-            "duration_seconds": duration,
-            "file_count": file_count,
-            "succeeded": succeeded,
-            "model": active_model,
-            "prompt_tokens": (last_call_metrics or {}).get("prompt_tokens"),
-            "completion_tokens": (last_call_metrics or {}).get("completion_tokens"),
-            "tokens_estimated": (last_call_metrics or {}).get("tokens_estimated"),
-            # VAL-001 G1-R3 (2026-09-18): same observational-only posture as
-            # every other field here - None whenever the provider/SDK never
-            # reported one (LLMClient.complete()'s own last_call_metrics
-            # already carries that same honest None, never a fabricated
-            # "stop").
-            "finish_reason": (last_call_metrics or {}).get("finish_reason"),
-            # PRD-013/015: the exact runtime the call went to and its
-            # normalized protocol outcome (secret-free).
-            "runtime_fingerprint": (last_call_metrics or {}).get("runtime_fingerprint"),
-            "protocol_status": (last_call_metrics or {}).get("protocol_status"),
-        })
-        # Code Intelligence R1 slice 2: what this request spent its prompt on
-        # (T0 member/header, sibling signatures, T1-T3, skills) and the
-        # provider's measured prefill time - observational only.
-        # Inside this finally block it must never raise over the call's own
-        # outcome: it reads only plain strings and mappings.
-        completion = (last_call_metrics or {}).get("completion")
-        code_context = kwargs.get("existing_code_context")
-        skills_text = getattr(ctx, "skills_prompt", "")
-        state.record_event(RunEvent(
-            kind="developer.prompt_composition", attempt=state.attempt_number, source="developer",
-            authority=EventAuthority.ADVISORY,
-            message="Developer prompt composition (estimated per section; provider-reported total).",
-            details=prompt_composition(
-                code_context if isinstance(code_context, str) else "",
-                skills_text if isinstance(skills_text, str) else "",
-                prompt_tokens_reported=(last_call_metrics or {}).get("prompt_tokens"),
-                provider_metadata=(completion.get("provider_metadata") if isinstance(completion, dict) else None),
-                prefix_reuse=(completion.get("prefix_reuse") if isinstance(completion, dict) else None),
-            ),
-        ))
-        state.record_event(RunEvent(
-            kind="generation.completed" if succeeded else "generation.failed",
-            attempt=state.attempt_number,
-            source="developer",
-            authority=EventAuthority.ADVISORY,
-            message=(
-                f"Developer generation {'completed' if succeeded else 'failed'} "
-                f"for {file_count} file(s) in {duration:.2f}s."
-            ),
-            details={
-                "duration_seconds": duration,
-                "file_count": file_count,
-                "model": active_model,
-                "model_use": (last_call_metrics or {}).get("completion"),
-            },
-        ))
+    return existing_target_sizes, fallback_incompatibilities, patch_only_files
+
+
+def _load_fallback_incompatibilities() -> Any:
+    from kriya.workflow.model_transition import fallback_incompatibilities
+    return fallback_incompatibilities
+
+
+def _generation_deps() -> "generation_service.GenerationDeps":
+    """The moved generation code's collaborators (kriya/workflow/generation_service.py), resolved through this
+    module NOW (at call time), so a test patch of any of these names here (``_enter_developer_model``,
+    ``_require_qualified_retry_identity``, ``_ensure_generation_time_budget``, ``_maybe_run_developer_investigation``,
+    ``_resolve_known_target_member_hints``, ``_code_intelligence_for``, ``exact_window_reserve``, ``time``, ``logger``,
+    ...) reaches the moved code exactly as it reached the bodies when they lived here."""
+    return generation_service.GenerationDeps(
+        logger=logger, time=time, DeveloperRequestFit=DeveloperRequestFit, OptionalSection=OptionalSection,
+        allocation_window=allocation_window, investigation_evidence_char_budget=investigation_evidence_char_budget,
+        build_code_context=build_code_context, fenced_reference_section=fenced_reference_section,
+        REASON_MINIMUM_AUTHORITY_UNFIT=REASON_MINIMUM_AUTHORITY_UNFIT,
+        _reserve_graph_context_budget=_reserve_graph_context_budget,
+        build_known_target_context=build_known_target_context, grant_member_hints=grant_member_hints,
+        exact_window_reserve=exact_window_reserve, OutputBudgetUnsatisfiableError=OutputBudgetUnsatisfiableError,
+        prompt_composition=prompt_composition, _chain_binding=_chain_binding,
+        _dependency_graph_db_path=_dependency_graph_db_path, _escalation_authorized_paths=_escalation_authorized_paths,
+        _preserve_member_exact_precision=_preserve_member_exact_precision,
+        _record_authority_expansions=_record_authority_expansions,
+        _resolve_known_target_member_hints=_resolve_known_target_member_hints,
+        _resolve_retry_member_hints=_resolve_retry_member_hints, _filtered_candidates=_filtered_candidates,
+        _planned_source_context=_planned_source_context, _goal_named_member_hints=_goal_named_member_hints,
+        _target_package_with_window_reserve=_target_package_with_window_reserve,
+        _code_intelligence_for=_code_intelligence_for, _decide_edit_capabilities=_decide_edit_capabilities,
+        _ensure_generation_time_budget=_ensure_generation_time_budget, _enter_developer_model=_enter_developer_model,
+        _grounded_output_expectations=_grounded_output_expectations,
+        _lower_output_protocol_retry=_lower_output_protocol_retry,
+        _maybe_run_developer_investigation=_maybe_run_developer_investigation,
+        _require_qualified_retry_identity=_require_qualified_retry_identity,
+        _run_developer_generation_as_developer=_run_developer_generation_as_developer,
+        _developer_request_profile=_developer_request_profile, _patch_required_files=_patch_required_files,
+        _substitute_for_required_patch=_substitute_for_required_patch,
+        load_model_role=_load_model_role, load_resolve_request_profile=_load_resolve_request_profile,
+        load_model_entry=_load_model_entry, load_retry_identity=_load_retry_identity,
+        load_resolve_model_capability_profile=_load_resolve_model_capability_profile,
+        load_investigation=_load_investigation, load_investigation_search=_load_investigation_search,
+    )
+
+
+def _fallback_deps() -> "fallback_decision.FallbackDeps":
+    """The moved fallback decisions' collaborators (kriya/workflow/fallback_decision.py), resolved through this
+    module NOW (at call time), exactly as the bodies resolved them when they lived here."""
+    return fallback_decision.FallbackDeps(
+        logger=logger, resolve_fallback_model=resolve_fallback_model,
+        _developer_request_profile=_developer_request_profile, _chain_binding=_chain_binding,
+        _patch_required_files=_patch_required_files, _fallback_rejection=_fallback_rejection,
+        _record_fallback_selection=_record_fallback_selection, _raise_fallback_incompatible=_raise_fallback_incompatible,
+        load_fallback_model_incompatible=_load_fallback_model_incompatible,
+        load_fallback_selection=_load_fallback_selection, load_fallback_incompatibilities=_load_fallback_incompatibilities,
+    )
 
 
 @dataclass
@@ -8947,7 +8480,6 @@ async def _run_executing_candidate_gates(
         "CANDIDATE GATES", "PASSED", state.attempt_number,
         scope=ctx.execution_scope,
     )
-
 
 
 async def _run_deferred_executing_gates(

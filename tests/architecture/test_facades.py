@@ -121,6 +121,18 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
          "untracked_repository_paths"), "P1",
         "M1: snapshots and raw-byte revision identity owned by REPOSITORY; the edit engine (GENERATION) and VerificationTreeBinding "
         "(AUTHORITY, which looks up the identities and untracked_repository_paths here) stay"),
+    "kriya/workflow/attempt.py": (
+        PartialFacade(
+            "kriya.workflow.generation_service", ("PLANNED_SOURCE_HEADER", "_PLANNED_SOURCE_UNBOUNDED_TOKENS", "_chain_binding"),
+            "P1", "E6: the Developer request assembly and generation owned by generation_service; attempt.py keeps forwarders "
+            "for the patched/called names and re-exports these three (the planned-source header and default budget that "
+            "tests and the forwarder's default read, the pure chain-binding lookup attempt.py's own retry and "
+            "edit-capability code still calls)"),
+        PartialFacade(
+            "kriya.workflow.fallback_decision", ("_fallback_rejection",), "P1",
+            "E6: the llm_chain fallback decisions owned by fallback_decision; the pure rejection record is re-exported "
+            "(the other four names are forwarders that inject attempt.py's collaborators)"),
+    ),
     "kriya/workflow/terminal_commit.py": PartialFacade(
         "kriya.repository.commit", ("CandidateMaterializationError",), "P1",
         "M1: the materialization error owned by repository.commit (static_analysis.service imports it there, which removes the "
