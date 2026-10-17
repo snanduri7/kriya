@@ -516,6 +516,26 @@ def test_the_investigations_code_search_records_an_unavailable_semantic_leg(tmp_
     assert event.message == "semantic search unavailable (EMBEDDING_UNAVAILABLE); lexical only"
 
 
+
+def test_the_optional_sections_keep_their_registration_order(tmp_path):
+    """DEVELOPER-PROMPT-FIT-001 (post-move mutant P04 survived every tier; green at dd8a980 and after the move): the
+    sections are registered planned source, graph context, fenced learned reference - in that order, each only when it
+    has text (the fit itself orders by kind, but the request fit and its LR-R1-M1 records carry this tuple)."""
+    from types import SimpleNamespace
+
+    from kriya.workflow import attempt
+    from kriya.workflow.context_source import SourceDerivationCache
+
+    (tmp_path / "planned.py").write_text("def planned():\n    return 1\n")
+    ctx = SimpleNamespace(planned_source_files=("planned.py",), worktree_path=str(tmp_path),
+                          source_cache=SourceDerivationCache(), matched_files=[], related_files=[])
+    planned = attempt._planned_source_context(ctx, set())
+    sections = attempt._developer_optional_sections(ctx, "graph text", set(), "a learned lesson", planned)
+    assert [section.kind for section in sections] == ["planned_source", "graph_context", "learned_reference"]
+    assert sections[0].text == planned and sections[1].text == "graph text"
+    assert [s.kind for s in attempt._developer_optional_sections(ctx, "", set(), "a learned lesson", "")] == [
+        "learned_reference"]
+
 # ----------------------------------------------------------------------------- the seam (E6 move)
 
 def _injected_names(deps_class):
