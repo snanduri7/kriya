@@ -400,8 +400,11 @@ def test_a_violation_in_a_module_enters_the_existing_repair_path_with_the_exact_
 
 
 def test_every_acceptance_execution_goes_through_the_one_module_aware_runner():
-    source = (Path(__file__).resolve().parent.parent / "kriya" / "workflow" / "workflow.py").read_text(encoding="utf-8")
-    assert source.count("run_java_acceptance(") >= 3          # intermediate gate, terminal closer, baseline: one runner
+    workflow_dir = Path(__file__).resolve().parent.parent / "kriya" / "workflow"
+    engine = (workflow_dir / "workflow.py").read_text(encoding="utf-8")
+    closers = (workflow_dir / "requirement_closers.py").read_text(encoding="utf-8")   # E4: the terminal closer moved here
+    assert engine.count("run_java_acceptance(") >= 2           # intermediate gate (_run_contract_acceptance), baseline
+    assert closers.count("run_java_acceptance(") >= 1          # terminal closer: one runner for all three
     assert "validator.run_tests(target_test=injection" in (
         Path(__file__).resolve().parent.parent / "kriya" / "workflow" / "acceptance_jvm.py").read_text(encoding="utf-8")
 

@@ -741,7 +741,8 @@ def test_only_the_operator_cli_writes_or_revokes_waivers():
 
 def test_every_production_commit_passes_a_config_built_guard():
     sites = _calls("commit_terminal_candidate")
-    assert sorted(p for p, _ in sites) == ["kriya/workflow/commit_service.py", "kriya/workflow/workflow.py"]
+    # E4: the direct terminal apply moved from workflow.py to stage_apply.py
+    assert sorted(p for p, _ in sites) == ["kriya/workflow/commit_service.py", "kriya/workflow/stage_apply.py"]
     for path, node in sites:
         [value] = [kw.value for kw in node.keywords if kw.arg == "static_analysis"]
         rendered = ast.unparse(value)
@@ -756,7 +757,8 @@ def test_both_commit_boundaries_use_the_one_service():
     """The enforce controller and the direct/milestone boundary construct
     the same service (the operator scan is the only other caller)."""
     assert sorted(p for p, _ in _calls("StaticAnalysisService")) == [
-        "kriya/static_analysis/operator_scan.py", "kriya/workflow/workflow.py", "kriya/workflow/workflow_controller.py",
+        # E4: the direct/milestone gate body moved from workflow.py to stage_apply.py (run_static_analysis_gate)
+        "kriya/static_analysis/operator_scan.py", "kriya/workflow/stage_apply.py", "kriya/workflow/workflow_controller.py",
     ]
 
 

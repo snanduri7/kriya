@@ -365,6 +365,7 @@ def test_every_production_commit_passes_the_binding_taken_at_verification():
             if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "commit_terminal_candidate":
                 [value] = [kw.value for kw in node.keywords if kw.arg == "verified_candidate"]
                 sites.append((path.name, ast.unparse(value)))
+    # E4: the direct terminal apply moved from workflow.py to stage_apply.py (kriya/workflow/stage_apply.py::apply_terminal_candidate)
     assert sorted(sites) == [("commit_service.py", "report.verified_candidate"),
-                             ("workflow.py", "state.verified_candidate_binding")]
+                             ("stage_apply.py", "state.verified_candidate_binding")]
     assert {value for _, value in sites} == ALLOWED_BINDINGS

@@ -1,4 +1,5 @@
-"""The design stages of a work unit (full modularization W4, E3): stages 0-3 moved verbatim out of
+"""The design stages of a work unit (full modularization W4, E3) and, at the end, its review, approval/apply and lesson
+stages (E4): stages 0-3 moved verbatim out of
 ``WorkflowEngine.run_generation_workflow`` into ``kriya/workflow/stage_{knowledge_guard,analysis,planning,architecture}.py``,
 driven by ``kriya/workflow/work_unit_runner.py`` over one ``StageContext``, every collaborator in ``StageDeps``.
 
@@ -10,7 +11,8 @@ The end-to-end preservation proof is the kernel goldens (``tests/state_machine/t
 import asyncio
 import dataclasses
 import json
-from unittest.mock import patch
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -451,3 +453,340 @@ def test_a_stage_result_stops_the_unit_and_is_returned_unchanged(tmp_path, monke
     result = asyncio.run(work_unit_runner.run_design_stages(
         _ctx(tmp_path), None, open_checkpoints=lambda: order.append("open_checkpoints")))
     assert result == {"status": f"stopped at {stop_at}"} and order == ran
+
+
+# ----------------------------------------------------------------------------- E4: review, approval/apply, lessons
+#
+# Stages 5-7 moved verbatim out of run_generation_workflow into kriya/workflow/stage_review.py and stage_apply.py (the
+# Developer loop that calls them stays in the engine until E5), the close_requirements_* family into
+# requirement_closers.py behind same-signature forwarders. The end-to-end preservation proof is the fourteen E4 kernel
+# goldens written from 3e5751c before the move (and every earlier golden); these tests drive the moved stages alone
+# with a StageContext fake and the engine-built StageDeps (WorkflowEngine._late_stage_deps on a real AppConfig).
+
+CALC_BASE = "def add(a, b):\n    return a + b\n"
+CALC_NEW = CALC_BASE + "\n\ndef mul(a, b):\n    return a * b\n"
+
+
+def _late_deps(engine, **overrides):
+    return dataclasses.replace(engine._late_stage_deps(), trace_events=lambda state: [{"kind": "scripted"}], **overrides)
+
+
+def _reviewing_engine(tmp_path, *, mode="human-in-the-loop", risk_threshold_lines=100, review="REVIEW: looks right"):
+    engine = _engine(tmp_path)
+    engine.kernel.config.autonomy.mode = mode
+    engine.kernel.config.autonomy.risk_threshold_lines = risk_threshold_lines
+    engine.reviewer.run = AsyncMock(return_value=review)
+    return engine
+
+
+def _apply_ctx(tmp_path, *, in_place=False, written=("calc.py",), **fields):
+    from kriya.workflow.obligations import ObligationLedger
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "calc.py").write_text(CALC_BASE)
+    worktree = workspace if in_place else tmp_path / "wt"
+    worktree.mkdir(exist_ok=True)
+    state = GenerationState()
+    for name in written:
+        (worktree / name).parent.mkdir(parents=True, exist_ok=True)
+        (worktree / name).write_text(CALC_NEW)
+        state.all_files_written.add(name)
+    state.all_original_contents["calc.py"] = CALC_BASE
+    values = dict(goal="Add mul to calc.py.", workspace_path=str(workspace), worktree_path=str(worktree), state=state,
+                  trace_id="trace-1", start_time=0.0, run_id="run-1", plan="the plan", design="the design",
+                  resolved_obligation_ledger=ObligationLedger())
+    values.update(fields)
+    return StageContext(**values)
+
+
+def _decisions(state):
+    return [event.details for event in state.run_events if event.kind == "approval.decision"]
+
+
+def test_the_engine_injects_every_late_stage_collaborator(tmp_path):
+    from kriya.workflow.stage_context import late_stage_fields
+
+    deps = _engine(tmp_path)._late_stage_deps()
+    assert not_injected(deps, late_stage_fields()) == []
+    assert len(late_stage_fields()) == 26
+    # and the three E3 collaborators the late stages use
+    assert not_injected(deps, ("llm", "_log_phase_banner", "InferenceDeadlineError")) == []
+
+
+def test_the_late_stages_given_lifecycle_only_deps_fail_closed(tmp_path):
+    """E2's ``_stage_deps()`` carries none of the E4 collaborators: their defaults raise on use, never a silent None."""
+    from kriya.workflow.stage_apply import approval_gate
+    from kriya.workflow.stage_context import late_stage_fields
+    from kriya.workflow.stage_review import final_review
+
+    engine = _engine(tmp_path)
+    assert sorted(not_injected(engine._stage_deps(), late_stage_fields())) == sorted(late_stage_fields())
+    with pytest.raises(StageCollaboratorMissing):
+        asyncio.run(approval_gate(_apply_ctx(tmp_path), engine._stage_deps(), attempt_ctx=_NO_HELD_GATES))
+    with pytest.raises(StageCollaboratorMissing):
+        asyncio.run(final_review(_apply_ctx(tmp_path), engine._stage_deps()))
+
+
+class _AttemptCtx:
+    deferred_executing_gates = None
+
+
+_NO_HELD_GATES = _AttemptCtx()
+
+
+@pytest.mark.parametrize("mode, threshold, written, triggers, reason_start", [
+    ("human-in-the-loop", 100, ("calc.py",), ["human_in_the_loop"], "Human-in-the-loop review policy"),
+    ("autonomous", 1, ("calc.py",), ["diff_size"], "Risk threshold exceeded ("),
+    ("autonomous", 100, ("config/secrets.py",), ["sensitive_path"], "Sensitive path matched: config/secrets.py"),
+])
+def test_an_approval_trigger_asks_the_person_with_the_review_attached(tmp_path, mode, threshold, written, triggers,
+                                                                        reason_start):
+    from kriya.control.launch_approval import REVIEW_SECTION_HEADER
+    from kriya.workflow.stage_apply import approval_gate
+
+    engine = _reviewing_engine(tmp_path, mode=mode, risk_threshold_lines=threshold)
+    asked = []
+    ctx = _apply_ctx(tmp_path, written=written, approval_callback=lambda diffs, reason: asked.append((diffs, reason)) or True)
+    stop, required = asyncio.run(approval_gate(ctx, _late_deps(engine), attempt_ctx=_NO_HELD_GATES))
+    assert (stop, required) == (None, True)
+    [(diffs, reason)] = asked
+    assert [d["filepath"] for d in diffs] == list(written) and "+def mul(a, b):" in diffs[0]["content"]
+    assert reason.startswith(reason_start)
+    assert f"{REVIEW_SECTION_HEADER}\nREVIEW: looks right" in reason and ctx.state.pre_approval_review == "REVIEW: looks right"
+    assert _decisions(ctx.state) == [{"outcome": "approved", "triggers": triggers}]
+    assert engine.reviewer.run.await_count == 1
+
+
+def test_no_trigger_and_no_source_mutation_ask_nobody(tmp_path):
+    """Autonomous with a small diff, and human-in-the-loop with an empty change set (a verification-only unit): no
+    approval, no pre-approval review, no decision record."""
+    from kriya.workflow.stage_apply import approval_gate
+
+    for mode, written in (("autonomous", ("calc.py",)), ("human-in-the-loop", ())):
+        engine = _reviewing_engine(tmp_path / mode, mode=mode)
+        callback = MagicMock(return_value=True)
+        ctx = _apply_ctx(tmp_path / mode, written=written, approval_callback=callback)
+        assert asyncio.run(approval_gate(ctx, _late_deps(engine), attempt_ctx=_NO_HELD_GATES)) == (None, False)
+        callback.assert_not_called()
+        assert engine.reviewer.run.await_count == 0 and _decisions(ctx.state) == []
+
+
+def test_human_in_the_loop_without_a_callback_aborts_without_applying(tmp_path, monkeypatch):
+    """Approval required and nobody can be asked: the typed abort (approval_required), the sandbox reset, the checkpoint
+    deleted, the full trace row written; the real workspace keeps its bytes."""
+    from kriya.workflow import stage_apply
+
+    removed, deleted = [], []
+    monkeypatch.setattr(stage_apply, "remove_git_worktree", lambda workspace, worktree: removed.append((workspace, worktree)))
+    engine = _reviewing_engine(tmp_path)
+    ctx = _apply_ctx(tmp_path)
+    deps = _late_deps(engine, delete_checkpoint=lambda workspace, run_id: deleted.append((workspace, run_id)))
+    with patch("kriya.control.trace.TraceLogger.log_run") as log_run:
+        stop, required = asyncio.run(stage_apply.approval_gate(ctx, deps, attempt_ctx=_NO_HELD_GATES))
+    assert required is True
+    assert sorted(stop) == ["accepted_risk", "accepted_risks", "design", "files", "plan", "quality_gates_passed", "review",
+                            "review_included_in_approval", "run_id", "static_analysis"]
+    assert stop["review"].startswith("Not applied: human approval was required (Human-in-the-loop review policy")
+    assert (stop["quality_gates_passed"], stop["files"], stop["run_id"], stop["review_included_in_approval"]) == (
+        False, [], "run-1", False)
+    assert removed == [(ctx.workspace_path, ctx.worktree_path)] and deleted == [(ctx.workspace_path, "run-1")]
+    row = log_run.call_args.kwargs
+    assert (row["status"], row["failure_category"], row["files_modified"], row["failure_report"]) == (
+        "approval_required", "approval_required", ["calc.py"], [])
+    assert list(row) == ["run_id", "goal", "duration_sec", "attempts", "status", "files_modified", "retrieved_chunks",
+                         "active_skills", "prompt_rendered", "gate_outcomes", "model_hops", "failure_category",
+                         "failure_report", "milestone_group_id", "milestone_index", "milestone_total", "enforce_run_id",
+                         "run_events", "evidence_records", "generation_metrics"]
+    assert _decisions(ctx.state) == [{"outcome": "unavailable", "triggers": ["human_in_the_loop"]}]
+    assert engine.reviewer.run.await_count == 0      # nobody to show it to: no pre-approval review
+    assert (tmp_path / "ws" / "calc.py").read_text() == CALC_BASE
+
+
+def test_a_rejection_without_a_sandbox_restores_the_exact_original_bytes(tmp_path, monkeypatch):
+    """The in-place branch of the abort (no worktree: unreachable from run_generation_workflow since D0 refuses an in-place
+    sandbox, kept for the other callers): an existing file gets its exact original bytes back, a created one is removed."""
+    from kriya.workflow import stage_apply
+
+    monkeypatch.setattr(stage_apply, "remove_git_worktree", lambda *_a: pytest.fail("no sandbox to reset"))
+    engine = _reviewing_engine(tmp_path)
+    ctx = _apply_ctx(tmp_path, in_place=True, written=("calc.py", "made.py"),
+                     approval_callback=lambda diffs, reason: False)
+    # what the attempt captured before writing: calc.py's exact bytes, made.py did not exist
+    ctx.state.all_original_contents["made.py"] = ""
+    ctx.state.all_original_raw.update({"calc.py": CALC_BASE.encode(), "made.py": None})
+    with patch("kriya.control.trace.TraceLogger.log_run") as log_run:
+        stop, required = asyncio.run(stage_apply.approval_gate(ctx, _late_deps(engine), attempt_ctx=_NO_HELD_GATES))
+    assert required is True and stop["review"] == "Rejected by user during approval gate review."
+    assert stop["review_included_in_approval"] is True     # the person saw the review before saying no
+    assert log_run.call_args.kwargs["status"] == "human_rejected"
+    assert (tmp_path / "ws" / "calc.py").read_text() == CALC_BASE and not (tmp_path / "ws" / "made.py").exists()
+    assert _decisions(ctx.state) == [{"outcome": "rejected", "triggers": ["human_in_the_loop"]}]
+
+
+def test_the_final_review_reuses_the_pre_approval_report(tmp_path):
+    from kriya.workflow.stage_review import final_review
+
+    engine = _reviewing_engine(tmp_path)
+    steps = []
+    ctx = _apply_ctx(tmp_path, step_callback=lambda name, text: steps.append((name, text)))
+    ctx.state.pre_approval_review = "the report the person saw"
+    assert asyncio.run(final_review(ctx, _late_deps(engine))) == "the report the person saw"
+    assert engine.reviewer.run.await_count == 0 and steps == [("Review", "the report the person saw")]
+
+
+@pytest.mark.parametrize("error, reason_code", [
+    ("deadline", "GENERATION_DEADLINE_EXHAUSTED"),
+    (RuntimeError("scripted bug"), "FINAL_REVIEW_INTERNAL_ERROR"),
+    (ConnectionError("backend down"), "FINAL_REVIEW_BACKEND_ERROR"),
+])
+def test_a_refused_or_failed_final_review_is_the_typed_refusal(tmp_path, error, reason_code):
+    """Both refusal constructions (the typed deadline/budget refusal and any other review failure) set the refusal and
+    record review.refused; the review text says it was not performed; nothing raises."""
+    from kriya.core.llm import InferenceDeadlineError
+    from kriya.workflow.stage_review import final_review
+
+    if error == "deadline":
+        error = InferenceDeadlineError("GENERATION_DEADLINE_EXHAUSTED",
+                                       {"deadline_source": "run", "remaining_budget_at_dispatch_ms": 0})
+    engine = _reviewing_engine(tmp_path)
+    engine.reviewer.run = AsyncMock(side_effect=error)
+    ctx = _apply_ctx(tmp_path)
+    review = asyncio.run(final_review(ctx, _late_deps(engine)))
+    assert review.startswith("Final review not performed: ")
+    refusal = ctx.state.final_review_refusal
+    assert refusal["reason_code"] == reason_code and (refusal["batch"], refusal["batches"]) == (1, 1)
+    assert ("exception_type" in refusal) is (reason_code != "GENERATION_DEADLINE_EXHAUSTED")
+    [event] = [e for e in ctx.state.run_events if e.kind == "review.refused"]
+    assert event.details == refusal
+    assert ctx.state.reviewer_calls == 0
+
+
+def test_the_rejected_candidate_review_has_its_own_prompt_and_is_never_streamed(tmp_path):
+    from kriya.workflow.stage_review import final_review
+
+    engine = _reviewing_engine(tmp_path, review="Diagnosis: add() raises.\nHow to Run: python -m calc\n")
+    streamed = []
+    ctx = _apply_ctx(tmp_path, stream_callback=lambda name, token: streamed.append(name))
+    ctx.state.final_attempt_contents["calc.py"] = CALC_NEW
+    ctx.state.error_context = "test_add failed"
+    review = asyncio.run(final_review(ctx, _late_deps(engine)))
+    kwargs = engine.reviewer.run.await_args.kwargs
+    assert kwargs["stream_callback"] is None
+    assert kwargs["system_prompt_override"] == engine.reviewer.rejected_candidate_system_prompt("test_add failed")
+    assert review == engine.reviewer.extract_rejected_candidate_diagnostic("Diagnosis: add() raises.\nHow to Run: python -m calc\n")
+    assert ctx.state.reviewer_calls == 1 and streamed == []
+
+
+@pytest.mark.parametrize("retries, candidates, override, self_corrected, extract", [
+    (0, 0, None, False, False), (1, 1, None, False, False), (2, 0, None, False, True), (0, 2, None, False, True),
+    (0, 0, "fallback-model", False, True), (0, 0, None, True, True),
+])
+def test_the_hard_won_lesson_trigger(tmp_path, retries, candidates, override, self_corrected, extract):
+    from kriya.workflow.stage_apply import prepare_lessons
+
+    ctx = _apply_ctx(tmp_path)
+    ctx.state.budgets.retry_count, ctx.state.budgets.best_of_n_candidates_tried = retries, candidates
+    ctx.state.last_model_override = override
+    corrected = {"type": "compile", "self_corrected": True} if self_corrected else None
+    if corrected:
+        ctx.state.gate_outcomes.append(corrected)
+    assert prepare_lessons(ctx, _late_deps(_engine(tmp_path))) == (corrected, extract)
+
+
+def test_auto_accrual_scaffolds_only_a_suggested_dependency_the_final_content_uses(tmp_path):
+    from kriya.workflow.stage_apply import prepare_lessons
+
+    scaffolded = []
+
+    class Guard:
+        def generate_skill_template(self, coordinate, version):
+            scaffolded.append((coordinate, version))
+    ctx = _apply_ctx(tmp_path, guard=Guard())
+    (tmp_path / "wt" / "calc.py").write_text(CALC_NEW + "# uses mylib-core\n")
+    ctx.state.budgets.retry_count = 1
+    ctx.state.gate_outcomes.append({"output": "=== KRIYA PLATFORM DEPENDENCY SUGGESTIONS ===\n"
+                                              "<groupId>org.example</groupId><artifactId>mylib-core</artifactId><version>1.4.2</version>\n"
+                                              "<groupId>org.x</groupId><artifactId>never-used</artifactId><version>0.1</version>"})
+    prepare_lessons(ctx, _late_deps(_engine(tmp_path)))
+    assert scaffolded == [("org.example:mylib-core", "1.4.2")]
+    ctx.state.budgets.retry_count = 0     # a first-attempt success accrues nothing
+    prepare_lessons(ctx, _late_deps(_engine(tmp_path)))
+    assert scaffolded == [("org.example:mylib-core", "1.4.2")]
+
+
+def test_the_lesson_extraction_stages_the_facts_and_never_fails_the_run(tmp_path):
+    from kriya.workflow.stage_apply import extract_lessons
+
+    staged = []
+
+    class Staging:
+        @staticmethod
+        def stage_facts(folder, facts):
+            staged.append((folder, facts))
+            return list(facts)
+
+    class Channel:
+        def __init__(self, llm):
+            self.llm = llm
+
+        async def extract(self, context):
+            return ["a fact about " + ",".join(sorted(context.file_contents))]
+
+    from kriya.knowledge.channels.live_failure import LiveFailureContext
+
+    engine = _engine(tmp_path)
+    ctx = _apply_ctx(tmp_path, repo_slug="calc-repo")
+    (tmp_path / "ws" / "calc.py").write_text(CALC_NEW)   # applied
+    deps = _late_deps(engine, load_lesson_extraction=lambda: (Staging, Channel, LiveFailureContext))
+    asyncio.run(extract_lessons(ctx, deps, should_extract_hard_won_knowledge=True, self_corrected_outcome=None))
+    assert staged == [(os.path.join(engine.kernel.config.paths.skills, "auto-calc-repo"), ["a fact about calc.py"])]
+    asyncio.run(extract_lessons(ctx, deps, should_extract_hard_won_knowledge=False, self_corrected_outcome=None))
+    assert len(staged) == 1
+
+    def broken():
+        raise ImportError("knowledge staging unavailable")
+    with patch("kriya.workflow.workflow.logger") as facade_logger:
+        asyncio.run(extract_lessons(ctx, _late_deps(engine, load_lesson_extraction=broken),
+                                    should_extract_hard_won_knowledge=True, self_corrected_outcome=None))
+    facade_logger.warning.assert_called_once_with("Failed to extract lesson or update skills: knowledge staging unavailable")
+
+
+def test_the_moved_review_and_closers_log_through_the_facades_patched_logger(tmp_path):
+    """The ``kriya.workflow.workflow.logger`` guard for E4: the late stages get the facade's logger from
+    ``_late_stage_deps`` and the closers from ``_closer_deps``, both at call time."""
+    from kriya.workflow import workflow as workflow_module
+    from kriya.workflow.stage_review import final_review
+
+    engine = _reviewing_engine(tmp_path)
+    engine.reviewer.run = AsyncMock(side_effect=RuntimeError("boom"))
+    plain = tmp_path / "not-a-repo"
+    plain.mkdir()
+    with patch("kriya.workflow.workflow.logger") as facade_logger:
+        asyncio.run(final_review(_apply_ctx(tmp_path), _late_deps(engine)))
+        assert workflow_module._reference_test_files(str(plain), str(plain)) is None
+    assert facade_logger.error.call_args_list[-1].args[0] == "Final review not performed: RuntimeError: boom"
+    assert facade_logger.info.call_args_list[-1].args[0].startswith("Named-test oracle base revision unavailable: ")
+
+
+FORWARDED_CLOSERS = ("immutable_test_files", "_reference_test_files", "close_requirements_with_acceptance_tests",
+                     "close_requirements_with_derived_examples", "close_requirements_by_file_immutability",
+                     "close_requirements_by_test_immutability", "close_requirements_with_authority_bundle_evidence",
+                     "close_requirements_by_api_preservation", "close_requirements_by_test_addition",
+                     "close_requirements_by_suite_preservation", "close_requirements_with_named_tests",
+                     "_oracle_base_revision", "close_requirements_by_mutation_scope")
+
+
+@pytest.mark.parametrize("name", FORWARDED_CLOSERS)
+def test_each_closer_forwarder_keeps_the_moved_bodys_signature(name):
+    """A forwarder that drifts from its body would turn a caller's TypeError into a different one, or drop a keyword."""
+    import inspect
+
+    from kriya.workflow import requirement_closers
+    from kriya.workflow import workflow as workflow_module
+
+    facade = list(inspect.signature(getattr(workflow_module, name)).parameters.values())
+    body = list(inspect.signature(getattr(requirement_closers, name)).parameters.values())
+    assert body[0].name == "deps"
+    assert [(p.name, p.kind, p.default) for p in facade] == [(p.name, p.kind, p.default) for p in body[1:]]
+    assert getattr(workflow_module, name).__module__ == "kriya.workflow.workflow"   # the facade keeps the definition

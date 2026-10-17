@@ -1,12 +1,9 @@
 import asyncio
 import dataclasses
-import difflib
-import functools
 import hashlib
 import json
 import logging
 import os
-import re
 from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.agents.agent import (
@@ -56,6 +53,7 @@ from kriya.static_analysis.service import (
 )
 from kriya.tools import test_execution
 from kriya.tools.validate import PolymorphicValidator, execution_evidence
+from kriya.workflow import requirement_closers as closers
 from kriya.workflow.acceptance import goal_requires_runtime_behavior, output_confirms_nonzero_test_execution
 from kriya.workflow.acceptance_approval import bound_approval
 from kriya.workflow.acceptance_oracle import bound_acceptance
@@ -88,7 +86,7 @@ from kriya.workflow.attribution import (
 from kriya.workflow.attribution import (
     find_whole_response_no_op as find_whole_response_no_op,
 )
-from kriya.workflow.banners import log_gate_banner, log_quality_gate_banner
+from kriya.workflow.banners import log_quality_gate_banner
 from kriya.workflow.best_of_n import BestOfNFailureRecorded
 from kriya.workflow.checkpoint import (
     ResumeAction,
@@ -134,14 +132,16 @@ from kriya.workflow.context_budget import (
     skeletonize_python as skeletonize_python,
 )
 from kriya.workflow.contract_authority import derive_direct_contract_authorizations
-from kriya.workflow.contract_lifecycle import CONTRACT_REGISTRY_STOP_REASON_CODES, derive_contract_transition
+from kriya.workflow.contract_lifecycle import derive_contract_transition
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
 from kriya.workflow.edit_safety import (
     apply_anchored_edits as apply_anchored_edits,
 )
 from kriya.workflow.edit_safety import (
-    atomic_write_file,
+    atomic_write_file as atomic_write_file,  # E4: the abort path moved to stage_apply; tests import it from here
+)
+from kriya.workflow.edit_safety import (
     commit_revision_grounded_file,
     content_revision,
     read_file_revision,
@@ -150,7 +150,6 @@ from kriya.workflow.edit_safety import (
     find_structural_corruption as find_structural_corruption,
 )
 from kriya.workflow.egress_authority import egress_authority_details
-from kriya.workflow.exception_masking import find_masking_in_batch
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import (
     _build_error_source_context as _build_error_source_context,
@@ -176,7 +175,6 @@ from kriya.workflow.failure_grounding import (
 from kriya.workflow.failure_grounding import (
     extract_implicated_files as extract_implicated_files,
 )
-from kriya.workflow.failure_reporting import build_failure_report_entry
 from kriya.workflow.file_integrity import (
     display_text,
     raw_digest,
@@ -270,6 +268,21 @@ from kriya.workflow.pytest_stability import (
     record_regression_decision,
 )
 from kriya.workflow.pytest_stability import decision_summary as pytest_decision_summary
+
+# E4: the closers that need no facade collaborator, re-exported here (kriya/, tests and the remaining contract
+# compilation import them from this module); the others are forwarders below.
+from kriya.workflow.requirement_closers import SUITE_BASELINE_FROM_RUN as SUITE_BASELINE_FROM_RUN
+from kriya.workflow.requirement_closers import SUITE_BASELINE_LAZY_CAPTURE as SUITE_BASELINE_LAZY_CAPTURE
+from kriya.workflow.requirement_closers import _candidate_test_files as _candidate_test_files
+from kriya.workflow.requirement_closers import _tracked_workspace_paths as _tracked_workspace_paths
+from kriya.workflow.requirement_closers import _workspace_file_reader as _workspace_file_reader
+from kriya.workflow.requirement_closers import _workspace_head as _workspace_head
+from kriya.workflow.requirement_closers import (
+    close_requirements_by_documentation as close_requirements_by_documentation,
+)
+from kriya.workflow.requirement_closers import documentation_referent_paths as documentation_referent_paths
+from kriya.workflow.requirement_closers import frozen_file_paths as frozen_file_paths
+from kriya.workflow.requirement_closers import named_preserved_test_files as named_preserved_test_files
 from kriya.workflow.requirement_contract import bound_requirement_contract, requirement_set_for
 from kriya.workflow.requirements import (
     REQUIREMENTS_UNRESOLVED,
@@ -343,7 +356,16 @@ from kriya.workflow.skill_extraction import (
 from kriya.workflow.skill_extraction import (
     _likely_misattributed_sibling as _likely_misattributed_sibling,
 )
+from kriya.workflow.stage_apply import (
+    apply_terminal_candidate,
+    approval_gate,
+    extract_lessons,
+    prepare_lessons,
+    run_semantic_safety_gate,
+    run_static_analysis_gate,
+)
 from kriya.workflow.stage_context import StageContext, StageDeps
+from kriya.workflow.stage_review import final_review
 from kriya.workflow.state import GenerationState, RecoveryPhaseAdvanced
 from kriya.workflow.suite_attribution import (
     SCOPE_FULL_REGRESSION,
@@ -380,7 +402,6 @@ from kriya.workflow.toolchain import (
 from kriya.workflow.triage import EngineeringRoute, EngineeringTriageService
 from kriya.workflow.validation_baseline import (
     DeltaClassification,
-    _capture_single_baseline,
     build_validation_outcome,
     capture_brownfield_baselines,
     regression_unattributed_diagnosis,
@@ -393,7 +414,9 @@ from kriya.workflow.work_unit_runner import run_design_stages
 from kriya.workflow.worktree import (
     WorktreeSyncError,
     create_git_worktree,
-    remove_git_worktree,
+)
+from kriya.workflow.worktree import (
+    remove_git_worktree as remove_git_worktree,  # E4: its call sites moved to stage_apply; tests import it from here
 )
 
 logger = logging.getLogger(__name__)
@@ -1034,83 +1057,16 @@ def _settle_future_owner_verification_obligations(
     return settled
 
 
-def _candidate_test_files(candidate_root: str) -> List[str]:
-    """The runnable test files of the candidate tree (a requirement's own
-    words may name them)."""
-    from kriya.workflow.file_resolution import is_runnable_test_file
-
-    test_files: List[str] = []
-    for root, dirs, files in os.walk(candidate_root):
-        dirs[:] = [d for d in dirs if d not in {".git", ".kriya", "node_modules", ".venv", "venv",
-                                                "__pycache__", "target", "build", "dist"}]
-        for name in files:
-            rel = os.path.relpath(os.path.join(root, name), candidate_root)
-            if is_runnable_test_file(rel):
-                test_files.append(rel)
-    return test_files
-
-
-def named_preserved_test_files(contract: Any) -> List[str]:
-    """PLAN-NAMED-TEST-IMMUTABILITY-001: the existing test files a PURE regression-preservation statement names ("Every
-    existing test in tests/test_a.py must keep passing unchanged"), read from the sealed contract's named-tests binding
-    (the compiler decided them from the goal's own words and the base tree). Only an entry whose single required claim is
-    REGRESSION_PRESERVATION counts: a statement that also asks for a test to be added (TEST_ADDITION) or for behaviour
-    (BEHAVIOR) is left to the terminal closure, which refuses a candidate-written named test whatever else it claims
-    (``close_unverified_requirements_with_named_tests``). A planning input; never a model input."""
-    from kriya.workflow.contract_compilation import CLOSER_NAMED_TESTS
-    from kriya.workflow.requirements import REGRESSION_PRESERVATION
-
-    if contract is None:
-        return []
-    pure = {entry.requirement_id for entry in getattr(contract, "entries", None) or ()
-            if tuple(entry.required_claims) == (REGRESSION_PRESERVATION,)}
-    return sorted({path for rid, binding in contract.binding_closers(CLOSER_NAMED_TESTS) if rid in pure
-                   for path in binding.detail.get("tests") or ()})
-
-
 def immutable_test_files(contract: Any, workspace_path: str) -> Optional[List[str]]:
-    """PLAN-TEST-IMMUTABILITY-SCOPE-001: the existing test files a plan may not edit or delete, else None. Two sources:
-    the tracked runnable test files of the workspace's HEAD when the sealed verification contract carries a
-    TEST_IMMUTABILITY claim (the goal says existing tests must stay as they are), and - PLAN-NAMED-TEST-IMMUTABILITY-001 -
-    the test files a pure regression-preservation statement names (``named_preserved_test_files``). A planning-time input
-    only: the terminal gate still judges the candidate's test tree against the same base."""
-    from kriya.workflow.file_resolution import is_runnable_test_file
-    from kriya.workflow.named_test_oracle import BaseTree
-    from kriya.workflow.requirements import TEST_IMMUTABILITY_CLAIM
-
-    frozen = set(named_preserved_test_files(contract))
-    entries = getattr(contract, "entries", None) or ()
-    if any(TEST_IMMUTABILITY_CLAIM in getattr(entry, "required_claims", ()) for entry in entries):
-        head = _workspace_head(workspace_path)
-        if head:
-            try:
-                frozen.update(path for path in BaseTree(workspace_path, head).paths if is_runnable_test_file(path))
-            except Exception as exc:  # unreadable base: only the named files constrain planning (the terminal gate still refuses)
-                logger.info(f"Immutable test files unavailable for planning: {type(exc).__name__}: {exc}")
-    return sorted(frozen) or None
+    """The body is ``kriya/workflow/requirement_closers.py::immutable_test_files`` (E4); its collaborators
+    are resolved here, at call time."""
+    return closers.immutable_test_files(_closer_deps(), contract, workspace_path)
 
 
 def _reference_test_files(candidate_root: str, workspace_path: str) -> Optional[List[str]]:
-    """The test files that existed before this run: the real workspace's
-    (untouched until apply) and the run base's. A statement naming one of
-    them claims regression preservation even when the candidate deleted it.
-    None when that cannot be established (an in-place candidate with no
-    readable base): the caller then assumes the statement claims both."""
-    from kriya.workflow.file_resolution import is_runnable_test_file
-    from kriya.workflow.named_test_oracle import BaseTree
-
-    in_place = os.path.realpath(candidate_root) == os.path.realpath(workspace_path)
-    files = [] if in_place else _candidate_test_files(workspace_path)
-    base_revision = _oracle_base_revision(candidate_root, workspace_path)
-    if base_revision:
-        try:
-            files += [path for path in BaseTree(candidate_root, base_revision).paths if is_runnable_test_file(path)]
-        except Exception as exc:  # unreadable base (git error, I/O): unknown, both claims required
-            logger.info(f"Acceptance: base test files unavailable: {type(exc).__name__}: {exc}")
-            return None
-    elif in_place:
-        return None
-    return sorted(set(files))
+    """The body is ``kriya/workflow/requirement_closers.py::_reference_test_files`` (E4); its collaborators
+    are resolved here, at call time."""
+    return closers._reference_test_files(_closer_deps(), candidate_root, workspace_path)
 
 
 def close_requirements_with_acceptance_tests(
@@ -1119,50 +1075,13 @@ def close_requirements_with_acceptance_tests(
     tree_binding: Any = None, approval: Any = None, contract: Any = None, companion: Any = None,
     source: str = "requirement_closure.acceptance",
 ) -> List[Dict[str, Any]]:
-    """FS-1C2 B2-a: judges the BEHAVIOR claims the operator's acceptance file
-    (bound before generation; ``acceptance`` None = none was given) covers,
-    by running it once, under Kriya's own runner, on the candidate at
-    ``candidate_root`` - see kriya/workflow/acceptance_oracle.py. Shared by the
-    direct/milestone pre-apply boundary and enforce's terminal gate, before
-    the named-test closure. With no artifact it only supersedes an earlier
-    acceptance judgment of the same candidate (never runs anything)."""
-    from kriya.workflow.acceptance_jvm import run_java_acceptance
-    from kriya.workflow.acceptance_oracle import close_requirements_with_acceptance, run_acceptance
-
-    modified = list(modified)
-    test_files = _candidate_test_files(candidate_root)
-    reference = _reference_test_files(candidate_root, workspace_path)
-
-    def validator() -> PolymorphicValidator:
-        built = PolymorphicValidator(
-            candidate_root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
-            toolchain_declaration_mutable=toolchain_declaration_mutable,
-        )
-        built.tree_binding = tree_binding
-        return built
-
-    def export_validator(root: str) -> PolymorphicValidator:
-        # B2-c: a Kriya-owned copy of the candidate; its build configuration is
-        # the authorized base's (trust surface checked first), so no toolchain
-        # declaration may differ there.
-        return PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
-
-    base_revision = _oracle_base_revision(candidate_root, workspace_path) if acceptance is not None else None
-
-    def execute(artifact: Any) -> Any:
-        if artifact.language == "java":
-            return run_java_acceptance(artifact, candidate_root, candidate_paths=modified,
-                                       base_revision=base_revision, validator_factory=export_validator)
-        return run_acceptance(artifact, candidate_root, candidate_paths=modified, validator_factory=validator)
-
-    from kriya.workflow.contract_closers import contract_claims_map
-
-    return close_requirements_with_acceptance(
-        ledger, requirement_set, acceptance,
-        test_files=None if reference is None else sorted(set(test_files) | set(reference)),
-        execute=execute, source=source, revision=revision,
-        approval=approval, base_revision=base_revision, contract_claims=contract_claims_map(contract),
-        companion_digests=[companion.digest] if companion is not None else (),
+    """The body is ``kriya/workflow/requirement_closers.py::close_requirements_with_acceptance_tests`` (E4); its collaborators
+    are resolved here, at call time."""
+    return closers.close_requirements_with_acceptance_tests(
+        _closer_deps(), autonomy_cfg, ledger, requirement_set, candidate_root, workspace_path,
+        acceptance=acceptance, modified=modified, revision=revision,
+        toolchain_declaration_mutable=toolchain_declaration_mutable, tree_binding=tree_binding, approval=approval,
+        contract=contract, companion=companion, source=source
     )
 
 
@@ -1171,21 +1090,12 @@ def close_requirements_with_derived_examples(
     engine: Any, modified: Iterable[str], revision: Any, toolchain_declaration_mutable: bool,
     tree_binding: Any = None, contract: Any = None,
 ) -> List[Dict[str, Any]]:
-    """VERIFICATION-CONTRACT-003: the goal's compiled example module (bound by
-    the contract compilation before any model call) judges the EXACT
-    behaviour statements it covers, through the same B2-a boundary as the
-    operator's file; the operator's artifact (if any) is its companion, so
-    neither supersedes the other's records."""
-    from kriya.workflow.example_oracle import bound_derived_examples
-
-    examples = bound_derived_examples(engine)
-    if examples is None:
-        return []
-    return close_requirements_with_acceptance_tests(
-        autonomy_cfg, ledger, requirement_set, candidate_root, workspace_path, acceptance=examples,
+    """The body is ``kriya/workflow/requirement_closers.py::close_requirements_with_derived_examples`` (E4); its collaborators
+    are resolved here, at call time."""
+    return closers.close_requirements_with_derived_examples(
+        _closer_deps(), autonomy_cfg, ledger, requirement_set, candidate_root, workspace_path, engine=engine,
         modified=modified, revision=revision, toolchain_declaration_mutable=toolchain_declaration_mutable,
-        tree_binding=tree_binding, approval=None, contract=contract, companion=bound_acceptance(engine),
-        source="requirement_closure.derived_examples",
+        tree_binding=tree_binding, contract=contract
     )
 
 
@@ -1251,17 +1161,6 @@ def _acceptance_requirement_ids(acceptance: Any) -> List[str]:
     return sorted(getattr(acceptance, "requirement_ids", ()) or ()) if acceptance is not None else []
 
 
-def _tracked_workspace_paths(workspace_path: str) -> List[str]:
-    """The paths git tracks in the workspace (the referent set of a mutation-scope
-    statement at admission); empty when git cannot answer."""
-    from kriya.workflow.worktree import git_read_lines
-
-    try:
-        return [path for path in git_read_lines(workspace_path, "ls-files") if path]
-    except Exception:
-        return []
-
-
 _PYTHON_MANIFESTS = frozenset({"pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"})
 _JVM_MANIFESTS = frozenset({"pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"})
 
@@ -1281,29 +1180,6 @@ def _project_language(tracked_paths: Iterable[str]) -> Optional[str]:
     if any(path.endswith(".py") for path in paths):
         return "python"
     return None
-
-
-def _workspace_file_reader(workspace_path: str) -> Callable[[str], Optional[bytes]]:
-    """A reader of tracked files for the contract compiler's documentation
-    referent inspection; None for an unreadable path (fail closed there)."""
-
-    def read(path: str) -> Optional[bytes]:
-        try:
-            with open(os.path.join(workspace_path, path), "rb") as handle:
-                return handle.read()
-        except OSError:
-            return None
-
-    return read
-
-
-def _workspace_head(workspace_path: str) -> Optional[str]:
-    from kriya.workflow.worktree import git_read_lines
-
-    try:
-        return git_read_lines(workspace_path, "rev-parse", "HEAD")[0]
-    except Exception:
-        return None
 
 
 def compile_run_contract(engine: Any, requirement_goal: Optional[str], goal: str, workspace_path: str,
@@ -1374,61 +1250,15 @@ def seal_run_contract(config: Any, contract: Any) -> Optional[str]:
         return None
 
 
-def frozen_file_paths(contract: Any) -> Dict[str, List[str]]:
-    """OD-3 (BACKEND-FINAL-CLOSURE-005): requirement id -> the tracked files its
-    FILE_IMMUTABILITY claim freezes, read from the sealed contract's binding
-    (the compiler decided them from the goal's words and the base tree). A
-    planning constraint and the terminal closer's referent; never a model input."""
-    from kriya.workflow.requirements import FILE_IMMUTABILITY
-
-    if contract is None:
-        return {}
-    return {rid: list(binding.detail.get("frozen_paths") or ())
-            for rid, binding in contract.binding_closers(FILE_IMMUTABILITY)}
-
-
-def documentation_referent_paths(contract: Any) -> List[str]:
-    """PLAN-DOCUMENTATION-UNIT-VERIFICATION-001: the tracked documentation
-    files a sealed contract judges deterministically (the referents of its
-    DOCUMENTATION claims bound to the documentation-entries predicate) - a
-    planning input: a unit that edits only these declares no verification
-    of its own."""
-    from kriya.workflow.contract_compilation import CLOSER_DOCUMENTATION_LIST_ENTRIES
-
-    if contract is None:
-        return []
-    paths: List[str] = []
-    for _rid, binding in contract.binding_closers(CLOSER_DOCUMENTATION_LIST_ENTRIES):
-        # Only the files whose named list section the sealed predicate actually judges (its ``headings`` are
-        # "<path>: <heading>"): a docs-directory referent's ``paths`` lists every file under docs/, code included
-        # (docs/conf.py) - independent review of the repair (finding 1) - and those are never exempt.
-        for entry in binding.detail.get("headings") or ():
-            path = str(entry).split(": ", 1)[0]
-            if path and path not in paths:
-                paths.append(path)
-    return paths
-
-
 def close_requirements_by_file_immutability(
     ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
     candidate_paths: Iterable[str], revision: Any, contract: Any = None,
 ) -> List[Dict[str, Any]]:
-    """OD-3: decides every "do not modify <named file>" requirement from the
-    run's own mutation record (mutation_scope_evidence) - a frozen file the
-    candidate changed, deleted or renamed is VIOLATED, every frozen file
-    byte-identical and present closes it. Shared by the pre-apply boundary
-    and enforce's terminal gate; a goal without such a requirement costs
-    nothing."""
-    from kriya.workflow.requirements import close_file_immutability_requirements
-
-    frozen = frozen_file_paths(contract)
-    if not frozen:
-        return []
-    _tracked, evidence = mutation_scope_evidence(candidate_root, workspace_path, candidate_paths=candidate_paths)
-    present = [path for paths in frozen.values() for path in paths if os.path.isfile(os.path.join(candidate_root, path))]
-    return close_file_immutability_requirements(
-        ledger, requirement_set, frozen_paths_by_requirement=frozen, present_paths=present, scope_evidence=evidence,
-        source="requirement_closure.file_immutability", revision=revision,
+    """The body is ``kriya/workflow/requirement_closers.py::close_requirements_by_file_immutability`` (E4); its collaborators
+    are resolved here, at call time."""
+    return closers.close_requirements_by_file_immutability(
+        _closer_deps(), ledger, requirement_set, candidate_root, workspace_path, candidate_paths=candidate_paths,
+        revision=revision, contract=contract
     )
 
 
@@ -1436,29 +1266,11 @@ def close_requirements_by_test_immutability(
     ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
     candidate_paths: Iterable[str], revision: Any, contract: Any = None,
 ) -> List[Dict[str, Any]]:
-    """REQUIREMENT-CLOSURE-PLAIN-GOAL-001: decides every "do not change any
-    existing test" requirement from the run's own mutation record
-    (mutation_scope_evidence) against the tests that existed before the run
-    (_reference_test_files). Shared by the pre-apply boundary and enforce's
-    terminal gate; a goal without such a requirement costs nothing. With the
-    sealed contract (VERIFICATION-CONTRACT-003) every requirement claiming
-    TEST_IMMUTABILITY is decided, compound statements as their claim."""
-    from kriya.workflow.contract_closers import contract_claims_map
-    from kriya.workflow.requirements import (
-        TEST_IMMUTABILITY_CLAIM,
-        close_test_immutability_requirements,
-        is_test_immutability_requirement,
-    )
-
-    claims = contract_claims_map(contract)
-    if not any(TEST_IMMUTABILITY_CLAIM in (claims.get(r.id) or ()) or (not claims and is_test_immutability_requirement(r.text))
-               for r in requirement_set.requirements):
-        return []
-    _tracked, evidence = mutation_scope_evidence(candidate_root, workspace_path, candidate_paths=candidate_paths)
-    return close_test_immutability_requirements(
-        ledger, requirement_set, reference_test_files=_reference_test_files(candidate_root, workspace_path),
-        present_test_files=_candidate_test_files(candidate_root), scope_evidence=evidence,
-        source="requirement_closure.test_immutability", revision=revision, contract_claims=claims,
+    """The body is ``kriya/workflow/requirement_closers.py::close_requirements_by_test_immutability`` (E4); its collaborators
+    are resolved here, at call time."""
+    return closers.close_requirements_by_test_immutability(
+        _closer_deps(), ledger, requirement_set, candidate_root, workspace_path, candidate_paths=candidate_paths,
+        revision=revision, contract=contract
     )
 
 
@@ -1540,37 +1352,12 @@ def close_requirements_with_authority_bundle_evidence(
     autonomy_cfg: Any, ledger: Any, requirement_set: Any, contract: Any, candidate_root: str, workspace_path: str, *,
     engine: Any, revision: Any, toolchain_declaration_mutable: bool, tree_binding: Any = None,
 ) -> List[Dict[str, Any]]:
-    """VERIFICATION-CONTRACT-003 (D2): the operator's sealed external oracle
-    (kriya/workflow/authority_bundle.py) judges the requirements the sealed
-    contract bound to it, run once on a Kriya-owned copy of the candidate
-    through the production containment boundary (the validator the gates
-    use, with the run's toolchain authority)."""
-    from kriya.core.state_paths import resolve_state_directory
-    from kriya.workflow.authority_bundle import (
-        bound_authority_bundle,
-        close_requirements_with_authority_bundle,
-        run_authority_bundle,
-    )
-
-    bundle = bound_authority_bundle(engine)
-    if bundle is None or contract is None:
-        return []
-    config = getattr(getattr(engine, "kernel", None), "config", None)
-    state_root = resolve_state_directory(config)[0] if config is not None else None
-    if state_root is None:
-        return []
-
-    def validator_for(root: str) -> PolymorphicValidator:
-        built = PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
-                                     toolchain_declaration_mutable=toolchain_declaration_mutable)
-        built.tree_binding = tree_binding
-        return built
-
-    return close_requirements_with_authority_bundle(
-        ledger, requirement_set, bundle, contract,
-        execute=lambda: run_authority_bundle(bundle, candidate_root, state_root=state_root, validator_factory=validator_for),
-        source="requirement_closure.external_acceptance_command", revision=revision,
-        base_revision=_oracle_base_revision(candidate_root, workspace_path),
+    """The body is ``kriya/workflow/requirement_closers.py::close_requirements_with_authority_bundle_evidence`` (E4); its collaborators
+    are resolved here, at call time."""
+    return closers.close_requirements_with_authority_bundle_evidence(
+        _closer_deps(), autonomy_cfg, ledger, requirement_set, contract, candidate_root, workspace_path,
+        engine=engine, revision=revision, toolchain_declaration_mutable=toolchain_declaration_mutable,
+        tree_binding=tree_binding
     )
 
 
@@ -1578,25 +1365,11 @@ def close_requirements_by_api_preservation(
     ledger: Any, requirement_set: Any, contract: Any, candidate_root: str, workspace_path: str, *,
     candidate_paths: Iterable[str], revision: Any,
 ) -> List[Dict[str, Any]]:
-    """VERIFICATION-CONTRACT-003: the Python public-API predicate
-    (kriya/workflow/api_preservation.py) for every requirement the sealed
-    contract bound to it: base revision versus the candidate, one comparison."""
-    from kriya.workflow.api_preservation import close_api_preservation_requirements, compare_public_api
-    from kriya.workflow.contract_closers import contract_claims_map
-    from kriya.workflow.contract_compilation import CLOSER_API_PRESERVATION
-
-    bindings = contract.binding_closers(CLOSER_API_PRESERVATION) if contract is not None else []
-    if not bindings:
-        return []
-    candidate_files = sorted(set(_tracked_workspace_paths(candidate_root)) | set(candidate_paths))
-    # The contract sealed which predicate applies (the project language at compile time); never re-derived here.
-    language = str(bindings[0][1].detail.get("language") or "python")
-    comparison = compare_public_api(candidate_root, _oracle_base_revision(candidate_root, workspace_path),
-                                    candidate_files=candidate_files, read_candidate=_workspace_file_reader(candidate_root),
-                                    language=language)
-    return close_api_preservation_requirements(
-        ledger, requirement_set, contract_claims=contract_claims_map(contract), comparison=comparison,
-        source="requirement_closure.api_preservation", revision=revision,
+    """The body is ``kriya/workflow/requirement_closers.py::close_requirements_by_api_preservation`` (E4); its collaborators
+    are resolved here, at call time."""
+    return closers.close_requirements_by_api_preservation(
+        _closer_deps(), ledger, requirement_set, contract, candidate_root, workspace_path,
+        candidate_paths=candidate_paths, revision=revision
     )
 
 
@@ -1605,55 +1378,13 @@ def close_requirements_by_test_addition(
     base_test_identities: Optional[Iterable[str]] = None, candidate_test_identities: Optional[Iterable[str]] = None,
     revision: Any,
 ) -> List[Dict[str, Any]]:
-    """VERIFICATION-CONTRACT-003: "add a test for it" from the candidate's own
-    test files versus the pre-run set, or its structured test identities
-    versus the base's (kriya/workflow/contract_closers.py)."""
-    from kriya.workflow.contract_closers import close_test_addition_requirements
-    from kriya.workflow.contract_compilation import CLOSER_TEST_ADDITION
-
-    if contract is None or not contract.binding_closers(CLOSER_TEST_ADDITION):
-        return []
-    return close_test_addition_requirements(
-        ledger, requirement_set, contract, reference_test_files=_reference_test_files(candidate_root, workspace_path),
-        candidate_test_files=_candidate_test_files(candidate_root), base_test_identities=base_test_identities,
-        candidate_test_identities=candidate_test_identities, source="requirement_closure.test_addition",
-        revision=revision, read_candidate=_workspace_file_reader(candidate_root),
+    """The body is ``kriya/workflow/requirement_closers.py::close_requirements_by_test_addition`` (E4); its collaborators
+    are resolved here, at call time."""
+    return closers.close_requirements_by_test_addition(
+        _closer_deps(), ledger, requirement_set, contract, candidate_root, workspace_path,
+        base_test_identities=base_test_identities, candidate_test_identities=candidate_test_identities,
+        revision=revision
     )
-
-
-def close_requirements_by_documentation(
-    ledger: Any, requirement_set: Any, contract: Any, candidate_root: str, *, revision: Any,
-) -> List[Dict[str, Any]]:
-    """VERIFICATION-CONTRACT-003: a conditional documentation request whose
-    referent the candidate still lacks (kriya/workflow/contract_closers.py)."""
-    from kriya.workflow.contract_closers import close_documentation_requirements
-    from kriya.workflow.contract_compilation import (
-        CLOSER_DOCUMENTATION_LIST_ENTRIES,
-        CLOSER_DOCUMENTATION_NOT_APPLICABLE,
-    )
-
-    if contract is None or not (contract.binding_closers(CLOSER_DOCUMENTATION_NOT_APPLICABLE)
-                                or contract.binding_closers(CLOSER_DOCUMENTATION_LIST_ENTRIES)):
-        return []
-    tracked = set(_tracked_workspace_paths(candidate_root))
-    for root, dirs, files in os.walk(candidate_root):  # untracked additions count as present too
-        dirs[:] = [d for d in dirs if d not in {".git", ".kriya", "node_modules", "__pycache__"}]
-        tracked.update(os.path.relpath(os.path.join(root, name), candidate_root) for name in files)
-    return close_documentation_requirements(
-        ledger, requirement_set, contract, candidate_tracked_paths=tracked,
-        read_candidate=_workspace_file_reader(candidate_root), source="requirement_closure.documentation",
-        revision=revision,
-    )
-
-
-SCOPE_SUITE_PRESERVATION = "suite_preservation"
-
-
-# SUITE-PRESERVATION-DIRECT-BASELINE-POLICY-001 (2026-10-10): who owns the PRE-mutation baseline a suite-preservation
-# closure may judge through - an explicit caller input, never inferred from a missing baseline. Closed set.
-SUITE_BASELINE_FROM_RUN = "run"            # the direct terminal gate: the run's baseline policy owns it; none means none
-SUITE_BASELINE_LAZY_CAPTURE = "lazy_capture"  # the enforce terminal gate: captured lazily on the untouched workspace
-_SUITE_BASELINE_SOURCES = frozenset({SUITE_BASELINE_FROM_RUN, SUITE_BASELINE_LAZY_CAPTURE})
 
 
 def close_requirements_by_suite_preservation(
@@ -1664,125 +1395,14 @@ def close_requirements_by_suite_preservation(
     baseline_suite_run: Optional[Callable[[Optional[Tuple[str, ...]]], Dict[str, Any]]] = None,
     run_baseline_policy: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """REQUIREMENT-CLOSURE-PLAIN-GOAL-001: closes every UNVERIFIED whole-suite
-    preservation requirement ("every existing test must keep passing") from
-    the candidate's own full test run under the production test gate, with
-    the run's toolchain authority (as the named-test closer): COMPLETE
-    structured evidence, tests executed, the suite green. The suite runs
-    once, only when such a requirement is open.
-
-    SUITE-PRESERVATION-CLOSURE-BASELINE-ATTRIBUTION-001: a failing candidate
-    suite is judged against the frozen PRE-mutation baseline by the one
-    attribution owner (kriya/workflow/suite_attribution.py, the decision the
-    terminal regression check and the candidate gates make). The direct
-    boundary passes the run's captured full-regression baseline, its
-    stability cache and its baseline replay (``suite_baseline``,
-    ``stability_cache``, ``baseline_suite_run``: nothing runs twice); the
-    enforce terminal gate passes none, and the baseline is then captured
-    lazily on the untouched real workspace (immutable until commit,
-    PRD-004) through the same capture the run start uses - once per
-    closure, only when the candidate suite failed, never for a green suite
-    - under the same validator and toolchain identity as the candidate run.
-    An indeterminate run baseline, a baseline that cannot be captured or an
-    attribution that cannot be made is reported as unavailable, and the
-    closer fails closed (REGRESSION_UNATTRIBUTED).
-
-    SUITE-PRESERVATION-DIRECT-BASELINE-POLICY-001 (review F3, 2026-10-10):
-    ``baseline_source`` is the caller's explicit statement of who owns the
-    baseline. ``SUITE_BASELINE_FROM_RUN`` (the direct terminal gate): the
-    run's effective policy (``run_baseline_policy``, recorded at run start)
-    decided whether a baseline exists; when it captured none (``disabled``,
-    or ``auto`` resolved to not required) a failing suite is unattributable
-    by policy - no lazy capture, no attribution authority the operator did
-    not grant, the typed REGRESSION_UNATTRIBUTED refusal. ``SUITE_BASELINE_
-    LAZY_CAPTURE`` (the enforce terminal gate) keeps the lazy capture above.
-    Any other value is refused before anything runs: the distinction is
-    never inferred from ``suite_baseline is None``."""
-    if baseline_source not in _SUITE_BASELINE_SOURCES:
-        raise ValueError(f"close_requirements_by_suite_preservation: unknown baseline_source {baseline_source!r} "
-                         f"(expected one of {sorted(_SUITE_BASELINE_SOURCES)})")
-    from kriya.workflow.baseline_policy import baseline_environment_identity
-    from kriya.workflow.contract_closers import contract_claims_map
-    from kriya.workflow.requirements import (
-        SUITE_PRESERVATION,
-        close_suite_preservation_requirements,
-        is_suite_preservation_requirement,
-        test_immutability_evidence,
-    )
-
-    candidate_paths = list(candidate_paths)
-    cache: Dict[str, Dict[str, Any]] = stability_cache if stability_cache is not None else {}
-
-    def untouched_workspace_run(target_test: Optional[Tuple[str, ...]]) -> Dict[str, Any]:
-        # The run start's own baseline call (run_generation_workflow's baseline_suite_run): the same validator and
-        # config on the untouched workspace, for the capture and for the owner's bounded stability replay.
-        return PolymorphicValidator(
-            workspace_path, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
-        ).run_tests(target_test=target_test)
-
-    baseline_run = baseline_suite_run or untouched_workspace_run
-
-    def attribute_suite(result: Dict[str, Any]) -> Tuple[Optional[Any], Optional[str]]:
-        # The closer asks exactly once per closure attempt (one candidate run, one decision for every pending
-        # requirement), so the lazy capture below runs at most once per closure.
-        baseline = captured_baseline(suite_baseline)
-        if baseline is None and suite_baseline is not None:
-            return None, ("the run's PRE-mutation baseline is indeterminate: "
-                          f"{getattr(suite_baseline, 'indeterminate_reason', None)}")
-        if baseline is None and baseline_source == SUITE_BASELINE_FROM_RUN:
-            # The run's policy captured no baseline; the direct closure owns no capture of its own.
-            return None, (f"the run's full-regression baseline policy ({run_baseline_policy or 'not required'}) "
-                          "captured no PRE-mutation baseline, and the direct terminal closure may not capture one")
-        if baseline is None:
-            try:
-                environment = baseline_environment_identity(workspace_path, autonomy_cfg, goal=goal)
-            except Exception as exc:
-                logger.warning(f"Suite-preservation baseline environment identity unavailable: {exc}")
-                environment = None
-            lazily_captured = _capture_single_baseline(
-                run_id=f"{SCOPE_SUITE_PRESERVATION}:{revision}", target_test=None, run_validator=baseline_run,
-                compute_revision=lambda: compute_workspace_content_hash(workspace_path),
-                environment_identity=environment)
-            baseline = captured_baseline(lazily_captured)
-            if baseline is None:
-                return None, ("the untouched workspace's PRE-mutation baseline could not be captured: "
-                              f"{lazily_captured.indeterminate_reason}")
-        try:
-            return attribute_suite_result(
-                scope=SCOPE_SUITE_PRESERVATION, baseline=baseline, result=result,
-                post_environment=post_environment_identity(
-                    baseline=baseline, workspace_path=workspace_path, worktree_path=candidate_root,
-                    autonomy_cfg=autonomy_cfg, goal=goal, written_files=candidate_paths),
-                stability_cache=cache, replay=baseline_run, workspace_path=workspace_path,
-            ), None
-        except Exception as exc:
-            logger.warning(f"Suite-preservation baseline attribution unavailable: {type(exc).__name__}: {exc}")
-            return None, f"the PRE/POST attribution could not be made ({type(exc).__name__}: {exc})"
-
-    suite_ids = None
-    if contract is not None:
-        suite_ids = sorted({rid for rid, _b in contract.binding_closers(SUITE_PRESERVATION)})
-    immutability = None
-    if (suite_ids if suite_ids is not None else
-            any(is_suite_preservation_requirement(r.text) for r in requirement_set.requirements)):
-        _tracked, evidence = mutation_scope_evidence(candidate_root, workspace_path, candidate_paths=candidate_paths)
-        immutability = test_immutability_evidence(
-            _reference_test_files(candidate_root, workspace_path), _candidate_test_files(candidate_root), evidence)
-
-    def run_suite() -> Dict[str, Any]:
-        validator = PolymorphicValidator(
-            candidate_root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
-            toolchain_declaration_mutable=toolchain_declaration_mutable,
-        )
-        validator.tree_binding = tree_binding
-        validator.java_home_override = java_home_override
-        return validator.run_tests()
-
-    return close_suite_preservation_requirements(
-        ledger, requirement_set, test_files=_candidate_test_files(candidate_root), run_suite=run_suite,
-        source="requirement_closure.suite_preservation", revision=revision, test_immutability=immutability,
-        contract_claims=contract_claims_map(contract), suite_requirement_ids=suite_ids,
-        attribute_suite=attribute_suite,
+    """The body is ``kriya/workflow/requirement_closers.py::close_requirements_by_suite_preservation`` (E4); its collaborators
+    are resolved here, at call time."""
+    return closers.close_requirements_by_suite_preservation(
+        _closer_deps(), autonomy_cfg, ledger, requirement_set, candidate_root, workspace_path, revision=revision,
+        toolchain_declaration_mutable=toolchain_declaration_mutable, baseline_source=baseline_source,
+        candidate_paths=candidate_paths, java_home_override=java_home_override, tree_binding=tree_binding,
+        contract=contract, goal=goal, suite_baseline=suite_baseline, stability_cache=stability_cache,
+        baseline_suite_run=baseline_suite_run, run_baseline_policy=run_baseline_policy
     )
 
 
@@ -1791,58 +1411,12 @@ def close_requirements_with_named_tests(
     modified: Iterable[str], revision: Any, toolchain_declaration_mutable: bool,
     java_home_override: Optional[str] = None, tree_binding: Any = None, contract: Any = None,
 ) -> List[Dict[str, Any]]:
-    """PRD-020: runs the tests an UNVERIFIED requirement's own text names, on
-    the candidate at ``candidate_root`` (the one the verifier just judged),
-    and records closure evidence when they execute and pass - see
-    requirements.close_unverified_requirements_with_named_tests. Shared by
-    the direct/milestone pre-apply boundary and enforce's terminal gate.
-
-    D8: the validator is built only when an UNVERIFIED requirement names an
-    existing test (otherwise there is nothing to close), and with the run's
-    own toolchain authority (``toolchain_declaration_mutable``,
-    derived by the caller from its write scope and approved plan exactly as
-    its own gates were): this step verifies the already-authorized
-    candidate; it never re-decides a toolchain change. Without that
-    authority a changed declaration still fails closed here."""
-    from kriya.workflow.named_test_oracle import judge_named_tests
-    from kriya.workflow.requirements import (
-        RequirementOutcome,
-        close_unverified_requirements_with_named_tests,
-        named_existing_tests,
-        requirement_outcomes,
-    )
-
-    test_files = _candidate_test_files(candidate_root)
-    outcomes = requirement_outcomes(ledger, requirement_set)
-    if not any(outcomes.get(requirement.id) is RequirementOutcome.UNVERIFIED
-               and named_existing_tests(requirement.text, test_files)
-               for requirement in requirement_set.requirements):
-        return []  # D8: nothing to close, so no validator and no toolchain resolution
-    def candidate_validator() -> PolymorphicValidator:
-        validator = PolymorphicValidator(
-            candidate_root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
-            toolchain_declaration_mutable=toolchain_declaration_mutable,
-        )
-        validator.java_home_override = java_home_override
-        validator.tree_binding = tree_binding
-        return validator
-
-    def base_validator(root: str) -> PolymorphicValidator:
-        # The base revision declares its own toolchain; nothing is changed there.
-        validator = PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
-        validator.java_home_override = java_home_override
-        return validator
-
-    from kriya.workflow.contract_closers import contract_claims_map
-
-    modified = list(modified)
-    base_revision = _oracle_base_revision(candidate_root, workspace_path)
-    return close_unverified_requirements_with_named_tests(
-        ledger, requirement_set, test_files=test_files, modified=modified,
-        judge=lambda named: judge_named_tests(
-            named, candidate_root=candidate_root, base_revision=base_revision, modified=modified,
-            candidate_validator=candidate_validator, base_validator=base_validator),
-        source="requirement_closure.named_test_run", revision=revision, contract_claims=contract_claims_map(contract),
+    """The body is ``kriya/workflow/requirement_closers.py::close_requirements_with_named_tests`` (E4); its collaborators
+    are resolved here, at call time."""
+    return closers.close_requirements_with_named_tests(
+        _closer_deps(), autonomy_cfg, ledger, requirement_set, candidate_root, workspace_path, modified=modified,
+        revision=revision, toolchain_declaration_mutable=toolchain_declaration_mutable,
+        java_home_override=java_home_override, tree_binding=tree_binding, contract=contract
     )
 
 
@@ -1883,17 +1457,9 @@ def _seed_grounded_loci(
 
 
 def _oracle_base_revision(candidate_root: str, workspace_path: str) -> Optional[str]:
-    """FS-1C0: the revision a named test must be authored at - the owning
-    run's base (so an earlier unit's committed change is still the run's
-    own), else the candidate's HEAD; None when neither can be read."""
-    from kriya.workflow.worktree import git_read_lines
-
-    try:
-        base = _run_committed_paths(workspace_path)[1]
-        return base or git_read_lines(candidate_root, "rev-parse", "HEAD")[0]
-    except Exception as exc:  # no readable base: the oracle refuses (UNVERIFIED)
-        logger.info(f"Named-test oracle base revision unavailable: {exc}")
-        return None
+    """The body is ``kriya/workflow/requirement_closers.py::_oracle_base_revision`` (E4); its collaborators
+    are resolved here, at call time."""
+    return closers._oracle_base_revision(_closer_deps(), candidate_root, workspace_path)
 
 
 def _run_committed_paths(workspace_path: str) -> Tuple[Optional[str], Optional[str], List[str]]:
@@ -1921,60 +1487,47 @@ def _run_committed_paths(workspace_path: str) -> Tuple[Optional[str], Optional[s
     return context.run_id, context.base_revision, paths
 
 
-def mutation_scope_evidence(
-    candidate_root: str, workspace_path: str, *, candidate_paths: Iterable[str],
-) -> Tuple[List[str], Dict[str, Any]]:
-    """PRD-020: what the run actually changed, for mutation-scope requirements
-    - (paths tracked at the run's base, evidence).
+def _load_baseline_environment_identity() -> Callable[..., Any]:
+    # The suite-preservation closer's function-local import (kriya.workflow.baseline_policy, in the kernel's
+    # all-import cycle), made where the body made it.
+    from kriya.workflow.baseline_policy import baseline_environment_identity
 
-    ``actual_paths`` = the candidate's own changes (``candidate_paths`` that
-    git reports changed in ``candidate_root`` against the base) plus the
-    run's committed path history (earlier milestones). ``foreign_paths`` =
-    anything else git reports changed or untracked (``.kriya/`` and ignored
-    files excluded): present, but not attributable to the run. Evidence is
-    ``unavailable`` when the candidate is not at the run's base revision or
-    git/commit evidence cannot be read."""
-    from kriya.workflow.worktree import git_read_lines as _git_lines
+    return baseline_environment_identity
 
-    try:
-        run_id, base, committed = _run_committed_paths(workspace_path)
-        head = _git_lines(candidate_root, "rev-parse", "HEAD")[0]
-        if base and head != base:
-            return [], {"unavailable": f"candidate is at {head[:12]}, not the run base {base[:12]}"}
-        base = base or head
-        tracked = _git_lines(candidate_root, "ls-tree", "-r", "--name-only", base)
-        changed = {
-            path for path in (
-                _git_lines(candidate_root, "diff", "--name-only", "--no-renames", "--relative", base)
-                + _git_lines(candidate_root, "ls-files", "--others", "--exclude-standard")
-            ) if not (path == ".kriya" or path.startswith(".kriya/"))
-        }
-    except Exception as exc:
-        return [], {"unavailable": f"{type(exc).__name__}: {exc}"}
-    actual = (set(candidate_paths) & changed) | set(committed)
-    return tracked, {
-        "run_id": run_id, "base_revision": base, "candidate_revision": head,
-        "actual_paths": sorted(actual), "committed_history": sorted(committed),
-        "foreign_paths": sorted(changed - actual),
-    }
+
+def _load_authority_bundle() -> Tuple[Callable[..., Any], Callable[..., Any], Callable[..., Any]]:
+    # The authority-bundle closer's function-local import (a non-public AUTHORITY module), made where the body made it.
+    from kriya.workflow.authority_bundle import (
+        bound_authority_bundle,
+        close_requirements_with_authority_bundle,
+        run_authority_bundle,
+    )
+
+    return bound_authority_bundle, close_requirements_with_authority_bundle, run_authority_bundle
+
+
+def _closer_deps() -> "closers.CloserDeps":
+    """The requirement closers' collaborators (kriya/workflow/requirement_closers.py), resolved through this module NOW
+    (at call time), so a test patch of _run_committed_paths, compute_workspace_content_hash or logger here
+    reaches the moved closers."""
+    return closers.CloserDeps(
+        logger=logger, run_committed_paths=_run_committed_paths,
+        compute_workspace_content_hash=compute_workspace_content_hash, captured_baseline=captured_baseline,
+        attribute_suite_result=attribute_suite_result, post_environment_identity=post_environment_identity,
+        load_baseline_environment_identity=_load_baseline_environment_identity,
+        load_authority_bundle=_load_authority_bundle,
+    )
 
 
 def close_requirements_by_mutation_scope(
     ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
     candidate_paths: Iterable[str], revision: Any,
 ) -> List[Dict[str, Any]]:
-    """PRD-020: decides every "do not modify any other file" requirement from
-    the run's own mutation record (requirements.close_mutation_scope_requirements).
-    Shared by the direct/milestone pre-apply boundary and enforce's terminal
-    gate; a goal without such a requirement costs nothing."""
-    from kriya.workflow.requirements import close_mutation_scope_requirements, is_mutation_scope_requirement
-
-    if not any(is_mutation_scope_requirement(r.text) for r in requirement_set.requirements):
-        return []
-    tracked, evidence = mutation_scope_evidence(candidate_root, workspace_path, candidate_paths=candidate_paths)
-    return close_mutation_scope_requirements(
-        ledger, requirement_set, tracked_paths=tracked, scope_evidence=evidence,
-        source="requirement_closure.mutation_scope", revision=revision,
+    """The body is ``kriya/workflow/requirement_closers.py::close_requirements_by_mutation_scope`` (E4); its collaborators
+    are resolved here, at call time."""
+    return closers.close_requirements_by_mutation_scope(
+        _closer_deps(), ledger, requirement_set, candidate_root, workspace_path, candidate_paths=candidate_paths,
+        revision=revision
     )
 
 
@@ -2055,33 +1608,13 @@ def _run_static_analysis_gate(
 ) -> None:
     """PRD-031A at the direct/milestone pre-apply boundary: the same
     StaticAnalysisService the enforce TerminalGateService uses."""
-    in_place = worktree_path == workspace_path
-    result = StaticAnalysisService(cfg).evaluate_candidate(StaticAnalysisCandidate(
-        materialize=lambda: _direct_terminal_writes(worktree_path, workspace_path, state),
-        workspace_path=workspace_path, run_id=run_id, unit_id=unit_id,
-        in_place=in_place,
-        # STATIC-ANALYSIS-INPLACE-BASELINE-001: the exact pre-write bytes the attempt captured are the PRE side.
-        originals=_captured_originals(state) if in_place else None,
-    ))
-    state.static_analysis_result = result
-    state.record_event(RunEvent(
-        kind="static_analysis.result", attempt=state.attempt_number, source="static_analysis_gate",
-        authority=EventAuthority.AUTHORITATIVE, message=banner(result), details=result.summary(),
-    ))
-    if result.permits_commit:
-        return
-    message = result.gap or f"STATIC_ANALYSIS_{result.outcome.value}"
-    state.environment_failure = message
-    failure = Failure(
-        type=f"static_analysis_{result.outcome.value.lower()}", message=message, raw_output=message,
-        source="static_analysis_gate", authority="deterministic", attempt=state.attempt_number,
-        diagnostics={
-            "reason_code": f"STATIC_ANALYSIS_{result.outcome.value}",
-            "reason_codes": list(result.reason_codes), "evidence_digest": result.evidence_digest,
-        },
+    # E4: the body is kriya/workflow/stage_apply.py::run_static_analysis_gate; this module's collaborators are passed
+    # at call time, so a patch of a name here (``_direct_terminal_writes``, ...) reaches it.
+    run_static_analysis_gate(
+        cfg, state, worktree_path=worktree_path, workspace_path=workspace_path, run_id=run_id, unit_id=unit_id,
+        StaticAnalysisService=StaticAnalysisService, StaticAnalysisCandidate=StaticAnalysisCandidate, banner=banner,
+        _direct_terminal_writes=_direct_terminal_writes, _captured_originals=_captured_originals,
     )
-    state.record_gate_outcome(failure.to_gate_outcome())
-    raise QualityGateFailure(failure)
 
 
 def _run_semantic_safety_gate(state: GenerationState, *, worktree_path: str, workspace_path: str) -> None:
@@ -2089,27 +1622,10 @@ def _run_semantic_safety_gate(state: GenerationState, *, worktree_path: str, wor
     the terminal apply commits (the enforce terminal's ``semantic_safety`` gate, same decision), against the bytes the
     run first read. It judges the final state, so a masking result is refused whichever route left it in the candidate.
     A finding is a deterministic stop of the same kind as the staging guard's: fix the cause, do not widen a catch."""
-    try:
-        writes = _direct_terminal_writes(worktree_path, workspace_path, state)
-    except CandidateMaterializationError:
-        return  # no bindable candidate: the terminal apply refuses it (VERIFIED_CANDIDATE_EVIDENCE_MISSING)
-
-    def run_start_text(write: Any) -> Optional[str]:
-        return state.all_original_contents.get(os.path.relpath(write.target_path, workspace_path))
-
-    findings = find_masking_in_batch(writes, run_start_text)
-    if not findings:
-        return
-    message = "SEMANTIC SAFETY VIOLATED (final candidate): " + "; ".join(
-        f"{os.path.relpath(target, workspace_path)}: {found}" for target, found in findings)
-    failure = Failure(
-        type="unsafe_exception_masking", message=message, raw_output=message,
-        file_locations=[FileLocation(filepath=os.path.relpath(target, workspace_path)) for target, _ in findings],
-        likely_files=[os.path.relpath(target, workspace_path) for target, _ in findings],
-        attempt=state.attempt_number, source="semantic_safety_gate", authority="deterministic",
+    # E4: the body is kriya/workflow/stage_apply.py::run_semantic_safety_gate (collaborators passed at call time).
+    run_semantic_safety_gate(
+        state, worktree_path=worktree_path, workspace_path=workspace_path, _direct_terminal_writes=_direct_terminal_writes,
     )
-    state.record_gate_outcome(failure.to_gate_outcome())
-    raise QualityGateFailure(failure)
 
 
 # PRD-032: WORKSPACE_COMMIT_NOT_COMPLETED (kriya/workflow/outcome.py) is the
@@ -2168,6 +1684,23 @@ def _raise_contract_registry_stop(state: GenerationState, outcome: Any) -> None:
     )
     state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
+
+
+def _load_full_suite_evidence_for_reuse() -> Callable[..., Any]:
+    # The terminal apply's function-local import (kriya.workflow.baseline_policy, in the kernel's all-import cycle),
+    # made where the body made it (kriya/workflow/stage_apply.py::apply_terminal_candidate).
+    from kriya.workflow.baseline_policy import full_suite_evidence_for_reuse
+
+    return full_suite_evidence_for_reuse
+
+
+def _load_lesson_extraction() -> Tuple[Any, Any, Any]:
+    # The lesson extraction's function-local imports (kriya.knowledge.staging and the live-failure channel: all-import
+    # cycle, non-public KNOWLEDGE), made where the body made them (kriya/workflow/stage_apply.py::extract_lessons).
+    from kriya.knowledge import staging as knowledge_staging
+    from kriya.knowledge.channels.live_failure import LiveFailureChannel, LiveFailureContext
+
+    return knowledge_staging, LiveFailureChannel, LiveFailureContext
 
 
 class WorkflowEngine:
@@ -2333,6 +1866,38 @@ class WorkflowEngine:
             ActionRequest=ActionRequest, ActionType=ActionType, PolicyDecision=PolicyDecision,
             PolicyDeniedError=PolicyDeniedError,
         )
+
+    def _late_stage_deps(self) -> StageDeps:
+        """``_stage_deps()`` plus the review, approval/apply and lesson stages' collaborators (kriya/workflow/
+        stage_review.py, stage_apply.py), all resolved NOW (at call time): this engine's agents and helpers and this
+        module's names, so a test patch of ``delete_checkpoint``, ``commit_terminal_candidate``,
+        ``derive_contract_transition``, ``_direct_terminal_writes`` or ``logger`` here reaches the moved stages. The
+        names the stage bodies imported lazily from all-import-cycle modules are loaders, called where the bodies
+        imported them."""
+        return dataclasses.replace(
+            self._stage_deps(),
+            llm=self.llm, _log_phase_banner=_log_phase_banner, InferenceDeadlineError=InferenceDeadlineError,
+            reviewer=self.reviewer, developer=self.developer, audit_approval_rules=self._audit_approval_rules,
+            keep_full_suite_evidence=self._keep_full_suite_evidence,
+            load_full_suite_evidence_for_reuse=_load_full_suite_evidence_for_reuse,
+            load_lesson_extraction=_load_lesson_extraction,
+            REVIEW_SECTION_HEADER=REVIEW_SECTION_HEADER, banner=banner, commit_guard=commit_guard,
+            review_requests=review_requests, build_reviewer_verified_evidence=build_reviewer_verified_evidence,
+            build_candidate_diff_context=build_candidate_diff_context,
+            ownership_review_evidence=ownership_review_evidence,
+            ContextBudgetUnsatisfiableError=ContextBudgetUnsatisfiableError,
+            _final_review_error_code=_final_review_error_code, _record_review_fit=_record_review_fit,
+            _review_refit_recorder=_review_refit_recorder, _record_approval_decision=_record_approval_decision,
+            _restore_original_bytes=_restore_original_bytes, _direct_terminal_writes=_direct_terminal_writes,
+            _terminal_contract_authorizations=_terminal_contract_authorizations,
+            _raise_contract_registry_stop=_raise_contract_registry_stop,
+            _raise_terminal_commit_stop=_raise_terminal_commit_stop, delete_checkpoint=delete_checkpoint,
+            commit_terminal_candidate=commit_terminal_candidate, derive_contract_transition=derive_contract_transition,
+        )
+
+    def _keep_full_suite_evidence(self, evidence: Optional[Dict[str, Any]]) -> None:
+        """PRD-024: what the terminal apply keeps for the next run's baseline (kriya/workflow/stage_apply.py)."""
+        self._prior_full_suite_evidence = evidence
 
     def _audit_approval_rules(
         self, files_written: Iterable[str], workspace_path: str,
@@ -3830,6 +3395,10 @@ class WorkflowEngine:
             requirement_set=requirement_set,
         )
 
+        # What the review, approval/apply and lesson stages (E4) read besides the design stages' outputs.
+        stage_ctx.worktree_path, stage_ctx.resolved_obligation_ledger = worktree_path, resolved_obligation_ledger
+        stage_ctx.grounding_goal, stage_ctx.work_unit = grounding_goal, work_unit
+
         from kriya.workflow.model_transition import fallback_routing_for_state
         from kriya.workflow.retry_policy import decide_for_state
         while decide_for_state(
@@ -4159,365 +3728,14 @@ class WorkflowEngine:
                 if attempt_ctx.deferred_executing_gates is None:
                     _save_candidate_gates_checkpoint(candidate_checkpoint_fields, final_files_for_checkpoint)
 
-                # 4.5. Pre-Apply Human Approval Gate
-                # (state.pre_approval_review is reset once per loop iteration, above -
-                # before run_attempt() runs, not here - see that comment for why.)
-                diffs_to_show = []
-                # Also kept for the pre-approval Reviewer call just below - same
-                # worktree read, no second file-open per file.
-                worktree_file_contents: Dict[str, str] = {}
-                for filepath in sorted(state.all_files_written):
-                    worktree_file = os.path.join(worktree_path, filepath)
-                    actual_content = state.all_original_contents.get(filepath, "")
-                    with open(worktree_file, "r", encoding="utf-8", errors="replace") as fh:
-                        new_content = fh.read()
-                    worktree_file_contents[filepath] = new_content
-
-                    file_diff = "".join(difflib.unified_diff(
-                        actual_content.splitlines(keepends=True),
-                        new_content.splitlines(keepends=True),
-                        fromfile=f"a/{filepath}",
-                        tofile=f"b/{filepath}"
-                    ))
-                    diffs_to_show.append({"filepath": filepath, "content": file_diff})
-
-                total_diff_lines = sum(len(d["content"].splitlines()) for d in diffs_to_show)
-                autonomy_cfg = self.kernel.config.autonomy
-                
-                # Check sensitive paths matches
-                sensitive_match = False
-                sensitive_reason = ""
-                for filepath in state.all_files_written:
-                    for pattern in autonomy_cfg.sensitive_paths:
-                        try:
-                            if re.match(pattern, filepath, re.IGNORECASE):
-                                sensitive_match = True
-                                sensitive_reason = f"Sensitive path matched: {filepath} ({pattern})"
-                                break
-                        except Exception as e:
-                            logger.warning(f"Invalid sensitive_paths regex '{pattern}' - this pattern is not being enforced: {e}")
-                    if sensitive_match:
-                        break
-
-                # MA2.5 - process_profile.human_review_required is OR'd in as a new,
-                # independent trigger, alongside (never replacing) the three that
-                # already existed. This is what actually makes HEAVY (and STANDARD)
-                # profiles require approval: autonomy_cfg.mode == "human-in-the-loop"
-                # is only ONE clause of this OR expression, not a gate the whole
-                # expression sits behind - a project configured for a more permissive
-                # mode still hits approval here whenever ANY clause fires, process
-                # profile included, once process_profiles.enabled/enforce_approval
-                # are both explicitly turned on (kriya/config/config.py::
-                # ProcessProfilesConfig - "safe incremental activation," off by
-                # default). `control` is also None-safe on its own (engineering_
-                # triage.enabled may be False, or MA1.3/MA2.4's classification may
-                # have failed and been caught/logged) - either gate missing means
-                # this new clause contributes nothing, same as before MA2.5 existed.
-                # MA4.9 - audit-only, does not affect need_human_approval below.
-                self._audit_approval_rules(state.all_files_written, workspace_path, control)
-
-                process_profiles_cfg = self.kernel.config.process_profiles
-                process_profile_requires_review = bool(
-                    process_profiles_cfg.enabled
-                    and process_profiles_cfg.enforce_approval
-                    and control is not None
-                    and control.process_profile.human_review_required
+                # 4.5. Pre-Apply Human Approval Gate (kriya/workflow/stage_apply.py::approval_gate, full modularization E4):
+                # the change set, the approval triggers, the pre-approval review and the request; an abort (the person
+                # rejected the change, or approval was required and nobody can be asked) is this method's result.
+                approval_stop, need_human_approval = await approval_gate(
+                    stage_ctx, self._late_stage_deps(), attempt_ctx=attempt_ctx,
                 )
-                # NO SOURCE MUTATION -> NO SOURCE-CHANGE APPROVAL. This gate approves the exact change set (diffs_to_show) before it is applied; a unit that wrote nothing (a
-                # verification-only unit: no planned files, DENY_ALL) has no subject to approve. Before this, the human-in-the-loop clause alone fired with an empty set: a
-                # desktop launch declined it (other_approval -> human_rejected, FAILURE) and a terminal user was asked to approve nothing (owner run 20261015T075602-2b5a0ad7, s4).
-                # Every non-empty change is approved exactly as before; the runtime-command approvals (attempt.py, approval_callback([], ...)) are a different subject and are
-                # not touched here.
-                has_source_mutation = bool(state.all_files_written)
-                need_human_approval = has_source_mutation and (
-                    autonomy_cfg.mode == "human-in-the-loop" or
-                    sensitive_match or
-                    total_diff_lines > autonomy_cfg.risk_threshold_lines or
-                    process_profile_requires_review
-                )
-
-                # PRD-033: why approval was required, for the approval.decision event.
-                approval_triggers = [name for name, fired in (
-                    ("human_in_the_loop", autonomy_cfg.mode == "human-in-the-loop"),
-                    ("sensitive_path", bool(sensitive_match)),
-                    ("diff_size", total_diff_lines > autonomy_cfg.risk_threshold_lines),
-                    ("process_profile", process_profile_requires_review),
-                ) if fired]
-
-                escalation_reason = "Human-in-the-loop review policy"
-                if sensitive_match:
-                    escalation_reason = sensitive_reason
-                elif total_diff_lines > autonomy_cfg.risk_threshold_lines:
-                    escalation_reason = f"Risk threshold exceeded ({total_diff_lines} lines > {autonomy_cfg.risk_threshold_lines})"
-                elif process_profile_requires_review:
-                    escalation_reason = (
-                        f"Engineering process profile requires review (execution_weight="
-                        f"{control.process_profile.execution_weight.value}, kind="
-                        f"{control.engineering_route.kind.value}, risk="
-                        f"{control.engineering_route.max_observed_risk_class.name})"
-                    )
-
-                if need_human_approval and attempt_ctx.deferred_executing_gates is not None:
-                    # Gap B: nothing has been built, tested or run yet - say exactly that, never a pending check as a success. In the policy note (before the reviewer's section),
-                    # so a display that splits the reason at the review header keeps it with the policy, not with the automated review.
-                    escalation_reason += (
-                        "\nPre-checks passed: expected files present, static rules, stack contract. Nothing has been built, tested or run yet."
-                        "\nBuild and tests: will run after you approve."
-                        "\nIf the application needs to be run, you will be asked separately before any command runs."
-                    )
-
-                # Stage 6 SME review, 2026-08-15, Finding 1: the Reviewer used to run
-                # AFTER this gate - by the time its verdict existed, a human had
-                # already approved based on nothing but a truncated raw diff, and the
-                # files were already copied into the real workspace with the worktree
-                # torn down. Even in strict human-in-the-loop mode, a Reviewer
-                # "REJECTED - critical issue" verdict changed nothing: quality_gates_passed
-                # stayed True, the files were already on disk. Only worth doing when a
-                # human is actually going to see it (need_human_approval AND a real
-                # callback) - the common autonomous-mode path pays zero extra latency/
-                # cost, Reviewer still runs at its usual later point for the final
-                # report. Deliberately folded into escalation_reason (a plain string
-                # on_approval already prints verbatim) rather than changing
-                # approval_callback's signature - that callback is shared, unmodified,
-                # across two OTHER, differently-shaped approval decisions elsewhere
-                # (Stage 2A knowledge-gap approval, Runtime-Verification command
-                # approval) and any external/REPL/MCP caller supplying their own
-                # callback - a signature change would risk breaking all of them for a
-                # fix scoped to just this one gate.
-                if need_human_approval and approval_callback:
-                    # The REAL Reviewer work for an escalated run happens HERE, not at
-                    # the later "5. Reviewer" section below (which, for this exact
-                    # path, only reuses state.pre_approval_review and does no new
-                    # work - see its own comment). Banner placed at the LATER section
-                    # unconditionally was found live to fire only after the human had
-                    # already been shown the review and approved it, misleadingly
-                    # announcing "Review" as just starting when it had already
-                    # finished minutes earlier.
-                    _log_phase_banner("REVIEW")
-                    try:
-                        verified_evidence = build_reviewer_verified_evidence(state.gate_outcomes) + \
-                            ownership_review_evidence(resolved_obligation_ledger, state.all_files_written)
-                        review_header = f"Goal: {goal}\n{verified_evidence}\nFiles generated:\n"
-                        # PROMPT-BUDGET-FIT-001B: batches get the room this
-                        # request leaves after its system prompt and header,
-                        # refitted for each role candidate that is called.
-                        review_batches, _, review_fit = review_requests(
-                            self.kernel.config, self.reviewer,
-                            [(fp, worktree_file_contents[fp]) for fp in sorted(state.all_files_written)],
-                            self.reviewer.system_prompt, review_header,
-                            on_refit=_review_refit_recorder(state, "pre_approval", self.kernel.config),
-                        )
-                        _record_review_fit(state, "pre_approval", review_fit)
-                        # The completed report is attached to the approval context
-                        # below, where the human must see it before deciding. Streaming
-                        # the same tokens first creates a second presentation of one
-                        # artifact. Keep a progress signal, but deliver the body once.
-                        if stream_callback:
-                            stream_callback(
-                                "Review", "Preparing automated code review for approval...\n",
-                            )
-                        review_parts = []
-                        for i, batch_prompts in enumerate(review_batches, 1):
-                            label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
-                            _reviewer_started = time.monotonic()
-                            review_text = await self.reviewer.run(
-                                batch_prompts.first(), stream_callback=None,
-                                temperature_override=self.kernel.config.llm.reviewer_temperature,
-                                candidate_prompt=batch_prompts,
-                            )
-                            # R1 Deliverable 5 - observational only, one
-                            # entry per review batch (a multi-batch review
-                            # makes more than one real LLM call).
-                            state.reviewer_calls += 1
-                            state.reviewer_llm_seconds += time.monotonic() - _reviewer_started
-                            review_parts.append(label + review_text)
-                        state.pre_approval_review = "\n".join(review_parts)
-                        escalation_reason += f"\n\n{REVIEW_SECTION_HEADER}\n{state.pre_approval_review}"
-                    except Exception as ex:
-                        logger.warning(f"Pre-approval Reviewer call failed, proceeding without it: {ex}")
-                        # PRE-APPROVAL-REVIEW-REFUSAL-001 (PRD-033): the approver
-                        # and the trace both see that no review is attached, and why.
-                        unattached_reason = getattr(ex, "reason_code", None) or type(ex).__name__
-                        state.record_event(RunEvent(
-                            kind="review.pre_approval_unattached", attempt=state.attempt_number,
-                            source="workflow.pre_approval_review", authority=EventAuthority.ADVISORY,
-                            message="the pre-approval review was not performed; approval proceeds without it",
-                            details={"reason_code": unattached_reason},
-                        ))
-                        escalation_reason += (
-                            f"\n\n{REVIEW_SECTION_HEADER}\nNOT ATTACHED: the review request failed "
-                            f"({unattached_reason}). Review the diff without it."
-                        )
-                if need_human_approval and approval_callback:
-                    # PRD-022: the approver sees open ownership findings as
-                    # evidence; they never decide the approval themselves.
-                    escalation_reason += ownership_review_evidence(
-                        resolved_obligation_ledger, state.all_files_written)
-                    # PRD-031A: the approver sees the static-analysis outcome,
-                    # including accepted risks; approving the diff creates no waiver.
-                    if state.static_analysis_result is not None:
-                        escalation_reason += f"\n\n=== Static Analysis ===\n{banner(state.static_analysis_result)}"
-
-                def _abort_without_applying(status: str, review_text: str) -> Dict[str, Any]:
-                    """Shared cleanup for both 'a human said no' and 'approval was
-                    required but there was no way to even ask' - never applies
-                    worktree changes to the real workspace, restoring/removing
-                    exactly as the original human-rejection path already did.
-
-                    Trace-persistence contract (2026-09-18, VAL-001 G1-R2
-                    post-mortem): this path runs strictly AFTER the full
-                    Developer + Quality Gates loop has already populated
-                    `state` with real gate_outcomes/model_hops/run_events/
-                    evidence_records - unlike the knowledge_gap/planner_
-                    output_incomplete early-abort paths above (which
-                    correctly log the sparse shape, since nothing has
-                    happened yet at that point in the workflow). A real
-                    G1-R2 run (trace 8cc2018a) proved this distinction
-                    matters: the previous, sparse log_run() call here
-                    persisted `model_hops=[]`/`attempts=0 events`/zero gate
-                    outcomes for a run that had made 9 real Developer calls,
-                    making the whole approval-diff incident forensically
-                    unreconstructable after the fact. This call site now
-                    mirrors the SAME full contract the terminal success/
-                    failure path uses (this method's own trailing
-                    trace_logger.log_run() call) - not a blind duplication,
-                    the exact fields that call already treats as the
-                    canonical "a real Developer loop ran" shape."""
-                    if worktree_path != workspace_path:
-                        remove_git_worktree(workspace_path, worktree_path)
-                    else:
-                        for filepath, orig_content in state.all_original_contents.items():
-                            actual_file = os.path.join(workspace_path, filepath)
-                            # FILE-INTEGRITY-CONTRACT-001: restore the exact original
-                            # bytes, never a decoded copy of them.
-                            orig_raw = state.all_original_raw.get(filepath)
-                            if orig_raw is not None:
-                                _restore_original_bytes(actual_file, orig_raw)
-                            elif filepath in state.all_original_raw:
-                                if os.path.exists(actual_file):
-                                    os.remove(actual_file)
-                            elif orig_content:
-                                # Atomic, not plain open(...,"w") - this restores the
-                                # user's REAL project file directly (no worktree
-                                # isolation on this path), so a kill mid-write here would
-                                # corrupt the user's actual pre-existing source, not just
-                                # a scratch sandbox file.
-                                # MA4.16 migration classification: (4) explicitly
-                                # documented safe/internal-only, not routed through
-                                # AuthorizedFileWriter. `orig_content` is content Kriya
-                                # itself already read from `actual_file` earlier THIS
-                                # run (state.all_original_contents), and `actual_file`
-                                # is that exact same real path - a rollback restoring a
-                                # file to its own prior real content, not new/model-
-                                # influenced content reaching a new/uncertain path. No
-                                # containment or sensitive-path question this call site
-                                # could meaningfully still fail.
-                                atomic_write_file(actual_file, orig_content)
-                            elif os.path.exists(actual_file):
-                                os.remove(actual_file)
-                    delete_checkpoint(workspace_path, run_id)
-                    try:
-                        from kriya.control.trace import TraceLogger
-                        trace_db = trace_db_path(self.kernel.config)
-                        trace_logger = TraceLogger(trace_db)
-                        # Same derivation the terminal success/failure path uses below
-                        # (this method's own trailing trace_logger.log_run() call) -
-                        # not re-implemented independently, so the two can never drift.
-                        abort_failure_report = [
-                            build_failure_report_entry(outcome.get("type", ""), outcome.get("attribution_tier"))
-                            for outcome in state.gate_outcomes
-                        ]
-                        abort_failure_report_dicts = [
-                            {"failure_type": e.failure_type, "category": e.category.value, "attribution_tier": e.attribution_tier}
-                            for e in abort_failure_report
-                        ]
-                        trace_logger.log_run(
-                            run_id=trace_id,
-                            goal=goal,
-                            duration_sec=time.time() - start_time,
-                            # + best_of_n_candidates_tried: retry_count alone understates true
-                            # effort whenever Best-of-N discarded independent candidates before
-                            # this run's winning/final attempt (retry_count gets reset to 0 for
-                            # each fresh candidate - see kriya/workflow/best_of_n.py).
-                            attempts=state.budgets.retry_count + state.budgets.best_of_n_candidates_tried,
-                            status=status,
-                            # Sandbox candidate files touched this run - the SAME meaning
-                            # this field carries at the terminal success/failure call site
-                            # below (list(state.all_files_written), never "applied to the
-                            # real workspace", which this path by definition never did).
-                            files_modified=list(state.all_files_written),
-                            retrieved_chunks=retrieved_chunks,
-                            active_skills=active_skills,
-                            prompt_rendered=plan_prompt,
-                            gate_outcomes=state.gate_outcomes,
-                            model_hops=state.model_hops,
-                            failure_category=status,
-                            failure_report=abort_failure_report_dicts,
-                            milestone_group_id=milestone_group_id,
-                            milestone_index=milestone_index,
-                            milestone_total=milestone_total, enforce_run_id=enforce_run_id,
-                            run_events=self._trace_run_events(state),
-                            evidence_records=[record.to_dict() for record in state.evidence_records],
-                            generation_metrics=state.generation_metrics(
-                                total_wall_seconds=time.monotonic() - state.generation_started_monotonic,
-                            ),
-                        )
-                    except Exception as trace_ex:
-                        logger.warning(f"Failed to write run trace: {trace_ex}")
-                    return {
-                        "plan": plan,
-                        "design": design,
-                        "files": [],
-                        "quality_gates_passed": False,
-                        "review": review_text,
-                        "review_included_in_approval": state.pre_approval_review is not None,
-                        "run_id": run_id,
-                        **static_analysis_result_fields(state.static_analysis_result),
-                    }
-
-                if need_human_approval and approval_callback:
-                    review_note = (
-                        " (automated code review attached to approval context)"
-                        if state.pre_approval_review is not None else ""
-                    )
-                    # The full report remains in the local result and approval
-                    # context; duplicating it in the INFO log adds no new evidence.
-                    logger.info(
-                        "Escalating changes to human approval gate: "
-                        f"{escalation_reason.splitlines()[0]}{review_note}"
-                    )
-                    approved = approval_callback(diffs_to_show, escalation_reason)
-                    if asyncio.iscoroutine(approved):
-                        approved = await approved
-                    _record_approval_decision(state, "approved" if approved else "rejected", approval_triggers)
-                    if not approved:
-                        logger.info("Human rejected changes. Aborting workflow.")
-                        return _abort_without_applying(
-                            "human_rejected", "Rejected by user during approval gate review."
-                        )
-                elif need_human_approval and not approval_callback:
-                    # Independent adversarial review, 2026-08-16, Finding 2: this gate used
-                    # to fail OPEN - if policy required approval but no callback was wired
-                    # (any direct run_generation_workflow() caller that doesn't supply one,
-                    # e.g. a library/MCP integration), execution silently fell through to
-                    # the unconditional "apply to workspace" step below with no approval
-                    # ever having been requested. A sensitive-path match or a large diff
-                    # would be applied to the real workspace with zero human involvement,
-                    # in the one mode whose entire purpose is preventing exactly that.
-                    # Fixed the same way the existing knowledge_gap/human_rejected paths
-                    # already handle "can't proceed automatically" - a distinct early-return
-                    # status, never silently applying, so a caller missing a callback gets
-                    # an unambiguous signal instead of an unreviewed change landing on disk.
-                    logger.warning(
-                        f"Approval required ({escalation_reason}) but no approval_callback was "
-                        "provided - refusing to apply changes rather than proceeding unreviewed."
-                    )
-                    _record_approval_decision(state, "unavailable", approval_triggers)
-                    return _abort_without_applying(
-                        "approval_required",
-                        f"Not applied: human approval was required ({escalation_reason}) but no "
-                        "approval_callback was provided to run_generation_workflow().",
-                    )
+                if approval_stop is not None:
+                    return approval_stop
 
                 # Gap B (owner decision 2026-10-15, stronger form): in human-in-the-loop mode every gate that EXECUTES the candidate (POM validation, build, tests, runtime
                 # verification) and the requirement closers that run its tests were held back by run_attempt until the person approved the source (a source approval here means
@@ -4584,107 +3802,10 @@ class WorkflowEngine:
                 # (kept until final success or final budget exhaustion via
                 # retry_strategy.py's own remove_git_worktree call).
 
-                # Phase 3: Auto-generate skill templates for solved dependencies. A
-                # coordinate merely appearing in a resolver.py suggestion during some
-                # retry attempt is not evidence it was ever actually used - confirmed
-                # live as a real bug: a wrong Maven-Central match for a generic
-                # missing-symbol name (the real problem was a bare wrong import path,
-                # not a genuinely missing dependency) got auto-accrued into a
-                # permanent, git-committed skill scaffold that then polluted an
-                # unrelated later goal's skill-gap detection. Only accrue a
-                # coordinate that actually appears in the FINAL applied file content -
-                # real evidence it was used, not just suggested at some point.
-                # best_of_n_candidates_tried also counts: a discarded independent
-                # candidate's own gate_outcomes can carry the same real dependency-
-                # resolution evidence retry_count alone would've gated on.
-                if state.budgets.retry_count > 0 or state.budgets.best_of_n_candidates_tried > 0:
-                    final_contents_combined = ""
-                    for filepath in state.all_files_written:
-                        try:
-                            with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
-                                final_contents_combined += fh.read()
-                        except Exception as e:
-                            logger.debug(f"Failed to read '{filepath}' for auto-accrual verification: {e}")
-                    for outcome in state.gate_outcomes:
-                        output_str = outcome.get("output", "")
-                        if output_str and "=== KRIYA PLATFORM DEPENDENCY SUGGESTIONS ===" in output_str:
-                            deps = re.findall(
-                                r"<groupId>([^<]+)</groupId>\s*<artifactId>([^<]+)</artifactId>\s*<version>([^<]+)</version>",
-                                output_str
-                            )
-                            for g, a, v in deps:
-                                artifact_id = a.strip()
-                                if artifact_id not in final_contents_combined:
-                                    logger.debug(
-                                        f"Skipping auto-accrual for {g.strip()}:{artifact_id} - not found in the "
-                                        "final applied files, likely an irrelevant suggestion never actually used."
-                                    )
-                                    continue
-                                try:
-                                    coord = f"{g.strip()}:{artifact_id}"
-                                    ver = v.strip()
-                                    logger.info(f"Auto-accrual: Automatically scaffolding verified skill for resolved dependency {coord}:{ver}")
-                                    guard.generate_skill_template(coord, ver)
-                                except Exception as ex:
-                                    logger.warning(f"Failed to auto-accrue skill for dependency: {ex}")
-
-                # Autonomous Skill Accrual / Lesson extraction. Originally gated on
-                # `state.last_model_override and chain` - fired ONLY for a fallback-
-                # model escalation rescue, never for a primary-model attempt that
-                # self-corrected, and never at all for a project with no llm_chain
-                # configured. Found live, 2026-08-11 (right after the JAVA_HOME-
-                # durability fix above, same session): this is exactly the gap the
-                # "durable verified project facts" backlog item was asking to close -
-                # project-specific lessons learned the hard way ("X resolves
-                # transitively, don't add it explicitly") most often come from an
-                # ordinary primary-model retry converging, not specifically an
-                # escalated fallback model, and plenty of real projects never
-                # configure a fallback chain at all.
-                #
-                # Broadened to ALSO fire when the PRIMARY model needed a genuinely
-                # significant amount of full-set regeneration to converge -
-                # `retry_count >= 2` (at least two full FULL-SET rewrites, not just
-                # one targeted patch) - rather than any retry at all. A first attempt
-                # at this used bare `state.error_context` truthiness (set on ANY
-                # failure, never cleared) as the trigger, reasoning it precisely
-                # captures "this successful attempt was actually informed by a real
-                # failure" - correct in principle, but it fires on essentially EVERY
-                # retry-then-succeed run, including a single trivial one-line
-                # syntax-typo fix (confirmed by the existing test suite: ~20
-                # unrelated tests broke, each hitting an unplanned extra LLM call for
-                # a routine single-retry recovery that has nothing to do with a
-                # durable, project-specific "fact"). That's also the wrong real-world
-                # tradeoff, not just a test inconvenience - it would flood
-                # staged_rules.txt with noise from routine retries instead of
-                # capturing genuinely hard-won lessons, and pay an extra completion
-                # call on nearly every imperfect-but-recoverable run. `retry_count >=
-                # 2` mirrors why fallback-model escalation was originally a decent
-                # proxy in the first place: reaching a SECOND full-set attempt is a
-                # real signal the first fix didn't fully work, not a proxy for
-                # "informed by a real failure" that's true almost always.
-                # best_of_n_candidates_tried >= 2 mirrors the same "genuinely hard-won"
-                # bar for two DISCARDED independent candidates, not just two full-set
-                # retries within one candidate - equally real signal, just reset out of
-                # retry_count between candidates (see kriya/workflow/best_of_n.py).
-                # A resolved self-correction micro-loop (kriya/workflow/self_correction.py)
-                # is added 2026-08-22 as its own, independent trigger, alongside the
-                # existing fallback-model-escalation/multi-retry ones above - it happens
-                # within a single attempt (touches neither last_model_override nor
-                # retry_count), so without this it was completely invisible to lesson
-                # extraction despite producing the richest evidence this pipeline
-                # generates all day (explicit tool-grounded diagnosis, a real before/
-                # after edit, a real verification call). This is the actual mechanism
-                # meant to close the gap between "an incident got tool-corrected" and
-                # "a future generation is warned about it" without a human needing to
-                # notice the pattern recurring and hand-write a deterministic check.
-                self_corrected_outcome = next(
-                    (o for o in state.gate_outcomes if o.get("self_corrected")), None,
-                )
-                should_extract_hard_won_knowledge = bool(
-                    state.last_model_override
-                    or state.budgets.retry_count >= 2
-                    or state.budgets.best_of_n_candidates_tried >= 2
-                    or self_corrected_outcome is not None
+                # Stage 7, before the terminal regression (kriya/workflow/stage_apply.py::prepare_lessons): the
+                # dependency-skill auto-accrual and the hard-won-knowledge trigger.
+                self_corrected_outcome, should_extract_hard_won_knowledge = prepare_lessons(
+                    stage_ctx, self._late_stage_deps(),
                 )
 
                 # If targeted gates passed, run the full regression suite against
@@ -5282,147 +4403,19 @@ class WorkflowEngine:
                     overall_attempt_passed=False,
                 )
 
-                # Terminal apply: the complete verified candidate as one
-                # revision-grounded batch through the shared commit seam
-                # (kriya/workflow/terminal_commit.py) - exact bytes and mode,
-                # durable RunRecord intent before the first workspace byte,
-                # and a settled commit result. Every real-workspace base
-                # revision must still match what this run originally read; a
-                # partial write is rolled back.
-                final_writes = _direct_terminal_writes(worktree_path, workspace_path, state)
-                annotate_run(
-                    workspace_path,
-                    retry_counters={
-                        "retry_count": state.budgets.retry_count,
-                        "targeted_retry_count": state.budgets.targeted_retry_count,
-                    },
-                    retry_state_reference=f"checkpoint:{run_id}",
-                )
-                # Unique per cycle: a resumed run reuses run_id.
-                terminal_transaction_id = uuid.uuid4().hex
-                # PRD-029: the ContractRegistry transition this candidate
-                # implies commits in the same transaction as its bytes.
-                contract_authorizations = _terminal_contract_authorizations(
-                    grounding_goal, structured_plan, current_subtask_id, state,
-                )
-                downstream_verified = bool(
-                    state.terminal_regression_succeeded
-                    and state.terminal_full_suite_result is not None
-                    and output_confirms_nonzero_test_execution(
-                        str(state.terminal_full_suite_result.get("output") or ""),
-                    )
+                # Stage 6, terminal apply (kriya/workflow/stage_apply.py::apply_terminal_candidate): the verified candidate
+                # as one revision-grounded batch through the shared commit seam, the attempt's success record, and the
+                # sandbox released before any optional learning call.
+                apply_terminal_candidate(
+                    stage_ctx, self._late_stage_deps(), attempt_ctx=attempt_ctx,
+                    final_candidate_contents=final_candidate_contents,
                 )
 
-                commit_outcome = commit_terminal_candidate(
-                    final_writes, workspace_path=workspace_path,
-                    static_analysis=commit_guard(self.kernel.config, state.static_analysis_result),
-                    verified_candidate=state.verified_candidate_binding,
-                    transaction_id=terminal_transaction_id,
-                    evidence={
-                        "verification_evidence_ids": [
-                            f"commit:{terminal_transaction_id}",
-                        ],
-                    },
-                    contract_transition=functools.partial(
-                        derive_contract_transition,
-                        workspace_path=workspace_path, registry=None,
-                        original_contents=dict(state.all_original_contents),
-                        final_contents=dict(final_candidate_contents),
-                        authorizations=tuple(contract_authorizations),
-                        transaction_id=terminal_transaction_id,
-                        downstream_verified=downstream_verified,
-                        # PRD-029: a milestone unit establishes its provided
-                        # capabilities in this same transaction.
-                        capability_contracts=(
-                            work_unit.provided_capabilities if work_unit is not None else ()
-                        ),
-                    ),
+                # Stage 7 (kriya/workflow/stage_apply.py::extract_lessons): advisory learning after authoritative success.
+                await extract_lessons(
+                    stage_ctx, self._late_stage_deps(), should_extract_hard_won_knowledge=should_extract_hard_won_knowledge,
+                    self_corrected_outcome=self_corrected_outcome,
                 )
-                if not commit_outcome.committed:
-                    if commit_outcome.reason_code in CONTRACT_REGISTRY_STOP_REASON_CODES:
-                        _raise_contract_registry_stop(state, commit_outcome)
-                    _raise_terminal_commit_stop(state, commit_outcome)
-                state.contract_registry_transition = commit_outcome.contract_registry
-                for filepath in sorted(state.all_files_written):
-                    logger.info(
-                        "Applied terminally verified sandbox change to workspace: %s", filepath,
-                    )
-                # PRD-024: the suite just ran against exactly what is now in
-                # the workspace; the next run starting here may reuse it.
-                if state.terminal_full_suite_result is not None:
-                    try:
-                        from kriya.workflow.baseline_policy import full_suite_evidence_for_reuse
-                        self._prior_full_suite_evidence = full_suite_evidence_for_reuse(
-                            workspace_path, self.kernel.config.autonomy, goal=goal, run_id=run_id,
-                            raw_result=state.terminal_full_suite_result,
-                        )
-                    except Exception as exc:
-                        self._prior_full_suite_evidence = None
-                        logger.warning(f"Full-suite evidence not kept for reuse: {exc}")
-
-                state.overall_attempt_succeeded = True
-                state.record_developer_attempt_outcome(self.developer.llm, passed=True)
-                state.record_event(RunEvent(
-                    kind="attempt.passed",
-                    attempt=state.attempt_number,
-                    source="workflow",
-                    authority=EventAuthority.AUTHORITATIVE,
-                    details={"passed": True, "applied": True},
-                ))
-                log_gate_banner(
-                    "OVERALL ATTEMPT", "PASSED", state.attempt_number,
-                    scope=attempt_ctx.execution_scope,
-                )
-                state.quality_gates_succeeded = True
-
-                # Authoritative work is durable now; release the sandbox
-                # before any optional learning call can stall or fail.
-                if worktree_path != workspace_path:
-                    remove_git_worktree(workspace_path, worktree_path)
-
-                # Advisory learning may consume a slow model call. It is legal
-                # only after terminal regression and atomic application have
-                # established authoritative success, never between candidate
-                # gates and the terminal regression boundary.
-                if should_extract_hard_won_knowledge:
-                    try:
-                        logger.info(
-                            "Terminal success established - extracting structured "
-                            "knowledge facts from the hard-won fix..."
-                        )
-                        from kriya.knowledge import staging as knowledge_staging
-                        from kriya.knowledge.channels.live_failure import LiveFailureChannel, LiveFailureContext
-
-                        file_contents = {}
-                        for filepath in state.all_files_written:
-                            full_path = os.path.join(workspace_path, filepath)
-                            try:
-                                with open(full_path, "r", encoding="utf-8") as fh:
-                                    file_contents[filepath] = fh.read()
-                            except Exception as e:
-                                logger.debug(f"Failed to read '{full_path}' for lesson extraction: {e}")
-
-                        channel = LiveFailureChannel(self.llm)
-                        facts = await channel.extract(LiveFailureContext(
-                            error_context=state.error_context,
-                            file_contents=file_contents,
-                            model_override=state.last_model_override,
-                            base_url_override=state.last_base_url_override,
-                            api_key_override=state.last_api_key_override,
-                            extra_body_override=state.last_extra_body_override,
-                            transcript=(
-                                self_corrected_outcome.get("self_correction_transcript")
-                                if self_corrected_outcome is not None else None
-                            ),
-                        ))
-                        if facts:
-                            skills_dir = self.kernel.config.paths.skills
-                            skill_folder = os.path.join(skills_dir, f"auto-{repo_slug}")
-                            written = knowledge_staging.stage_facts(skill_folder, facts)
-                            if written:
-                                logger.info(f"Staged {len(written)} structured knowledge fact(s) to {skill_folder}")
-                    except Exception as ex:
-                        logger.warning(f"Failed to extract lesson or update skills: {ex}")
 
                 break
 
@@ -5485,191 +4478,8 @@ class WorkflowEngine:
             status="in_progress", failure_note="Failed to write intermediate trace checkpoint (pre-Reviewer)",
         )
 
-        # 5. Reviewer
-        if state.pre_approval_review is not None:
-            # Stage 6 SME review, Finding 1: already ran at the
-            # Pre-Apply Human Approval Gate, against the exact same final content - a
-            # second call here would be a redundant LLM round-trip for an identical
-            # answer. step_callback still fires below so anything consuming the "Review"
-            # step in pipeline order sees it at the position it expects. No banner here
-            # - it already fired at the pre-approval gate above, where the real work
-            # happened; repeating it here would misleadingly announce "Review" as just
-            # starting when it in fact finished (and was already shown to the human)
-            # earlier in this same run.
-            logger.info(
-                "Reusing pre-approval Reviewer report; no second Reviewer call required."
-            )
-            review = state.pre_approval_review
-        else:
-            _log_phase_banner("REVIEW")
-            logger.info("Reviewer Agent evaluating results...")
-            if state.final_attempt_contents:
-                goal_header = (
-                    f"Goal: {goal}\n\n"
-                    "NOTE: Quality gates did not pass within the retry budget - these files were "
-                    "NOT applied to the workspace and only reflect the last (failing) attempt.\n"
-                    f"Last quality gate error:\n{state.error_context}\n\nFiles from the failing attempt:\n"
-                )
-            else:
-                goal_header = (
-                    f"Goal: {goal}\n{build_reviewer_verified_evidence(state.gate_outcomes)}"
-                    f"{ownership_review_evidence(resolved_obligation_ledger, state.all_files_written)}"
-                    "\nFiles generated:\n"
-                )
-
-            file_contents_for_review: List[Tuple[str, str]] = []
-            for filepath in sorted(state.all_files_written):
-                if filepath in state.final_attempt_contents:
-                    file_contents_for_review.append((filepath, state.final_attempt_contents[filepath]))
-                    continue
-                full_path = os.path.join(workspace_path, filepath)
-                try:
-                    with open(full_path, "r", encoding="utf-8") as f:
-                        file_contents_for_review.append((filepath, f.read()))
-                except Exception as e:
-                    logger.debug(f"Failed to read '{full_path}' for reviewer prompt: {e}")
-
-            # Reviewer mutation-evidence priority (2026-09-20): a real live
-            # incident - a large brownfield file's own candidate diff sat
-            # deep past where build_review_batches's own from-the-front
-            # token-budget truncation reached, so the Reviewer was shown
-            # thousands of lines of untouched code and never the actual
-            # changed region, then correctly (but unhelpfully) rejected the
-            # candidate for "insufficient evidence." Prepended to goal_header
-            # so it reaches the Reviewer in EVERY batch, ahead of the
-            # (possibly-truncated) full-file content - see build_candidate_
-            # diff_context()'s own docstring for the full incident and why
-            # this is additive, never a replacement for the existing
-            # full-file block. "" (no candidate files changed relative to
-            # their own original content - e.g. every written file is
-            # brand new) is a complete no-op, byte-identical to before this
-            # fix.
-            candidate_diff_context = build_candidate_diff_context(
-                state.all_original_contents, dict(file_contents_for_review),
-            )
-            goal_header = candidate_diff_context + goal_header
-
-            # Stage 6 SME review, Finding 2: previously concatenated every file's full
-            # raw content with no token-budget check at all - the exact silent-
-            # truncation-from-the-front failure mode the standalone `kriya review` CLI
-            # command was already fixed for (see kriya/workflow/review_context.py).
-            # PROMPT-BUDGET-FIT-001B: batches get the room this request
-            # leaves after the system prompt actually sent and the header
-            # (goal, candidate diff, gate and ownership evidence).
-            # Authoritative disposition override (2026-09-11, Demo-01 Run A
-            # finding): state.final_attempt_contents is populated ONLY on the
-            # terminal-failure paths (retry_strategy.py's scope-conflict and
-            # budget-exhausted branches) where this run will not succeed -
-            # the exact same, already-established signal goal_header above
-            # keys off of. Passing a disposition-aware system_prompt_override
-            # here, rather than relying solely on the plain-text NOTE already
-            # in goal_header, is what stops the Reviewer from writing "How to
-            # Run" instructions for a candidate that was never applied.
-            reviewer_system_prompt_override = (
-                self.reviewer.rejected_candidate_system_prompt(
-                    state.error_context or "Quality gates did not pass within the retry budget."
-                )
-                if state.final_attempt_contents else None
-            )
-            review_batches, _, review_fit = review_requests(
-                self.kernel.config, self.reviewer, file_contents_for_review,
-                reviewer_system_prompt_override or self.reviewer.system_prompt, goal_header,
-                on_refit=_review_refit_recorder(state, "final", self.kernel.config),
-            )
-            _record_review_fit(state, "final", review_fit)
-            # Demo-01 Finding 3 follow-up (2026-09-11): a rejected/unapplied
-            # candidate's review must never stream raw, unfiltered LLM
-            # tokens live to the user - extract_rejected_candidate_
-            # diagnostic() below only ever filters the FINAL joined text
-            # (review_text), so leaving live streaming on here would still
-            # leak the exact unfiltered "How to Run"/success-language
-            # content Finding 3 already closed for the final output, just
-            # earlier, token by token. Suppressed entirely for this case
-            # (not filtered after the fact - the raw tokens are simply
-            # never sent to stream_callback at all); the accepted-candidate
-            # path is completely unaffected.
-            reviewer_stream = (
-                (lambda token: stream_callback("Review", token))
-                if stream_callback and not state.final_attempt_contents else None
-            )
-            review_parts = []
-            for i, batch_prompts in enumerate(review_batches, 1):
-                label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
-                _reviewer_started = time.monotonic()
-                try:
-                    review_text = await self.reviewer.run(
-                        batch_prompts.first(), stream_callback=reviewer_stream,
-                        temperature_override=self.kernel.config.llm.reviewer_temperature,
-                        system_prompt_override=reviewer_system_prompt_override,
-                        candidate_prompt=batch_prompts,
-                    )
-                except (ContextBudgetUnsatisfiableError, InferenceDeadlineError) as refusal:
-                    # PROMPT-BUDGET-FIT-001C: PRD-016 refused the request
-                    # before inference (or, PROVIDER-CONTRACT-001A, the run's
-                    # generation deadline refused or stopped it). The run ends
-                    # as a typed non-success that keeps what already happened
-                    # (the candidate may be applied and committed); nothing is
-                    # retried or rolled back.
-                    state.final_review_refusal = {
-                        "reason_code": refusal.reason_code, "detail": str(refusal),
-                        "batch": i, "batches": len(review_batches),
-                    }
-                    state.record_event(RunEvent(
-                        kind="review.refused", attempt=state.attempt_number, source="workflow",
-                        authority=EventAuthority.AUTHORITATIVE,
-                        message=("the final review request was stopped by the run's generation deadline"
-                                 if isinstance(refusal, InferenceDeadlineError)
-                                 else "the final review request was refused before inference"),
-                        details=dict(state.final_review_refusal),
-                    ))
-                    logger.error(f"Final review not performed: {refusal}")
-                    review_parts.append(label + f"Final review not performed: {refusal}")
-                    break
-                except Exception as error:
-                    # FINAL-REVIEW-BACKEND-ERROR-001: any other failure of the
-                    # review request (a provider/transport error, a protocol
-                    # error, an unexpected exception) once the candidate is
-                    # applied and committed ends the run the same typed way
-                    # (final_review_refused, naming the committed state) with
-                    # the error's own reason code (FINAL_REVIEW_BACKEND_ERROR
-                    # when it carries none) and type - never a raw exception
-                    # out of run_generation_workflow over work already in the
-                    # workspace. Nothing is retried or rolled back. A coding
-                    # error here still surfaces: its type and message are the
-                    # recorded detail, and the run is a non-success.
-                    code, message = _final_review_error_code(error)
-                    state.final_review_refusal = {
-                        "reason_code": code,
-                        "detail": f"{type(error).__name__}: {error}", "exception_type": type(error).__name__,
-                        "batch": i, "batches": len(review_batches),
-                    }
-                    state.record_event(RunEvent(
-                        kind="review.refused", attempt=state.attempt_number, source="workflow",
-                        authority=EventAuthority.AUTHORITATIVE, message=message,
-                        details=dict(state.final_review_refusal),
-                    ))
-                    logger.error(f"Final review not performed: {type(error).__name__}: {error}")
-                    review_parts.append(label + f"Final review not performed: {type(error).__name__}: {error}")
-                    break
-                # Demo-01 Finding 3 (2026-09-11): the structural enforcement
-                # boundary itself - applied per-batch (not to the joined
-                # final text) so one batch's non-compliance with the marker
-                # contract doesn't discard another batch's compliant
-                # diagnostic content. Streamed tokens above (reviewer_stream)
-                # are real-time progress display and are not retroactively
-                # filtered - this governs the FINAL text that reaches
-                # res["review"]/the CLI, which is what Finding 3 is actually
-                # about.
-                if state.final_attempt_contents:
-                    review_text = self.reviewer.extract_rejected_candidate_diagnostic(review_text)
-                # R1 Deliverable 5 - observational only, same posture as the
-                # pre-approval reviewer wrapper above.
-                state.reviewer_calls += 1
-                state.reviewer_llm_seconds += time.monotonic() - _reviewer_started
-                review_parts.append(label + review_text)
-            review = "\n".join(review_parts)
-        if step_callback:
-            step_callback("Review", review)
+        # 5. Reviewer (kriya/workflow/stage_review.py::final_review, full modularization E4)
+        review = await final_review(stage_ctx, self._late_stage_deps())
 
         # Final status is derived from terminal state, not from append-only
         # failure history. An intermediate failed recovery attempt remains in

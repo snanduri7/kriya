@@ -197,7 +197,11 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         "kriya.workflow.retry_strategy": (1, "P2", _P2),
         "kriya.workflow.review_context": (1, "P2", _P2),
         "kriya.workflow.triage": (1, "P2", _P2),
-        "kriya.workflow.workflow": (4, "P2", _P2),
+        # E4: 3 of the 4 sites moved count-neutral (kriya.workflow.workflow -> requirement_closers, with
+        # _candidate_test_files, close_requirements_by_documentation and mutation_scope_evidence: the `.kriya`
+        # skip-sets of their tree walks / git listings); same removal slice, same reason.
+        "kriya.workflow.requirement_closers": (3, "P2", _P2),
+        "kriya.workflow.workflow": (1, "P2", _P2),
         "kriya.workflow.workflow_controller": (3, "P2", _P2),
         "kriya.workflow.worktree": (11, "M2", "moves to kriya/repository (owner of the worktree path)"),
     },

@@ -73,7 +73,10 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (W, '_ensure_repository_indexed'): P(2, W, ((W, 1),), ()),
     (W, '_gate_outcome_proven'): P(1, W, ((W, 2),), ()),
     (W, '_migration_identities'): P(1, W, ((W, 1),), ()),
-    (W, '_run_committed_paths'): P(2, W, ((W, 2),), ()),
+    # E4: 2 -> 1 lookup: both loads (_oracle_base_revision, mutation_scope_evidence) moved to requirement_closers and
+    # bind CloserDeps.run_committed_paths, built by _closer_deps from this name at call time (the two patch sites are
+    # the dynamic proof: they patch it on this module and drive the moved closers).
+    (W, '_run_committed_paths'): P(2, W, ((W, 1),), ()),
     (W, '_run_contract_acceptance'): P(1, W, ((W, 1),), ()),
     (W, '_run_static_analysis_gate'): P(2, W, ((W, 1),), ()),
     (W, 'assert_candidate_unchanged_since_source_review'): P(2, A, ((W, 3),), ()),
@@ -96,7 +99,12 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E3: 145 -> 90 lookups: the 55 logger loads of stages 0-3 moved to the stage modules, which bind
     # StageDeps.logger (WorkflowEngine._work_unit_deps -> _stage_deps, resolved here at call time; proven by the
     # same test_outcome logger test, extended to the KnowledgeGuard stage).
-    (W, 'logger'): P(3, W, ((W, 90),), ()),
+    # E4: 90 -> 65 lookups: the 5 logger loads of the moved requirement closers bind CloserDeps.logger (one new load
+    # in the module-level _closer_deps) and the 21 of the moved stages 5-7 bind StageDeps.logger (_late_stage_deps ->
+    # _stage_deps, no new load); both resolved here at call time. +2 sites: the dynamic proofs in
+    # tests/test_work_unit_stages.py (the moved lesson extraction's swallowed failure, and the final review stage and a
+    # closer forwarder, log through the patched facade logger).
+    (W, 'logger'): P(5, W, ((W, 65),), ()),
     (W, 'resolve_future_owner_verification_deferral'): P(1, 'kriya.workflow.attribution', ((W, 1),), ()),
     # E3 characterization: +1 site (the legacy_stage_context_success golden scripts the retrieval through it).
     (W, 'retrieve_graph_context'): P(2, 'kriya.workflow.graph_retrieval', ((W, 1),), ()),
@@ -221,8 +229,9 @@ def test_every_kernel_patch_target_is_pinned_and_still_reaches_what_it_patched(m
 def test_the_table_totals_are_the_measured_e1_baseline():
     totals = {module: sum(row.sites for (owner, _t), row in PATCH_POINTS.items() if owner == module) for module in ps.KERNEL_MODULES}
     # E1 baseline 87/69/268; E2 +1 W.logger site (test_outcome); E3 +1 W.retrieve_graph_context site (golden
-    # scenario) and +1 W.include_response_construction_owners site (test_work_unit_stages)
-    assert totals == {A: 87, W: 72, C: 268}
+    # scenario) and +1 W.include_response_construction_owners site (test_work_unit_stages); E4 +2 W.logger sites
+    # (test_work_unit_stages: the moved late stages and closers log through the patched facade logger)
+    assert totals == {A: 87, W: 74, C: 268}
     assert len(PATCH_POINTS) == 83
 
 
@@ -235,7 +244,9 @@ KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_life
                         # E3: the design stages and their runner
                         "kriya.workflow.work_unit_runner", "kriya.workflow.stage_knowledge_guard",
                         "kriya.workflow.stage_analysis", "kriya.workflow.stage_planning",
-                        "kriya.workflow.stage_architecture")
+                        "kriya.workflow.stage_architecture",
+                        # E4: the review, approval/apply and lesson stages and the requirement closers
+                        "kriya.workflow.stage_review", "kriya.workflow.stage_apply", "kriya.workflow.requirement_closers")
 FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
 
 

@@ -619,8 +619,9 @@ def test_only_the_change_gate_passes_a_non_empty_change_set_to_an_approval_callb
             first = match.group(1).strip()
             if first not in ("[]", "diffs_to_show or []"):
                 non_empty.append((path, first))
-    assert non_empty == [("kriya/workflow/workflow.py", "diffs_to_show")], non_empty
-    text = open("kriya/workflow/workflow.py", encoding="utf-8").read()
+    # E4: the change gate moved from workflow.py to stage_apply.py (approval_gate)
+    assert non_empty == [("kriya/workflow/stage_apply.py", "diffs_to_show")], non_empty
+    text = open("kriya/workflow/stage_apply.py", encoding="utf-8").read()
     gate = text[text.index("approved = approval_callback(diffs_to_show, escalation_reason)"):][:200]
     assert "asyncio.iscoroutine(approved)" in gate and "await approved" in gate
 

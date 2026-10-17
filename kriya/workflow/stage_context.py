@@ -18,12 +18,15 @@ cycle.
 The E3 design-stage collaborators default to ``NOT_INJECTED`` values that fail on any use
 (``StageCollaboratorMissing``): a ``StageDeps`` built for the lifecycle/outcome stages only (E2's
 ``WorkflowEngine._stage_deps``, a test double) can never silently run a design stage with a missing collaborator;
-``WorkflowEngine._work_unit_deps`` injects every one of them (pinned by ``tests/test_work_unit_stages.py``).
+``WorkflowEngine._work_unit_deps`` injects every one of them (pinned by ``tests/test_work_unit_stages.py``). The E4
+review, approval/apply and lesson collaborators (``stage_review``, ``stage_apply``) are a second fail-closed group
+(``late_stage_fields``), injected by ``WorkflowEngine._late_stage_deps``.
 
 ``StageContext`` is ONE work unit's run-local names shared by the design stages: the run's inputs (the
 ``run_generation_workflow`` arguments the stages read, the run state and trace identity the engine opened) and what
 each stage produces for the next stage and for the engine's Developer loop. It holds exactly the locals the stages
-shared when they were one method, under the same names.
+shared when they were one method, under the same names. E4 adds what the engine's Developer loop hands the late
+stages (the sandbox path, the effective obligation ledger, the grounding goal, the work unit).
 
 ``RunState`` is the run's ``kriya.workflow.state.GenerationState``. It is spelled ``Any`` here on purpose: an
 import of ``kriya.workflow.state`` (even under ``TYPE_CHECKING``, which the architecture scan counts as a
@@ -54,12 +57,13 @@ class StageCollaboratorMissing(RuntimeError):
 
 
 class _NotInjected:
-    """The default of an E3 collaborator field: every use (call, attribute, iteration, test) raises."""
+    """The default of an E3/E4 collaborator field: every use (call, attribute, iteration, test) raises."""
 
-    __slots__ = ("name",)
+    __slots__ = ("name", "group")
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, group: str = "design") -> None:
         self.name = name
+        self.group = group      # "design": an E3 design-stage field; "late": an E4 review/apply/lesson field
 
     def __repr__(self) -> str:
         return f"<not injected: {self.name}>"
@@ -80,6 +84,10 @@ class _NotInjected:
 
 def _injected(name: str) -> Any:
     return field(default=_NotInjected(name))
+
+
+def _late(name: str) -> Any:
+    return field(default=_NotInjected(name, "late"))
 
 
 @dataclass(frozen=True)
@@ -169,15 +177,57 @@ class StageDeps:
     PolicyDecision: Any = _injected("PolicyDecision")
     PolicyDeniedError: Any = _injected("PolicyDeniedError")
 
+    # ---- E4 review, approval/apply and lesson stages (stages 5-7); WorkflowEngine._late_stage_deps injects every
+    # field below (and the E3 fields those stages use: llm, _log_phase_banner, InferenceDeadlineError).
+    # The engine's own collaborators (were ``self.<name>`` in run_generation_workflow).
+    reviewer: Any = _late("reviewer")
+    developer: Any = _late("developer")
+    audit_approval_rules: Any = _late("audit_approval_rules")              # WorkflowEngine._audit_approval_rules
+    keep_full_suite_evidence: Any = _late("keep_full_suite_evidence")      # sets WorkflowEngine._prior_full_suite_evidence
+    # Function-local imports of all-import-cycle modules in the moved bodies, as loaders called where they imported.
+    load_full_suite_evidence_for_reuse: Any = _late("load_full_suite_evidence_for_reuse")   # kriya.workflow.baseline_policy
+    load_lesson_extraction: Any = _late("load_lesson_extraction")          # kriya.knowledge.staging + live-failure channel
+    # Names tests patch on kriya.workflow.workflow (resolved there at call time).
+    delete_checkpoint: Any = _late("delete_checkpoint")
+    commit_terminal_candidate: Any = _late("commit_terminal_candidate")
+    derive_contract_transition: Any = _late("derive_contract_transition")
+    _direct_terminal_writes: Any = _late("_direct_terminal_writes")
+    # kriya.workflow.workflow's own helpers (the FINAL_REVIEW_* mapping keeps its provider imports on the facade).
+    _final_review_error_code: Any = _late("_final_review_error_code")
+    _record_review_fit: Any = _late("_record_review_fit")
+    _review_refit_recorder: Any = _late("_review_refit_recorder")
+    _record_approval_decision: Any = _late("_record_approval_decision")
+    _restore_original_bytes: Any = _late("_restore_original_bytes")
+    _terminal_contract_authorizations: Any = _late("_terminal_contract_authorizations")
+    _raise_contract_registry_stop: Any = _late("_raise_contract_registry_stop")
+    _raise_terminal_commit_stop: Any = _late("_raise_terminal_commit_stop")
+    # All-import-cycle KERNEL modules (context_budget, review_context, ownership_findings) and non-public
+    # AUTHORITY/EXECUTION/PROVIDER names (control.launch_approval, static_analysis.service, core.token_budget).
+    review_requests: Any = _late("review_requests")
+    build_reviewer_verified_evidence: Any = _late("build_reviewer_verified_evidence")
+    build_candidate_diff_context: Any = _late("build_candidate_diff_context")
+    ownership_review_evidence: Any = _late("ownership_review_evidence")
+    REVIEW_SECTION_HEADER: Any = _late("REVIEW_SECTION_HEADER")
+    banner: Any = _late("banner")
+    commit_guard: Any = _late("commit_guard")
+    ContextBudgetUnsatisfiableError: Any = _late("ContextBudgetUnsatisfiableError")
+
 
 def design_stage_fields() -> Tuple[str, ...]:
-    """The E3 collaborator field names (those with a ``NOT_INJECTED`` default)."""
-    return tuple(f.name for f in fields(StageDeps) if isinstance(f.default, _NotInjected))
+    """The E3 collaborator field names (those with a design-stage ``NOT_INJECTED`` default)."""
+    return tuple(f.name for f in fields(StageDeps) if isinstance(f.default, _NotInjected) and f.default.group == "design")
 
 
-def not_injected(deps: StageDeps) -> List[str]:
-    """The design-stage collaborators of ``deps`` still at their fail-closed default."""
-    return [name for name in design_stage_fields() if isinstance(getattr(deps, name), _NotInjected)]
+def late_stage_fields() -> Tuple[str, ...]:
+    """The E4 collaborator field names (the review, approval/apply and lesson stages)."""
+    return tuple(f.name for f in fields(StageDeps) if isinstance(f.default, _NotInjected) and f.default.group == "late")
+
+
+def not_injected(deps: StageDeps, names: Optional[Tuple[str, ...]] = None) -> List[str]:
+    """The collaborators of ``deps`` (the design-stage ones unless ``names`` is given) still at their fail-closed
+    default."""
+    return [name for name in (design_stage_fields() if names is None else names)
+            if isinstance(getattr(deps, name), _NotInjected)]
 
 
 @dataclass(kw_only=True)
@@ -260,6 +310,12 @@ class StageContext:
     architect_files: Any = None
     active_skill_rules_snapshot: Dict[str, List[str]] = field(default_factory=dict)
     active_skill_manifest: List[Any] = field(default_factory=list)
+    # ---- set by the engine before its Developer loop, read by the E4 review, approval/apply and lesson stages
+    worktree_path: str = ""
+    resolved_obligation_ledger: Any = None
+    grounding_goal: str = ""
+    work_unit: Any = None
 
 
-__all__ = ["RunState", "StageCollaboratorMissing", "StageContext", "StageDeps", "design_stage_fields", "not_injected"]
+__all__ = ["RunState", "StageCollaboratorMissing", "StageContext", "StageDeps", "design_stage_fields",
+           "late_stage_fields", "not_injected"]
