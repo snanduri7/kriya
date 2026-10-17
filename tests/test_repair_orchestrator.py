@@ -1117,3 +1117,32 @@ def test_a_coordinated_participant_outside_the_active_group_is_shown_only_within
                                                            CodeOperation.REPAIR_WITH_PATCH))
     assert large_build in contexts[pom]
     assert large_build not in contexts[APP] and pom in contexts[APP]
+
+
+def test_retry_prompts_renders_both_api_contract_recovery_phases():
+    """E7 (post-move): the API_CONTRACT_RECOVERY request text moved verbatim into retry_prompts. The RESTORE phase's
+    text is never sent (that phase restores deterministically, with no Developer call: the attempt-level golden
+    pins that no request is made), so it is pinned here, on the renderer itself."""
+    from kriya.workflow.retry_prompts import _build_api_contract_recovery_prompt
+
+    recovery = _api_recovery(APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT)
+    originals = {E: "E" * 12005}
+    task, context, required, protected = _build_api_contract_recovery_prompt(
+        "the goal", recovery, originals, "BASE", repair_behavior=False)
+    assert required == f"{E}::public String absUrl(String key), {N}::public int childCount()"
+    assert protected == "src/test/org/example/ElementTest.java"
+    owners = (f"=== EXACT BASELINE OWNER SOURCE: {E} ===\n" + "E" * 12000
+              + f"\n\n=== EXACT BASELINE OWNER SOURCE: {N} ===\n<baseline source unavailable>")
+    assert context == "BASE\n\n" + owners
+    assert task == (
+        "=== API_CONTRACT_RECOVERY: RESTORE_PUBLIC_CONTRACT ===\n"
+        "This is the only objective for this phase.\n"
+        f"Restore these exact public signatures in their existing owners: {required}.\n"
+        "Do not solve the behavioral issue yet. Do not rename or replace a method. "
+        "Do not modify protected callers/tests. The candidate is invalid unless "
+        "every exact signature exists after this edit.\n"
+        f"Protected contract evidence: {protected}.\n\n{owners}")
+    repair, _context, _required, _protected = _build_api_contract_recovery_prompt(
+        "the goal", recovery, originals, "BASE", repair_behavior=True)
+    assert repair.startswith("=== API_CONTRACT_RECOVERY: REPAIR_BEHAVIOR ===\n")
+    assert repair.endswith(f"Original goal:\nthe goal\n\n{owners}")

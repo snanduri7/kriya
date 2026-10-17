@@ -406,6 +406,8 @@ def test_reference_text_is_read_only_where_it_is_shown_to_a_model():
         os.path.join("workflow", "stage_planning.py"), os.path.join("workflow", "stage_architecture.py"),
         # E5: the Developer loop's prelude hands the learned reference to the AttemptContext (moved from workflow.py)
         os.path.join("workflow", "development_loop.py"),
+        # E7: the retry preparation sizes the retry's member package beside the learned reference (moved from attempt.py)
+        os.path.join("workflow", "repair_orchestrator.py"),
     }
 
 

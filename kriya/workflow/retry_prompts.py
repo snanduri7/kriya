@@ -319,6 +319,47 @@ def _build_coordinated_retry_prompt(
     return task_desc, coordinated_context
 
 
+def _build_api_contract_recovery_prompt(
+    goal: str, contract: Any, original_contents: Dict[str, str], base_code_context: str, *, repair_behavior: bool,
+) -> Tuple[str, str, str, str]:
+    """API_CONTRACT_RECOVERY's Developer request (moved verbatim from attempt.run_attempt, E7): ``(task_desc,
+    existing code context, required signatures, protected evidence)`` for the recovery ``contract`` (the run's
+    ``APIContractRecovery``: its ``violations`` and ``protected_evidence_files``), with each violated owner's exact
+    baseline source from ``original_contents``. ``repair_behavior`` is the caller's phase decision (REPAIR_BEHAVIOR /
+    AWAIT_TERMINAL_SUCCESS: repair the behavior behind the restored contract; otherwise restore the public contract)."""
+    required = ", ".join(
+        f"{item['owner']}::{item['removed_signature']}"
+        for item in contract["violations"]
+    )
+    protected = ", ".join(contract["protected_evidence_files"])
+    baseline_owners = "\n\n".join(
+        f"=== EXACT BASELINE OWNER SOURCE: {owner} ===\n"
+        + original_contents.get(owner, "<baseline source unavailable>")[:12000]
+        for owner in sorted({item["owner"] for item in contract["violations"]})
+    )
+    if repair_behavior:
+        task_desc = (
+            "=== API_CONTRACT_RECOVERY: REPAIR_BEHAVIOR ===\n"
+            f"The following restored public contracts are immutable: {required}.\n"
+            f"Protected baseline callers/tests are immutable evidence: {protected}.\n"
+            "Now repair the requested behavior behind the existing public contract. "
+            "Prefer private/internal helper changes. Do not rename, remove, replace, "
+            "or redirect the public API.\n\n"
+            f"Original goal:\n{goal}\n\n{baseline_owners}"
+        )
+    else:
+        task_desc = (
+            "=== API_CONTRACT_RECOVERY: RESTORE_PUBLIC_CONTRACT ===\n"
+            "This is the only objective for this phase.\n"
+            f"Restore these exact public signatures in their existing owners: {required}.\n"
+            "Do not solve the behavioral issue yet. Do not rename or replace a method. "
+            "Do not modify protected callers/tests. The candidate is invalid unless "
+            "every exact signature exists after this edit.\n"
+            f"Protected contract evidence: {protected}.\n\n{baseline_owners}"
+        )
+    return task_desc, base_code_context + "\n\n" + baseline_owners, required, protected
+
+
 def _prepend_recovery_contract_block(task_desc: str, recovery_contract_block: str) -> str:
     """Recovery Execution Contract (PRV-06, 2026-08-29). A live incident
     traced the previous mechanism precisely: MA8.1 owner-recovery's own

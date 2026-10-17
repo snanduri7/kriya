@@ -132,6 +132,16 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
             "kriya.workflow.fallback_decision", ("_fallback_rejection",), "P1",
             "E6: the llm_chain fallback decisions owned by fallback_decision; the pure rejection record is re-exported "
             "(the other four names are forwarders that inject attempt.py's collaborators)"),
+        PartialFacade(
+            "kriya.workflow.repair_orchestrator",
+            ("RetryContextPreparation", "_DETERMINISTIC_VERDICT_REASON_CODES", "_GOAL_CALL_NAME", "_GOAL_MEMBER_HINTS_MAX",
+             "_classify_retry_target_source_origin", "_compute_retry_evidence_fingerprint", "_goal_named_member_candidates",
+             "_goal_named_members_of", "_preserve_member_exact_precision", "_target_source_record"), "P1",
+            "E7: the retry/repair preparation and the coordinated repair owned by repair_orchestrator; attempt.py keeps 11 "
+            "forwarders that inject its collaborators and re-exports these ten pure names (the preparation's result type, "
+            "the deterministic-verdict codes, the goal-member pattern and cap, the target-source record, the evidence "
+            "fingerprint, the goal-named candidates edit_feasibility imports from attempt, the member-exact merge "
+            "generation_service receives through GenerationDeps)"),
     ),
     "kriya/workflow/terminal_commit.py": PartialFacade(
         "kriya.repository.commit", ("CandidateMaterializationError",), "P1",

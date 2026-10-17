@@ -39,6 +39,8 @@ class P(NamedTuple):
 PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # kriya.workflow.attempt
     (A, '_approve_runtime_commands'): P(1, A, ((A, 2),), ()),
+    # E7: unchanged - still the retry_prompts function attempt.py imports, looked up by run_attempt's two targeted
+    # branches (which stay in attempt.py); retry_prompts.py stays its only definition.
     (A, '_build_targeted_retry_prompt'): P(2, 'kriya.workflow.retry_prompts', ((A, 2),), ()),
     (A, '_check_java_toolchain_mismatch'): P(2, 'kriya.workflow.toolchain', ((A, 2),), ()),
     (A, '_code_intelligence_for'): P(2, A, ((A, 2),), ()),
@@ -47,6 +49,8 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E6: 4 -> 3 lookups: the selection's and the substitution's loads moved to fallback_decision and read
     # FallbackDeps._developer_request_profile (one load in attempt._fallback_deps), the model entry's to generation_service
     # (one load in attempt._generation_deps); the retry preparation keeps its own. The patch site above is the dynamic proof.
+    # E7: 3 -> 3 lookups: the retry preparation's load moved to repair_orchestrator and reads
+    # RepairDeps._developer_request_profile (one load in attempt._repair_deps).
     (A, '_developer_request_profile'): P(1, A, ((A, 3),), ()),
     (A, '_ensure_generation_time_budget'): P(2, A, ((A, 1),), ()),
     (A, '_enter_developer_model'): P(1, A, ((A, 1),), ()),
@@ -55,13 +59,22 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (A, '_reject_exception_masking'): P(1, A, ((A, 2),), ()),
     (A, '_require_qualified_retry_identity'): P(1, A, ((A, 1),), ()),
     (A, '_resolve_java_home_override'): P(4, 'kriya.workflow.toolchain', ((A, 2),), ()),
+    # E7: the body moved to repair_orchestrator; attempt.py keeps a forwarder (owner A). 3 -> 3 lookups: the retry
+    # preparation's load reads RepairDeps (one load in attempt._repair_deps), generation_service's and
+    # run_attempt's are unchanged.
     (A, '_resolve_known_target_member_hints'): P(1, A, ((A, 3),), ()),
     (A, '_resolve_run_command'): P(10, 'kriya.workflow.file_resolution', ((A, 3),), ()),
     (A, '_restore_api_contract_owners_deterministically'): P(1, A, ((A, 1),), ()),
+    # E7: the body moved to repair_orchestrator; attempt.py keeps an async forwarder (owner A) that run_attempt's
+    # coordinated branch still calls by this name (the 5 patch sites intercept the whole coordinated repair).
     (A, '_run_coordinated_repair_generation'): P(5, A, ((A, 1),), ()),
+    # E7: 5 -> 5 lookups: the coordinated repair's per-participant call moved to repair_orchestrator and reads
+    # RepairDeps._run_developer_generation (one load in attempt._repair_deps).
     (A, '_run_developer_generation'): P(11, A, ((A, 5),), ()),
     (A, '_run_verification_only_attempt'): P(1, A, ((A, 1),), ()),
     (A, '_validate_and_convert_managed_service_contract'): P(1, A, ((A, 1),), ()),
+    # E7: 3 -> 3 lookups: the coordinated candidate view's materialization moved to repair_orchestrator and reads
+    # RepairDeps.apply_anchored_edits (one load in attempt._repair_deps).
     (A, 'apply_anchored_edits'): P(1, 'kriya.workflow.edit_safety', ((A, 3),), ()),
     (A, 'defer_execution_until_source_review'): P(1, A, ((A, 1),), ()),
     (A, 'exact_window_reserve'): P(1, 'kriya.workflow.edit_capability', ((A, 2),), ()),
@@ -279,7 +292,9 @@ KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_life
                         # E5: the Developer loop (stage 4) and one iteration's typed lifecycle
                         "kriya.workflow.development_loop", "kriya.workflow.attempt_lifecycle",
                         # E6: the Developer request assembly and generation, and the llm_chain fallback decisions
-                        "kriya.workflow.generation_service", "kriya.workflow.fallback_decision")
+                        "kriya.workflow.generation_service", "kriya.workflow.fallback_decision",
+                        # E7: the retry/repair preparation and the coordinated repair
+                        "kriya.workflow.repair_orchestrator")
 FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
 
 
