@@ -40,11 +40,14 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # kriya.workflow.attempt
     # E8 characterization: +1 site (tests/test_gate_orchestrator.py records what the candidate gates hand to the
     # runtime-verification seam - E9's code - through this name).
+    # E8: 1 -> 1: the executing gates' call moved to gate_orchestrator and reads GateDeps (one load in attempt._gate_deps).
     (A, '_approve_and_execute_runtime_verification'): P(1, A, ((A, 1),), ()),
     (A, '_approve_runtime_commands'): P(1, A, ((A, 2),), ()),
     # E7: unchanged - still the retry_prompts function attempt.py imports, looked up by run_attempt's two targeted
     # branches (which stay in attempt.py); retry_prompts.py stays its only definition.
     (A, '_build_targeted_retry_prompt'): P(2, 'kriya.workflow.retry_prompts', ((A, 2),), ()),
+    # E8 (guard): 2 -> 2: the toolchain preflight's load moved to gate_orchestrator and reads GateDeps (one load in
+    # attempt._gate_deps); the verification-only/runtime path keeps its own.
     (A, '_check_java_toolchain_mismatch'): P(2, 'kriya.workflow.toolchain', ((A, 2),), ()),
     (A, '_code_intelligence_for'): P(2, A, ((A, 2),), ()),
     # E6 characterization: +1 site (tests/test_fallback_decision.py records which request profiles a fallback decision
@@ -57,14 +60,19 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (A, '_developer_request_profile'): P(1, A, ((A, 3),), ()),
     (A, '_ensure_generation_time_budget'): P(2, A, ((A, 1),), ()),
     # E8 characterization: +1 site (tests/test_gate_orchestrator.py: the managed-service early return of the gates).
+    # E8: 2 -> 2: the executing gates' load moved (GateDeps, one load in attempt._gate_deps); the direct runtime path keeps its own.
     (A, '_execute_managed_service_verification'): P(1, A, ((A, 2),), ()),
     (A, '_enter_developer_model'): P(1, A, ((A, 1),), ()),
     # E8 characterization: +1 site (tests/test_gate_orchestrator.py records the scope every suite judgment is asked for).
-    (A, '_judge_candidate_suite'): P(1, A, ((A, 4),), ()),
+    # E8: 4 -> 2 lookups: the three loads of the moved gates (the selection fallback's and the full suite's judgment,
+    # the verification-only judge_suite lambda) read GateDeps._judge_candidate_suite (one load in attempt._gate_deps);
+    # the test-delta covering run keeps its own. The patch site above is the dynamic proof (all three paths).
+    (A, '_judge_candidate_suite'): P(1, A, ((A, 2),), ()),
     (A, '_maybe_run_developer_investigation'): P(1, A, ((A, 1),), ()),
     (A, '_prepare_finite_command_runtime_artifacts'): P(1, A, ((A, 3),), ()),
     (A, '_reject_exception_masking'): P(1, A, ((A, 2),), ()),
     (A, '_require_qualified_retry_identity'): P(1, A, ((A, 1),), ()),
+    # E8 (guard): 2 -> 2: the toolchain preflight's load moved (GateDeps, one load in attempt._gate_deps); the other stays.
     (A, '_resolve_java_home_override'): P(4, 'kriya.workflow.toolchain', ((A, 2),), ()),
     # E7: the body moved to repair_orchestrator; attempt.py keeps a forwarder (owner A). 3 -> 3 lookups: the retry
     # preparation's load reads RepairDeps (one load in attempt._repair_deps), generation_service's and
@@ -78,6 +86,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E7: 5 -> 5 lookups: the coordinated repair's per-participant call moved to repair_orchestrator and reads
     # RepairDeps._run_developer_generation (one load in attempt._repair_deps).
     (A, '_run_developer_generation'): P(11, A, ((A, 5),), ()),
+    # E8: the body moved to gate_orchestrator; attempt.py keeps an async forwarder (owner A) that run_attempt calls by this name.
     (A, '_run_verification_only_attempt'): P(1, A, ((A, 1),), ()),
     (A, '_validate_and_convert_managed_service_contract'): P(1, A, ((A, 1),), ()),
     # E7: 3 -> 3 lookups: the coordinated candidate view's materialization moved to repair_orchestrator and reads
@@ -85,7 +94,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (A, 'apply_anchored_edits'): P(1, 'kriya.workflow.edit_safety', ((A, 3),), ()),
     (A, 'defer_execution_until_source_review'): P(1, A, ((A, 1),), ()),
     (A, 'exact_window_reserve'): P(1, 'kriya.workflow.edit_capability', ((A, 2),), ()),
+    # E8 (guard): 1 -> 1: the executing gates' load moved (GateDeps, one load in attempt._gate_deps).
     (A, 'extract_target_test'): P(4, 'kriya.workflow.file_resolution', ((A, 1),), ()),
+    # E8 (guard): 2 -> 2: the executing gates' load moved (GateDeps, one load in attempt._gate_deps); the other stays.
     (A, 'find_runnable_test_files'): P(3, 'kriya.workflow.file_resolution', ((A, 2),), ()),
     (A, 'normalize_written_filepath'): P(1, 'kriya.workflow.file_resolution', ((A, 1),), ()),
     (A, 'run_attempt'): P(10, A, (('kriya.workflow.best_of_n', 1),), (W,)),
@@ -93,7 +104,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E6: 9 -> 8 lookups: the generation's two time.monotonic() loads moved to generation_service and read
     # GenerationDeps.time, bound to this module's time by attempt._generation_deps at call time (one new load), so a
     # patch of kriya.workflow.attempt.time still reaches the generation's duration measurement.
-    (A, 'time'): P(1, 'time', ((A, 8),), ()),
+    # E8: 8 -> 7 lookups: the compile timing's two time.monotonic() loads moved to gate_orchestrator and read
+    # GateDeps.time (one load in attempt._gate_deps), so a patch of kriya.workflow.attempt.time still reaches it.
+    (A, 'time'): P(1, 'time', ((A, 7),), ()),
     # kriya.workflow.workflow
     (W, 'RepositoryAnalyzer'): P(3, 'kriya.analyzer.analyzer', ((W, 2),), ()),
     (W, 'RepositoryAnalyzer.index_repository'): P(3, 'kriya.analyzer.analyzer', None, ()),
@@ -302,7 +315,9 @@ KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_life
                         # E6: the Developer request assembly and generation, and the llm_chain fallback decisions
                         "kriya.workflow.generation_service", "kriya.workflow.fallback_decision",
                         # E7: the retry/repair preparation and the coordinated repair
-                        "kriya.workflow.repair_orchestrator")
+                        "kriya.workflow.repair_orchestrator",
+                        # E8: the candidate-gate orchestration and the verification-only attempt
+                        "kriya.workflow.gate_orchestrator")
 FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
 
 

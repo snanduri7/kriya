@@ -346,16 +346,22 @@ FORBIDDEN = {"kriya.workflow.attempt", "kriya.workflow.retry_strategy", "kriya.w
 
 
 @pytest.mark.parametrize("module", ["kriya/workflow/recovery_coordinator.py",
-                                    "kriya/workflow/verification_coordinator.py"])
+                                    "kriya/workflow/verification_coordinator.py",
+                                    "kriya/workflow/gate_orchestrator.py"])
 def test_the_coordinators_depend_only_downward(module):
     """Neither coordinator imports the orchestration modules that call it
-    (including lazy imports), so the dependency runs one way."""
+    (including lazy imports), so the dependency runs one way. E8: the gate
+    orchestrator that now runs the verification-only attempt through
+    VerificationCoordinator obeys the same rule (its attempt.py and
+    retry_strategy collaborators arrive through GateDeps)."""
     assert not _imported_modules(module) & FORBIDDEN
 
 
 def test_the_callers_reach_the_coordinators():
     assert "kriya.workflow.recovery_coordinator" in _imported_modules("kriya/workflow/retry_strategy.py")
     assert "kriya.workflow.verification_coordinator" in _imported_modules("kriya/workflow/attempt.py")
+    # E8: the verification-only attempt (kriya/workflow/gate_orchestrator.py) sequences the declared verifiers through it.
+    assert "kriya.workflow.verification_coordinator" in _imported_modules("kriya/workflow/gate_orchestrator.py")
     verification = (REPO / "kriya/workflow/verification_coordinator.py").read_text()
     recovery = (REPO / "kriya/workflow/recovery_coordinator.py").read_text()
     # The coordinators decide nothing themselves: recovery defers to the

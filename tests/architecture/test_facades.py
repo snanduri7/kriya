@@ -142,6 +142,11 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
             "the deterministic-verdict codes, the goal-member pattern and cap, the target-source record, the evidence "
             "fingerprint, the goal-named candidates edit_feasibility imports from attempt, the member-exact merge "
             "generation_service receives through GenerationDeps)"),
+        PartialFacade(
+            "kriya.workflow.gate_orchestrator",
+            ("SPEC_COMPLIANCE_MODEL_ADVISORY", "SPEC_MODEL_INDETERMINATE", "SPEC_MODEL_REPORTED_MISSING"), "P1",
+            "E8: the candidate-gate orchestration owned by gate_orchestrator; attempt.py keeps 11 forwarders that inject "
+            "its collaborators (GateDeps) and re-exports the goal-spec gate's three advisory statuses"),
     ),
     "kriya/workflow/terminal_commit.py": PartialFacade(
         "kriya.repository.commit", ("CandidateMaterializationError",), "P1",

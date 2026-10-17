@@ -360,13 +360,14 @@ def test_end_to_end_an_unavailable_runner_never_becomes_a_candidate_failure(tmp_
 def test_the_gate_sits_after_compile_and_before_the_model_verifier_gates():
     import inspect
 
-    from kriya.workflow import attempt
+    from kriya.workflow import attempt, gate_orchestrator
 
     # Demo V2 (Gap B): the compile, the contract-feedback gate and the test finder are the EXECUTING candidate gates, which a human-in-the-loop run holds until the source review succeeds. The
     # order among them is unchanged; where they sit is `_run_executing_candidate_gates`, and `run_attempt` itself no longer compiles anything (nothing can execute ahead of the held gates).
-    source = inspect.getsource(attempt._run_executing_candidate_gates)
-    assert source.index("compile_res = validator.run_compile_check") < source.index("_run_contract_feedback_gate(state, ctx)") \
-        < source.index("runnable_test_files = find_runnable_test_files")
+    # E8: the body is kriya/workflow/gate_orchestrator.py (attempt.py's name is a forwarder); its collaborators arrive as deps.
+    source = inspect.getsource(gate_orchestrator._run_executing_candidate_gates)
+    assert source.index("compile_res = validator.run_compile_check") < source.index("deps._run_contract_feedback_gate(state, ctx)") \
+        < source.index("runnable_test_files = deps.find_runnable_test_files")
     assert "run_compile_check" not in inspect.getsource(attempt.run_attempt)
 
 
