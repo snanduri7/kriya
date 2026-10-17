@@ -25,14 +25,17 @@ substitution (blob text through ``EvidenceRun.blob``), so the digest stays sensi
 
 Portability (HX1, OI-41): the goldens pass at any absolute checkout path and under load. Two typed fields are
 canonicalized (``run.opened`` ``kriya_build.install_path`` and ``provider_contract.deadline.elapsed_request_ms``, see
-``INSTALL_PATH_TOKEN``), and every scenario runs from an isolated working directory (``isolated_working_directory``)
-holding an EMPTY ``./memory``: the E1 scenarios keep the AppConfig default ``paths.memory = ./memory`` (so the RunRecord
-config fingerprint is unchanged) but no longer open or create the checkout's untracked ``./memory``. The goldens were
-re-rendered once by HX1 with ONLY those two leaves changed (the behaviour stays the one of each ``generated_from``).
+``INSTALL_PATH_TOKEN``), and every run that resolves the relative default ``./memory`` (``MEMORY_RESOLVING``:
+``_scripted`` and ``legacy_resume_after_failure``, whoever calls them) runs from an isolated working directory
+(``isolated_working_directory``) holding an EMPTY ``./memory``: those E1 scenarios keep the AppConfig default
+``paths.memory = ./memory`` (so the RunRecord config fingerprint is unchanged) but no longer open or create the
+checkout's untracked ``./memory``. The goldens were re-rendered once by HX1 with ONLY those two leaves changed (the
+behaviour stays the one of each ``generated_from``).
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import enum
 import hashlib
@@ -40,8 +43,9 @@ import json
 import os
 import re
 import sqlite3
+import tempfile
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional
 from unittest.mock import MagicMock
 
 # Imported at module import, never first inside a scenario: a kernel module first imported while a test has patched
@@ -96,7 +100,7 @@ _TRANSACTION = re.compile(r"(<run:\d+>-)([0-9a-f]{12})(?![0-9a-f])")
 # Not numbered: even their equality pattern is MEASURED to vary (two attempts' pytest timings sometimes coincide).
 VOLATILE_DIGEST_KEYS = frozenset({"fingerprint_hash", "last_vector_digest"})
 # HX1 (OI-41) - two TYPED fields, canonicalized at this representation boundary only (production evidence unchanged;
-# handover/modularization/HX1-CHARACTERIZATION.md has the measurements):
+# handover/MODULARIZATION/HX1-CHARACTERIZATION.md has the measurements):
 # - run.opened payload -> kriya_build -> install_path is the imported kriya package directory (build_info.PACKAGE_DIR),
 #   i.e. the checkout path: it becomes a first-appearance "<install_path:N>" token, and ONLY when it IS the running
 #   package directory (any other value, or the same key anywhere else, stays raw and breaks the golden).
@@ -393,6 +397,8 @@ class Outcome:
     # Values MEASURED to be volatile in THIS scenario only, replaced like the paths (value -> token prefix): an early
     # exit's result run_id is the 8-hex traces.db row id, which the run_events form tokenizes as "trace".
     literals: Dict[str, str] = dataclasses.field(default_factory=dict)
+    # HX1: the isolated working directory a MEMORY_RESOLVING run used (never rendered into the form).
+    working_directory: Optional[str] = None
 
 
 # Every scenario's terminal path, as the golden header states it (test_sm_kernel_golden checks each golden agrees).
@@ -469,12 +475,20 @@ MEMORY_RESOLVING = frozenset({
 })
 
 
-def isolated_working_directory(root: Path) -> Path:
-    """A fresh working directory for one scenario, outside its workspace, holding an EMPTY ``./memory``: the relative
-    config paths keep their logical value (the config fingerprint is unchanged) and resolve here, never in the checkout."""
-    cwd = root / "cwd"
-    (cwd / "memory").mkdir(parents=True)
-    return cwd
+@contextlib.contextmanager
+def isolated_working_directory(tmp_path: Path) -> Iterator[Path]:
+    """Run the block from a fresh working directory next to ``tmp_path`` (outside the scenario's workspace) holding an
+    EMPTY ``./memory``, then restore the previous one: the relative config paths keep their logical value (the config
+    fingerprint is unchanged) and resolve here, never in the checkout. Owned by the harness, so every caller of the
+    MEMORY_RESOLVING runs (``_scripted``, ``legacy_resume_after_failure``; also test_outcome / test_kernel_seams) is isolated."""
+    previous = os.getcwd()
+    cwd = Path(tempfile.mkdtemp(prefix=f"{tmp_path.name}-cwd-", dir=str(tmp_path.parent)))
+    (cwd / "memory").mkdir()
+    os.chdir(cwd)
+    try:
+        yield cwd
+    finally:
+        os.chdir(previous)
 
 
 def capture(outcome: Outcome, tmp_path: Path, name: str = "") -> Dict[str, Any]:
@@ -542,6 +556,16 @@ def _scripted(tmp_path: Path, developer: Callable[[str, int, str], str], *, chai
               configure: Optional[Callable[[Any], None]] = None, reviewer_error: bool = False,
               approve: bool = True, controller: bool = True, run_kwargs: Optional[Dict[str, Any]] = None,
               workspace: Optional[str] = None) -> Outcome:
+    with isolated_working_directory(tmp_path) as cwd:
+        outcome = _scripted_isolated(tmp_path, developer, chain=chain, configure=configure, reviewer_error=reviewer_error,
+                                     approve=approve, controller=controller, run_kwargs=run_kwargs, workspace=workspace)
+    outcome.working_directory = str(cwd)
+    return outcome
+
+
+def _scripted_isolated(tmp_path: Path, developer: Callable[[str, int, str], str], *, chain: bool,
+                       configure: Optional[Callable[[Any], None]], reviewer_error: bool, approve: bool, controller: bool,
+                       run_kwargs: Optional[Dict[str, Any]], workspace: Optional[str]) -> Outcome:
     from _scripted_run import engine, git_workspace, script
 
     if workspace is None:
@@ -667,6 +691,13 @@ def _role_script(llm, developer: Callable[[str, int, str], str], record: List[st
 @scenario("legacy_resume_after_failure")
 def legacy_resume_after_failure(tmp_path: Path) -> Outcome:
     """Run 1 exhausts its gates and leaves its stage checkpoints; run 2 (resume=True) restores them and succeeds."""
+    with isolated_working_directory(tmp_path) as cwd:
+        outcome = _resume_after_failure(tmp_path)
+    outcome.working_directory = str(cwd)
+    return outcome
+
+
+def _resume_after_failure(tmp_path: Path) -> Outcome:
     from _scripted_run import engine, git_workspace
 
     from kriya.workflow.workflow_controller import WorkflowController

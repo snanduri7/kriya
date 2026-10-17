@@ -28,11 +28,6 @@ def _fixed_git_identity(monkeypatch):
         monkeypatch.setenv(name, value)
 
 
-@pytest.fixture(autouse=True)
-def _isolated_working_directory(tmp_path_factory, monkeypatch):
-    """Every test here runs from a fresh working directory holding an empty ./memory (never the checkout's)."""
-    monkeypatch.chdir(kg.isolated_working_directory(tmp_path_factory.mktemp("hx1-cwd")))
-
 
 @pytest.mark.parametrize("name", sorted(kg.SCENARIOS))
 def test_the_kernel_scenario_matches_its_pre_decomposition_golden(name, tmp_path):
@@ -128,7 +123,7 @@ def test_every_golden_shows_its_terminal_path_and_real_evidence():
 # Each normalization is proven both ways: the value it hides really varies in a real run and the golden still holds;
 # anything next to it (another path, another kriya_build field, a deadline, a classification, an identity, the order)
 # still breaks the golden. The isolation is proven to keep the logical config and to resolve ./memory away from the
-# checkout. handover/modularization/HX1-CHARACTERIZATION.md has the measurements these controls reproduce.
+# checkout. handover/MODULARIZATION/HX1-CHARACTERIZATION.md has the measurements these controls reproduce.
 
 INSTALL_SCENARIO = "legacy_knowledge_gap"   # a short run with one run.opened record
 ELAPSED_SCENARIO = "enforce_approval_refused"   # model calls through LLMClient._request_once -> _finish
@@ -284,12 +279,17 @@ def test_the_elapsed_request_canonicalization_is_exact():
 
 
 def test_scenarios_resolve_memory_in_an_isolated_working_directory(request, tmp_path):
-    cwd = Path.cwd().resolve()
+    """The harness (not this file) runs every MEMORY_RESOLVING run from a fresh working directory with an empty
+    ./memory and restores the caller's afterwards: the relative ./memory resolves there, never in the checkout."""
+    before = os.getcwd()
+    outcome = kg.SCENARIOS["legacy_budget_stop"](tmp_path)
+    assert os.getcwd() == before
+    cwd = Path(outcome.working_directory).resolve()
     checkout = Path(request.config.rootpath).resolve()
-    assert checkout not in cwd.parents and cwd != checkout and os.listdir("memory") == []
+    assert checkout not in cwd.parents and cwd != checkout and cwd != tmp_path.resolve()
+    assert os.listdir(cwd / "memory") != []   # the run opened (created) its sqlite stores in THIS ./memory
     assert kg.MEMORY_RESOLVING <= set(kg.SCENARIOS)
-    assert _form("legacy_budget_stop", tmp_path) == _golden("legacy_budget_stop")
-    assert os.listdir("memory") != []   # the run opened (created) its sqlite stores in THIS ./memory, not the checkout's
+    assert kg.render(kg.capture(outcome, tmp_path, "legacy_budget_stop")) == _golden("legacy_budget_stop")
 
 
 def test_the_isolated_working_directory_keeps_the_config_fingerprint(tmp_path, monkeypatch):
@@ -302,7 +302,8 @@ def test_the_isolated_working_directory_keeps_the_config_fingerprint(tmp_path, m
         if memory is not None:
             cfg.paths.memory = memory
         return cfg.paths.memory, compute_config_fingerprint(cfg.model_dump())
-    isolated = fingerprint()
+    with kg.isolated_working_directory(tmp_path):
+        isolated = fingerprint()
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
