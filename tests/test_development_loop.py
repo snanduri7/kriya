@@ -391,3 +391,31 @@ def test_a_baseline_the_run_refused_to_reuse_is_recorded_before_the_first_attemp
     with patch(f"{W}.capture_brownfield_baselines", new=captured), patch(f"{W}.run_attempt", new=capture_and_stop):
         kg._apply_run(tmp_path, controller=False)
     assert seen == [[{"reason": "prior baseline lacks per-test evidence"}, {"reason": "stale"}]]
+
+
+def test_a_terminal_regression_whose_tool_cannot_start_is_an_environment_stop(tmp_path, _git_identity):
+    """GRADLE-WRAPPER-CONTAINMENT-001 at the terminal regression: a full-suite result whose verification tool could not
+    start (a typed environment_reason_code) is the run's verification_infrastructure_failure - the environment stop after
+    that one attempt - never a regression failure of the candidate that a retry could repair."""
+    import json
+
+    def cannot_start(self, target_test=None, *args, **kwargs):
+        return {"success": False, "output": "the test runner could not start",
+                "environment_reason_code": "TOOL_UNAVAILABLE"}
+
+    attempts = []
+    write = _bypassing_attempt({"calc.py": kg.GOOD})
+
+    async def counted(state, ctx):
+        attempts.append(state.attempt_number)
+        await write(state, ctx)
+
+    with patch(f"{W}.run_attempt", new=counted), \
+            patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=cannot_start):
+        outcome = kg._apply_run(tmp_path, controller=False)
+    with sqlite3.connect(trace_db_path(outcome.cfg)) as db:
+        outcomes = json.loads(db.execute("SELECT gate_outcomes FROM runs ORDER BY rowid DESC LIMIT 1").fetchone()[0])
+    failed = [g for g in outcomes if g.get("success") is False]
+    assert len(attempts) == 1 and outcome.result["quality_gates_passed"] is False
+    assert [g.get("type") for g in failed] == ["verification_infrastructure_failure"]
+    assert failed[0]["attribution_kind"] == "INFRASTRUCTURE_DEFECT"   # nothing about the candidate was observed

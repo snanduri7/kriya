@@ -124,8 +124,8 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (W, 'retrieve_graph_context'): P(2, 'kriya.workflow.graph_retrieval', ((W, 1),), ()),
     # E5 characterization: +8 sites (tests/test_development_loop.py drives stage 4 through the facade's run_attempt: the
     # per-iteration resets, Best-of-N's handed-over stop, the prelude's run-wide decisions, the terminal checks, resume,
-    # the rejected baseline reuse).
-    (W, 'run_attempt'): P(10, A, ((W, 1),), ()),
+    # the rejected baseline reuse, the terminal regression's environment stop).
+    (W, 'run_attempt'): P(11, A, ((W, 1),), ()),
     (W, 'save_checkpoint'): P(6, 'kriya.control.checkpoint', ((W, 1),), ()),
     # kriya.workflow.workflow_controller
     (C, 'ArtifactRegistry.derive_from_workspace'): P(4, 'kriya.control.artifacts', None, ()),
@@ -248,9 +248,9 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # E1 baseline 87/69/268; E2 +1 W.logger site (test_outcome); E3 +1 W.retrieve_graph_context site (golden
     # scenario) and +1 W.include_response_construction_owners site (test_work_unit_stages); E4 +2 W.logger sites
     # (test_work_unit_stages: the moved late stages and closers log through the patched facade logger); E5 +1 W.logger and
-    # +1 W.create_git_worktree, +1 W.handle_attempt_failure, +1 W.capture_brownfield_baselines and +9 W.run_attempt sites
+    # +1 W.create_git_worktree, +1 W.handle_attempt_failure, +1 W.capture_brownfield_baselines and +10 W.run_attempt sites
     # (test_development_loop: stage 4's characterization and dynamic proofs, written before the move)
-    assert totals == {A: 87, W: 87, C: 268}
+    assert totals == {A: 87, W: 88, C: 268}
     assert len(PATCH_POINTS) == 83
 
 
