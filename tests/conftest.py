@@ -217,7 +217,8 @@ MODULE_TIER_FILES = {
         "test_lr_r1_p4_verification_only_retry_reproducer.py", "test_lr_r1_p4_verification_retry_admission.py",
         "test_milestone2.py", "test_milestone3_4.py", "test_milestone_validation.py", "test_milestones.py",
         "test_outcome.py",  # E2: run outcome construction (result dict / terminal trace row) per terminal path
-        "test_work_unit_stages.py",  # E3: the design stages (0-3) and their runner, with StageContext fakes
+        "test_work_unit_stages.py",  # E3: the design stages (0-3) and their runner; E4: the review/apply/lesson stages
+        "test_early_exit_traces.py",  # E4: the run-opening early exits and their short traces.db rows (OI-32)
         "test_p2_compile_regression_attribution.py", "test_p2_regression_attribution_reproducer.py",
         "test_p3c_prose_candidate_delta.py", "test_plan_edit_feasibility_001.py", "test_plan_executability.py",
         "test_plan_external_package_capability_001.py", "test_plan_global_invariant_projection_001.py",
