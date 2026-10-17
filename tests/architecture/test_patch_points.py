@@ -456,3 +456,58 @@ def test_a_moved_renamed_or_rebound_patch_target_fails_with_the_sites_to_retarge
                patch_point_problems(table, grown, resolve_with({"f": native}), same_index))
     assert patch_point_problems(table, [], resolve_with({"f": native}), same_index) == [
         "patch target kriya.workflow.facade.f is no longer patched by any test: delete its row"]
+
+
+# ----------------------------------------------------------------------------- E7: the retry/repair names
+
+# Written at c41e0ff, BEFORE kriya/workflow/repair_orchestrator.py exists (E7 moves these bodies there): every name
+# stays importable from kriya.workflow.attempt with the same parameters (names, kinds, defaults) and the same
+# sync/async kind, so the 23 test files and the 3 production modules (generation_service, investigation's docs,
+# edit_feasibility's function-local import of _goal_named_member_candidates) that reach them through attempt keep
+# calling them exactly as before. Annotations are not pinned: an owner module spells the kernel's cycle types Any.
+E7_ATTEMPT_CALLABLES = {
+    "_goal_named_members_of": "(goal, owner)",
+    "_resolve_known_target_member_hints": "(ctx, known_target_files)",
+    "_goal_named_member_candidates": "(goal, path)",
+    "_goal_named_member_hints": "(ctx, known_target_files)",
+    "_merge_goal_named_member_hints": "(ctx, member_hints, paths)",
+    "_validated_member_hints": "(ctx, candidates_by_path)",
+    "_resolve_retry_member_hints": "(ctx, state, target_files)",
+    "_record_retry_projection_context_items": "(state, retry_package)",
+    "_preserve_member_exact_precision": "(state, path, new_item)",
+    "_classify_retry_target_source_origin": "(state, ctx, path)",
+    "_target_source_record": "(state, ctx, path)",
+    "_compute_retry_evidence_fingerprint": "(state, target_files, mode, model_identity, member_hints)",
+    "_effective_retry_temperature": "(ctx, model_identity)",
+    "_prepare_retry_context": ("(state, ctx, *, target_files, prompt_window, model_identity, base_code_context='', "
+                               "enable_no_progress_gate=True)"),
+    "_retry_package_for_attempt": "(state, ctx, *, target_files, prompt_window, exclude=None)",
+    "_materialize_candidate_content": "(ctx, filepath, file_obj)",
+    "async _run_coordinated_repair_generation": ("(state, ctx, contract, base_code_context, stream_callback, "
+                                                 "attempt_operation, optional_sections=())"),
+}
+
+
+def _unannotated(function) -> str:
+    signature = inspect.signature(function)
+    plain = signature.replace(parameters=[p.replace(annotation=inspect.Parameter.empty)
+                                          for p in signature.parameters.values()],
+                              return_annotation=inspect.Signature.empty)
+    return ("async " if inspect.iscoroutinefunction(function) else "") + str(plain)
+
+
+def test_the_retry_and_repair_names_keep_their_call_shape_on_attempt():
+    attempt = importlib.import_module(A)
+    found = {}
+    for key in E7_ATTEMPT_CALLABLES:
+        name = key.split(" ")[-1]
+        shape = _unannotated(getattr(attempt, name))
+        found[key] = shape.split(" ", 1)[1] if shape.startswith("async ") else shape
+        assert shape.startswith("async ") == key.startswith("async "), name
+    assert found == E7_ATTEMPT_CALLABLES
+    assert attempt._GOAL_CALL_NAME.pattern == r"\b([a-z_][A-Za-z0-9_]*)\s*\("
+    assert attempt._GOAL_MEMBER_HINTS_MAX == 4
+    assert attempt._DETERMINISTIC_VERDICT_REASON_CODES == frozenset({"ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED"})
+    import dataclasses
+    assert [f.name for f in dataclasses.fields(attempt.RetryContextPreparation)] == [
+        "retry_package", "retry_error_context", "member_hints", "member_hint_rendered"]
