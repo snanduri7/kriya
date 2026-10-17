@@ -3398,6 +3398,7 @@ class WorkflowEngine:
         # What the review, approval/apply and lesson stages (E4) read besides the design stages' outputs.
         stage_ctx.worktree_path, stage_ctx.resolved_obligation_ledger = worktree_path, resolved_obligation_ledger
         stage_ctx.grounding_goal, stage_ctx.work_unit = grounding_goal, work_unit
+        stage_ctx.run_trace = run_trace
 
         from kriya.workflow.model_transition import fallback_routing_for_state
         from kriya.workflow.retry_policy import decide_for_state

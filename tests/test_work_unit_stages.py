@@ -481,6 +481,7 @@ def _reviewing_engine(tmp_path, *, mode="human-in-the-loop", risk_threshold_line
 
 def _apply_ctx(tmp_path, *, in_place=False, written=("calc.py",), **fields):
     from kriya.workflow.obligations import ObligationLedger
+    from kriya.workflow.run_lifecycle import RunTrace
 
     workspace = tmp_path / "ws"
     workspace.mkdir(parents=True, exist_ok=True)
@@ -495,7 +496,7 @@ def _apply_ctx(tmp_path, *, in_place=False, written=("calc.py",), **fields):
     state.all_original_contents["calc.py"] = CALC_BASE
     values = dict(goal="Add mul to calc.py.", workspace_path=str(workspace), worktree_path=str(worktree), state=state,
                   trace_id="trace-1", start_time=0.0, run_id="run-1", plan="the plan", design="the design",
-                  resolved_obligation_ledger=ObligationLedger())
+                  resolved_obligation_ledger=ObligationLedger(), run_trace=RunTrace("trace-1", "Add mul to calc.py.", 0.0))
     values.update(fields)
     return StageContext(**values)
 

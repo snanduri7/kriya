@@ -27,12 +27,10 @@ import difflib
 import functools
 import os
 import re
-import time
 import uuid
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from kriya.control.run_coordinator import annotate_run
-from kriya.core.state_paths import trace_db_path
 from kriya.repository.atomic_write import atomic_write_file
 from kriya.repository.commit import CandidateMaterializationError
 from kriya.workflow.acceptance import output_confirms_nonzero_test_execution
@@ -40,8 +38,9 @@ from kriya.workflow.banners import log_gate_banner
 from kriya.workflow.contract_lifecycle import CONTRACT_REGISTRY_STOP_REASON_CODES
 from kriya.workflow.exception_masking import find_masking_in_batch
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
-from kriya.workflow.failure_reporting import build_failure_report_entry
+from kriya.workflow.outcome import failure_report_dicts
 from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.run_lifecycle import TerminalTrace, TraceDetail, persist_run_trace
 from kriya.workflow.stage_context import StageContext, StageDeps
 from kriya.workflow.stage_review import pre_approval_review
 from kriya.workflow.worktree import remove_git_worktree
@@ -122,11 +121,9 @@ async def approval_gate(
     change, or approval was required and no approval callback exists - else None, whether approval was required)."""
     # The stage's run-local names (StageContext) and injected collaborators (StageDeps), bound under the names the
     # body used inside run_generation_workflow; the body below is that method's code, moved verbatim.
-    state, goal, workspace_path, worktree_path = ctx.state, ctx.goal, ctx.workspace_path, ctx.worktree_path
+    state, workspace_path, worktree_path = ctx.state, ctx.workspace_path, ctx.worktree_path
     plan, design, run_id, control = ctx.plan, ctx.design, ctx.run_id, ctx.control
     approval_callback, resolved_obligation_ledger = ctx.approval_callback, ctx.resolved_obligation_ledger
-    trace_id, start_time, enforce_run_id = ctx.trace_id, ctx.start_time, ctx.enforce_run_id
-    milestone_group_id, milestone_index, milestone_total = ctx.milestone_group_id, ctx.milestone_index, ctx.milestone_total
     retrieved_chunks, active_skills, plan_prompt = ctx.retrieved_chunks, ctx.active_skills, ctx.plan_prompt
     logger, banner, ownership_review_evidence = deps.logger, deps.banner, deps.ownership_review_evidence
     static_analysis_result_fields, delete_checkpoint = deps.static_analysis_fields, deps.delete_checkpoint
@@ -330,54 +327,13 @@ async def approval_gate(
                 elif os.path.exists(actual_file):
                     os.remove(actual_file)
         delete_checkpoint(workspace_path, run_id)
-        try:
-            from kriya.control.trace import TraceLogger
-            trace_db = trace_db_path(deps.config)
-            trace_logger = TraceLogger(trace_db)
-            # Same derivation the terminal success/failure path uses below
-            # (this method's own trailing trace_logger.log_run() call) -
-            # not re-implemented independently, so the two can never drift.
-            abort_failure_report = [
-                build_failure_report_entry(outcome.get("type", ""), outcome.get("attribution_tier"))
-                for outcome in state.gate_outcomes
-            ]
-            abort_failure_report_dicts = [
-                {"failure_type": e.failure_type, "category": e.category.value, "attribution_tier": e.attribution_tier}
-                for e in abort_failure_report
-            ]
-            trace_logger.log_run(
-                run_id=trace_id,
-                goal=goal,
-                duration_sec=time.time() - start_time,
-                # + best_of_n_candidates_tried: retry_count alone understates true
-                # effort whenever Best-of-N discarded independent candidates before
-                # this run's winning/final attempt (retry_count gets reset to 0 for
-                # each fresh candidate - see kriya/workflow/best_of_n.py).
-                attempts=state.budgets.retry_count + state.budgets.best_of_n_candidates_tried,
-                status=status,
-                # Sandbox candidate files touched this run - the SAME meaning
-                # this field carries at the terminal success/failure call site
-                # below (list(state.all_files_written), never "applied to the
-                # real workspace", which this path by definition never did).
-                files_modified=list(state.all_files_written),
-                retrieved_chunks=retrieved_chunks,
-                active_skills=active_skills,
-                prompt_rendered=plan_prompt,
-                gate_outcomes=state.gate_outcomes,
-                model_hops=state.model_hops,
-                failure_category=status,
-                failure_report=abort_failure_report_dicts,
-                milestone_group_id=milestone_group_id,
-                milestone_index=milestone_index,
-                milestone_total=milestone_total, enforce_run_id=enforce_run_id,
-                run_events=deps.trace_events(state),
-                evidence_records=[record.to_dict() for record in state.evidence_records],
-                generation_metrics=state.generation_metrics(
-                    total_wall_seconds=time.monotonic() - state.generation_started_monotonic,
-                ),
-            )
-        except Exception as trace_ex:
-            logger.warning(f"Failed to write run trace: {trace_ex}")
+        # OI-31/OI-32 (E4): the full row through the one trace writer (kriya/workflow/run_lifecycle.py), with the
+        # failure report the terminal row uses (kriya/workflow/outcome.py) - the same kwargs in the same order, the
+        # store opened first, a failure logged and never raised, as the inline write did.
+        persist_run_trace(
+            deps, state, ctx.run_trace, TraceDetail(retrieved_chunks, active_skills, plan_prompt), status=status,
+            terminal=TerminalTrace(status, failure_report_dicts(state)),
+        )
         return {
             "plan": plan,
             "design": design,

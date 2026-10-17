@@ -312,6 +312,7 @@ class StageContext:
     active_skill_manifest: List[Any] = field(default_factory=list)
     # ---- set by the engine before its Developer loop, read by the E4 review, approval/apply and lesson stages
     worktree_path: str = ""
+    run_trace: Any = None                  # kriya.workflow.run_lifecycle.RunTrace (the approval abort's trace row)
     resolved_obligation_ledger: Any = None
     grounding_goal: str = ""
     work_unit: Any = None
