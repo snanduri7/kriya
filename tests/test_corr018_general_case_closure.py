@@ -552,13 +552,14 @@ def test_scenario_p_terminal_recheck_catches_post_acceptance_drift(tmp_path):
 
 
 def test_terminal_call_site_passes_strict_mode_flag():
-    """Structural proof the terminal recheck in workflow.py actually wires
+    """Structural proof the terminal recheck actually wires
     strict_existing_java_files= from the config flag (not just the pre-
     write gate) - a silent omission here would mean strict mode is only
-    half-enforced."""
-    with open(os.path.join(_WORKFLOW_DIR, "workflow.py"), encoding="utf-8") as fh:
+    half-enforced. E5: the terminal regression moved to development_loop.py
+    (the engine's config arrives as StageDeps.config)."""
+    with open(os.path.join(_WORKFLOW_DIR, "development_loop.py"), encoding="utf-8") as fh:
         source = fh.read()
-    assert "strict_existing_java_files=self.kernel.config.autonomy.semantic_region_enforcement_required" in source
+    assert "strict_existing_java_files=deps.config.autonomy.semantic_region_enforcement_required" in source
 
 
 def test_pre_write_call_site_passes_strict_mode_flag():

@@ -174,8 +174,9 @@ def _decision_violations(node):
 
 def test_10_regression_decisions_are_assigned_only_from_gate_verdicts_and_structured_deltas():
     """Tripwire over plain assignments to the three decision names; an augmented assignment, a new decision
-    name or a decision made under another name is outside it (the anchor count below guards the names)."""
-    tree = ast.parse((ROOT / "kriya" / "workflow" / "workflow.py").read_text())
+    name or a decision made under another name is outside it (the anchor count below guards the names). E5: the
+    terminal regression moved from workflow.py to development_loop.py."""
+    tree = ast.parse((ROOT / "kriya" / "workflow" / "development_loop.py").read_text())
     assignments = [node for node in ast.walk(tree) if isinstance(node, ast.Assign)
                    and any(isinstance(t, ast.Name) and t.id in _DECISION_NAMES for t in node.targets)]
     assert len(assignments) >= 4, "the regression decision variables disappeared - re-anchor this tripwire"
@@ -201,6 +202,6 @@ def test_11_regression_authority_modules_never_import_a_model_or_agent():
 
 @pytest.mark.parametrize("field", ["blocking_reasons", "pytest_evidence_status", "attribution"])
 def test_12_the_stop_carries_its_structured_diagnostics(field):
-    source = (ROOT / "kriya" / "workflow" / "workflow.py").read_text()
+    source = (ROOT / "kriya" / "workflow" / "development_loop.py").read_text()   # E5: moved from workflow.py
     stop = source[source.index('type="regression_unattributed"'):]
     assert f'"{field}"' in stop[:1500]

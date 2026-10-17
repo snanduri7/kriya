@@ -145,9 +145,10 @@ def test_non_copying_handoff_detector_catches_a_planted_site(tmp_path):
 def test_inventory_counts_the_design_relies_on():
     """Pins the M1.0 inventory (design §5.2, notes §1/§4) so a drift is seen."""
     appends = {}
-    # E4: the pre-apply static-analysis and semantic-safety gates moved to stage_apply.py (2 record sites, count-neutral)
+    # E4: the pre-apply static-analysis and semantic-safety gates moved to stage_apply.py (2 record sites, count-neutral);
+    # E5: the Developer loop moved to development_loop.py (9 record sites, count-neutral)
     for rel in ("kriya/workflow/attempt.py", "kriya/workflow/workflow.py", "kriya/workflow/retry_strategy.py",
-                "kriya/workflow/stage_apply.py"):
+                "kriya/workflow/stage_apply.py", "kriya/workflow/development_loop.py"):
         appends[rel] = (ROOT / rel).read_text(encoding="utf-8").count("state.gate_outcomes.append(")
     # M1.3b converted all 85; the tripwire (test_lr_r1_m1_mirroring.py) keeps it at 0.
     assert sum(appends.values()) == 0, appends

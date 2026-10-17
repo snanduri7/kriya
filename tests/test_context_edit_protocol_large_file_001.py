@@ -223,12 +223,13 @@ def test_07_omitted_members_are_replaced_wholesale_by_the_next_package(workspace
 def test_08_the_workflow_threads_the_retrieval_loci_into_the_attempt_context():
     """Review 3.1: the symbol loci reach AttemptContext from the retrieval result (structural tripwire: the
     retrieval stage assigns them and the AttemptContext construction passes them). E3: the retrieval stage is
-    kriya/workflow/stage_analysis.py; the engine reads its output from the StageContext and builds AttemptContext."""
+    kriya/workflow/stage_analysis.py; E5: the Developer loop's prelude (kriya/workflow/development_loop.py) reads its
+    output from the StageContext and builds AttemptContext."""
     import ast
     import pathlib
     workflow_dir = pathlib.Path(__file__).resolve().parents[1] / "kriya" / "workflow"
     stage = ast.parse((workflow_dir / "stage_analysis.py").read_text())
-    tree = ast.parse((workflow_dir / "workflow.py").read_text())
+    tree = ast.parse((workflow_dir / "development_loop.py").read_text())
     assigned = [node for node in ast.walk(stage) if isinstance(node, ast.Assign)
                 and any(isinstance(t, ast.Name) and t.id == "retrieval_symbol_loci" for t in node.targets)
                 and isinstance(node.value, ast.Attribute) and node.value.attr == "retrieval_symbol_loci"]
@@ -238,7 +239,7 @@ def test_08_the_workflow_threads_the_retrieval_loci_into_the_attempt_context():
         for t in (e.elts if isinstance(e, ast.Tuple) else [e]))]
     assert handed, "the retrieval stage no longer writes its symbol loci to the StageContext"
     read = [node for node in ast.walk(tree) if isinstance(node, ast.Attribute) and node.attr == "retrieval_symbol_loci"
-            and isinstance(node.value, ast.Name) and node.value.id == "stage_ctx"]
+            and isinstance(node.value, ast.Name) and node.value.id == "ctx"]
     assert read, "the engine no longer reads the stage's symbol loci"
     passed = [kw for node in ast.walk(tree) if isinstance(node, ast.Call) for kw in node.keywords
               if kw.arg == "retrieval_symbol_loci" and isinstance(kw.value, ast.Name) and kw.value.id == "retrieval_symbol_loci"]
