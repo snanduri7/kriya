@@ -559,6 +559,45 @@ def test_an_approval_trigger_asks_the_person_with_the_review_attached(tmp_path, 
     assert engine.reviewer.run.await_count == 1
 
 
+@pytest.mark.parametrize("reason, stop_type", [
+    ("CONTRACT_CONSUMER_VERIFICATION_MISSING", "contract_registry"),
+    ("CONTRACT_REGISTRY_TRANSITION_INCOMPLETE", "contract_registry"),
+    ("CONTRACT_REGISTRY_STAGING_FAILED", "contract_registry"),
+    ("CONTRACT_REGISTRY_TRANSITION_INVALID", "contract_registry"),
+    ("WORKSPACE_REVISION_CONFLICT", "workspace_commit"),
+    (None, "workspace_commit"),
+])
+def test_a_commit_that_did_not_commit_is_a_typed_deterministic_stop_by_its_reason(tmp_path, reason, stop_type):
+    """The terminal apply routes a refused commit by reason code: a contract-registry reason is a ``contract_registry`` stop
+    (PRD-029: no terminal-commit payload, the reason is the message), every other reason a ``workspace_commit`` stop (PRD-032:
+    the commit payload and a ``workspace_commit.failed`` event). Found by an orchestrator mutant after E4: skipping the
+    contract-registry branch survived every existing test."""
+    from kriya.workflow.failure import QualityGateFailure
+    from kriya.workflow.stage_apply import apply_terminal_candidate
+    from kriya.workflow.terminal_commit import TerminalCommitOutcome
+
+    refused = TerminalCommitOutcome(committed=False, workspace_state="UNCHANGED", commit_result="REFUSED", transaction_id="tx-1",
+                                    reason_code=reason, error=ValueError("the registry could not be updated"))
+    ctx = _apply_ctx(tmp_path)
+    deps = _late_deps(_engine(tmp_path), commit_terminal_candidate=lambda *args, **kwargs: refused)
+    with pytest.raises(QualityGateFailure) as stop:
+        apply_terminal_candidate(ctx, deps, attempt_ctx=_NO_HELD_GATES, final_candidate_contents={"calc.py": CALC_NEW})
+    assert stop.value.failure.type == stop_type
+    state = ctx.state
+    if stop_type == "contract_registry":
+        assert stop.value.failure.diagnostics == {"reason_code": reason}
+        assert state.environment_failure == f"{reason}: the registry could not be updated"
+        assert state.terminal_commit_failure is None
+        assert not [e for e in state.run_events if e.kind == "workspace_commit.failed"]
+    else:
+        # the payload keeps the outcome's own reason (None stays None); the message and the event carry the fallback
+        assert state.terminal_commit_failure["reason_code"] == reason
+        assert state.terminal_commit_failure["workspace_state"] == "UNCHANGED"
+        assert (reason or "WORKSPACE_COMMIT_FAILED") in state.environment_failure
+        assert [e.details["reason_code"] for e in state.run_events if e.kind == "workspace_commit.failed"] == [
+            reason or "WORKSPACE_COMMIT_FAILED"]
+
+
 def test_no_trigger_and_no_source_mutation_ask_nobody(tmp_path):
     """Autonomous with a small diff, and human-in-the-loop with an empty change set (a verification-only unit): no
     approval, no pre-approval review, no decision record."""
