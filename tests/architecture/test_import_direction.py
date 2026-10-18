@@ -35,7 +35,7 @@ SLICES = frozenset(
     + [f"G{i}" for i in range(1, 6)] + [f"H{i}" for i in range(1, 6)] + [f"I{i}" for i in range(1, 5)]
     + ["J1", "J2", "K1", "K2", "L1", "L2", "M1", "M2", "M3", "N1", "N2", "O1", "O2", "O3", "P1", "P2", "Q1", "Q2"]
     + ["R1", "R2", "HX1"])  # R1/R2: owner-approved corrections (2026-10-16) of defects the PRESERVE slices M1/D3 had to keep; HX1: golden-harness portability micro-slice (OI-41), after E4, before E5
-DONE_SLICES = frozenset({"A1", "A2", "A3", "B1", "B2", "B3", "B4", "C1", "C2", "C3", "D1", "D2", "D3", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "HX1", "M1"})
+DONE_SLICES = frozenset({"A1", "A2", "A3", "B1", "B2", "B3", "B4", "C1", "C2", "C3", "D1", "D2", "D3", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E9", "HX1", "M1"})
 
 # CURRENT-DEPENDENCY-MAP.md §3, the back-edges into kriya/workflow that close
 # the big cycle (TRACED to the import line there; MEASURED here): (source,
