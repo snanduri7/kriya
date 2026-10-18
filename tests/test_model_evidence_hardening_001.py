@@ -124,9 +124,10 @@ def test_every_planner_rejection_code_is_classified():
                              (REPO / "kriya/workflow/plan_validation.py").read_text()))
     emitted |= set(re.findall(r'reason_codes=\["([A-Z_]+)"\]',
                               (REPO / "kriya/workflow/planner_validation.py").read_text()))
-    source = (REPO / "kriya/workflow/workflow_controller.py").read_text()
+    # E12: the structured-planning loop is kriya/workflow/enforce_loop.py (EnforceLoop.run)
+    source = (REPO / "kriya/workflow/enforce_loop.py").read_text()
     loop = source[source.index("        while True:\n            errors: List[str] = []"):
-                  source.index('raise _UnsafeStructuredPlan(\n                    "structured plan remained unsafe')]
+                  source.index('raise deps._UnsafeStructuredPlan(\n                    "structured plan remained unsafe')]
     # Per-response codes only (the loop's own ``reason_codes``); the
     # run-level terminal codes go on ``final_reason_codes``.
     emitted |= set(re.findall(r'\breason_codes\.append\("([A-Z_]+)"\)', loop))

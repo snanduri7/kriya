@@ -122,8 +122,8 @@ _KRIYA = pathlib.Path(__file__).resolve().parents[1] / "kriya"
 
 def test_the_bounded_subtask_hands_planned_paths_to_the_attempt():
     """The enforce subtask call passes planned_source_files and renders its
-    context only after split_planned_source."""
-    tree = ast.parse((_KRIYA / "workflow" / "workflow_controller.py").read_text(encoding="utf-8"))
+    context only after split_planned_source. E12: the enforce loop is kriya/workflow/enforce_loop.py."""
+    tree = ast.parse((_KRIYA / "workflow" / "enforce_loop.py").read_text(encoding="utf-8"))
     calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
              and getattr(node.func, "attr", None) == "run_generation_workflow"
              and any(kw.arg == "supplementary_context" for kw in node.keywords)]

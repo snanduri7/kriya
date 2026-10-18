@@ -600,9 +600,10 @@ def _workflow_module_sources():
         "subtask_executor.py": inspect.getsource(executor_mod),
         "workflow.py": inspect.getsource(workflow_mod),
         # E11: the module-level controller code moved to these owners; the checks follow it
-        # E12: and the shadow run (WorkflowController._run_structured_shadow) moved to shadow_mode
+        # E12: and the shadow run (shadow_mode) and the structured enforce run (enforce_loop) moved too
         **{f"{name}.py": inspect.getsource(importlib.import_module(f"kriya.workflow.{name}"))
-           for name in ("plan_revision", "owner_recovery", "planning_request", "resume_support", "shadow_mode")},
+           for name in ("plan_revision", "owner_recovery", "planning_request", "resume_support", "shadow_mode",
+                        "enforce_loop")},
     }
 
 
@@ -625,7 +626,10 @@ def test_no_direct_shelltool_run_from_workflow_package():
 
 
 def test_tool_subtask_unsupported_in_enforce_reason_code_no_longer_exists():
-    source = inspect.getsource(wc_module)
+    import kriya.workflow.enforce_loop as enforce_loop_module
+
+    # E12: the enforce loop's body is kriya/workflow/enforce_loop.py; the controller keeps its forwarder
+    source = inspect.getsource(wc_module) + inspect.getsource(enforce_loop_module)
     # The string may still appear in an explanatory comment (documenting
     # what changed and why) - what must be gone is the code that ever
     # PRODUCES it as a real reason code.
@@ -645,15 +649,19 @@ def test_exactly_one_tool_execute_call_site_in_subtask_executor():
 def test_enforce_loop_dispatches_tool_subtasks_only_through_subtask_executor():
     """AST/source proof that the TOOL branch in _run_structured_enforce's
     own per-subtask loop calls subtask_executor.execute (never
-    _invoke_bounded_subtask/run_generation_workflow for a TOOL subtask)."""
-    source = inspect.getsource(wc_module.WorkflowController._run_structured_enforce)
-    assert "ExecutionMethod.TOOL:" in source
-    assert "subtask_executor.execute(" in source
+    _invoke_bounded_subtask/run_generation_workflow for a TOOL subtask).
+    E12: the body is kriya/workflow/enforce_loop.py (EnforceLoop.run); it reads
+    the controller's names through EnforceDeps (``deps.``)."""
+    from kriya.workflow.enforce_loop import EnforceLoop
+
+    source = inspect.getsource(EnforceLoop.run)
+    assert "deps.ExecutionMethod.TOOL:" in source
+    assert "deps.subtask_executor.execute(" in source
     # The TOOL branch must `continue`/`break` before ever reaching
     # _invoke_bounded_subtask - structurally confirmed by the ordering of
     # the two markers in source (the TOOL branch's own continue/break
     # occurs textually before the MODEL-only call below it).
-    tool_branch_idx = source.index("if subtask.execution_method == ExecutionMethod.TOOL:")
+    tool_branch_idx = source.index("if subtask.execution_method == deps.ExecutionMethod.TOOL:")
     model_call_idx = source.index("call_result = await _invoke_bounded_subtask(subtask, position)")
     assert tool_branch_idx < model_call_idx
 

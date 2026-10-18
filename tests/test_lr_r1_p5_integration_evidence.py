@@ -217,10 +217,12 @@ def test_case10_a_plan_without_integration_relationships_is_untouched(tmp_path):
 
 
 def test_every_production_call_passes_the_runs_provenance():
-    source = open(os.path.join(os.path.dirname(__file__), "..", "kriya", "workflow", "workflow_controller.py"),
+    # E12: the enforce loop is kriya/workflow/enforce_loop.py; it calls the controller's name through EnforceDeps
+    source = open(os.path.join(os.path.dirname(__file__), "..", "kriya", "workflow", "enforce_loop.py"),
                   encoding="utf-8").read()
     calls = [node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.Call)
-             and getattr(node.func, "id", None) == "_evaluate_integration_obligations"]
+             and isinstance(node.func, ast.Attribute) and getattr(node.func.value, "id", None) == "deps"
+             and node.func.attr == "_evaluate_integration_obligations"]
     # completion, owner recovery, verification-owner recovery (BACKEND-FINAL-CLOSURE-005)
     assert len(calls) == 3
     assert all(any(k.arg == "provenance" and getattr(k.value, "id", None) == "established_provenance"

@@ -497,3 +497,130 @@ def test_each_e11_loader_imports_at_call_time(loader, module, names):
     with patch.multiple(module, **dict(zip(names, markers, strict=True))):
         loaded = getattr(controller, loader)()
     assert (loaded if len(names) > 1 else (loaded,)) == tuple(markers)
+
+
+# ----------------------------------------------------------------------------- E12: the enforce loop and the shadow run
+
+# WorkflowController keeps the three method names with their pre-move kind and signature (measured at b834d71); the
+# bodies are kriya/workflow/shadow_mode.py (ShadowMode.run, ShadowMode.write_enforce_trace) and
+# kriya/workflow/enforce_loop.py (EnforceLoop.run), reached through one Deps built per forwarder entry.
+E12_METHODS: Dict[str, Tuple[str, str, str, str]] = {
+    "_run_structured_shadow": ("shadow_mode", "ShadowMode.run", "async", "(self, goal: 'str', workspace_path: 'str', route: 'Any', run_id: 'str', control_context: 'WorkflowControlContext', control_state: 'ControlState') -> 'Tuple[Optional[EngineeringPlan], Tuple[SubtaskResult, ...], Tuple[Decision, ...], Optional[VerificationReport], List[str]]'"),
+    "_write_enforce_trace": ("shadow_mode", "ShadowMode.write_enforce_trace", "def", "(self, run_id: 'str', goal: 'str', result: 'Dict[str, Any]', started_at: 'float') -> 'bool'"),
+    "_run_structured_enforce": ("enforce_loop", "EnforceLoop.run", "async", "(self, goal: 'str', workspace_path: 'str', route: 'Any', run_id: 'str', control_context: 'WorkflowControlContext', control_state: 'ControlState', legacy_kwargs: 'Dict[str, Any]') -> 'Tuple[Dict[str, Any], Optional[EngineeringPlan], Tuple[SubtaskResult, ...], Tuple[Decision, ...], Optional[VerificationReport], ControlState]'"),
+}
+E12_BUILDERS = {"_shadow_deps": ("shadow_mode", "ShadowDeps"), "_trace_deps": ("shadow_mode", "TraceDeps"),
+                "_enforce_deps": ("enforce_loop", "EnforceDeps")}
+E12_LOADERS = {
+    "_load_write_outcome_trace": ("kriya.workflow.run_trace", ("write_outcome_trace",)),
+    "_load_run_contract": ("kriya.workflow.workflow", ("_requirement_policy_blocks", "compile_run_contract",
+                                                       "seal_run_contract")),
+    "_load_contract_planning_constraints": ("kriya.workflow.workflow", ("documentation_referent_paths",
+                                                                        "frozen_file_paths", "immutable_test_files")),
+    "_load_goal_facts": ("kriya.workflow.goal_facts", ("delegating_shim_targets", "goal_facts_block")),
+    "_load_run_contract_baseline": ("kriya.workflow.workflow", ("run_contract_baseline",)),
+}
+_E12_SELF_FIELDS = ("workflow_engine", "_build_context")
+
+
+def _e12_fields(owner: str, deps: str) -> List[str]:
+    import dataclasses
+    return [f.name for f in dataclasses.fields(getattr(importlib.import_module(f"kriya.workflow.{owner}"), deps))]
+
+
+@pytest.mark.parametrize("name", sorted(E12_METHODS))
+def test_the_controller_keeps_every_e12_method_with_its_kind_and_signature(name):
+    _owner, _target, kind, signature = E12_METHODS[name]
+    from kriya.workflow.workflow_controller import WorkflowController
+    method = WorkflowController.__dict__[name]
+    assert inspect.isfunction(method) and method.__module__ == C
+    assert inspect.iscoroutinefunction(method) is (kind == "async")
+    assert str(inspect.signature(method)) == signature
+
+
+@pytest.mark.parametrize("builder", sorted(E12_BUILDERS))
+def test_each_e12_deps_builder_resolves_every_controller_name_at_call_time(builder):
+    """Every module-level field is read from the controller when the builder runs: a patch there is what the moved
+    body gets (negative control: a builder that bound an original or imported one directly fails here)."""
+    controller_module = importlib.import_module(C)
+    owner, deps = E12_BUILDERS[builder]
+    engine, context = object(), object()
+    controller = type("Controller", (), {"workflow_engine": engine, "_build_context": context})()
+    fields = _e12_fields(owner, deps)
+    built = getattr(controller_module, builder)(controller)
+    assert [f for f in fields if f in _E12_SELF_FIELDS] and built.workflow_engine is engine
+    if "_build_context" in fields:
+        assert built._build_context is context  # pylint: disable=protected-access
+    for field in fields:
+        if field in _E12_SELF_FIELDS:
+            continue
+        source = f"_{field}" if f"_{field}" in E12_LOADERS else field
+        marker = object()
+        with patch.object(controller_module, source, marker):
+            assert getattr(getattr(controller_module, builder)(controller), field) is marker, (builder, field)
+
+
+@pytest.mark.parametrize("builder", sorted(E12_BUILDERS))
+def test_each_e12_deps_is_frozen_and_requires_every_field(builder):
+    import dataclasses
+    owner, deps = E12_BUILDERS[builder]
+    cls = getattr(importlib.import_module(f"kriya.workflow.{owner}"), deps)
+    params = cls.__dataclass_params__
+    assert params.frozen
+    assert all(f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING
+               for f in dataclasses.fields(cls))
+    with pytest.raises(TypeError):
+        cls()
+
+
+@pytest.mark.parametrize("owner, deps", sorted(set(E12_BUILDERS.values())))
+def test_the_moved_bodies_read_exactly_their_deps_fields(owner, deps):
+    """A body reading a deps attribute that is not a field raises AttributeError at run time - inside several
+    log-and-continue handlers that would hide it. Static guard: the set of ``deps.<attr>`` reads in the owner's
+    classes equals the fields of the Deps their methods take."""
+    import ast
+    path = Path(importlib.import_module(f"kriya.workflow.{owner}").__file__)
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    used = set()
+    for cls in (n for n in tree.body if isinstance(n, ast.ClassDef) and not n.name.endswith("Deps")):
+        for fn in (m for m in cls.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))):
+            annotation = fn.args.args[0].annotation
+            if annotation is not None and ast.unparse(annotation) == deps:
+                used |= {n.attr for n in ast.walk(fn) if isinstance(n, ast.Attribute)
+                         and isinstance(n.value, ast.Name) and n.value.id == "deps"}
+    assert used == set(_e12_fields(owner, deps))
+
+
+@pytest.mark.parametrize("loader", sorted(E12_LOADERS))
+def test_each_e12_loader_imports_at_call_time(loader):
+    controller = importlib.import_module(C)
+    module, names = E12_LOADERS[loader]
+    markers = [object() for _ in names]
+    with patch.multiple(module, **dict(zip(names, markers, strict=True))):
+        loaded = getattr(controller, loader)()
+    assert (loaded if len(names) > 1 else (loaded,)) == tuple(markers)
+
+
+def test_enforce_deps_follow_controller_patches(tmp_path):
+    """SLICE-PLAN E12's named seam test: the enforce run reaches the sandbox lifecycle, the plan validation and the
+    terminal static analysis through the controller's names, patched after import (the suite's way), and builds its
+    EnforceDeps once per run, not per subtask."""
+    controller_module = importlib.import_module(C)
+    real_builder = controller_module._enforce_deps  # pylint: disable=protected-access
+    builds = []
+
+    def counting(controller):
+        builds.append(controller)
+        return real_builder(controller)
+    names = ("create_git_worktree", "remove_git_worktree", "validate_plan", "StaticAnalysisService")
+    patchers = [patch.object(controller_module, name, wraps=getattr(controller_module, name)) for name in names]
+    mocks = [p.start() for p in patchers]
+    try:
+        with patch.object(controller_module, "_enforce_deps", side_effect=counting):
+            outcome = kg.SCENARIOS["enforce_success_with_verification_unit"](tmp_path)
+    finally:
+        for patcher in patchers:
+            patcher.stop()
+    assert [m.called for m in mocks] == [True] * len(names)
+    assert len(builds) == 1
+    assert {r.subtask_id for r in outcome.result.subtask_results} == {"s1", "sv"}

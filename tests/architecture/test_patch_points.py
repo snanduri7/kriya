@@ -207,7 +207,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (C, 'StaticAnalysisService.evaluate_candidate'): P(1, 'kriya.static_analysis.service', None, ()),
     (C, 'WorkflowController._run_structured_enforce'): P(1, C, None, ()),
     (C, 'WorkflowController._write_enforce_trace'): P(2, C, None, ()),
-    (C, '_evaluate_subtask_verification'): P(1, C, ((C, 2),), ()),
+    # E12: 2 -> 1 lookup: the enforce loop's loads moved to enforce_loop and read EnforceDeps (one load in
+    # workflow_controller._enforce_deps); the patch sites above are the dynamic proof.
+    (C, '_evaluate_subtask_verification'): P(1, C, ((C, 1),), ()),
     # E11 characterization: +2 sites (tests/test_e11_owner_modules.py: the planned-edit feasibility through this name).
     # E11: 2 -> 1 lookup: evaluate_plan_edit_feasibility's two calls moved to planning_request and read
     # PlanningDeps.assess_planned_edit (one load in workflow_controller._planning_deps); the sites above are the dynamic proof.
@@ -240,21 +242,30 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # state through this name).
     (C, 'save_control_state'): P(7, 'kriya.control.persistence', ((C, 6),), ()),
     (C, 'subtask_executor.execute'): P(9, 'kriya.workflow.subtask_executor', None, ()),
-    (C, 'validate_plan'): P(52, 'kriya.workflow.plan_validation', ((C, 5),), ()),
+    # E12: 5 -> 2 lookups: the enforce loop's loads moved to enforce_loop and read EnforceDeps (one load in
+    # workflow_controller._enforce_deps); the shadow run's load is _shadow_deps' (E12 1/2); the patch sites above
+    # are the dynamic proof.
+    (C, 'validate_plan'): P(52, 'kriya.workflow.plan_validation', ((C, 2),), ()),
     (C, 'validate_stack_contract_artifacts'): P(1, 'kriya.workflow.static_checks', ((C, 1),), ()),
     # E12 characterization: 37 new rows (tests/test_e12_enforce_characterization.py pins the enforce loop's and the shadow
     # run's decisions through these controller names; E12 moves the bodies and reads each through EnforceDeps/ShadowDeps).
     (C, 'EstablishedProvenance'): P(1, C, ((C, 3),), ()),
     (C, 'TerminalGateRequest'): P(2, 'kriya.workflow.terminal_gate_service', ((C, 1),), ()),
     (C, 'TerminalGateService'): P(1, 'kriya.workflow.terminal_gate_service', ((C, 1),), ()),
-    (C, '_evaluate_integration_obligations'): P(2, C, ((C, 3),), ()),
+    # E12: 3 -> 1 lookup: the enforce loop's loads moved to enforce_loop and read EnforceDeps (one load in
+    # workflow_controller._enforce_deps); the patch sites above are the dynamic proof.
+    (C, '_evaluate_integration_obligations'): P(2, C, ((C, 1),), ()),
     (C, '_preserved_reference_must_preserve_lines'): P(1, C, ((C, 1),), ()),
     (C, '_preserved_reference_regressions'): P(1, C, ((C, 1),), ()),
     (C, '_semantic_contract_must_preserve_lines'): P(1, C, ((C, 1),), ()),
     (C, '_semantic_contract_regression_subtasks'): P(1, C, ((C, 1),), ()),
-    (C, 'annotate_run'): P(1, 'kriya.control.run_coordinator', ((C, 2),), ()),
+    # E12: 2 -> 1 lookup: the enforce loop's loads moved to enforce_loop and read EnforceDeps (one load in
+    # workflow_controller._enforce_deps); the patch sites above are the dynamic proof.
+    (C, 'annotate_run'): P(1, 'kriya.control.run_coordinator', ((C, 1),), ()),
     (C, 'bound_acceptance'): P(1, 'kriya.workflow.acceptance_oracle', ((C, 1),), ()),
-    (C, 'bound_approval'): P(1, 'kriya.workflow.acceptance_approval', ((C, 3),), ()),
+    # E12: 3 -> 1 lookup: the enforce loop's loads moved to enforce_loop and read EnforceDeps (one load in
+    # workflow_controller._enforce_deps); the patch sites above are the dynamic proof.
+    (C, 'bound_approval'): P(1, 'kriya.workflow.acceptance_approval', ((C, 1),), ()),
     (C, 'build_recovery_execution_plan'): P(7, C, ((C, 1),), ()),
     (C, 'build_structured_plan_repair_prompt'): P(1, 'kriya.workflow.planner_repair', ((C, 1),), ()),
     (C, 'check_plan_targets'): P(1, 'kriya.workflow.plan_targets', ((C, 1),), ()),
@@ -278,7 +289,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (C, 'revise_plan_for_grounded_scope_owner'): P(2, C, ((C, 1),), ()),
     (C, 'revise_plan_for_planned_prerequisite'): P(1, C, ((C, 1),), ()),
     (C, 'revise_plan_for_runtime_plan_gap'): P(3, C, ((C, 1),), ()),
-    (C, 'save_approved_plan'): P(7, 'kriya.control.persistence', ((C, 11),), ()),
+    # E12: 11 -> 1 lookup: the enforce loop's loads moved to enforce_loop and read EnforceDeps (one load in
+    # workflow_controller._enforce_deps); the patch sites above are the dynamic proof.
+    (C, 'save_approved_plan'): P(7, 'kriya.control.persistence', ((C, 1),), ()),
     (C, 'scope_verification_to_requirements'): P(1, 'kriya.workflow.plan_normalization', ((C, 1),), ()),
     (C, 'settle_findings'): P(1, 'kriya.workflow.ownership_findings', ((C, 1),), ()),
 }
@@ -423,7 +436,9 @@ KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_life
                         # E11: the resume support and legacy-ownership migrations (from workflow_controller.py)
                         "kriya.workflow.resume_support",
                         # E12: the shadow run and the enforce run's trace row (WorkflowController methods)
-                        "kriya.workflow.shadow_mode")
+                        "kriya.workflow.shadow_mode",
+                        # E12: the structured enforce run (WorkflowController._run_structured_enforce)
+                        "kriya.workflow.enforce_loop")
 FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
 
 

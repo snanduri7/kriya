@@ -357,7 +357,9 @@ FORBIDDEN = {"kriya.workflow.attempt", "kriya.workflow.retry_strategy", "kriya.w
                                     "kriya/workflow/planning_request.py",
                                     "kriya/workflow/resume_support.py",
                                     # E12: the controller's shadow run and enforce trace (ShadowDeps / TraceDeps)
-                                    "kriya/workflow/shadow_mode.py"])
+                                    "kriya/workflow/shadow_mode.py",
+                                    # E12: the controller's structured enforce run (EnforceDeps)
+                                    "kriya/workflow/enforce_loop.py"])
 def test_the_coordinators_depend_only_downward(module):
     """Neither coordinator imports the orchestration modules that call it
     (including lazy imports), so the dependency runs one way. E8: the gate

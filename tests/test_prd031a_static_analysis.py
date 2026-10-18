@@ -747,9 +747,10 @@ def test_every_production_commit_passes_a_config_built_guard():
         [value] = [kw.value for kw in node.keywords if kw.arg == "static_analysis"]
         rendered = ast.unparse(value)
         assert rendered.startswith("commit_guard(") or rendered == "request.static_analysis", (path, rendered)
-    [(_, request_site)] = [s for s in _calls("TerminalCommitRequest") if s[0] == "kriya/workflow/workflow_controller.py"]
+    # E12: the enforce commit request is built in kriya/workflow/enforce_loop.py (moved from workflow_controller.py)
+    [(_, request_site)] = [s for s in _calls("TerminalCommitRequest") if s[0] == "kriya/workflow/enforce_loop.py"]
     [guard] = [kw.value for kw in request_site.keywords if kw.arg == "static_analysis"]
-    assert ast.unparse(guard).startswith("commit_guard(")
+    assert ast.unparse(guard).startswith("deps.commit_guard(")
     assert [p for p, _ in _calls("StaticAnalysisCommitGuard")] == ["kriya/static_analysis/service.py"]
 
 
@@ -758,7 +759,8 @@ def test_both_commit_boundaries_use_the_one_service():
     the same service (the operator scan is the only other caller)."""
     assert sorted(p for p, _ in _calls("StaticAnalysisService")) == [
         # E4: the direct/milestone gate body moved from workflow.py to stage_apply.py (run_static_analysis_gate)
-        "kriya/static_analysis/operator_scan.py", "kriya/workflow/stage_apply.py", "kriya/workflow/workflow_controller.py",
+        # E12: the enforce controller's construction moved with the enforce loop to enforce_loop.py
+        "kriya/static_analysis/operator_scan.py", "kriya/workflow/enforce_loop.py", "kriya/workflow/stage_apply.py",
     ]
 
 

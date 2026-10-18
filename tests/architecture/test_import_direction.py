@@ -423,6 +423,9 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.workflow.workflow", "kriya.workflow.authority_bundle"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.workflow.workflow", "kriya.workflow.authority_request"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.workflow.workflow", "kriya.workflow.verification_binding"): ("P2", _P2),  # non-public AUTHORITY module
+    # E12: moved count-neutral with the enforce loop (its only user: the typed authority requests sealed before an
+    # admission stop) from workflow_controller to enforce_loop; removal slice P2 unchanged
+    ("kriya.workflow.enforce_loop", "kriya.workflow.authority_request"): ("P2", _P2),  # non-public AUTHORITY module
     # E11: moved count-neutral with build_planning_structural_evidence (its only user) to planning_request
     ("kriya.workflow.planning_request", "kriya.analyzer.graph"): ("P2", _P2),  # non-public RETRIEVAL module
     ("kriya.workflow.workflow_controller", "kriya.control.artifacts"): ("P2", _P2),  # non-public STATE module
@@ -434,7 +437,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.workflow.workflow_controller", "kriya.static_analysis.service"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.workflow.workflow_controller", "kriya.tools.knowledge"): ("P2", _P2),  # non-public KNOWLEDGE module
     ("kriya.workflow.workflow_controller", "kriya.workflow.acceptance_approval"): ("P2", _P2),  # non-public AUTHORITY module
-    ("kriya.workflow.workflow_controller", "kriya.workflow.authority_request"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.workflow.workflow_types", "kriya.control.decisions"): ("P2", _P2),  # non-public STATE module
     ("kriya.workflow.worktree", "kriya.policy.enforcement"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.workflow.worktree", "kriya.policy.errors"): ("P2", _P2),  # non-public AUTHORITY module

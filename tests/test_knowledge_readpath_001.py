@@ -400,7 +400,9 @@ def test_reference_text_is_read_only_where_it_is_shown_to_a_model():
                 users.add(path)
     assert users == {
         "cli.py", os.path.join("workflow", "workflow.py"), os.path.join("workflow", "attempt.py"),
-        os.path.join("workflow", "workflow_controller.py"), os.path.join("workflow", "milestones.py"),
+        os.path.join("workflow", "milestones.py"),
+        # E12: the enforce loop fits the reference into the Planner request (moved from workflow_controller.py)
+        os.path.join("workflow", "enforce_loop.py"),
         # E3: the design stages that fence and show it (moved from workflow.py) and the context that carries it
         os.path.join("workflow", "stage_context.py"), os.path.join("workflow", "stage_analysis.py"),
         os.path.join("workflow", "stage_planning.py"), os.path.join("workflow", "stage_architecture.py"),

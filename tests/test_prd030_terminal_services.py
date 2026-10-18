@@ -430,5 +430,11 @@ def test_one_terminal_gate_and_one_commit_implementation():
         for primitive in ("commit_terminal_candidate", "materialize_candidate", "CandidateFile(",
                           "commit_verified_candidate(", "TerminalGateService("):
             assert primitive not in owner_source, (owner, primitive)
-    assert controller.count("commit_verified_candidate(") == 1
-    assert controller.count("TerminalGateService(") == 1
+    # E12: the enforce run (its one terminal gate service and one commit) is kriya/workflow/enforce_loop.py, reading
+    # both through EnforceDeps; the controller only binds them
+    enforce_loop = (REPO / "kriya/workflow/enforce_loop.py").read_text()
+    for primitive in ("commit_terminal_candidate", "materialize_candidate", "CandidateFile("):
+        assert primitive not in enforce_loop, primitive
+    assert controller.count("commit_verified_candidate(") == 0 and controller.count("TerminalGateService(") == 0
+    assert enforce_loop.count("deps.commit_verified_candidate(") == 1
+    assert enforce_loop.count("deps.TerminalGateService(") == 1

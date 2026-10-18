@@ -422,20 +422,26 @@ def test_run_structured_enforce_uses_persist_control_state_closure_everywhere():
     staleness bug. execute()/execute_milestones() keep their own small
     number of raw save_control_state() calls (state saved before any
     subtask of a NEW call has run, or from an entirely different,
-    non-enforce flow) - deliberately unchanged, not part of this sweep."""
-    path = os.path.join(_REPO_ROOT, "kriya", "workflow", "workflow_controller.py")
+    non-enforce flow) - deliberately unchanged, not part of this sweep.
+    E12: the body is kriya/workflow/enforce_loop.py (EnforceLoop.run) and reads
+    the controller's save_control_state through EnforceDeps (deps.save_control_state)."""
+    path = os.path.join(_REPO_ROOT, "kriya", "workflow", "enforce_loop.py")
     with open(path, encoding="utf-8") as fh:
         source = fh.read()
     tree = ast.parse(source, filename=path)
     target_fn = None
     for node in ast.walk(tree):
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_run_structured_enforce":
-            target_fn = node
+        if isinstance(node, ast.ClassDef) and node.name == "EnforceLoop":
+            target_fn = next(m for m in node.body if isinstance(m, ast.AsyncFunctionDef) and m.name == "run")
             break
     assert target_fn is not None
     raw_save_calls = 0
     persist_calls = 0
     for node in ast.walk(target_fn):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == "deps" \
+                and node.func.attr == "save_control_state":
+            raw_save_calls += 1
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             if node.func.id == "save_control_state":
                 raw_save_calls += 1
@@ -466,11 +472,12 @@ def test_workflow_py_resume_check_wired_to_content_hash():
 
 
 def test_workflow_controller_subtask_resume_wired_to_content_hash():
-    path = os.path.join(_REPO_ROOT, "kriya", "workflow", "workflow_controller.py")
+    # E12: the enforce loop (and its subtask-spanning resume) is kriya/workflow/enforce_loop.py
+    path = os.path.join(_REPO_ROOT, "kriya", "workflow", "enforce_loop.py")
     with open(path, encoding="utf-8") as fh:
         source = fh.read()
     assert '"workspace_content_hash": prior_control_state.workspace_content_hash' in source
-    assert "workspace_content_hash=compute_workspace_content_hash(workspace_path)" in source
+    assert "workspace_content_hash=deps.compute_workspace_content_hash(workspace_path)" in source
 
 
 def test_generate_and_fix_cli_share_the_same_resume_call_path():
