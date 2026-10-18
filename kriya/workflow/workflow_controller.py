@@ -120,15 +120,7 @@ from kriya.static_analysis.service import (
     commit_guard,
     static_analysis_result_fields,
 )
-from kriya.workflow import (
-    enforce_loop,
-    owner_recovery,
-    plan_revision,
-    planning_request,
-    resume_support,
-    shadow_mode,
-    subtask_executor,
-)
+from kriya.workflow import owner_recovery, plan_revision, planning_request, resume_support, subtask_executor
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
 from kriya.workflow.acceptance_approval import bound_approval
 from kriya.workflow.acceptance_oracle import bound_acceptance
@@ -499,13 +491,29 @@ def _load_milestone_run_state_store() -> Any:
     return MilestoneRunState, save_milestone_run_state
 
 
-def _shadow_deps(controller: WorkflowController) -> shadow_mode.ShadowDeps:
+def _shadow_mode() -> Any:
+    """kriya/workflow/shadow_mode.py, imported when a shadow run or an enforce trace first needs it, not when this module
+    is imported: its two Deps dataclasses cost ~1 ms to create (E12 performance rule; the owner is outside every import
+    cycle, so this is a plain call-time import, not a cycle break)."""
+    from kriya.workflow import shadow_mode
+    return shadow_mode
+
+
+def _enforce_loop() -> Any:
+    """kriya/workflow/enforce_loop.py, imported when an enforce run first needs it, not when this module is imported:
+    creating the 174-field EnforceDeps dataclass costs ~5 ms (MEASURED, E12), which every ``import kriya.cli`` paid
+    (OI-61). The owner is outside every import cycle; this is a plain call-time import, not a cycle break."""
+    from kriya.workflow import enforce_loop
+    return enforce_loop
+
+
+def _shadow_deps(controller: WorkflowController) -> Any:
     """The moved shadow run's collaborators (kriya/workflow/shadow_mode.py), resolved through this module and the
     controller instance NOW (once, when ``WorkflowController._run_structured_shadow`` is entered), so a test patch
     of any of these names here (``parse_planner_structured_output``, ``build_engineering_plan_from_planner_output``,
     ``validate_plan``, ``record_plan_created``, ...) reaches the moved body exactly as it reached it here.
     """
-    return shadow_mode.ShadowDeps(
+    return _shadow_mode().ShadowDeps(
         workflow_engine=controller.workflow_engine, _build_context=controller._build_context,
         SHADOW_PLANNER_ROLE=SHADOW_PLANNER_ROLE, logger=logger,
         parse_planner_structured_output=parse_planner_structured_output, DecisionLedger=DecisionLedger,
@@ -524,12 +532,12 @@ def _shadow_deps(controller: WorkflowController) -> shadow_mode.ShadowDeps:
     )
 
 
-def _trace_deps(controller: WorkflowController) -> shadow_mode.TraceDeps:
+def _trace_deps(controller: WorkflowController) -> Any:
     """The moved enforce-trace writer's collaborators (kriya/workflow/shadow_mode.py), resolved once, when
     ``WorkflowController._write_enforce_trace`` is entered: the engine, this module's ``logger``, and the trace
     writer's call-time import.
     """
-    return shadow_mode.TraceDeps(
+    return _shadow_mode().TraceDeps(
         workflow_engine=controller.workflow_engine, logger=logger, load_write_outcome_trace=_load_write_outcome_trace,
     )
 
@@ -541,14 +549,14 @@ def _load_write_outcome_trace() -> Any:
     return write_outcome_trace
 
 
-def _enforce_deps(controller: WorkflowController) -> enforce_loop.EnforceDeps:
+def _enforce_deps(controller: WorkflowController) -> Any:
     """The moved enforce loop's collaborators (kriya/workflow/enforce_loop.py), resolved through this module and the
     controller instance NOW (once, when ``WorkflowController._run_structured_enforce`` is entered, never per loop
     iteration), so a test patch of any of these names here (``parse_planner_structured_output``, ``validate_plan``,
     ``create_git_worktree``, ``remove_git_worktree``, ``subtask_executor``, ``StaticAnalysisService``,
     ``enforce_preserved_reference_terminal_integrity``, ...) reaches the moved body exactly as it reached it here.
     """
-    return enforce_loop.EnforceDeps(
+    return _enforce_loop().EnforceDeps(
         workflow_engine=controller.workflow_engine, _build_context=controller._build_context,
         EstablishedProvenance=EstablishedProvenance,
         _ENFORCE_ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE=_ENFORCE_ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE,
@@ -1809,14 +1817,14 @@ class WorkflowController:
     ]:
         """The body is kriya/workflow/shadow_mode.py (ShadowMode.run, E12); its collaborators are resolved here, once per
         entry (_shadow_deps)."""
-        return await shadow_mode.ShadowMode.run(
+        return await _shadow_mode().ShadowMode.run(
             _shadow_deps(self), goal, workspace_path, route, run_id, control_context, control_state,
         )
 
     def _write_enforce_trace(self, run_id: str, goal: str, result: Dict[str, Any], started_at: float) -> bool:
         """The body is kriya/workflow/shadow_mode.py (ShadowMode.write_enforce_trace, E12); its collaborators are resolved here, once per
         entry (_trace_deps)."""
-        return shadow_mode.ShadowMode.write_enforce_trace(_trace_deps(self), run_id, goal, result, started_at)
+        return _shadow_mode().ShadowMode.write_enforce_trace(_trace_deps(self), run_id, goal, result, started_at)
 
     async def _run_structured_enforce(
         self, goal: str, workspace_path: str, route: Any, run_id: str,
@@ -1828,7 +1836,7 @@ class WorkflowController:
     ]:
         """The body is kriya/workflow/enforce_loop.py (EnforceLoop.run, E12); its collaborators are resolved here, once per
         entry (_enforce_deps)."""
-        return await enforce_loop.EnforceLoop.run(
+        return await _enforce_loop().EnforceLoop.run(
             _enforce_deps(self), goal, workspace_path, route, run_id, control_context, control_state, legacy_kwargs,
         )
 

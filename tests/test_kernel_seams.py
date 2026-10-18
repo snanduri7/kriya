@@ -624,3 +624,21 @@ def test_enforce_deps_follow_controller_patches(tmp_path):
     assert [m.called for m in mocks] == [True] * len(names)
     assert len(builds) == 1
     assert {r.subtask_id for r in outcome.result.subtask_results} == {"s1", "sv"}
+
+
+def test_the_e12_owners_are_imported_only_when_a_run_needs_them():
+    """E12 performance rule (MEASURED: creating the 174-field EnforceDeps class costs ~5 ms, ShadowDeps/TraceDeps
+    ~1 ms): importing kriya.cli or the controller imports neither owner module; the controller's accessors import them
+    when a forwarder first needs one (negative control: an eager top-level import of either fails here)."""
+    import subprocess
+
+    code = ("import sys\n"
+            "import kriya.cli\n"
+            "import kriya.workflow.workflow_controller as controller\n"
+            "owners = ('kriya.workflow.enforce_loop', 'kriya.workflow.shadow_mode')\n"
+            "assert not [m for m in owners if m in sys.modules], [m for m in owners if m in sys.modules]\n"
+            "assert controller._enforce_loop().EnforceLoop and controller._shadow_mode().ShadowMode\n"
+            "assert all(m in sys.modules for m in owners)\n")
+    result = subprocess.run([sys.executable, "-c", code], cwd=str(Path(__file__).resolve().parents[1]),
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stderr[-2000:]
