@@ -197,6 +197,11 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # the rejected baseline reuse, the terminal regression's environment stop).
     (W, 'run_attempt'): P(11, A, ((W, 1),), ()),
     (W, 'save_checkpoint'): P(6, 'kriya.control.checkpoint', ((W, 1),), ()),
+    # E12 characterization: 3 new rows (tests/test_e12_enforce_characterization.py patches the enforce run's call-time
+    # imports of the facade where they are defined: the controller's function-local imports read them here at call time).
+    (W, 'compile_run_contract'): P(1, W, ((W, 1),(C, 1),), ()),
+    (W, 'immutable_test_files'): P(1, W, ((C, 1),), ()),
+    (W, 'run_contract_baseline'): P(2, W, ((W, 1),(C, 1),), ()),
     # kriya.workflow.workflow_controller
     (C, 'ArtifactRegistry.derive_from_workspace'): P(4, 'kriya.control.artifacts', None, ()),
     (C, 'StaticAnalysisService.evaluate_candidate'): P(1, 'kriya.static_analysis.service', None, ()),
@@ -208,35 +213,74 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # PlanningDeps.assess_planned_edit (one load in workflow_controller._planning_deps); the sites above are the dynamic proof.
     (C, 'assess_planned_edit'): P(3, 'kriya.workflow.edit_feasibility', ((C, 1),), ()),
     (C, 'blocking_requirements'): P(1, 'kriya.workflow.requirements', ((C, 1),), ()),
-    (C, 'build_engineering_plan_from_planner_output'): P(63, 'kriya.workflow.plan_schema', ((C, 2),), ()),
-    (C, 'build_planning_structural_evidence'): P(1, C, (('kriya.workflow.ownership_findings', 1), (C, 1)), ()),
+    (C, 'build_engineering_plan_from_planner_output'): P(69, 'kriya.workflow.plan_schema', ((C, 2),), ()),
+    (C, 'build_planning_structural_evidence'): P(2, C, (('kriya.workflow.ownership_findings', 1), (C, 1)), ()),
     (C, 'canonicalize_planned_file_actions'): P(1, 'kriya.workflow.plan_validation', ((C, 2),), ()),
     # E11 characterization: +1 site (tests/test_e11_owner_modules.py: one unit grounding per unit, through this name).
     (C, 'collect_unit_grounding'): P(9, 'kriya.workflow.edit_feasibility', ((C, 1),), ()),
-    (C, 'create_git_worktree'): P(22, 'kriya.workflow.worktree', ((C, 1),), ()),
+    (C, 'create_git_worktree'): P(29, 'kriya.workflow.worktree', ((C, 1),), ()),
     (C, 'enforce_preserved_reference_terminal_integrity'): P(3, 'kriya.workflow.terminal_gate_service', ((C, 1),), ()),
-    (C, 'evaluate_plan_edit_feasibility'): P(3, C, ((C, 1),), ()),
+    (C, 'evaluate_plan_edit_feasibility'): P(5, C, ((C, 1),), ()),
     (C, 'find_migration_incomplete'): P(2, 'kriya.workflow.migration', ((C, 1),), ()),
-    (C, 'find_missing_grounded_production_artifacts'): P(2, C, ((C, 1),), ()),
-    (C, 'grounded_owner_candidates'): P(1, 'kriya.workflow.ownership_findings', ((C, 1),), ()),
-    (C, 'localization_candidates'): P(1, 'kriya.workflow.graph_retrieval', ((C, 1),), ()),
+    (C, 'find_missing_grounded_production_artifacts'): P(3, C, ((C, 1),), ()),
+    (C, 'grounded_owner_candidates'): P(2, 'kriya.workflow.ownership_findings', ((C, 1),), ()),
+    (C, 'localization_candidates'): P(2, 'kriya.workflow.graph_retrieval', ((C, 1),), ()),
     # E11 characterization: +2 sites (tests/test_e11_owner_modules.py).
     (C, 'model_capacities'): P(13, 'kriya.workflow.edit_feasibility', ((C, 1),), ()),
-    (C, 'parse_planner_structured_output'): P(68, 'kriya.agents.contracts', ((C, 2),), ()),
+    (C, 'parse_planner_structured_output'): P(74, 'kriya.agents.contracts', ((C, 2),), ()),
     (C, 'record_plan_created'): P(1, 'kriya.workflow.subtask_telemetry', ((C, 2),), ()),
-    (C, 'remove_git_worktree'): P(9, 'kriya.workflow.worktree', ((C, 1),), ()),
-    (C, 'resolve_migration_resolution'): P(3, 'kriya.workflow.migration', ((C, 1),), ()),
+    (C, 'remove_git_worktree'): P(10, 'kriya.workflow.worktree', ((C, 1),), ()),
+    (C, 'resolve_migration_resolution'): P(4, 'kriya.workflow.migration', ((C, 1),), ()),
     # E11 characterization: +2 sites (tests/test_e11_owner_modules.py: both legacy-ownership migrations stamp the
     # artifact registry through this name).
     # E11: 3 -> 2 lookups: the two legacy-ownership migrations moved to resume_support and read
     # ResumeDeps.save_artifact_registry (one load in workflow_controller._resume_deps); the enforce loop keeps its own.
-    (C, 'save_artifact_registry'): P(3, 'kriya.control.persistence', ((C, 2),), ()),
+    (C, 'save_artifact_registry'): P(4, 'kriya.control.persistence', ((C, 2),), ()),
     # E11 characterization: +1 site (tests/test_e11_owner_modules.py: the controller migration stamps the control
     # state through this name).
-    (C, 'save_control_state'): P(5, 'kriya.control.persistence', ((C, 6),), ()),
-    (C, 'subtask_executor.execute'): P(6, 'kriya.workflow.subtask_executor', None, ()),
-    (C, 'validate_plan'): P(46, 'kriya.workflow.plan_validation', ((C, 5),), ()),
+    (C, 'save_control_state'): P(7, 'kriya.control.persistence', ((C, 6),), ()),
+    (C, 'subtask_executor.execute'): P(9, 'kriya.workflow.subtask_executor', None, ()),
+    (C, 'validate_plan'): P(52, 'kriya.workflow.plan_validation', ((C, 5),), ()),
     (C, 'validate_stack_contract_artifacts'): P(1, 'kriya.workflow.static_checks', ((C, 1),), ()),
+    # E12 characterization: 37 new rows (tests/test_e12_enforce_characterization.py pins the enforce loop's and the shadow
+    # run's decisions through these controller names; E12 moves the bodies and reads each through EnforceDeps/ShadowDeps).
+    (C, 'EstablishedProvenance'): P(1, C, ((C, 3),), ()),
+    (C, 'TerminalGateRequest'): P(2, 'kriya.workflow.terminal_gate_service', ((C, 1),), ()),
+    (C, 'TerminalGateService'): P(1, 'kriya.workflow.terminal_gate_service', ((C, 1),), ()),
+    (C, '_evaluate_integration_obligations'): P(2, C, ((C, 3),), ()),
+    (C, '_preserved_reference_must_preserve_lines'): P(1, C, ((C, 1),), ()),
+    (C, '_preserved_reference_regressions'): P(1, C, ((C, 1),), ()),
+    (C, '_semantic_contract_must_preserve_lines'): P(1, C, ((C, 1),), ()),
+    (C, '_semantic_contract_regression_subtasks'): P(1, C, ((C, 1),), ()),
+    (C, 'annotate_run'): P(1, 'kriya.control.run_coordinator', ((C, 2),), ()),
+    (C, 'bound_acceptance'): P(1, 'kriya.workflow.acceptance_oracle', ((C, 1),), ()),
+    (C, 'bound_approval'): P(1, 'kriya.workflow.acceptance_approval', ((C, 3),), ()),
+    (C, 'build_recovery_execution_plan'): P(7, C, ((C, 1),), ()),
+    (C, 'build_structured_plan_repair_prompt'): P(1, 'kriya.workflow.planner_repair', ((C, 1),), ()),
+    (C, 'check_plan_targets'): P(1, 'kriya.workflow.plan_targets', ((C, 1),), ()),
+    (C, 'classify_planner_outcome'): P(1, 'kriya.workflow.planner_repair', ((C, 2),), ()),
+    (C, 'coalesce_same_file_owners'): P(1, 'kriya.workflow.plan_normalization', ((C, 1),), ()),
+    (C, 'commit_verified_candidate'): P(2, 'kriya.workflow.commit_service', ((C, 1),), ()),
+    (C, 'derive_verification_contracts'): P(1, 'kriya.workflow.plan_normalization', ((C, 1),), ()),
+    (C, 'find_ownership_findings'): P(1, 'kriya.workflow.ownership_findings', ((C, 1),), ()),
+    (C, 'findings_prompt_block'): P(1, 'kriya.workflow.ownership_findings', ((C, 1),), ()),
+    (C, 'load_control_state_run_reference'): P(1, 'kriya.control.persistence', ((C, 1),), ()),
+    (C, 'load_run_record'): P(1, 'kriya.control.persistence', ((C, 1),), ()),
+    (C, 'owner_candidates_prompt_block'): P(1, 'kriya.workflow.ownership_findings', ((C, 1),), ()),
+    (C, 'quarantine_abandoned_plan_files'): P(1, C, ((C, 1),), ()),
+    (C, 'record_findings'): P(2, 'kriya.workflow.ownership_findings', ((C, 1),), ()),
+    (C, 'record_planner_outcome'): P(2, 'kriya.workflow.planner_repair', ((C, 2),), ()),
+    (C, 'redirect_immutable_test_edits'): P(1, 'kriya.workflow.plan_normalization', ((C, 1),), ()),
+    (C, 'render_localization_candidates'): P(1, 'kriya.workflow.graph_retrieval', ((C, 1),), ()),
+    (C, 'resolve_effective_scope_conflict_owners'): P(1, C, ((C, 1),), ()),
+    (C, 'resolve_python_module_to_candidate_artifact_path'): P(4, C, ((C, 1),), ()),
+    (C, 'resolve_runtime_plan_gap_owner'): P(4, C, ((C, 1),), ()),
+    (C, 'revise_plan_for_grounded_scope_owner'): P(2, C, ((C, 1),), ()),
+    (C, 'revise_plan_for_planned_prerequisite'): P(1, C, ((C, 1),), ()),
+    (C, 'revise_plan_for_runtime_plan_gap'): P(3, C, ((C, 1),), ()),
+    (C, 'save_approved_plan'): P(7, 'kriya.control.persistence', ((C, 11),), ()),
+    (C, 'scope_verification_to_requirements'): P(1, 'kriya.workflow.plan_normalization', ((C, 1),), ()),
+    (C, 'settle_findings'): P(1, 'kriya.workflow.ownership_findings', ((C, 1),), ()),
 }
 
 
@@ -335,9 +379,11 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # sites, 3 new rows (test_gate_orchestrator: the runtime-verification and managed-service seams, the suite judgment);
     # E9 +8 A sites (test_runtime_verification: the dynamic proofs of the runtime seams, written before the move); E10 +1
     # A site, 1 new row (test_candidate_transaction: the evidence boundary's call-time recorder lookup, post-move pin); E11
-    # +8 C sites (test_e11_owner_modules: the feasibility and legacy-migration names, written before the move)
-    assert totals == {A: 100, W: 88, C: 276}
-    assert len(PATCH_POINTS) == 88
+    # +8 C sites (test_e11_owner_modules: the feasibility and legacy-migration names, written before the move); E12 +4 W
+    # sites (3 new rows) and +102 C sites: 37 new rows (63 sites) and 39 more sites on 14 existing rows
+    # (test_e12_enforce_characterization: the enforce loop's and the shadow run's decisions, written before the move)
+    assert totals == {A: 100, W: 92, C: 378}
+    assert len(PATCH_POINTS) == 128
 
 
 # ----------------------------------------------------------------------------- owner modules (DEPENDENCY-RULES)
