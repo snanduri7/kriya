@@ -529,6 +529,18 @@ def test_a_downstream_owner_merge_drops_the_cyclic_edges_and_their_requires(tmp_
     assert revised.subtask_by_id("s4").depends_on == ["s2"]
 
 
+def test_a_capability_with_several_providers_is_not_dropped_with_one_dropped_provider(tmp_path):
+    # only a capability whose SOLE provider is the dropped downstream stage leaves the merged owner's requires
+    _files(tmp_path, "c.py")
+    p = plan(st("s1", ["a.py"], provides=["A"]), st("s2", ["b.py"], deps=["s1"], requires=["A"], provides=["B"]),
+             st("s5", ["e.py"], deps=["s2"], requires=["B"], provides=["E"]),
+             st("s6", ["g.py"], provides=["E"]),
+             st("s3", ["c.py"], deps=["s2", "s5"], requires=["B", "E"], provides=["C"]),
+             st("s4", ["d.py"], deps=["s3"], requires=["C"]))
+    s2 = wc.revise_plan_for_grounded_scope_owner(p, "s2", ["c.py"], str(tmp_path)).subtask_by_id("s2")
+    assert s2.depends_on == ["s1"] and s2.requires == ["A", "E"] and s2.provides == ["B", "C"]
+
+
 def test_an_upstream_consumer_of_the_merged_owner_drops_the_edge(tmp_path):
     _files(tmp_path, "m.xml")
     p = plan(st("s1", ["m.xml"], provides=["M"]), st("s2", ["a.py"], deps=["s1"], requires=["M"], provides=["A"]),
@@ -623,6 +635,16 @@ def test_the_dependency_ancestry_fallback():
     assert wc.resolve_effective_artifact_owner(p, "C.java", p.subtask_by_id("s3")).owner_subtask_id is None
     assert wc.resolve_scope_conflict_owners(p, ["A.java", "B.java", "D.java", "C.java"], p.subtask_by_id("s3")) == {
         "s1": ["A.java"], "s2": ["B.java"]}
+
+
+def test_execution_provenance_needs_both_the_order_and_the_control_state_else_the_ancestry_fallback_decides():
+    # the docstring contract: "skipped entirely (falls through to step 2) when either is omitted"
+    p = plan(st("s1", ["A.java"]), st("s2", ["B.java"], deps=["s1"]), st("s3", ["C.java"], deps=["s2"]))
+    control = _state({"s1": "completed"}, {"s1": ["A.java"]})
+    for order, state in ((["s1", "s2", "s3"], None), (None, control)):
+        resolution = wc.resolve_effective_artifact_owner(p, "A.java", p.subtask_by_id("s3"), order, state)
+        assert (resolution.owner_subtask_id, resolution.resolution_basis) == (
+            "s1", wc.ArtifactOwnerResolutionBasis.DEPENDENCY_ANCESTRY)
 
 
 def test_the_scope_conflict_owner_map_logs_every_resolution(caplog):
