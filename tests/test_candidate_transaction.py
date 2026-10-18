@@ -88,6 +88,10 @@ class _Run:
         architect = architect if architect is not None else [A, B]
         developer = developer_double()
         developer.run_generation = AsyncMock(return_value=files)
+        # The run's memory directory (dependency graph, knowledge cache) under tmp_path: the AppConfig default is
+        # cwd-relative and would open the checkout's ./memory (OI-45).
+        config = AppConfig()
+        config.paths.memory = str(tmp_path / "memory")
         defaults: Dict[str, Any] = dict(
             goal="Return the larger constants", plan="Step 1: change the returns", design="", workspace_path=str(
                 self.workspace), worktree_path=str(self.worktree), architect_files=architect, resume_state=None,
@@ -98,7 +102,7 @@ class _Run:
             architect_basename_to_path={os.path.basename(p): p for p in architect}, chain=[], targeted_max_retries=3,
             stream_callback=None, approval_callback=None, active_skills=[], active_skill_rules_snapshot={},
             developer=developer, run_verifier=AsyncMock(), spec_compliance=AsyncMock(), skill_engine=MagicMock(),
-            kernel=Kernel(config=AppConfig()), max_retries=4, web_lookup_query_callback=None,
+            kernel=Kernel(config=config), max_retries=4, web_lookup_query_callback=None,
             approve_web_lookup=AsyncMock(return_value=False), obligation_ledger=ObligationLedger(),
             migration_resolution=resolve_migration_resolution("Return the larger constants", str(self.workspace)),
         )
@@ -295,6 +299,7 @@ def test_the_authority_snapshot_is_emitted_before_an_infeasible_capability_stops
     (tmp_path / "calc.py").write_text(source)
     cfg = _cfg()
     cfg.llm.inference_runtime = None
+    cfg.paths.memory = str(tmp_path / "memory")   # never the checkout's ./memory (OI-45)
     ctx = _attempt_ctx(tmp_path, cfg, developer=None)
     shown = f"=== File: calc.py ===\n{source}"
     kwargs = {"known_target_files": ["calc.py"], "existing_code_context": "HEAD\n",
@@ -470,6 +475,7 @@ def _capability_ctx(tmp_path):
     (tmp_path / "calc.py").write_text(source)
     cfg = _cfg()
     cfg.llm.inference_runtime = None
+    cfg.paths.memory = str(tmp_path / "memory")   # never the checkout's ./memory (OI-45)
     return source, _attempt_ctx(tmp_path, cfg, developer=None)
 
 
@@ -936,6 +942,9 @@ def test_the_scenario04_attempts_are_refused_transactions(tmp_path, monkeypatch)
     ``refused``, with the invalid sibling as the refusing file and the valid parser proposal never staged."""
     from integration import test_scenario04_replay as s04
 
+    # the A3 helpers build an AppConfig whose memory directory is cwd-relative: run from tmp_path, never the
+    # checkout's ./memory (OI-45; the A3 file itself is left unchanged)
+    monkeypatch.chdir(tmp_path)
     made = _transactions(monkeypatch)
     previous3 = s04.Failure(
         type="anchored_edit", message=f"ANCHORED EDIT FAILURE in {s04.PARSER}: ANCHOR_NOT_IN_FILE",
