@@ -751,6 +751,40 @@ def test_the_recorded_verdicts_carry_the_verifier_and_its_findings():
     assert findings and event.details["findings"] == findings
 
 
+def test_the_recorded_verdicts_name_the_attempt_whose_deterministic_gates_passed():
+    """Orchestrator mutant s16 (E10 verification): every original verdict records, as its gate evidence, that THIS
+    attempt's deterministic gates passed (the verdicts are recorded only after them)."""
+    from types import SimpleNamespace
+
+    from kriya.workflow.requirements import requirement_obligation_id
+
+    reqs, ledger = _requirements({})
+    state = GenerationState()
+    state.attempt_number = 3
+    attempt._record_original_requirement_verdicts(
+        state, SimpleNamespace(requirement_set=reqs, obligation_ledger=ledger),
+        {"compliant": True, "reasoning": "x", "missing_requirements": []}, "fp-3")
+    gate_evidence = {rid: ledger.current(requirement_obligation_id(rid)).evidence["gate_evidence"] for rid in reqs.ids}
+    assert gate_evidence == {rid: ["attempt 3: deterministic gates passed"] for rid in reqs.ids}
+
+
+@pytest.mark.parametrize("missing", ["requirement_set", "obligation_ledger"])
+def test_original_verdicts_are_recorded_only_with_both_a_requirement_set_and_a_ledger(missing):
+    """Orchestrator mutant s17 (E10 verification): either one missing is a no-op - no event, no ledger change, no
+    error (the guard is OR, not AND)."""
+    from types import SimpleNamespace
+
+    reqs, ledger = _requirements({})
+    state = GenerationState()
+    state.attempt_number = 1
+    parts = {"requirement_set": reqs, "obligation_ledger": ledger}
+    parts[missing] = None
+    before = len(state.run_events)
+    attempt._record_original_requirement_verdicts(
+        state, SimpleNamespace(**parts), {"compliant": False, "reasoning": "x", "missing_requirements": []}, "fp-1")
+    assert len(state.run_events) == before
+
+
 def test_a_suppressed_claim_downgrades_only_its_own_requirement_to_unverified():
     """Mutants s23/s24: a suppressed 'REQ-n is missing' claim records exactly REQ-n UNVERIFIED with the
     suppression's typed reason (never as the model's VIOLATED claim, never another requirement)."""
