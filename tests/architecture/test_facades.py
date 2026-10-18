@@ -126,6 +126,11 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
             "kriya.workflow.plan_revision", ("PLAN_SCOPE_REVISION_REQUIRED",), "P1",
             "E11: the plan revisions and plan-graph queries owned by plan_revision; the controller keeps a forwarder for "
             "each function and re-exports the scope-revision reason code (the enforce loop and tests read it)"),
+        PartialFacade(
+            "kriya.workflow.owner_recovery", ("ArtifactOwnerResolutionBasis", "OwnerResolution", "_GATE_FAILURE_TYPES"), "P1",
+            "E11: the owner recovery and the integration obligations owned by owner_recovery; the controller keeps a "
+            "forwarder for each function and re-exports the two resolution types and the gate-failure set (tests import "
+            "them from the controller)"),
     ),
     "kriya/workflow/attempt.py": (
         PartialFacade(

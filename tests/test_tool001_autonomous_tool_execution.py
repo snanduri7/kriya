@@ -601,7 +601,7 @@ def _workflow_module_sources():
         "workflow.py": inspect.getsource(workflow_mod),
         # E11: the module-level controller code moved to these owners; the checks follow it
         **{f"{name}.py": inspect.getsource(importlib.import_module(f"kriya.workflow.{name}"))
-           for name in ("plan_revision",)},
+           for name in ("plan_revision", "owner_recovery")},
     }
 
 

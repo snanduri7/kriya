@@ -365,7 +365,9 @@ KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_life
                         # E10: the candidate staging transaction and its helpers
                         "kriya.workflow.candidate_transaction",
                         # E11: the plan revisions and plan-graph queries (from workflow_controller.py)
-                        "kriya.workflow.plan_revision")
+                        "kriya.workflow.plan_revision",
+                        # E11: the owner recovery and integration obligations (from workflow_controller.py)
+                        "kriya.workflow.owner_recovery")
 FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
 
 
