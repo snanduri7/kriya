@@ -347,13 +347,15 @@ FORBIDDEN = {"kriya.workflow.attempt", "kriya.workflow.retry_strategy", "kriya.w
 
 @pytest.mark.parametrize("module", ["kriya/workflow/recovery_coordinator.py",
                                     "kriya/workflow/verification_coordinator.py",
-                                    "kriya/workflow/gate_orchestrator.py"])
+                                    "kriya/workflow/gate_orchestrator.py",
+                                    "kriya/workflow/runtime_verification.py"])
 def test_the_coordinators_depend_only_downward(module):
     """Neither coordinator imports the orchestration modules that call it
     (including lazy imports), so the dependency runs one way. E8: the gate
     orchestrator that now runs the verification-only attempt through
     VerificationCoordinator obeys the same rule (its attempt.py and
-    retry_strategy collaborators arrive through GateDeps)."""
+    retry_strategy collaborators arrive through GateDeps). E9: the runtime
+    verification the gates hand work to obeys it too (RuntimeDeps)."""
     assert not _imported_modules(module) & FORBIDDEN
 
 

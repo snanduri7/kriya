@@ -44,7 +44,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (A, '_approve_and_execute_runtime_verification'): P(1, A, ((A, 1),), ()),
     # E9 characterization: +1 site (tests/test_runtime_verification.py: the dynamic proof that both runtime call sites
     # resolve it through this module at call time).
-    (A, '_approve_runtime_commands'): P(2, A, ((A, 2),), ()),
+    # E9: 2 -> 1 lookup: the two callers (approve-and-execute, direct) moved to runtime_verification and read
+    # RuntimeDeps._approve_runtime_commands (one load in attempt._runtime_deps); the site above is the dynamic proof.
+    (A, '_approve_runtime_commands'): P(2, A, ((A, 1),), ()),
     # E7: unchanged - still the retry_prompts function attempt.py imports, looked up by run_attempt's two targeted
     # branches (which stay in attempt.py); retry_prompts.py stays its only definition.
     (A, '_build_targeted_retry_prompt'): P(2, 'kriya.workflow.retry_prompts', ((A, 2),), ()),
@@ -76,7 +78,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (A, '_maybe_run_developer_investigation'): P(1, A, ((A, 1),), ()),
     # E9 characterization: +1 site (tests/test_runtime_verification.py: the dynamic proof that both runtime call sites
     # resolve it through this module at call time).
-    (A, '_prepare_finite_command_runtime_artifacts'): P(2, A, ((A, 3),), ()),
+    # E9: 3 -> 1 lookup: the three calls (approve-and-execute x2, direct) moved to runtime_verification and read
+    # RuntimeDeps (one load in attempt._runtime_deps).
+    (A, '_prepare_finite_command_runtime_artifacts'): P(2, A, ((A, 1),), ()),
     (A, '_reject_exception_masking'): P(1, A, ((A, 2),), ()),
     (A, '_require_qualified_retry_identity'): P(1, A, ((A, 1),), ()),
     # E8 (guard): 2 -> 2: the toolchain preflight's load moved (GateDeps, one load in attempt._gate_deps); the other stays.
@@ -88,7 +92,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (A, '_resolve_known_target_member_hints'): P(1, A, ((A, 3),), ()),
     # E9 characterization: +1 site (tests/test_runtime_verification.py: the dynamic proof that both runtime call sites
     # resolve it through this module at call time).
-    (A, '_resolve_run_command'): P(11, 'kriya.workflow.file_resolution', ((A, 3),), ()),
+    # E9: 3 -> 1 lookup: the subject's and both executors' resolution moved to runtime_verification and read
+    # RuntimeDeps._resolve_run_command (one load in attempt._runtime_deps).
+    (A, '_resolve_run_command'): P(11, 'kriya.workflow.file_resolution', ((A, 1),), ()),
     (A, '_restore_api_contract_owners_deterministically'): P(1, A, ((A, 1),), ()),
     # E7: the body moved to repair_orchestrator; attempt.py keeps an async forwarder (owner A) that run_attempt's
     # coordinated branch still calls by this name (the 5 patch sites intercept the whole coordinated repair).
@@ -119,7 +125,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E8: 8 -> 7 lookups: the compile timing's two time.monotonic() loads moved to gate_orchestrator and read
     # GateDeps.time (one load in attempt._gate_deps), so a patch of kriya.workflow.attempt.time still reaches it.
     # E9 characterization: +1 site (tests/test_runtime_verification.py: the runtime timings read this module's clock).
-    (A, 'time'): P(2, 'time', ((A, 7),), ()),
+    # E9: 7 -> 4 lookups: the four time.monotonic() loads of the direct and managed-service timings moved to
+    # runtime_verification and read RuntimeDeps.time (one load in attempt._runtime_deps).
+    (A, 'time'): P(2, 'time', ((A, 4),), ()),
     # kriya.workflow.workflow
     (W, 'RepositoryAnalyzer'): P(3, 'kriya.analyzer.analyzer', ((W, 2),), ()),
     (W, 'RepositoryAnalyzer.index_repository'): P(3, 'kriya.analyzer.analyzer', None, ()),
@@ -331,7 +339,9 @@ KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_life
                         # E7: the retry/repair preparation and the coordinated repair
                         "kriya.workflow.repair_orchestrator",
                         # E8: the candidate-gate orchestration and the verification-only attempt
-                        "kriya.workflow.gate_orchestrator")
+                        "kriya.workflow.gate_orchestrator",
+                        # E9: runtime and managed-service verification
+                        "kriya.workflow.runtime_verification")
 FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
 
 

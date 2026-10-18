@@ -147,6 +147,15 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
             ("SPEC_COMPLIANCE_MODEL_ADVISORY", "SPEC_MODEL_INDETERMINATE", "SPEC_MODEL_REPORTED_MISSING"), "P1",
             "E8: the candidate-gate orchestration owned by gate_orchestrator; attempt.py keeps 11 forwarders that inject "
             "its collaborators (GateDeps) and re-exports the goal-spec gate's three advisory statuses"),
+        PartialFacade(
+            "kriya.workflow.runtime_verification",
+            ("MANAGED_SERVICE_APPROVAL_UNSUPPORTED", "_DISTRUST_DISCLOSURE_NOTE", "_MANAGED_SERVICE_FORBIDDEN_LEADING_EXECUTABLES",
+             "_MANAGED_SERVICE_PROBE_KINDS", "_MANAGED_SERVICE_READINESS_KINDS", "_MANAGED_SERVICE_SHELL_MARKERS",
+             "_RUNTIME_VERIFICATION_SYNTHETIC_INPUT", "_SHELL_INTERPRETER_EXECUTABLES", "_SUPPORTED_RUNTIME_EXECUTION_MODES"),
+            "P1", "E9: runtime and managed-service verification owned by runtime_verification; attempt.py keeps 26 forwarders "
+            "that inject its collaborators (RuntimeDeps) and re-exports these nine constants (test_workflow, "
+            "test_runtime_stdin_rerun_binding and test_managed_service_hitl_fail_closed read the synthetic input and the "
+            "managed-service reason code from attempt)"),
     ),
     "kriya/workflow/terminal_commit.py": PartialFacade(
         "kriya.repository.commit", ("CandidateMaterializationError",), "P1",
