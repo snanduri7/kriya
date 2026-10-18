@@ -37,6 +37,7 @@ from kriya.core.kernel import Kernel
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.workflow import attempt
+from kriya.workflow.edit_safety import content_revision
 from kriya.workflow.failure import QualityGateFailure
 from kriya.workflow.file_integrity import raw_digest
 from kriya.workflow.file_resolution import IncompleteGenerationError
@@ -68,12 +69,15 @@ class _Run:
     """One real ``run_attempt`` over a workspace and a separate worktree (the sandbox) holding the same files."""
 
     def __init__(self, tmp_path: Path, files: List[Dict[str, Any]], *, architect: Optional[List[str]] = None,
+                 extra: Optional[Dict[str, bytes]] = None, workspace_only: Tuple[str, ...] = (),
                  **ctx_overrides: Any) -> None:
         self.workspace, self.worktree = tmp_path / "ws", tmp_path / "wt"
         for root in (self.workspace, self.worktree):
-            for path, text in ((A, A_SRC), (B, B_SRC)):
+            for path, data in [(A, A_SRC.encode()), (B, B_SRC.encode()), *(extra or {}).items()]:
+                if root == self.worktree and path in workspace_only:
+                    continue
                 (root / path).parent.mkdir(parents=True, exist_ok=True)
-                (root / path).write_text(text, encoding="utf-8")
+                (root / path).write_bytes(data)
         self.files = files
         self.state = GenerationState()
         self.emitted: List[Tuple[str, Dict[str, Any], Dict[str, Optional[str]]]] = []
@@ -310,3 +314,527 @@ def test_the_authority_snapshot_is_emitted_before_an_infeasible_capability_stops
     assert [target["path"] for target in snapshot["targets"]] == ["calc.py"]
     assert snapshot["targets"][0]["whole_file_authority"] is False
     assert snapshot["known_target_files"] == ["calc.py"]
+
+
+# ---------------------------------------------------------------------------- unit pins of the staging helpers
+# Added after the pre-move mutant pass over the to-be-moved code (6742f29): each pins a decision a surviving mutant
+# changed (named in the docstring) through the name attempt.py keeps.
+
+def _full_item(path: str, content: str, **overrides: Any) -> Any:
+    from kriya.workflow.context_package import make_context_item
+
+    fields: Dict[str, Any] = dict(tier="full", is_exact=True, revision=content_revision(content))
+    fields.update(overrides)
+    return make_context_item(path=path, content=content, reason="known_target_full_source",
+                             source_type="named_in_request", trust_level="repository", **fields)
+
+
+def _restoring(state: GenerationState) -> None:
+    from kriya.workflow.state import APIContractRecovery
+
+    state.api_contract_recovery = APIContractRecovery.detected(
+        [{"owner": A, "removed_signature": "a()"}], [], {A: "API_OWNER"})
+    state.api_contract_recovery.begin_restoration()
+
+
+def test_an_original_is_recorded_once_and_keeps_an_earlier_display_text(tmp_path):
+    """``_capture_original`` (mutants c01/c02): the raw bytes once per run, the display text only when none is known."""
+    run = _Run(tmp_path, [])
+    run.state.all_original_contents[A] = "earlier display text"
+    attempt._capture_original(run.state, run.ctx, A)
+    assert run.state.all_original_raw[A] == A_SRC.encode()
+    assert run.state.all_original_contents[A] == "earlier display text"
+    (run.workspace / A).write_text("changed later\n", encoding="utf-8")
+    attempt._capture_original(run.state, run.ctx, A)
+    assert run.state.all_original_raw[A] == A_SRC.encode()
+    attempt._capture_original(run.state, run.ctx, "pkg/absent.py")
+    assert run.state.all_original_raw["pkg/absent.py"] is None and run.state.all_original_contents["pkg/absent.py"] == ""
+
+
+def test_whole_file_authority_needs_full_exact_current_whole_file_source(tmp_path):
+    """``_has_authoritative_full_source`` (mutants c07/c08/c09): a full, exact, whole-file item of the current revision
+    authorizes; a skeleton, a member slice, a stale revision or an inexact item does not; an item without a revision
+    predates revisions and counts as current."""
+    run = _Run(tmp_path, [])
+    items = run.state.known_target_context_items
+    for overrides, authoritative in (({}, True), ({"tier": "skeleton"}, False), ({"member_id": "a"}, False),
+                                     ({"revision": "stale"}, False), ({"is_exact": False}, False),
+                                     ({"revision": ""}, True)):
+        items[A] = _full_item(A, A_SRC, **overrides)
+        assert attempt._has_authoritative_full_source(A, run.ctx, run.state) is authoritative, overrides
+
+
+def test_the_deterministic_restoration_phase_keeps_whole_file_authority(tmp_path):
+    """RESTORE_PUBLIC_CONTRACT (mutants c04/c12): without authoritative source a whole-file request is downgraded
+    mandatorily and a whole-file response refused - except in the deterministic restoration phase, at request and at
+    response time alike."""
+    from kriya.workflow.operations import CodeOperation
+
+    run = _Run(tmp_path, [])
+    full = CodeOperation.REPAIR_WITH_FULL_FILE
+    assert attempt._completeness_gated_operation(A, full, file_exists=True, ctx=run.ctx, state=run.state) == (
+        CodeOperation.REPAIR_WITH_PATCH, True)
+    assert attempt._validate_actual_mutation_authority(A, full, file_exists=True, ctx=run.ctx, state=run.state)
+    _restoring(run.state)
+    assert attempt._completeness_gated_operation(A, full, file_exists=True, ctx=run.ctx, state=run.state) == (full, False)
+    assert attempt._validate_actual_mutation_authority(A, full, file_exists=True, ctx=run.ctx, state=run.state) is None
+
+
+def test_a_capability_grants_whole_file_only_for_its_own_attempt_and_revision(tmp_path):
+    """``_validate_actual_mutation_authority`` with a capability (mutants c11/c41): the capability decided for THIS
+    attempt and THIS revision decides; one of another revision (the file changed since) or without whole-file authority
+    refuses; one of an earlier attempt is not current (the authoritative-source check decides: none here)."""
+    from types import SimpleNamespace
+
+    from kriya.workflow.operations import CodeOperation
+
+    run = _Run(tmp_path, [])
+    state, full = run.state, CodeOperation.REPAIR_WITH_FULL_FILE
+    state.attempt_number = state.edit_capabilities_attempt = 2
+    current = content_revision(A_SRC)
+    for capability, authorized in ((SimpleNamespace(full_file=True, revision=current), True),
+                                   (SimpleNamespace(full_file=True, revision="another"), False),
+                                   (SimpleNamespace(full_file=False, revision=current), False)):
+        state.edit_capabilities = {A: capability}
+        verdict = attempt._validate_actual_mutation_authority(A, full, file_exists=True, ctx=run.ctx, state=state)
+        assert (verdict is None) is authorized, capability
+    state.edit_capabilities = {A: SimpleNamespace(full_file=True, revision=current)}
+    state.edit_capabilities_attempt = 1
+    assert attempt._current_edit_capability(state, A) is None
+    assert attempt._validate_actual_mutation_authority(A, full, file_exists=True, ctx=run.ctx, state=state)
+
+
+def test_one_anchor_failure_escalates_the_next_request_to_whole_file_where_authorized(tmp_path):
+    """``_operation_map`` (mutant c13): after ONE anchored-edit failure an existing file is requested whole - and the
+    D1 gate still downgrades it where no authoritative source is on record."""
+    from kriya.workflow.operations import CodeOperation
+
+    run = _Run(tmp_path, [])
+    run.state.known_target_context_items[A] = _full_item(A, A_SRC)
+    patch_op, full = CodeOperation.REPAIR_WITH_PATCH, CodeOperation.REPAIR_WITH_FULL_FILE
+    assert attempt._operation_map(run.ctx, [A, B], patch_op, run.state) == {A: patch_op, B: patch_op}
+    run.state.budgets.anchor_failure_counts = {A: 1, B: 1}
+    assert attempt._operation_map(run.ctx, [A, B], patch_op, run.state) == {A: full, B: patch_op}
+
+
+def test_edit_loci_are_this_files_failure_lines_and_every_rejected_anchor(tmp_path):
+    """``_edit_capability_loci`` / ``_remember_anchor_loci`` (mutants c15/c19): only the failure locations of THIS
+    file are loci; a rejected SEARCH block's real lines join the loci already kept (never replace them)."""
+    from kriya.workflow.edit_capability import locate_search_text
+    from kriya.workflow.failure import Failure, FileLocation
+
+    run = _Run(tmp_path, [])
+    run.state.last_failure = Failure(type="compile", message="x", raw_output="x", attempt=1, file_locations=[
+        FileLocation(filepath=A, line=2), FileLocation(filepath=B, line=1)])
+    assert attempt._edit_capability_loci(run.state, run.ctx, A, A_SRC.splitlines()) == [2]
+    run.state.edit_anchor_loci[A] = [7]
+    attempt._remember_anchor_loci(run.state, A, [A_EDIT], A_SRC)
+    located = locate_search_text(A_SRC.splitlines(), A_EDIT["search"])
+    assert located and run.state.edit_anchor_loci[A] == sorted({7, *located})
+
+
+def test_the_requested_operation_falls_back_to_the_invocations_default():
+    """``_requested_operation`` (mutant c40)."""
+    from kriya.workflow.operations import CodeOperation
+
+    kwargs = {"operation_by_file": {A: CodeOperation.REPAIR_WITH_FULL_FILE},
+              "default_operation": CodeOperation.REPAIR_WITH_PATCH}
+    assert attempt._requested_operation(kwargs, A) == CodeOperation.REPAIR_WITH_FULL_FILE.value
+    assert attempt._requested_operation(kwargs, B) == CodeOperation.REPAIR_WITH_PATCH.value
+
+
+BOX_PATH = "src/main/java/p/Box.java"
+BOX_SRC = ("package p;\n\npublic class Box {\n    private int size;\n\n    public int size() {\n        return size;\n"
+           "    }\n}\n")
+BOX_GOAL = "Add `public int clamp(int v)` to Box."
+
+
+def test_the_structural_insertion_locus_reads_the_grounded_members_and_the_users_goal():
+    """``_structural_insertion_locus`` (mutants c38/c39): a grounded member anchors the insertion right after it; the
+    locus is decided from the user's grounding goal (the unit goal here names no new member)."""
+    from types import SimpleNamespace
+
+    state = GenerationState()
+    ctx = SimpleNamespace(goal="Fix the box", grounding_goal=BOX_GOAL)
+    assert attempt._structural_insertion_locus(state, ctx, BOX_PATH, BOX_SRC).tier == "owner_closing_delimiter"
+    state.known_target_context_items[BOX_PATH] = _full_item(BOX_PATH, BOX_SRC, member_id="Box.size")
+    assert attempt._structural_insertion_locus(state, ctx, BOX_PATH, BOX_SRC).tier == "after_grounded_member"
+    assert attempt._structural_insertion_locus(state, SimpleNamespace(goal="Fix the box", grounding_goal=None),
+                                               BOX_PATH, BOX_SRC) is None
+
+
+def _capability_ctx(tmp_path):
+    from test_prd016_adaptive_budget import _attempt_ctx, _cfg
+
+    source = "def calc(a, b):\n    return a + b\n"
+    (tmp_path / "calc.py").write_text(source)
+    cfg = _cfg()
+    cfg.llm.inference_runtime = None
+    return source, _attempt_ctx(tmp_path, cfg, developer=None)
+
+
+def test_a_shown_item_of_another_revision_never_makes_source_shown(tmp_path):
+    """``_decide_edit_capabilities`` (mutant c24): an exact item recorded for a since-changed revision is not shown
+    source: with nothing else shown the invocation is infeasible; the same item of the current revision is shown."""
+    from kriya.workflow.edit_capability import CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE
+
+    source, ctx = _capability_ctx(tmp_path)
+    for revision, feasible in (("stale-revision", False), (content_revision(source), True)):
+        state = GenerationState()
+        state.attempt_number = 1
+        state.known_target_context_items["calc.py"] = _full_item("calc.py", source, tier="member_exact",
+                                                                 member_id="calc", revision=revision)
+        kwargs = {"known_target_files": ["calc.py"], "existing_code_context": "HEAD\n"}
+        if feasible:
+            assert attempt._decide_edit_capabilities(state, ctx, kwargs)["calc.py"].feasible
+        else:
+            with pytest.raises(QualityGateFailure) as stopped:
+                attempt._decide_edit_capabilities(state, ctx, kwargs)
+            assert stopped.value.failure.diagnostics["reason_code"] == CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE
+
+
+def test_the_edit_capabilities_of_an_earlier_attempt_are_dropped(tmp_path):
+    """``_decide_edit_capabilities`` (mutant c30): a new attempt's invocation starts from no capabilities."""
+    source, ctx = _capability_ctx(tmp_path)
+    state = GenerationState()
+    state.attempt_number = 2
+    state.edit_capabilities, state.edit_capabilities_attempt = {"old.py": object()}, 1
+    kwargs = {"known_target_files": ["calc.py"], "existing_code_context": f"HEAD\n=== File: calc.py ===\n{source}"}
+    attempt._decide_edit_capabilities(state, ctx, kwargs)
+    assert set(state.edit_capabilities) == {"calc.py"} and state.edit_capabilities_attempt == 2
+
+
+# --------------------------------------------------------------------- staging-loop pins (pre-move mutant pass)
+
+def test_an_anchored_edit_on_a_file_the_engine_cannot_represent_is_a_deterministic_stop(tmp_path):
+    """The staging loop's file-integrity stop (mutant r14): a non-UTF-8 file is never edited; the typed
+    ``file_integrity_unsupported`` stop, not an anchored-edit retry."""
+    latin = "pkg/latin.py"
+    run = _Run(tmp_path, [_edit(latin, {"search": "x = 1\n", "replace": "x = 2\n"})], architect=[latin],
+               extra={latin: "s = 'caf\xe9'\nx = 1\n".encode("latin-1")}).run()
+    assert run.failure is not None and run.failure.type == "file_integrity_unsupported"
+    assert (run.failure.source, run.failure.authority, run.failure.likely_files) == ("orchestrator", "deterministic", [latin])
+    assert run.state.budgets.anchor_failure_counts == {}
+
+
+def test_an_accepted_anchored_edit_clears_its_files_edit_protocol_failure(tmp_path):
+    """Mutant r21: the remembered edit-protocol failure of a file stands until an edit to it is accepted."""
+    run = _Run(tmp_path, [_edit(A, A_EDIT)], architect=[A, "pkg/missing.py"])
+    run.state.edit_failure_capability = {A: ("anchored_edit", "d1", None), B: ("anchored_edit", "d2", None)}
+    run.run()
+    assert isinstance(run.error, IncompleteGenerationError)
+    assert set(run.state.edit_failure_capability) == {B}
+
+
+@pytest.mark.parametrize("shape", ["edit", "content"])
+def test_explanatory_prose_added_by_the_candidate_is_refused(tmp_path, shape):
+    """The prose pre-flight check on both staging branches (mutants r28/r42)."""
+    prose = A_SRC.replace("    return 1\n", "    return 10\nThe fix is to return ten.\n")
+    if shape == "edit":
+        files = [_edit(A, {"search": "    return 1\n", "replace": "    return 10\nThe fix is to return ten.\n"})]
+        path = A
+    else:
+        path, files = C, [{"filepath": C, "content": prose}]
+    run = _Run(tmp_path, files, architect=[path]).run()
+    assert run.failure is not None and (run.failure.type, run.failure.likely_files) == ("prose_contamination", [path])
+    assert run.disk() == BASELINE
+
+
+JAVA = "src/P.java"
+JAVA_SRC = ("class P {\n    void f() {\n        try {\n            g();\n        } catch (Exception e) {\n"
+            "            throw new RuntimeException(e);\n        }\n    }\n    void g() {}\n}\n")
+
+
+@pytest.mark.parametrize("shape", ["edit", "content"])
+def test_newly_masked_exceptions_are_refused(tmp_path, shape):
+    """The exception-masking pre-flight check on both staging branches (mutants r29/r43), through the name tests
+    patch on attempt."""
+    masked = JAVA_SRC.replace("Exception e", "Throwable e")
+    if shape == "edit":
+        files = [_edit(JAVA, {"search": "        } catch (Exception e) {\n", "replace": "        } catch (Throwable e) {\n"})]
+        path = JAVA
+        extra = {JAVA: JAVA_SRC.encode()}
+    else:
+        path, files, extra = "src/Q.java", [{"filepath": "src/Q.java", "content": masked.replace("class P", "class Q")}], {}
+    run = _Run(tmp_path, files, architect=[path], extra=extra).run()
+    assert run.failure is not None and (run.failure.type, run.failure.likely_files) == ("unsafe_exception_masking",
+                                                                                         [path])
+
+
+def test_an_anchored_edit_keeps_the_files_line_endings_and_mode(tmp_path):
+    """The prepared write carries the edit engine's bytes and the file mode (mutants r31/r32): a CRLF file stays
+    CRLF and an executable stays executable."""
+    script = "pkg/run.py"
+    run = _Run(tmp_path, [_edit(script, {"search": "x = 1\n", "replace": "x = 2\n"})], architect=[script, "pkg/missing.py"],
+               extra={script: b"#!/usr/bin/env python3\r\nx = 1\r\n"})
+    for root in (run.workspace, run.worktree):
+        os.chmod(root / script, 0o755)
+    run.run()
+    assert isinstance(run.error, IncompleteGenerationError)
+    assert (run.worktree / script).read_bytes() == b"#!/usr/bin/env python3\r\nx = 2\r\n"
+    assert os.stat(run.worktree / script).st_mode & 0o777 == 0o755
+    assert run.state.candidate_digests[script] == raw_digest(b"#!/usr/bin/env python3\r\nx = 2\r\n")
+
+
+def test_a_whole_file_replacement_based_on_the_workspace_file_is_refused_by_the_guarded_commit(tmp_path):
+    """Mutant r34 (TODAY's behaviour, pinned): a whole-file replacement of a file the sandbox lacks but the workspace
+    has is based on the WORKSPACE file - outside the writer's root - so the guarded batch commit refuses the batch
+    (BatchCommitError) and nothing is written."""
+    from kriya.repository.commit import BatchCommitError
+
+    nonl = "pkg/nonl.py"
+    run = _Run(tmp_path, [{"filepath": nonl, "content": "X = 2\n"}], architect=[nonl, "pkg/missing.py"],
+               extra={nonl: b"X = 1"}, workspace_only=(nonl,))
+    run.state.known_target_context_items[nonl] = _full_item(nonl, "X = 1")
+    with pytest.raises(BatchCommitError, match="escapes workspace"):
+        asyncio.run(attempt.run_attempt(run.state, run.ctx))
+    assert not (run.worktree / nonl).exists() and run.state.candidate_digests == {}
+
+
+def test_a_whole_file_replacement_of_an_unrepresentable_file_is_a_deterministic_stop(tmp_path):
+    """Mutant r35: an existing file the engine cannot represent exactly (mixed line endings) is refused before any
+    re-encoding: the typed ``file_integrity_unsupported`` stop."""
+    mixed = "pkg/mixed.py"
+    run = _Run(tmp_path, [{"filepath": mixed, "content": "a = 2\nb = 2\n"}], architect=[],
+               extra={mixed: b"a = 1\r\nb = 1\n"})
+    run.state.known_target_context_items[mixed] = _full_item(mixed, "a = 1\nb = 1\n", revision="")
+    run.run()
+    assert run.failure is not None and run.failure.type == "file_integrity_unsupported", run.failure
+    assert (run.worktree / mixed).read_bytes() == b"a = 1\r\nb = 1\n"
+
+
+def test_a_structurally_corrupt_whole_file_is_refused(tmp_path):
+    """Mutant r38: the structural pre-flight check of a whole-file (new) candidate."""
+    run = _Run(tmp_path, [{"filepath": "src/R.java", "content": "class R {\n    void f() {\n}\n"}],
+               architect=["src/R.java"]).run()
+    assert run.failure is not None and (run.failure.type, run.failure.likely_files) == ("structural_corruption",
+                                                                                         ["src/R.java"])
+
+
+def test_two_new_files_of_one_batch_declaring_the_same_type_collide(tmp_path):
+    """Mutant r40: each accepted new file's types join the batch's type index, so a second new file in the SAME
+    response redeclaring one is refused as a duplicate (the index is not only the workspace's)."""
+    run = _Run(tmp_path, [{"filepath": "src/x/Dup.java", "content": "class Dup {\n}\n"},
+                          {"filepath": "src/y/Dup.java", "content": "class Dup {\n}\n"}],
+               architect=["src/x/Dup.java", "src/y/Dup.java"], extra={JAVA: JAVA_SRC.encode()},
+               established_files=[JAVA]).run()
+    assert run.failure is not None and run.failure.type == "duplicate_type_across_files"
+    assert run.failure.likely_files == ["src/y/Dup.java", "src/x/Dup.java"]
+
+
+def test_a_real_change_clears_an_earlier_identical_rewrite_mark(tmp_path):
+    """Mutant r49: a path an earlier attempt rewrote byte-identically is no longer an identical rewrite once this
+    attempt really changes it."""
+    run = _Run(tmp_path, [_edit(A, A_EDIT)], architect=[A, "pkg/missing.py"])
+    run.state.identical_rewrites = {A, B}
+    run.run()
+    assert isinstance(run.error, IncompleteGenerationError)
+    assert run.state.identical_rewrites == {B} and run.state.files_written == [A]
+
+
+# ------------------------------------------------------------------------ spec-compliance pins (pre-move mutant pass)
+
+def _migration_ledger(*statuses: Any, source: str = "io-gson", target: str = "jackson-databind") -> ObligationLedger:
+    from kriya.workflow.obligations import ObligationAuthority, ObligationKind, ObligationRecord
+
+    ledger = ObligationLedger()
+    for index, status in enumerate(statuses):
+        ledger.record(ObligationRecord(
+            id=f"migration.m{index}", kind=ObligationKind.MIGRATION_COMPLETION, status=status,
+            authority=ObligationAuthority.DETERMINISTIC, description=f"migration step {index}", source="test",
+            revision=1, evidence={"source_identity": source, "target_identity": target}))
+    return ledger
+
+
+def test_the_authoritative_migration_context_needs_every_obligation_satisfied():
+    """Mutants s01/s03: the authoritative context and the arbitration precondition exist only when at least one
+    migration obligation exists and every one is SATISFIED."""
+    from kriya.workflow.obligations import ObligationStatus
+
+    ok, bad = ObligationStatus.SATISFIED, ObligationStatus.VIOLATED
+    assert attempt._spec_compliance_authoritative_context(_migration_ledger(ok, bad)) is None
+    assert attempt._spec_compliance_authoritative_context(None) is None
+    assert attempt._spec_compliance_authoritative_context(_migration_ledger(ok, ok)) == (
+        "AUTHORITATIVELY ESTABLISHED (deterministic evidence - do not report these as missing/incomplete):\n"
+        "- migration step 0\n- migration step 1\n\nEvaluate only requirements not already covered by the above.")
+    assert attempt._migration_obligations_all_satisfied(ObligationLedger()) is False
+    assert attempt._migration_obligations_all_satisfied(_migration_ledger(ok, bad)) is False
+    assert attempt._migration_obligations_all_satisfied(_migration_ledger(ok)) is True
+
+
+def test_a_contradicted_claim_names_a_migration_identity_term_of_three_or_more_letters():
+    """Mutant s05: the identity's short tokens ("io" of "io-gson") correlate with nothing."""
+    from kriya.workflow.obligations import ObligationStatus
+
+    ledger = _migration_ledger(ObligationStatus.SATISFIED)
+    kept, contradicted = attempt._spec_requirements_contradicting_authority(
+        ["the code still imports gson", "the io layer is incomplete"], ledger)
+    assert (kept, contradicted) == (["the io layer is incomplete"], ["the code still imports gson"])
+
+
+def test_requirement_identifier_tokens_drop_short_words_and_stopwords():
+    """Mutant s09."""
+    assert attempt._extract_requirement_identifier_tokens("Add an id field to the CustomerDto record") == [
+        "Add", "field", "CustomerDto", "record"]
+
+
+def _stage_plan(completed=()):
+    from types import SimpleNamespace
+
+    from kriya.workflow.plan_schema import RequirementOwnershipRelation
+
+    subtasks = [SimpleNamespace(id="s1", description="scaffold the project", acceptance_criteria_ids=["AC-1"],
+                                relevant_global_invariant_ids=[]),
+                SimpleNamespace(id="s0", description="done earlier", acceptance_criteria_ids=["AC-0"],
+                                relevant_global_invariant_ids=[]),
+                SimpleNamespace(id="s2", description="the endpoint", acceptance_criteria_ids=["AC-2"],
+                                relevant_global_invariant_ids=["INV-1"])]
+    plan = SimpleNamespace(
+        subtasks=subtasks, acceptance_criteria=[SimpleNamespace(id="AC-1", description="the build passes")],
+        global_invariants=[SimpleNamespace(id="INV-1", statement="no new dependency")],
+        subtask_by_id=lambda sid: next((st for st in subtasks if st.id == sid), None),
+        classify_requirement_ownership=lambda _current, _claimants: RequirementOwnershipRelation.CURRENT)
+    return SimpleNamespace(structured_plan=plan, current_subtask_id="s1", completed_subtask_ids=list(completed),
+                           goal="the whole goal")
+
+
+def test_the_stage_scoped_goal_lists_due_requirements_and_only_pending_later_work():
+    """Mutants s17/s18: the scoped goal's exact text (with the pending rule), and only requirements of NOT YET
+    completed other subtasks are future."""
+    scoped, future = attempt._stage_scoped_spec_compliance_goal(_stage_plan(completed=("s0",)))
+    assert scoped == ("Current approved subtask: s1\nCurrent implementation obligation: scaffold the project\n"
+                      "Acceptance requirements due at this stage:\n- the build passes\nOnly decide whether this current "
+                      "stage satisfies the requirements listed above. Requirements assigned to unfinished later "
+                      "subtasks are pending, not violated.")
+    assert future == ["AC-2", "INV-1"]
+    assert attempt._stage_scoped_spec_compliance_goal(_stage_plan())[1] == ["AC-0", "AC-2", "INV-1"]
+
+
+def _requirements(outcomes: Dict[str, Any], evidence_id: str = "cand-1"):
+    from test_prd020_requirement_lineage import _ledger_with
+
+    goal = "Migrate the JSON layer from gson to jackson-databind.\n- Use jackson snake_case naming everywhere\n"
+    return _ledger_with(outcomes, goal=goal, evidence_id=evidence_id)
+
+
+def test_the_recorded_verdicts_carry_the_verifier_and_its_findings():
+    """Mutants s21/s22: the lineage event of the original verdicts names the verifier identity per requirement and
+    keeps the verifier's findings."""
+    from types import SimpleNamespace
+
+    reqs, ledger = _requirements({})
+    state = GenerationState()
+    state.attempt_number = 1
+    result = {"compliant": False, "reasoning": "x", "missing_requirements": ["REQ-2: snake_case naming missing"],
+              "verifier": {"model": "judge-model", "runtime_digest": "d1"},
+              "requirement_verdicts": [{"id": "REQ-9", "verdict": "missing"}]}
+    attempt._record_original_requirement_verdicts(state, SimpleNamespace(requirement_set=reqs, obligation_ledger=ledger),
+                                                  result, "fp-1")
+    event = state.run_events[-1]
+    assert event.kind == "requirement.verdicts" and event.details["evidence_id"] == "fp-1"
+    assert {rid: v["verifier"] for rid, v in event.details["verdicts"].items()} == {
+        rid: {"model": "judge-model", "runtime_digest": "d1"} for rid in reqs.ids}
+    from kriya.workflow.requirements import verifier_result_verdicts
+
+    findings = verifier_result_verdicts(result, reqs)[1]
+    assert findings and event.details["findings"] == findings
+
+
+def test_a_suppressed_claim_downgrades_only_its_own_requirement_to_unverified():
+    """Mutants s23/s24: a suppressed 'REQ-n is missing' claim records exactly REQ-n UNVERIFIED with the
+    suppression's typed reason (never as the model's VIOLATED claim, never another requirement)."""
+    from types import SimpleNamespace
+
+    from kriya.workflow.requirements import (
+        CLAIM_CONTRADICTS_STRONGER_AUTHORITY,
+        RequirementOutcome,
+        requirement_outcomes,
+        requirement_verdict_details,
+    )
+
+    reqs, ledger = _requirements({})
+    state = GenerationState()
+    state.attempt_number = 2
+    attempt._downgrade_suppressed_requirement_claims(state, SimpleNamespace(requirement_set=reqs, obligation_ledger=ledger),
+                                                     ["REQ-2: snake_case naming missing"], "cand-1")
+    outcomes = requirement_outcomes(ledger, reqs)
+    assert (outcomes["REQ-1"], outcomes["REQ-2"]) == (RequirementOutcome.UNKNOWN, RequirementOutcome.UNVERIFIED)
+    details = requirement_verdict_details(ledger, reqs)["REQ-2"]
+    assert (details["model_outcome"], details["reason_code"], details["evidence_id"]) == (
+        "unverified", CLAIM_CONTRADICTS_STRONGER_AUTHORITY, "cand-1")
+
+
+def test_the_migration_gate_closes_only_an_unverified_requirement_of_the_same_candidate():
+    """Mutants s25/s26: a requirement that is not UNVERIFIED (no verdict yet), or whose verdict judged another
+    candidate, is never closed by the migration gate."""
+    from types import SimpleNamespace
+
+    from kriya.workflow.obligations import ObligationStatus
+    from kriya.workflow.requirements import RequirementOutcome, requirement_closure_id, requirement_outcomes
+
+    def closures(outcome, verdict_candidate, *gate_candidates):
+        """(closed?, the number of closure records written) after the gate ran for each candidate."""
+        reqs, ledger = _requirements({"REQ-1": outcome} if outcome else {}, evidence_id=verdict_candidate)
+        for record in _migration_ledger(ObligationStatus.SATISFIED, source="gson")._history.values():
+            ledger.record(record[-1])
+        ctx = SimpleNamespace(requirement_set=reqs, obligation_ledger=ledger)
+        for candidate in gate_candidates:
+            attempt._close_requirements_by_migration_gate(SimpleNamespace(attempt_number=1), ctx, candidate)
+        return (requirement_outcomes(ledger, reqs)["REQ-1"] is RequirementOutcome.CLOSED_BY_EVIDENCE,
+                len(ledger._history.get(requirement_closure_id("REQ-1"), [])))
+
+    assert closures(RequirementOutcome.UNVERIFIED, "cand-1", "cand-1") == (True, 1)
+    assert closures(RequirementOutcome.UNVERIFIED, "cand-1", "cand-2") == (False, 0)   # another candidate's verdict
+    assert closures(RequirementOutcome.UNVERIFIED, "cand-1", "cand-1", "cand-1") == (True, 1)  # closed: not again
+    assert closures(None, "cand-1", "cand-1") == (False, 0)   # no verdict yet: UNKNOWN, not UNVERIFIED
+
+
+def test_an_unscoped_spec_goal_needs_a_current_subtask():
+    """Mutant s16: without a current subtask id the whole goal is judged, whatever the plan's subtasks."""
+    ctx = _stage_plan()
+    ctx.current_subtask_id = ""
+    ctx.structured_plan.subtasks[0].id = ""
+    assert attempt._stage_scoped_spec_compliance_goal(ctx) == ("the whole goal", [])
+
+
+def test_the_ownership_redirect_restoration_restores_only_changed_tests_and_records_it(tmp_path):
+    """Mutants s30/s32: a redirected test is restored only when its sandbox bytes differ from its baseline, and the
+    restoration is recorded."""
+    from types import SimpleNamespace
+
+    run = _Run(tmp_path, [])
+    state = run.state
+    state.attempt_number = 3
+    state.all_original_contents = {A: A_SRC, B: B_SRC}
+    state.all_original_raw = {A: A_SRC.encode(), B: B_SRC.encode()}
+    state.ownership_redirect_recovery = {"redirected_tests": [A, B], "abandoned_candidates": [], "owners": ["pkg/o.py"]}
+    (run.worktree / B).write_text("def b():\n    return 99\n", encoding="utf-8")
+    staged: List[Any] = []
+    attempt._stage_ownership_redirect_restoration(state, SimpleNamespace(worktree_path=str(run.worktree),
+                                                                         workspace_path=str(run.workspace),
+                                                                         structured_plan=None), staged)
+    assert [(os.path.relpath(w.target_path, run.worktree), w.content_bytes) for w in staged] == [(B, B_SRC.encode())]
+    event = state.run_events[-1]
+    assert (event.kind, event.source, event.attempt) == ("ownership.redirect_restored", "attempt.staged_writes", 3)
+    assert event.details == {"restored_tests": [B], "removed_candidates": [], "owners": ["pkg/o.py"]}
+
+
+def test_the_obligations_snapshot_lists_the_unresolved_terminal_obligations_sorted():
+    """Mutants e03/e10: the snapshot carries the ledger's revision and digest and, per kind, the sorted ids of the
+    unresolved terminal obligations."""
+    from types import SimpleNamespace
+
+    from kriya.workflow.obligations import ObligationAuthority, ObligationKind, ObligationRecord, ObligationStatus
+
+    ledger = ObligationLedger()
+    for oid in ("z.last", "a.first"):
+        ledger.record(ObligationRecord(id=oid, kind=ObligationKind.MIGRATION_COMPLETION, status=ObligationStatus.PENDING,
+                                       authority=ObligationAuthority.DETERMINISTIC, description=oid, source="test",
+                                       revision=1, terminal_required=True))
+    emitted: List[Tuple[str, Dict[str, Any]]] = []
+    with patch.object(scope, "_active_writer", return_value=_Writer()), \
+            patch.object(scope, "emit", lambda kind, payload, **_kw: emitted.append((kind, dict(payload)))):
+        attempt._record_obligations_snapshot(SimpleNamespace(obligation_ledger=ledger))
+    revision, digest = ledger.fingerprint()
+    assert emitted == [("obligations.snapshot", {"ledger_revision": revision, "ledger_digest": digest,
+                                                 "unresolved_terminal": {"migration_completion": ["a.first", "z.last"]}})]
