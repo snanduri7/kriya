@@ -81,6 +81,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E9: 3 -> 1 lookup: the three calls (approve-and-execute x2, direct) moved to runtime_verification and read
     # RuntimeDeps (one load in attempt._runtime_deps).
     (A, '_prepare_finite_command_runtime_artifacts'): P(2, A, ((A, 1),), ()),
+    # E10 post-move pin: +1 site (tests/test_candidate_transaction.py: run_attempt's evidence boundary resolves the
+    # obligations-snapshot recorder through this module when the attempt closes; one load in attempt._evidence_deps).
+    (A, '_record_obligations_snapshot'): P(1, A, ((A, 1),), ()),
     # E10: 2 -> 1 lookup: the staging loop's two pre-flight calls moved to candidate_transaction and read
     # CandidateDeps._reject_exception_masking (one load in attempt._candidate_deps).
     (A, '_reject_exception_masking'): P(1, A, ((A, 1),), ()),
@@ -319,9 +322,10 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # (test_development_loop: stage 4's characterization and dynamic proofs, written before the move); E6 +1
     # A._developer_request_profile site (test_fallback_decision: the profiles a fallback decision resolves); E8 +3 A
     # sites, 3 new rows (test_gate_orchestrator: the runtime-verification and managed-service seams, the suite judgment);
-    # E9 +8 A sites (test_runtime_verification: the dynamic proofs of the runtime seams, written before the move)
-    assert totals == {A: 99, W: 88, C: 268}
-    assert len(PATCH_POINTS) == 87
+    # E9 +8 A sites (test_runtime_verification: the dynamic proofs of the runtime seams, written before the move); E10 +1
+    # A site, 1 new row (test_candidate_transaction: the evidence boundary's call-time recorder lookup, post-move pin)
+    assert totals == {A: 100, W: 88, C: 268}
+    assert len(PATCH_POINTS) == 88
 
 
 # ----------------------------------------------------------------------------- owner modules (DEPENDENCY-RULES)

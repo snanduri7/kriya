@@ -670,6 +670,11 @@ def test_a_contradicted_claim_names_a_migration_identity_term_of_three_or_more_l
     kept, contradicted = attempt._spec_requirements_contradicting_authority(
         ["the code still imports gson", "the io layer is incomplete"], ledger)
     assert (kept, contradicted) == (["the io layer is incomplete"], ["the code still imports gson"])
+    # a VIOLATED migration obligation: judgment and determinism agree, nothing is contradicted (post-move mutant x15:
+    # the precondition is read through attempt's name)
+    violated = _migration_ledger(ObligationStatus.SATISFIED, ObligationStatus.VIOLATED)
+    assert attempt._spec_requirements_contradicting_authority(["the code still imports gson"], violated) == (
+        ["the code still imports gson"], [])
 
 
 def test_requirement_identifier_tokens_drop_short_words_and_stopwords():
@@ -949,3 +954,64 @@ def test_the_scenario04_attempts_are_refused_transactions(tmp_path, monkeypatch)
     assert fourth.proposals == (_proposal(s04.PROTOCOL, 0, "ok", "INDENTATION_STYLE_MISMATCH", "refused"),
                                 _proposal(s04.PARSER, 1))
     assert (fourth.decision, fourth.refused) == ("refused", ((s04.PROTOCOL, "INDENTATION_STYLE_MISMATCH"),))
+
+
+# ------------------------------------------------------------------------- post-move pins (E10 post-move mutants)
+
+def test_a_never_reached_invalid_proposal_keeps_the_parsers_reason(tmp_path, monkeypatch):
+    """Post-move mutant t08: an invalid answer after the refusing file is never evaluated; its proposal still
+    records the parser's verdict and typed reason."""
+    made = _transactions(monkeypatch)
+    run = _Run(tmp_path, [_edit(C, {"search": "x", "replace": "y"}), {"filepath": B, **INVALID}], architect=[C, B]).run()
+    assert run.failure is not None and (run.failure.type, run.failure.likely_files) == ("operation_contract", [C])
+    assert made[0].proposals == (_proposal(C, 0, "ok", "operation_contract", "refused"),
+                                 _proposal(B, 1, "invalid", "INVALID_EDIT_PROTOCOL"))
+
+
+def test_the_moved_code_logs_through_the_attempt_modules_logger(tmp_path, caplog):
+    """Post-move mutants x01/x11/x12: the staging loop, the contract-change escalation and the evidence recorders log
+    through ``kriya.workflow.attempt``'s logger, as before the move."""
+    import logging
+    from types import SimpleNamespace
+
+    caplog.set_level(logging.INFO, logger="kriya.workflow")
+    _Run(tmp_path, [_edit(A, A_EDIT), _edit(B, B_EDIT)], write_scope_mode=WriteScopeMode.ALLOWLIST,
+         allowed_write_relpaths=[A]).run()
+    staging = [r for r in caplog.records if "RECOVERY_GENERATION_TARGET_REJECTED" in r.getMessage()]
+    assert staging and {r.name for r in staging} == {"kriya.workflow.attempt"}
+
+    class _Broken:
+        def fingerprint(self):
+            raise RuntimeError("no fingerprint")
+
+    caplog.clear()
+    with patch.object(scope, "_active_writer", return_value=_Writer()), patch.object(scope, "emit", lambda *a, **k: None):
+        attempt._record_obligations_snapshot(SimpleNamespace(obligation_ledger=_Broken()))
+    assert [(r.name, r.levelname) for r in caplog.records
+            if "obligations.snapshot not built" in r.getMessage()] == [("kriya.workflow.attempt", "WARNING")]
+
+    caplog.clear()
+    from kriya.workflow.contract_classification import ESCALATABLE
+
+    cfg = AppConfig()
+    cfg.autonomy.contract_change_escalation = "human"
+    classification = SimpleNamespace(status=next(iter(ESCALATABLE)), id="c1")
+    with patch("kriya.workflow.contract_classification.classify_api_violations", return_value=[classification]), \
+            patch("kriya.workflow.contract_classification.record_classifications"):
+        state = GenerationState()
+        ctx = SimpleNamespace(obligation_ledger=None, current_subtask_id=None, approval_callback=None,
+                              kernel=SimpleNamespace(config=cfg))
+        asyncio.run(attempt._classify_and_escalate_contract_changes(state, ctx, [], {}, {}, []))
+    assert [r.name for r in caplog.records if "Contract change needs human authorization" in r.getMessage()] == [
+        "kriya.workflow.attempt"]
+
+
+def test_the_evidence_boundary_resolves_its_snapshot_recorder_when_the_attempt_closes(tmp_path):
+    """Post-move mutant x13: run_attempt's evidence boundary looks ``_record_obligations_snapshot`` up through
+    attempt.py when the wrapped attempt closes (a patch entered after import reaches it), as the global lookup did."""
+    seen: List[Any] = []
+    run = _Run(tmp_path, [{"filepath": B, **INVALID}], architect=[B])
+    with patch.object(attempt, "_record_obligations_snapshot", side_effect=seen.append):
+        run.run()
+    assert run.failure is not None and seen == [run.ctx]
+

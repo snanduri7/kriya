@@ -46,6 +46,7 @@ KINDS: Dict[Tuple[str, str], str] = {
     (A, '_judge_candidate_suite'): 'function',
     (A, '_maybe_run_developer_investigation'): 'async function',
     (A, '_prepare_finite_command_runtime_artifacts'): 'function',
+    (A, '_record_obligations_snapshot'): 'function',
     (A, '_reject_exception_masking'): 'function',
     (A, '_require_qualified_retry_identity'): 'function',
     (A, '_resolve_java_home_override'): 'function',
@@ -128,7 +129,8 @@ CALL_THROUGH: Dict[str, Tuple[Tuple[str, str], ...]] = {
     "legacy_success": (
         (A, "_check_java_toolchain_mismatch"), (A, "_developer_request_profile"), (A, "_ensure_generation_time_budget"),
         (A, "_enter_developer_model"),
-        (A, "_maybe_run_developer_investigation"), (A, "_reject_exception_masking"), (A, "_require_qualified_retry_identity"),
+        (A, "_maybe_run_developer_investigation"), (A, "_record_obligations_snapshot"), (A, "_reject_exception_masking"),
+        (A, "_require_qualified_retry_identity"),
         (A, "_resolve_known_target_member_hints"), (A, "_run_developer_generation"), (A, "defer_execution_until_source_review"),
         (A, "extract_target_test"), (A, "find_runnable_test_files"), (A, "normalize_written_filepath"),
         (W, "RepositoryAnalyzer"), (W, "_direct_terminal_writes"), (W, "_gate_outcome_proven"), (W, "_migration_identities"), (W, "_run_committed_paths"),
