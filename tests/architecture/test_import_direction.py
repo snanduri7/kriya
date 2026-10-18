@@ -423,7 +423,8 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.workflow.workflow", "kriya.workflow.authority_bundle"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.workflow.workflow", "kriya.workflow.authority_request"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.workflow.workflow", "kriya.workflow.verification_binding"): ("P2", _P2),  # non-public AUTHORITY module
-    ("kriya.workflow.workflow_controller", "kriya.analyzer.graph"): ("P2", _P2),  # non-public RETRIEVAL module
+    # E11: moved count-neutral with build_planning_structural_evidence (its only user) to planning_request
+    ("kriya.workflow.planning_request", "kriya.analyzer.graph"): ("P2", _P2),  # non-public RETRIEVAL module
     ("kriya.workflow.workflow_controller", "kriya.control.artifacts"): ("P2", _P2),  # non-public STATE module
     ("kriya.workflow.workflow_controller", "kriya.control.commit_state"): ("P2", _P2),  # non-public STATE module
     ("kriya.workflow.workflow_controller", "kriya.control.contracts"): ("P2", _P2),  # non-public STATE module

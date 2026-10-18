@@ -131,6 +131,15 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
             "E11: the owner recovery and the integration obligations owned by owner_recovery; the controller keeps a "
             "forwarder for each function and re-exports the two resolution types and the gate-failure set (tests import "
             "them from the controller)"),
+        PartialFacade(
+            "kriya.workflow.planning_request",
+            ("AUTHORITATIVE_PLANNER_SYSTEM_PROMPT", "BOUNDED_SUBTASK_DESIGN", "PLANNED_FILE_SOURCE_REASON",
+             "_JAVA_CONSTRUCTOR_INSTANTIATION_RE", "_JAVA_TYPE_MENTION_RE", "_PRESERVED_REFERENCE_CONFLICT_RE",
+             "_QUOTED_TOKEN_RE", "_REQUIRES_PROVIDES_ERROR_KEYWORDS", "_SUBTASK_MENTION_RE"), "P1",
+            "E11: the planning request and the plan checks owned by planning_request; the controller keeps a forwarder "
+            "for each function (three are patched on it, ownership_findings imports one at call time) and re-exports "
+            "the system prompt, the bounded-subtask design and planned-source reason the enforce loop reads, and the "
+            "patterns"),
     ),
     "kriya/workflow/attempt.py": (
         PartialFacade(

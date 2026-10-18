@@ -946,7 +946,7 @@ def test_the_attempt_and_toolchain_never_write_files_directly():
                 "kriya/workflow/decision_evidence.py", "kriya/workflow/spec_compliance.py",
                 "kriya/workflow/candidate_transaction.py", "kriya/workflow/toolchain.py",
                 # E11: the controller's module-level owners that never write
-                "kriya/workflow/plan_revision.py", "kriya/workflow/owner_recovery.py",
+                "kriya/workflow/plan_revision.py", "kriya/workflow/owner_recovery.py", "kriya/workflow/planning_request.py",
                 "kriya/workflow/file_resolution.py",
                 "kriya/workflow/self_correction.py", "kriya/agents/agent.py"):
         source = (ROOT / rel).read_text()

@@ -204,7 +204,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (C, 'WorkflowController._write_enforce_trace'): P(2, C, None, ()),
     (C, '_evaluate_subtask_verification'): P(1, C, ((C, 2),), ()),
     # E11 characterization: +2 sites (tests/test_e11_owner_modules.py: the planned-edit feasibility through this name).
-    (C, 'assess_planned_edit'): P(3, 'kriya.workflow.edit_feasibility', ((C, 2),), ()),
+    # E11: 2 -> 1 lookup: evaluate_plan_edit_feasibility's two calls moved to planning_request and read
+    # PlanningDeps.assess_planned_edit (one load in workflow_controller._planning_deps); the sites above are the dynamic proof.
+    (C, 'assess_planned_edit'): P(3, 'kriya.workflow.edit_feasibility', ((C, 1),), ()),
     (C, 'blocking_requirements'): P(1, 'kriya.workflow.requirements', ((C, 1),), ()),
     (C, 'build_engineering_plan_from_planner_output'): P(63, 'kriya.workflow.plan_schema', ((C, 2),), ()),
     (C, 'build_planning_structural_evidence'): P(1, C, (('kriya.workflow.ownership_findings', 1), (C, 1)), ()),
@@ -367,7 +369,9 @@ KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_life
                         # E11: the plan revisions and plan-graph queries (from workflow_controller.py)
                         "kriya.workflow.plan_revision",
                         # E11: the owner recovery and integration obligations (from workflow_controller.py)
-                        "kriya.workflow.owner_recovery")
+                        "kriya.workflow.owner_recovery",
+                        # E11: the planning request and the plan checks (from workflow_controller.py)
+                        "kriya.workflow.planning_request")
 FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
 
 

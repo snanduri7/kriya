@@ -202,7 +202,10 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         # skip-sets of their tree walks / git listings); same removal slice, same reason.
         "kriya.workflow.requirement_closers": (3, "P2", _P2),
         "kriya.workflow.workflow": (1, "P2", _P2),
-        "kriya.workflow.workflow_controller": (3, "P2", _P2),
+        # E11: 1 of the 3 sites moved with _authoritative_planner_extension_candidates (the `.kriya` entry of its
+        # ignored-directory set) to planning_request; same removal slice and reason (an entry split, sites unchanged)
+        "kriya.workflow.planning_request": (1, "P2", _P2),
+        "kriya.workflow.workflow_controller": (2, "P2", _P2),
         "kriya.workflow.worktree": (11, "M2", "moves to kriya/repository (owner of the worktree path)"),
     },
 }
