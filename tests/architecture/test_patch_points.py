@@ -421,7 +421,9 @@ KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_life
                         # E11: the planning request and the plan checks (from workflow_controller.py)
                         "kriya.workflow.planning_request",
                         # E11: the resume support and legacy-ownership migrations (from workflow_controller.py)
-                        "kriya.workflow.resume_support")
+                        "kriya.workflow.resume_support",
+                        # E12: the shadow run and the enforce run's trace row (WorkflowController methods)
+                        "kriya.workflow.shadow_mode")
 FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
 
 

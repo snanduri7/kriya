@@ -156,7 +156,10 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         "kriya.cli": (5, "K2", "ToolRegistry.execute / catalog (cli tools list/execute)"),
         # moved count-neutral in E3 (kriya.workflow.workflow -> stage_planning, with the Planner prompt's tool catalog)
         "kriya.workflow.stage_planning": (1, "K1", "available tool names through ToolRegistry"),
-        "kriya.workflow.workflow_controller": (2, "K1", "available tool names through ToolRegistry"),
+        # E12: SPLIT (2 sites -> 1 + 1, entries +1; why: the shadow run's available-tool listing moved with
+        # _run_structured_shadow; owner: kriya.workflow.shadow_mode; removal slice K1 unchanged)
+        "kriya.workflow.shadow_mode": (1, "K1", "available tool names through ToolRegistry"),
+        "kriya.workflow.workflow_controller": (1, "K1", "available tool names through ToolRegistry"),
     },
     "kriya_dir": {
         "kriya.analyzer.analyzer": (1, "P2", _P2),

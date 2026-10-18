@@ -600,8 +600,9 @@ def _workflow_module_sources():
         "subtask_executor.py": inspect.getsource(executor_mod),
         "workflow.py": inspect.getsource(workflow_mod),
         # E11: the module-level controller code moved to these owners; the checks follow it
+        # E12: and the shadow run (WorkflowController._run_structured_shadow) moved to shadow_mode
         **{f"{name}.py": inspect.getsource(importlib.import_module(f"kriya.workflow.{name}"))
-           for name in ("plan_revision", "owner_recovery", "planning_request", "resume_support")},
+           for name in ("plan_revision", "owner_recovery", "planning_request", "resume_support", "shadow_mode")},
     }
 
 

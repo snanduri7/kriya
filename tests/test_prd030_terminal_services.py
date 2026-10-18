@@ -424,8 +424,8 @@ def test_one_terminal_gate_and_one_commit_implementation():
     controller = (REPO / "kriya/workflow/workflow_controller.py").read_text()
     for primitive in ("commit_terminal_candidate", "materialize_candidate", "CandidateFile("):
         assert primitive not in controller, primitive
-    # E11: the controller's module-level code moved to these owners; none commits either
-    for owner in ("plan_revision", "owner_recovery", "planning_request", "resume_support"):
+    # E11: the controller's module-level code moved to these owners; none commits either (E12: nor the shadow run)
+    for owner in ("plan_revision", "owner_recovery", "planning_request", "resume_support", "shadow_mode"):
         owner_source = (REPO / f"kriya/workflow/{owner}.py").read_text()
         for primitive in ("commit_terminal_candidate", "materialize_candidate", "CandidateFile(",
                           "commit_verified_candidate(", "TerminalGateService("):
