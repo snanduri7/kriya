@@ -424,5 +424,11 @@ def test_one_terminal_gate_and_one_commit_implementation():
     controller = (REPO / "kriya/workflow/workflow_controller.py").read_text()
     for primitive in ("commit_terminal_candidate", "materialize_candidate", "CandidateFile("):
         assert primitive not in controller, primitive
+    # E11: the controller's module-level code moved to these owners; none commits either
+    for owner in ("plan_revision",):
+        owner_source = (REPO / f"kriya/workflow/{owner}.py").read_text()
+        for primitive in ("commit_terminal_candidate", "materialize_candidate", "CandidateFile(",
+                          "commit_verified_candidate(", "TerminalGateService("):
+            assert primitive not in owner_source, (owner, primitive)
     assert controller.count("commit_verified_candidate(") == 1
     assert controller.count("TerminalGateService(") == 1

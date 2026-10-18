@@ -121,6 +121,12 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
          "untracked_repository_paths"), "P1",
         "M1: snapshots and raw-byte revision identity owned by REPOSITORY; the edit engine (GENERATION) and VerificationTreeBinding "
         "(AUTHORITY, which looks up the identities and untracked_repository_paths here) stay"),
+    "kriya/workflow/workflow_controller.py": (
+        PartialFacade(
+            "kriya.workflow.plan_revision", ("PLAN_SCOPE_REVISION_REQUIRED",), "P1",
+            "E11: the plan revisions and plan-graph queries owned by plan_revision; the controller keeps a forwarder for "
+            "each function and re-exports the scope-revision reason code (the enforce loop and tests read it)"),
+    ),
     "kriya/workflow/attempt.py": (
         PartialFacade(
             "kriya.workflow.generation_service", ("PLANNED_SOURCE_HEADER", "_PLANNED_SOURCE_UNBOUNDED_TOKENS", "_chain_binding"),

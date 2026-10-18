@@ -590,6 +590,8 @@ def test_scenario_g_real_pip_through_autonomous_path_authorized_vs_unauthorized(
 # =====================================================================
 
 def _workflow_module_sources():
+    import importlib
+
     import kriya.workflow.subtask_executor as executor_mod
     import kriya.workflow.workflow as workflow_mod
     import kriya.workflow.workflow_controller as controller_mod
@@ -597,6 +599,9 @@ def _workflow_module_sources():
         "workflow_controller.py": inspect.getsource(controller_mod),
         "subtask_executor.py": inspect.getsource(executor_mod),
         "workflow.py": inspect.getsource(workflow_mod),
+        # E11: the module-level controller code moved to these owners; the checks follow it
+        **{f"{name}.py": inspect.getsource(importlib.import_module(f"kriya.workflow.{name}"))
+           for name in ("plan_revision",)},
     }
 
 
