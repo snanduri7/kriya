@@ -598,3 +598,63 @@ def test_the_candidate_gate_names_keep_their_call_shape_on_attempt():
     assert (attempt.SPEC_MODEL_REPORTED_MISSING, attempt.SPEC_MODEL_INDETERMINATE,
             attempt.SPEC_COMPLIANCE_MODEL_ADVISORY) == ("model_reported_missing", "model_indeterminate",
                                                         "SPEC_COMPLIANCE_MODEL_ADVISORY")
+
+
+# ----------------------------------------------------------------------------- E9: the runtime-verification names
+
+# Written at 76f5e9a, BEFORE kriya/workflow/runtime_verification.py exists (E9 moves these bodies there): every name stays
+# importable from kriya.workflow.attempt with the same parameters and the same sync/async kind (GateDeps hands the
+# candidate gates five of them by these names; milestones.py imports _build_python_runtime_grounding; 14 test files call
+# them through attempt), and the constants keep their values. Annotations are not pinned.
+E9_ATTEMPT_CALLABLES = {
+    "_classify_grounded_contract_verdict": "(output, worktree_path, files_written)",
+    "async _resolve_runtime_verification_grade": "(ctx, state, contract_verdict, grade_kwargs, *, run_result=None)",
+    "_deterministic_result_provenance_field": "(verification_authority)",
+    "_prepare_finite_command_runtime_artifacts": "(resolved_run_commands, validator, ctx, state)",
+    "_raise_runtime_verification_infrastructure_failure": "(state, run_result, commands)",
+    "_raise_candidate_runtime_entrypoint_failure": "(state, run_result, commands, entrypoint)",
+    "_apply_runtime_verification_contract": "(commands, input_channel)",
+    "_run_verification_basis_hash": "(ctx, state)",
+    "_collect_python_runtime_grounding_facts": "(root)",
+    "_build_python_runtime_grounding": "(root)",
+    "_runtime_verification_is_advisory_only": "(ctx, judgment)",
+    "_derive_runtime_command_subject": "(ctx, judgment, intro)",
+    "_runtime_commands_need_approval": "(ctx, state, judgment, autonomy_mode)",
+    "async _approve_runtime_commands": "(ctx, state, judgment, intro)",
+    "_required_runtime_verification_missing_message": "(judgment)",
+    "_resolve_execution_mode": "(judgment)",
+    "_looks_like_shell_compound_command": "(command)",
+    "_reject_non_local_managed_service_host": "(field_name, host)",
+    "_validate_and_convert_readiness": "(raw)",
+    "_validate_and_convert_probe": "(raw)",
+    "_validate_and_convert_managed_service_contract": "(managed_service, worktree_path, validator)",
+    "_managed_service_blocked_without_approval_subject": "(state, ctx)",
+    "async _execute_managed_service_verification": "(state, ctx, judgment, known_files, validator)",
+    "_raise_if_required_runtime_verification_declined": "(state, ctx)",
+    "async _execute_runtime_verification_directly": "(state, ctx, validator)",
+    "async _approve_and_execute_runtime_verification": ("(state, ctx, validator, active_code_context, judgment, "
+                                                        "autonomy_cfg_rv)"),
+}
+
+
+def test_the_runtime_verification_names_keep_their_call_shape_on_attempt():
+    attempt = importlib.import_module(A)
+    found = {}
+    for key in E9_ATTEMPT_CALLABLES:
+        name = key.split(" ")[-1]
+        shape = _unannotated(getattr(attempt, name))
+        found[key] = shape.split(" ", 1)[1] if shape.startswith("async ") else shape
+        assert shape.startswith("async ") == key.startswith("async "), name
+    assert found == E9_ATTEMPT_CALLABLES
+    assert (attempt.MANAGED_SERVICE_APPROVAL_UNSUPPORTED, attempt._RUNTIME_VERIFICATION_SYNTHETIC_INPUT) == (
+        "MANAGED_SERVICE_APPROVAL_UNSUPPORTED", "kriya-verification-input")
+    assert attempt._SUPPORTED_RUNTIME_EXECUTION_MODES == frozenset({"finite_command", "managed_service"})
+    assert (attempt._MANAGED_SERVICE_SHELL_MARKERS, attempt._MANAGED_SERVICE_FORBIDDEN_LEADING_EXECUTABLES,
+            attempt._SHELL_INTERPRETER_EXECUTABLES) == (frozenset({"&&", "||", ";", "&"}), frozenset({"nohup", "sleep"}),
+                                                        frozenset({"sh", "bash", "zsh", "dash", "ksh"}))
+    assert (attempt._MANAGED_SERVICE_READINESS_KINDS, attempt._MANAGED_SERVICE_PROBE_KINDS) == (
+        frozenset({"tcp", "http"}), frozenset({"http"}))
+    assert attempt._DISTRUST_DISCLOSURE_NOTE.startswith("A deterministic check already inspected the captured output")
+    assert attempt._PYTHON_RUNTIME_GROUNDING_EXCLUDED_DIRS == {
+        ".git", ".kriya", "__pycache__", ".venv", "venv", "env", "node_modules", ".tox", ".mypy_cache", ".pytest_cache",
+        ".ruff_cache", "dist", "build", ".eggs", "site-packages"}
