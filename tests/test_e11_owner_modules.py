@@ -53,8 +53,8 @@ RUNTIME = VerificationMethod(type=VerificationMethodType.JUDGMENT, description="
 
 def st(sid, files=(), deps=(), provides=(), requires=(), *, action=FileAction.MODIFY, verification=(COMPILE,),
        acceptance=(), invariants=(), role=ExecutionRole.IMPLEMENTATION, method=ExecutionMethod.MODEL, preserved=None,
-       reasons=None, description=None):
-    planned = [PlannedFile(path=p, action=action, reason=(reasons or {}).get(p, ""),
+       reasons=None, description=None, actions=None):
+    planned = [PlannedFile(path=p, action=(actions or {}).get(p, action), reason=(reasons or {}).get(p, ""),
                            preserved_references=list((preserved or {}).get(p, ()))) for p in files]
     extra = {"tool_name": "compile"} if method == ExecutionMethod.TOOL else {}
     return Subtask(id=sid, description=description or f"do {sid}", execution_method=method, execution_role=role,
@@ -96,8 +96,7 @@ def test_the_subtask_goal_text_sections_and_their_order():
 def test_the_semantic_context_payload():
     p = plan(st("s1", ["svc.py"], provides=["SVC"], verification=(COMPILE,)),
              st("s2", ["test_svc.py"], deps=["s1"], requires=["SVC"], invariants=["gi1"]),
-             st("s3", ["main.py"], deps=["s2"], requires=["T"] if False else [], provides=["APP"],
-                verification=(RUNTIME,)),
+             st("s3", ["main.py"], deps=["s2"], provides=["APP"], verification=(COMPILE, RUNTIME)),
              st("s4", ["other.py"], deps=["s1"], requires=["SVC"]),
              global_invariants=[GlobalInvariant(id="gi1", statement="never print")])
     payload = json.loads(wc.build_subtask_semantic_context(p, p.subtask_by_id("s1")).split("\n", 1)[1])
@@ -316,19 +315,29 @@ def test_the_structural_evidence_edges(tmp_path):
                                         "  void go(CustomerService svc) { svc.find(); }\n}\n"),
         "src/Twin.java": "package p;\npublic class Twin { public void wrap() { } void self() { wrap(); } }\n",
         "src/Caller.java": "package p;\npublic class Caller { void go() { x.wrap(); } }\n",
+        "src/Holder.java": "package p;\nimport p.Twin;\npublic class Holder { Twin t; Customer c = new Customer(); }\n",
+        "src/Self.java": "package p;\nimport p.Self;\npublic class Self { }\n",
+        "src/Ambiguous.java": "package p;\npublic class Ambiguous { void go(CustomerService s) { s.wrap(); } }\n",
     })
     text, edges = wc.build_planning_structural_evidence(str(tmp_path), paths + ["src/Missing.java"])
+    # imports resolve to the declaring candidate (never the importing file itself, never a wildcard); a callee declared
+    # by several other candidates resolves to nothing; targets are sorted (Holder: the import of Twin is found first)
     assert edges == {"src/CustomerController.java": ["src/CustomerService.java"],
-                     "src/CustomerService.java": ["src/Customer.java"]}
+                     "src/CustomerService.java": ["src/Customer.java"],
+                     "src/Holder.java": ["src/Customer.java", "src/Twin.java"]}
     assert text == ("src/CustomerController.java references -> src/CustomerService.java\n"
-                    "src/CustomerService.java references -> src/Customer.java")
+                    "src/CustomerService.java references -> src/Customer.java\n"
+                    "src/Holder.java references -> src/Customer.java\n"
+                    "src/Holder.java references -> src/Twin.java")
 
 
 def test_the_structural_evidence_of_python_imports(tmp_path):
     paths = _java(tmp_path, {"app/models.py": "class Model:\n    pass\n",
-                             "app/views.py": "from app.models import Model\n\ndef view():\n    return Model()\n"})
+                             "app/views.py": "from app.models import Model\n\ndef view():\n    return Model()\n",
+                             "app/text.py": 'HELP = "use new Model() here"\n'})
     _text, edges = wc.build_planning_structural_evidence(str(tmp_path), paths)
-    assert edges == {"app/views.py": ["app/models.py"]}
+    # a non-Java file's text is scanned raw: the constructor pattern inside a Python string is an edge today
+    assert edges == {"app/text.py": ["app/models.py"], "app/views.py": ["app/models.py"]}
 
 
 # ============================================================================== planning request: grounded artifacts
@@ -343,8 +352,12 @@ def test_the_missing_grounded_production_artifact_shapes(tmp_path):
              st("s3", ["src/test/ATest.java"], deps=["s1"], requires=["A"]),
              st("s4", ["src/test/BTest.java"], deps=["s1"], requires=["A"]),
              st("s5", ["src/test/CTest.java"], deps=["s2"], requires=["B"]),
-             st("s6", ["src/C.java"], deps=["s2"]))
-    edges = {"src/test/ATest.java": ["src/A.java", "src/test/BTest.java", "README.md", "src/Unowned.java"],
+             st("s6", ["src/C.java"], deps=["s2"]),
+             st("s7", ["src/test/DTest.java", "src/D.java"]))
+    edges = {"src/test/ATest.java": ["src/A.java", "src/test/BTest.java", "README.md", "src/Unowned.java",
+                                     "src/TestHelper.java"],   # a runnable-test NAME outside a test directory
+             "src/test/DTest.java": ["src/D.java"],            # the same subtask owns both ends
+             "src/test/NotPlannedTest.java": ["src/Unowned.java"],
              "src/test/BTest.java": ["src/B.java"],
              "src/test/CTest.java": ["src/B.java", "src/Unowned.java", "src/Unowned.java"],
              "src/C.java": ["src/Gone.java", "src/A.java"],
@@ -397,8 +410,10 @@ def test_a_preserved_reference_is_recorded_and_a_dropped_one_violated(tmp_path):
     assert (record.status, record.terminal_required, record.evidence["dropped_between_revisions"]) == (
         ObligationStatus.VIOLATED, False, True)
     regressed_before = len(ledger.regressions)
+    history_before = len(ledger.history("plan.preserved_reference.src/test/PetTest.java->src/Base.java"))
     wc.find_missing_grounded_production_artifacts(dropped, edges, workspace_path=str(tmp_path), obligation_ledger=ledger)
     assert len(ledger.regressions) == regressed_before   # a VIOLATED record is never re-violated
+    assert len(ledger.history("plan.preserved_reference.src/test/PetTest.java->src/Base.java")) == history_before
 
 
 def test_the_approved_plan_document():
@@ -452,7 +467,7 @@ def _files(tmp_path, *names):
 def test_the_grounded_scope_owner_revision_moves_and_merges(tmp_path):
     _files(tmp_path, "a.py", "b.py", "own.py")
     vm = VerificationMethod(type=VerificationMethodType.TOOL, description="test", tool_name="test")
-    p = plan(st("s1", ["a.py"], provides=["A"], reasons={"a.py": "first"}),
+    p = plan(st("s1", ["a.py"], provides=["A"], reasons={"a.py": "first"}, actions={"a.py": FileAction.CREATE}),
              st("s2", ["a.py", "own.py"], deps=["s1"], provides=["A2"], reasons={"a.py": "second"}),
              st("s3", ["b.py"], deps=["s1"], provides=["B"], requires=["A"], acceptance=["ac1"], invariants=["gi1"],
                 verification=(COMPILE, vm)),
@@ -486,10 +501,21 @@ def test_the_grounded_revision_of_an_unowned_file_and_of_a_failed_stage_that_alr
     revised = wc.revise_plan_for_grounded_scope_owner(p, "s2", ["u.py"], str(tmp_path))
     assert [(pf.path, pf.action) for pf in revised.subtask_by_id("s2").planned_files] == [
         ("b.py", FileAction.MODIFY), ("u.py", FileAction.MODIFY)]
-    both = plan(st("s1", ["a.py", "k.py"]), st("s2", ["a.py"], deps=["s1"]))
+    both = plan(st("s1", ["a.py", "k.py"]), st("s2", ["a.py", "z.py"], deps=["s1"]))
     revised = wc.revise_plan_for_grounded_scope_owner(both, "s2", ["a.py"], str(tmp_path))
-    assert [pf.path for pf in revised.subtask_by_id("s2").planned_files] == ["a.py"]
+    # the failed stage's own declaration is kept as it was (never re-derived as a moved one)
+    assert [(pf.path, pf.reason) for pf in revised.subtask_by_id("s2").planned_files] == [("a.py", ""), ("z.py", "")]
     assert [pf.path for pf in revised.subtask_by_id("s1").planned_files] == ["k.py"]
+
+
+def test_a_downstream_owner_merge_never_inherits_an_edge_to_a_stage_downstream_of_the_failed_one(tmp_path):
+    _files(tmp_path, "c.py")
+    p = plan(st("s1", ["a.py"], provides=["A"]), st("s2", ["b.py"], deps=["s1"], requires=["A"], provides=["B"]),
+             st("s5", ["e.py"], deps=["s2"], requires=["B"], provides=["E"]),
+             st("s3", ["c.py"], deps=["s2", "s5"], requires=["B", "E"], provides=["C"]),
+             st("s4", ["d.py"], deps=["s3"], requires=["C"]))
+    s2 = wc.revise_plan_for_grounded_scope_owner(p, "s2", ["c.py"], str(tmp_path)).subtask_by_id("s2")
+    assert s2.depends_on == ["s1"] and s2.requires == ["A"] and s2.provides == ["B", "C"]
 
 
 def test_a_downstream_owner_merge_drops_the_cyclic_edges_and_their_requires(tmp_path):
@@ -506,10 +532,19 @@ def test_a_downstream_owner_merge_drops_the_cyclic_edges_and_their_requires(tmp_
 def test_an_upstream_consumer_of_the_merged_owner_drops_the_edge(tmp_path):
     _files(tmp_path, "m.xml")
     p = plan(st("s1", ["m.xml"], provides=["M"]), st("s2", ["a.py"], deps=["s1"], requires=["M"], provides=["A"]),
-             st("s3", ["t.py"], deps=["s2"], requires=["A"]))
+             st("s9", ["b.py"], deps=["s2"], requires=["A"], provides=["B"]),
+             st("s3", ["t.py"], deps=["s9"], requires=["B"]))
     revised = wc.revise_plan_for_grounded_scope_owner(p, "s3", ["m.xml"], str(tmp_path))
-    assert revised.subtask_by_id("s2").depends_on == []
-    assert revised.subtask_by_id("s3").depends_on == ["s2"]
+    assert revised.subtask_by_id("s2").depends_on == []   # s2 is (transitively) upstream of s3: dropped, not redirected
+    assert revised.subtask_by_id("s3").depends_on == ["s9"]
+
+
+def test_an_owner_transitively_downstream_of_the_failed_stage_never_hands_it_that_edge(tmp_path):
+    _files(tmp_path, "c.py")
+    p = plan(st("s1", ["a.py"]), st("s2", ["b.py"], deps=["s1"]), st("s5", ["e.py"], deps=["s2"]),
+             st("s6", ["f.py"], deps=["s5"]), st("s3", ["c.py"], deps=["s6"]))
+    assert wc.revise_plan_for_grounded_scope_owner(p, "s2", ["c.py"], str(tmp_path)).subtask_by_id("s2").depends_on == [
+        "s1"]
 
 
 def test_the_planned_prerequisite_revision():
@@ -645,6 +680,10 @@ def test_the_cross_owner_obligation_identity_authority_and_stickiness():
                                                      generation=1, revision="r3")
     assert later.id == "recovery.s4.s1.a.b.unknown.1"
     assert later.evidence["must_preserve"][2:] == ["needs X"]
+    other_scope = wc._get_or_create_cross_owner_obligation(
+        ledger, originating_subtask_id="s4", owner_subtask_id="s1", required_files=["a"], scope_conflict={"reason": "Z"},
+        generation=1, revision="r4")
+    assert other_scope.evidence["must_preserve"][2:] == []   # another artifact scope's corrections are not folded in
 
 
 def test_the_scope_conflict_evidence_authority():
@@ -702,6 +741,10 @@ def test_the_recovery_participants():
         ("Gone.java", RecoveryParticipantRole.READ_ONLY_CONTEXT, None, "unresolved", "", RecoveryAction.MUST_CHANGE)]
     verify = wc.derive_recovery_participants(p, {"required_files": ["App.java"], "failure_type": "attribution_rejected"}, s3)
     assert [(x.artifact, x.recovery_action) for x in verify] == [("App.java", RecoveryAction.VERIFY)]
+    control = _state({"s2": "completed"}, {"s2": ["pom.xml"]})
+    [modified] = wc.derive_recovery_participants(p, {"required_files": ["pom.xml"]}, s3, order=["s1", "s2", "s3"],
+                                                 control_state=control)
+    assert (modified.effective_owner_subtask_id, modified.owner_resolution_basis) == ("s2", "latest_successful_modifier")
 
 
 def test_the_recovery_groups_order_and_the_execution_plan():
@@ -726,8 +769,26 @@ def test_the_recovery_groups_order_and_the_execution_plan():
 def test_an_ownerless_and_an_ambiguous_recovery_fail_closed(caplog):
     p = plan(st("s1", ["a.py"]), st("s2", ["b.py"], deps=["s1"]))
     with caplog.at_level(logging.WARNING, logger="kriya.workflow.workflow_controller"):
+        assert wc.build_recovery_execution_plan(p, {}, p.subtask_by_id("s2")) is None   # nothing to recover: silent
         assert wc.build_recovery_execution_plan(p, {"required_files": ["zzz.py"]}, p.subtask_by_id("s2")) is None
     assert [r.getMessage().split(" ")[0] for r in caplog.records] == ["SCOPE_RECOVERY_OWNER_UNRESOLVED"]
+
+
+def test_a_cyclic_owner_order_fails_closed(caplog):
+    # an EngineeringPlan accepts a dependency cycle (validate_plan rejects it); the group order refuses to guess one
+    p = plan(st("s1", ["a.py"], deps=["s2"]), st("s2", ["b.py"], deps=["s1"]), st("s3", ["c.py"], deps=["s1", "s2"]))
+    s3 = p.subtask_by_id("s3")
+    participants = wc.derive_recovery_participants(p, {"required_files": ["a.py", "b.py"]}, s3)
+    assert wc._order_recovery_groups(p, participants) is None
+    with caplog.at_level(logging.WARNING, logger="kriya.workflow.workflow_controller"):
+        assert wc.build_recovery_execution_plan(p, {"required_files": ["a.py", "b.py"]}, s3) is None
+    assert [r.getMessage().split(" ")[0] for r in caplog.records] == ["RECOVERY_GROUP_ORDER_AMBIGUOUS"]
+
+
+def test_unrelated_recovery_owners_are_ordered_by_file_role_before_id():
+    p = plan(st("s1", ["src/Z.java"]), st("s9", ["pom.xml"]), st("s3", ["src/test/T.java"], deps=["s1", "s9"]))
+    recovery = wc.build_recovery_execution_plan(p, {"required_files": ["src/Z.java", "pom.xml"]}, p.subtask_by_id("s3"))
+    assert recovery.group_order == ("group.s9", "group.s1")   # the build file's owner first, though s1 < s9
 
 
 # ============================================================================== owner recovery: self-correction
@@ -832,6 +893,9 @@ def test_the_integration_evidence_with_provenance(tmp_path):
         "consumer_evidence": {"paths": ["src/App.java"], "sources": {"src/App.java": "written_this_run"},
                               "verification": ["tool:compile"]},
         "evaluation": "reference"}
+    missing, _evidence = wc._integration_evidence(p, rel, "s2", ["src/Service.java"], ["src/App.java"],
+                                                  {"src/App.java": "class App { ServiceImpl s; }"}, provenance)
+    assert missing == ["src/Service.java"]   # a whole-word reference, never a substring
     other = wc.EstablishedProvenance(str(tmp_path))
     other.record("src/Service.java", "s1")
     other.record("src/App.java", "s9")
