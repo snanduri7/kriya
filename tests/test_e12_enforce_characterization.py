@@ -1211,20 +1211,23 @@ async def test_a_failed_consumer_retry_never_closes_the_cross_owner_obligation(t
     script = {("s1", "planned"): [_insufficient()],
               ("s1", "consumer_retry"): [{"quality_gates_passed": False, "status": "failed"}]}
     from kriya.control.persistence import save_control_state as real_save_cs
-    saved, persisted = [], []
+    saved, persisted, trail = [], [], []
     result, calls = await _enforce_scripted(
         _enforce_engine(tmp_path), tmp_path, plan, script,
         extra=[patch(f"{C}.build_recovery_execution_plan",
                      side_effect=_once_for_s1(_recovery_plan(plan, [RecoveryAction.MUST_CHANGE]))),
                patch.object(ObligationLedger, "record", record),
-               patch(f"{C}.save_approved_plan", side_effect=lambda ws, pid, doc: saved.append(doc)),
-               patch(f"{C}.save_control_state", side_effect=lambda ws, cs: persisted.append(cs) or real_save_cs(ws, cs))])
+               patch(f"{C}.save_approved_plan", side_effect=lambda ws, pid, doc: saved.append(doc) or trail.append(doc)),
+               patch(f"{C}.save_control_state",
+                     side_effect=lambda ws, cs: persisted.append(cs) or trail.append(cs) or real_save_cs(ws, cs))])
     assert [d["lifecycle_state"] for d in saved] == ["approved", "in_progress", "in_progress", "in_progress",
                                                      "recovering", "in_progress", "needs_review", "failed", "failed"]
     recovering = [d for d in saved if d["lifecycle_state"] == "recovering"]
     assert [d["stage_states"] for d in recovering] == [{"s0": "in_progress", "s1": "pending"}]
     assert [d["stage_states"]["s0"] for d in saved if d["lifecycle_state"] == "needs_review"] == ["needs_review"]
-    assert {"s0": "in_progress", "s1": "pending"} in [dict(cs.subtask_states) for cs in persisted]
+    recovering_at = next(i for i, item in enumerate(trail) if isinstance(item, dict)
+                         and item["lifecycle_state"] == "recovering")
+    assert dict(trail[recovering_at + 1].subtask_states) == {"s0": "in_progress", "s1": "pending"}
     assert result.control_state.subtask_states["s0"] == "needs_review"
     kinds = [(r.kind, r.status) for r in records if r.kind == ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT]
     assert kinds and (ObligationKind.CROSS_OWNER_ARTIFACT_REQUIREMENT, ObligationStatus.SATISFIED) not in kinds
