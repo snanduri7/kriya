@@ -1,0 +1,166 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "commands": [
+    [
+     "mvn",
+     "-e",
+     "exec:java",
+     "-Dexec.mainClass=org.example.App"
+    ]
+   ],
+   "deterministic_result": null,
+   "graded_by": "llm",
+   "output": "=== Runtime prerequisite: mvn clean compile (current source): PASSED ===\n\n=== Step 1/1: mvn -e exec:java -Dexec.mainClass=org.example.App ===\n6\n\n\n\n[Grader reasoning]: the output shows 6",
+   "runtime_disposition": {
+    "authority": "llm",
+    "deterministic": "NONE",
+    "deterministic_reason": null,
+    "final": "PASS",
+    "semantic": "PASS",
+    "semantic_reason": null
+   },
+   "steps": [
+    {
+     "command": [
+      "mvn",
+      "-e",
+      "exec:java",
+      "-Dexec.mainClass=org.example.App"
+     ],
+     "exit_code": 0,
+     "stderr": "",
+     "stdout": "6\n",
+     "timed_out": false
+    }
+   ],
+   "success": true,
+   "type": "run_verification"
+  }
+ ],
+ "outcome": "returned",
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": false,
+  "cached_judgment": null,
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": false,
+  "validator_java_home_override": null,
+  "validator_timings": [],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "a Maven runtime step: the prerequisite build, then the step as a tooling-only acquisition within the run's root deadline, carrying the reviewed stdin",
+ "trace": [
+  {
+   "interpreter_grounding": [
+    [
+     "mvn",
+     "-e",
+     "exec:java",
+     "-Dexec.mainClass=org.example.App"
+    ]
+   ]
+  },
+  {
+   "deadline_is_the_runs": true,
+   "maven": [
+    "clean",
+    "compile",
+    "-Dmaven.compiler.showWarnings=true",
+    "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked"
+   ],
+   "stdin": null,
+   "tooling_only": false
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "compile",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "deadline_is_the_runs": true,
+   "maven": [
+    "-e",
+    "exec:java",
+    "-Dexec.mainClass=org.example.App"
+   ],
+   "stdin": "kriya-verification-input",
+   "tooling_only": true
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "runtime_verification",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "distrust_notice": false,
+   "files_written": [
+    "src/main/java/org/example/App.java"
+   ],
+   "model": "grader",
+   "retained_evidence": true,
+   "returncode": 0,
+   "timed_out": false
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "commands": [
+     [
+      "mvn",
+      "-e",
+      "exec:java",
+      "-Dexec.mainClass=org.example.App"
+     ]
+    ],
+    "deterministic_result": null,
+    "graded_by": "llm",
+    "output": "=== Runtime prerequisite: mvn clean compile (current source): PASSED ===\n\n=== Step 1/1: mvn -e exec:java -Dexec.mainClass=org.example.App ===\n6\n\n\n\n[Grader reasoning]: the output shows 6",
+    "runtime_disposition": {
+     "authority": "llm",
+     "deterministic": "NONE",
+     "deterministic_reason": null,
+     "final": "PASS",
+     "semantic": "PASS",
+     "semantic_reason": null
+    },
+    "steps": [
+     {
+      "command": [
+       "mvn",
+       "-e",
+       "exec:java",
+       "-Dexec.mainClass=org.example.App"
+      ],
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "6\n",
+      "timed_out": false
+     }
+    ],
+    "success": true,
+    "type": "run_verification"
+   },
+   "success": true,
+   "type": "run_verification"
+  },
+  {
+   "context": "version unspecified",
+   "skill_verified": "calc-conventions"
+  }
+ ],
+ "worktree_changes": {
+  "added": [
+   "target/classes/org/example/App.class"
+  ],
+  "changed": [],
+  "removed": []
+ }
+}

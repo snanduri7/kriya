@@ -1,0 +1,80 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "SOURCE_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [],
+   "failed_content": {
+    "pom.xml": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>org.example</groupId>\n  <artifactId>app</artifactId>\n  <version>1.0</version>\n</project>\n"
+   },
+   "file_locations": [],
+   "likely_files": [
+    "pom.xml"
+   ],
+   "milestone_id": null,
+   "mode": null,
+   "output": "stdout:\n[ERROR] COMPILATION ERROR\n[INFO] BUILD FAILURE\n\n\nstderr:\n",
+   "plan_id": null,
+   "planned_files": [],
+   "self_correction_attempt": null,
+   "subtask_id": null,
+   "success": false,
+   "type": "compile",
+   "verification_target": null
+  }
+ ],
+ "outcome": {
+  "diagnostics": null,
+  "likely_files": [
+   "pom.xml"
+  ],
+  "message": "PACKAGE_PREPARATION_FAILED: preparation command mvn package -DskipTests failed (exit 1, timeout=False)\n\nBuild command: mvn package -DskipTests\n\nstdout:\n[ERROR] COMPILATION ERROR\n[INFO] BUILD FAILURE\n\n\nstderr:\n",
+  "raised": "QualityGateFailure",
+  "raw_output": "stdout:\n[ERROR] COMPILATION ERROR\n[INFO] BUILD FAILURE\n\n\nstderr:\n",
+  "self_correction_attempt": null,
+  "type": "compile"
+ },
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": false,
+  "cached_judgment": null,
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": false,
+  "validator_java_home_override": null,
+  "validator_timings": [],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "mvn package ran and failed: a repair-eligible 'compile' failure, nothing run",
+ "trace": [
+  {
+   "argv": [
+    "mvn",
+    "package",
+    "-DskipTests"
+   ],
+   "contained": false,
+   "cwd": "<wt:1>",
+   "env": true,
+   "spawn": "maven",
+   "stdin": null,
+   "timeout": 300
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "success": false,
+   "type": "compile"
+  }
+ ],
+ "worktree_changes": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ }
+}

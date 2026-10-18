@@ -1,0 +1,195 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "SOURCE_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [],
+   "commands": [
+    [
+     "mvn",
+     "-e",
+     "exec:java",
+     "-Dexec.mainClass=org.example.App"
+    ]
+   ],
+   "failed_content": {},
+   "file_locations": [],
+   "likely_files": [
+    "pom.xml"
+   ],
+   "milestone_id": null,
+   "mode": null,
+   "output": "=== Runtime prerequisite: mvn clean compile (current source): PASSED ===\n\n=== Step 1/1: mvn -e exec:java -Dexec.mainClass=org.example.App ===\n[ERROR] java.lang.ClassNotFoundException: org.example.Ghost\n\n",
+   "plan_id": null,
+   "planned_files": [],
+   "self_correction_attempt": null,
+   "steps": [
+    {
+     "command": [
+      "mvn",
+      "-e",
+      "exec:java",
+      "-Dexec.mainClass=org.example.App"
+     ],
+     "exit_code": 1,
+     "stderr": "",
+     "stdout": "[ERROR] java.lang.ClassNotFoundException: org.example.Ghost\n",
+     "timed_out": false
+    }
+   ],
+   "subtask_id": null,
+   "success": false,
+   "type": "candidate_runtime_entrypoint_invalid",
+   "verification_target": null
+  }
+ ],
+ "outcome": {
+  "diagnostics": {
+   "entrypoint_diagnosis": {
+    "candidate_config_key": "build/plugins/plugin[exec-maven-plugin]/configuration/mainClass",
+    "candidate_config_source": "pom.xml",
+    "command": [
+     "mvn",
+     "-e",
+     "exec:java",
+     "-Dexec.mainClass=org.example.App"
+    ],
+    "compiled_artifact_exists": false,
+    "effective_entrypoint": "org.example.Ghost",
+    "effective_entrypoint_provenance": "CANDIDATE_BUILD_CONFIG",
+    "requested_entrypoint": "org.example.App",
+    "source_declares_entrypoint": false
+   },
+   "reason_code": "CANDIDATE_RUNTIME_ENTRYPOINT_INVALID"
+  },
+  "likely_files": [
+   "pom.xml"
+  ],
+  "message": "sha256:f517cd4d99bf3894+600",
+  "raised": "QualityGateFailure",
+  "raw_output": "=== Runtime prerequisite: mvn clean compile (current source): PASSED ===\n\n=== Step 1/1: mvn -e exec:java -Dexec.mainClass=org.example.App ===\n[ERROR] java.lang.ClassNotFoundException: org.example.Ghost\n\n",
+  "self_correction_attempt": null,
+  "type": "candidate_runtime_entrypoint_invalid"
+ },
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": false,
+  "cached_judgment": null,
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": false,
+  "validator_java_home_override": null,
+  "validator_timings": [],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "the candidate's pom selects a main class no source declares (D4 case A): candidate_runtime_entrypoint_invalid grounded to pom.xml",
+ "trace": [
+  {
+   "interpreter_grounding": [
+    [
+     "mvn",
+     "-e",
+     "exec:java",
+     "-Dexec.mainClass=org.example.App"
+    ]
+   ]
+  },
+  {
+   "deadline_is_the_runs": true,
+   "maven": [
+    "clean",
+    "compile",
+    "-Dmaven.compiler.showWarnings=true",
+    "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked"
+   ],
+   "stdin": null,
+   "tooling_only": false
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "compile",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "deadline_is_the_runs": true,
+   "maven": [
+    "-e",
+    "exec:java",
+    "-Dexec.mainClass=org.example.App"
+   ],
+   "stdin": null,
+   "tooling_only": true
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "runtime_verification",
+   "stage": "validator",
+   "success": false
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "attempted_edits": [],
+    "attribution_confidence": null,
+    "attribution_kind": "SOURCE_DEFECT",
+    "attribution_reasoning": null,
+    "attribution_tier": null,
+    "authoritative_files": [],
+    "commands": [
+     [
+      "mvn",
+      "-e",
+      "exec:java",
+      "-Dexec.mainClass=org.example.App"
+     ]
+    ],
+    "failed_content": {},
+    "file_locations": [],
+    "likely_files": [
+     "pom.xml"
+    ],
+    "milestone_id": null,
+    "mode": null,
+    "output": "=== Runtime prerequisite: mvn clean compile (current source): PASSED ===\n\n=== Step 1/1: mvn -e exec:java -Dexec.mainClass=org.example.App ===\n[ERROR] java.lang.ClassNotFoundException: org.example.Ghost\n\n",
+    "plan_id": null,
+    "planned_files": [],
+    "self_correction_attempt": null,
+    "steps": [
+     {
+      "command": [
+       "mvn",
+       "-e",
+       "exec:java",
+       "-Dexec.mainClass=org.example.App"
+      ],
+      "exit_code": 1,
+      "stderr": "",
+      "stdout": "[ERROR] java.lang.ClassNotFoundException: org.example.Ghost\n",
+      "timed_out": false
+     }
+    ],
+    "subtask_id": null,
+    "success": false,
+    "type": "candidate_runtime_entrypoint_invalid",
+    "verification_target": null
+   },
+   "success": false,
+   "type": "candidate_runtime_entrypoint_invalid"
+  }
+ ],
+ "worktree_changes": {
+  "added": [
+   "target/classes/org/example/App.class"
+  ],
+  "changed": [],
+  "removed": []
+ }
+}

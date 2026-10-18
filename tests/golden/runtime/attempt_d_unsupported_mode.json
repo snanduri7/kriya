@@ -1,0 +1,105 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "INFRASTRUCTURE_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [],
+   "failed_content": {},
+   "file_locations": [],
+   "likely_files": [],
+   "milestone_id": null,
+   "mode": null,
+   "output": "MANAGED_SERVICE_CONTRACT_INVALID: unsupported execution_mode 'service'",
+   "plan_id": null,
+   "planned_files": [],
+   "self_correction_attempt": null,
+   "subtask_id": null,
+   "success": false,
+   "type": "verification_infrastructure_failure",
+   "verification_target": null
+  }
+ ],
+ "outcome": {
+  "diagnostics": null,
+  "likely_files": [],
+  "message": "MANAGED_SERVICE_CONTRACT_INVALID: unsupported execution_mode 'service'",
+  "raised": "QualityGateFailure",
+  "raw_output": "MANAGED_SERVICE_CONTRACT_INVALID: unsupported execution_mode 'service'",
+  "self_correction_attempt": null,
+  "type": "verification_infrastructure_failure"
+ },
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": true,
+  "cached_judgment": {
+   "command_source": "inferred",
+   "execution_mode": "service",
+   "input_channel": "none",
+   "managed_service": null,
+   "reasoning": "main.py prints mul(2, 3)",
+   "run_commands": [
+    [
+     "python3",
+     "main.py"
+    ]
+   ],
+   "should_run": true,
+   "success_criteria": "The program prints 6"
+  },
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": true,
+  "validator_java_home_override": null,
+  "validator_timings": [],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "an unsupported execution_mode: MANAGED_SERVICE_CONTRACT_INVALID",
+ "trace": [
+  {
+   "build_file_content": false,
+   "files_written": [
+    "calc.py",
+    "main.py"
+   ],
+   "model": "judge"
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "attempted_edits": [],
+    "attribution_confidence": null,
+    "attribution_kind": "INFRASTRUCTURE_DEFECT",
+    "attribution_reasoning": null,
+    "attribution_tier": null,
+    "authoritative_files": [],
+    "failed_content": {},
+    "file_locations": [],
+    "likely_files": [],
+    "milestone_id": null,
+    "mode": null,
+    "output": "MANAGED_SERVICE_CONTRACT_INVALID: unsupported execution_mode 'service'",
+    "plan_id": null,
+    "planned_files": [],
+    "self_correction_attempt": null,
+    "subtask_id": null,
+    "success": false,
+    "type": "verification_infrastructure_failure",
+    "verification_target": null
+   },
+   "success": false,
+   "type": "verification_infrastructure_failure"
+  }
+ ],
+ "worktree_changes": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ }
+}

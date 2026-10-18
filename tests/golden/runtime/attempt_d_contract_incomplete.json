@@ -1,0 +1,105 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "INFRASTRUCTURE_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [],
+   "failed_content": {},
+   "file_locations": [],
+   "likely_files": [],
+   "milestone_id": null,
+   "mode": null,
+   "output": "sha256:6f3f36771c83a9d5+263",
+   "plan_id": null,
+   "planned_files": [],
+   "self_correction_attempt": null,
+   "subtask_id": null,
+   "success": false,
+   "type": "verification_infrastructure_failure",
+   "verification_target": null
+  }
+ ],
+ "outcome": {
+  "diagnostics": null,
+  "likely_files": [],
+  "message": "sha256:6f3f36771c83a9d5+263",
+  "raised": "QualityGateFailure",
+  "raw_output": "sha256:6f3f36771c83a9d5+263",
+  "self_correction_attempt": null,
+  "type": "verification_infrastructure_failure"
+ },
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": true,
+  "cached_judgment": {
+   "command_source": "inferred",
+   "execution_mode": "finite_command",
+   "input_channel": "argv",
+   "managed_service": null,
+   "reasoning": "main.py prints mul(2, 3)",
+   "run_commands": [
+    [
+     "mvn",
+     "exec:exec"
+    ]
+   ],
+   "should_run": true,
+   "success_criteria": "The program prints 6"
+  },
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": true,
+  "validator_java_home_override": null,
+  "validator_timings": [],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "an unsatisfiable argv contract: RUNTIME_VERIFICATION_CONTRACT_INCOMPLETE, nothing run",
+ "trace": [
+  {
+   "build_file_content": false,
+   "files_written": [
+    "calc.py",
+    "main.py"
+   ],
+   "model": "judge"
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "attempted_edits": [],
+    "attribution_confidence": null,
+    "attribution_kind": "INFRASTRUCTURE_DEFECT",
+    "attribution_reasoning": null,
+    "attribution_tier": null,
+    "authoritative_files": [],
+    "failed_content": {},
+    "file_locations": [],
+    "likely_files": [],
+    "milestone_id": null,
+    "mode": null,
+    "output": "sha256:6f3f36771c83a9d5+263",
+    "plan_id": null,
+    "planned_files": [],
+    "self_correction_attempt": null,
+    "subtask_id": null,
+    "success": false,
+    "type": "verification_infrastructure_failure",
+    "verification_target": null
+   },
+   "success": false,
+   "type": "verification_infrastructure_failure"
+  }
+ ],
+ "worktree_changes": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ }
+}

@@ -1,0 +1,128 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "SOURCE_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [],
+   "commands": [
+    [
+     "<python:1>",
+     "main.py"
+    ]
+   ],
+   "failed_content": {},
+   "file_locations": [],
+   "graded_by": "managed_service_probe",
+   "likely_files": [],
+   "managed_service_outcome": "PROBE_FAILED",
+   "milestone_id": null,
+   "mode": null,
+   "output": "stdout:\nservice listening on 127.0.0.1:8765\n\n\nstderr:\n\n\nprobe_status: 500\nprobe_body: boom",
+   "plan_id": null,
+   "planned_files": [],
+   "self_correction_attempt": null,
+   "subtask_id": null,
+   "success": false,
+   "type": "run_verification",
+   "verification_target": null
+  }
+ ],
+ "outcome": {
+  "diagnostics": null,
+  "likely_files": [],
+  "message": "RUNTIME VERIFICATION FAILURE (managed service): expected 200, got 500\n\nCaptured output:\nstdout:\nservice listening on 127.0.0.1:8765\n\n\nstderr:\n\n\nprobe_status: 500\nprobe_body: boom",
+  "raised": "QualityGateFailure",
+  "raw_output": "stdout:\nservice listening on 127.0.0.1:8765\n\n\nstderr:\n\n\nprobe_status: 500\nprobe_body: boom",
+  "self_correction_attempt": null,
+  "type": "run_verification"
+ },
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": false,
+  "cached_judgment": null,
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": false,
+  "validator_java_home_override": null,
+  "validator_timings": [
+   [
+    "managed_service_verification",
+    false,
+    true
+   ]
+  ],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "the probe answers 500: a repair-eligible run_verification failure",
+ "trace": [
+  {
+   "interpreter_grounding": [
+    [
+     "python3",
+     "main.py"
+    ]
+   ]
+  },
+  {
+   "contained": false,
+   "cwd": "<wt:1>",
+   "start_managed": [
+    "<python:1>",
+    "main.py"
+   ]
+  },
+  {
+   "readiness": "tcp://127.0.0.1:8765/"
+  },
+  {
+   "probe": "GET 127.0.0.1:8765/health",
+   "timeout": 10.0
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "attempted_edits": [],
+    "attribution_confidence": null,
+    "attribution_kind": "SOURCE_DEFECT",
+    "attribution_reasoning": null,
+    "attribution_tier": null,
+    "authoritative_files": [],
+    "commands": [
+     [
+      "<python:1>",
+      "main.py"
+     ]
+    ],
+    "failed_content": {},
+    "file_locations": [],
+    "graded_by": "managed_service_probe",
+    "likely_files": [],
+    "managed_service_outcome": "PROBE_FAILED",
+    "milestone_id": null,
+    "mode": null,
+    "output": "stdout:\nservice listening on 127.0.0.1:8765\n\n\nstderr:\n\n\nprobe_status: 500\nprobe_body: boom",
+    "plan_id": null,
+    "planned_files": [],
+    "self_correction_attempt": null,
+    "subtask_id": null,
+    "success": false,
+    "type": "run_verification",
+    "verification_target": null
+   },
+   "success": false,
+   "type": "run_verification"
+  }
+ ],
+ "worktree_changes": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ }
+}

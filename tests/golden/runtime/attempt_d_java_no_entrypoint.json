@@ -1,0 +1,46 @@
+{
+ "events": [],
+ "gate_outcomes": [],
+ "outcome": "returned",
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": true,
+  "cached_judgment": {
+   "command_source": "inferred",
+   "execution_mode": "finite_command",
+   "input_channel": "none",
+   "managed_service": null,
+   "reasoning": "main.py prints mul(2, 3)",
+   "run_commands": [
+    [
+     "java",
+     "Ghost"
+    ]
+   ],
+   "should_run": true,
+   "success_criteria": "The program prints 6"
+  },
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": true,
+  "validator_java_home_override": null,
+  "validator_timings": [],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "java, no build file, no main(): should_run forced False, nothing run",
+ "trace": [
+  {
+   "build_file_content": false,
+   "files_written": [
+    "src/Lib.java"
+   ],
+   "model": "judge"
+  }
+ ],
+ "worktree_changes": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ }
+}

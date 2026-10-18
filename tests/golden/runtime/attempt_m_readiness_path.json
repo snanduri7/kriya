@@ -1,0 +1,91 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "INFRASTRUCTURE_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [],
+   "failed_content": {},
+   "file_locations": [],
+   "likely_files": [],
+   "milestone_id": null,
+   "mode": null,
+   "output": "MANAGED_SERVICE_CONTRACT_INVALID: managed_service.readiness.path must be a string starting with '/', got 'health'",
+   "plan_id": null,
+   "planned_files": [],
+   "self_correction_attempt": null,
+   "subtask_id": null,
+   "success": false,
+   "type": "verification_infrastructure_failure",
+   "verification_target": null
+  }
+ ],
+ "outcome": {
+  "diagnostics": null,
+  "likely_files": [],
+  "message": "MANAGED_SERVICE_CONTRACT_INVALID: managed_service.readiness.path must be a string starting with '/', got 'health'",
+  "raised": "QualityGateFailure",
+  "raw_output": "MANAGED_SERVICE_CONTRACT_INVALID: managed_service.readiness.path must be a string starting with '/', got 'health'",
+  "self_correction_attempt": null,
+  "type": "verification_infrastructure_failure"
+ },
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": false,
+  "cached_judgment": null,
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": false,
+  "validator_java_home_override": null,
+  "validator_timings": [],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "an http readiness path without '/': refused",
+ "trace": [
+  {
+   "interpreter_grounding": [
+    [
+     "python3",
+     "main.py"
+    ]
+   ]
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "attempted_edits": [],
+    "attribution_confidence": null,
+    "attribution_kind": "INFRASTRUCTURE_DEFECT",
+    "attribution_reasoning": null,
+    "attribution_tier": null,
+    "authoritative_files": [],
+    "failed_content": {},
+    "file_locations": [],
+    "likely_files": [],
+    "milestone_id": null,
+    "mode": null,
+    "output": "MANAGED_SERVICE_CONTRACT_INVALID: managed_service.readiness.path must be a string starting with '/', got 'health'",
+    "plan_id": null,
+    "planned_files": [],
+    "self_correction_attempt": null,
+    "subtask_id": null,
+    "success": false,
+    "type": "verification_infrastructure_failure",
+    "verification_target": null
+   },
+   "success": false,
+   "type": "verification_infrastructure_failure"
+  }
+ ],
+ "worktree_changes": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ }
+}

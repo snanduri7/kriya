@@ -178,6 +178,7 @@ STATE_MACHINE_TIER_FILES = frozenset({
     "test_generation_service.py",  # E6: the Developer request assembly of every generation mode
     "test_repair_orchestrator.py",  # E7: the retry/repair preparation and the coordinated repair of every retry family
     "test_gate_orchestrator.py",  # E8: the candidate-gate order and evidence of every representative terminal path
+    "test_runtime_verification.py",  # E9: runtime and managed-service verification: approval, execution, evidence order
     # resume / invalidation
     "test_prd008_resume_fingerprints.py", "test_prd008a_resume_convergence.py", "test_resume_integrity.py",
     "test_prd008_recovery.py",
@@ -230,6 +231,7 @@ MODULE_TIER_FILES = {
         "test_fallback_decision.py",  # E6: the llm_chain fallback decisions (fallback_decision)
         "test_repair_orchestrator.py",  # E7: the retry/repair preparation and coordinated repair (repair_orchestrator)
         "test_gate_orchestrator.py",  # E8: the candidate-gate orchestration (gate_orchestrator)
+        "test_runtime_verification.py",  # E9: runtime and managed-service verification (runtime_verification)
         "test_p2_compile_regression_attribution.py", "test_p2_regression_attribution_reproducer.py",
         "test_p3c_prose_candidate_delta.py", "test_plan_edit_feasibility_001.py", "test_plan_executability.py",
         "test_plan_external_package_capability_001.py", "test_plan_global_invariant_projection_001.py",

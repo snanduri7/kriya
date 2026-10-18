@@ -1,0 +1,106 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "SOURCE_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [],
+   "failed_content": {
+    "pom.xml": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>org.example</groupId>\n  <artifactId>app</artifactId>\n  <version>1.0</version>\n</project>\n"
+   },
+   "file_locations": [],
+   "likely_files": [
+    "pom.xml"
+   ],
+   "milestone_id": null,
+   "mode": null,
+   "output": "stdout:\n[INFO] BUILD SUCCESS\n\n\nstderr:\n",
+   "plan_id": null,
+   "planned_files": [],
+   "self_correction_attempt": null,
+   "subtask_id": null,
+   "success": false,
+   "type": "package_preparation_failed",
+   "verification_target": null
+  }
+ ],
+ "outcome": {
+  "diagnostics": null,
+  "likely_files": [
+   "pom.xml"
+  ],
+  "message": "sha256:c6e67cc77c58058d+514",
+  "raised": "QualityGateFailure",
+  "raw_output": "stdout:\n[INFO] BUILD SUCCESS\n\n\nstderr:\n",
+  "self_correction_attempt": null,
+  "type": "package_preparation_failed"
+ },
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": false,
+  "cached_judgment": null,
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": false,
+  "validator_java_home_override": null,
+  "validator_timings": [],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "mvn package succeeded but produced no jar: package_preparation_failed, nothing run",
+ "trace": [
+  {
+   "argv": [
+    "mvn",
+    "package",
+    "-DskipTests"
+   ],
+   "contained": false,
+   "cwd": "<wt:1>",
+   "env": true,
+   "spawn": "maven",
+   "stdin": null,
+   "timeout": 300
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "attempted_edits": [],
+    "attribution_confidence": null,
+    "attribution_kind": "SOURCE_DEFECT",
+    "attribution_reasoning": null,
+    "attribution_tier": null,
+    "authoritative_files": [],
+    "failed_content": {
+     "pom.xml": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>org.example</groupId>\n  <artifactId>app</artifactId>\n  <version>1.0</version>\n</project>\n"
+    },
+    "file_locations": [],
+    "likely_files": [
+     "pom.xml"
+    ],
+    "milestone_id": null,
+    "mode": null,
+    "output": "stdout:\n[INFO] BUILD SUCCESS\n\n\nstderr:\n",
+    "plan_id": null,
+    "planned_files": [],
+    "self_correction_attempt": null,
+    "subtask_id": null,
+    "success": false,
+    "type": "package_preparation_failed",
+    "verification_target": null
+   },
+   "success": false,
+   "type": "package_preparation_failed"
+  }
+ ],
+ "worktree_changes": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ }
+}

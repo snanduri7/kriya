@@ -1,0 +1,104 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "INFRASTRUCTURE_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [],
+   "failed_content": {},
+   "file_locations": [],
+   "likely_files": [],
+   "milestone_id": null,
+   "mode": null,
+   "output": "venv creation failed: no ensurepip",
+   "plan_id": null,
+   "planned_files": [],
+   "self_correction_attempt": null,
+   "subtask_id": null,
+   "success": false,
+   "type": "verification_infrastructure_failure",
+   "verification_target": null
+  }
+ ],
+ "outcome": {
+  "diagnostics": {
+   "gate": "runtime",
+   "gradle_distribution": null,
+   "reason_code": "PYTHON_ENVIRONMENT_UNAVAILABLE"
+  },
+  "likely_files": [],
+  "message": "VERIFICATION_INFRASTRUCTURE_FAILURE: the runtime gate's verification tool could not start (PYTHON_ENVIRONMENT_UNAVAILABLE); nothing about the candidate was observed, so this is not a code failure.\nvenv creation failed: no ensurepip",
+  "raised": "QualityGateFailure",
+  "raw_output": "venv creation failed: no ensurepip",
+  "self_correction_attempt": null,
+  "type": "verification_infrastructure_failure"
+ },
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": false,
+  "cached_judgment": null,
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": false,
+  "validator_java_home_override": null,
+  "validator_timings": [],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "the project interpreter cannot be prepared: the typed environment stop, nothing run or graded",
+ "trace": [
+  {
+   "interpreter_grounding": [
+    [
+     "python3",
+     "main.py"
+    ]
+   ]
+  },
+  {
+   "interpreter_resolution": "PYTHON_ENVIRONMENT_UNAVAILABLE"
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "runtime_verification",
+   "stage": "validator",
+   "success": false
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "attempted_edits": [],
+    "attribution_confidence": null,
+    "attribution_kind": "INFRASTRUCTURE_DEFECT",
+    "attribution_reasoning": null,
+    "attribution_tier": null,
+    "authoritative_files": [],
+    "failed_content": {},
+    "file_locations": [],
+    "likely_files": [],
+    "milestone_id": null,
+    "mode": null,
+    "output": "venv creation failed: no ensurepip",
+    "plan_id": null,
+    "planned_files": [],
+    "self_correction_attempt": null,
+    "subtask_id": null,
+    "success": false,
+    "type": "verification_infrastructure_failure",
+    "verification_target": null
+   },
+   "success": false,
+   "type": "verification_infrastructure_failure"
+  }
+ ],
+ "worktree_changes": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ }
+}

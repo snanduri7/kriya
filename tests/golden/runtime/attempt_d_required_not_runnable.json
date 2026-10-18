@@ -1,0 +1,100 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "VERIFICATION_CONTRACT_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [],
+   "failed_content": {},
+   "file_locations": [],
+   "likely_files": [],
+   "milestone_id": null,
+   "mode": null,
+   "output": "REQUIRED_RUNTIME_VERIFICATION_MISSING: the declared verification contract requires observable runtime behavior, but no executable verification sequence was produced.\nJudge's own reasoning: a library",
+   "plan_id": null,
+   "planned_files": [],
+   "self_correction_attempt": null,
+   "subtask_id": null,
+   "success": false,
+   "type": "verification_infrastructure_failure",
+   "verification_target": null
+  }
+ ],
+ "outcome": {
+  "diagnostics": null,
+  "likely_files": [],
+  "message": "REQUIRED_RUNTIME_VERIFICATION_MISSING: the declared verification contract requires observable runtime behavior, but no executable verification sequence was produced.\nJudge's own reasoning: a library",
+  "raised": "QualityGateFailure",
+  "raw_output": "REQUIRED_RUNTIME_VERIFICATION_MISSING: the declared verification contract requires observable runtime behavior, but no executable verification sequence was produced.\nJudge's own reasoning: a library",
+  "self_correction_attempt": null,
+  "type": "verification_infrastructure_failure"
+ },
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": true,
+  "cached_judgment": {
+   "command_source": "inferred",
+   "execution_mode": "finite_command",
+   "input_channel": "none",
+   "managed_service": null,
+   "reasoning": "a library",
+   "run_commands": null,
+   "should_run": false,
+   "success_criteria": "The program prints 6"
+  },
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": true,
+  "validator_java_home_override": null,
+  "validator_timings": [],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "required but judged not runnable: REQUIRED_RUNTIME_VERIFICATION_MISSING (reasoning)",
+ "trace": [
+  {
+   "build_file_content": false,
+   "files_written": [
+    "calc.py",
+    "main.py"
+   ],
+   "model": "judge"
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "attempted_edits": [],
+    "attribution_confidence": null,
+    "attribution_kind": "VERIFICATION_CONTRACT_DEFECT",
+    "attribution_reasoning": null,
+    "attribution_tier": null,
+    "authoritative_files": [],
+    "failed_content": {},
+    "file_locations": [],
+    "likely_files": [],
+    "milestone_id": null,
+    "mode": null,
+    "output": "REQUIRED_RUNTIME_VERIFICATION_MISSING: the declared verification contract requires observable runtime behavior, but no executable verification sequence was produced.\nJudge's own reasoning: a library",
+    "plan_id": null,
+    "planned_files": [],
+    "self_correction_attempt": null,
+    "subtask_id": null,
+    "success": false,
+    "type": "verification_infrastructure_failure",
+    "verification_target": null
+   },
+   "success": false,
+   "type": "verification_infrastructure_failure"
+  }
+ ],
+ "worktree_changes": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ }
+}

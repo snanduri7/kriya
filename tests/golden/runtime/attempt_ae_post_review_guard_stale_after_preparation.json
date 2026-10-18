@@ -1,0 +1,98 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "INFRASTRUCTURE_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [],
+   "failed_content": {},
+   "file_locations": [],
+   "likely_files": [],
+   "milestone_id": null,
+   "mode": null,
+   "output": "CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW: the candidate changed after you approved its source, so that approval no longer covers it. Nothing was run and nothing was applied.",
+   "plan_id": null,
+   "planned_files": [],
+   "self_correction_attempt": null,
+   "subtask_id": null,
+   "success": false,
+   "type": "verification_infrastructure_failure",
+   "verification_target": null
+  }
+ ],
+ "outcome": {
+  "diagnostics": null,
+  "likely_files": [],
+  "message": "CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW: the candidate changed after you approved its source, so that approval no longer covers it. Nothing was run and nothing was applied.",
+  "raised": "QualityGateFailure",
+  "raw_output": "CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW: the candidate changed after you approved its source, so that approval no longer covers it. Nothing was run and nothing was applied.",
+  "self_correction_attempt": null,
+  "type": "verification_infrastructure_failure"
+ },
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": false,
+  "cached_judgment": null,
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": false,
+  "validator_java_home_override": null,
+  "validator_timings": [],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "the candidate changed during the artifact preparation: refused before the run",
+ "trace": [
+  {
+   "argv": [
+    "mvn",
+    "package",
+    "-DskipTests"
+   ],
+   "contained": false,
+   "cwd": "<wt:1>",
+   "env": true,
+   "spawn": "maven",
+   "stdin": null,
+   "timeout": 300
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "attempted_edits": [],
+    "attribution_confidence": null,
+    "attribution_kind": "INFRASTRUCTURE_DEFECT",
+    "attribution_reasoning": null,
+    "attribution_tier": null,
+    "authoritative_files": [],
+    "failed_content": {},
+    "file_locations": [],
+    "likely_files": [],
+    "milestone_id": null,
+    "mode": null,
+    "output": "CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW: the candidate changed after you approved its source, so that approval no longer covers it. Nothing was run and nothing was applied.",
+    "plan_id": null,
+    "planned_files": [],
+    "self_correction_attempt": null,
+    "subtask_id": null,
+    "success": false,
+    "type": "verification_infrastructure_failure",
+    "verification_target": null
+   },
+   "success": false,
+   "type": "verification_infrastructure_failure"
+  }
+ ],
+ "worktree_changes": {
+  "added": [
+   "target/app-1.0.jar"
+  ],
+  "changed": [],
+  "removed": []
+ }
+}

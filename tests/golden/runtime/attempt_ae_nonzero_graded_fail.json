@@ -1,0 +1,201 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "SOURCE_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [],
+   "commands": [
+    [
+     "python3",
+     "main.py"
+    ]
+   ],
+   "deterministic_result": null,
+   "failed_content": {
+    "calc.py": "def add(a, b):\n    return a + b\n\n\ndef mul(a, b):\n    return a * b\n"
+   },
+   "file_locations": [],
+   "graded_by": "llm",
+   "likely_files": [
+    "calc.py"
+   ],
+   "milestone_id": null,
+   "mode": null,
+   "output": "=== Step 1/1: <python:1> main.py ===\n\nTraceback (most recent call last):\nNameError: name 'mul' is not defined\n\n\n[Grader reasoning]: the program crashed before printing",
+   "plan_id": null,
+   "planned_files": [],
+   "runtime_disposition": {
+    "authority": "llm",
+    "deterministic": "FAIL",
+    "deterministic_reason": "NONZERO_EXIT_AUTHORITATIVE",
+    "final": "FAIL",
+    "semantic": "FAIL",
+    "semantic_reason": null
+   },
+   "self_correction_attempt": null,
+   "steps": [
+    {
+     "command": [
+      "<python:1>",
+      "main.py"
+     ],
+     "exit_code": 1,
+     "resources": {
+      "address_space_enforcement": "advisory",
+      "address_space_limit_mb": 4096,
+      "cpu_seconds": 240,
+      "jvm_options": [],
+      "memory_budget_mb": 4096,
+      "strategy": "address_space"
+     },
+     "stderr": "Traceback (most recent call last):\nNameError: name 'mul' is not defined\n",
+     "stdout": "",
+     "timed_out": false
+    }
+   ],
+   "subtask_id": null,
+   "success": false,
+   "type": "run_verification",
+   "verification_target": null
+  }
+ ],
+ "outcome": {
+  "diagnostics": null,
+  "likely_files": [
+   "calc.py"
+  ],
+  "message": "RUNTIME VERIFICATION FAILURE: the program crashed before printing\n\nCaptured output:\n=== Step 1/1: <python:1> main.py ===\n\nTraceback (most recent call last):\nNameError: name 'mul' is not defined\n",
+  "raised": "QualityGateFailure",
+  "raw_output": "=== Step 1/1: <python:1> main.py ===\n\nTraceback (most recent call last):\nNameError: name 'mul' is not defined\n\n\n[Grader reasoning]: the program crashed before printing",
+  "self_correction_attempt": null,
+  "type": "run_verification"
+ },
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": false,
+  "cached_judgment": null,
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": false,
+  "validator_java_home_override": null,
+  "validator_timings": [],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "a nonzero exit graded FAIL: run_verification failure with the grader's likely files",
+ "trace": [
+  {
+   "interpreter_grounding": [
+    [
+     "python3",
+     "main.py"
+    ]
+   ]
+  },
+  {
+   "argv": [
+    "<python:1>",
+    "main.py"
+   ],
+   "contained": false,
+   "cwd": "<wt:1>",
+   "env": true,
+   "spawn": "app",
+   "stdin": null,
+   "timeout": 37
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "runtime_verification",
+   "stage": "validator",
+   "success": false
+  },
+  {
+   "distrust_notice": false,
+   "files_written": [
+    "calc.py"
+   ],
+   "model": "grader",
+   "retained_evidence": true,
+   "returncode": 1,
+   "timed_out": false
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "attempted_edits": [],
+    "attribution_confidence": null,
+    "attribution_kind": "SOURCE_DEFECT",
+    "attribution_reasoning": null,
+    "attribution_tier": null,
+    "authoritative_files": [],
+    "commands": [
+     [
+      "python3",
+      "main.py"
+     ]
+    ],
+    "deterministic_result": null,
+    "failed_content": {
+     "calc.py": "def add(a, b):\n    return a + b\n\n\ndef mul(a, b):\n    return a * b\n"
+    },
+    "file_locations": [],
+    "graded_by": "llm",
+    "likely_files": [
+     "calc.py"
+    ],
+    "milestone_id": null,
+    "mode": null,
+    "output": "=== Step 1/1: <python:1> main.py ===\n\nTraceback (most recent call last):\nNameError: name 'mul' is not defined\n\n\n[Grader reasoning]: the program crashed before printing",
+    "plan_id": null,
+    "planned_files": [],
+    "runtime_disposition": {
+     "authority": "llm",
+     "deterministic": "FAIL",
+     "deterministic_reason": "NONZERO_EXIT_AUTHORITATIVE",
+     "final": "FAIL",
+     "semantic": "FAIL",
+     "semantic_reason": null
+    },
+    "self_correction_attempt": null,
+    "steps": [
+     {
+      "command": [
+       "<python:1>",
+       "main.py"
+      ],
+      "exit_code": 1,
+      "resources": {
+       "address_space_enforcement": "advisory",
+       "address_space_limit_mb": 4096,
+       "cpu_seconds": 240,
+       "jvm_options": [],
+       "memory_budget_mb": 4096,
+       "strategy": "address_space"
+      },
+      "stderr": "Traceback (most recent call last):\nNameError: name 'mul' is not defined\n",
+      "stdout": "",
+      "timed_out": false
+     }
+    ],
+    "subtask_id": null,
+    "success": false,
+    "type": "run_verification",
+    "verification_target": null
+   },
+   "success": false,
+   "type": "run_verification"
+  }
+ ],
+ "worktree_changes": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ }
+}

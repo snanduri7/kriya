@@ -1,0 +1,198 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "commands": [
+    [
+     "python3",
+     "main.py"
+    ]
+   ],
+   "deterministic_result": null,
+   "graded_by": "llm",
+   "output": "=== Step 1/1: <python:1> main.py ===\n6\n\n\n\n[Grader reasoning]: the output shows 6",
+   "resources": {
+    "address_space_enforcement": "advisory",
+    "address_space_limit_mb": 4096,
+    "cpu_seconds": 240,
+    "jvm_options": [],
+    "memory_budget_mb": 4096,
+    "strategy": "address_space"
+   },
+   "runtime_artifacts": [],
+   "runtime_disposition": {
+    "authority": "llm",
+    "deterministic": "NONE",
+    "deterministic_reason": null,
+    "final": "PASS",
+    "semantic": "PASS",
+    "semantic_reason": null
+   },
+   "steps": [
+    {
+     "command": [
+      "<python:1>",
+      "main.py"
+     ],
+     "exit_code": 0,
+     "resources": {
+      "address_space_enforcement": "advisory",
+      "address_space_limit_mb": 4096,
+      "cpu_seconds": 240,
+      "jvm_options": [],
+      "memory_budget_mb": 4096,
+      "strategy": "address_space"
+     },
+     "stderr": "",
+     "stdout": "6\n",
+     "timed_out": false
+    }
+   ],
+   "success": true,
+   "type": "run_verification"
+  }
+ ],
+ "outcome": "returned",
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": true,
+  "cached_judgment": {
+   "command_source": "inferred",
+   "execution_mode": "finite_command",
+   "input_channel": "none",
+   "managed_service": null,
+   "reasoning": "main.py prints mul(2, 3)",
+   "run_commands": [
+    [
+     "python3",
+     "main.py"
+    ]
+   ],
+   "should_run": true,
+   "success_criteria": "The program prints 6"
+  },
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": true,
+  "validator_java_home_override": null,
+  "validator_timings": [
+   [
+    "run_verification",
+    true,
+    true
+   ]
+  ],
+  "validator_tree_bound": true
+ },
+ "terminal_path": "the cached judgment of another basis: dropped, judged again",
+ "trace": [
+  {
+   "build_file_content": false,
+   "files_written": [
+    "calc.py",
+    "main.py"
+   ],
+   "model": "judge"
+  },
+  {
+   "interpreter_grounding": [
+    [
+     "python3",
+     "main.py"
+    ]
+   ]
+  },
+  {
+   "argv": [
+    "<python:1>",
+    "main.py"
+   ],
+   "contained": false,
+   "cwd": "<wt:1>",
+   "env": true,
+   "spawn": "app",
+   "stdin": null,
+   "timeout": 37
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "runtime_verification",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "distrust_notice": false,
+   "files_written": [
+    "calc.py",
+    "main.py"
+   ],
+   "model": "grader",
+   "retained_evidence": true,
+   "returncode": 0,
+   "timed_out": false
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "commands": [
+     [
+      "python3",
+      "main.py"
+     ]
+    ],
+    "deterministic_result": null,
+    "graded_by": "llm",
+    "output": "=== Step 1/1: <python:1> main.py ===\n6\n\n\n\n[Grader reasoning]: the output shows 6",
+    "resources": {
+     "address_space_enforcement": "advisory",
+     "address_space_limit_mb": 4096,
+     "cpu_seconds": 240,
+     "jvm_options": [],
+     "memory_budget_mb": 4096,
+     "strategy": "address_space"
+    },
+    "runtime_artifacts": [],
+    "runtime_disposition": {
+     "authority": "llm",
+     "deterministic": "NONE",
+     "deterministic_reason": null,
+     "final": "PASS",
+     "semantic": "PASS",
+     "semantic_reason": null
+    },
+    "steps": [
+     {
+      "command": [
+       "<python:1>",
+       "main.py"
+      ],
+      "exit_code": 0,
+      "resources": {
+       "address_space_enforcement": "advisory",
+       "address_space_limit_mb": 4096,
+       "cpu_seconds": 240,
+       "jvm_options": [],
+       "memory_budget_mb": 4096,
+       "strategy": "address_space"
+      },
+      "stderr": "",
+      "stdout": "6\n",
+      "timed_out": false
+     }
+    ],
+    "success": true,
+    "type": "run_verification"
+   },
+   "success": true,
+   "type": "run_verification"
+  }
+ ],
+ "worktree_changes": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ }
+}

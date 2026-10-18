@@ -42,13 +42,16 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # runtime-verification seam - E9's code - through this name).
     # E8: 1 -> 1: the executing gates' call moved to gate_orchestrator and reads GateDeps (one load in attempt._gate_deps).
     (A, '_approve_and_execute_runtime_verification'): P(1, A, ((A, 1),), ()),
-    (A, '_approve_runtime_commands'): P(1, A, ((A, 2),), ()),
+    # E9 characterization: +1 site (tests/test_runtime_verification.py: the dynamic proof that both runtime call sites
+    # resolve it through this module at call time).
+    (A, '_approve_runtime_commands'): P(2, A, ((A, 2),), ()),
     # E7: unchanged - still the retry_prompts function attempt.py imports, looked up by run_attempt's two targeted
     # branches (which stay in attempt.py); retry_prompts.py stays its only definition.
     (A, '_build_targeted_retry_prompt'): P(2, 'kriya.workflow.retry_prompts', ((A, 2),), ()),
     # E8 (guard): 2 -> 2: the toolchain preflight's load moved to gate_orchestrator and reads GateDeps (one load in
     # attempt._gate_deps); the verification-only/runtime path keeps its own.
-    (A, '_check_java_toolchain_mismatch'): P(2, 'kriya.workflow.toolchain', ((A, 2),), ()),
+    # E9 characterization: +1 site (tests/test_runtime_verification.py: the direct path's preflight through this name).
+    (A, '_check_java_toolchain_mismatch'): P(3, 'kriya.workflow.toolchain', ((A, 2),), ()),
     (A, '_code_intelligence_for'): P(2, A, ((A, 2),), ()),
     # E6 characterization: +1 site (tests/test_fallback_decision.py records which request profiles a fallback decision
     # resolves, through this name: the selection, the call-time substitution and the model entry look it up here).
@@ -61,7 +64,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (A, '_ensure_generation_time_budget'): P(2, A, ((A, 1),), ()),
     # E8 characterization: +1 site (tests/test_gate_orchestrator.py: the managed-service early return of the gates).
     # E8: 2 -> 2: the executing gates' load moved (GateDeps, one load in attempt._gate_deps); the direct runtime path keeps its own.
-    (A, '_execute_managed_service_verification'): P(1, A, ((A, 2),), ()),
+    # E9 characterization: +1 site (tests/test_runtime_verification.py: the direct path hands a managed service over by
+    # this name).
+    (A, '_execute_managed_service_verification'): P(2, A, ((A, 2),), ()),
     (A, '_enter_developer_model'): P(1, A, ((A, 1),), ()),
     # E8 characterization: +1 site (tests/test_gate_orchestrator.py records the scope every suite judgment is asked for).
     # E8: 4 -> 2 lookups: the three loads of the moved gates (the selection fallback's and the full suite's judgment,
@@ -69,16 +74,21 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # the test-delta covering run keeps its own. The patch site above is the dynamic proof (all three paths).
     (A, '_judge_candidate_suite'): P(1, A, ((A, 2),), ()),
     (A, '_maybe_run_developer_investigation'): P(1, A, ((A, 1),), ()),
-    (A, '_prepare_finite_command_runtime_artifacts'): P(1, A, ((A, 3),), ()),
+    # E9 characterization: +1 site (tests/test_runtime_verification.py: the dynamic proof that both runtime call sites
+    # resolve it through this module at call time).
+    (A, '_prepare_finite_command_runtime_artifacts'): P(2, A, ((A, 3),), ()),
     (A, '_reject_exception_masking'): P(1, A, ((A, 2),), ()),
     (A, '_require_qualified_retry_identity'): P(1, A, ((A, 1),), ()),
     # E8 (guard): 2 -> 2: the toolchain preflight's load moved (GateDeps, one load in attempt._gate_deps); the other stays.
-    (A, '_resolve_java_home_override'): P(4, 'kriya.workflow.toolchain', ((A, 2),), ()),
+    # E9 characterization: +1 site (tests/test_runtime_verification.py: the direct path's preflight through this name).
+    (A, '_resolve_java_home_override'): P(5, 'kriya.workflow.toolchain', ((A, 2),), ()),
     # E7: the body moved to repair_orchestrator; attempt.py keeps a forwarder (owner A). 3 -> 3 lookups: the retry
     # preparation's load reads RepairDeps (one load in attempt._repair_deps), generation_service's and
     # run_attempt's are unchanged.
     (A, '_resolve_known_target_member_hints'): P(1, A, ((A, 3),), ()),
-    (A, '_resolve_run_command'): P(10, 'kriya.workflow.file_resolution', ((A, 3),), ()),
+    # E9 characterization: +1 site (tests/test_runtime_verification.py: the dynamic proof that both runtime call sites
+    # resolve it through this module at call time).
+    (A, '_resolve_run_command'): P(11, 'kriya.workflow.file_resolution', ((A, 3),), ()),
     (A, '_restore_api_contract_owners_deterministically'): P(1, A, ((A, 1),), ()),
     # E7: the body moved to repair_orchestrator; attempt.py keeps an async forwarder (owner A) that run_attempt's
     # coordinated branch still calls by this name (the 5 patch sites intercept the whole coordinated repair).
@@ -88,7 +98,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (A, '_run_developer_generation'): P(11, A, ((A, 5),), ()),
     # E8: the body moved to gate_orchestrator; attempt.py keeps an async forwarder (owner A) that run_attempt calls by this name.
     (A, '_run_verification_only_attempt'): P(1, A, ((A, 1),), ()),
-    (A, '_validate_and_convert_managed_service_contract'): P(1, A, ((A, 1),), ()),
+    # E9 characterization: +1 site (tests/test_runtime_verification.py: the dynamic proof that both runtime call sites
+    # resolve it through this module at call time).
+    (A, '_validate_and_convert_managed_service_contract'): P(2, A, ((A, 1),), ()),
     # E7: 3 -> 3 lookups: the coordinated candidate view's materialization moved to repair_orchestrator and reads
     # RepairDeps.apply_anchored_edits (one load in attempt._repair_deps).
     (A, 'apply_anchored_edits'): P(1, 'kriya.workflow.edit_safety', ((A, 3),), ()),
@@ -106,7 +118,8 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # patch of kriya.workflow.attempt.time still reaches the generation's duration measurement.
     # E8: 8 -> 7 lookups: the compile timing's two time.monotonic() loads moved to gate_orchestrator and read
     # GateDeps.time (one load in attempt._gate_deps), so a patch of kriya.workflow.attempt.time still reaches it.
-    (A, 'time'): P(1, 'time', ((A, 7),), ()),
+    # E9 characterization: +1 site (tests/test_runtime_verification.py: the runtime timings read this module's clock).
+    (A, 'time'): P(2, 'time', ((A, 7),), ()),
     # kriya.workflow.workflow
     (W, 'RepositoryAnalyzer'): P(3, 'kriya.analyzer.analyzer', ((W, 2),), ()),
     (W, 'RepositoryAnalyzer.index_repository'): P(3, 'kriya.analyzer.analyzer', None, ()),
@@ -293,8 +306,9 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # +1 W.create_git_worktree, +1 W.handle_attempt_failure, +1 W.capture_brownfield_baselines and +10 W.run_attempt sites
     # (test_development_loop: stage 4's characterization and dynamic proofs, written before the move); E6 +1
     # A._developer_request_profile site (test_fallback_decision: the profiles a fallback decision resolves); E8 +3 A
-    # sites, 3 new rows (test_gate_orchestrator: the runtime-verification and managed-service seams, the suite judgment)
-    assert totals == {A: 91, W: 88, C: 268}
+    # sites, 3 new rows (test_gate_orchestrator: the runtime-verification and managed-service seams, the suite judgment);
+    # E9 +8 A sites (test_runtime_verification: the dynamic proofs of the runtime seams, written before the move)
+    assert totals == {A: 99, W: 88, C: 268}
     assert len(PATCH_POINTS) == 87
 
 

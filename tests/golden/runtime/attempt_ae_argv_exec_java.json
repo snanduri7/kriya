@@ -1,0 +1,181 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "commands": [
+    [
+     "mvn",
+     "-e",
+     "exec:java",
+     "-Dexec.mainClass=App",
+     "-Dexec.args=kriya-verification-input"
+    ]
+   ],
+   "deterministic_result": null,
+   "graded_by": "llm",
+   "output": "=== Step 1/1: mvn -e exec:java -Dexec.mainClass=App -Dexec.args=kriya-verification-input ===\n6\n\n\n\n[Grader reasoning]: the output shows 6",
+   "runtime_disposition": {
+    "authority": "llm",
+    "deterministic": "NONE",
+    "deterministic_reason": null,
+    "final": "PASS",
+    "semantic": "PASS",
+    "semantic_reason": null
+   },
+   "steps": [
+    {
+     "command": [
+      "mvn",
+      "-e",
+      "exec:java",
+      "-Dexec.mainClass=App",
+      "-Dexec.args=kriya-verification-input"
+     ],
+     "exit_code": 0,
+     "resources": {
+      "address_space_enforcement": null,
+      "address_space_limit_mb": null,
+      "cpu_seconds": 240,
+      "jvm_options": [
+       "-Xmx2048m",
+       "-XX:MaxMetaspaceSize=512m",
+       "-XX:MaxDirectMemorySize=512m"
+      ],
+      "memory_budget_mb": 4096,
+      "strategy": "jvm_heap"
+     },
+     "stderr": "",
+     "stdout": "6\n",
+     "timed_out": false
+    }
+   ],
+   "success": true,
+   "type": "run_verification"
+  }
+ ],
+ "outcome": "returned",
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": false,
+  "cached_judgment": null,
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": false,
+  "validator_java_home_override": null,
+  "validator_timings": [],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "input_channel argv on mvn exec:java: -Dexec.args=<input>",
+ "trace": [
+  {
+   "interpreter_grounding": [
+    [
+     "mvn",
+     "-e",
+     "exec:java",
+     "-Dexec.mainClass=App",
+     "-Dexec.args=kriya-verification-input"
+    ]
+   ]
+  },
+  {
+   "argv": [
+    "mvn",
+    "-e",
+    "exec:java",
+    "-Dexec.mainClass=App",
+    "-Dexec.args=kriya-verification-input"
+   ],
+   "contained": false,
+   "cwd": "<wt:1>",
+   "env": true,
+   "spawn": "app",
+   "stdin": null,
+   "timeout": 37
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "runtime_verification",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "distrust_notice": false,
+   "files_written": [
+    "calc.py"
+   ],
+   "model": "grader",
+   "retained_evidence": true,
+   "returncode": 0,
+   "timed_out": false
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "commands": [
+     [
+      "mvn",
+      "-e",
+      "exec:java",
+      "-Dexec.mainClass=App",
+      "-Dexec.args=kriya-verification-input"
+     ]
+    ],
+    "deterministic_result": null,
+    "graded_by": "llm",
+    "output": "=== Step 1/1: mvn -e exec:java -Dexec.mainClass=App -Dexec.args=kriya-verification-input ===\n6\n\n\n\n[Grader reasoning]: the output shows 6",
+    "runtime_disposition": {
+     "authority": "llm",
+     "deterministic": "NONE",
+     "deterministic_reason": null,
+     "final": "PASS",
+     "semantic": "PASS",
+     "semantic_reason": null
+    },
+    "steps": [
+     {
+      "command": [
+       "mvn",
+       "-e",
+       "exec:java",
+       "-Dexec.mainClass=App",
+       "-Dexec.args=kriya-verification-input"
+      ],
+      "exit_code": 0,
+      "resources": {
+       "address_space_enforcement": null,
+       "address_space_limit_mb": null,
+       "cpu_seconds": 240,
+       "jvm_options": [
+        "-Xmx2048m",
+        "-XX:MaxMetaspaceSize=512m",
+        "-XX:MaxDirectMemorySize=512m"
+       ],
+       "memory_budget_mb": 4096,
+       "strategy": "jvm_heap"
+      },
+      "stderr": "",
+      "stdout": "6\n",
+      "timed_out": false
+     }
+    ],
+    "success": true,
+    "type": "run_verification"
+   },
+   "success": true,
+   "type": "run_verification"
+  },
+  {
+   "context": "version unspecified",
+   "skill_verified": "calc-conventions"
+  }
+ ],
+ "worktree_changes": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ }
+}

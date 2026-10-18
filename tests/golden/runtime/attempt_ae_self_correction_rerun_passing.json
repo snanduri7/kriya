@@ -1,0 +1,219 @@
+{
+ "events": [
+  {
+   "failure_type": "edit_refused",
+   "kind": "auxiliary.failed",
+   "message": "one turn refused",
+   "operation": "repair_run_verification",
+   "source": "self_correction"
+  }
+ ],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "commands": [
+    [
+     "python3",
+     "-m",
+     "pytest"
+    ]
+   ],
+   "deterministic_result": "PASS",
+   "graded_by": "process_exit",
+   "output": "=== Step 1/1: <python:1> -m pytest ===\n1 passed\n\n\n\n[Grader reasoning]: All deterministic test verification commands completed successfully (exit code 0).",
+   "runtime_disposition": {
+    "authority": "process_exit",
+    "deterministic": "PASS",
+    "deterministic_reason": "DETERMINISTIC_PROCESS_EXIT",
+    "final": "PASS",
+    "semantic": "PASS",
+    "semantic_reason": null
+   },
+   "self_corrected": true,
+   "self_correction_transcript": [
+    {
+     "action": "patched calc.py",
+     "turn": 1
+    }
+   ],
+   "self_correction_turns": 2,
+   "steps": [
+    {
+     "command": [
+      "<python:1>",
+      "-m",
+      "pytest"
+     ],
+     "exit_code": 0,
+     "resources": {
+      "address_space_enforcement": "advisory",
+      "address_space_limit_mb": 4096,
+      "cpu_seconds": 240,
+      "jvm_options": [],
+      "memory_budget_mb": 4096,
+      "strategy": "address_space"
+     },
+     "stderr": "",
+     "stdout": "1 passed\n",
+     "timed_out": false
+    }
+   ],
+   "success": true,
+   "type": "test"
+  }
+ ],
+ "outcome": "returned",
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": false,
+  "cached_judgment": null,
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": false,
+  "validator_java_home_override": null,
+  "validator_timings": [],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "a deterministic command passing after a resolved self-correction: process_exit PASS, self_corrected",
+ "trace": [
+  {
+   "interpreter_grounding": [
+    [
+     "python3",
+     "-m",
+     "pytest"
+    ]
+   ]
+  },
+  {
+   "argv": [
+    "<python:1>",
+    "-m",
+    "pytest"
+   ],
+   "contained": false,
+   "cwd": "<wt:1>",
+   "env": true,
+   "spawn": "pytest",
+   "stdin": null,
+   "timeout": 37
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "runtime_verification",
+   "stage": "validator",
+   "success": false
+  },
+  {
+   "active_code_context": "=== ACTIVE CODE CONTEXT ===",
+   "files_in_scope": [
+    "calc.py",
+    "main.py"
+   ],
+   "max_turns": 4,
+   "self_correction": "run_verification",
+   "writable_files": [
+    "calc.py"
+   ]
+  },
+  {
+   "event": "auxiliary.failed",
+   "evidence": "event"
+  },
+  {
+   "interpreter_grounding": [
+    [
+     "python3",
+     "-m",
+     "pytest"
+    ]
+   ]
+  },
+  {
+   "argv": [
+    "<python:1>",
+    "-m",
+    "pytest"
+   ],
+   "contained": false,
+   "cwd": "<wt:1>",
+   "env": true,
+   "spawn": "pytest",
+   "stdin": null,
+   "timeout": 37
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "runtime_verification",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "commands": [
+     [
+      "python3",
+      "-m",
+      "pytest"
+     ]
+    ],
+    "deterministic_result": "PASS",
+    "graded_by": "process_exit",
+    "output": "=== Step 1/1: <python:1> -m pytest ===\n1 passed\n\n\n\n[Grader reasoning]: All deterministic test verification commands completed successfully (exit code 0).",
+    "runtime_disposition": {
+     "authority": "process_exit",
+     "deterministic": "PASS",
+     "deterministic_reason": "DETERMINISTIC_PROCESS_EXIT",
+     "final": "PASS",
+     "semantic": "PASS",
+     "semantic_reason": null
+    },
+    "self_corrected": true,
+    "self_correction_transcript": [
+     {
+      "action": "patched calc.py",
+      "turn": 1
+     }
+    ],
+    "self_correction_turns": 2,
+    "steps": [
+     {
+      "command": [
+       "<python:1>",
+       "-m",
+       "pytest"
+      ],
+      "exit_code": 0,
+      "resources": {
+       "address_space_enforcement": "advisory",
+       "address_space_limit_mb": 4096,
+       "cpu_seconds": 240,
+       "jvm_options": [],
+       "memory_budget_mb": 4096,
+       "strategy": "address_space"
+      },
+      "stderr": "",
+      "stdout": "1 passed\n",
+      "timed_out": false
+     }
+    ],
+    "success": true,
+    "type": "test"
+   },
+   "success": true,
+   "type": "test"
+  },
+  {
+   "context": "version unspecified",
+   "skill_verified": "calc-conventions"
+  }
+ ],
+ "worktree_changes": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ }
+}

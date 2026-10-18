@@ -1,0 +1,322 @@
+{
+ "events": [
+  {
+   "failure_type": null,
+   "kind": "candidate.deterministic_transformation",
+   "message": "pom.xml corrected in the candidate (exec_main_class) before verification",
+   "operation": null,
+   "source": "attempt.pom_corrections"
+  }
+ ],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "commands": [
+    [
+     "javac",
+     "-d",
+     ".kriya/runtime-verification/classes",
+     "src/main/java/org/example/App.java"
+    ],
+    [
+     "java",
+     "-cp",
+     ".kriya/runtime-verification/classes",
+     "org.example.App"
+    ]
+   ],
+   "deterministic_result": null,
+   "graded_by": "llm",
+   "output": "=== Step 1/2: javac -d .kriya/runtime-verification/classes src/main/java/org/example/App.java ===\n6\n\n\n\n=== Step 2/2: java -cp .kriya/runtime-verification/classes org.example.App ===\n6\n\n\n\n[Grader reasoning]: the output shows 6",
+   "resources": {
+    "address_space_enforcement": null,
+    "address_space_limit_mb": null,
+    "cpu_seconds": 240,
+    "jvm_options": [
+     "-Xmx2048m",
+     "-XX:MaxMetaspaceSize=512m",
+     "-XX:MaxDirectMemorySize=512m"
+    ],
+    "memory_budget_mb": 4096,
+    "strategy": "jvm_heap"
+   },
+   "runtime_artifacts": [],
+   "runtime_disposition": {
+    "authority": "llm",
+    "deterministic": "NONE",
+    "deterministic_reason": null,
+    "final": "PASS",
+    "semantic": "PASS",
+    "semantic_reason": null
+   },
+   "steps": [
+    {
+     "command": [
+      "javac",
+      "-d",
+      ".kriya/runtime-verification/classes",
+      "src/main/java/org/example/App.java"
+     ],
+     "exit_code": 0,
+     "resources": {
+      "address_space_enforcement": null,
+      "address_space_limit_mb": null,
+      "cpu_seconds": 240,
+      "jvm_options": [
+       "-Xmx2048m",
+       "-XX:MaxMetaspaceSize=512m",
+       "-XX:MaxDirectMemorySize=512m"
+      ],
+      "memory_budget_mb": 4096,
+      "strategy": "jvm_heap"
+     },
+     "stderr": "",
+     "stdout": "6\n",
+     "timed_out": false
+    },
+    {
+     "command": [
+      "java",
+      "-cp",
+      ".kriya/runtime-verification/classes",
+      "org.example.App"
+     ],
+     "exit_code": 0,
+     "resources": {
+      "address_space_enforcement": null,
+      "address_space_limit_mb": null,
+      "cpu_seconds": 240,
+      "jvm_options": [
+       "-Xmx2048m",
+       "-XX:MaxMetaspaceSize=512m",
+       "-XX:MaxDirectMemorySize=512m"
+      ],
+      "memory_budget_mb": 4096,
+      "strategy": "jvm_heap"
+     },
+     "stderr": "",
+     "stdout": "6\n",
+     "timed_out": false
+    }
+   ],
+   "success": true,
+   "type": "run_verification"
+  }
+ ],
+ "outcome": "returned",
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": true,
+  "cached_judgment": {
+   "command_source": "inferred",
+   "execution_mode": "finite_command",
+   "input_channel": "none",
+   "managed_service": null,
+   "reasoning": "main.py prints mul(2, 3)",
+   "run_commands": [
+    [
+     "mvn",
+     "exec:java"
+    ]
+   ],
+   "should_run": true,
+   "success_criteria": "The program prints 6"
+  },
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": true,
+  "validator_java_home_override": null,
+  "validator_timings": [
+   [
+    "run_verification",
+    true,
+    true
+   ]
+  ],
+  "validator_tree_bound": true
+ },
+ "terminal_path": "the candidate's pom corrections are applied (and the tree bound) before the run",
+ "trace": [
+  {
+   "build_file_content": true,
+   "files_written": [
+    "pom.xml",
+    "src/main/java/org/example/App.java"
+   ],
+   "model": "judge"
+  },
+  {
+   "evidence": "candidate.change",
+   "path": "pom.xml"
+  },
+  {
+   "interpreter_grounding": [
+    [
+     "javac",
+     "-d",
+     ".kriya/runtime-verification/classes",
+     "src/main/java/org/example/App.java"
+    ],
+    [
+     "java",
+     "-cp",
+     ".kriya/runtime-verification/classes",
+     "org.example.App"
+    ]
+   ]
+  },
+  {
+   "argv": [
+    "javac",
+    "-d",
+    ".kriya/runtime-verification/classes",
+    "src/main/java/org/example/App.java"
+   ],
+   "contained": false,
+   "cwd": "<wt:1>",
+   "env": true,
+   "spawn": "jvm",
+   "stdin": null,
+   "timeout": 37
+  },
+  {
+   "argv": [
+    "java",
+    "-cp",
+    ".kriya/runtime-verification/classes",
+    "org.example.App"
+   ],
+   "contained": false,
+   "cwd": "<wt:1>",
+   "env": true,
+   "spawn": "jvm",
+   "stdin": null,
+   "timeout": 37
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "runtime_verification",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "distrust_notice": false,
+   "files_written": [
+    "pom.xml",
+    "src/main/java/org/example/App.java"
+   ],
+   "model": "grader",
+   "retained_evidence": true,
+   "returncode": 0,
+   "timed_out": false
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "commands": [
+     [
+      "javac",
+      "-d",
+      ".kriya/runtime-verification/classes",
+      "src/main/java/org/example/App.java"
+     ],
+     [
+      "java",
+      "-cp",
+      ".kriya/runtime-verification/classes",
+      "org.example.App"
+     ]
+    ],
+    "deterministic_result": null,
+    "graded_by": "llm",
+    "output": "=== Step 1/2: javac -d .kriya/runtime-verification/classes src/main/java/org/example/App.java ===\n6\n\n\n\n=== Step 2/2: java -cp .kriya/runtime-verification/classes org.example.App ===\n6\n\n\n\n[Grader reasoning]: the output shows 6",
+    "resources": {
+     "address_space_enforcement": null,
+     "address_space_limit_mb": null,
+     "cpu_seconds": 240,
+     "jvm_options": [
+      "-Xmx2048m",
+      "-XX:MaxMetaspaceSize=512m",
+      "-XX:MaxDirectMemorySize=512m"
+     ],
+     "memory_budget_mb": 4096,
+     "strategy": "jvm_heap"
+    },
+    "runtime_artifacts": [],
+    "runtime_disposition": {
+     "authority": "llm",
+     "deterministic": "NONE",
+     "deterministic_reason": null,
+     "final": "PASS",
+     "semantic": "PASS",
+     "semantic_reason": null
+    },
+    "steps": [
+     {
+      "command": [
+       "javac",
+       "-d",
+       ".kriya/runtime-verification/classes",
+       "src/main/java/org/example/App.java"
+      ],
+      "exit_code": 0,
+      "resources": {
+       "address_space_enforcement": null,
+       "address_space_limit_mb": null,
+       "cpu_seconds": 240,
+       "jvm_options": [
+        "-Xmx2048m",
+        "-XX:MaxMetaspaceSize=512m",
+        "-XX:MaxDirectMemorySize=512m"
+       ],
+       "memory_budget_mb": 4096,
+       "strategy": "jvm_heap"
+      },
+      "stderr": "",
+      "stdout": "6\n",
+      "timed_out": false
+     },
+     {
+      "command": [
+       "java",
+       "-cp",
+       ".kriya/runtime-verification/classes",
+       "org.example.App"
+      ],
+      "exit_code": 0,
+      "resources": {
+       "address_space_enforcement": null,
+       "address_space_limit_mb": null,
+       "cpu_seconds": 240,
+       "jvm_options": [
+        "-Xmx2048m",
+        "-XX:MaxMetaspaceSize=512m",
+        "-XX:MaxDirectMemorySize=512m"
+       ],
+       "memory_budget_mb": 4096,
+       "strategy": "jvm_heap"
+      },
+      "stderr": "",
+      "stdout": "6\n",
+      "timed_out": false
+     }
+    ],
+    "success": true,
+    "type": "run_verification"
+   },
+   "success": true,
+   "type": "run_verification"
+  }
+ ],
+ "worktree_changes": {
+  "added": [
+   ".kriya/control/commits/<hex:1>.json"
+  ],
+  "changed": [
+   "pom.xml"
+  ],
+  "removed": []
+ }
+}

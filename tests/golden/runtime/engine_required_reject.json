@@ -1,0 +1,84 @@
+{
+ "result": {
+  "candidate_gates_passed": false,
+  "failure_category": "environment_failure",
+  "overall_attempt_passed": false,
+  "quality_gates_passed": false,
+  "terminal_regression_passed": false
+ },
+ "terminal_path": "required runtime REJECT: the source approved, the runtime-command review declined -> REQUIRED_RUNTIME_VERIFICATION_DECLINED stop, nothing executed",
+ "trace": [
+  {
+   "evidence": "attempt.opened"
+  },
+  {
+   "model": "developer"
+  },
+  {
+   "evidence": "candidate.change",
+   "path": "calc.py"
+  },
+  {
+   "answer": true,
+   "approval": "source",
+   "reason": "sha256:7d7d42e3aee690bf"
+  },
+  {
+   "event": "approval.decision",
+   "evidence": "event"
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "compile",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "success": true,
+   "type": "compile"
+  },
+  {
+   "model": "judge"
+  },
+  {
+   "answer": false,
+   "approval": "runtime",
+   "reason": "sha256:c91c5c5e0e78e484+277"
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "attempted_edits": [],
+    "attribution_confidence": null,
+    "attribution_kind": "INFRASTRUCTURE_DEFECT",
+    "attribution_reasoning": null,
+    "attribution_tier": null,
+    "authoritative_files": [],
+    "failed_content": {},
+    "file_locations": [],
+    "likely_files": [],
+    "milestone_id": null,
+    "mode": null,
+    "output": "REQUIRED_RUNTIME_VERIFICATION_DECLINED: the declared runtime check was not authorized, so correctness remains unverified.",
+    "plan_id": null,
+    "planned_files": [],
+    "self_correction_attempt": null,
+    "subtask_id": null,
+    "success": false,
+    "type": "verification_infrastructure_failure",
+    "verification_target": null
+   },
+   "success": false,
+   "type": "verification_infrastructure_failure"
+  },
+  {
+   "event": "attempt.failed",
+   "evidence": "event"
+  },
+  {
+   "evidence": "attempt.concluded"
+  }
+ ]
+}

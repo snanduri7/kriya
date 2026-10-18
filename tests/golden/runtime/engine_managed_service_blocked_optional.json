@@ -1,0 +1,67 @@
+{
+ "result": {
+  "candidate_gates_passed": false,
+  "failure_category": "quality_gates_exhausted",
+  "overall_attempt_passed": true,
+  "quality_gates_passed": false,
+  "terminal_regression_passed": true
+ },
+ "terminal_path": "managed service in human-in-the-loop, optional: recorded as declined, nothing started, success",
+ "trace": [
+  {
+   "evidence": "attempt.opened"
+  },
+  {
+   "model": "developer"
+  },
+  {
+   "evidence": "candidate.change",
+   "path": "calc.py"
+  },
+  {
+   "answer": true,
+   "approval": "source",
+   "reason": "sha256:7d7d42e3aee690bf"
+  },
+  {
+   "event": "approval.decision",
+   "evidence": "event"
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "compile",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "success": true,
+   "type": "compile"
+  },
+  {
+   "model": "judge"
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "tests",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "success": true,
+   "type": "regression_test"
+  },
+  {
+   "event": "terminal_regression.passed",
+   "evidence": "event"
+  },
+  {
+   "event": "attempt.passed",
+   "evidence": "event"
+  },
+  {
+   "evidence": "attempt.concluded"
+  }
+ ]
+}

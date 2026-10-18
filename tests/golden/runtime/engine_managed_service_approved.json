@@ -1,0 +1,86 @@
+{
+ "result": {
+  "candidate_gates_passed": false,
+  "failure_category": "quality_gates_exhausted",
+  "overall_attempt_passed": true,
+  "quality_gates_passed": false,
+  "terminal_regression_passed": true
+ },
+ "terminal_path": "managed service (autonomous): started, ready, probed (PROBE_PASSED), terminated",
+ "trace": [
+  {
+   "evidence": "attempt.opened"
+  },
+  {
+   "model": "developer"
+  },
+  {
+   "evidence": "candidate.change",
+   "path": "calc.py"
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "compile",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "success": true,
+   "type": "compile"
+  },
+  {
+   "model": "judge"
+  },
+  {
+   "contained": false,
+   "cwd": "<workspace:1>/.kriya/worktree",
+   "start_managed": [
+    "<python:1>",
+    "main.py"
+   ]
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "commands": [
+     [
+      "<python:1>",
+      "main.py"
+     ]
+    ],
+    "deterministic_result": "PASS",
+    "graded_by": "managed_service_probe",
+    "managed_service_outcome": "PROBE_PASSED",
+    "output": "stdout:\nservice listening on 127.0.0.1:8765\n\n\nstderr:\n\n\nprobe_status: 200\nprobe_body: {\"status\": \"ok\"}\n\n[Managed service probe]: probe returned 200",
+    "success": true,
+    "type": "run_verification"
+   },
+   "success": true,
+   "type": "run_verification"
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "tests",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "success": true,
+   "type": "regression_test"
+  },
+  {
+   "event": "terminal_regression.passed",
+   "evidence": "event"
+  },
+  {
+   "event": "attempt.passed",
+   "evidence": "event"
+  },
+  {
+   "evidence": "attempt.concluded"
+  }
+ ]
+}

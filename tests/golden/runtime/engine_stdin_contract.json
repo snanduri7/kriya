@@ -1,0 +1,150 @@
+{
+ "result": {
+  "candidate_gates_passed": true,
+  "failure_category": null,
+  "overall_attempt_passed": true,
+  "quality_gates_passed": true,
+  "terminal_regression_passed": true
+ },
+ "terminal_path": "input_channel stdin: the run gets the synthetic input on stdin",
+ "trace": [
+  {
+   "evidence": "attempt.opened"
+  },
+  {
+   "model": "developer"
+  },
+  {
+   "evidence": "candidate.change",
+   "path": "calc.py"
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "compile",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "success": true,
+   "type": "compile"
+  },
+  {
+   "model": "judge"
+  },
+  {
+   "argv": [
+    "<python:1>",
+    "main.py"
+   ],
+   "contained": false,
+   "cwd": "<workspace:1>/.kriya/worktree",
+   "env": true,
+   "spawn": "app",
+   "stdin": "kriya-verification-input",
+   "timeout": 90
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "runtime_verification",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "model": "grader"
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "commands": [
+     [
+      "python3",
+      "main.py"
+     ]
+    ],
+    "deterministic_result": null,
+    "graded_by": "llm",
+    "output": "=== Step 1/1: <python:1> main.py ===\n6\n\n\n\n[Grader reasoning]: the output shows 6",
+    "runtime_disposition": {
+     "authority": "llm",
+     "deterministic": "NONE",
+     "deterministic_reason": null,
+     "final": "PASS",
+     "semantic": "PASS",
+     "semantic_reason": "VERIFIER_CONFIRMED"
+    },
+    "steps": [
+     {
+      "command": [
+       "<python:1>",
+       "main.py"
+      ],
+      "exit_code": 0,
+      "resources": {
+       "address_space_enforcement": "advisory",
+       "address_space_limit_mb": 4096,
+       "cpu_seconds": 240,
+       "jvm_options": [],
+       "memory_budget_mb": 4096,
+       "strategy": "address_space"
+      },
+      "stderr": "",
+      "stdout": "6\n",
+      "timed_out": false
+     }
+    ],
+    "success": true,
+    "type": "run_verification",
+    "verifier_evidence": [
+     {
+      "answered": true,
+      "budget_bytes": 66515,
+      "capture_truncation": [],
+      "decisive_windows_omitted": false,
+      "distinct_signature_overflow": 0,
+      "extraction_version": "verifier-evidence/1",
+      "head_tail": [],
+      "included_windows": [],
+      "model": "primary-coder:30b",
+      "omitted_ranges": [],
+      "omitted_windows": [],
+      "package_truncated": false,
+      "rendered_bytes": 161,
+      "rendered_chars": 161,
+      "rendered_sha256": "91a75bf16e6a66c44a541bc4deff2d0ae23714bbf2795028de3f239e0deb1514",
+      "truncation": []
+     }
+    ]
+   },
+   "success": true,
+   "type": "run_verification"
+  },
+  {
+   "event": "candidate_gates.passed",
+   "evidence": "event"
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "tests",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "success": true,
+   "type": "regression_test"
+  },
+  {
+   "event": "terminal_regression.passed",
+   "evidence": "event"
+  },
+  {
+   "event": "attempt.passed",
+   "evidence": "event"
+  },
+  {
+   "evidence": "attempt.concluded"
+  }
+ ]
+}

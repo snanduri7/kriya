@@ -1,0 +1,38 @@
+{
+ "events": [],
+ "gate_outcomes": [],
+ "outcome": "returned",
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": true,
+  "cached_judgment": {
+   "infrastructure_error": "judge backend down",
+   "run_commands": null,
+   "should_run": false,
+   "success_criteria": ""
+  },
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": true,
+  "validator_java_home_override": null,
+  "validator_timings": [],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "the judge unavailable, optional: cached as should_run False, nothing run",
+ "trace": [
+  {
+   "build_file_content": false,
+   "files_written": [
+    "calc.py",
+    "main.py"
+   ],
+   "model": "judge"
+  }
+ ],
+ "worktree_changes": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ }
+}

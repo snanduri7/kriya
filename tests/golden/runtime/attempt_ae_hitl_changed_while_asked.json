@@ -1,0 +1,35 @@
+{
+ "events": [],
+ "gate_outcomes": [],
+ "outcome": "returned",
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": false,
+  "cached_judgment": null,
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": true,
+  "toolchain_checked": false,
+  "validator_java_home_override": null,
+  "validator_timings": [],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "the set changed while asked (every round): re-reviewed MAX_REVIEW_ROUNDS times, never executed, declined",
+ "trace": [
+  {
+   "answer": true,
+   "approval": "runtime",
+   "reason": "sha256:c91c5c5e0e78e484+277"
+  },
+  {
+   "answer": true,
+   "approval": "runtime",
+   "reason": "sha256:56b9e5351fa04122+285"
+  }
+ ],
+ "worktree_changes": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ }
+}

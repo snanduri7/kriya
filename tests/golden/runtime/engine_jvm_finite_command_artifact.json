@@ -1,0 +1,185 @@
+{
+ "result": {
+  "candidate_gates_passed": true,
+  "failure_category": null,
+  "overall_attempt_passed": true,
+  "quality_gates_passed": true,
+  "terminal_regression_passed": true
+ },
+ "terminal_path": "java -jar of a jar no gate builds: mvn package (validator environment), then the run",
+ "trace": [
+  {
+   "evidence": "attempt.opened"
+  },
+  {
+   "model": "developer"
+  },
+  {
+   "evidence": "candidate.change",
+   "path": "src/main/java/org/example/App.java"
+  },
+  {
+   "maven": [
+    "clean",
+    "compile",
+    "-Dmaven.compiler.showWarnings=true",
+    "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked"
+   ],
+   "tooling_only": false
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "compile",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "success": true,
+   "type": "compile"
+  },
+  {
+   "model": "judge"
+  },
+  {
+   "argv": [
+    "mvn",
+    "package",
+    "-DskipTests"
+   ],
+   "contained": false,
+   "cwd": "<workspace:1>/.kriya/worktree",
+   "env": true,
+   "spawn": "maven",
+   "stdin": null,
+   "timeout": 300
+  },
+  {
+   "argv": [
+    "java",
+    "-jar",
+    "target/app-1.0.jar"
+   ],
+   "contained": false,
+   "cwd": "<workspace:1>/.kriya/worktree",
+   "env": true,
+   "spawn": "app",
+   "stdin": null,
+   "timeout": 90
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "runtime_verification",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "model": "grader"
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "commands": [
+     [
+      "java",
+      "-jar",
+      "target/app-1.0.jar"
+     ]
+    ],
+    "deterministic_result": null,
+    "graded_by": "llm",
+    "output": "=== Step 1/1: java -jar target/app-1.0.jar ===\n6\n\n\n\n[Grader reasoning]: the output shows 6",
+    "runtime_disposition": {
+     "authority": "llm",
+     "deterministic": "NONE",
+     "deterministic_reason": null,
+     "final": "PASS",
+     "semantic": "PASS",
+     "semantic_reason": "VERIFIER_CONFIRMED"
+    },
+    "steps": [
+     {
+      "command": [
+       "java",
+       "-jar",
+       "target/app-1.0.jar"
+      ],
+      "exit_code": 0,
+      "resources": {
+       "address_space_enforcement": null,
+       "address_space_limit_mb": null,
+       "cpu_seconds": 240,
+       "jvm_options": [
+        "-Xmx2048m",
+        "-XX:MaxMetaspaceSize=512m",
+        "-XX:MaxDirectMemorySize=512m"
+       ],
+       "memory_budget_mb": 4096,
+       "strategy": "jvm_heap"
+      },
+      "stderr": "",
+      "stdout": "6\n",
+      "timed_out": false
+     }
+    ],
+    "success": true,
+    "type": "run_verification",
+    "verifier_evidence": [
+     {
+      "answered": true,
+      "budget_bytes": 66482,
+      "capture_truncation": [],
+      "decisive_windows_omitted": false,
+      "distinct_signature_overflow": 0,
+      "extraction_version": "verifier-evidence/1",
+      "head_tail": [],
+      "included_windows": [],
+      "model": "primary-coder:30b",
+      "omitted_ranges": [],
+      "omitted_windows": [],
+      "package_truncated": false,
+      "rendered_bytes": 93,
+      "rendered_chars": 93,
+      "rendered_sha256": "94a1c44e4812814311d3601f461963c330868ae8afa7ee4833120c30a686c197",
+      "truncation": []
+     }
+    ]
+   },
+   "success": true,
+   "type": "run_verification"
+  },
+  {
+   "event": "candidate_gates.passed",
+   "evidence": "event"
+  },
+  {
+   "maven": [
+    "test"
+   ],
+   "tooling_only": false
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "tests",
+   "stage": "validator",
+   "success": true
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "success": true,
+   "type": "regression_test"
+  },
+  {
+   "event": "terminal_regression.passed",
+   "evidence": "event"
+  },
+  {
+   "event": "attempt.passed",
+   "evidence": "event"
+  },
+  {
+   "evidence": "attempt.concluded"
+  }
+ ]
+}

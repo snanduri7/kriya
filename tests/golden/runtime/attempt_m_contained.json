@@ -1,0 +1,93 @@
+{
+ "events": [],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "commands": [
+    [
+     "<python:1>",
+     "main.py"
+    ]
+   ],
+   "deterministic_result": "PASS",
+   "graded_by": "managed_service_probe",
+   "managed_service_outcome": "PROBE_PASSED",
+   "output": "stdout:\nservice listening on 127.0.0.1:8765\n\n\nstderr:\n\n\nprobe_status: 200\nprobe_body: {\"status\": \"ok\"}\n\n[Managed service probe]: probe returned 200",
+   "success": true,
+   "type": "run_verification"
+  }
+ ],
+ "outcome": "returned",
+ "state": {
+  "approved_fingerprint": false,
+  "cached_basis": false,
+  "cached_judgment": null,
+  "java_home_override": null,
+  "plan_scope_conflict": null,
+  "run_verification_declined": false,
+  "toolchain_checked": false,
+  "validator_java_home_override": null,
+  "validator_timings": [
+   [
+    "managed_service_verification",
+    true,
+    true
+   ]
+  ],
+  "validator_tree_bound": false
+ },
+ "terminal_path": "the validator's containment profile and backend reach the launched service",
+ "trace": [
+  {
+   "interpreter_grounding": [
+    [
+     "python3",
+     "main.py"
+    ]
+   ]
+  },
+  {
+   "contained": {
+    "backend": "oci",
+    "profile": "candidate-profile"
+   },
+   "cwd": "<wt:1>",
+   "start_managed": [
+    "<python:1>",
+    "main.py"
+   ]
+  },
+  {
+   "readiness": "tcp://127.0.0.1:8765/"
+  },
+  {
+   "probe": "GET 127.0.0.1:8765/health",
+   "timeout": 10.0
+  },
+  {
+   "evidence": "mirror.gate_outcome",
+   "outcome": {
+    "attempt": 1,
+    "commands": [
+     [
+      "<python:1>",
+      "main.py"
+     ]
+    ],
+    "deterministic_result": "PASS",
+    "graded_by": "managed_service_probe",
+    "managed_service_outcome": "PROBE_PASSED",
+    "output": "stdout:\nservice listening on 127.0.0.1:8765\n\n\nstderr:\n\n\nprobe_status: 200\nprobe_body: {\"status\": \"ok\"}\n\n[Managed service probe]: probe returned 200",
+    "success": true,
+    "type": "run_verification"
+   },
+   "success": true,
+   "type": "run_verification"
+  }
+ ],
+ "worktree_changes": {
+  "added": [],
+  "changed": [],
+  "removed": []
+ }
+}
