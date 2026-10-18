@@ -349,7 +349,8 @@ FORBIDDEN = {"kriya.workflow.attempt", "kriya.workflow.retry_strategy", "kriya.w
                                     "kriya/workflow/verification_coordinator.py",
                                     "kriya/workflow/gate_orchestrator.py",
                                     "kriya/workflow/runtime_verification.py",
-                                    "kriya/workflow/decision_evidence.py"])
+                                    "kriya/workflow/decision_evidence.py",
+                                    "kriya/workflow/spec_compliance.py"])
 def test_the_coordinators_depend_only_downward(module):
     """Neither coordinator imports the orchestration modules that call it
     (including lazy imports), so the dependency runs one way. E8: the gate

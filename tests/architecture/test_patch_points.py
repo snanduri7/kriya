@@ -343,7 +343,9 @@ KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_life
                         # E9: runtime and managed-service verification
                         "kriya.workflow.runtime_verification",
                         # E10: the kernel's own attempt-evidence emission helpers
-                        "kriya.workflow.decision_evidence")
+                        "kriya.workflow.decision_evidence",
+                        # E10: spec compliance, requirement verdicts and the contract-change classification
+                        "kriya.workflow.spec_compliance")
 FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
 
 

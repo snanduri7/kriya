@@ -156,6 +156,11 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
             "that inject its collaborators (RuntimeDeps) and re-exports these nine constants (test_workflow, "
             "test_runtime_stdin_rerun_binding and test_managed_service_hitl_fail_closed read the synthetic input and the "
             "managed-service reason code from attempt)"),
+        PartialFacade(
+            "kriya.workflow.spec_compliance", ("_REQUIREMENT_PROVENANCE_STOPWORDS", "_REQUIREMENT_WORD_RE"), "P1",
+            "E10: spec compliance, requirement verdicts and the contract-change classification owned by "
+            "spec_compliance; attempt.py keeps 18 forwarders (GateDeps hands the gates eleven of them, terminal_gate_service "
+            "imports one at call time) and re-exports the two requirement-provenance word primitives"),
     ),
     "kriya/workflow/terminal_commit.py": PartialFacade(
         "kriya.repository.commit", ("CandidateMaterializationError",), "P1",

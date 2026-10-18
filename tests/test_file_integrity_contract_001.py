@@ -943,7 +943,7 @@ def test_the_writer_modules_hold_exactly_their_counted_sites():
 
 def test_the_attempt_and_toolchain_never_write_files_directly():
     for rel in ("kriya/workflow/attempt.py", "kriya/workflow/gate_orchestrator.py", "kriya/workflow/runtime_verification.py",
-                "kriya/workflow/decision_evidence.py", "kriya/workflow/toolchain.py",
+                "kriya/workflow/decision_evidence.py", "kriya/workflow/spec_compliance.py", "kriya/workflow/toolchain.py",
                 "kriya/workflow/file_resolution.py",
                 "kriya/workflow/self_correction.py", "kriya/agents/agent.py"):
         source = (ROOT / rel).read_text()
