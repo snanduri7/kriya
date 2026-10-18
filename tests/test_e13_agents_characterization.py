@@ -286,6 +286,14 @@ def test_an_unrecognised_boolean_is_logged_under_the_agents_logger_name(caplog):
     assert "'should_run' was 7 (type int)" in caplog.records[0].getMessage()
 
 
+@pytest.mark.parametrize("value", [True, False, "true", "yes", "1", "false", "no", "0", ""])
+def test_a_recognised_boolean_spelling_is_not_logged(caplog, value):
+    from kriya.agents.agent import _coerce_bool_field
+    with caplog.at_level(logging.WARNING, logger="kriya.agents.agent"):
+        _coerce_bool_field(value, "should_run", "judge")
+    assert caplog.records == []
+
+
 @pytest.mark.parametrize("criteria,reasoning,expected", [
     ("reads the command line argument", "", "argv"),
     ("pass it as a CLI ARGUMENT", "", "argv"),
