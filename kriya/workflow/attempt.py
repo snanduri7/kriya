@@ -60,6 +60,7 @@ from kriya.tools.service_runtime import (
 from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow import (
     contract_feedback,
+    decision_evidence,
     fallback_decision,
     gate_orchestrator,
     generation_service,
@@ -1383,32 +1384,8 @@ def _only_response_validity_failures(state: GenerationState) -> bool:
 
 def _record_authority_snapshot(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any],
                                capabilities: Dict[str, Any], requested: Dict[str, Any], model: str) -> None:
-    """LR-R1-M1 ``authority.snapshot``: what this Developer invocation was
-    authorized to change and on what source, recorded before inference
-    (observational; every value is already decided above)."""
-    if attempt_evidence_scope.capture_mode() is None:
-        return
-    try:
-        allowed = list(getattr(ctx, "allowed_write_relpaths", None) or [])
-        mode = getattr(ctx, "write_scope_mode", None)
-        targets = []
-        for path, capability in capabilities.items():
-            item = state.known_target_context_items.get(path)
-            targets.append({
-                **capability.summary(),
-                "requested_operation": getattr(requested.get(path), "value", requested.get(path)),
-                "whole_file_authority": capability.full_file,
-                "shown_tier": getattr(item, "tier", None), "shown_member_id": getattr(item, "member_id", None),
-                "shown_is_exact": getattr(item, "is_exact", None), "shown_revision": getattr(item, "revision", None),
-                "member_units_shown": len(state.known_target_member_items.get(path, ())),
-                "in_write_scope": (path in allowed) if allowed else None,
-            })
-        payload = {"model": model, "write_scope_mode": getattr(mode, "value", mode), "authorized_write_scope": allowed,
-                   "targets": targets, "known_target_files": list(kwargs.get("known_target_files") or [])}
-    except Exception as error:  # observational: never alters the attempt
-        logger.warning("Attempt evidence: authority.snapshot not built (%s: %s)", type(error).__name__, error)
-        return
-    attempt_evidence_scope.emit("authority.snapshot", payload)
+    """LR-R1-M1 ``authority.snapshot`` of one Developer invocation. The body is kriya/workflow/decision_evidence.py (E10); its collaborators are resolved here, at call time (_evidence_deps)."""
+    return decision_evidence._record_authority_snapshot(_evidence_deps(), state, ctx, kwargs, capabilities, requested, model)
 
 
 def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -1992,6 +1969,15 @@ def _runtime_deps() -> "runtime_verification.RuntimeDeps":
         _runtime_verification_is_advisory_only=_runtime_verification_is_advisory_only,
         _validate_and_convert_probe=_validate_and_convert_probe,
         _validate_and_convert_readiness=_validate_and_convert_readiness,
+    )
+
+
+def _evidence_deps() -> "decision_evidence.EvidenceDeps":
+    """The moved evidence recorders' collaborators (kriya/workflow/decision_evidence.py), resolved through this
+    module NOW (at call time), so a test patch of ``logger`` or ``_record_obligations_snapshot`` here reaches the
+    moved code exactly as it reached the bodies when they lived here."""
+    return decision_evidence.EvidenceDeps(
+        logger=logger, _record_obligations_snapshot=_record_obligations_snapshot,
     )
 
 
@@ -4210,41 +4196,13 @@ def _verified_no_change_proposal(
 
 
 def _attempt_evidence_boundary(func):
-    """LR-R1-M1: run one attempt inside its attempt-evidence scope
-    (observational). The attempt's number is read from
-    ``state.attempt_number`` at each record - it is incremented first thing
-    inside the attempt, never predicted here."""
-    @functools.wraps(func)
-    async def wrapper(state: GenerationState, ctx: AttemptContext) -> None:
-        with attempt_evidence_scope.attempt_scope(lambda: state.attempt_number) as closing:
-            try:
-                await func(state, ctx)
-                # run_attempt returned: generation and the candidate gates
-                # completed. Whether the attempt as a whole succeeded is the
-                # retry loop's attempt.concluded (later checks run there).
-                closing.update(outcome="RETURNED", candidate_gates_passed=state.candidate_gates_succeeded)
-            finally:
-                _record_obligations_snapshot(ctx)
-    return wrapper
+    """LR-R1-M1: run one attempt inside its attempt-evidence scope. The body is kriya/workflow/decision_evidence.py (E10); its collaborators are resolved here, at call time (_evidence_deps)."""
+    return decision_evidence._attempt_evidence_boundary(_evidence_deps, func)
 
 
 def _record_obligations_snapshot(ctx: AttemptContext) -> None:
-    """LR-R1-M1 ``obligations.snapshot`` at attempt close: the ledger's
-    revision and digest and the unresolved terminal obligations by kind."""
-    ledger = getattr(ctx, "obligation_ledger", None)
-    if ledger is None or attempt_evidence_scope.capture_mode() is None:
-        return
-    try:
-        revision, digest = ledger.fingerprint()
-        unresolved: Dict[str, List[str]] = {}
-        for record in ledger.unresolved_terminal_obligations():
-            unresolved.setdefault(getattr(record.kind, "value", str(record.kind)), []).append(record.id)
-        payload = {"ledger_revision": revision, "ledger_digest": digest,
-                   "unresolved_terminal": {kind: sorted(ids) for kind, ids in sorted(unresolved.items())}}
-    except Exception as error:  # observational: never alters the attempt
-        logger.warning("Attempt evidence: obligations.snapshot not built (%s)", error)
-        return
-    attempt_evidence_scope.emit("obligations.snapshot", payload)
+    """LR-R1-M1 ``obligations.snapshot`` at attempt close. The body is kriya/workflow/decision_evidence.py (E10); its collaborators are resolved here, at call time (_evidence_deps)."""
+    return decision_evidence._record_obligations_snapshot(_evidence_deps(), ctx)
 
 
 def defer_execution_until_source_review(state: GenerationState, ctx: "AttemptContext") -> bool:
