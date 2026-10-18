@@ -81,7 +81,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E9: 3 -> 1 lookup: the three calls (approve-and-execute x2, direct) moved to runtime_verification and read
     # RuntimeDeps (one load in attempt._runtime_deps).
     (A, '_prepare_finite_command_runtime_artifacts'): P(2, A, ((A, 1),), ()),
-    (A, '_reject_exception_masking'): P(1, A, ((A, 2),), ()),
+    # E10: 2 -> 1 lookup: the staging loop's two pre-flight calls moved to candidate_transaction and read
+    # CandidateDeps._reject_exception_masking (one load in attempt._candidate_deps).
+    (A, '_reject_exception_masking'): P(1, A, ((A, 1),), ()),
     (A, '_require_qualified_retry_identity'): P(1, A, ((A, 1),), ()),
     # E8 (guard): 2 -> 2: the toolchain preflight's load moved (GateDeps, one load in attempt._gate_deps); the other stays.
     # E9 characterization: +1 site (tests/test_runtime_verification.py: the direct path's preflight through this name).
@@ -109,7 +111,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (A, '_validate_and_convert_managed_service_contract'): P(2, A, ((A, 1),), ()),
     # E7: 3 -> 3 lookups: the coordinated candidate view's materialization moved to repair_orchestrator and reads
     # RepairDeps.apply_anchored_edits (one load in attempt._repair_deps).
-    (A, 'apply_anchored_edits'): P(1, 'kriya.workflow.edit_safety', ((A, 3),), ()),
+    # E10: 3 -> 2 lookups: the staging loop's and the structural-insertion check's loads moved to candidate_transaction
+    # and read CandidateDeps.apply_anchored_edits (one load in attempt._candidate_deps); RepairDeps keeps its load.
+    (A, 'apply_anchored_edits'): P(1, 'kriya.workflow.edit_safety', ((A, 2),), ()),
     (A, 'defer_execution_until_source_review'): P(1, A, ((A, 1),), ()),
     (A, 'exact_window_reserve'): P(1, 'kriya.workflow.edit_capability', ((A, 2),), ()),
     # E8 (guard): 1 -> 1: the executing gates' load moved (GateDeps, one load in attempt._gate_deps).
@@ -345,7 +349,9 @@ KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_life
                         # E10: the kernel's own attempt-evidence emission helpers
                         "kriya.workflow.decision_evidence",
                         # E10: spec compliance, requirement verdicts and the contract-change classification
-                        "kriya.workflow.spec_compliance")
+                        "kriya.workflow.spec_compliance",
+                        # E10: the candidate staging transaction and its helpers
+                        "kriya.workflow.candidate_transaction")
 FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
 
 

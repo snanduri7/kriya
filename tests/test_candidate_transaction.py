@@ -838,3 +838,114 @@ def test_the_obligations_snapshot_lists_the_unresolved_terminal_obligations_sort
     revision, digest = ledger.fingerprint()
     assert emitted == [("obligations.snapshot", {"ledger_revision": revision, "ledger_digest": digest,
                                                  "unresolved_terminal": {"migration_completion": ["a.first", "z.last"]}})]
+
+
+# ======================================================================================================================
+# The structure (added with the move, kriya/workflow/candidate_transaction.py): run_attempt's per-file loops run as one
+# CandidateTransaction. These pins capture the transaction run_attempt builds (a recording subclass on the owner module,
+# no production hook) and assert what it recorded on the same runs as above: one proposal per file in response order,
+# the decision equal to TODAY's outcome (refused / staged) and the refusing file.
+
+def _transactions(monkeypatch) -> List[Any]:
+    from kriya.workflow import candidate_transaction
+
+    made: List[Any] = []
+    real = candidate_transaction.CandidateTransaction
+
+    class Recording(real):  # type: ignore[misc, valid-type]
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            made.append(self)
+
+    monkeypatch.setattr(candidate_transaction, "CandidateTransaction", Recording)
+    return made
+
+
+def _proposal(path, seq, parse="ok", reason=None, result=None, digest=None):
+    from kriya.workflow.candidate_transaction import FileProposal
+
+    return FileProposal(path=path, response_seq=seq, parse=parse, reason_code=reason, edit_result=result,
+                        staged_digest=digest)
+
+
+def test_a_contract_refusal_is_the_transactions_refusal(tmp_path, monkeypatch):
+    made = _transactions(monkeypatch)
+    run = _Run(tmp_path, [{"filepath": C, "content": "C = 3\n"}, {"filepath": B, **INVALID}], architect=[C, B]).run()
+    assert run.failure is not None and len(made) == 1
+    transaction = made[0]
+    assert transaction.proposals == (_proposal(C, 0), _proposal(B, 1, "invalid", "INVALID_EDIT_PROTOCOL", "refused"))
+    assert (transaction.decision, transaction.reason_code) == ("refused", "INVALID_EDIT_PROTOCOL")
+    assert transaction.refused == ((B, "INVALID_EDIT_PROTOCOL"),)
+
+
+def test_a_staging_refusal_is_the_transactions_refusal_and_earlier_files_stay_unstaged(tmp_path, monkeypatch):
+    made = _transactions(monkeypatch)
+    run = _Run(tmp_path, [_edit(A, A_EDIT), _edit(B, FABRICATED)]).run()
+    reason = run.failure.diagnostics["reason_code"]
+    transaction = made[0]
+    assert transaction.proposals == (_proposal(A, 0), _proposal(B, 1, "ok", reason, "refused"))
+    assert (transaction.decision, transaction.reason_code, transaction.refused) == ("refused", reason, ((B, reason),))
+
+
+def test_a_refusal_by_the_first_file_leaves_the_later_ones_unevaluated(tmp_path, monkeypatch):
+    made = _transactions(monkeypatch)
+    run = _Run(tmp_path, [_edit(B, FABRICATED), _edit(A, A_EDIT)]).run()
+    reason = run.failure.diagnostics["reason_code"]
+    assert made[0].proposals == (_proposal(B, 0, "ok", reason, "refused"), _proposal(A, 1))
+
+
+def test_a_write_scope_refusal_names_the_refused_file(tmp_path, monkeypatch):
+    made = _transactions(monkeypatch)
+    _Run(tmp_path, [_edit(A, A_EDIT), _edit(B, B_EDIT)], write_scope_mode=WriteScopeMode.ALLOWLIST,
+         allowed_write_relpaths=[A]).run()
+    transaction = made[0]
+    assert transaction.refused == ((B, "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE"),)
+    assert transaction.proposals[1].edit_result == "refused" and transaction.proposals[0].edit_result is None
+
+
+def test_a_staged_transaction_records_the_committed_digests(tmp_path, monkeypatch):
+    made = _transactions(monkeypatch)
+    files = [_edit(A, A_EDIT), {"filepath": B, "content": B_SRC}, {"filepath": C, "content": "C = 3\n"}]
+    run = _Run(tmp_path, files, architect=[A, B, C, "pkg/missing.py"]).run()
+    on_disk = run.disk()
+    transaction = made[0]
+    assert transaction.proposals == (_proposal(A, 0, result="staged", digest=on_disk[A]),
+                                     _proposal(B, 1, result="identical", digest=on_disk[B]),
+                                     _proposal(C, 2, result="staged", digest=on_disk[C]))
+    assert (transaction.decision, transaction.reason_code, transaction.refused) == ("staged", None, ())
+
+
+def test_a_refusal_at_the_guarded_commit_is_the_transactions_refusal(tmp_path, monkeypatch):
+    made = _transactions(monkeypatch)
+    run = _Run(tmp_path, [_edit(A, A_EDIT), _edit(B, B_EDIT)], protected_relpath=B).run()
+    assert isinstance(run.error, PolicyDeniedError)
+    transaction = made[0]
+    assert transaction.decision == "refused" and transaction.reason_code == run.error.result.reason_code
+    assert transaction.refused == ()   # no single file was under evaluation: the whole batch was refused
+    assert [p.edit_result for p in transaction.proposals] == ["prepared", "prepared"]
+    assert run.disk() == BASELINE and run.state.candidate_digests == {}
+
+
+def test_the_scenario04_attempts_are_refused_transactions(tmp_path, monkeypatch):
+    """The recorded scenario-04 attempts 3 and 4 (the A3 gate's runs): the transaction decision equals TODAY's outcome,
+    ``refused``, with the invalid sibling as the refusing file and the valid parser proposal never staged."""
+    from integration import test_scenario04_replay as s04
+
+    made = _transactions(monkeypatch)
+    previous3 = s04.Failure(
+        type="anchored_edit", message=f"ANCHORED EDIT FAILURE in {s04.PARSER}: ANCHOR_NOT_IN_FILE",
+        raw_output="ANCHOR_NOT_IN_FILE", file_locations=[s04.FileLocation(filepath=s04.PARSER)],
+        likely_files=[s04.PARSER], attempted_edits=[], diagnostics={"reason_code": "ANCHOR_NOT_IN_FILE"}, attempt=2)
+    s04._replay_attempt(tmp_path / "a3", {s04.PROTOCOL: 9, s04.PARSER: 10}, 2, previous3)
+    previous4 = s04.Failure(
+        type="operation_contract", message=s04._logged_failure("targeted, full-set 1/4 + targeted 1/3: "),
+        raw_output="INVALID_EDIT_PROTOCOL", file_locations=[s04.FileLocation(filepath=s04.PROTOCOL)],
+        likely_files=[s04.PROTOCOL], attempted_edits=[], diagnostics={"reason_code": "INVALID_EDIT_PROTOCOL"}, attempt=3)
+    s04._replay_attempt(tmp_path / "a4", {s04.PROTOCOL: 11, s04.PARSER: 12}, 3, previous4)
+    third, fourth = made
+    assert third.proposals == (_proposal(s04.PROTOCOL, 0, "invalid", "INVALID_EDIT_PROTOCOL", "refused"),
+                               _proposal(s04.PARSER, 1))
+    assert (third.decision, third.refused) == ("refused", ((s04.PROTOCOL, "INVALID_EDIT_PROTOCOL"),))
+    assert fourth.proposals == (_proposal(s04.PROTOCOL, 0, "ok", "INDENTATION_STYLE_MISMATCH", "refused"),
+                                _proposal(s04.PARSER, 1))
+    assert (fourth.decision, fourth.refused) == ("refused", ((s04.PROTOCOL, "INDENTATION_STYLE_MISMATCH"),))

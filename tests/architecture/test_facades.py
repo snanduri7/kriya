@@ -161,6 +161,11 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
             "E10: spec compliance, requirement verdicts and the contract-change classification owned by "
             "spec_compliance; attempt.py keeps 18 forwarders (GateDeps hands the gates eleven of them, terminal_gate_service "
             "imports one at call time) and re-exports the two requirement-provenance word primitives"),
+        PartialFacade(
+            "kriya.workflow.candidate_transaction", ("MAX_SYMBOL_LOCI_PER_FILE", "_RESPONSE_VALIDITY_FAILURES"), "P1",
+            "E10: the candidate staging transaction owned by candidate_transaction; attempt.py keeps 18 "
+            "forwarders that inject its collaborators (CandidateDeps) and re-exports the edit-capability locus bound "
+            "(test_context_edit_protocol_large_file_001 reads it from attempt) and the response-validity failure family"),
     ),
     "kriya/workflow/terminal_commit.py": PartialFacade(
         "kriya.repository.commit", ("CandidateMaterializationError",), "P1",
