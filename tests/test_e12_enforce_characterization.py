@@ -1564,6 +1564,7 @@ async def test_a_failed_workspace_commit_fails_the_run_and_keeps_the_candidate_o
     assert saved[-1]["lifecycle_state"] == "needs_review"
     assert saved[-1]["stage_states"] == {"s1": "pending"}
     assert result.control_state.subtask_states == {"s1": "pending"} and result.control_state.subtask_written_files == {}
+    assert result.control_state.subtask_completion_scope == "candidate"  # orchestrator pin t9: nothing reached the workspace
     save_registry.assert_not_called()
     assert "derived_artifacts" not in legacy
     assert gates_artifacts, "the gates derived the candidate's artifacts (the commit then failed)"
@@ -1704,10 +1705,12 @@ async def test_a_scope_revision_that_fails_revalidation_is_not_retried(tmp_path)
     {"final_review_refusal": {"detail": "unsendable", "reason_code": "FINAL_REVIEW_UNSENDABLE"}},
     {"_skip_write": True, "files": ["a.py"]},
     {"_write": ["a.py", "zzz.py"], "files": ["a.py", "zzz.py"]},
-], ids=["review_refused", "unchanged_bytes", "undeclared_file"])
+    {"quality_gates_passed": None},
+], ids=["review_refused", "unchanged_bytes", "undeclared_file", "gates_unreported"])
 async def test_a_reopened_owner_candidate_must_be_reviewed_changed_and_in_scope(tmp_path, owner_answer):
     """EW04 / EW06 / EW07: each refusal leaves the verification failure standing (no rerun) and is recorded as a
-    rejected reopen."""
+    rejected reopen. The orchestrator's pin (v4) adds the owner whose Quality Gates outcome is not reported at all
+    (None, neither True nor False): acceptance needs the gates to have PASSED."""
     events = []
     with patch("kriya.core.attempt_evidence.scope.mirror_event", side_effect=lambda event: events.append(event)):
         result, calls = await _enforce_scripted(
@@ -1809,3 +1812,78 @@ async def test_a_verification_unit_reopens_its_nearest_completed_ancestor_not_on
     roles = [c["execution_scope"] for c in calls]
     assert "subtask=s0 role=owner_recovery" in roles and "subtask=s2 role=consumer_retry" in roles
     assert [r for r in roles if r.endswith("verification_owner_recovery")] == ["subtask=s0 role=verification_owner_recovery"]
+
+
+# ============================================================================ orchestrator pins (independent mutation campaign over E12)
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing, expected", [("s1", False), ("s2", True)], ids=["nothing_completed", "one_completed"])
+async def test_a_resume_claims_its_own_established_progress_only_for_a_completed_prior_unit(tmp_path, failing, expected):
+    """a7 (any prior unit state that is not completed counted as progress): the first run leaves a prior ControlState;
+    only a COMPLETED unit in it tells validate_plan the existing work is this run's own."""
+    plan = _two_units()
+    await _interrupted(tmp_path, plan, failing=failing)
+    we = _enforce_engine(tmp_path)
+    we.run_generation_workflow = _writer(tmp_path, [])
+    validate = AsyncMock(return_value=PlanValidationResult(valid=True))
+    p1, p2, _ = _planned(plan)
+    with p1, p2, patch(f"{C}.validate_plan", new=validate), patch(f"{C}.create_git_worktree", side_effect=lambda w: w):
+        await WorkflowController(we).execute("Create a.py", str(tmp_path), migration_mode="enforce", resume=True)
+    assert validate.await_args.kwargs["resuming_own_established_progress"] is expected
+
+
+@pytest.mark.asyncio
+async def test_a_plan_that_flips_between_violated_and_satisfied_ends_as_an_oscillation(tmp_path):
+    """r4 (the oscillation reason code dropped): a plan-structure obligation recorded VIOLATED, then SATISFIED, then
+    VIOLATED again (the validator records them in the run's ObligationLedger) exhausts the bounded repair with
+    PLAN_REPAIR_OSCILLATION and never with the plain non-convergence code."""
+    from kriya.workflow.obligations import ObligationAuthority, ObligationKind, ObligationRecord, ObligationStatus
+    statuses = iter([ObligationStatus.VIOLATED, ObligationStatus.SATISFIED, ObligationStatus.VIOLATED])
+
+    async def validate(plan, **kwargs):
+        status = next(statuses)
+        kwargs["obligation_ledger"].record(ObligationRecord(
+            id="plan.subtask.s1.flip", kind=ObligationKind.PLAN_STRUCTURAL_VALIDITY, status=status,
+            authority=ObligationAuthority.DETERMINISTIC, description="s1 flips", source="test",
+            revision=kwargs["revision"], owner_subtask_id="s1", terminal_required=True))
+        return PlanValidationResult(valid=False, errors=["flip"], reason_codes=["FLIP"])
+
+    result, *_ = await _enforce_rounds(_enforce_engine(tmp_path), tmp_path, _plan_of(_unit("s1")), [],
+                                       extra=[patch(f"{C}.validate_plan", new=validate)])
+    codes = result.legacy_result["reason_codes"]
+    assert "PLAN_REPAIR_OSCILLATION" in codes and "PLAN_REPAIR_NON_CONVERGENCE" not in codes
+    assert "STRUCTURED_PLAN_REPAIR_EXHAUSTED" in codes
+
+
+@pytest.mark.asyncio
+async def test_a_refused_contract_never_runs_its_bound_authority_at_baseline(tmp_path, monkeypatch):
+    """a5 (the baseline run gated only on a bound authority): a contract whose admission is refused (here recorded, not
+    blocking: the policy is not `block`) has no baseline authority run."""
+    from kriya.workflow import workflow as wf
+    _with_authority(monkeypatch)
+    baseline = MagicMock(return_value=_report())
+    monkeypatch.setattr(wf, "run_contract_baseline", baseline)
+    result, _ = await _enforce(_enforce_engine(tmp_path), tmp_path, _plan_of(_unit("s1")))
+    baseline.assert_not_called()
+    assert "baseline_authority" not in result.legacy_result
+
+
+@pytest.mark.asyncio
+async def test_a_structural_section_that_occurs_twice_in_the_request_is_left_unfitted(tmp_path):
+    """a9 (a request fitted whenever the structural section occurs at least once): the fit splits the request at the
+    section and needs exactly one occurrence; here the goal repeats it, so the request goes out unchanged."""
+    with patch(f"{C}.build_planning_structural_evidence", return_value=("STRUCT-X", {})):
+        we = _enforce_engine(tmp_path)
+        result, _ = await _enforce(we, tmp_path, _plan_of(_unit("s1")), goal="Create a.py STRUCT-X")
+    assert _request(we).count("STRUCT-X") > 1  # the goal repeats the section (and so does its requirements block)
+    assert result.legacy_result["status"] == "success"
+
+
+def test_the_trace_row_records_how_long_the_enforce_run_took():
+    """f2 (the run's start time not handed to the trace): a run that started 1000 s ago records about that duration."""
+    import time
+    cfg = strict_config()
+    _traced(cfg)._write_enforce_trace("r9", "goal", {"status": "success"}, time.time() - 1000)
+    with sqlite3.connect(trace_db_path(cfg)) as db:
+        ((duration,),) = db.execute("SELECT duration_sec FROM runs").fetchall()
+    assert 999 <= duration < 1100
