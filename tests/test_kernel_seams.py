@@ -20,7 +20,7 @@ import importlib
 import inspect
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 from unittest.mock import patch
 
 import pytest
@@ -304,3 +304,130 @@ def test_a_patch_on_attempt_run_attempt_reaches_only_the_best_of_n_path(best_of_
     assert on_attempt.called is reached
     assert on_workflow.called is not reached
 
+
+
+# ----------------------------------------------------------------------------- E11: the controller's moved names
+# The controller's module-level planning-request, plan-revision, owner-recovery and resume-support code moved to four
+# owner modules (E11); the controller keeps EVERY name: each function as a forwarder with the pre-move kind and
+# signature (MEASURED at 6b33eff, before the move: this table passes on those bytes), each constant and class as a
+# re-export of the owner's object. A forwarder deleted, a default or annotation changed, a coroutine turned into a
+# function, or a re-export rebound fails here.
+E11_CONTROLLER_NAMES: Dict[str, Tuple[str, str, Optional[str]]] = {
+    'build_subtask_goal_text': ('planning_request', 'def', "(subtask: 'Subtask', position: 'int', total: 'int', *, plan: 'Optional[EngineeringPlan]' = None, grounding_goal: 'str' = '') -> 'str'"),
+    'evaluate_plan_edit_feasibility': ('planning_request', 'async', "(config: 'Optional[Any]', plan: 'EngineeringPlan', goal: 'str', workspace_path: 'str') -> 'List[EditFeasibility]'"),
+    'PLANNED_FILE_SOURCE_REASON': ('planning_request', 'str', None),
+    'BOUNDED_SUBTASK_DESIGN': ('planning_request', 'str', None),
+    'split_planned_source': ('planning_request', 'def', "(package: 'Any') -> 'Tuple[List[str], Any]'"),
+    'build_subtask_constraint_context': ('planning_request', 'def', "(original_goal: 'str') -> 'str'"),
+    'build_subtask_semantic_context': ('planning_request', 'def', "(plan: 'EngineeringPlan', subtask: 'Subtask') -> 'str'"),
+    'build_subtask_plan_text': ('planning_request', 'def', "(subtask: 'Subtask') -> 'str'"),
+    'AUTHORITATIVE_PLANNER_SYSTEM_PROMPT': ('planning_request', 'str', None),
+    '_authoritative_planner_extension_candidates': ('planning_request', 'def', "(workspace_path: 'str', max_files: 'int' = 100, *, goal: 'str' = '') -> 'List[str]'"),
+    '_is_strict_regression': ('planning_request', 'def', "(retained_reason_codes: 'Optional[frozenset]', candidate_reason_codes: 'frozenset') -> 'bool'"),
+    '_preserved_reference_must_preserve_lines': ('planning_request', 'def', "(obligation_ledger: 'ObligationLedger') -> 'List[str]'"),
+    '_semantic_contract_must_preserve_lines': ('planning_request', 'def', "(obligation_ledger: 'ObligationLedger') -> 'List[str]'"),
+    '_SUBTASK_MENTION_RE': ('planning_request', 'Pattern', None),
+    '_QUOTED_TOKEN_RE': ('planning_request', 'Pattern', None),
+    '_REQUIRES_PROVIDES_ERROR_KEYWORDS': ('planning_request', 'tuple', None),
+    '_subtask_ids_mentioned': ('planning_request', 'def', "(texts: 'List[str]') -> 'Set[str]'"),
+    '_semantic_contract_regression_subtasks': ('planning_request', 'def', "(obligation_ledger: 'ObligationLedger', regressions_before: 'int', implicated_subtask_ids: 'Set[str]') -> 'List[str]'"),
+    '_PRESERVED_REFERENCE_CONFLICT_RE': ('planning_request', 'Pattern', None),
+    '_preserved_reference_pairs_mentioned': ('planning_request', 'def', "(texts: 'List[str]') -> 'Set[Tuple[str, str]]'"),
+    '_preserved_reference_regressions': ('planning_request', 'def', "(obligation_ledger: 'ObligationLedger', regressions_before: 'int', implicated_pairs: 'Set[Tuple[str, str]]') -> 'List[Tuple[str, str]]'"),
+    'build_authoritative_planner_request': ('planning_request', 'def', "(goal: 'str', *, route_kind: 'Optional[ChangeKind]' = None, extension_candidates: 'Optional[List[str]]' = None, repository_candidates: 'Optional[List[str]]' = None, structural_evidence: 'str' = '') -> 'str'"),
+    '_JAVA_CONSTRUCTOR_INSTANTIATION_RE': ('planning_request', 'Pattern', None),
+    '_JAVA_TYPE_MENTION_RE': ('planning_request', 'Pattern', None),
+    'build_planning_structural_evidence': ('planning_request', 'def', "(workspace_path: 'str', candidate_paths: 'List[str]') -> 'Tuple[str, Dict[str, List[str]]]'"),
+    '_transitive_depends_on': ('planning_request', 'def', "(plan: 'EngineeringPlan', subtask_id: 'str') -> 'set'"),
+    'find_missing_grounded_production_artifacts': ('planning_request', 'def', "(plan: 'EngineeringPlan', resolved_edges: 'Dict[str, List[str]]', *, workspace_path: 'Optional[str]' = None, obligation_ledger: 'Optional[ObligationLedger]' = None, revision: 'object' = None) -> 'List[Dict[str, str]]'"),
+    'build_approved_plan_document': ('planning_request', 'def', "(plan: 'EngineeringPlan', *, plan_hash: 'str', repair_attempts: 'int', stage_states: 'Dict[str, str]', lifecycle_state: 'str') -> 'Dict[str, Any]'"),
+    'transitive_subtask_dependents': ('plan_revision', 'def', "(plan: 'EngineeringPlan', subtask_id: 'str') -> 'List[str]'"),
+    'resolve_scope_conflict_owners': ('owner_recovery', 'def', "(plan: 'EngineeringPlan', required_files: 'List[str]', failed_subtask: 'Subtask') -> 'Dict[str, List[str]]'"),
+    'nearest_mutating_upstream_owner': ('plan_revision', 'def', "(plan: 'EngineeringPlan', subtask: 'Subtask', completed_ids: 'Sequence[str]') -> 'Optional[Subtask]'"),
+    '_GATE_FAILURE_TYPES': ('owner_recovery', 'frozenset', None),
+    'verification_failure_evidence': ('owner_recovery', 'def', "(call_result: 'Mapping[str, Any]') -> 'str'"),
+    'verification_owner_recovery_context': ('owner_recovery', 'def', "(*, verification_subtask_id: 'str', owner_id: 'str', owner_files: 'Sequence[str]', evidence: 'str') -> 'str'"),
+    'ArtifactOwnerResolutionBasis': ('owner_recovery', 'EnumType', None),
+    'OwnerResolution': ('owner_recovery', 'type', None),
+    '_successful_modifiers_in_execution_order': ('owner_recovery', 'def', "(path: 'str', order: 'List[str]', control_state: 'ControlState') -> 'List[str]'"),
+    'resolve_effective_artifact_owner': ('owner_recovery', 'def', "(plan: 'EngineeringPlan', path: 'str', failed_subtask: 'Subtask', order: 'Optional[List[str]]' = None, control_state: 'Optional[ControlState]' = None) -> 'OwnerResolution'"),
+    'resolve_effective_scope_conflict_owners': ('owner_recovery', 'def', "(plan: 'EngineeringPlan', required_files: 'List[str]', failed_subtask: 'Subtask', order: 'Optional[List[str]]' = None, control_state: 'Optional[ControlState]' = None) -> 'Dict[str, List[str]]'"),
+    '_cross_owner_obligation_id': ('owner_recovery', 'def', "(originating_subtask_id: 'str', owner_subtask_id: 'str', required_files: 'List[str]', failure_family: 'str', generation: 'int') -> 'str'"),
+    '_prior_cross_owner_musts': ('owner_recovery', 'def', "(ledger: 'Optional[ObligationLedger]', *, owner_subtask_id: 'str', required_files: 'List[str]') -> 'List[str]'"),
+    '_get_or_create_cross_owner_obligation': ('owner_recovery', 'def', "(ledger: 'Optional[ObligationLedger]', *, originating_subtask_id: 'str', owner_subtask_id: 'str', required_files: 'List[str]', scope_conflict: 'Dict[str, Any]', generation: 'int', revision: 'Any') -> 'Optional[ObligationRecord]'"),
+    '_build_owner_recovery_context': ('owner_recovery', 'def', "(*, owner_id: 'str', failed_subtask_id: 'str', required_owner_files: 'List[str]', cross_owner_obligation: 'Optional[ObligationRecord]', scope_conflict: 'Dict[str, Any]') -> 'str'"),
+    '_evaluate_recovery_acceptance_precheck': ('owner_recovery', 'def', "(*, scope_conflict: 'Dict[str, Any]', plan_workspace_path: 'str', required_owner_files: 'List[str]') -> 'Optional[bool]'"),
+    '_participant_evidence_is_grounded': ('owner_recovery', 'def', "(scope_conflict: 'Dict[str, Any]') -> 'bool'"),
+    '_scope_conflict_evidence_authority': ('owner_recovery', 'def', "(scope_conflict: 'Dict[str, Any]') -> 'ObligationAuthority'"),
+    'derive_recovery_participants': ('owner_recovery', 'def', "(plan: 'EngineeringPlan', scope_conflict: 'Dict[str, Any]', failed_subtask: 'Subtask', order: 'Optional[List[str]]' = None, control_state: 'Optional[ControlState]' = None, recovery_generation_by_key: 'Optional[Dict[Tuple[str, str, Tuple[str, ...]], int]]' = None) -> 'Tuple[RecoveryParticipant, ...]'"),
+    '_order_recovery_groups': ('owner_recovery', 'def', "(plan: 'EngineeringPlan', participants: 'Tuple[RecoveryParticipant, ...]') -> 'Optional[Tuple[RecoveryOwnerGroup, ...]]'"),
+    'build_recovery_execution_plan': ('owner_recovery', 'def', "(plan: 'EngineeringPlan', scope_conflict: 'Dict[str, Any]', failed_subtask: 'Subtask', *, order: 'Optional[List[str]]' = None, control_state: 'Optional[ControlState]' = None, plan_generation: 'int' = 0, recovery_generation_by_key: 'Optional[Dict[Tuple[str, str, Tuple[str, ...]], int]]' = None) -> 'Optional[RecoveryExecutionPlan]'"),
+    '_attempt_owner_recovery_self_correction': ('owner_recovery', 'async', "(*, kernel: 'Any', developer_llm: 'Any', plan_workspace_path: 'str', workspace_path: 'str', owner: 'Subtask', required_owner_files: 'List[str]', scope_conflict: 'Dict[str, Any]') -> 'Optional[Dict[str, Any]]'"),
+    '_integration_reference_token': ('owner_recovery', 'def', "(path: 'str') -> 'str'"),
+    '_integration_evidence': ('owner_recovery', 'def', "(plan: 'EngineeringPlan', rel: 'Any', consumer_id: 'str', producer_paths: 'List[str]', consumer_paths: 'List[str]', established_file_context: 'Dict[str, str]', provenance: 'EstablishedProvenance') -> 'Tuple[List[str], Dict[str, Any]]'"),
+    '_evaluate_integration_obligations': ('owner_recovery', 'def', "(plan: 'EngineeringPlan', obligation_ledger: 'Optional[ObligationLedger]', completed_subtask_id: 'str', established_file_context: 'Dict[str, str]', revision: 'Any', provenance: 'Optional[EstablishedProvenance]' = None) -> 'None'"),
+    '_transitive_dependents': ('plan_revision', 'def', "(plan: 'EngineeringPlan', subtask_id: 'str') -> 'set[str]'"),
+    '_transitive_upstream_ids': ('plan_revision', 'def', "(plan: 'EngineeringPlan', subtask_id: 'str') -> 'set[str]'"),
+    'PLAN_SCOPE_REVISION_REQUIRED': ('plan_revision', 'str', None),
+    'subtask_scope_conflict_report': ('plan_revision', 'def', "(scope_conflict: 'Dict[str, Any]') -> 'Tuple[str, Tuple[str, ...]]'"),
+    '_plan_scope_conflict_files': ('plan_revision', 'def', "(scope_conflict: 'Optional[Dict[str, object]]') -> 'List[str]'"),
+    'revise_plan_for_grounded_scope_owner': ('plan_revision', 'def', "(plan: 'EngineeringPlan', failed_subtask_id: 'str', grounded_files: 'List[str]', workspace_path: 'str') -> 'EngineeringPlan'"),
+    'revise_plan_for_planned_prerequisite': ('plan_revision', 'def', "(plan: 'EngineeringPlan', *, consumer_subtask_id: 'str', owner_subtask_id: 'str', capability: 'str', consumer_artifacts: 'Iterable[str]' = ()) -> 'EngineeringPlan'"),
+    'resolve_python_module_to_candidate_artifact_path': ('plan_revision', 'def', "(module_name: 'str', workspace_path: 'str') -> 'Optional[str]'"),
+    'resolve_runtime_plan_gap_owner': ('plan_revision', 'def', "(plan: 'EngineeringPlan', candidate_path: 'str', failed_subtask: 'Subtask') -> 'Optional[str]'"),
+    'revise_plan_for_runtime_plan_gap': ('plan_revision', 'def', "(plan: 'EngineeringPlan', *, owner_subtask_id: 'str', artifact_path: 'str', reason: 'str') -> 'EngineeringPlan'"),
+    'exclude_tool_subtasks_from_resume': ('resume_support', 'def', "(plan: 'EngineeringPlan', resumed_subtask_states: 'Dict[str, str]') -> 'Tuple[Dict[str, str], List[str]]'"),
+    'all_subtasks_completed': ('resume_support', 'def', "(current_plan_subtask_ids: 'Set[str]', latest_status_by_subtask: 'Dict[str, SubtaskStatus]') -> 'bool'"),
+    'compute_abandoned_plan_files': ('resume_support', 'def', "(prior_subtask_states: 'Dict[str, str]', prior_subtask_written_files: 'Dict[str, List[str]]', new_plan_files: 'Any') -> 'List[str]'"),
+    'quarantine_abandoned_plan_files': ('resume_support', 'def', "(workspace_path: 'str', abandoned_files: 'List[str]', quarantine_subdir: 'str') -> 'List[str]'"),
+    '_migrate_legacy_milestone_ownership': ('resume_support', 'def', "(workspace_path: 'str', run_state: 'Any', contract_registry: 'Any', artifact_registry: 'Any', *, prior_control_state_ownerless: 'bool') -> 'Tuple[str, ...]'"),
+    '_migrate_legacy_controller_ownership': ('resume_support', 'def', "(workspace_path: 'str', run_id: 'str') -> 'Tuple[str, ...]'"),
+}
+E11_DEPS_BUILDERS = {
+    "_planning_deps": ("logger", "model_capacities", "assess_planned_edit", "collect_unit_grounding", "EditFeasibility",
+                       "Feasibility", "topological_subtask_order"),
+    "_revision_deps": ("topological_subtask_order",),
+    "_owner_recovery_deps": ("logger", "DETERMINISTIC_ATTRIBUTION_TIERS"),
+    "_resume_deps": ("logger", "ArtifactRegistry", "ContractRegistry", "ControlState", "DecisionLedger",
+                     "stamp_legacy_decision_ledger_ownership", "save_artifact_registry", "save_control_state",
+                     "list_checkpoints", "save_checkpoint"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(E11_CONTROLLER_NAMES))
+def test_the_controller_keeps_every_e11_name_with_its_kind_and_signature(name):
+    _owner, kind, signature = E11_CONTROLLER_NAMES[name]
+    obj = getattr(importlib.import_module(C), name)
+    if kind in ("def", "async"):
+        assert inspect.isfunction(obj) and obj.__module__ == C
+        assert inspect.iscoroutinefunction(obj) is (kind == "async")
+        assert str(inspect.signature(obj)) == signature
+    else:
+        assert type(obj).__name__ == kind
+
+
+@pytest.mark.parametrize("name", sorted(n for n, (_o, kind, _s) in E11_CONTROLLER_NAMES.items() if kind not in ("def", "async")))
+def test_every_e11_reexport_is_the_owners_object(name):
+    owner = E11_CONTROLLER_NAMES[name][0]
+    assert getattr(importlib.import_module(C), name) is getattr(importlib.import_module(f"kriya.workflow.{owner}"), name)
+
+
+@pytest.mark.parametrize("builder", sorted(E11_DEPS_BUILDERS))
+def test_each_e11_deps_builder_resolves_the_controllers_names_at_call_time(builder):
+    controller = importlib.import_module(C)
+    for field in E11_DEPS_BUILDERS[builder]:
+        marker = object()
+        with patch.object(controller, field, marker):
+            assert getattr(getattr(controller, builder)(), field) is marker, (builder, field)
+
+
+@pytest.mark.parametrize("loader, module, names", [
+    ("_load_run_self_correction_loop", "kriya.workflow.self_correction", ("run_self_correction_loop",)),
+    ("_load_milestone_run_state_store", "kriya.workflow.milestones", ("MilestoneRunState", "save_milestone_run_state")),
+])
+def test_each_e11_loader_imports_at_call_time(loader, module, names):
+    controller = importlib.import_module(C)
+    markers = [object() for _ in names]
+    with patch.multiple(module, **dict(zip(names, markers, strict=True))):
+        loaded = getattr(controller, loader)()
+    assert (loaded if len(names) > 1 else (loaded,)) == tuple(markers)
