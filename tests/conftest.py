@@ -180,6 +180,8 @@ STATE_MACHINE_TIER_FILES = frozenset({
     "test_gate_orchestrator.py",  # E8: the candidate-gate order and evidence of every representative terminal path
     "test_runtime_verification.py",  # E9: runtime and managed-service verification: approval, execution, evidence order
     "test_candidate_transaction.py",  # E10: the per-file candidate staging: atomic refusal, staged identity, evidence order
+    "test_e11_owner_modules.py",  # E11: planning request, plan revision, owner recovery and resume-support decisions
+    "test_e11_milestones_real_engine.py",  # E11 (OI-29): the milestone path through the real engine
     # resume / invalidation
     "test_prd008_resume_fingerprints.py", "test_prd008a_resume_convergence.py", "test_resume_integrity.py",
     "test_prd008_recovery.py",
@@ -234,6 +236,8 @@ MODULE_TIER_FILES = {
         "test_gate_orchestrator.py",  # E8: the candidate-gate orchestration (gate_orchestrator)
         "test_runtime_verification.py",  # E9: runtime and managed-service verification (runtime_verification)
         "test_candidate_transaction.py",  # E10: the candidate staging transaction (candidate_transaction)
+        "test_e11_owner_modules.py",  # E11: planning_request / plan_revision / owner_recovery / resume_support
+        "test_e11_milestones_real_engine.py",  # E11 (OI-29): execute_milestones through the real engine
         "test_p2_compile_regression_attribution.py", "test_p2_regression_attribution_reproducer.py",
         "test_p3c_prose_candidate_delta.py", "test_plan_edit_feasibility_001.py", "test_plan_executability.py",
         "test_plan_external_package_capability_001.py", "test_plan_global_invariant_projection_001.py",
