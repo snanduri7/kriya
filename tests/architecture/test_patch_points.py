@@ -201,7 +201,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # imports of the facade where they are defined: the controller's function-local imports read them here at call time).
     (W, 'compile_run_contract'): P(1, W, ((W, 1),(C, 1),), ()),
     (W, 'immutable_test_files'): P(1, W, ((C, 1),), ()),
-    (W, 'run_contract_baseline'): P(2, W, ((W, 1),(C, 1),), ()),
+    (W, 'run_contract_baseline'): P(3, W, ((W, 1),(C, 1),), ()),
     # kriya.workflow.workflow_controller
     (C, 'ArtifactRegistry.derive_from_workspace'): P(4, 'kriya.control.artifacts', None, ()),
     (C, 'StaticAnalysisService.evaluate_candidate'): P(1, 'kriya.static_analysis.service', None, ()),
@@ -216,11 +216,11 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (C, 'assess_planned_edit'): P(3, 'kriya.workflow.edit_feasibility', ((C, 1),), ()),
     (C, 'blocking_requirements'): P(1, 'kriya.workflow.requirements', ((C, 1),), ()),
     (C, 'build_engineering_plan_from_planner_output'): P(69, 'kriya.workflow.plan_schema', ((C, 2),), ()),
-    (C, 'build_planning_structural_evidence'): P(2, C, (('kriya.workflow.ownership_findings', 1), (C, 1)), ()),
+    (C, 'build_planning_structural_evidence'): P(3, C, (('kriya.workflow.ownership_findings', 1), (C, 1)), ()),
     (C, 'canonicalize_planned_file_actions'): P(1, 'kriya.workflow.plan_validation', ((C, 2),), ()),
     # E11 characterization: +1 site (tests/test_e11_owner_modules.py: one unit grounding per unit, through this name).
     (C, 'collect_unit_grounding'): P(9, 'kriya.workflow.edit_feasibility', ((C, 1),), ()),
-    (C, 'create_git_worktree'): P(29, 'kriya.workflow.worktree', ((C, 1),), ()),
+    (C, 'create_git_worktree'): P(30, 'kriya.workflow.worktree', ((C, 1),), ()),
     (C, 'enforce_preserved_reference_terminal_integrity'): P(3, 'kriya.workflow.terminal_gate_service', ((C, 1),), ()),
     (C, 'evaluate_plan_edit_feasibility'): P(5, C, ((C, 1),), ()),
     (C, 'find_migration_incomplete'): P(2, 'kriya.workflow.migration', ((C, 1),), ()),
@@ -245,7 +245,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E12: 5 -> 2 lookups: the enforce loop's loads moved to enforce_loop and read EnforceDeps (one load in
     # workflow_controller._enforce_deps); the shadow run's load is _shadow_deps' (E12 1/2); the patch sites above
     # are the dynamic proof.
-    (C, 'validate_plan'): P(52, 'kriya.workflow.plan_validation', ((C, 2),), ()),
+    (C, 'validate_plan'): P(54, 'kriya.workflow.plan_validation', ((C, 2),), ()),
     (C, 'validate_stack_contract_artifacts'): P(1, 'kriya.workflow.static_checks', ((C, 1),), ()),
     # E12 characterization: 37 new rows (tests/test_e12_enforce_characterization.py pins the enforce loop's and the shadow
     # run's decisions through these controller names; E12 moves the bodies and reads each through EnforceDeps/ShadowDeps).
@@ -394,8 +394,10 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # A site, 1 new row (test_candidate_transaction: the evidence boundary's call-time recorder lookup, post-move pin); E11
     # +8 C sites (test_e11_owner_modules: the feasibility and legacy-migration names, written before the move); E12 +4 W
     # sites (3 new rows) and +102 C sites: 37 new rows (63 sites) and 39 more sites on 14 existing rows
-    # (test_e12_enforce_characterization: the enforce loop's and the shadow run's decisions, written before the move)
-    assert totals == {A: 100, W: 92, C: 378}
+    # (test_e12_enforce_characterization: the enforce loop's and the shadow run's decisions, written before the move); the
+    # orchestrator's E12 pins (ca1c97c) add +1 W.run_contract_baseline and +4 C sites (validate_plan +2, create_git_worktree
+    # +1, build_planning_structural_evidence +1)
+    assert totals == {A: 100, W: 93, C: 382}
     assert len(PATCH_POINTS) == 128
 
 
