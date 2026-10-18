@@ -137,7 +137,10 @@ MODULES: Dict[str, Module] = {
         public=("kriya.workflow", "kriya.workflow.workflow", "kriya.workflow.workflow_controller",
                 "kriya.workflow.plan_executor", "kriya.workflow.execution_plan", "kriya.workflow.state",
                 "kriya.workflow.failure", "kriya.workflow.plan_schema", "kriya.agents.agent", "kriya.core",
-                "kriya.core.kernel"),
+                "kriya.core.kernel",
+                # E9 (assigned 2026-10-16): the deterministic build/test classification of a recorded command sequence,
+                # a pure stdlib-only module APPLICATION's run history reads (deterministic_sequence_kind)
+                "kriya.workflow.verification_authority"),
         layer=3),
     "QUALIFICATION": Module(
         owner_paths=("kriya/qualification/", "kriya/core/model_qualification.py", "kriya/core/qualification_identity.py",
