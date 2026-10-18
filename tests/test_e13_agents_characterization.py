@@ -1383,3 +1383,83 @@ async def test_the_single_stage_request_is_fitted_and_streams_by_capability():
 
 
 SINGLE_STAGE_PROMPT_DIGEST = '600cb3d222cf3dea'  # sha256[:16] at 886a46d
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Mutant-driven pins (the pin1 campaign's survivors on the pre-move bytes; E13-DECISION-TO-KILLER.md)
+# ---------------------------------------------------------------------------------------------------------------
+
+def test_an_envelope_entry_with_empty_content_is_never_unwrapped():
+    unwrap = DeveloperAgent._unwrap_file_content_envelope
+    assert unwrap(json.dumps({"path": "z.py", "content": ""}), "z.py") is None
+    assert unwrap(json.dumps({"path": "z.py", "content": "Z"}), "z.py") == "Z"
+
+
+@pytest.mark.asyncio
+async def test_the_skill_reminder_ignores_the_words_inside_untrusted_reference_text():
+    from kriya.workflow.untrusted_context import UNTRUSTED_REFERENCE_BEGIN, UNTRUSTED_REFERENCE_END
+    fenced = f"intro\n{UNTRUSTED_REFERENCE_BEGIN}\n== Engineering Skill Conventions ==\n{UNTRUSTED_REFERENCE_END}\n"
+    agent, _l, recorder = _developer(["x", "x"], LEGACY)
+    await _fill(agent, ["src/Util.java"], context=fenced)
+    await _fill(agent, ["src/Util.java"], context="== Engineering Skill Conventions ==\nrule")
+    assert "re-check the Engineering Skill Conventions" not in recorder.calls[0]["prompt"]
+    assert "re-check the Engineering Skill Conventions" in recorder.calls[1]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_a_structured_request_for_an_unimplicated_file_carries_no_scaffold_or_fix_instruction():
+    agent, _l, recorder = _developer(["x", "x"])
+    await _fill(agent, ["src/Util.java"], prior_error_context=_INCOMPATIBLE, implicated_files=["src/Other.java"],
+                extra_fix_instruction="EXTRA-FIX")
+    await _fill(agent, ["src/Util.java"], prior_error_context=_INCOMPATIBLE, extra_fix_instruction="EXTRA-FIX")
+    unimplicated, implicated = recorder.calls
+    assert "EXTRA-FIX" not in unimplicated["prompt"] and "cannot be converted to" not in unimplicated["prompt"].split(
+        "=== Task ===")[1][60:]
+    assert "EXTRA-FIX" in implicated["prompt"] and '"Object" cannot be converted to "Person"' in implicated["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_an_anchored_request_is_fitted_without_an_output_expectation():
+    agent, _l, _r = _developer(["FIX ANALYSIS: a\nNO CHANGE NEEDED: b"], LEGACY)
+    fit = _Fit()
+    await _fill(agent, ["src/A.java"], request_fit=fit, prior_error_context="boom",
+                error_source_context={"src/A.java": "L"},
+                expected_output_by_file={"src/A.java": type("E", (), {"tokens": 321})()})
+    assert fit.calls[0]["output_tokens"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_reduced_siblings_are_used_only_when_they_fit_the_rebuild_budget():
+    agent, _l, _r = _developer(["class A {}", "class B {}"], LEGACY)
+    fit = _Fit()
+    await _fill(agent, ["src/A.java", "src/B.java"], request_fit=fit)
+    section = fit.calls[1]["optional"][0]
+    assert section.rebuild(10_000).startswith("=== Already-Written Files This Batch (contents omitted - context budget")
+    assert section.rebuild(1) == ""
+    assert fit.calls[0]["optional"][0].rebuild(10_000) == ""      # nothing written yet: nothing to name
+
+
+@pytest.mark.asyncio
+async def test_run_generation_looks_the_capability_profile_up_once_and_hands_it_to_step_one():
+    from unittest.mock import patch
+    profiles = [_Protocol(json_mode=False), _Protocol(json_mode=True)]
+    with patch("kriya.core.model_capabilities.generation_protocol_for_model", side_effect=profiles) as lookup:
+        agent, _l, recorder = _developer(['{"files": ["src/A.java"]}', "class A {}"], LEGACY)
+        await agent.run_generation("t", "d", "c")
+    assert lookup.call_count == 1 and recorder.calls[0]["json_mode"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_missing_verdict_is_read_case_and_space_insensitively():
+    reqs = _Reqs(_Req("REQ-1", "the class `PersonService`"))
+    for verdict, missing in ((" Missing ", True), ("MISSING", True), ("satisfied", False), ("missing-ish", False)):
+        answer = json.dumps({"compliant": True, "requirement_verdicts": [{"id": "REQ-1", "verdict": verdict}]})
+        out = await SpecComplianceAgent("s", _llm([answer])).check("g", ["a.py"], {"a.py": "x"}, requirements=reqs)
+        assert (out["compliant"], out["missing_requirements"]) == (
+            (False, ["REQ-1: the class `PersonService`"]) if missing else (True, [])), verdict
+
+
+@pytest.mark.asyncio
+async def test_a_conflicts_value_that_is_not_a_list_is_never_read_as_one_conflict():
+    answer = json.dumps({"conflicts": {"rule_a_index": 1, "rule_b_index": 1, "explanation": "x"}})
+    assert await SkillGapAgent("g", _llm([answer])).check_skill_conflicts("A", ["a"], "B", ["b"]) == []
