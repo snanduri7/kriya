@@ -228,7 +228,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (C, 'resolve_migration_resolution'): P(3, 'kriya.workflow.migration', ((C, 1),), ()),
     # E11 characterization: +2 sites (tests/test_e11_owner_modules.py: both legacy-ownership migrations stamp the
     # artifact registry through this name).
-    (C, 'save_artifact_registry'): P(3, 'kriya.control.persistence', ((C, 3),), ()),
+    # E11: 3 -> 2 lookups: the two legacy-ownership migrations moved to resume_support and read
+    # ResumeDeps.save_artifact_registry (one load in workflow_controller._resume_deps); the enforce loop keeps its own.
+    (C, 'save_artifact_registry'): P(3, 'kriya.control.persistence', ((C, 2),), ()),
     # E11 characterization: +1 site (tests/test_e11_owner_modules.py: the controller migration stamps the control
     # state through this name).
     (C, 'save_control_state'): P(5, 'kriya.control.persistence', ((C, 6),), ()),
@@ -371,7 +373,9 @@ KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_life
                         # E11: the owner recovery and integration obligations (from workflow_controller.py)
                         "kriya.workflow.owner_recovery",
                         # E11: the planning request and the plan checks (from workflow_controller.py)
-                        "kriya.workflow.planning_request")
+                        "kriya.workflow.planning_request",
+                        # E11: the resume support and legacy-ownership migrations (from workflow_controller.py)
+                        "kriya.workflow.resume_support")
 FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
 
 
