@@ -668,3 +668,77 @@ def test_the_runtime_verification_names_keep_their_call_shape_on_attempt():
     assert attempt._PYTHON_RUNTIME_GROUNDING_EXCLUDED_DIRS == {
         ".git", ".kriya", "__pycache__", ".venv", "venv", "env", "node_modules", ".tox", ".mypy_cache", ".pytest_cache",
         ".ruff_cache", "dist", "build", ".eggs", "site-packages"}
+
+
+# ----------------------------------------------------------------------------- E10: candidate staging, spec, evidence
+
+# Written at 6742f29, BEFORE kriya/workflow/candidate_transaction.py, spec_compliance.py and decision_evidence.py exist
+# (E10 moves these bodies there): every name stays importable from kriya.workflow.attempt with the same parameters and
+# the same sync/async kind (GateDeps, GenerationDeps and RepairDeps hand the gates, the Developer request and the
+# coordinated repair a dozen of them by these names; terminal_gate_service imports _close_requirements_by_migration_gate
+# at call time; 24 test files call them through attempt), the constants keep their values, and run_attempt stays the
+# attempt module's coroutine function wrapped by the evidence boundary. Annotations are not pinned.
+E10_ATTEMPT_CALLABLES = {
+    "_capture_original": "(state, ctx, relpath)",
+    "_completeness_gated_operation": "(filepath, base_operation, *, file_exists, ctx, state)",
+    "_is_restore_public_contract_phase": "(state)",
+    "_has_authoritative_full_source": "(filepath, ctx, state)",
+    "_current_revision": "(filepath, ctx)",
+    "_validate_actual_mutation_authority": "(filepath, actual_operation, *, file_exists, ctx, state)",
+    "_operation_map": "(ctx, filepaths, attempt_operation, state=None)",
+    "_edit_capability_loci": "(state, ctx, path, lines, *, revision=None, raw_digest=None)",
+    "_remember_anchor_loci": "(state, path, edits, current)",
+    "_only_response_validity_failures": "(state)",
+    "_decide_edit_capabilities": "(state, ctx, kwargs)",
+    "_structural_insertion_locus": "(state, ctx, path, content)",
+    "_requested_operation": "(kwargs, path)",
+    "_current_edit_capability": "(state, path)",
+    "_record_edit_protocol_failure": "(state, path, family)",
+    "_authorize_anchors": "(state, path, edits, current)",
+    "_authorize_structural_insertion": "(state, capability, path, index, edit, current)",
+    "_sent_exact_source_covers": "(state, capability, path, search, current)",
+    "_spec_compliance_authoritative_context": "(ledger)",
+    "_migration_obligations_all_satisfied": "(ledger)",
+    "_spec_requirements_contradicting_authority": "(missing_requirements, ledger)",
+    "_identifier_local_terms": "(text, identifier, radius=3)",
+    "_extract_requirement_identifier_tokens": "(requirement)",
+    "_spec_requirements_naming_planner_only_identifiers": "(missing_requirements, goal_text)",
+    "_goal_spec_requirement_obligation_id": "(subtask_id)",
+    "_stage_scoped_spec_compliance_goal": "(ctx)",
+    "_goal_spec_evidence_fingerprint": "(goal, file_contents)",
+    "_record_original_requirement_verdicts": "(state, ctx, spec_result, fingerprint)",
+    "_downgrade_suppressed_requirement_claims": "(state, ctx, suppressed, fingerprint)",
+    "_close_requirements_by_migration_gate": "(state, ctx, fingerprint)",
+    "_structured_plan_paths": "(ctx)",
+    "_stage_ownership_redirect_restoration": "(state, ctx, staged_writes)",
+    "async _classify_and_escalate_contract_changes": ("(state, ctx, violations, baseline_contents, candidate_contents, "
+                                                      "run_direct_authorizations, authorized_changes=())"),
+    "_settled_goal_spec_requirement": "(ledger, obligation_id, fingerprint)",
+    "_restore_api_contract_owners_deterministically": "(state, contract)",
+    "_verified_no_change_proposal": "(state, ctx, files, missing_files)",
+    "_attempt_evidence_boundary": "(func)",
+    "_record_obligations_snapshot": "(ctx)",
+    "_record_authority_snapshot": "(state, ctx, kwargs, capabilities, requested, model)",
+}
+
+
+def test_the_candidate_spec_and_evidence_names_keep_their_call_shape_on_attempt():
+    attempt = importlib.import_module(A)
+    found = {}
+    for key in E10_ATTEMPT_CALLABLES:
+        name = key.split(" ")[-1]
+        shape = _unannotated(getattr(attempt, name))
+        found[key] = shape.split(" ", 1)[1] if shape.startswith("async ") else shape
+        assert shape.startswith("async ") == key.startswith("async "), name
+    assert found == E10_ATTEMPT_CALLABLES
+    assert attempt.MAX_SYMBOL_LOCI_PER_FILE == 2
+    assert attempt._RESPONSE_VALIDITY_FAILURES == frozenset({
+        "operation_contract", "anchored_edit", "structural_corruption", "no_op_edit", "diagnosis_mismatch"})
+    assert attempt._REQUIREMENT_WORD_RE.pattern == r"[A-Za-z_][A-Za-z0-9_-]*"
+    assert attempt._REQUIREMENT_PROVENANCE_STOPWORDS == {
+        "a", "an", "and", "are", "as", "at", "be", "but", "by", "does", "for", "from", "has", "have", "in", "instead",
+        "is", "it", "must", "named", "not", "of", "on", "or", "requires", "require", "required", "should", "that",
+        "the", "this", "to", "uses", "using", "with"}
+    run_attempt = attempt.run_attempt
+    assert inspect.iscoroutinefunction(run_attempt) and run_attempt.__module__ == A
+    assert run_attempt.__wrapped__.__name__ == "run_attempt" and run_attempt.__wrapped__.__module__ == A
