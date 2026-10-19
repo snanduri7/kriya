@@ -70,7 +70,6 @@ MA7.1's scope, left for a later increment.
 """
 from __future__ import annotations
 
-import functools
 import hashlib
 import json
 import logging
@@ -212,7 +211,6 @@ from kriya.workflow.plan_schema import (
     FileAction,
     FileOwnershipRelation,
     Subtask,
-    VerificationMethodType,
     build_engineering_plan_from_planner_output,
 )
 from kriya.workflow.plan_targets import check_plan_targets
@@ -291,40 +289,8 @@ from kriya.workflow.worktree import WorktreeSyncError, create_git_worktree, remo
 def _evaluate_subtask_verification(
     subtask: Subtask, call_result: Dict[str, Any],
 ) -> Tuple[SubtaskStatus, Optional[str], Tuple[str, ...]]:
-    if not subtask.verification:
-        return SubtaskStatus.COMPLETED, None, ()
-    evidence = call_result.get("verification_results")
-    if not isinstance(evidence, list) or len(evidence) != len(subtask.verification):
-        return (
-            SubtaskStatus.NEEDS_REVIEW,
-            "declared verification requirements have no complete authoritative evidence",
-            ("VERIFICATION_EVIDENCE_MISSING",),
-        )
-    unresolved: List[str] = []
-    failed: List[str] = []
-    for method, item in zip(subtask.verification, evidence, strict=True):
-        if not isinstance(item, dict) or item.get("type") != method.type.value:
-            unresolved.append(method.description)
-            continue
-        if method.type == VerificationMethodType.TOOL and item.get("tool_name") != method.tool_name:
-            unresolved.append(method.description)
-            continue
-        if item.get("description", "") != method.description:
-            unresolved.append(method.description)
-            continue
-        if item.get("passed") is False:
-            failed.append(method.description)
-        elif item.get("passed") is not True:
-            unresolved.append(method.description)
-    if failed:
-        return SubtaskStatus.FAILED, f"verification failed: {failed!r}", ("VERIFICATION_FAILED",)
-    if unresolved:
-        return (
-            SubtaskStatus.NEEDS_REVIEW,
-            f"verification unresolved: {unresolved!r}",
-            ("VERIFICATION_UNRESOLVED",),
-        )
-    return SubtaskStatus.COMPLETED, None, ()
+    """The body is kriya/workflow/enforce_loop.py (E14), reached through the call-time accessor _enforce_loop()."""
+    return _enforce_loop()._evaluate_subtask_verification(subtask, call_result)
 
 logger = logging.getLogger(__name__)
 
@@ -352,39 +318,8 @@ def _enforce_contract_transition(
     terminal_writes: List[Any], *, workspace_path: str, goal: str, plan: Any, transaction_id: str,
     subtask_call_results: List[Dict[str, Any]],
 ) -> Callable[..., Any]:
-    """PRD-029: the enforce commit's ContractRegistry transition builder.
-    Baseline = the live workspace (the candidate lives in the plan
-    workspace until this commit); authorizations = DIRECT ones from the
-    user's goal for this plan; downstream verification = the final
-    subtask's own terminal full suite, which ran on the final candidate with
-    tests executed."""
-    from kriya.workflow.contract_authority import derive_direct_contract_authorizations
-    from kriya.workflow.contract_lifecycle import derive_contract_transition
-
-    original, final = {}, {}
-    for write in terminal_writes:
-        if write.delete:
-            continue
-        relpath = (
-            os.path.relpath(write.target_path, workspace_path) if os.path.isabs(write.target_path)
-            else write.target_path
-        )
-        final[relpath] = write.content
-        path = os.path.join(workspace_path, relpath)
-        if os.path.isfile(path):
-            with open(path, "r", encoding="utf-8", errors="replace") as handle:
-                original[relpath] = handle.read()
-    last = subtask_call_results[-1] if subtask_call_results else {}
-    downstream_verified = any(
-        item.get("type") == "regression_test" and item.get("status") == "PASS_WITH_TESTS"
-        for item in (last.get("deterministic_gate_evidence") or [])
-    )
-    return functools.partial(
-        derive_contract_transition, workspace_path=workspace_path, registry=None,
-        original_contents=original, final_contents=final,
-        authorizations=tuple(derive_direct_contract_authorizations(goal, plan)),
-        transaction_id=transaction_id, downstream_verified=downstream_verified,
-    )
+    """The body is kriya/workflow/enforce_loop.py (E14), reached through the call-time accessor _enforce_loop()."""
+    return _enforce_loop()._enforce_contract_transition(terminal_writes, workspace_path=workspace_path, goal=goal, plan=plan, transaction_id=transaction_id, subtask_call_results=subtask_call_results)
 
 
 class WorkflowControllerConfigurationError(ValueError):
