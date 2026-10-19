@@ -3252,8 +3252,9 @@ keeps about a review is identity (candidate digest, per-file digests and counts,
 `.kriya/control/launches/` is the one raw copy, read only by the review after re-proving its digests. Survey fixes at the
 APPLICATION projection (the OI-131 rule): `launch.status` (a command refused for review because it carries a secret
 is recorded raw as `approval_required` details - the stored copy is S20's), `evidence.records` (free-text envelope
-payload fields; redacted before the page's byte budget is counted), the change review's reason and the terminal prompt's
-reason (one `_terminal_approval` helper now serves `kriya generate` and the approved-proposal execution).
+payload fields; redacted before the page's byte budget is counted), the change review's reason and the reason line of
+both terminal prompts (`kriya generate`'s `_approval_decision` and `kriya proposal execute`'s own inline copy; their diff
+lines stay raw).
 
 ### S3 - enabling fields need the human authority path (2026-10-19, OI-99, OWNER-RECOVERY-SELF-CORRECTION-REVIEW-001)
 

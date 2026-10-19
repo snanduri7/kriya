@@ -4,8 +4,11 @@ Mutants: `~/kriya-modularization-tools/mutrun.py` v2 (git archive of HEAD 5dbf6b
 `not test_engine_runtime_verification_trace and not test_post_check_passes_on_the_reference`). L1 =
 tests/test_s2c_redaction_residuals.py + tests/test_s2b_redaction_completeness.py + tests/test_s2_redaction_owner.py; no L2.
 
-Campaign (MEASURED): `20261020_021315_0b0465c5` at 5dbf6b6: 25 mutants, 25 killed at L1, 0 survived, VALID (tree_diff
-empty, no straggler), 116 s.
+Campaigns (MEASURED): `20261020_021315_0b0465c5` at 5dbf6b6: 25 mutants, 25 killed at L1, 0 survived, VALID (tree_diff
+empty, no straggler), 116 s. After the own-bug fix 4ba90ca (the shared `_terminal_approval` helper of 5dbf6b6 broke
+tests/test_kup_execution.py's source-order pin; the prompt is inline again in both places) the terminal-prompt mutants were
+re-run on the new anchors: `20261020_024644_a95c0ee1` at 4ba90ca: 6 mutants (S2cM22-24 re-anchored, S2cM26-28 new), 6 killed
+at L1, VALID, 30 s. Total 28 distinct mutants, 28 killed.
 
 Reproduction (MEASURED, scratch `s2c/{before,after}/`): `probe.py` (35 secret cases, 32 readable controls) 32 leaking
 before -> 9 after (the 8 OI-144 (4) positional cases, open owner question, and `MYSQLPWD=` - not a real variable name,
@@ -40,9 +43,12 @@ flips pass, the 8 open-question pins stay strict-xfail.
 | survey: evidence.records redacted | `EvidenceService._page` | an envelope payload secret shown | test_the_evidence_records_the_gui_receives_hide_a_secret_in_a_record_payload | S2cM19 raw | KILLED L1 |
 | OI-146 strict scope: the review REASON is display text | `ReviewService.change_review` | model text quoting a secret shown | test_the_change_review_reason_is_redacted_while_its_diff_stays_raw | S2cM20 raw | KILLED L1 |
 | OI-146: the approval DIFF is never redacted | `ReviewService.change_review` | reviewed bytes != approved bytes | test_the_approval_diff_is_served_raw_and_byte_faithful_and_persisted_only_as_digests | S2cM21 redact diff | KILLED L1 |
-| terminal prompt reason redacted | `_terminal_approval` | reason secret printed | test_the_terminal_approval_prompt_redacts_its_reason_not_its_diff | S2cM22 raw | KILLED L1 |
-| OI-146: the terminal prompt's diff lines stay raw | `_terminal_approval` | the person approves bytes they did not read | test_the_terminal_approval_prompt_shows_the_diff_raw | S2cM23 redact | KILLED L1 |
-| `--yes` reason line redacted | `_terminal_approval` | reason secret printed | ...prompt_redacts_its_reason_not_its_diff | S2cM24 raw | KILLED L1 |
+| terminal prompt reason redacted (kriya generate) | `_approval_decision` | reason secret printed | test_the_terminal_approval_prompt_redacts_its_reason_not_its_diff | S2cM22 raw | KILLED L1 (both campaigns) |
+| OI-146: the terminal prompt's diff lines stay raw (kriya generate) | `_approval_decision` | the person approves bytes they did not read | test_the_terminal_approval_prompt_shows_the_diff_raw | S2cM23 redact | KILLED L1 (both) |
+| `--yes` reason line redacted (kriya generate) | `_approval_decision` | reason secret printed | ...prompt_redacts_its_reason_not_its_diff | S2cM24 raw | KILLED L1 (both) |
+| proposal execute: reason redacted | `proposal_execute.on_approval` | reason secret printed | test_the_proposal_execution_prompt_redacts_its_reason_not_its_diff[prompt] | S2cM26 raw | KILLED L1 |
+| proposal execute: diff lines raw | `proposal_execute.on_approval` | approved bytes not shown | ...proposal_execution_prompt...[prompt] | S2cM27 redact | KILLED L1 |
+| proposal execute `-y`: reason redacted | `proposal_execute.on_approval` | reason secret printed | ...proposal_execution_prompt...[yes] | S2cM28 raw | KILLED L1 |
 | OI-146: content_visibility on = the recorded bytes | `EvidenceService.content` | the opt-in surface silently altered | test_content_visibility_on_serves_the_recorded_bytes_raw[change, call] | S2cM25 redact | KILLED L1 |
 
 Governed controls (green on the unfixed bytes AND after; MEASURED at 1d1a3e0 and at HEAD): 36 readable texts
@@ -66,7 +72,7 @@ default WITHHOLD (x4); an opt-in content read writes and logs nothing. The cost 
 | decision document | control/launch_approval.py:174 `decide` -> persistence.py:110 | YES | NO (ids, candidate digest, workspace identity, decision; MEASURED: no diff byte) | - |
 | `approval.decision` RunEvent (traces.db run_events, attempt-evidence mirror) | workflow/workflow.py:1638-1645 | YES | NO (outcome + triggers; no candidate digest either - that gap is OI-68, R4) | - |
 | approval log line | workflow/stage_apply.py:358-361 | log | first line of the reason only, through the log redactor | S2 |
-| terminal prompt | cli.py `_terminal_approval` | no | diff lines raw (surface), reason redacted (S2c) | OI-146 |
+| terminal prompts | cli.py `_approval_decision`, `proposal_execute.on_approval` | no | diff lines raw (surface), reason redacted (S2c) | OI-146 |
 | `approval_required` details of a refused runtime review | cli.py:2836 -> control/launch.py:127 | YES (launch record) | YES (MEASURED marker 8: `run.sh --token <secret>` stored raw; the reason too) | display fixed in S2c (`launch.status`); stored copy -> S20 (Class A, reproducer `s2c/channels.py`) |
 | candidate content `candidate.change` before/after/diff, model `messages`/`wire_body` | core/attempt_evidence/scope.py:735, :920 (writer blobs) | YES at the DEFAULT capture `full` | YES (MEASURED `s2c/store_probe.py`: gzip blob, `reader.blob` returns the secret; content_visibility gates SERVING only) | OBS-003 / OI-134 -> S20 (Class A). Not a copy of the approval diff: the recorder's own capture of the same candidate bytes |
 | opt-in served content | kup/evidence_ops.py:184 policy check -> application/evidence.py:310 | NO (a read; MEASURED: state tree unchanged, nothing logged) | YES when on; WITHHELD when off/default | OI-146 |
