@@ -186,13 +186,14 @@ def test_the_recovery_display_names_states_and_shows_detail_only_for_unapplied_o
     assert cli._runs_short("0123456789abcdef") == "0123456789ab" and cli._runs_short(None) == "-"
     assert cli._runs_state({"outside_workspace": True}) == "outside the workspace"
     assert cli._runs_state({"exists": True, "sha256": "f" * 64, "mode": 0o644}) == f"{'f' * 12} mode 0o644"
-    def op(classification, path):
+    def op(classification, path, before):
         return SimpleNamespace(classification=classification, kind="write", target_path=path,
-                               expected_before={"exists": False}, expected_after={"text_revision": "a" * 20},
+                               expected_before=before, expected_after={"text_revision": "a" * 20},
                                current={"outside_workspace": True})
 
     finding = SimpleNamespace(transaction_id="tx-1", state="PENDING", outcome="PARTIAL", owner_run_id=None, error=None,
-                              operations=[op(recovery.OP_APPLIED, "done.py"), op("PENDING", "todo.py")],
+                              operations=[op(recovery.OP_APPLIED, "done.py", {"not_a_regular_file": True}),
+                                          op("PENDING", "todo.py", {"exists": False})],
                               roll_forward_refusal=None, leftover_staged_files=[])
     assessment = SimpleNamespace(workspace_path="/w", status="MANUAL_ACTION_REQUIRED", run_active=None, records=[],
                                  evidence=[finding], unreadable_records=[], evidence_error=None)
