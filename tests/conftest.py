@@ -209,6 +209,7 @@ STATE_MACHINE_TIER_FILES = frozenset({
     "test_e11_milestones_real_engine.py",  # E11 (OI-29): the milestone path through the real engine
     "test_e12_enforce_characterization.py",  # E12: the enforce loop's, shadow run's and enforce trace's decisions
     "test_e13_agents_characterization.py",  # E13: every agent's decisions through its public methods (agents split)
+    "test_e14_characterization.py",  # E14: the decisions of every symbol E14 moves out of attempt.py / workflow_controller.py
     # resume / invalidation
     "test_prd008_resume_fingerprints.py", "test_prd008a_resume_convergence.py", "test_resume_integrity.py",
     "test_prd008_recovery.py",
@@ -267,6 +268,7 @@ MODULE_TIER_FILES = {
         "test_e11_milestones_real_engine.py",  # E11 (OI-29): execute_milestones through the real engine
         "test_e12_enforce_characterization.py",  # E12: enforce_loop / shadow_mode (the controller's enforce and shadow runs)
         "test_e13_agents_characterization.py",  # E13: the agents (escalation, base, planner, architect, developer, verifier, reviewer)
+        "test_e14_characterization.py",  # E14: process_boundary and the E14 placements in the gate/candidate/repair/enforce owners
         "test_p2_compile_regression_attribution.py", "test_p2_regression_attribution_reproducer.py",
         "test_p3c_prose_candidate_delta.py", "test_plan_edit_feasibility_001.py", "test_plan_executability.py",
         "test_plan_external_package_capability_001.py", "test_plan_global_invariant_projection_001.py",

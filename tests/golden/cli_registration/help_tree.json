@@ -1,0 +1,7300 @@
+{
+ "chain": false,
+ "commands": {
+  "analyze": {
+   "deprecated": false,
+   "epilog": null,
+   "help": "Analyze and index a repository directory.",
+   "hidden": false,
+   "name": "analyze",
+   "params": [
+    {
+     "default": null,
+     "envvar": null,
+     "multiple": false,
+     "name": "path",
+     "nargs": 1,
+     "opts": [
+      "path"
+     ],
+     "param_type_name": "argument",
+     "required": true,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": true,
+      "exists": true,
+      "file_okay": true,
+      "name": "path",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Only index files changed in git.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "changed",
+     "nargs": 1,
+     "opts": [
+      "--changed",
+      "-d"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Force complete re-indexing.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "force",
+     "nargs": 1,
+     "opts": [
+      "--force",
+      "-f"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "ask": {
+   "deprecated": false,
+   "epilog": null,
+   "help": "Ask Kriya questions about the codebase.",
+   "hidden": false,
+   "name": "ask",
+   "params": [
+    {
+     "default": null,
+     "envvar": null,
+     "multiple": false,
+     "name": "question",
+     "nargs": 1,
+     "opts": [
+      "question"
+     ],
+     "param_type_name": "argument",
+     "required": true,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "authority": {
+   "chain": false,
+   "commands": {
+    "approve": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Explicitly approve the CURRENT effective security-authority configuration.\n\nAlways re-resolves the configuration fresh (never reuses a prior `inspect`\ncall's output - closes the TOCTOU window by construction: what you approve\nis recomputed at the moment of approval, not shown once and trusted\nlater). Approval binds to the EXACT set of security-relevant fields and\ntheir current values - adding, removing, or changing ANY of them\nafterward invalidates this approval entirely; it is not a blanket grant\nto the repository, the config file, or any future field.",
+     "hidden": false,
+     "name": "approve",
+     "params": [
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Write the approval artifact to this path instead of the default local per-workspace store (~/.kriya/authority/ by default, override via KRIYA_AUTHORITY_HOME) - for producing a portable artifact to ship to CI via your own external channel. Must resolve outside the workspace, same rule as --trust-file; refused otherwise.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "out",
+       "nargs": 1,
+       "opts": [
+        "--out"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": true,
+        "exists": false,
+        "file_okay": true,
+        "name": "path",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Skip the interactive confirmation prompt (for scripted/operator use). This is a dedicated flag for this command only - it has no relationship to and is never satisfied by generate/fix's -y flag.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "confirm",
+       "nargs": 1,
+       "opts": [
+        "--confirm"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "inspect": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Display the CURRENT effective configuration's pending security-authority\nfields (field path, classification, provenance, and a secret-redacted\nvalue) and whether an existing local approval currently covers them.\nRead-only - never writes anything, never itself approves.",
+     "hidden": false,
+     "name": "inspect",
+     "params": [
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "revoke": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Immediately revoke this workspace's local approval, if any - future\n`load_config()` calls fall back to P1 fail-closed denial for every\nsecurity-authority field, with no need to touch the config itself.\nIdempotent: revoking when nothing is approved is not an error.",
+     "hidden": false,
+     "name": "revoke",
+     "params": [
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    }
+   },
+   "deprecated": false,
+   "epilog": null,
+   "help": "SEC-009 P2: inspect and explicitly, durably approve security-authority\nconfiguration (mcp.*, plugins.*, execution_policy.*, runtime_profile, and\nsimilar fields kriya/config/authority.py classifies SECURITY_AUTHORITY/\nPLATFORM_POLICY) that a repository-equivalent source (auto-discovered\nkriya.yaml, an explicit --config) cannot grant itself. Approval is bound\nto the EXACT current effective security configuration (a digest over the\ncomplete set, not a blanket \"trust this repo\" bit) and is stored outside\nthe workspace, never inside it - see kriya/config/authority_approval.py's\nmodule docstring for why. Reachable even when the current configuration\nhas pending/denied security fields, so this is always the way out of a\n\"Configuration-authority denied\" error.",
+   "hidden": false,
+   "name": "authority",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "completion": {
+   "deprecated": false,
+   "epilog": null,
+   "help": "Print shell completion setup instructions for SHELL (bash/zsh/fish).\n\nClick (this CLI's underlying framework) already generates a working\ncompletion script for free via a magic env var - `kriya` itself needs no\ncompletion-specific code at all. This command exists purely for\ndiscoverability, since nothing else in the CLI surfaces that the\ncapability is already there. Architectural add-on from a 2026-08-12 SME\nreview.",
+   "hidden": false,
+   "name": "completion",
+   "params": [
+    {
+     "default": null,
+     "envvar": null,
+     "multiple": false,
+     "name": "shell",
+     "nargs": 1,
+     "opts": [
+      "shell"
+     ],
+     "param_type_name": "argument",
+     "required": true,
+     "secondary_opts": [],
+     "type": {
+      "case_sensitive": true,
+      "choices": [
+       "bash",
+       "zsh",
+       "fish"
+      ],
+      "name": "choice",
+      "param_type": "Choice"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "config": {
+   "deprecated": false,
+   "epilog": null,
+   "help": "Display current Kriya configuration.",
+   "hidden": false,
+   "name": "config",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "context": {
+   "chain": false,
+   "commands": {
+    "certify": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Run the version-controlled recall/precision benchmark against the\nconfigured embedding model and record the result outside the workspace.\nNever calls a chat model. Exit 0 only when every class target and the\nprecision target are met.",
+     "hidden": false,
+     "name": "certify",
+     "params": [
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Print the certification record as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "as_json",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    }
+   },
+   "deprecated": false,
+   "epilog": null,
+   "help": "PRD-027: context-recall certification - does Kriya's retrieval deliver\nthe evidence a task needs, independently of any model.",
+   "hidden": false,
+   "name": "context",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "doctor": {
+   "deprecated": false,
+   "epilog": null,
+   "help": "Check Kriya platform health, directories, and LLM connection.",
+   "hidden": false,
+   "name": "doctor",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Run the fail-closed production deployment preflight.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "production",
+     "nargs": 1,
+     "opts": [
+      "--production"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Emit the production report as stable JSON.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "json_output",
+     "nargs": 1,
+     "opts": [
+      "--json"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "evidence": {
+   "chain": false,
+   "commands": {
+    "call-content": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Read-only KUP: ONE authorized, capped part of ONE recorded model request. Refused unless Kriya's own content_visibility is on.",
+     "hidden": false,
+     "name": "call-content",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "run_id",
+       "nargs": 1,
+       "opts": [
+        "run_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": null,
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "With --json: wrap the result in a KUP envelope of this schema version (1). Run Cockpit v1.1.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "kup_version",
+       "nargs": 1,
+       "opts": [
+        "--kup-version"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "integer",
+        "param_type": "Int"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "The seq of the model.request record.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "seq",
+       "nargs": 1,
+       "opts": [
+        "--seq"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "integer",
+        "param_type": "Int"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Which kept part of the request: messages, tools or wire_body.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "part",
+       "nargs": 1,
+       "opts": [
+        "--part"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "candidate": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Reconstruct a run's staged (possibly rejected) candidate from its sealed evidence for external judgement.",
+     "hidden": false,
+     "name": "candidate",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "run_id",
+       "nargs": 1,
+       "opts": [
+        "run_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Directory to reconstruct the staged candidate into (must lie outside the workspace).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "out_dir",
+       "nargs": 1,
+       "opts": [
+        "--out"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": true,
+        "exists": false,
+        "file_okay": false,
+        "name": "directory",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Attempt number (default: the last staged attempt).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "attempt",
+       "nargs": 1,
+       "opts": [
+        "--attempt"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "integer",
+        "param_type": "Int"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": null,
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "change-content": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Read-only KUP: ONE authorized, capped part of ONE recorded candidate change. Refused unless Kriya's own content_visibility is on.",
+     "hidden": false,
+     "name": "change-content",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "run_id",
+       "nargs": 1,
+       "opts": [
+        "run_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": null,
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "With --json: wrap the result in a KUP envelope of this schema version (1). Run Cockpit v1.1.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "kup_version",
+       "nargs": 1,
+       "opts": [
+        "--kup-version"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "integer",
+        "param_type": "Int"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "The seq of the candidate.change record.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "seq",
+       "nargs": 1,
+       "opts": [
+        "--seq"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "integer",
+        "param_type": "Int"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Which kept part: diff, before, after, proposed or attempted_edits.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "part",
+       "nargs": 1,
+       "opts": [
+        "--part"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "explain": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Answer the nine attempt-evidence questions for each attempt of a run.",
+     "hidden": false,
+     "name": "explain",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "run_id",
+       "nargs": 1,
+       "opts": [
+        "run_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": null,
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "leak-check": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Prove, at blob level, that hidden oracle content never reached a model-facing request of a sealed run.",
+     "hidden": false,
+     "name": "leak-check",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "run_id",
+       "nargs": 1,
+       "opts": [
+        "run_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "A file the model must never have seen (hidden test, oracle script); repeatable.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": true,
+       "name": "hidden",
+       "nargs": 1,
+       "opts": [
+        "--hidden"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": false,
+        "exists": true,
+        "file_okay": true,
+        "name": "file",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "The public workspace counterpart(s) of the hidden files: lines they share are expected in prompts and double as the positive control; repeatable.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": true,
+       "name": "public",
+       "nargs": 1,
+       "opts": [
+        "--public"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": false,
+        "exists": true,
+        "file_okay": true,
+        "name": "file",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Extra authority markers to grep for; the defaults always apply.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": true,
+       "name": "markers",
+       "nargs": 1,
+       "opts": [
+        "--marker"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": null,
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "manifest": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Read-only KUP: a run's attempt-evidence store metadata (capture mode, seal, gaps) or the derived reason it is absent.",
+     "hidden": false,
+     "name": "manifest",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "run_id",
+       "nargs": 1,
+       "opts": [
+        "run_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": null,
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "With --json: wrap the result in a KUP envelope of this schema version (1). Run Cockpit v1.1.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "kup_version",
+       "nargs": 1,
+       "opts": [
+        "--kup-version"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "integer",
+        "param_type": "Int"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "A published KUP snapshot: lets the manifest DERIVE why an absent store is absent (from the run's recorded event).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "snapshot_id",
+       "nargs": 1,
+       "opts": [
+        "--snapshot-id"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "RUN_ID is a TRACE row id (as history lists it): resolve the evidence run id from that row's recorded evidence.attempt_store event. Needs --snapshot-id.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "from_trace",
+       "nargs": 1,
+       "opts": [
+        "--from-trace"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "prune": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Apply evidence.attempt_recorder.retention to the store now.",
+     "hidden": false,
+     "name": "prune",
+     "params": [
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show what would be pruned; write nothing.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "dry_run",
+       "nargs": 1,
+       "opts": [
+        "--dry-run"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": ".",
+       "envvar": null,
+       "flag_value": null,
+       "help": "Protect the runs this workspace references (default: the current directory).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "workspace",
+       "nargs": 1,
+       "opts": [
+        "--workspace"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": true,
+        "exists": false,
+        "file_okay": false,
+        "name": "directory",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": null,
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "records": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Read-only KUP: one page of a verified store's records, verbatim, with reader-computed phase provenance.",
+     "hidden": false,
+     "name": "records",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "run_id",
+       "nargs": 1,
+       "opts": [
+        "run_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": null,
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "With --json: wrap the result in a KUP envelope of this schema version (1). Run Cockpit v1.1.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "kup_version",
+       "nargs": 1,
+       "opts": [
+        "--kup-version"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "integer",
+        "param_type": "Int"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Only records of this unit id.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "unit",
+       "nargs": 1,
+       "opts": [
+        "--unit"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Only records whose stored phase equals this (verbatim).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "phase",
+       "nargs": 1,
+       "opts": [
+        "--phase"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Only records of this attempt number.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "attempt",
+       "nargs": 1,
+       "opts": [
+        "--attempt"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "integer",
+        "param_type": "Int"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Only records of this model role.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "role",
+       "nargs": 1,
+       "opts": [
+        "--role"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Only these record kinds (repeatable).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": true,
+       "name": "kinds",
+       "nargs": 1,
+       "opts": [
+        "--kind"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Only records with seq >= this.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "from_seq",
+       "nargs": 1,
+       "opts": [
+        "--from-seq"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "integer",
+        "param_type": "Int"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Page size (default 200, maximum 1000).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "limit",
+       "nargs": 1,
+       "opts": [
+        "-n",
+        "--limit"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "integer",
+        "param_type": "Int"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "The next_cursor of the previous page (bound to the run, the filters and the chain head).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "cursor",
+       "nargs": 1,
+       "opts": [
+        "--cursor"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "show": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "List recorded runs, or show one run's identity, integrity and records.",
+     "hidden": false,
+     "name": "show",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "run_id",
+       "nargs": 1,
+       "opts": [
+        "run_id"
+       ],
+       "param_type_name": "argument",
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Print the exact bytes of one content reference (sha256:...).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "content_ref",
+       "nargs": 1,
+       "opts": [
+        "--content"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": null,
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "verify": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Recompute a run's hash chain, blobs and seal (exit 0 only when VERIFIED; with --kup-version, always a KUP envelope and exit 0).",
+     "hidden": false,
+     "name": "verify",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "run_id",
+       "nargs": 1,
+       "opts": [
+        "run_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": null,
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "With --json: wrap the result in a KUP envelope of this schema version (1). Run Cockpit v1.1.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "kup_version",
+       "nargs": 1,
+       "opts": [
+        "--kup-version"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "integer",
+        "param_type": "Int"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    }
+   },
+   "deprecated": false,
+   "epilog": null,
+   "help": "LR-R1-M1: the per-run attempt evidence store (local-only). Read-only,\nexcept ``prune``; built on the store's reader API.",
+   "hidden": false,
+   "name": "evidence",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "fix": {
+   "deprecated": false,
+   "epilog": null,
+   "help": "Diagnose and automatically apply patches for compiler or test errors.",
+   "hidden": false,
+   "name": "fix",
+   "params": [
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "Compilation or test error log string. If omitted, reads from stdin.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "error",
+     "nargs": 1,
+     "opts": [
+      "--error",
+      "-e"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": ".",
+     "envvar": null,
+     "flag_value": null,
+     "help": "Workspace directory path.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "workspace",
+     "nargs": 1,
+     "opts": [
+      "--workspace",
+      "-w"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": true,
+      "exists": true,
+      "file_okay": false,
+      "name": "directory",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Auto-approve patch application without prompting.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "yes",
+     "nargs": 1,
+     "opts": [
+      "--yes",
+      "-y"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Resume the most recently saved checkpoint for this workspace.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "resume",
+     "nargs": 1,
+     "opts": [
+      "--resume"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "Resume a specific checkpoint by run_id instead of the latest one.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "resume_id",
+     "nargs": 1,
+     "opts": [
+      "--resume-id"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "generate": {
+   "deprecated": false,
+   "epilog": null,
+   "help": "Run autonomous multi-agent pipeline to satisfy a goal.",
+   "hidden": false,
+   "name": "generate",
+   "params": [
+    {
+     "default": null,
+     "envvar": null,
+     "multiple": false,
+     "name": "goal",
+     "nargs": 1,
+     "opts": [
+      "goal"
+     ],
+     "param_type_name": "argument",
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "Path to a text/markdown file containing the goal/prompt.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "file",
+     "nargs": 1,
+     "opts": [
+      "--file",
+      "-f"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": true,
+      "exists": true,
+      "file_okay": true,
+      "name": "path",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Auto-approve all proposed code changes.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "yes",
+     "nargs": 1,
+     "opts": [
+      "--yes",
+      "-y"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": "warn",
+     "envvar": null,
+     "flag_value": null,
+     "help": "KnowledgeGuard policy for handling detected gaps.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "knowledge_policy",
+     "nargs": 1,
+     "opts": [
+      "--knowledge-policy"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "case_sensitive": true,
+      "choices": [
+       "strict",
+       "warn",
+       "permissive"
+      ],
+      "name": "choice",
+      "param_type": "Choice"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "Acknowledge specific coordinates (e.g. org.apache.ignite:ignite-core) to bypass check.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": true,
+     "name": "ack_knowledge_gap",
+     "nargs": 1,
+     "opts": [
+      "--ack-knowledge-gap"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Resume the most recently saved checkpoint for this workspace (only exists if a prior run was interrupted mid-Plan/Design/Developer).",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "resume",
+     "nargs": 1,
+     "opts": [
+      "--resume"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "Resume a specific checkpoint by run_id instead of the latest one.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "resume_id",
+     "nargs": 1,
+     "opts": [
+      "--resume-id"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Print only the final result as JSON on stdout - all progress/narrative output goes to stderr instead. For CI/scripting use.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "json_output",
+     "nargs": 1,
+     "opts": [
+      "--json"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "Execute a milestone plan file produced by `kriya plan-milestones` instead of a single goal - GOAL/--file are ignored.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "from_milestones",
+     "nargs": 1,
+     "opts": [
+      "--from-milestones"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": true,
+      "exists": true,
+      "file_okay": true,
+      "name": "path",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "Operator acceptance file (Python/pytest) whose cases prove the goal's behaviour requirements: each case carries @pytest.mark.kriya_requirement(\"REQ-n\"). Bound before generation; the only evidence that can close a behaviour requirement.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "acceptance",
+     "nargs": 1,
+     "opts": [
+      "--acceptance"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": false,
+      "exists": true,
+      "file_okay": true,
+      "name": "file",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "Operator approval (JSON, outside the workspace) that the --acceptance suite is SUFFICIENT evidence for named GENERAL requirements - human authority, not a proof (B3). Every binding (goal, requirement text, acceptance digest, cases, runner contract, base revision) must match.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "acceptance_approval",
+     "nargs": 1,
+     "opts": [
+      "--acceptance-approval"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": false,
+      "exists": true,
+      "file_okay": true,
+      "name": "file",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "Operator requirement contract (JSON kriya.requirements/1, outside the workspace): the complete, closed set of requirements that must close before success, instead of the requirements derived from the goal's sentences. The goal stays the planning context.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "requirements_file",
+     "nargs": 1,
+     "opts": [
+      "--requirements"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": false,
+      "exists": true,
+      "file_okay": true,
+      "name": "file",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "Operator requirement disposition (JSON kriya.requirement_disposition/1, outside the workspace): statements or single claims the operator removes from the obligation set with a sealed reason (REJECTED_FALSE_PREMISE, HISTORICAL_CONTEXT, INFORMATIONAL_CONTEXT, OUT_OF_SCOPE). Bound to the goal, requirement set, exact text and base revision before any model call; reported, never satisfied; its digest joins the verification contract.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "requirement_disposition",
+     "nargs": 1,
+     "opts": [
+      "--requirement-disposition"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": false,
+      "exists": true,
+      "file_okay": true,
+      "name": "file",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "Operator verification authority (JSON kriya.verification_authority/1 beside its assets, outside the workspace): a sealed external acceptance command Kriya runs under its containment against a copy of the candidate, covering the requirements it declares (operator sufficiency, never a proof). Bound before any model call; its digest joins the verification contract.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "verification_authority",
+     "nargs": 1,
+     "opts": [
+      "--verification-authority"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": false,
+      "exists": true,
+      "file_okay": true,
+      "name": "file",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "GUI M6 (desktop host): run this goal as a recorded launch with this id. The goal is read from stdin; the run is non-interactive (knowledge-policy strict, no auto-approval) and the launch is recorded in the workspace (kriya/control/launch.py). Requires --json.",
+     "hidden": true,
+     "is_flag": false,
+     "multiple": false,
+     "name": "launch_id",
+     "nargs": 1,
+     "opts": [
+      "--launch-id"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "kup-stdio": {
+   "deprecated": false,
+   "epilog": null,
+   "help": "Serve the allowlisted KUP read operations over stdin/stdout (newline-delimited JSON) from ONE long-lived process.\n\nGUI M5 transport for the desktop host; the one-shot `traces --json` / `evidence ... --json` commands remain and answer through the same\noperation implementation. Loads the configuration per request (kriya/kup/serve.py), so nothing about SECURITY_AUTHORITY is cached.",
+   "hidden": true,
+   "name": "kup-stdio",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "launch-decision": {
+   "deprecated": false,
+   "epilog": null,
+   "help": "The typed approval action of the desktop host: record ONE human decision for the change review that is pending in this folder's launch.\n\nThe folder is the working directory (like `generate`). Prints one JSON object on stdout; exit 0 only when the decision was accepted. The waiting\n`generate --launch-id` process records the decision durably and only then continues (kriya/control/launch_approval.py).",
+   "hidden": true,
+   "name": "launch-decision",
+   "params": [
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "The desktop launch (its run id).",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "launch_id",
+     "nargs": 1,
+     "opts": [
+      "--launch-id"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": true,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "The pending review being decided (from launch.status).",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "review_id",
+     "nargs": 1,
+     "opts": [
+      "--review-id"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": true,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "The digest of the change under review (from launch.status).",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "candidate_digest",
+     "nargs": 1,
+     "opts": [
+      "--candidate-digest"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": true,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": null,
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "decision",
+     "nargs": 1,
+     "opts": [
+      "--decision"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": true,
+     "secondary_opts": [],
+     "type": {
+      "case_sensitive": true,
+      "choices": [
+       "approve",
+       "reject"
+      ],
+      "name": "choice",
+      "param_type": "Choice"
+     }
+    },
+    {
+     "count": false,
+     "default": "change_approval",
+     "envvar": null,
+     "flag_value": null,
+     "help": "Which review this decision is for; refused for a review of the other kind.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "kind",
+     "nargs": 1,
+     "opts": [
+      "--kind"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "case_sensitive": true,
+      "choices": [
+       "change_approval",
+       "runtime_command"
+      ],
+      "name": "choice",
+      "param_type": "Choice"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "learn": {
+   "deprecated": false,
+   "epilog": null,
+   "help": "Index web pages, local files, or raw inline text into Kriya's local RAG memory.",
+   "hidden": false,
+   "name": "learn",
+   "params": [
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "URL to read and persist in local memory.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": true,
+     "name": "url",
+     "nargs": 1,
+     "opts": [
+      "--url",
+      "-u"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "Local plain-text file containing reference documentation.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": true,
+     "name": "file",
+     "nargs": 1,
+     "opts": [
+      "--file",
+      "-f"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": false,
+      "exists": true,
+      "file_okay": true,
+      "name": "file",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "Raw text rules to index directly.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": true,
+     "name": "text",
+     "nargs": 1,
+     "opts": [
+      "--text",
+      "-t"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "mcp": {
+   "chain": false,
+   "commands": {
+    "approve": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Explicitly, durably approve invocation of TOOL_NAME - the exact\nflattened name shown by `kriya mcp inspect` / `kriya tools list`\n(e.g. `myserver_mytool`).\n\nAlways re-discovers TOOL_NAME fresh from a real, currently-running MCP\nconnection - never reuses a prior `inspect` call's output - and binds\nthe approval to its EXACT (workspace, server identity, tool name,\nschema digest, capability-profile digest) at the moment of approval,\nclosing the TOCTOU window by construction.",
+     "hidden": false,
+     "name": "approve",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "tool_name",
+       "nargs": 1,
+       "opts": [
+        "tool_name"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Skip the interactive confirmation prompt.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "confirm",
+       "nargs": 1,
+       "opts": [
+        "--confirm"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "inspect": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Discover every configured MCP server's tools and show their exact\nidentity, TOOL-003 capability profile, containment state, and current\ninvocation-approval status. Read-only - starts configured MCP servers\nto discover their real schema/identity but never writes an approval.",
+     "hidden": false,
+     "name": "inspect",
+     "params": [
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "revoke": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Immediately revoke any durable invocation approval for TOOL_NAME\n(matches on exact server identity + tool name, even if its schema or\ncapability profile has since drifted from what was originally\napproved - an operator must be able to revoke a stale approval too).\nIdempotent, and takes effect on the very next invocation - no restart\nof Kriya required.",
+     "hidden": false,
+     "name": "revoke",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "tool_name",
+       "nargs": 1,
+       "opts": [
+        "tool_name"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    }
+   },
+   "deprecated": false,
+   "epilog": null,
+   "help": "TOOL-002 P2: inspect MCP tool identities and explicitly, durably\napprove or revoke invocation authority for them. Approval is never\ngranted implicitly during `tools execute` (and `-y` never creates\nit) - it must be requested here, once, and it persists across\nprocesses until revoked or invalidated by drift.",
+   "hidden": false,
+   "name": "mcp",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "metrics": {
+   "chain": false,
+   "commands": {
+    "adjudicate": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Record a human verdict on a traced run (the only way one is recorded).",
+     "hidden": false,
+     "name": "adjudicate",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "run_id",
+       "nargs": 1,
+       "opts": [
+        "run_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": null,
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "verdict",
+       "nargs": 1,
+       "opts": [
+        "--verdict"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "case_sensitive": true,
+        "choices": [
+         "false_success",
+         "regression_escape",
+         "confirmed_success"
+        ],
+        "name": "choice",
+        "param_type": "Choice"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "What proves the verdict (a bug, a failing test, a review).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "evidence",
+       "nargs": 1,
+       "opts": [
+        "--evidence"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Who adjudicates.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "adjudicator",
+       "nargs": 1,
+       "opts": [
+        "--adjudicator"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Record without asking.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "yes",
+       "nargs": 1,
+       "opts": [
+        "-y",
+        "--yes"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "adjudications": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "List recorded adjudications (read-only).",
+     "hidden": false,
+     "name": "adjudications",
+     "params": [
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": null,
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "report": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Derive the metrics report (exit 1 when a configured threshold FAILs).",
+     "hidden": false,
+     "name": "report",
+     "params": [
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Only trace rows at or after this time (YYYY-MM-DD[ HH:MM:SS]).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "since",
+       "nargs": 1,
+       "opts": [
+        "--since"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Also derive RunRecord metrics (resume invalidation, recovery) from this workspace; repeatable.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": true,
+       "name": "workspaces",
+       "nargs": 1,
+       "opts": [
+        "--workspace"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": true,
+        "exists": false,
+        "file_okay": false,
+        "name": "directory",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "A PRD-032 chaos-report.json to include.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "chaos_report",
+       "nargs": 1,
+       "opts": [
+        "--chaos-report"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": false,
+        "exists": true,
+        "file_okay": true,
+        "name": "file",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "An operator thresholds file (outside the workspace); none ship with Kriya.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "thresholds",
+       "nargs": 1,
+       "opts": [
+        "--thresholds"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": false,
+        "exists": true,
+        "file_okay": true,
+        "name": "file",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Write metrics-report.json and metrics-report.md here.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "out_dir",
+       "nargs": 1,
+       "opts": [
+        "--out"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": true,
+        "exists": false,
+        "file_okay": false,
+        "name": "directory",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Print the report as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    }
+   },
+   "deprecated": false,
+   "epilog": null,
+   "help": "PRD-033: production metrics derived from persisted run evidence, and\nthe trusted adjudication of past runs (false success, regression escape).\nAdjudications are recorded ONLY here; never from a model's opinion.",
+   "hidden": false,
+   "name": "metrics",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "model": {
+   "chain": false,
+   "commands": {
+    "certification": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "PRD-035: is the configured Developer identity live-certified? CURRENT\nonly for the exact runtime, inference settings, execution environment and\ncase set a passing matrix (scripts/certify_model.sh) certified; exit 1\notherwise.",
+     "hidden": false,
+     "name": "certification",
+     "params": [
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Emit the certification status as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "fingerprint": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Show the exact runtime fingerprint of a configured model.",
+     "hidden": false,
+     "name": "fingerprint",
+     "params": [
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Model to fingerprint (default: llm.model).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "model_name",
+       "nargs": 1,
+       "opts": [
+        "--model"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Emit the fingerprint as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "metrics": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Per-role model metrics aggregated over the finished runs in traces.db.\n\nOne row per (role, model, exact runtime): calls, protocol and schema\nfailures, latency and tokens, and for the Developer its attempts,\nfirst-pass successes and the retries its failed attempts triggered.\nObservations only: deterministic gate outcomes remain the only\nverification evidence (PRD-018).",
+     "hidden": false,
+     "name": "metrics",
+     "params": [
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Emit the aggregated table as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Also write it as the routing table model_policy.routing reads (PRD-019; runs never write it).",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "write_table",
+       "nargs": 1,
+       "opts": [
+        "--write-table"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "pin": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Serve a model with its binding's server-only settings (PROVIDER-CONTRACT-001).\n\nSettings a request cannot carry (context window, top_k, ...) are fixed in\na derived, content-named model on the local runtime. Only values the\nbinding itself declares are pinned. The configuration is not changed:\npoint the binding at the printed model name, then qualify it.",
+     "hidden": false,
+     "name": "pin",
+     "params": [
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Model to pin (default: llm.model).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "model_name",
+       "nargs": 1,
+       "opts": [
+        "--model"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show the derived model and its parameters; create nothing.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "dry_run",
+       "nargs": 1,
+       "opts": [
+        "--dry-run"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Emit the pin as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "qualify": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Run the protocol qualification cases against the exact served runtime.\n\nThe record is keyed by the runtime fingerprint plus the inference\nsettings the model is called with (temperature, reasoning flag,\nreasoning_effort, sampling options: MODEL-QUAL-IDENTITY-001) and stored\noutside the workspace (~/.kriya/qualifications, or\nKRIYA_QUALIFICATION_HOME). It becomes stale when the runtime, those\nsettings, Kriya's protocol adapter or the qualification policy changes.\nWhen the configured roles call the model with different settings, each\ndistinct settings identity is qualified in turn. With --context-window\nthe runtime is the same model at that num_ctx (a different fingerprint);\ncontext_capacity then sends one near-window request, which loads the\nmodel at that size.",
+     "hidden": false,
+     "name": "qualify",
+     "params": [
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Model to qualify (default: llm.model).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "model_name",
+       "nargs": 1,
+       "opts": [
+        "--model"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Run only these capability cases (repeatable).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": true,
+       "name": "cases",
+       "nargs": 1,
+       "opts": [
+        "--case"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Emit the qualification record as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Also write the record (JSON) to this file, e.g. for a handover.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "out_path",
+       "nargs": 1,
+       "opts": [
+        "--out"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": false,
+        "exists": false,
+        "file_okay": true,
+        "name": "file",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Qualify the model at this num_ctx instead of its configured one: a larger context tier the adaptive budget policy may then select (it must also pass context_capacity).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "context_window",
+       "nargs": 1,
+       "opts": [
+        "--context-window"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "clamp": false,
+        "max": null,
+        "max_open": false,
+        "min": 1024,
+        "min_open": false,
+        "name": "integer range",
+        "param_type": "IntRange"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Qualify a model_policy.routing candidate exactly as it runs when routed to this role (PRD-019: a runtime's identity depends on the binding it is placed in).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "route_role",
+       "nargs": 1,
+       "opts": [
+        "--role"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "routes": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Show the evidence-based route of every role in model_policy.routing.roles\n(PRD-019): each candidate's evidence, every rejection reason and the final\nroute. Runs nothing; shows the evidence decision even while routing is\noff (in frozen mode, the replayed routes).",
+     "hidden": false,
+     "name": "routes",
+     "params": [
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Emit the route decisions as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Write these decisions as a frozen route table (for model_policy.routing.mode: frozen).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "freeze_path",
+       "nargs": 1,
+       "opts": [
+        "--freeze"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": false,
+        "exists": false,
+        "file_okay": true,
+        "name": "file",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "status": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Show each production role's models, exact runtimes and qualification.",
+     "hidden": false,
+     "name": "status",
+     "params": [
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Emit the per-role assessment as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    }
+   },
+   "deprecated": false,
+   "epilog": null,
+   "help": "PRD-013/014: exact model runtime identity and protocol qualification.\nA model name is never a qualification: `qualify` runs the protocol cases\nagainst the exact served runtime and records the evidence outside the\nworkspace; `status` shows whether each production role's models are\ncurrently qualified.",
+   "hidden": false,
+   "name": "model",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "plan-milestones": {
+   "deprecated": false,
+   "epilog": null,
+   "help": "Decompose a large goal into small, independently verifiable milestones.\n\nSlices by BEHAVIOR, not by code structure - writes the proposed plan to a\nfile for review and possible hand-editing; nothing is executed. Run\n`kriya generate --from-milestones <file>` to actually execute a\n(possibly edited) plan against your workspace. Deliberately a separate,\nno-side-effects step: the slicing quality is worth a human eyeballing\nbefore N real generate calls run against a real workspace.\n",
+   "hidden": false,
+   "name": "plan-milestones",
+   "params": [
+    {
+     "default": null,
+     "envvar": null,
+     "multiple": false,
+     "name": "goal",
+     "nargs": 1,
+     "opts": [
+      "goal"
+     ],
+     "param_type_name": "argument",
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "Path to a text/markdown file containing the goal/prompt.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "file",
+     "nargs": 1,
+     "opts": [
+      "--file",
+      "-f"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": true,
+      "exists": true,
+      "file_okay": true,
+      "name": "path",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "Where to write the proposed milestone plan (default: .kriya/milestones/<group_id>.plan.json).",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "output",
+     "nargs": 1,
+     "opts": [
+      "--output",
+      "-o"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": true,
+      "exists": false,
+      "file_okay": true,
+      "name": "path",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "plugins": {
+   "deprecated": false,
+   "epilog": null,
+   "help": "List loaded plugins and their lifecycle status.",
+   "hidden": false,
+   "name": "plugins",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "prompt": {
+   "chain": false,
+   "commands": {
+    "generate": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Generate an optimized code-generation prompt based on a high-level description.\n\nPrints the prompt to stdout and auto-saves it to .kriya/last_prompt.md,\nso you can review it before actually building anything:\n\n\b\n  kriya prompt generate \"a REST API for managing a todo list\"\n  kriya generate --file .kriya/last_prompt.md -y\n",
+     "hidden": false,
+     "name": "generate",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "description",
+       "nargs": 1,
+       "opts": [
+        "description"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "render": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Render a prompt template with variables.",
+     "hidden": false,
+     "name": "render",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "template_name",
+       "nargs": 1,
+       "opts": [
+        "template_name"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Variables to pass to template in key=value format.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": true,
+       "name": "var",
+       "nargs": 1,
+       "opts": [
+        "--var",
+        "-v"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Directory containing custom '<name>.jinja' templates, checked before the 4 built-in defaults (system_instructions, code_review, refactor, generate_code).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "template_dir",
+       "nargs": 1,
+       "opts": [
+        "--template-dir",
+        "-t"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": true,
+        "exists": true,
+        "file_okay": false,
+        "name": "directory",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    }
+   },
+   "deprecated": false,
+   "epilog": null,
+   "help": "Manage and render prompt templates.",
+   "hidden": false,
+   "name": "prompt",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "proposal": {
+   "chain": false,
+   "commands": {
+    "approve": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Explicitly approve a PENDING_APPROVAL proposal - requires the exact\npersisted artifact to still be untampered and currently valid against\nthe real repository/evidence. Never re-runs review or rebuilds the\nproposal. Never invokes generation.",
+     "hidden": false,
+     "name": "approve",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "proposal_id",
+       "nargs": 1,
+       "opts": [
+        "proposal_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "execute": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "A3-P2: promote an APPROVED, currently-valid persisted proposal into a real\ngeneration run via Kriya's existing generation workflow.\n\nRefuses BEFORE invoking any generation if the proposal is PENDING_APPROVAL,\nREJECTED, tampered, or has drifted stale (target/evidence file changed, wrong\nworkspace) since approval - `-y` here can never substitute for `kriya proposal\napprove <id>`, it only controls the generation run's own internal write-approval\nprompt once promotion has already been validated.",
+     "hidden": false,
+     "name": "execute",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "proposal_id",
+       "nargs": 1,
+       "opts": [
+        "proposal_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Auto-approve the generation workflow's own write-approval gate (and any knowledge-guard risk it surfaces) once this ALREADY-APPROVED proposal is confirmed still valid - does not and cannot approve the proposal itself, that only ever happens via `kriya proposal approve`.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "yes",
+       "nargs": 1,
+       "opts": [
+        "--yes",
+        "-y"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "reject": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Mark a proposal REJECTED - permanent; a rejected proposal can never\nbe approved (create a new proposal instead).",
+     "hidden": false,
+     "name": "reject",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "proposal_id",
+       "nargs": 1,
+       "opts": [
+        "proposal_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "show": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Display a persisted proposal's state, digest, and current binding/staleness status.",
+     "hidden": false,
+     "name": "show",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "proposal_id",
+       "nargs": 1,
+       "opts": [
+        "proposal_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    }
+   },
+   "deprecated": false,
+   "epilog": null,
+   "help": "A3-P1: inspect/approve/reject persisted advisory proposals\n(.kriya/proposals/, created via `kriya review <file> --propose <id> --save`).\nRead-only + explicit approval-state changes only - never invokes generation,\nnever writes to the target repository, never applies any change.",
+   "hidden": false,
+   "name": "proposal",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "repl": {
+   "deprecated": false,
+   "epilog": null,
+   "help": "Start an interactive session - issue several commands in a row without\nrestarting the CLI each time. Each command inside the session is the exact\nsame 'kriya <command>' you'd run standalone (e.g. generate \"goal\" -y), just\nwithout the leading 'kriya' and with --config applied automatically.",
+   "hidden": false,
+   "name": "repl",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "review": {
+   "deprecated": false,
+   "epilog": null,
+   "help": "Run code review agent on a file or a folder.",
+   "hidden": false,
+   "name": "review",
+   "params": [
+    {
+     "default": null,
+     "envvar": null,
+     "multiple": false,
+     "name": "file_path",
+     "nargs": 1,
+     "opts": [
+      "file_path"
+     ],
+     "param_type_name": "argument",
+     "required": true,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": true,
+      "exists": true,
+      "file_okay": true,
+      "name": "path",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "A2: after the review, build an advisory (not-yet-approved) proposed modification from finding FINDING_ID (e.g. F2) in THIS review's own output - invocation-local, single-Java-file repository-aware review path only. Never modifies files, never invokes generation - see the printed proposal's own Authority/Approval fields.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "propose_finding_id",
+     "nargs": 1,
+     "opts": [
+      "--propose"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "A3-P1: with --propose, also persist the proposal to .kriya/proposals/<id>.json as PENDING_APPROVAL (see `kriya proposal show/approve/reject`). Without --save, the proposal is printed only, exactly as before - nothing is written.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "save_proposal",
+     "nargs": 1,
+     "opts": [
+      "--save"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "runs": {
+   "chain": false,
+   "commands": {
+    "prune": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Reference-safe retention under the workspace lock: never removes a\nnon-terminal record, one whose commit state is unknown, one a checkpoint\nor the control state references, or commit evidence a kept record needs;\nnothing at all while any record is unreadable.",
+     "hidden": false,
+     "name": "prune",
+     "params": [
+      {
+       "count": false,
+       "default": ".",
+       "envvar": null,
+       "flag_value": null,
+       "help": "Workspace whose runs to inspect.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "workspace",
+       "nargs": 1,
+       "opts": [
+        "--workspace"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": true,
+        "exists": true,
+        "file_okay": false,
+        "name": "directory",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Terminal run records to keep (default: the retention default).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "keep",
+       "nargs": 1,
+       "opts": [
+        "--keep"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "clamp": false,
+        "max": null,
+        "max_open": false,
+        "min": 0,
+        "min_open": false,
+        "name": "integer range",
+        "param_type": "IntRange"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Report what would be pruned without deleting.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "dry_run",
+       "nargs": 1,
+       "opts": [
+        "--dry-run"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Print the report as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "as_json",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "recover": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Settle crashed runs and interrupted commits from what the evidence\nproves (RunRecord -> RECOVERED, never SUCCESS). Takes the workspace lock.\nSource files change only with --complete-partial; there is no rollback.",
+     "hidden": false,
+     "name": "recover",
+     "params": [
+      {
+       "count": false,
+       "default": ".",
+       "envvar": null,
+       "flag_value": null,
+       "help": "Workspace whose runs to inspect.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "workspace",
+       "nargs": 1,
+       "opts": [
+        "--workspace"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": true,
+        "exists": true,
+        "file_okay": false,
+        "name": "directory",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Finish a partially applied commit from its staged candidate files. Only allowed when the run's record proves the exact candidate was commit-eligible.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "complete_partial",
+       "nargs": 1,
+       "opts": [
+        "--complete-partial"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Print the report as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "as_json",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "status": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Read-only: classify crashed runs and interrupted commits from their\ndurable evidence and the files on disk, and say what `recover` would do.\nNever takes the lock or writes anything; reports RUN_ACTIVE while a live\nrun holds the workspace.",
+     "hidden": false,
+     "name": "status",
+     "params": [
+      {
+       "count": false,
+       "default": ".",
+       "envvar": null,
+       "flag_value": null,
+       "help": "Workspace whose runs to inspect.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "workspace",
+       "nargs": 1,
+       "opts": [
+        "--workspace"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": true,
+        "exists": true,
+        "file_okay": false,
+        "name": "directory",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Print the assessment as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "as_json",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "With --json: wrap the assessment in a KUP envelope of this schema version (1). GUI M1 Phase C.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "kup_version",
+       "nargs": 1,
+       "opts": [
+        "--kup-version"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "integer",
+        "param_type": "Int"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    }
+   },
+   "deprecated": false,
+   "epilog": null,
+   "help": "Inspect, recover and prune this workspace's run records and commit\nevidence. Exit codes: 0 = nothing needs attention, 1 = action required\n(see the output), 3 = a live Kriya run holds the workspace lock.",
+   "hidden": false,
+   "name": "runs",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "skills": {
+   "chain": false,
+   "commands": {
+    "approve": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Approve all staged rules/knowledge facts for a specific skill, promoting them\nto rules.txt (and, for structured facts, knowledge.json).",
+     "hidden": false,
+     "name": "approve",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "skill_name",
+       "nargs": 1,
+       "opts": [
+        "skill_name"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "create": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Create a default skeleton for a new skill.",
+     "hidden": false,
+     "name": "create",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "skill_name",
+       "nargs": 1,
+       "opts": [
+        "skill_name"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "gaps": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Show targeted questions for whatever the readiness rubric says is still thin,\ninstead of a blank rules.txt - optionally answer them right here with --interactive.",
+     "hidden": false,
+     "name": "gaps",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "skill_name",
+       "nargs": 1,
+       "opts": [
+        "skill_name"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Prompt for an answer to each gap question and record it immediately.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "interactive",
+       "nargs": 1,
+       "opts": [
+        "--interactive"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "list": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "List all registered skills and staged/active conventions.",
+     "hidden": false,
+     "name": "list",
+     "params": [
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "promote": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Promote a validated, repo-local lesson into a shared, reusable skill.\n\nLesson extraction (kriya generate's auto-debugging loop) and 'kriya skills approve'\nonly ever affect a single repo's private auto-<repo-slug> skill - the same mistake\nhas to be independently rediscovered in every other project that uses the same\ntechnology. This promotes an already-approved rule from SOURCE_SKILL up into\nTARGET_SKILL in Kriya's shared skill library, so every future project benefits.\n\nDeliberately requires interactive confirmation with no --yes bypass, even under\n'generate -y' - promoting into a shared skill affects every future project that\nuses it, not just the current one, and should never happen unattended.\n",
+     "hidden": false,
+     "name": "promote",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "source_skill",
+       "nargs": 1,
+       "opts": [
+        "source_skill"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "target_skill",
+       "nargs": 1,
+       "opts": [
+        "target_skill"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Promote exactly this one rule (must already be an approved rule in the source skill's rules.txt).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "rule",
+       "nargs": 1,
+       "opts": [
+        "--rule"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Promote every approved rule in the source skill not already present in the target.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "promote_all",
+       "nargs": 1,
+       "opts": [
+        "--all"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "readiness": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Score a skill's knowledge against the 10-category readiness rubric (0-4 per\ncategory, scoring both staged and already-approved structured facts together).",
+     "hidden": false,
+     "name": "readiness",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "skill_name",
+       "nargs": 1,
+       "opts": [
+        "skill_name"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "show": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Display information about a specific skill.",
+     "hidden": false,
+     "name": "show",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "skill_name",
+       "nargs": 1,
+       "opts": [
+        "skill_name"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "unverify": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Resets a skill's verified status, so future generation runs are asked to\nstrengthen/re-confirm it again.\n\nDeliberately manual - a failing Runtime Verification run never automatically\ndemotes a previously-verified skill, since attributing a failure to one specific\nskill among several active ones is unreliable. Use this when you know a skill has\ngone stale for any reason (a pinned version got yanked, a new major version\nchanged the config shape, an approach became deprecated) - check 'kriya skills\nshow <name>' first to see when/what it was last verified for.\n",
+     "hidden": false,
+     "name": "unverify",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "skill_name",
+       "nargs": 1,
+       "opts": [
+        "skill_name"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    }
+   },
+   "deprecated": false,
+   "epilog": null,
+   "help": "Manage platform engineering skills.",
+   "hidden": false,
+   "name": "skills",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "static-analysis": {
+   "chain": false,
+   "commands": {
+    "revoke": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Revoke a waiver; takes effect on the next gate evaluation.",
+     "hidden": false,
+     "name": "revoke",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "waiver_id",
+       "nargs": 1,
+       "opts": [
+        "waiver_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "scan": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Evaluate the gate on the working tree's changes against BASE. Read-only:\nnothing is committed. Exit 0 only when the result would permit a commit.",
+     "hidden": false,
+     "name": "scan",
+     "params": [
+      {
+       "count": false,
+       "default": "HEAD",
+       "envvar": null,
+       "flag_value": null,
+       "help": "Git revision the working tree is compared with.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "base",
+       "nargs": 1,
+       "opts": [
+        "--base"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Emit the full evidence as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "status": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Configuration, provider identity/capability and waiver store (read-only).",
+     "hidden": false,
+     "name": "status",
+     "params": [
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Emit the status as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "waive": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Record an operator risk acceptance (disposition accepted_risk).",
+     "hidden": false,
+     "name": "waive",
+     "params": [
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Stable waiver id, e.g. SAW-2026-0001.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "waiver_id",
+       "nargs": 1,
+       "opts": [
+        "--id"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Provider name (as configured).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "provider",
+       "nargs": 1,
+       "opts": [
+        "--provider"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Exact normalized rule id (<provider>:<rule>).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "rule_id",
+       "nargs": 1,
+       "opts": [
+        "--rule"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Path or glob scope (repeatable).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": true,
+       "name": "paths",
+       "nargs": 1,
+       "opts": [
+        "--path"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": null,
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "reason",
+       "nargs": 1,
+       "opts": [
+        "--reason"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "The accountable owner/authority.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "owner",
+       "nargs": 1,
+       "opts": [
+        "--owner"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": "high",
+       "envvar": null,
+       "flag_value": null,
+       "help": null,
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "max_severity",
+       "nargs": 1,
+       "opts": [
+        "--max-severity"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "case_sensitive": true,
+        "choices": [
+         "critical",
+         "high",
+         "medium",
+         "low",
+         "info"
+        ],
+        "name": "choice",
+        "param_type": "Choice"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Finding classes covered (default: existing only).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": true,
+       "name": "classifications",
+       "nargs": 1,
+       "opts": [
+        "--classification"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "case_sensitive": true,
+        "choices": [
+         "existing",
+         "introduced",
+         "worsened"
+        ],
+        "name": "choice",
+        "param_type": "Choice"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Restrict to one exact finding fingerprint.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "fingerprint",
+       "nargs": 1,
+       "opts": [
+        "--fingerprint"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Apply only under this exact rule-pack digest.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "rule_pack_digest",
+       "nargs": 1,
+       "opts": [
+        "--rule-pack-digest"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": null,
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "tracking_ref",
+       "nargs": 1,
+       "opts": [
+        "--tracking-ref"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "ISO-8601 expiry with timezone, e.g. 2026-12-31T00:00:00Z.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "expires_at",
+       "nargs": 1,
+       "opts": [
+        "--expires"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Skip the confirmation prompt.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "yes",
+       "nargs": 1,
+       "opts": [
+        "-y",
+        "--yes"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "waivers": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "List this workspace's waivers (read-only).",
+     "hidden": false,
+     "name": "waivers",
+     "params": [
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Only expired waivers.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "expired",
+       "nargs": 1,
+       "opts": [
+        "--expired"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": null,
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "json_output",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    }
+   },
+   "deprecated": false,
+   "epilog": null,
+   "help": "PRD-031A: the static-analysis gate's status, an operator scan, and\ntrusted risk acceptance. Waivers are created and revoked ONLY here;\nno model, repository or candidate can create one.",
+   "hidden": false,
+   "name": "static-analysis",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "tools": {
+   "chain": false,
+   "commands": {
+    "execute": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Execute a tool with JSON arguments.",
+     "hidden": false,
+     "name": "execute",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "tool_name",
+       "nargs": 1,
+       "opts": [
+        "tool_name"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "arguments_json",
+       "nargs": 1,
+       "opts": [
+        "arguments_json"
+       ],
+       "param_type_name": "argument",
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Auto-approve execution of tools that require confirmation (e.g. shell).",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "yes",
+       "nargs": 1,
+       "opts": [
+        "--yes",
+        "-y"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "list": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "List all registered tools and their arguments schema.",
+     "hidden": false,
+     "name": "list",
+     "params": [
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    }
+   },
+   "deprecated": false,
+   "epilog": null,
+   "help": "Manage and execute platform tools.",
+   "hidden": false,
+   "name": "tools",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "traces": {
+   "deprecated": false,
+   "epilog": null,
+   "help": "Show persistent run trace logs and metrics of past runs.\n\nWith --json this is the KUP v1 read path (GUI M1 Phase C, handover/GUI-D4-READ-STRATEGY/03_GATE.md): it never\nbootstraps logging, never migrates or creates a schema, never opens the live store except for the explicit\n--snapshot acquisition, and reads history only from a published snapshot named by --snapshot-id.",
+   "hidden": false,
+   "name": "traces",
+   "params": [
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "Maximum number of most-recent runs to show. Use --all to show every run. (KUP --json: default 50, maximum 200.)",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "limit",
+     "nargs": 1,
+     "opts": [
+      "-n",
+      "--limit"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "integer",
+      "param_type": "Int"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show all recorded runs, ignoring --limit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "show_all",
+     "nargs": 1,
+     "opts": [
+      "--all"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Copy a pre-state-directory traces.db to the canonical state location. Refused if the canonical database already exists (histories are never merged); the source is kept.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "migrate_legacy",
+     "nargs": 1,
+     "opts": [
+      "--migrate-legacy"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "With --migrate-legacy: the exact traces.db to copy (absolute). Without it, only the historical default <install dir>/logs/traces.db is considered.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "legacy_path",
+     "nargs": 1,
+     "opts": [
+      "--legacy-path"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": true,
+      "exists": false,
+      "file_okay": true,
+      "name": "path",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "KUP v1 (Kriya UI Protocol): one JSON envelope on stdout. Read-only inspection of a PUBLISHED SNAPSHOT (never the live store), plus the explicit snapshot operations below.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "as_json",
+     "nargs": 1,
+     "opts": [
+      "--json"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "KUP: protocol versions, operations, identity and limits.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "capabilities",
+     "nargs": 1,
+     "opts": [
+      "--capabilities"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "KUP: ACQUIRE a new consistent snapshot of the history store (SQLite online backup inside one read transaction) into <state dir>/kup-snapshots and publish it. The only KUP operation that writes.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "acquire",
+     "nargs": 1,
+     "opts": [
+      "--snapshot"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "With --snapshot: refuse acquisition while a run is active for this workspace (policy). With a history read: only the runs whose evidence manifest records this workspace.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "workspace",
+     "nargs": 1,
+     "opts": [
+      "--workspace"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": true,
+      "exists": false,
+      "file_okay": true,
+      "name": "path",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "KUP (GUI M5): read-only facts Kriya reports about this folder (identity, Git, recovery status, state directory). Opens nothing for writing.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "describe_workspace",
+     "nargs": 1,
+     "opts": [
+      "--describe-workspace"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": true,
+      "exists": false,
+      "file_okay": true,
+      "name": "path",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "KUP (GUI M6): what a run in this folder would be (configuration, state directory, models, authority). Read-only.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "execution_preflight",
+     "nargs": 1,
+     "opts": [
+      "--execution-preflight"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "allow_dash": false,
+      "dir_okay": true,
+      "exists": false,
+      "file_okay": true,
+      "name": "path",
+      "param_type": "Path",
+      "readable": true,
+      "writable": false
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "KUP (GUI M6): one desktop launch read back from durable records; requires --workspace.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "launch_status",
+     "nargs": 1,
+     "opts": [
+      "--launch-status"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "KUP: list the published snapshots.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "list_snaps",
+     "nargs": 1,
+     "opts": [
+      "--snapshots"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "With --snapshots: also verify every snapshot's digest.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "verify",
+     "nargs": 1,
+     "opts": [
+      "--verify"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "KUP: verify the SHA-256 of exactly this published snapshot (the host does this when it pins a snapshot; per-query checks stay size/mtime only).",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "verify_id",
+     "nargs": 1,
+     "opts": [
+      "--snapshot-verify"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "KUP: remove published snapshots beyond --keep and orphaned staging.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "prune",
+     "nargs": 1,
+     "opts": [
+      "--snapshot-prune"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "With --snapshot-prune: how many newest snapshots to keep (default 3; 0 removes all).",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "keep",
+     "nargs": 1,
+     "opts": [
+      "--keep"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "integer",
+      "param_type": "Int"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "KUP: the published snapshot to read (REQUIRED for history reads; browsing is pinned to one id).",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "snapshot_id",
+     "nargs": 1,
+     "opts": [
+      "--snapshot-id"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "KUP: opaque pagination cursor from a previous page of the SAME snapshot.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "cursor",
+     "nargs": 1,
+     "opts": [
+      "--cursor"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": null,
+     "envvar": null,
+     "flag_value": null,
+     "help": "KUP: one run's stored row in recorded form.",
+     "hidden": false,
+     "is_flag": false,
+     "multiple": false,
+     "name": "run_id",
+     "nargs": 1,
+     "opts": [
+      "--run-id"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "text",
+      "param_type": "String"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "KUP: with --run-id, return the stored prompt_rendered instead (sensitive; explicit request only).",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "include_prompt",
+     "nargs": 1,
+     "opts": [
+      "--include-prompt"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  },
+  "version": {
+   "deprecated": false,
+   "epilog": null,
+   "help": "Print the Kriya version and the exact source it was built from.\n\nKRIYA-VERSION-001: the package version comes from the installed\ndistribution's metadata; commit, tree and dirty come from the identity\nembedded when the wheel was built (never from git at run time). Without\nembedded provenance they are UNKNOWN, never guessed.",
+   "hidden": false,
+   "name": "version",
+   "params": [
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Machine-readable identity (stdout carries only the JSON).",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "as_json",
+     "nargs": 1,
+     "opts": [
+      "--json"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    },
+    {
+     "count": false,
+     "default": false,
+     "envvar": null,
+     "flag_value": true,
+     "help": "Show this message and exit.",
+     "hidden": false,
+     "is_flag": true,
+     "multiple": false,
+     "name": "help",
+     "nargs": 1,
+     "opts": [
+      "--help"
+     ],
+     "param_type_name": "option",
+     "prompt": null,
+     "required": false,
+     "secondary_opts": [],
+     "type": {
+      "name": "boolean",
+      "param_type": "Bool"
+     }
+    }
+   ],
+   "short_help": null
+  }
+ },
+ "deprecated": false,
+ "epilog": null,
+ "help": "Kriya - Production-Grade AI Engineering Platform CLI.",
+ "hidden": false,
+ "name": "main",
+ "params": [
+  {
+   "count": false,
+   "default": false,
+   "envvar": null,
+   "flag_value": true,
+   "help": "Print the Kriya version and the exact source it was built from, then exit.",
+   "hidden": false,
+   "is_flag": true,
+   "multiple": false,
+   "name": "version",
+   "nargs": 1,
+   "opts": [
+    "--version"
+   ],
+   "param_type_name": "option",
+   "prompt": null,
+   "required": false,
+   "secondary_opts": [],
+   "type": {
+    "name": "boolean",
+    "param_type": "Bool"
+   }
+  },
+  {
+   "count": false,
+   "default": null,
+   "envvar": null,
+   "flag_value": null,
+   "help": "Path to Kriya configuration YAML file.",
+   "hidden": false,
+   "is_flag": false,
+   "multiple": false,
+   "name": "config",
+   "nargs": 1,
+   "opts": [
+    "--config",
+    "-c"
+   ],
+   "param_type_name": "option",
+   "prompt": null,
+   "required": false,
+   "secondary_opts": [],
+   "type": {
+    "allow_dash": false,
+    "dir_okay": true,
+    "exists": true,
+    "file_okay": true,
+    "name": "path",
+    "param_type": "Path",
+    "readable": true,
+    "writable": false
+   }
+  },
+  {
+   "count": false,
+   "default": null,
+   "envvar": null,
+   "flag_value": null,
+   "help": "SEC-009 P2: path to an operator/CI-supplied approval artifact (see `kriya authority approve --out`), for non-interactive authorization of security-authority configuration. Must resolve outside the workspace - an in-repository path is refused, never silently ignored. Defaults to the KRIYA_TRUST_FILE environment variable when not passed.",
+   "hidden": false,
+   "is_flag": false,
+   "multiple": false,
+   "name": "trust_file",
+   "nargs": 1,
+   "opts": [
+    "--trust-file"
+   ],
+   "param_type_name": "option",
+   "prompt": null,
+   "required": false,
+   "secondary_opts": [],
+   "type": {
+    "allow_dash": false,
+    "dir_okay": true,
+    "exists": false,
+    "file_okay": true,
+    "name": "path",
+    "param_type": "Path",
+    "readable": true,
+    "writable": false
+   }
+  },
+  {
+   "count": false,
+   "default": false,
+   "envvar": null,
+   "flag_value": true,
+   "help": "Show this message and exit.",
+   "hidden": false,
+   "is_flag": true,
+   "multiple": false,
+   "name": "help",
+   "nargs": 1,
+   "opts": [
+    "--help"
+   ],
+   "param_type_name": "option",
+   "prompt": null,
+   "required": false,
+   "secondary_opts": [],
+   "type": {
+    "name": "boolean",
+    "param_type": "Bool"
+   }
+  }
+ ],
+ "short_help": null
+}

@@ -34,6 +34,11 @@ import _kernel_golden as kg  # noqa: E402 - needs the sys.path entry above  # py
 A, W, C = "kriya.workflow.attempt", "kriya.workflow.workflow", "kriya.workflow.workflow_controller"
 
 KINDS: Dict[Tuple[str, str], str] = {
+    # E14 characterization (tests/test_e14_characterization.py): the four collaborators its pins patch
+    (A, '_attribute_candidate_suite'): 'function',
+    (A, '_fallback_routing'): 'function',
+    (A, '_has_authoritative_full_source'): 'function',
+    (A, '_sync_active_repair_contract'): 'function',
     (A, '_approve_and_execute_runtime_verification'): 'async function',
     (A, '_approve_runtime_commands'): 'async function',
     (A, '_build_targeted_retry_prompt'): 'function',
@@ -170,6 +175,8 @@ CALL_THROUGH: Dict[str, Tuple[Tuple[str, str], ...]] = {
     "legacy_success": (
         (A, "_check_java_toolchain_mismatch"), (A, "_developer_request_profile"), (A, "_ensure_generation_time_budget"),
         (A, "_enter_developer_model"),
+        # E14 characterization (MEASURED: these two are reached by every scripted attempt; the other two it patches are not)
+        (A, "_fallback_routing"), (A, "_has_authoritative_full_source"),
         (A, "_maybe_run_developer_investigation"), (A, "_record_obligations_snapshot"), (A, "_reject_exception_masking"),
         (A, "_require_qualified_retry_identity"),
         (A, "_resolve_known_target_member_hints"), (A, "_run_developer_generation"), (A, "defer_execution_until_source_review"),
@@ -218,6 +225,10 @@ CLASS_CALL_THROUGH: Dict[str, Tuple[Tuple[str, str], ...]] = {
 HARNESS_PATCHED = ((C, "parse_planner_structured_output"), (C, "build_engineering_plan_from_planner_output"))
 
 NOT_REACHED: Dict[Tuple[str, str], str] = {
+    # E14 characterization: patched by tests/test_e14_characterization.py, which calls the moved helper that looks each
+    # one up directly (MEASURED: no scripted kernel run reaches these two)
+    (A, "_attribute_candidate_suite"): "suite attribution against a captured baseline: no scripted kernel run captures one",
+    (A, "_sync_active_repair_contract"): "process-boundary RepairContract: needs a test_process_terminated failure",
     (A, "_approve_and_execute_runtime_verification"): "runtime verification (disabled in the scripted runs; E8: "
                                                        "tests/test_gate_orchestrator.py drives the candidate gates "
                                                        "THROUGH this patch point)",

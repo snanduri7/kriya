@@ -47,6 +47,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E9: 2 -> 1 lookup: the two callers (approve-and-execute, direct) moved to runtime_verification and read
     # RuntimeDeps._approve_runtime_commands (one load in attempt._runtime_deps); the site above is the dynamic proof.
     (A, '_approve_runtime_commands'): P(2, A, ((A, 1),), ()),
+    # E14 characterization (tests/test_e14_characterization.py, written before the moves): 2 sites (the suite judgment's attribution, looked
+    # up by _judge_candidate_suite; one load).
+    (A, '_attribute_candidate_suite'): P(2, A, ((A, 1),), ()),
     # E7: unchanged - still the retry_prompts function attempt.py imports, looked up by run_attempt's two targeted
     # branches (which stay in attempt.py); retry_prompts.py stays its only definition.
     (A, '_build_targeted_retry_prompt'): P(2, 'kriya.workflow.retry_prompts', ((A, 2),), ()),
@@ -54,7 +57,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # attempt._gate_deps); the verification-only/runtime path keeps its own.
     # E9 characterization: +1 site (tests/test_runtime_verification.py: the direct path's preflight through this name).
     (A, '_check_java_toolchain_mismatch'): P(3, 'kriya.workflow.toolchain', ((A, 2),), ()),
-    (A, '_code_intelligence_for'): P(2, A, ((A, 2),), ()),
+    # E14 characterization (tests/test_e14_characterization.py, written before the moves): +1 site, the dynamic proof that a patch of this
+    # name reaches both the CandidateDeps and the GenerationDeps field.
+    (A, '_code_intelligence_for'): P(3, A, ((A, 2),), ()),
     # E6 characterization: +1 site (tests/test_fallback_decision.py records which request profiles a fallback decision
     # resolves, through this name: the selection, the call-time substitution and the model entry look it up here).
     # E6: 4 -> 3 lookups: the selection's and the substitution's loads moved to fallback_decision and read
@@ -70,11 +75,19 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # this name).
     (A, '_execute_managed_service_verification'): P(2, A, ((A, 2),), ()),
     (A, '_enter_developer_model'): P(1, A, ((A, 1),), ()),
+    # E14 characterization (tests/test_e14_characterization.py, written before the moves): 1 site (the rejected-locator fallback request's
+    # routing; loads: that helper and run_attempt).
+    (A, '_fallback_routing'): P(1, A, ((A, 2),), ()),
+    # E14 characterization (tests/test_e14_characterization.py, written before the moves): 1 site (the D1 patch-only set's authority, looked
+    # up through CandidateDeps; one load in attempt._candidate_deps).
+    (A, '_has_authoritative_full_source'): P(1, A, ((A, 1),), ()),
     # E8 characterization: +1 site (tests/test_gate_orchestrator.py records the scope every suite judgment is asked for).
     # E8: 4 -> 2 lookups: the three loads of the moved gates (the selection fallback's and the full suite's judgment,
     # the verification-only judge_suite lambda) read GateDeps._judge_candidate_suite (one load in attempt._gate_deps);
     # the test-delta covering run keeps its own. The patch site above is the dynamic proof (all three paths).
-    (A, '_judge_candidate_suite'): P(1, A, ((A, 2),), ()),
+    # E14 characterization (tests/test_e14_characterization.py, written before the moves): +1 site, the dynamic proof that a patch of this
+    # name reaches the GateDeps field.
+    (A, '_judge_candidate_suite'): P(2, A, ((A, 2),), ()),
     (A, '_maybe_run_developer_investigation'): P(1, A, ((A, 1),), ()),
     # E9 characterization: +1 site (tests/test_runtime_verification.py: the dynamic proof that both runtime call sites
     # resolve it through this module at call time).
@@ -86,7 +99,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (A, '_record_obligations_snapshot'): P(1, A, ((A, 1),), ()),
     # E10: 2 -> 1 lookup: the staging loop's two pre-flight calls moved to candidate_transaction and read
     # CandidateDeps._reject_exception_masking (one load in attempt._candidate_deps).
-    (A, '_reject_exception_masking'): P(1, A, ((A, 1),), ()),
+    # E14 characterization (tests/test_e14_characterization.py, written before the moves): +1 site, the dynamic proof that a patch of this
+    # name reaches the CandidateDeps field.
+    (A, '_reject_exception_masking'): P(2, A, ((A, 1),), ()),
     (A, '_require_qualified_retry_identity'): P(1, A, ((A, 1),), ()),
     # E8 (guard): 2 -> 2: the toolchain preflight's load moved (GateDeps, one load in attempt._gate_deps); the other stays.
     # E9 characterization: +1 site (tests/test_runtime_verification.py: the direct path's preflight through this name).
@@ -109,6 +124,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (A, '_run_developer_generation'): P(11, A, ((A, 5),), ()),
     # E8: the body moved to gate_orchestrator; attempt.py keeps an async forwarder (owner A) that run_attempt calls by this name.
     (A, '_run_verification_only_attempt'): P(1, A, ((A, 1),), ()),
+    # E14 characterization (tests/test_e14_characterization.py, written before the moves): 5 sites (the process-boundary obligation's
+    # RepairContract sync; one load in _record_process_boundary_obligation).
+    (A, '_sync_active_repair_contract'): P(5, A, ((A, 1),), ()),
     # E9 characterization: +1 site (tests/test_runtime_verification.py: the dynamic proof that both runtime call sites
     # resolve it through this module at call time).
     (A, '_validate_and_convert_managed_service_contract'): P(2, A, ((A, 1),), ()),
@@ -209,7 +227,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (C, 'WorkflowController._write_enforce_trace'): P(2, C, None, ()),
     # E12: 2 -> 1 lookup: the enforce loop's loads moved to enforce_loop and read EnforceDeps (one load in
     # workflow_controller._enforce_deps); the patch sites above are the dynamic proof.
-    (C, '_evaluate_subtask_verification'): P(1, C, ((C, 1),), ()),
+    # E14 characterization (tests/test_e14_characterization.py, written before the moves): +1 site, the dynamic proof that a patch of this
+    # name reaches the EnforceDeps field.
+    (C, '_evaluate_subtask_verification'): P(2, C, ((C, 1),), ()),
     # E11 characterization: +2 sites (tests/test_e11_owner_modules.py: the planned-edit feasibility through this name).
     # E11: 2 -> 1 lookup: evaluate_plan_edit_feasibility's two calls moved to planning_request and read
     # PlanningDeps.assess_planned_edit (one load in workflow_controller._planning_deps); the sites above are the dynamic proof.
@@ -397,8 +417,12 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # (test_e12_enforce_characterization: the enforce loop's and the shadow run's decisions, written before the move); the
     # orchestrator's E12 pins (ca1c97c) add +1 W.run_contract_baseline and +4 C sites (validate_plan +2, create_git_worktree
     # +1, build_planning_structural_evidence +1)
-    assert totals == {A: 100, W: 93, C: 382}
-    assert len(PATCH_POINTS) == 128
+    # E14 characterization (tests/test_e14_characterization.py, written before the moves): +12 A sites (+1 each on
+    # _code_intelligence_for, _judge_candidate_suite and _reject_exception_masking; 4 new rows with 9 sites:
+    # _attribute_candidate_suite 2, _fallback_routing 1, _has_authoritative_full_source 1, _sync_active_repair_contract 5)
+    # and +1 C site (_evaluate_subtask_verification)
+    assert totals == {A: 112, W: 93, C: 383}
+    assert len(PATCH_POINTS) == 132
 
 
 # ----------------------------------------------------------------------------- owner modules (DEPENDENCY-RULES)
