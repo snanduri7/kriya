@@ -448,7 +448,6 @@ def test_the_divergence_is_real(tmp_path):
 
 
 @pytest.mark.parametrize("sub", CANDIDATE_TRUTH)
-@pytest.mark.xfail(strict=True, reason="S18b: expected to flip with the OI-140 correction (status/diff read the candidate)")
 def test_a_planned_status_or_diff_reads_the_candidate(tmp_path, sub):
     """B: the run's working-tree state. A planned status/diff after a MODEL subtask must describe the candidate the
     run is building (and will commit), never the untouched owner folder."""
@@ -469,17 +468,18 @@ def test_a_planned_log_branch_or_blame_reads_the_owner_repository(tmp_path, sub)
     assert result.tool_output == _git(owner, *GIT_COMMANDS[sub])
 
 
+@pytest.mark.parametrize("in_place", [False, True], ids=["one-root", "candidate-is-the-owner"])
 @pytest.mark.parametrize("sub", list(GIT_COMMANDS))
-def test_one_root_means_the_owner_is_the_candidate(tmp_path, sub):
-    """With a single root (an in-place run: the owner folder IS what the run changes) every read uses it."""
+def test_one_root_means_the_owner_is_the_candidate(tmp_path, sub, in_place):
+    """With a single root, or a candidate that IS the owner folder (an in-place run), the owner folder is what the run
+    changes: every read uses it, with no candidate-view check."""
     owner, _candidate = _diverged(tmp_path)
-    result = _planned_git(sub, (owner,), **_args(sub))
+    result = _planned_git(sub, (owner, owner) if in_place else (owner,), **_args(sub))
     assert result.status == SubtaskStatus.COMPLETED, result.error
     assert result.tool_output == _git(owner, *GIT_COMMANDS[sub])
 
 
 @pytest.mark.parametrize("sub", CANDIDATE_TRUTH)
-@pytest.mark.xfail(strict=True, reason="S18b: expected to flip with the OI-140 correction (status/diff read the candidate)")
 def test_a_candidate_with_no_base_revision_refuses_status_and_diff_typed(tmp_path, sub):
     """The scoped snapshot candidate (a workspace nested in an enclosing repository) is a repository with NO commits:
     its diff is empty and its status lists every file as untracked whatever the run changed, and the owner root is the
@@ -493,7 +493,6 @@ def test_a_candidate_with_no_base_revision_refuses_status_and_diff_typed(tmp_pat
     assert result.tool_output is None
 
 
-@pytest.mark.xfail(strict=True, reason="S18b: expected to flip with the OI-140 correction (status/diff read the candidate)")
 def test_a_planned_diff_after_a_model_subtask_shows_the_change_the_run_commits(tmp_path, monkeypatch):
     """The real scenario, end to end: an enforce run whose s1 caches the service in the candidate, then a planned
     `git diff` step (depends_on s1). Before S18b it returned '' (the owner folder, untouched until the commit) while

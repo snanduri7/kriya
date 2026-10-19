@@ -30,6 +30,7 @@ from kriya.tools.containment import (
 from kriya.tools.process import ProcessController
 from kriya.tools.tool import (
     TOOL_OPERATOR_ONLY,
+    TOOL_WORKSPACE_ROOT_UNAVAILABLE,
     BaseTool,
     ModelInvocationRefused,
     ModelToolInvocation,
@@ -398,6 +399,12 @@ class GitTool(BaseTool):
     # currently-supported mutating subcommand this tool exposes - no
     # push/reset/ref-delete capability exists here to gate.
     _MUTATING_SUBCOMMANDS = frozenset({"commit"})
+    # S18b (OI-140, owner decision 3): which repository truth a PLANNED read describes. status and diff describe the
+    # working tree the run is changing, so they read the run's candidate (the invocation's second root; B); log,
+    # branch and blame describe the owner repository's history, refs and committed-line attribution, so they read the
+    # owner workspace (the first root; A) - the candidate is a detached Kriya worktree that gains no commits during a
+    # run. The operator's own `kriya tools execute` is unchanged (the process folder).
+    _CANDIDATE_VIEW_SUBCOMMANDS = frozenset({"status", "diff"})
     # SEC-001-P6: this tool had no wall-clock timeout at all before its
     # ProcessController migration - every subcommand here is a fast,
     # finite, local git operation, so a generous-but-bounded ceiling
@@ -482,16 +489,55 @@ class GitTool(BaseTool):
                                     result=trusted_control_path_denial(git_dir))
         if sub == "blame" and args.file_path:
             return args.model_copy(update={"file_path": _authorized_read(invocation, args.file_path)})
+        root = self._planned_read_root(sub, invocation)
+        if invocation.roots and os.path.realpath(root) != os.path.realpath(invocation.roots[0]):
+            self._require_own_repository_view(root)  # a separate candidate must be a view of the run's own changes
         return args
+
+    @classmethod
+    def _planned_read_root(cls, sub: str, invocation: ModelToolInvocation) -> str:
+        """S18b (OI-140): the folder a planned read runs in. B (status/diff): the candidate - the second root when the
+        run supplied one; with one root the owner folder IS what the run changes. A (log/branch/blame): the owner
+        workspace. With no roots the process folder, as before."""
+        if not invocation.roots:
+            return os.getcwd()
+        if sub in cls._CANDIDATE_VIEW_SUBCOMMANDS and len(invocation.roots) > 1:
+            return invocation.roots[1]
+        return invocation.roots[0]
+
+    def _require_own_repository_view(self, root: str) -> None:
+        """S18b (OI-140): a status/diff of a candidate ``root`` (separate from the owner workspace) is candidate truth
+        only when ``root`` is itself a repository's top level with a base revision. Otherwise git describes something
+        else - a scoped snapshot candidate (a workspace nested in an enclosing repository) has no commits, so its diff
+        is empty and its status lists every file as untracked whatever the run changed, and a folder that is not a
+        repository root reports the ENCLOSING repository - so the read is refused, typed, before git runs (never a
+        substitute view such as the owner folder). With one root (or the candidate IS the owner folder, an in-place
+        run) the owner folder is what the run changes and is read as before."""
+        profile = ContainmentProfile(trust_class=TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE, workspace_path=root)
+        try:
+            probe = ProcessController().run(
+                ["git", "rev-parse", "--show-toplevel", "HEAD^{commit}"], cwd=root,
+                timeout=self._GIT_COMMAND_TIMEOUT_SECONDS, containment_profile=profile,
+                containment_backend=resolve_containment_backend("none"),
+            )
+            lines = probe.stdout.splitlines() if probe.returncode == 0 and not probe.timeout else []
+        except Exception as error:  # an unreadable repository is no view at all
+            logger.warning("GitTool: the repository view of %r could not be read (%s)", root, error)
+            lines = []
+        if len(lines) != 2 or os.path.realpath(lines[0]) != os.path.realpath(root):
+            raise ModelInvocationRefused(
+                TOOL_WORKSPACE_ROOT_UNAVAILABLE,
+                f"the run's working tree at {root!r} is not a repository with a base revision of its own, so a planned "
+                "git status/diff cannot describe what the run changed. Nothing was run.",
+            )
 
     async def _run(self, args: GitArgs) -> Any:
         return await self._run_in(args, os.getcwd())
 
     async def _run_model_authored(self, args: GitArgs, invocation: ModelToolInvocation) -> Any:
-        """S18 (OI-129 item 3): a planned git read runs in the invocation's owner-workspace root, named explicitly
-        (the enforce loop supplies it first; it is the folder the process works in, so behaviour is unchanged). With no
-        roots it keeps the process folder, as before."""
-        return await self._run_in(args, invocation.roots[0] if invocation.roots else os.getcwd())
+        """S18 (OI-129 item 3) / S18b (OI-140): a planned git read runs in the root its subject belongs to
+        (_planned_read_root): status/diff in the candidate, log/branch/blame in the owner workspace."""
+        return await self._run_in(args, self._planned_read_root(args.subcommand.lower(), invocation))
 
     async def _run_in(self, args: GitArgs, cwd: str) -> Any:
         sub = args.subcommand.lower()
