@@ -3211,3 +3211,22 @@ launch-approval reviewability decision (a command a redaction would alter is not
 kept apart on purpose: the SEC-009 approval digest input (salted per-value digests, so a rotated secret still
 invalidates an approval) and the identity canonicalizer `endpoint_identity` (digest input; drops userinfo itself).
 
+### S3 - enabling fields need the human authority path (2026-10-19, OI-99, OWNER-RECOVERY-SELF-CORRECTION-REVIEW-001)
+
+Rule: a repository-controlled kriya.yaml cannot enable authority-sensitive behaviour without SEC-009's human authority
+path. `autonomy.self_correction_loop_enabled` (a model edit loop whose validator compiles model-written files) and
+`autonomy.web_lookup_auto_approve` (removes the per-query human confirmation of outbound search) are VALUE-GATED in
+`kriya/config/authority.py`: `value_gated_field_classification()` answers REPOSITORY_SAFE only for the exact restricting
+bool `False` (what `kriya init` writes) and SECURITY_AUTHORITY for any other value; `resolution.py` supplies it as a
+classification override like `paths.*` and `logging.directory`, and the static table lists both as SECURITY_AUTHORITY
+so a skipped override fails closed. The outcome is the existing one: a `ConfigAuthorityError` naming the field until
+`kriya authority approve` or a trust file covers it. SEC-009 has no trusted user-level layer (only the packaged default
+and the platform floor are trusted; an explicit `--config` outside the workspace is repository-equivalent), so the
+durable approval is the operator's path. Separately, the controller's owner-recovery self-correction
+(`owner_recovery._attempt_owner_recovery_self_correction`) now asks AUTHORITY's Gap B decision
+(`policy.approval.defer_execution_until_source_review`) and is held in human-in-the-loop
+(`OWNER_RECOVERY_SELF_CORRECTION_HELD_FOR_SOURCE_REVIEW`, logged), falling through to the governed Developer
+owner-recovery path, exactly as the three attempt-level micro-loops already are. What remains reachable: an
+operator-approved loop in `guardrails`/other modes (the same as the attempt-level loops). Every REPOSITORY_SAFE field
+was audited and is pinned with its reason in `tests/test_s3_config_authority_enabling_fields.py`.
+

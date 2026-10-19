@@ -118,6 +118,10 @@ autonomy:
   web_lookup_enabled: false                # Opt-in per project - see "search:" below and Section 4.6
   self_correction_loop_enabled: false      # Opt-in: a bounded native-tool-calling micro-loop on a compile
                                             # failure, before falling back to full-file regeneration.
+                                            # S3: `true` set by a repository's kriya.yaml needs
+                                            # `kriya authority approve`; `false` needs nothing. Never runs
+                                            # in human-in-the-loop mode (it would compile model-written
+                                            # code before you review it).
   best_of_n_first_attempt: 1               # >1 tries that many independent candidates on the very first attempt
                                             # only (never on retries, which already have real error grounding).
   generation_time_budget_seconds: null     # Set to the harness deadline (or slightly below); null is unbounded
@@ -1463,6 +1467,7 @@ By default, when Kriya lacks verified information for a skill, it stops and asks
 autonomy:
   web_lookup_enabled: true       # both switches required - flipping only one does nothing
   web_lookup_auto_approve: false # true = skip the pre-send confirmation below, allow fully unattended search
+                                 # (S3: `true` from a repository's kriya.yaml needs `kriya authority approve`)
 
 search:
   base_url: "http://localhost:8080"  # a search endpoint, e.g. a self-hosted SearXNG instance
