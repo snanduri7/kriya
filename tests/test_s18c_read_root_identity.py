@@ -522,3 +522,28 @@ def test_an_enforce_run_reads_the_candidate_after_its_model_step_and_the_baselin
     assert steps["s3"].status == SubtaskStatus.COMPLETED and steps["s3"].tool_output == shape.SERVICE_SRC
     assert steps["s4"].status == SubtaskStatus.COMPLETED and steps["s4"].tool_output == "No matches found."
     assert (observed.workspace / shape.SERVICE).read_text() == shape.SERVICE_SRC  # the change s3 described
+
+
+# Orchestrator verification (S18c): the walk over depends_on must terminate on a repeated id. Plan validation refuses a
+# cycle upstream, so this is defence in depth - but without the `seen` guard a cycle (or an exponential diamond) never
+# ends; mutant p15 (the guard dropped) survived the worker's pins.
+def _walk_in_a_thread(subtask, plan):
+    import threading
+    outcome = {}
+    worker = threading.Thread(target=lambda: outcome.setdefault("value", subtask_executor.follows_model_step(subtask, plan)),
+                              daemon=True)
+    worker.start()
+    worker.join(timeout=10)
+    return outcome
+
+
+def _tool_step(step_id, depends_on):
+    return Subtask(id=step_id, description="d", execution_method=ExecutionMethod.TOOL, tool_name="search",
+                   tool_arguments={"pattern": "x"}, depends_on=list(depends_on))
+
+
+def test_the_dependency_walk_terminates_on_a_cycle_and_a_diamond():
+    cycle = [_tool_step("a", ["b"]), _tool_step("b", ["a"])]
+    assert _walk_in_a_thread(cycle[0], EngineeringPlan.model_construct(subtasks=cycle)) == {"value": False}
+    diamond = [_tool_step("root", []), _tool_step("l", ["root"]), _tool_step("r", ["root"]), _tool_step("top", ["l", "r"])]
+    assert _walk_in_a_thread(diamond[3], EngineeringPlan.model_construct(subtasks=diamond)) == {"value": False}
