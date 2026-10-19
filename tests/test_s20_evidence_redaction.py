@@ -77,7 +77,6 @@ def _row(db):
         conn.close()
 
 
-@FLIP
 def test_the_trace_row_stores_no_secret(tmp_path):
     db = str(tmp_path / "traces.db")
     _log_secret_row(db)
@@ -98,14 +97,13 @@ def test_the_trace_row_keeps_its_non_secret_structure(tmp_path):
     assert json.loads(row["failure_report"])[0]["failure_type"] == "x"
 
 
-@FLIP
 def test_the_trace_row_holds_the_redacted_values(tmp_path):
     db = str(tmp_path / "traces.db")
     _log_secret_row(db)
     row = _row(db)
     assert row["goal"] == f"deploy with api_key={R} please"
     assert json.loads(row["gate_outcomes"])[0]["steps"][0]["command"] == ["run.sh", "--token", R, f"--password={R}"]
-    assert row["prompt_rendered"] == f"=== Goal ===\nAuthorization: Bearer {R}"
+    assert row["prompt_rendered"] == f"=== Goal ===\nAuthorization: {R} {R}"       # the header rule hides the scheme word too
 
 
 def test_a_trace_row_without_secrets_is_byte_identical_to_the_unredacted_serialization(tmp_path):
@@ -151,7 +149,7 @@ def test_the_evidence_envelope_stores_no_secret(tmp_path):
     state, _ = _store(tmp_path)
     records = open(os.path.join(state, "attempt-evidence", "s20-rec", "records.jsonl"), "rb").read()
     assert f"{S}20".encode() not in records
-    assert b"Authorization: " + R.encode() in records
+    assert f"Authorization: {R} {R}".encode() in records
 
 
 @FLIP
@@ -243,7 +241,7 @@ def test_the_launch_record_holds_the_redacted_free_text(tmp_path):
     assert record["approval_required"]["reason"] == f"run it; token: {R}"
     assert record["declined_decisions"][0]["reason"] == f"lookup with secret={R}"
     assert record["declined_decisions"][0]["details"] == {"terms": [f"api_key={R}"]}
-    assert record["ended"]["error"] == f"boom Authorization: Bearer {R}"
+    assert record["ended"]["error"] == f"boom Authorization: {R} {R}"
     change = [e for e in record["approval_history"] if e.get("kind") == "change_approval"][0]
     assert change["reason"] == f"size trigger; reviewer said password={R}"
 
@@ -357,7 +355,6 @@ def test_a_scripted_run_writes_its_trace_row_and_keeps_the_exact_content_blobs(t
     assert result.get("failure_report"), result.keys()       # the first attempt really failed (gate output recorded)
 
 
-@FLIP
 def test_a_scripted_run_keeps_no_planted_secret_in_its_trace_row(tmp_path, monkeypatch):
     """The original symptom (preflight part A): traces.db held the goal's and the gate output's credential raw."""
     _result, traces, _blobs = _scripted_run(tmp_path, monkeypatch)

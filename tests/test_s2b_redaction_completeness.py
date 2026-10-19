@@ -3,7 +3,7 @@ verification measured leaking, and the KUP history projection the GUI receives g
 
 Owner decisions (2026-10-19): one owner (kriya/foundation/redaction.py), no per-field or GUI-specific rule; OI-131: redact
 at the APPLICATION projection before the payload reaches Electron, never in the renderer; stored evidence stays RAW
-(digests bind exact bytes); a value that merely looks like a URL/token but carries no secret stays readable.
+(digests bind exact bytes; S20 narrowed this: the unbound traces.db row is redacted at write, OI-134); a value that merely looks like a URL/token but carries no secret stays readable.
 
 Characterization FIRST (S1 method). Pins of governed behaviour (green before and after: the readable-by-design values,
 the raw stored row, the approval record holding no value, never-mutates, idempotence) and EXPECTED-TO-FLIP pins written as
@@ -130,15 +130,20 @@ def _kup(operation, **request):
     return envelope, encode_response(envelope)        # the bytes the KUP host writes to Electron
 
 
-def test_the_stored_run_row_stays_raw_after_a_history_detail_read():
+def test_the_stored_run_row_is_redacted_at_write_and_a_history_detail_read_does_not_rewrite_it():
+    """S20 (OI-134): this pin encoded the defect (it asserted the stored row RAW: OBS-003 requires traces to be redacted,
+    and no digest binds the row - S20-PREFLIGHT I-1). The row is now redacted by its one writer; a read never rewrites it."""
     db, snap = _snapshot()
-    _kup("history.detail", snapshot_id=snap, run_id="r-s2b")
     conn = sqlite3.connect(db)
     try:
+        before = conn.execute("SELECT gate_outcomes, goal FROM runs WHERE run_id = 'r-s2b'").fetchone()
+        _kup("history.detail", snapshot_id=snap, run_id="r-s2b")
         stored, goal = conn.execute("SELECT gate_outcomes, goal FROM runs WHERE run_id = 'r-s2b'").fetchone()
     finally:
         conn.close()
-    assert json.loads(stored) == GATES and goal.endswith(f"{S}4'")      # the authoritative evidence is never rewritten
+    assert (stored, goal) == before                                       # a read never rewrites the stored row
+    assert json.loads(stored) == redact_value(GATES) and goal == f"deploy with api_key = '{R}'"
+    assert S not in stored and S not in goal
 
 
 def test_the_history_detail_blob_and_its_parsed_section_say_the_same_thing():

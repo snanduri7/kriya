@@ -5,13 +5,23 @@ from contextlib import closing
 from typing import Optional
 
 from kriya.core.db import get_connection
+from kriya.foundation.redaction import redact_text, redact_value
 
 
 class TraceLogger:
     """Writes run and milestone-plan rows to traces.db. Each operation opens
     its own connection and closes it (RESOURCE-SQLITE-CLOSE-001): a logger is
     usually a temporary (``TraceLogger(path).log_run(...)``), and a connection
-    held for the object's life was left for the garbage collector to close."""
+    held for the object's life was left for the garbage collector to close.
+
+    S20 (OI-134, OBS-003): the ONE writer of the ``runs`` / ``milestone_plans``
+    rows stores every column through the ONE redactor
+    (kriya/foundation/redaction.py): a credential in a goal, a rendered
+    prompt, a gate argv or its output, an event, an evidence record, a model
+    hop or a failure report is hidden BEFORE it reaches the database (no
+    digest binds these rows; every reader is a display or a metric). The
+    caller's objects are never mutated; text without a secret shape is
+    stored byte-identically."""
 
     def __init__(self, db_path: str) -> None:
         self.db_path = os.path.abspath(db_path)
@@ -132,16 +142,18 @@ class TraceLogger:
         with self._connect() as conn:
             cursor = conn.cursor()
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            files_str = ",".join(files_modified)
+            files_str = redact_text(",".join(files_modified))
+            goal = redact_text(goal)
+            prompt_rendered = redact_text(prompt_rendered)
 
-            chunks_json = json.dumps(retrieved_chunks or [])
-            skills_str = ",".join(active_skills or [])
-            gates_json = json.dumps(gate_outcomes or [])
-            hops_json = json.dumps(model_hops or [])
-            events_json = json.dumps(run_events or [])
-            evidence_json = json.dumps(evidence_records or [])
-            generation_metrics_json = json.dumps(generation_metrics or {})
-            failure_report_json = json.dumps(failure_report or [])
+            chunks_json = json.dumps(redact_value(retrieved_chunks or []))
+            skills_str = redact_text(",".join(active_skills or []))
+            gates_json = json.dumps(redact_value(gate_outcomes or []))
+            hops_json = json.dumps(redact_value(model_hops or []))
+            events_json = json.dumps(redact_value(run_events or []))
+            evidence_json = json.dumps(redact_value(evidence_records or []))
+            generation_metrics_json = json.dumps(redact_value(generation_metrics or {}))
+            failure_report_json = json.dumps(redact_value(failure_report or []))
 
             cursor.execute("""
                 INSERT OR REPLACE INTO runs (
@@ -196,7 +208,7 @@ class TraceLogger:
             """, (
                 group_id, timestamp, status, schema_version, milestone_count,
                 dependency_edges, extension_count, composition_count,
-                validation_attempts, json.dumps(validation_failures), json.dumps(repository_topology),
+                validation_attempts, json.dumps(redact_value(validation_failures)), json.dumps(redact_value(repository_topology)),
             ))
             conn.commit()
 
