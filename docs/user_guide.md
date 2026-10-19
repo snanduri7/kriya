@@ -207,9 +207,25 @@ logging:
   all.
 - **`kriya doctor --production`** logs to the terminal only. It checks that the log directory is valid and writable
   (`persistence.logs`) without creating it.
+- **Secrets never reach a log** (S2): every log line Kriya writes (terminal, application log, run log) is passed through
+  the same redaction as `kriya config`, below; a credential in a URL (`http://user:password@host`) becomes
+  `http://***REDACTED***@host`.
 - **Errors:** an invalid or unwritable log directory stops the command with an "Error configuring logging" message.
   Kriya never falls back to `./logs`.
 - **Existing `./logs` directories** are left alone, never migrated or deleted.
+
+### 2.0a-1 What Kriya shows of a secret (S2)
+`kriya config`, `kriya authority inspect` / `approve`, `kriya doctor` (also `--production`), error messages, log lines,
+the desktop app's error messages and the audit records never show a secret. One rule decides, everywhere:
+- **A setting whose name says it is a secret** (`api_key`, `API_KEY`, `token`, `Auth-Token`, `password`,
+  `client_secret`, `credentials`, `Authorization`, ...) shows `***REDACTED***`; an empty one shows as empty, so you can
+  still see it is unset. Names are matched by word: `max_tokens` is not a secret.
+- **Every value of an MCP server's `env`** is hidden; the variable names stay visible.
+- **A secret by its shape, anywhere in a value or message**: the user/password part of a URL
+  (`http://***REDACTED***@host:11434/v1`), `Bearer`/`Basic` credentials, `password=...`-style pairs, and AWS / `sk-` /
+  GitHub token shapes.
+- Readable on purpose: the host, port and path of a URL, hashes and commit SHAs, e-mail addresses, `git@host:repo`
+  remotes. The approval record (`kriya authority approve`) never stored values; it keeps salted digests.
 
 ### 2.0b Where run history goes (`paths.state`)
 `traces.db` is the run history behind `kriya traces`. It is persistent state, not log output, so it has its own
