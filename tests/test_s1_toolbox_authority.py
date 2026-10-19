@@ -675,3 +675,25 @@ def test_the_tool002_mcp_scenarios_hold_in_human_in_the_loop(tmp_path, monkeypat
     monkeypatch.setenv("KRIYA_AUTHORITY_HOME", str(tmp_path / "_authority_home"))
     monkeypatch.setenv("KRIYA_MCP_APPROVAL_HOME", str(tmp_path / "_mcp_approval_home"))
     getattr(tool001, scenario)(tmp_path)  # the scenario body itself, without that module's mode fixture
+
+
+def test_the_toolbox_entry_refuses_on_its_own_without_the_executor(tmp_path):
+    """The authority sits at the tool boundary, below any caller: the model-authored entry called directly (no B3,
+    no subtask executor) still refuses shell in human-in-the-loop and a write in every mode, before anything runs."""
+    from kriya.policy.errors import PolicyDeniedError
+    from kriya.tools.tool import ModelInvocationRefused, ModelToolInvocation, ToolExecutionError, execute_model_authored
+
+    ws, cand, out = _ws(tmp_path)
+    marker = out / "shell_ran"
+    with pytest.raises(ModelInvocationRefused) as refused:
+        asyncio.run(execute_model_authored(_core().ShellTool(), {"command": f"touch {marker}"},
+                                           ModelToolInvocation(roots=(str(ws),), autonomy_mode=HITL)))
+    assert refused.value.reason_code == "TOOL_MUTATION_REVIEW_UNAVAILABLE" and not marker.exists()
+    for mode in MODES:
+        with pytest.raises(ToolExecutionError) as denied:
+            asyncio.run(execute_model_authored(_core().FilesystemTool(),
+                                               {"operation": "write", "path": str(out / "W.txt"), "content": "x"},
+                                               ModelToolInvocation(roots=(str(ws), str(cand)), autonomy_mode=mode)))
+        assert isinstance(denied.value.__cause__, PolicyDeniedError)
+        assert denied.value.__cause__.result.reason_code == "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS"
+    assert not (out / "W.txt").exists()
