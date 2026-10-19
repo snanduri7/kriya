@@ -291,7 +291,10 @@ def test_egress_violation_messages_never_carry_url_credentials(monkeypatch):
     monkeypatch.setattr(LLMClient, "_request_once", AsyncMock(side_effect=AssertionError("no request")))
     with pytest.raises(EgressViolationError) as completion:
         asyncio.run(llm.complete("system", "user"))
-    for error in (embedding.value, completion.value):
+    monkeypatch.setattr(llm.client.chat.completions, "create", AsyncMock(side_effect=AssertionError("no request")))
+    with pytest.raises(EgressViolationError) as tool_calling:
+        asyncio.run(llm.complete_with_tools(messages=[{"role": "user", "content": "u"}], tools=[]))
+    for error in (embedding.value, completion.value, tool_calling.value):
         assert "8.8.8.8" in str(error) and PW not in str(error), str(error)
 
 

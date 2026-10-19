@@ -72,6 +72,7 @@ Unchanged: which fields need approval, digest calculation (`compute_value_digest
 ## 6. Observations (not changed here)
 
 * **Pre-existing:** `kriya authority inspect|approve` print `llm.base_url` in clear including URL credentials (`describe_pending` redacts only `env` and `api_key`). The GUI sends no values at all, so it is unaffected. Recorded for the owner; a display-redaction fix is a CLI change outside this task.
+  * **S2 update (2026-10-19, OI-98):** the CLI display now goes through the one redaction owner (`kriya/foundation/redaction.py`): URL userinfo, secret-named keys at any depth and header credentials are hidden in inspect/approve, `kriya config`, doctor, logs and KUP error messages. The GUI still sends no values (unchanged). The text above (lines 20, 42, 74) describes the state before S2 and is kept as the design-time record.
 * The review fingerprint is process-local: restarting the Kriya service between Review and Approve refuses the approval as stale and the person reviews again (safe direction, tested).
 * No Revoke UI (the CLI `kriya authority revoke` remains; `reset_demo.sh` revokes).
 
