@@ -1,0 +1,653 @@
+[
+ {
+  "target": "kriya.agents.extractor",
+  "domain": "KERNEL",
+  "importing_rows_count": 1,
+  "row_failure_kind": "direction",
+  "resolution": "REMOVE_DEPENDENCY",
+  "final_class": "TEMPORARY",
+  "actual_owner": "the analyze use case (ADAPTER-CLI/APPLICATION) or SKILLS (skill writing); RETRIEVAL keeps indexing only",
+  "removal_or_acceptance_slice": "NEW: ANALYZER-SKILL-BOOTSTRAP-OUT (Type C): move RepositoryAnalyzer.index_repository step 5 (LLM conventions-skill bootstrap + skill.yaml write) out of RETRIEVAL into the analyze use case / SKILLS registry; the analyzer returns the IndexReport only",
+  "change_type": "C",
+  "evidence": "TRACED analyzer/analyzer.py:1122-1200: index_repository step 5 '# 5. Auto-Generate Codebase Conventions Skill' lazily imports ConventionsExtractorAgent (agents/extractor.py, 64 lines, a KERNEL agent over agents.agent) and core.llm.LLMClient, calls the model and writes skills/auto-<slug>/skill.yaml with click output. Row fails as 'direction RETRIEVAL -> KERNEL' (test_import_direction.py:78), not a public-surface issue: no public declaration can clear it. generate_conventions_skill defaults True (analyzer.py:874); callers: cli.py:2315 (analyze) and workflow/workflow.py:885 (_ensure_repository_indexed, first index of a run, default flag); context_certification passes False. E13 lists analyzer.analyzer only as an import-path rewrite of the agent split, it does not remove the edge.",
+  "confidence": "high",
+  "open_question": "Should a kernel-initiated first index (workflow.py:885) still auto-generate a model-written skill? Today it does whenever paths.skills has no auto-<slug> dir (TRACED; live reach INFERRED).",
+  "importing_rows": [
+   "kriya.analyzer.analyzer"
+  ],
+  "hidden_violation_or_defect": "LAYERING VIOLATION (misplaced logic, not bookkeeping): RETRIEVAL performs an LLM call and writes a skill file that later loads as a skill; model text becoming skill content is adjacent to the 'model text is evidence, never authority' invariant - flagged INFERRED, not a confirmed defect."
+ },
+ {
+  "target": "kriya.config.authority_approval",
+  "domain": "AUTHORITY",
+  "importing_rows_count": 4,
+  "row_failure_kind": "mixed: 3 non-public + 1 direction",
+  "resolution": "PUBLIC_CONTRACT",
+  "final_class": "PERMANENT_INTENTIONAL",
+  "actual_owner": "AUTHORITY (SEC-009 durable config approval; file stays in kriya/config per footnote 1)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2; metrics.thresholds row -> NEW: TRUST-PATH-GUARD (Type B): one outside-workspace artifact-store guard in CONTEXT (over platform.filesystem_semantics.path_relation), used by config.authority_approval, mcp.invocation_approval (dedupes validate_store_path_outside_workspace), static_analysis.waivers and metrics.thresholds; exception types preserved by subclassing",
+  "change_type": "A (metrics row: B)",
+  "evidence": "MEASURED module_map.py:210 RESTRICTED[('CONFIG','AUTHORITY')] names kriya.config.authority_approval, but AUTHORITY.public (module_map.py:79-80) omits it, so footnote 1 can never be satisfied: config.config (L1640 lazy, resolve_with_approval / validate_trust_path_outside_workspace - SEC-009 runs inside load_config) can ONLY be legalised by declaring it public; re-pointing to policy.authority fails RESTRICTED. release_candidate (L51: build_security_field_records, compute_set_digest - the release identity binds the SEC-009 field-set digest) and static_analysis.waivers (L28: validate_trust_path_outside_workspace) are legitimate consumers of the single owner; policy.authority already re-exports the waivers name (policy/authority.py:25-34). SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total). metrics.thresholds remains: it fails as 'direction METRICS -> AUTHORITY' (test_import_direction.py:226).",
+  "confidence": "high",
+  "open_question": "metrics.thresholds: DEPENDENCY-RULES \u00a73 line 114 enumerates this edge as 'none: METRICS may read STATE/CONFIG' - that rationale assumed authority_approval is CONFIG, but module_map makes it AUTHORITY, so the row is mislabeled P2. Owner: repoint (TRUST-PATH-GUARD) or amend the matrix for METRICS->AUTHORITY?",
+  "importing_rows": [
+   "kriya.config.config",
+   "kriya.core.release_candidate",
+   "kriya.metrics.thresholds",
+   "kriya.static_analysis.waivers"
+  ],
+  "row_decisions": {
+   "kriya.config.config": "PUBLIC_CONTRACT (footnote 1), PERMANENT",
+   "kriya.core.release_candidate": "PUBLIC_CONTRACT, PERMANENT (importer moves with N1, edge stays)",
+   "kriya.static_analysis.waivers": "PUBLIC_CONTRACT, PERMANENT (later moves to the TRUST-PATH-GUARD primitive)",
+   "kriya.metrics.thresholds": "REPOINT_IMPORTERS to a CONTEXT-owned guard (TRUST-PATH-GUARD), TEMPORARY; direction row"
+  },
+  "hidden_violation_or_defect": "DUPLICATE GUARD (low severity): authority_approval.validate_trust_path_outside_workspace (L362) and mcp/invocation_approval.validate_store_path_outside_workspace (L231) are the same path_relation check with different error types; waivers and metrics borrow the SEC-009 approval module for non-approval artifacts. Also two private _atomic_write_json copies (authority_approval L382, invocation_approval L248) without parent-dir fsync - candidates for R1's single durable writer (MEASURED code; whether R1 covers them NOT checked)."
+ },
+ {
+  "target": "kriya.control.launch_approval",
+  "domain": "AUTHORITY",
+  "importing_rows_count": 2,
+  "row_failure_kind": "non-public",
+  "resolution": "REPOINT_IMPORTERS",
+  "final_class": "TEMPORARY",
+  "actual_owner": "AUTHORITY: policy.approval (review vocabulary) + policy.authority.AuthorityPort (await/build pending); launch_approval stays the implementation",
+  "removal_or_acceptance_slice": "NEW: AUTH-PORT-ADOPT (Type B, PRESERVE): re-point AUTHORITY mechanism importers to policy.authority / policy.approval / the true owner (launch_approval, invocation_approval, enforcement); add the missing names to the port surface",
+  "change_type": "A (workflow row) / B (launch row)",
+  "evidence": "TRACED workflow/workflow.py:26 imports REVIEW_SECTION_HEADER from launch_approval, which only re-exports it from policy.approval (launch_approval.py:41, a PUBLIC AUTHORITY module): pure laundering, Type A repoint. control/launch.py:157/175/186 lazily import build_pending, await_decision, build_pending_runtime, await_runtime_decision, HISTORY_MAX, STATUS_* (defined launch_approval.py:56-60); AuthorityPort already fronts await_source_decision/await_runtime_decision (policy/authority.py:86-96) but not build_pending*/status vocabulary. launch_approval imports control.launch lazily back (L176): a STATE<->AUTHORITY mutual lazy cycle.",
+  "confidence": "medium-high",
+  "open_question": "Footnote 2 / RESTRICTED[('AUTHORITY','STATE')] (module_map.py:211) names control.launch_approval - an AUTHORITY module - as a STATE target; launch_approval's real STATE reads are control.launch and control.run_ownership (both STATE-public), which is why the non-batch P2 rows launch_approval->launch/run_ownership (test_import_direction.py:172-173) exist. Owner: correct the footnote to name the STATE modules.",
+  "importing_rows": [
+   "kriya.control.launch",
+   "kriya.workflow.workflow"
+  ],
+  "row_decisions": {
+   "kriya.workflow.workflow": "REPOINT to policy.approval.REVIEW_SECTION_HEADER (Type A)",
+   "kriya.control.launch": "REPOINT to AuthorityPort + move STATUS_*/HISTORY_MAX to policy.approval (Type B)"
+  }
+ },
+ {
+  "target": "kriya.core.kernel",
+  "domain": "KERNEL",
+  "importing_rows_count": 2,
+  "row_failure_kind": "direction",
+  "resolution": "REPOINT_IMPORTERS",
+  "final_class": "TEMPORARY",
+  "actual_owner": "TOOLBOX (a ToolHost Protocol owned by kriya/toolbox); KERNEL composes the providers",
+  "removal_or_acceptance_slice": "NEW: TOOLBOX-HOST (Type B, recommended to ride with K1): MCPManager/PluginManager take a TOOLBOX-owned ToolHost Protocol (registry, events, config) instead of core.kernel.Kernel; core.kernel/core.__init__ reach ComponentRegistry through toolbox.registry or drop the unused re-export",
+  "change_type": "B",
+  "evidence": "MEASURED: rows fail as 'direction TOOLBOX -> KERNEL' (test_import_direction.py:217, 227) - matrix-forbidden, not a public-surface issue (core.kernel IS public). mcp/mcp.py:10 and plugins/plugin.py:8 import Kernel for constructor typing; they use only kernel.registry (register/unregister 'tool'), kernel.events.emit and kernel.config (mcp.py:935-1053, plugin.py:88-138). K1 text removes the opposite edge only ('Kernel composes MCPManager through toolbox.compose (removes core.kernel -> mcp and tools.service -> mcp)'), so these two rows survive K1 unless its scope is extended.",
+  "confidence": "high",
+  "open_question": "Approve the ToolHost scope addition to K1 (or a separate micro-slice)?",
+  "importing_rows": [
+   "kriya.mcp.mcp",
+   "kriya.plugins.plugin"
+  ]
+ },
+ {
+  "target": "kriya.core.registry",
+  "domain": "TOOLBOX",
+  "importing_rows_count": 3,
+  "row_failure_kind": "non-public",
+  "resolution": "REPOINT_IMPORTERS",
+  "final_class": "TEMPORARY",
+  "actual_owner": "TOOLBOX (ComponentRegistry declared TOOLBOX, TARGET-MODULE-MAP row 12; public surface toolbox.registry)",
+  "removal_or_acceptance_slice": "K2 (subtask_executor row) + NEW: TOOLBOX-HOST (Type B, recommended to ride with K1): MCPManager/PluginManager take a TOOLBOX-owned ToolHost Protocol (registry, events, config) instead of core.kernel.Kernel; core.kernel/core.__init__ reach ComponentRegistry through toolbox.registry or drop the unused re-export (core.kernel, core/__init__ rows)",
+  "change_type": "A/B",
+  "evidence": "TRACED: core/kernel.py:5/13 constructs ComponentRegistry (TARGET-MODULE-MAP row 12: 'core/registry.py::ComponentRegistry (the executing registry) declared TOOLBOX (A; the Kernel keeps holding it)'); toolbox.registry is TOOLBOX's declared public module (module_map.py:120) but does not exist yet (kriya/toolbox absent at 8e0c90a). subtask_executor.py:59/147 catches ComponentRegistryError around Kernel.registry.get('tool'): K2 quote: 'ToolRegistry.execute as the ONE delegation path (subtask_executor and cli tools execute call it; BaseTool.execute remains the only path into _run)'. core/__init__.py:4 re-exports ComponentRegistry/ComponentRegistryError: MEASURED zero in-repo consumers import them from kriya.core (grep kriya/ plugins/ tests/).",
+  "confidence": "medium-high",
+  "open_question": "core/__init__ re-export may be third-party plugin API; confirm before deleting.",
+  "importing_rows": [
+   "kriya.core",
+   "kriya.core.kernel",
+   "kriya.workflow.subtask_executor"
+  ],
+  "row_decisions": {
+   "kriya.workflow.subtask_executor": "EXISTING_SLICE_ALREADY_OWNS K2",
+   "kriya.core.kernel": "REPOINT to toolbox.registry re-export (K1 files list already includes core/kernel.py; scope addition)",
+   "kriya.core": "REMOVE_DEPENDENCY (dead re-export)"
+  },
+  "dead_edge": "kriya.core -> kriya.core.registry: re-export with no in-repo consumer (MEASURED)"
+ },
+ {
+  "target": "kriya.mcp.capability",
+  "domain": "AUTHORITY",
+  "importing_rows_count": 2,
+  "row_failure_kind": "non-public",
+  "resolution": "PUBLIC_CONTRACT",
+  "final_class": "PERMANENT_INTENTIONAL",
+  "actual_owner": "AUTHORITY (TOOL-003 capability authority: definition + governance)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "TRACED mcp/capability.py (240 lines; imports only platform.filesystem_semantics): MCPCapabilityProfile/MCPNetworkAuthority/MCPPathScope types, compute_mcp_capability_profile_digest, resolve_mcp_capability_profile. Importers are the TOOLBOX enforcement side: mcp.mcp L11, mcp.containment_adapter L20 (the OCI enforcement adapter). Single definition site of the operator-authorized profile the provider must enforce (effective <= authorized); not on AuthorityPort and MODULE-CONTRACTS \u00a74 has no profile type. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "high",
+  "open_question": null,
+  "importing_rows": [
+   "kriya.mcp.containment_adapter",
+   "kriya.mcp.mcp"
+  ]
+ },
+ {
+  "target": "kriya.mcp.invocation_approval",
+  "domain": "AUTHORITY",
+  "importing_rows_count": 2,
+  "row_failure_kind": "non-public",
+  "resolution": "REPOINT_IMPORTERS",
+  "final_class": "TEMPORARY",
+  "actual_owner": "AUTHORITY via policy.authority (AuthorityPort.mcp_invocation_resolver, C1) and context.workspace_identity",
+  "removal_or_acceptance_slice": "NEW: AUTH-PORT-ADOPT (Type B, PRESERVE): re-point AUTHORITY mechanism importers to policy.authority / policy.approval / the true owner (launch_approval, invocation_approval, enforcement); add the missing names to the port surface (tools.service row: do it in K1 when tools/service.py becomes toolbox/catalog.py)",
+  "change_type": "A/B",
+  "evidence": "MEASURED policy/authority.py:131-135 AuthorityPort.mcp_invocation_resolver already wraps resolve_mcp_invocation_approval, the only name mcp.mcp imports (mcp.py:17). tools/service.py:22 imports MCPApprovalArtifactError, MCPTrustPathInsideWorkspaceError, default_local_approval_path, load_approval_artifact AND workspace_identity - the last is laundered from context.workspace_identity (CONTEXT public). K1 deletes tools/service.py (moves to toolbox.catalog) - that re-homes the importer only, the edge stays.",
+  "confidence": "medium-high",
+  "open_question": "Alternative: declare invocation_approval public (it is the TOOL-002 single owner). Chosen repoint because C1 built the port method for exactly this call.",
+  "importing_rows": [
+   "kriya.mcp.mcp",
+   "kriya.tools.service"
+  ],
+  "row_decisions": {
+   "kriya.mcp.mcp": "REPOINT to AuthorityPort.mcp_invocation_resolver",
+   "kriya.tools.service": "REPOINT: artifact names via policy.authority re-exports, workspace_identity from context.workspace_identity"
+  }
+ },
+ {
+  "target": "kriya.platform.host_properties",
+  "domain": "PLATFORM",
+  "importing_rows_count": 2,
+  "row_failure_kind": "non-public",
+  "resolution": "PUBLIC_CONTRACT",
+  "final_class": "PERMANENT_INTENTIONAL",
+  "actual_owner": "PLATFORM (ARCH-PLATFORM-001 hardware probe)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "TRACED platform/host_properties.py (82 lines, no kriya imports): host_properties(), os_and_architecture(), UNAVAILABLE - the OS probe moved out of core/execution_environment by ARCH-PLATFORM-001 and listed as a platform member in handover/PLATFORM_ARCHITECTURE.md:65 ('host_properties.py hardware probe'). Importers execution_environment (PROVIDER, L42-43) and release_identity (QUALIFICATION, L29) build environment identity from it - the intended consumer direction. PLATFORM.public (module_map.py:59-60) simply omitted it. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "high",
+  "open_question": null,
+  "importing_rows": [
+   "kriya.core.execution_environment",
+   "kriya.core.release_identity"
+  ]
+ },
+ {
+  "target": "kriya.platform.toolchain_locator",
+  "domain": "PLATFORM",
+  "importing_rows_count": 1,
+  "row_failure_kind": "non-public",
+  "resolution": "PUBLIC_CONTRACT",
+  "final_class": "PERMANENT_INTENTIONAL",
+  "actual_owner": "PLATFORM (PLAT-015 JDK home discovery)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "TRACED platform/toolchain_locator.py (137 lines, no kriya imports) docstring: 'Where a specific JDK major version lives is platform mechanism ... The workflow asks this locator; it never branches on the OS itself.' Importer workflow.toolchain L9 (jdk_home_for_version). SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total). Also clears the non-batch O1 row kup.execution -> platform.toolchain_locator, which must be deleted in the same slice (stale-entry rule).",
+  "confidence": "high",
+  "open_question": null,
+  "importing_rows": [
+   "kriya.workflow.toolchain"
+  ]
+ },
+ {
+  "target": "kriya.policy.enforcement",
+  "domain": "AUTHORITY",
+  "importing_rows_count": 2,
+  "row_failure_kind": "non-public",
+  "resolution": "REPOINT_IMPORTERS",
+  "final_class": "TEMPORARY",
+  "actual_owner": "AUTHORITY via policy.authority (add enforce_hard_invariants to the facade surface)",
+  "removal_or_acceptance_slice": "NEW: AUTH-PORT-ADOPT (Type B, PRESERVE): re-point AUTHORITY mechanism importers to policy.authority / policy.approval / the true owner (launch_approval, invocation_approval, enforcement); add the missing names to the port surface",
+  "change_type": "A",
+  "evidence": "TRACED policy/enforcement.py (62 lines): enforce_hard_invariants(policy, request) raises PolicyDeniedError for the closed HARD_ENFORCED_REASON_CODES table (MA7.3) - a decision wrapper over ExecutionPolicy, not a leaf type module. Importers: tools.validate L20, workflow.worktree L11 (M2 moves worktree to repository.worktree: importer re-home only, REPOSITORY->AUTHORITY is pub-allowed so the row stays non-public). AuthorityPort.evaluate_action exists; the enforcing variant is not on the port yet.",
+  "confidence": "medium",
+  "open_question": "Equally defensible: PUBLIC_CONTRACT (single function + closed table). Chosen repoint to keep decisions behind the one facade.",
+  "importing_rows": [
+   "kriya.tools.validate",
+   "kriya.workflow.worktree"
+  ]
+ },
+ {
+  "target": "kriya.policy.errors",
+  "domain": "AUTHORITY",
+  "importing_rows_count": 10,
+  "row_failure_kind": "non-public",
+  "resolution": "PUBLIC_CONTRACT",
+  "final_class": "PERMANENT_INTENTIONAL",
+  "actual_owner": "AUTHORITY (PolicyDeniedError, the typed refusal)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "TRACED policy/errors.py (28 lines, imports only policy.model): PolicyDeniedError. Fan-in 10 modules / 3 domains (TOOLBOX, EXECUTION, KERNEL) all import only the exception type; raised for real at mcp.py:810, workflow.py:2072-2081, attempt.py:3334, policy/filesystem.py:358/462, enforcement.py:61; caught in validate.py:976, worktree.py:173, investigation.py, self_correction.py, stage_architecture.py, plugins/core_tools - live, not dead. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "high",
+  "open_question": "errors.py docstring claims no real call site passes enforce=True - stale against the raise sites above (doc only).",
+  "importing_rows": [
+   "kriya.mcp.mcp",
+   "kriya.tools.validate",
+   "kriya.workflow.attempt",
+   "kriya.workflow.investigation",
+   "kriya.workflow.recovery_coordinator",
+   "kriya.workflow.retry_strategy",
+   "kriya.workflow.self_correction",
+   "kriya.workflow.subtask_executor",
+   "kriya.workflow.workflow",
+   "kriya.workflow.worktree"
+  ]
+ },
+ {
+  "target": "kriya.policy.execution",
+  "domain": "AUTHORITY",
+  "importing_rows_count": 1,
+  "row_failure_kind": "direction",
+  "resolution": "REPOINT_IMPORTERS",
+  "final_class": "TEMPORARY",
+  "actual_owner": "AUTHORITY via policy.egress (footnote 4 target)",
+  "removal_or_acceptance_slice": "NEW: LLM-EGRESS-AUDIT (Type B) - move LLMClient._audit_llm_network_access's ExecutionPolicy consultation behind policy.egress (footnote-4 target); OR owner amends footnote 4 to admit policy.execution/policy.model (then PERMANENT)",
+  "change_type": "B",
+  "evidence": "MEASURED: row fails as 'direction PROVIDER -> AUTHORITY' (test_import_direction.py:182) because RESTRICTED[('PROVIDER','AUTHORITY')] = (policy.egress,) (module_map.py:213); policy.execution is already public, so no declaration can clear it and repointing to policy.authority fails RESTRICTED too. TRACED core/llm.py:23-24, 193, 445-467: LLMClient builds its own ExecutionPolicy() and _audit_llm_network_access evaluates ActionRequest(LLM_NETWORK_ACCESS) audit-only (logged, exceptions swallowed); the hard egress boundary (llm.py:853, 1188) stays in llm with policy.egress.is_local_url - documented defense in depth, not a duplicate decision.",
+  "confidence": "medium",
+  "open_question": "Owner decision: move the audit consultation behind policy.egress, or amend footnote 4 (then PERMANENT_INTENTIONAL with test_prd012_egress as protector)?",
+  "importing_rows": [
+   "kriya.core.llm"
+  ]
+ },
+ {
+  "target": "kriya.policy.model",
+  "domain": "AUTHORITY",
+  "importing_rows_count": 8,
+  "row_failure_kind": "mixed: 7 non-public + 1 direction",
+  "resolution": "PUBLIC_CONTRACT",
+  "final_class": "PERMANENT_INTENTIONAL",
+  "actual_owner": "AUTHORITY (MA4.1 domain vocabulary: ActionRequest/ActionType/PolicyDecision/PolicyResult, MCP identities)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2; core.llm row -> NEW: LLM-EGRESS-AUDIT (Type B) - move LLMClient._audit_llm_network_access's ExecutionPolicy consultation behind policy.egress (footnote-4 target); OR owner amends footnote 4 to admit policy.execution/policy.model (then PERMANENT)",
+  "change_type": "A (core.llm row: B)",
+  "evidence": "TRACED policy/model.py (221 lines, imports only policy.risk which is public): closed vocabulary + frozen request/result dataclasses. Fan-in 8 modules / 5 domains (PROVIDER, TOOLBOX, REPOSITORY, EXECUTION, KERNEL); every importer builds ActionRequest/reads PolicyResult. AuthorityPort itself takes ActionRequest (policy/authority.py:38,62), so the port's own signature requires these types to be importable. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total). core.llm row remains (direction PROVIDER -> AUTHORITY, test_import_direction.py:183).",
+  "confidence": "high",
+  "open_question": "core.llm row: same owner decision as policy.execution (footnote 4).",
+  "importing_rows": [
+   "kriya.core.llm",
+   "kriya.mcp.mcp",
+   "kriya.repository.atomic_write",
+   "kriya.tools.validate",
+   "kriya.tools.web",
+   "kriya.workflow.attempt",
+   "kriya.workflow.workflow",
+   "kriya.workflow.worktree"
+  ],
+  "row_decisions": {
+   "kriya.core.llm": "REPOINT via policy.egress (LLM-EGRESS-AUDIT) or footnote-4 amendment; direction row",
+   "others (7)": "PUBLIC_CONTRACT, PERMANENT"
+  }
+ },
+ {
+  "target": "kriya.policy.telemetry",
+  "domain": "AUTHORITY",
+  "importing_rows_count": 2,
+  "row_failure_kind": "non-public",
+  "resolution": "PUBLIC_CONTRACT",
+  "final_class": "PERMANENT_INTENTIONAL",
+  "actual_owner": "AUTHORITY (MA4.14 structured PolicyDecisionRecord + secret scrubber)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "TRACED policy/telemetry.py (221 lines, imports only policy.model): PolicyDecisionRecord, build_decision_record, scrub_potential_secrets. Importers mcp.mcp L38 and workflow.workflow L42 (build_decision_record); policy.authority already re-exports scrub_potential_secrets as AUTHORITY public surface (policy/authority.py:39) and launch_approval/egress use it - a shared record-shaping contract. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "medium-high",
+  "open_question": null,
+  "importing_rows": [
+   "kriya.mcp.mcp",
+   "kriya.workflow.workflow"
+  ]
+ },
+ {
+  "target": "kriya.policy.trust",
+  "domain": "AUTHORITY",
+  "importing_rows_count": 3,
+  "row_failure_kind": "non-public",
+  "resolution": "PUBLIC_CONTRACT",
+  "final_class": "PERMANENT_INTENTIONAL",
+  "actual_owner": "AUTHORITY (MA4.10 trust vocabulary)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "TRACED policy/trust.py (82 lines, NO kriya imports): TrustLevel enum, outranks(), TrustedContent - a closed ordered vocabulary. Importers context_budget (lazy L1597/1910), context_orchestrator L47, context_package L35 label untrusted context. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "high",
+  "open_question": null,
+  "importing_rows": [
+   "kriya.workflow.context_budget",
+   "kriya.workflow.context_orchestrator",
+   "kriya.workflow.context_package"
+  ]
+ },
+ {
+  "target": "kriya.tools.search",
+  "domain": "TOOLBOX",
+  "importing_rows_count": 1,
+  "row_failure_kind": "non-public",
+  "resolution": "REPOINT_IMPORTERS",
+  "final_class": "TEMPORARY",
+  "actual_owner": "TOOLBOX provider (after K2 toolbox/providers/search.py) reached through a public lookup-provider surface / StageDeps injection",
+  "removal_or_acceptance_slice": "K2 (move) + scope addition: declare kriya.toolbox.providers public as the outbound-lookup provider contract, or inject search_web/fetch_url_text into live_lookup through StageDeps (workflow.py already injects fetch_url_text at L1827)",
+  "change_type": "B",
+  "evidence": "TRACED workflow/live_lookup.py:43-44 lazily imports search_web/fetch_url_text. K2 quote: 'tools/search.py, tools/web.py -> toolbox/providers/ (B)' - a move only; toolbox.providers is not in TOOLBOX.public (module_map.py:120), so the KERNEL edge survives K2. DEPENDENCY-RULES hard-forbids KERNEL -> 'a concrete plugin/MCP tool'. J2 adds knowledge.lookup_policy consulted by live_lookup but does not re-route the provider calls.",
+  "confidence": "medium",
+  "open_question": "Which owner fronts outbound lookup providers: TOOLBOX (public providers surface) or KNOWLEDGE (lookup_policy)?",
+  "importing_rows": [
+   "kriya.workflow.live_lookup"
+  ]
+ },
+ {
+  "target": "kriya.tools.tool",
+  "domain": "TOOLBOX",
+  "importing_rows_count": 2,
+  "row_failure_kind": "mixed: 1 direction + 1 non-public",
+  "resolution": "REPOINT_IMPORTERS",
+  "final_class": "TEMPORARY",
+  "actual_owner": "TOOLBOX (toolbox.tool after K1)",
+  "removal_or_acceptance_slice": "K1 + P1 (subtask_executor row); kriya.tools row -> REMOVE in K1",
+  "change_type": "A",
+  "evidence": "K1 quote: 'tool.py (BaseTool moved; tools/tool.py facade)', toolbox.tool is TOOLBOX public (module_map.py:120); P1 quote: 'remove every C facade (... tools/tool.py ...) migrating the importing tests and the remaining patch targets'. subtask_executor.py:61 imports ToolExecutionError -> toolbox.tool. kriya/tools/__init__.py:1 re-exports BaseTool/ToolExecutionError: row fails as 'direction EXECUTION -> TOOLBOX' (test_import_direction.py:262); MEASURED zero consumers use 'from kriya.tools import BaseTool/ToolExecutionError' (grep kriya/ plugins/ tests/ docs/) - but every 'import kriya.tools.X' executes it.",
+  "confidence": "high",
+  "open_question": "kriya.tools re-export may be third-party plugin API (plugins import kriya.tools.tool directly in-repo).",
+  "importing_rows": [
+   "kriya.tools",
+   "kriya.workflow.subtask_executor"
+  ],
+  "row_decisions": {
+   "kriya.workflow.subtask_executor": "EXISTING_SLICE_ALREADY_OWNS K1+P1",
+   "kriya.tools": "REMOVE_DEPENDENCY (dead re-export, direction row)"
+  },
+  "dead_edge": "kriya.tools -> kriya.tools.tool: unused re-export (MEASURED)"
+ },
+ {
+  "target": "kriya.tools.web",
+  "domain": "TOOLBOX",
+  "importing_rows_count": 2,
+  "row_failure_kind": "non-public",
+  "resolution": "REPOINT_IMPORTERS",
+  "final_class": "TEMPORARY",
+  "actual_owner": "TOOLBOX provider (after K2 toolbox/providers/web.py) through a public surface / StageDeps",
+  "removal_or_acceptance_slice": "K2 (move) + same scope addition as kriya.tools.search",
+  "change_type": "B",
+  "evidence": "TRACED live_lookup.py:44 and workflow.py:1827 (lazy, inside the StageDeps builder: fetch_url_text handed to stages - the composition point). K2 moves the file (quote under tools.search); the kernel edge survives because toolbox.providers is not public. tools/web.py itself audits egress through policy.execution/model (TOOLBOX->AUTHORITY, legal once policy.model is public).",
+  "confidence": "medium",
+  "open_question": "Same as tools.search.",
+  "importing_rows": [
+   "kriya.workflow.live_lookup",
+   "kriya.workflow.workflow"
+  ]
+ },
+ {
+  "target": "kriya.workflow.acceptance_approval",
+  "domain": "AUTHORITY",
+  "importing_rows_count": 3,
+  "row_failure_kind": "non-public (its own outgoing rows: direction)",
+  "resolution": "MOVE_DOMAIN",
+  "final_class": "TEMPORARY",
+  "actual_owner": "KERNEL (FS-1C2 B3 requirement-closure: human-bound acceptance over the kernel's acceptance/requirements subsystem)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "TRACED acceptance_approval.py imports acceptance_jvm (L96), acceptance_oracle (L100/106), requirements (L119) - all KERNEL; acceptance_oracle imports it back (L726): a KERNEL<->AUTHORITY lazy cycle. 3 of its own rows fail as 'direction AUTHORITY -> KERNEL', a HARD forbidden. All 3 importers are KERNEL (acceptance_oracle, workflow, workflow_controller). Re-keying to KERNEL makes 6 batch rows intra-module. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total). CLI rows stay O2 (reason text changes to ADAPTER-CLI -> KERNEL).",
+  "confidence": "medium-high",
+  "open_question": "Contradicts TARGET-MODULE-MAP \u00a71 row 6 (declares it AUTHORITY, decision A). Owner: accept the re-key, or the Type C/D alternative - split pure approval decision types into AUTHORITY and keep orchestration in KERNEL with injected digests.",
+  "importing_rows": [
+   "kriya.workflow.acceptance_oracle",
+   "kriya.workflow.workflow",
+   "kriya.workflow.workflow_controller"
+  ]
+ },
+ {
+  "target": "kriya.workflow.acceptance_jvm",
+  "domain": "KERNEL",
+  "importing_rows_count": 1,
+  "row_failure_kind": "direction",
+  "resolution": "MOVE_DOMAIN",
+  "final_class": "TEMPORARY",
+  "actual_owner": "KERNEL (target stays KERNEL; the IMPORTER is misassigned in module_map owner_paths)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "MEASURED: every row into this target fails as 'direction AUTHORITY -> KERNEL' (hard-forbidden), not as a public-surface issue; acceptance_approval L96 (lazy) needs JVM_RUNNER/detect_jvm_runner/runner_source_digest. The importer is one of the four workflow/*.py files declared AUTHORITY at module_map.py:73-77 whose real responsibility is kernel requirement-closure / contract compilation / context expansion; re-keying the importer makes the edge intra-KERNEL. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "medium-high",
+  "open_question": "Same owner question as acceptance_approval (TARGET-MODULE-MAP row 6).",
+  "importing_rows": [
+   "kriya.workflow.acceptance_approval"
+  ]
+ },
+ {
+  "target": "kriya.workflow.acceptance_oracle",
+  "domain": "KERNEL",
+  "importing_rows_count": 1,
+  "row_failure_kind": "direction",
+  "resolution": "MOVE_DOMAIN",
+  "final_class": "TEMPORARY",
+  "actual_owner": "KERNEL (target stays KERNEL; the IMPORTER is misassigned in module_map owner_paths)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "MEASURED: every row into this target fails as 'direction AUTHORITY -> KERNEL' (hard-forbidden), not as a public-surface issue; acceptance_approval L100/106 (lazy) needs RUNNER_CONTRACT_DIGEST/AcceptanceError; mutual lazy cycle with acceptance_approval. The importer is one of the four workflow/*.py files declared AUTHORITY at module_map.py:73-77 whose real responsibility is kernel requirement-closure / contract compilation / context expansion; re-keying the importer makes the edge intra-KERNEL. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "medium-high",
+  "open_question": "Same owner question as acceptance_approval (TARGET-MODULE-MAP row 6).",
+  "importing_rows": [
+   "kriya.workflow.acceptance_approval"
+  ]
+ },
+ {
+  "target": "kriya.workflow.contract_compilation",
+  "domain": "KERNEL",
+  "importing_rows_count": 2,
+  "row_failure_kind": "direction",
+  "resolution": "MOVE_DOMAIN",
+  "final_class": "TEMPORARY",
+  "actual_owner": "KERNEL (target stays KERNEL; the IMPORTER is misassigned in module_map owner_paths)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "MEASURED: every row into this target fails as 'direction AUTHORITY -> KERNEL' (hard-forbidden), not as a public-surface issue; authority_bundle L56/533 and authority_request L27 import contract types incl. the PRIVATE _closer_contract; contract_compilation lazily imports authority_request back (L436): cross-domain cycle. The importer is one of the four workflow/*.py files declared AUTHORITY at module_map.py:73-77 whose real responsibility is kernel requirement-closure / contract compilation / context expansion; re-keying the importer makes the edge intra-KERNEL. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "medium-high",
+  "open_question": "Same owner question as acceptance_approval (TARGET-MODULE-MAP row 6).",
+  "importing_rows": [
+   "kriya.workflow.authority_bundle",
+   "kriya.workflow.authority_request"
+  ]
+ },
+ {
+  "target": "kriya.workflow.obligations",
+  "domain": "KERNEL",
+  "importing_rows_count": 1,
+  "row_failure_kind": "direction",
+  "resolution": "MOVE_DOMAIN",
+  "final_class": "TEMPORARY",
+  "actual_owner": "KERNEL (target stays KERNEL; the IMPORTER is misassigned in module_map owner_paths)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "MEASURED: every row into this target fails as 'direction AUTHORITY -> KERNEL' (hard-forbidden), not as a public-surface issue; authority_bundle L62 needs ObligationLedger/ObligationStatus. The importer is one of the four workflow/*.py files declared AUTHORITY at module_map.py:73-77 whose real responsibility is kernel requirement-closure / contract compilation / context expansion; re-keying the importer makes the edge intra-KERNEL. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "medium-high",
+  "open_question": "Same owner question as acceptance_approval (TARGET-MODULE-MAP row 6).",
+  "importing_rows": [
+   "kriya.workflow.authority_bundle"
+  ]
+ },
+ {
+  "target": "kriya.workflow.requirement_scopes",
+  "domain": "KERNEL",
+  "importing_rows_count": 1,
+  "row_failure_kind": "direction",
+  "resolution": "MOVE_DOMAIN",
+  "final_class": "TEMPORARY",
+  "actual_owner": "KERNEL (target stays KERNEL; the IMPORTER is misassigned in module_map owner_paths)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "MEASURED: every row into this target fails as 'direction AUTHORITY -> KERNEL' (hard-forbidden), not as a public-surface issue; authority_request L39 needs PROCEDURE. The importer is one of the four workflow/*.py files declared AUTHORITY at module_map.py:73-77 whose real responsibility is kernel requirement-closure / contract compilation / context expansion; re-keying the importer makes the edge intra-KERNEL. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "medium-high",
+  "open_question": "Same owner question as acceptance_approval (TARGET-MODULE-MAP row 6).",
+  "importing_rows": [
+   "kriya.workflow.authority_request"
+  ]
+ },
+ {
+  "target": "kriya.workflow.requirements",
+  "domain": "KERNEL",
+  "importing_rows_count": 3,
+  "row_failure_kind": "direction",
+  "resolution": "MOVE_DOMAIN",
+  "final_class": "TEMPORARY",
+  "actual_owner": "KERNEL (target stays KERNEL; the IMPORTER is misassigned in module_map owner_paths)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "MEASURED: every row into this target fails as 'direction AUTHORITY -> KERNEL' (hard-forbidden), not as a public-surface issue; acceptance_approval L119 (lazy), authority_bundle L63, authority_request L40 need requirement vocabulary/recorders; requirements imports contract_compilation which imports authority_request: one SCC across the declared boundary. The importer is one of the four workflow/*.py files declared AUTHORITY at module_map.py:73-77 whose real responsibility is kernel requirement-closure / contract compilation / context expansion; re-keying the importer makes the edge intra-KERNEL. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "medium-high",
+  "open_question": "Same owner question as acceptance_approval (TARGET-MODULE-MAP row 6).",
+  "importing_rows": [
+   "kriya.workflow.acceptance_approval",
+   "kriya.workflow.authority_bundle",
+   "kriya.workflow.authority_request"
+  ]
+ },
+ {
+  "target": "kriya.workflow.context_source",
+  "domain": "KERNEL",
+  "importing_rows_count": 1,
+  "row_failure_kind": "direction",
+  "resolution": "MOVE_DOMAIN",
+  "final_class": "TEMPORARY",
+  "actual_owner": "KERNEL (target stays KERNEL; the IMPORTER is misassigned in module_map owner_paths)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "MEASURED: every row into this target fails as 'direction AUTHORITY -> KERNEL' (hard-forbidden), not as a public-surface issue; authority_escalation L112 (lazy) needs member_boundaries_for/boundaries_matching_member_id. The importer is one of the four workflow/*.py files declared AUTHORITY at module_map.py:73-77 whose real responsibility is kernel requirement-closure / contract compilation / context expansion; re-keying the importer makes the edge intra-KERNEL. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "medium-high",
+  "open_question": "Same owner question as acceptance_approval (TARGET-MODULE-MAP row 6).",
+  "importing_rows": [
+   "kriya.workflow.authority_escalation"
+  ]
+ },
+ {
+  "target": "kriya.workflow.language_adapters",
+  "domain": "KERNEL",
+  "importing_rows_count": 1,
+  "row_failure_kind": "direction",
+  "resolution": "MOVE_DOMAIN",
+  "final_class": "TEMPORARY",
+  "actual_owner": "KERNEL (target stays KERNEL; the IMPORTER is misassigned in module_map owner_paths)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "MEASURED: every row into this target fails as 'direction AUTHORITY -> KERNEL' (hard-forbidden), not as a public-surface issue; authority_escalation L42 needs Capability/CapabilityStatus/adapter_for. The importer is one of the four workflow/*.py files declared AUTHORITY at module_map.py:73-77 whose real responsibility is kernel requirement-closure / contract compilation / context expansion; re-keying the importer makes the edge intra-KERNEL. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "medium-high",
+  "open_question": "Same owner question as acceptance_approval (TARGET-MODULE-MAP row 6).",
+  "importing_rows": [
+   "kriya.workflow.authority_escalation"
+  ]
+ },
+ {
+  "target": "kriya.workflow.authority_bundle",
+  "domain": "AUTHORITY",
+  "importing_rows_count": 2,
+  "row_failure_kind": "non-public (its own outgoing rows: direction)",
+  "resolution": "MOVE_DOMAIN",
+  "final_class": "TEMPORARY",
+  "actual_owner": "KERNEL (VERIFICATION-CONTRACT-003 external-acceptance closer: runs the operator bundle in containment and closes requirements)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "TRACED authority_bundle.py (618 lines) imports contract_compilation, obligations, requirements (KERNEL) and tools.containment; run_authority_bundle/close_requirements_with_authority_bundle are kernel requirement closers called from workflow.py:1265/1474 and contract_baseline L205. Its non-batch row authority_bundle -> tools.containment fails as direction AUTHORITY -> EXECUTION and is ALSO cleared by the re-key (sim). SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "medium-high",
+  "open_question": "TARGET-MODULE-MAP row 6 conflict (see acceptance_approval).",
+  "importing_rows": [
+   "kriya.workflow.contract_baseline",
+   "kriya.workflow.workflow"
+  ]
+ },
+ {
+  "target": "kriya.workflow.authority_escalation",
+  "domain": "AUTHORITY",
+  "importing_rows_count": 1,
+  "row_failure_kind": "non-public (its own outgoing rows: direction)",
+  "resolution": "MOVE_DOMAIN",
+  "final_class": "TEMPORARY",
+  "actual_owner": "KERNEL (PRD-028 member context expansion for the Developer)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "TRACED authority_escalation.py (190 lines) imports repository.commit, context_source, language_adapters; sole importer attempt.py:72 (grant_member_hints). It decides Developer CONTEXT expansion from failure evidence (read-only), not an execution-security authority. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "medium-high",
+  "open_question": "TARGET-MODULE-MAP row 6 conflict.",
+  "importing_rows": [
+   "kriya.workflow.attempt"
+  ]
+ },
+ {
+  "target": "kriya.workflow.authority_request",
+  "domain": "AUTHORITY",
+  "importing_rows_count": 3,
+  "row_failure_kind": "non-public (its own outgoing rows: direction)",
+  "resolution": "MOVE_DOMAIN",
+  "final_class": "TEMPORARY",
+  "actual_owner": "KERNEL (BACKEND-READINESS-004 typed authority requests derived from the sealed contract)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "TRACED authority_request.py imports contract_compilation (incl. private _closer_contract), requirement_scopes, requirements, core.state_paths; imported lazily by contract_compilation L436, enforce_loop L472, workflow.py:2754. Its non-batch row authority_request -> core.state_paths is also cleared by the re-key (sim). SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "medium-high",
+  "open_question": "TARGET-MODULE-MAP row 6 conflict.",
+  "importing_rows": [
+   "kriya.workflow.contract_compilation",
+   "kriya.workflow.enforce_loop",
+   "kriya.workflow.workflow"
+  ]
+ },
+ {
+  "target": "kriya.workflow.context_budget",
+  "domain": "KERNEL",
+  "importing_rows_count": 1,
+  "row_failure_kind": "non-public",
+  "resolution": "REPOINT_IMPORTERS",
+  "final_class": "TEMPORARY",
+  "actual_owner": "KERNEL (context budget) exposing a certification surface through public graph_retrieval",
+  "removal_or_acceptance_slice": "NEW: CTX-CERT-SURFACE (Type B, recommended to ride with N2): KERNEL exposes retrieval_limit_policies() and implementation_sources() on the public graph_retrieval surface; context_certification stops reading context_budget internals (incl. the private _RETRIEVAL_LIMITS_BY_DEPTH)",
+  "change_type": "B",
+  "evidence": "TRACED workflow/context_certification.py (QUALIFICATION by declaration): L47 RetrievalLimits; L279-294 index_implementation_digest() fingerprints inspect.getsource of context_budget.build_code_context_package/_build_file_tiers/_omit_over_budget/skeletonize_*/estimate_tokens (private names); L307 reads the PRIVATE _RETRIEVAL_LIMITS_BY_DEPTH although context_budget.py:62 offers retrieval_limits_for(depth). context_budget is a 2,196-line kernel internal, not a contract. The coupling is intentional (certification binds to the exact retrieval implementation) so the kernel should OWN the identity function.",
+  "confidence": "medium",
+  "open_question": "Should the implementation digest be kernel-owned (recommended) or stay a QUALIFICATION white-box read declared as a permanent exception?",
+  "importing_rows": [
+   "kriya.workflow.context_certification"
+  ]
+ },
+ {
+  "target": "kriya.workflow.context_recall_fixtures",
+  "domain": "KERNEL",
+  "importing_rows_count": 1,
+  "row_failure_kind": "non-public",
+  "resolution": "MOVE_DOMAIN",
+  "final_class": "TEMPORARY",
+  "actual_owner": "QUALIFICATION (PRD-027 certification fixtures)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2 (could ride with N1)",
+  "change_type": "A",
+  "evidence": "TRACED context_recall_fixtures.py (466 lines, no kriya imports): golden repositories/cases for PRD-027 context-recall certification; the only production importer is workflow/context_certification.py:48 (QUALIFICATION). Other importers are tests only (test_prd027_*, test_prompt_budget_fit_001ab, test_live_prd025_029_batch6). SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "high",
+  "open_question": null,
+  "importing_rows": [
+   "kriya.workflow.context_certification"
+  ]
+ },
+ {
+  "target": "kriya.workflow.graph_retrieval",
+  "domain": "KERNEL",
+  "importing_rows_count": 1,
+  "row_failure_kind": "non-public",
+  "resolution": "PUBLIC_CONTRACT",
+  "final_class": "PERMANENT_INTENTIONAL",
+  "actual_owner": "KERNEL (the production Graph-RAG retrieval entry)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "TRACED graph_retrieval.py docstring: 'This is the exact retrieval WorkflowEngine.run_generation_workflow runs'; context_certification (L279 module fingerprint, L408 retrieve_graph_context) must run production retrieval, not a copy (evidence binds to the exact implementation). QUALIFICATION -> KERNEL is matrix-allowed through public. Protecting test: tests/test_prd027_context_certification.py. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "medium-high",
+  "open_question": null,
+  "importing_rows": [
+   "kriya.workflow.context_certification"
+  ]
+ },
+ {
+  "target": "kriya.workflow.verification_binding",
+  "domain": "AUTHORITY",
+  "importing_rows_count": 3,
+  "row_failure_kind": "non-public",
+  "resolution": "PUBLIC_CONTRACT",
+  "final_class": "PERMANENT_INTENTIONAL",
+  "actual_owner": "AUTHORITY (CANDIDATE-VERIFIED-DIGEST-BINDING-001: verified candidate == committed batch)",
+  "removal_or_acceptance_slice": "NEW: SURFACE-1 (Type A, PRESERVE, module_map + allowlist only): declare public AUTHORITY {policy.model, policy.errors, policy.trust, policy.telemetry, mcp.capability, workflow.verification_binding, config.authority_approval}, PLATFORM {platform.host_properties, platform.toolchain_locator}, KERNEL {workflow.graph_retrieval}; re-key workflow/{acceptance_approval,authority_bundle,authority_request,authority_escalation}.py AUTHORITY->KERNEL and workflow/context_recall_fixtures.py KERNEL->QUALIFICATION; delete the 55 cleared batch-1 rows + 3 stale non-batch rows; add a leaf-contract tripwire test; amend TARGET-MODULE-MAP rows 6/9 and DEPENDENCY-RULES footnote 2",
+  "change_type": "A",
+  "evidence": "TRACED verification_binding.py (113 lines, NO kriya imports): VerifiedCandidateStale, CandidateVerificationBinding, bind_candidate, binding_refusal. Importers terminal_commit L62 (type + exception + binding_refusal), terminal_gate_service L80, workflow.py:385. AuthorityPort.bind_verified_candidate/verified_candidate_refusal exist (policy/authority.py:117-127) but the port does not export the two types terminal_commit needs, and its lazy-load rationale ('heavier owners') does not apply to a leaf. Protecting tests: tests/test_candidate_verification_binding.py, test_authority_invariants.py. SIM MEASURED (reg/work_allow1/sim.py on SNAP 8e0c90a): SURFACE-1 clears this row with 0 new violations (363 -> 305 total).",
+  "confidence": "medium-high",
+  "open_question": "Alternative REPOINT via the C1 port (+ re-export the two types); chosen PUBLIC because the module is a leaf contract with one owner.",
+  "importing_rows": [
+   "kriya.workflow.terminal_commit",
+   "kriya.workflow.terminal_gate_service",
+   "kriya.workflow.workflow"
+  ]
+ }
+]

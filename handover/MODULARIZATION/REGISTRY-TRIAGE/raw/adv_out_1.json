@@ -1,0 +1,246 @@
+[
+ {
+  "id": "APPLICATION-OUTPUT-PROGRAM-STREAM-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": [
+   "TRACED ui/shared/src/cockpit/core/ResultParts.tsx:14-28 (CapturedOutput: captured stream shown verbatim, bounded to OUTPUT_PREVIEW_LINES=15, 'Show full output'; docstring states program and launcher share one stream and nothing parses it)",
+   "TRACED ui/shared: no '[INFO]' parsing outside tests (grep)",
+   "TRACED ResultParts.tsx:31-48 ApplicationResult: label is neutral 'Output' / 'Output / error', not 'the program printed'"
+  ],
+  "defect": null,
+  "pins": [
+   "doc: handover/DEMO-V2/POST-LIVE-GREENFIELD-CLOSURE.md (row detail_ref); ResultParts.tsx:14-15 docstring",
+   "test: ui/shared presentation/project_home tests named in DIRECT-PLAN-CORRECTNESS-CLOSURE.md:49 (bounded output not separately located by me: MISSING-unverified)"
+  ],
+  "reasoning": "Today the executor records one combined stdout/stderr per command and the UI shows it verbatim, bounded, with a neutral label; it never claims to have isolated the program's own lines and never regex-parses Maven output. A separate program stream needs a new executor capture mode plus a projection field: new functionality. No wrong result truth: nothing is presented as 'the program printed X' after filtering. Adjacent observation (TRACED, outside this row, not Class A by itself): ApplicationResult renders `app.stdout?.text || app.stderr?.text`, so on a FAILED run whose stdout is non-empty the stderr text is not shown in the 'Output / error' pane; whether it is visible elsewhere (Technical details) was not checked (UNKNOWN)."
+ },
+ {
+  "id": "ENFORCE-CLOSURE-STABILITY-CACHE-REUSE-001",
+  "verdict": "NO_DEFECT_DOCUMENTED_CONTRACT",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/workflow/requirement_closers.py:451-540 (enforce path: baseline_source LAZY_CAPTURE, closure-local cache `stability_cache if not None else {}`, lazy capture once per closure; unavailable/indeterminate -> REGRESSION_UNATTRIBUTED fail-closed)",
+   "TRACED kriya/workflow/pytest_stability.py:71 BASELINE_REPLAYS = 2 (bounded)",
+   "TRACED handover/BACKEND_FINAL_CLOSURE_005_DESIGN.md:559-617 (13.2 + F5 BY_DESIGN note: at most four full-suite executions, no recursion)"
+  ],
+  "defect": null,
+  "pins": [
+   "doc: handover/BACKEND_FINAL_CLOSURE_005_DESIGN.md section 13.2 (F5 note) and 13.8",
+   "tests: tests/test_repair_003_p1_2_suite_preservation_attribution.py::test_p1_2_two_suite_statements_share_one_baseline_capture, ::test_p1_2_the_direct_boundary_reuses_the_runs_captured_baseline_and_replay_without_a_second_capture, ::test_p1_2_an_indeterminate_run_baseline_is_reported_unavailable_never_recaptured, ::test_p1_2_an_unavailable_baseline_is_a_typed_unattributed_refusal_never_a_closure"
+  ],
+  "reasoning": "I tried to find a correctness consequence of the closure re-measuring instead of reusing the run's cache: every non-determinate branch fails closed to REGRESSION_UNATTRIBUTED, the lazy capture runs on the untouched real workspace (immutable until commit per the docstring), and the replay count is bounded. The only cost is up to four suite executions per enforce closure, i.e. pure performance with no wrong result. A divergence between the closure's own stability measurement and the candidate gate's earlier one could only make the closure stricter or equal (both use the same attribution owner), not admit a regression. Not Class A."
+ },
+ {
+  "id": "GUI-APPEARANCE-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": [
+   "TRACED row text: dark-only theme; deferral reason cosmetic, no safety impact"
+  ],
+  "defect": null,
+  "pins": [
+   "doc: handover/GUI-RUN-COCKPIT-V1_1/11_END_USER_EXPERIENCE.md",
+   "test: N/A (feature absent)"
+  ],
+  "reasoning": "A light/auto appearance preference does not exist; adding it is a new UI capability with its own contrast audit. Dark-only rendering produces no wrong result, authority or evidence issue. Cosmetic/UX preference is explicitly outside Class A."
+ },
+ {
+  "id": "GUI-EXEC-GIT-SHIM-001",
+  "verdict": "NO_DEFECT_DOCUMENTED_CONTRACT",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/platform/toolchain_locator.py:86-87 (first tool on PATH decides; a later working copy is only mentioned as an alternative; Xcode shim exit 69 documented)",
+   "TRACED kriya/application/run.py:105 (TOOL_UNAVAILABLE blocker 'git is required for every run and ...' + alternative)",
+   "TRACED ui/shared/src/cockpit/modules/workspace/Readiness.tsx:26 (BLOCKER_FIX text) and GoalComposer start refusal"
+  ],
+  "defect": null,
+  "pins": [
+   "doc: handover/GUI-RUN-COCKPIT-V1_1/08_M7_M8_CLOSURE.md (owner decision M1 F-1/F-2 fixed PATH); toolchain_locator.py:86 docstring",
+   "tests: tests/test_kup_execution.py::test_a_tool_git_that_does_not_run_blocks_the_start_with_the_reason_and_the_alternative, ::test_the_FIRST_tool_on_path_decides_a_working_copy_later_is_only_mentioned, ::test_a_tool_git_working_first_on_path_does_not_block; ui/shared/src/cockpit/modules/workspace/runsetup.test.tsx 'git unavailable: the Git row is red ... Start is off'"
+  ],
+  "reasoning": "The failure is a host prerequisite (unaccepted Xcode license makes /usr/bin/git a stub) on a PATH the owner fixed deliberately; Kriya does not silently pick a later git (that would let a user-writable directory shadow a system tool, a security choice). The preflight detects it, refuses to start with a typed TOOL_UNAVAILABLE and names the remedy, and this is pinned on both the Python and UI sides. This is fail-closed, not a wrong result. Not Class A; the remaining action is an owner environment/PATH decision."
+ },
+ {
+  "id": "GUI-M1-STORED-PROMPT-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "medium",
+  "evidence": [
+   "TRACED ui/shared/src/cockpit/core/availability.ts:10,49 ('store_absent' -> 'No evidence store', covering pruned / capture off / pre-recorder)",
+   "TRACED ui/shared/src/panels/Inspector.tsx:81 (retired M1 inspector read prompt_rendered)"
+  ],
+  "defect": null,
+  "pins": [
+   "doc: handover/GUI-RUN-COCKPIT-V1_1/08_M7_M8_CLOSURE.md (M7 parity table)",
+   "test: availability 'store_absent' rendering test not located by me (MISSING-unverified)"
+  ],
+  "reasoning": "For pre-recorder runs the cockpit states the absence explicitly ('No evidence store') rather than showing a wrong or substitute prompt, so there is no wrong result truth. Showing history.prompt for legacy rows would be a new, sensitive read path (a new Context-module fallback with its own visibility rules). Legacy-only parity, no authority or evidence defect for current runs."
+ },
+ {
+  "id": "GUI-REASON-CODES-IN-ERROR-STATES-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": [
+   "TRACED ui/shared/src/cockpit/modules/workspace/GoalComposer.tsx:58 (each blocker renders its human message first, then the code muted/small, then the fix text)"
+  ],
+  "defect": null,
+  "pins": [
+   "doc: handover/DEMO-V2/PRODUCT-UX-COMPLETION.md",
+   "tests: runsetup.test.tsx asserts both the message and the code (e.g. 'TOOL_UNAVAILABLE' + remedy text)"
+  ],
+  "reasoning": "Every code I inspected is accompanied by a human message and a remedy; the code is extra, muted text. Moving it under a Technical-details disclosure is a cosmetic presentation preference with no truth, authority or evidence impact. Cosmetic -> not Class A (closest verdict: no defect; the change is presentation work, not a fix)."
+ },
+ {
+  "id": "GUI-RUN-REPORT-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": [
+   "TRACED row: a Kriya-owned run.report operation does not exist; Copy Run ID / failure details / workspace path ship"
+  ],
+  "defect": null,
+  "pins": [
+   "doc: handover/GUI-RUN-COCKPIT-V1_1/11_END_USER_EXPERIENCE.md",
+   "test: N/A (feature absent)"
+  ],
+  "reasoning": "An exportable authorized Markdown run report is a new backend operation plus a GUI action. Its absence does not make any existing record wrong; the GUI explicitly does not compose such a report itself (which would be the risky alternative: UI-authored evidence). New capability."
+ },
+ {
+  "id": "GUI-SKILLS-MUTATION-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/kup/catalog_ops.py:5,65-82 (skills_list / skills_describe only; module states nothing here writes a file)",
+   "TRACED kriya/kup/inspect.py:119 (skills_view / skills_catalog capabilities, read-only)"
+  ],
+  "defect": null,
+  "pins": [
+   "doc: handover/GUI-RUN-COCKPIT-V1_1/11_END_USER_EXPERIENCE.md",
+   "test: KUP catalog read-only (not separately located; MISSING-unverified)"
+  ],
+  "reasoning": "The cockpit exposes skills read-only and there is no KUP mutation path, so the GUI cannot bypass the CLI's authority. Typed skill lifecycle actions with CLI-equivalent authority would be a new backend capability. The safe default (no GUI mutation) is the correct fail-closed state."
+ },
+ {
+  "id": "HITL-OTHER-APPROVAL-TRIGGERS-DEFERRAL-001",
+  "verdict": "NO_DEFECT_DOCUMENTED_CONTRACT",
+  "confidence": "medium",
+  "evidence": [
+   "TRACED kriya/policy/approval.py:260-267 defer_execution_until_source_review: deferral only when enabled AND autonomy_mode=='human-in-the-loop' AND wrote_source; docstring: other modes' approval policy (sensitive paths, size, process profile) is unchanged and out of scope",
+   "TRACED handover/claude-context/generation-pipeline.md:12 (approval gate = only after approval are worktree changes copied into the real workspace)",
+   "TRACED handover/DEMO-V2/DIRECT-PLAN-CORRECTNESS-CLOSURE.md:84 (review I7b registered, owner decision pending)"
+  ],
+  "defect": null,
+  "pins": [
+   "doc: approval.py:260-267 docstring; generation-pipeline.md:12; DIRECT-PLAN-CORRECTNESS-CLOSURE.md:51-61,84",
+   "test: tests/test_greenfield_direct_plan_runtime.py::test_gap_b_other_autonomy_modes_keep_their_existing_order_and_policy (autonomous, no approval trigger only)",
+   "test for 'sensitive-path / diff-size / process-profile trigger in a non-HITL mode runs build/tests before the approval': MISSING"
+  ],
+  "reasoning": "In non-HITL modes the documented meaning of a sensitive-path/size approval is write authority over the real workspace, and the executing gates run in the isolated worktree under containment before it, exactly as before Demo V2; the operator chose a non-HITL mode, which already authorizes executing model-authored code in the sandbox. That does not contradict the authority model, and the HITL decision explicitly scoped itself. The gap I found is coverage: no test pins the ordering for a triggered approval outside HITL, so a future change could alter it silently; I record that as a missing pin, not a product defect. The open question (should any trigger hold execution) is an owner policy decision."
+ },
+ {
+  "id": "LOCALIZATION-DEVELOPER-PATH-OVERLOAD-001",
+  "verdict": "UNKNOWN",
+  "confidence": "medium",
+  "evidence": [
+   "TRACED kriya/workflow/graph_retrieval.py:477-500 (`if rank >= top_k: continue` counts each candidate hit, so N overloads of one name in one file consume N of top_k direct slots; comment 492-493 states hits-not-distinct-files deliberately, 'like the legacy leg')",
+   "MEASURED (doc) handover/BACKEND-READINESS-V2/01_4_OF_12_ARCHITECTURE_ROOT_CAUSE.md:77,157,175: the same flooding cut the correct definition off the Planner map (T2); fixed at the Planner boundary only"
+  ],
+  "defect": null,
+  "pins": [
+   "doc: graph_retrieval.py:492-493 comment; 01_4_OF_12 doc",
+   "test: none pinning the Developer-path top_k-by-hit semantics (MISSING)"
+  ],
+  "reasoning": "The mechanism that was a measured defect on the Planner path is present unchanged on the Developer path (TRACED). Whether it loses a relevant distinct file in practice is UNKNOWN: overflow candidates remain in result.localization (only the direct-evidence set is truncated), and no Developer-context trace shows a loss. It cannot produce a false success (gates decide), so at most it is a retrieval-reliability defect. Evidence needed: a deterministic replay of a Developer-context retrieval on a heavily overloaded symbol (e.g. the T2 Jsoup.parse index) showing a distinct relevant file excluded from retrieved_chunks."
+ },
+ {
+  "id": "PLAN-FORM-NORMALISATION-001",
+  "verdict": "FOUND_DEFECT",
+  "confidence": "medium",
+  "evidence": [
+   "TRACED kriya/workflow/enforce_loop.py:827-829 and kriya/workflow/shadow_mode.py:174: plan.kind = route.kind (deterministic triage), PlannerStructuredOutput has NO kind field (kriya/workflow/plan_schema.py:830-839) - the Planner never 'types' the kind",
+   "TRACED kriya/workflow/triage.py:597-599: REFACTOR is chosen only by _detect_migration_language (words such as replace/deprecat*/switch to) when no repro cue fires",
+   "TRACED kriya/workflow/planning_request.py:721-734: build_authoritative_planner_request gives route guidance for ENHANCEMENT/MILESTONE only; nothing for REFACTOR; the plan example (planning_request.py:355, agents/agent.py:471) shows \"refactor_baseline\": null",
+   "MEASURED probe reg/work_1_probes/refactor_prompt_probe.py: the REFACTOR request text contains no 'refactor' and no 'routed as'; the ENHANCEMENT one does",
+   "TRACED kriya/workflow/plan_validation.py:1222-1229: REFACTOR plan with blank refactor_baseline -> REFACTOR_BASELINE_MISSING (only non-blank checked; not checked against subtask ids)",
+   "TRACED (grep) refactor_baseline is read nowhere else in kriya/ except schema/validation/repair prompt text - no consumer orders anything by it",
+   "MEASURED (doc) 01_4_OF_12_ARCHITECTURE_ROOT_CAUSE.md:48,181: REFACTOR_BASELINE_MISSING fired in every T3 and S3_A run (7/7)",
+   "MEASURED probe reg/work_1_probes/triage_probe.py on SYNTHETIC bug-fix goals containing 'replace'/'Deprecated': repro_shape False, migration_language True -> REFACTOR (the real T3/S3_A goal text was not found in SNAP: INFERRED that they routed this way)"
+  ],
+  "defect": "Kriya-owned prompt/validator contract gap: on a REFACTOR route the enforce Planner request never says the route is refactor or that refactor_baseline is required, and its own example sets it to null, while plan_validation rejects a REFACTOR plan whose refactor_baseline is blank. Every REFACTOR-routed enforce run therefore spends at least one planner repair round on a field that no code consumes and whose value is not validated against subtask ids (any non-blank string satisfies the DETERMINISTIC obligation plan.refactor_baseline.non_blank). The registry row and 01_4 doc misattribute the kind to the Planner ('it typed a bug fix as kind=refactor'); the kind is set by the deterministic triage router (migration-language cue), so the row's target_scope 'canonicalise derivable fields (kind)' aims at a field the model does not author. Reproducer: build_authoritative_planner_request(goal, route_kind=ChangeKind.REFACTOR) has no REFACTOR guidance; feed validate_plan the example-shaped plan (refactor_baseline null) with kind=REFACTOR -> REFACTOR_BASELINE_MISSING on attempt 0, deterministically. First wrong owner: kriya/workflow/planning_request.py (route guidance) with kriya/workflow/plan_validation.py (validates an unconsumed, unchecked field).",
+  "severity": "P3",
+  "pins": [
+   "doc: 01_4_OF_12_ARCHITECTURE_ROOT_CAUSE.md:48,90,181 (measured friction, wrong attribution)",
+   "test pinning REFACTOR route guidance: MISSING"
+  ],
+  "reasoning": "I first suspected a routing misclassification with a correctness consequence, but a REFACTOR route only adds a fail-closed full-regression baseline (baseline_policy.py:126), so there is no false success. The real Kriya-owned defect is narrower: the deterministic route requires a field that the request never asks for (its example says null), which guarantees a repair round on every REFACTOR enforce run (measured 7/7) and adds a form error that contributes to planner non-convergence (3/44 runs). The validated value is never used and never checked against subtask ids, so the obligation is satisfied by any string. Severity P3 (reliability/cost, no wrong result). Whether this meets the Class A bar depends on whether a deterministic, Kriya-caused guaranteed repair round counts as a reliability defect; I believe it does because the cause is entirely Kriya's own contract mismatch, not model behaviour. Confidence medium because the real T3/S3_A goal text was not available to confirm the routing cue."
+ },
+ {
+  "id": "PLAT-WINDOWS-POLICY-PARITY-001",
+  "verdict": "NO_DEFECT_DOCUMENTED_CONTRACT",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/platform/services.py:29-62: a win32/cygwin/msys host composes UNAVAILABLE workspace-lock, resource-limit, host-identity and process-control providers ('Windows runtime is not supported')",
+   "TRACED handover/PLATFORM_DEPENDENCY_AUDIT.md:54,62,63: PLAT-011/019/020 each marked OK on macOS/Linux, VULN(future) on Windows only"
+  ],
+  "defect": null,
+  "pins": [
+   "doc: handover/PLATFORM_DEPENDENCY_AUDIT.md PLAT-011/019/020 rows; services.py:58 reason string",
+   "tests: tests/test_platform_process_control_contract.py::test_the_posix_provider_reports_enforced_tree_termination_and_windows_reports_it_unavailable, ::test_without_tree_termination_run_starts_nothing, ::test_without_tree_termination_async_and_managed_spawns_start_nothing; tests/test_platform_workspace_lock_contract.py::test_the_doctor_reports_an_unavailable_workspace_lock; tests/test_platform_resource_limits_contract.py::test_a_host_without_a_provider_refuses_requested_limits_and_reports_unavailable"
+  ],
+  "reasoning": "My adversarial angle was whether Kriya would run unguarded on Windows and hit the separator-anchored sensitive-path bypass; it does not: the Windows family composes unavailable providers and a run with no tree-termination provider starts nothing (pinned). On the certified POSIX hosts every listed item is OK per the audit (a backslash is a literal filename character, not a separator). 'Reserved names/ADS/trailing dot on every host' is a portability hardening for repositories later checked out on Windows, not a POSIX correctness or authority defect. Windows support is a future capability program."
+ },
+ {
+  "id": "REQ-LEDGER-RUNTIME-CLOSURE-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": [
+   "TRACED handover/DEMO-V2/DIRECT-PLAN-CORRECTNESS-CLOSURE.md:24-28,48-49: verifier verdicts recorded MODEL_CLAIMED -> UNVERIFIED; no deterministic closer consumes runtime-execution evidence; example compiler refused for unknown language",
+   "TRACED kriya/workflow/terminal_gate_service.py:243,349-351: requirements_verified defaults False and is set only from requirements_fully_verified(...)",
+   "TRACED the UI shows 'Overall request: not fully verified' (closure doc :49, I9 :82)"
+  ],
+  "defect": null,
+  "pins": [
+   "doc: DIRECT-PLAN-CORRECTNESS-CLOSURE.md Gap C + Decision 1",
+   "tests: tests/test_greenfield_direct_plan_runtime.py::test_CHARACTERISATION_gap_c_the_direct_plan_leaves_the_requirement_ledger_pending_exactly_like_the_structured_plan, ::test_gap_b_strong_the_ledger_stays_unverified_and_the_run_is_still_an_honest_success; ui presentation.test.ts / project_home.test.tsx ('Overall request: not fully verified')"
+  ],
+  "reasoning": "I looked for an overclaim: the ledger stays pending, requirements_verified is never set true without a deterministic closer, and the UI says 'not fully verified' on every surface named in I9. Closing a 'prints X' requirement would need a new deterministic closer with new semantics (it can over-claim), which the cross-cutting invariant forbids doing from model text. The current behaviour is honest, documented and pinned; the missing closer is a new verification capability (owner-decided post-Demo-V2)."
+ },
+ {
+  "id": "SUREFIRE-RENDERER-FAILURE-DETAIL-001",
+  "verdict": "FOUND_DEFECT",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/workflow/validation_baseline.py:1387-1427 extract_test_failure_sections: per-test detail from pytest FAILURES layout, else a pytest-format 'FAILED|ERROR <id>' summary line, else failure_details.get(test_id) ('the runner's own structured report (JVM)'), else '(failure detail unavailable in raw output)'",
+   "TRACED kriya/workflow/validation_baseline.py:755-766: a Maven run's level-2 ids come from the console Surefire Results block (parse_surefire_structured_outcomes, _SUREFIRE_ENTRY_RE id = the short 'SimpleClass.method'); the JUnit-XML fallback is used only when no Surefire block exists (Gradle)",
+   "TRACED kriya/tools/test_execution.py:192-200,236-248,532-540: failure_details keys are report identities _identity(classname, name) = fully qualified 'pkg.Class.method'",
+   "TRACED production joins: kriya/workflow/development_loop.py:1246-1256 (confirmed ids from _resolved_level2, details from test_execution.failure_details(full_test_res)); kriya/workflow/attempt.py:2981-2982 (attribution.evidence_text(..., test_execution.failure_details(result)))",
+   "MEASURED real Surefire console format in SNAP fixtures: '[ERROR]   StringUtilTest.resolvesRelativeUrls:125 expected: <...> but was: <...>' (short class name)",
+   "MEASURED probe reg/work_1_probes/surefire_probe.py: console ids ['StringUtilTest.resolvesRelativeUrls'], report identities ['org.jsoup.internal.StringUtilTest.resolvesRelativeUrls'], render -> 'FAILED StringUtilTest.resolvesRelativeUrls (failure detail unavailable in raw output)' although the detail is present both in the XML and on the same console line",
+   "MEASURED (doc) 01_4_OF_12_ARCHITECTURE_ROOT_CAUSE.md:126 and BACKEND_FINAL_CLOSURE_005_DESIGN.md 13.4: 16 'detail unavailable' entries; attempts 4-5 were NO_CHANGE answers",
+   "Only test of the JVM detail path: tests/test_backend_readiness_v2_gradle_regression.py (Gradle, where both sides use XML identities)"
+  ],
+  "defect": "The JVM failure-detail path that exists to fill this exact gap (failure_details from the runner's JUnit XML) never matches on Maven: Maven level-2 regression ids are the console's short 'SimpleClass.method' while failure_details is keyed by the fully qualified report identity, and the renderer also ignores the reason text Surefire prints on the same console line. Result: every confirmed Maven regression reaches the Developer's repair prompt as '(failure detail unavailable in raw output)' even though Kriya holds the detail twice. No test covers the Maven path (only Gradle, where both sides share XML identities), so the gap is hidden. Reproducer: reg/work_1_probes/surefire_probe.py (parse_surefire_structured_outcomes on a real-format Results block + parse_junit_xml on the matching report + extract_test_failure_sections). First wrong owner: kriya/workflow/validation_baseline.py (identity space of Maven level-2 ids vs kriya/tools/test_execution.py report identities; renderer does not use the Surefire entry reason).",
+  "severity": "P3",
+  "pins": [
+   "doc: BACKEND_FINAL_CLOSURE_005_DESIGN.md 13.4 (owner BY_DESIGN for the attribution decision; renderer limitation deferred)",
+   "test for Maven failure detail in the repair prompt: MISSING"
+  ],
+  "reasoning": "The attribution DECISION is unaffected (both PRE and POST of a Maven run use the same console identity space), so this is not a false success or false attribution; that part of the row's claim holds. But the row's premise that this is only a missing pytest-only renderer feature is stale: SNAP already has a JVM detail mechanism wired into both production renderer call sites, and it silently fails for Maven because of an identity-space mismatch, with no test on the Maven path. That is a defect in existing functionality plus a test gap, with a measured reliability impact (repair attempts receiving no failure text, followed by NO_CHANGE answers). Severity P3: it degrades repair convergence, never certifies a wrong result. Residual (INFERRED, not probed): if PRE and POST of one Maven run ever took different parse paths (console vs XML fallback), level-2 ids would be compared across identity spaces; I found no path that does so with the same validator, so I did not escalate."
+ },
+ {
+  "id": "TEST-DEADLINE-TIMING-001",
+  "verdict": "ALREADY_FIXED",
+  "confidence": "medium",
+  "evidence": [
+   "TRACED tests/test_provider_contract_001a.py:149 test_a_request_outliving_the_budget_is_a_typed_deadline_stop: already_used=597.5 (2.5 s left, was 599.5 / 0.5 s) with the load rationale in the comment",
+   "TRACED tests/test_provider_contract_001a.py:529 test_a_deadline_stop_is_never_resent_without_response_format: already_used=597.5 (2.5 s left)",
+   "Assertions not weakened: reason_code == INFERENCE_DEADLINE_EXCEEDED, one request, response_format_dropped False remain (lines 150-168, 530-532)",
+   "Residual TRACED: tests/test_provider_contract_001a.py:290 test_no_deadline_leaks_out_of_a_run_or_a_cap uses already_used=599 (1.0 s left, no pytest.raises): if >1 s elapses before dispatch under 8-worker load it raises INFERENCE_DEADLINE_EXHAUSTED and fails; :111 test_a_smaller_remaining_budget_is_the_request_timeout asserts 24.0 < read <= 25.0 with already_used=575 (fails if >1 s elapses before dispatch). Same wall-clock race class; never measured failing (INFERRED)."
+  ],
+  "defect": null,
+  "pins": [
+   "fix: tests/test_provider_contract_001a.py:149 and :529 (margin widened 0.5 s -> 2.5 s)",
+   "closure evidence still requires a passing canonical parallel run (not run by me)"
+  ],
+  "reasoning": "The two named flaky tests carry the exact remedy the row prescribes (wider budget margin, assertion unchanged), so for the registered symptom the fix is in SNAP; the registry row is stale (still OPEN, quoting 599.5). It was a test-harness timing race, not a product defect, and it could only produce false failures, never hide a product defect. Two sibling tests in the same file keep a 1 s wall-clock margin and are the same race class; they were not observed failing, so I record them as a residual hardening note rather than a Class A finding. Confirmation still needs one canonical 8-worker run, which I did not perform (rules)."
+ }
+]

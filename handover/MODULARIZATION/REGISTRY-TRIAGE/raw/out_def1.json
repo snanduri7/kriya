@@ -1,0 +1,300 @@
+[
+ {
+  "id": "ENFORCE-EXECUTE-PLAN-CONVERGENCE-001",
+  "title": "The enforce-mode structured subtask loop still orchestrates its own subtasks (own ControlState resume, TOOL-subtask resume exclusion, completion skip); STRUCTURED WorkUnitInvocation is provenance only, not executed by plan_executor.execute_plan()",
+  "registry_status": "DEFERRED",
+  "priority": "P2",
+  "proposed_class": "AMBIGUOUS",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: E12 moved _run_structured_enforce verbatim into kriya/workflow/enforce_loop.py (3456 lines) as EnforceLoop.run; it still owns its subtask loop, ControlState resume (enforce_loop.py:351-365, 1332-1390), the TOOL-subtask resume exclusion (enforce_loop.py:1372-1379) and the completion skip (enforce_loop.py:1748). Its subtask calls carry WorkUnitInvocation(PlanSourceKind.STRUCTURED, ...) as provenance only; the comment at enforce_loop.py:1725-1728 still says 'The structured subtask loop is not yet executed by execute_plan'. execute_plan (plan_executor.py:315) is called only from milestones.py:1767 and plan_executor.py:541 (direct). No behavioural gap is demonstrated: the terminal gate/commit already go through TerminalGateService/commit_service (PRD-030).",
+  "contract_ref": "handover/PRD-008A_CODING_HANDOVER.md:13 ('Enforce/STRUCTURED orchestration is explicitly deferred ... It should converge during PRD-030/031 ... PRD-008A does not claim all orchestration is unified') and :165; handover/PRD-031_CODING_HANDOVER.md:28 ('stays deferred ... it would change behaviour'); handover/MODULARIZATION/TARGET-MODULE-MAP.md:102 keeps enforce_loop.py as its own KERNEL module (EnforceLoop.run(EnforceDeps)); SLICE-PLAN.md §8: no slice 'removes validated behaviour'.",
+  "evidence": [
+   "kriya/workflow/enforce_loop.py:1725-1731 (STRUCTURED provenance-only comment + WorkUnitInvocation construction)",
+   "grep 'execute_plan(' kriya -> only milestones.py:1767 and plan_executor.py:541 call it (MEASURED)",
+   "kriya/workflow/enforce_loop.py:1372-1390 (own TOOL resume exclusion and completion skip)",
+   "SLICE-PLAN.md E12 status line: 'TYPE A (pure extraction, PRESERVE)' -> E12 did NOT overtake the convergence",
+   "KRIYA_FULL_MODULARIZATION_AUTONOMOUS_PLAN_v1.1.md:226 ('no hidden monolithic coupling') vs no slice in SLICE-PLAN that converges enforce into execute_plan"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "Not C: E12 was a PRESERVE extraction and the code comment still states the gap. Not D: the divergence is real and TRACED. A vs E/B cannot be decided from evidence: PRD-008A says enforce 'should converge' (an architecture commitment, which would make the residue an A architecture defect under the zero-known-gap rule), but PRD-031 deferred it because convergence changes behaviour (resume semantics, TOOL resume exclusion, sandbox-scoped completion) and the modularization TARGET-MODULE-MAP deliberately keeps EnforceLoop as a separate orchestrator, which reads as an accepted two-orchestrator design (E, documented, characterized by tests/test_e12_enforce_characterization.py and the chaos harness). No behavioural defect was found, so a behaviour-changing convergence needs the owner's authorization either way (SLICE-PLAN §8 stop-list).",
+  "owner_question": "Is 'one executor for every plan source (direct, milestone, STRUCTURED)' part of the target architecture you want the modularization to finish (then A: a NEW behaviour-changing kernel slice after E14-C/R2 that routes EnforceLoop's subtasks through execute_plan, preserving the TOOL resume exclusion and sandbox-scoped completion as plan-level policy), or is the enforce loop an accepted second orchestrator (then E: record the contract in TARGET-MODULE-MAP/MODULE-CONTRACTS and pin 'STRUCTURED is provenance-only' with a test)?"
+ },
+ {
+  "id": "RUN-ATTEMPT-GATE-EXTRACTION-001",
+  "title": "run_attempt's implementation-subtask gate sequence (compile -> targeted/full tests -> runtime verification -> spec compliance, ~1600 lines) is still inline and interleaves self-correction, which writes files; not a mutation-free VerificationCoordinator boundary",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: E8 (commits 0bd7877, 1916887, 57402be, 215177b) moved the sequence out of run_attempt into kriya/workflow/gate_orchestrator.py (_run_executing_candidate_gates at :488, deferred gates at :1682-1687); gate order and decisions unchanged (module docstring :1-24). The distinctive claim still holds: on a compile failure the gate runs the self-correction micro-loop, which writes files, inside the gate (gate_orchestrator.py:541-600; again for tests at :816-836). Mitigations TRACED: writable_files is [] under WriteScopeMode.DENY_ALL (:554-561), each self-correction write is authorized into the verification tree binding (self_correction.py:559-560 tree_binding.authorize), and the loop is never entered after the source review (ctx.post_source_review_guard is None, :542, :816). VerificationCoordinator (verification_coordinator.py:107) sequences only verification-only units.",
+  "contract_ref": "handover/PRD-031_CODING_HANDOVER.md:26 and :92 ('The coordinator is the extension point if it is ever migrated'); handover/MODULARIZATION/TARGET-MODULE-MAP.md:73 (gate_orchestrator.py owns the gates; _run_verification_only_attempt via VerificationCoordinator; self-correction stays inside the gates)",
+  "evidence": [
+   "kriya/workflow/gate_orchestrator.py:1-24 (E8 provenance: moved verbatim, gate ORDER unchanged)",
+   "kriya/workflow/gate_orchestrator.py:541-600 (self-correction loop called inside the compile gate)",
+   "kriya/workflow/self_correction.py:559-560 (writes authorized into the tree binding)",
+   "kriya/workflow/verification_coordinator.py:107-160 (coordinator only used for verification-only units)",
+   "SLICE-PLAN.md E8 status line (commits listed)"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "Not C: E8 removed only the 'inline in run_attempt' half; the 'interleaves self-correction writes, not a mutation-free boundary' half is unchanged. Not A: no authority, byte-binding or verification defect is shown - the writes go through the write-scope and the tree binding, and are disabled after source review; the target module map accepts self-correction inside gate_orchestrator, and PRD-031 frames the migration as optional ('if it is ever migrated'). It is therefore a genuine future decomposition (making candidate gates side-effect-free and moving repair out of verification), i.e. B. Confidence MEDIUM because the owner could choose to treat 'verification never mutates' as an architecture invariant, which would turn this into A."
+ },
+ {
+  "id": "PLAT-WINDOWS-POLICY-PARITY-001",
+  "title": "Before any Windows claim: separator-normalized sensitive-path matching, ..\\ escape checks in static-analysis scope, reserved names/ADS/trailing dot rejected in model paths on every host, cmd/PowerShell shell-wrapper recognition, executable stems (.exe/.cmd) (PLAT-011/019/020/021/033)",
+  "registry_status": "DEFERRED",
+  "priority": "P2",
+  "proposed_class": "B",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: all five items are Windows-only failure modes (handover/PLATFORM_DEPENDENCY_AUDIT.md:54,62,63,64,76: each 'OK' on macOS and Linux). Windows runtime is RUNTIME_NOT_SUPPORTED: kriya/platform/services.py:66-69 composes Unavailable* providers for the WINDOWS family (lock, resource limits, host identity, process control) and tests/test_platform_workspace_lock_contract.py:100-128 pins PlatformCapabilityUnavailable for compose(WINDOWS). There is no process-wide refusal of the WINDOWS family at CLI entry (grep for services.WINDOWS/family outside kriya/platform: none), so a command that applies sensitive-path policy without a lock or spawn (e.g. tools execute of a read tool) is not refused up-front on Windows (INFERRED reach; not exercised).",
+  "contract_ref": "handover/PLATFORM_ARCHITECTURE.md §13 (Windows before P5 = PORTABILITY_ARCHITECTURE_DEFINED / RUNTIME_NOT_SUPPORTED); handover/PLATFORM_MIGRATION_PLAN.md (Phase P5); tests/test_platform_workspace_lock_contract.py:100-128",
+  "evidence": [
+   "handover/PLATFORM_DEPENDENCY_AUDIT.md:54 (PLAT-011), :62 (PLAT-019), :63 (PLAT-020), :64 (PLAT-021), :76 (PLAT-033)",
+   "kriya/platform/services.py:30-32, 64-69 (WINDOWS family -> Unavailable providers, reason cites PLAT-WINDOWS-PROVIDERS-001)",
+   "handover/PLATFORM_ARCHITECTURE.md:192-200 (§13 support policy)",
+   "grep 'services.WINDOWS|family ==' kriya outside kriya/platform -> no hits (no entry-level refusal)"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "These are prerequisites for a platform Kriya explicitly does not support (documented support policy, no Windows claim), so they are future capability (B), not defects of the supported POSIX product; on POSIX the anchored regexes, '../' checks and wrapper set are correct. Not E: an E needs the limitation tested as a whole, and only the capability-level refusal is pinned. Confidence MEDIUM, not HIGH, because the items are security-relevant and nothing refuses the WINDOWS family before sensitive-path policy is applied in commands that never touch the lock/spawn ports; recommend (owner) a small fail-closed 'refuse WINDOWS family at CLI/KUP entry with PLATFORM_CAPABILITY_UNAVAILABLE' item (would be A if the owner reads §13 as requiring fail-closed refusal of every unsupported path)."
+ },
+ {
+  "id": "PLAT-WINDOWS-FS-GIT-001",
+  "title": "Windows filesystem + git fidelity: mode bits, os.replace over open files, directory fsync, symlink privilege, a Kriya git invocation profile for autocrlf/eol/filemode/hooksPath (PLAT-022..027)",
+  "registry_status": "DEFERRED",
+  "priority": "P2",
+  "proposed_class": "A",
+  "confidence": "MEDIUM",
+  "current_behaviour": "MEASURED on macOS (supported platform) with Kriya's own producer: a repo committed with LF, then core.autocrlf=true in the repo config; SNAP kriya.workflow.worktree.create_git_worktree(ws) produced .kriya/worktree with A.java/B.java = b'class A {\\r\\n}\\r\\n' while the workspace stays b'class A {\\n}\\n' (equal=False for both files); git status is clean in both trees, so _sync_uncommitted_changes_into_worktree (worktree.py:194) copies nothing. TRACED: Kriya pins only core.hooksPath (worktree.py:34) and no eol/autocrlf/filemode profile (grep autocrlf|core.eol in kriya: none). The Developer edits the worktree snapshot (candidate_transaction.py:965-969, 1246-1255: base = worktree file), while the terminal commit's expected base is the WORKSPACE bytes (candidate_transaction.py:140-155 _capture_original; workflow.py:1533-1549), so the base check passes and the worktree's CRLF-converted bytes would be written over the LF workspace file (INFERRED: whole-file line-ending rewrite / phantom diff), and untouched files were verified as CRLF while the workspace keeps LF (verified tree != post-commit workspace tree). The Windows-only sub-items (PLAT-022 mode bits, 023 os.replace sharing violations, 024 dir fsync, 027 symlink privilege) are 'OK' on POSIX.",
+  "contract_ref": "CLAUDE.md cross-cutting invariant 'Evidence binds to exact identity'; FILE-INTEGRITY-CONTRACT-001 (exact raw bytes); handover/PLATFORM_DEPENDENCY_AUDIT.md:68 (PLAT-025: 'Windows (autocrlf defaults to true); any host with custom git config' ... 'Candidate bytes, the verification binding and diffs can differ from the workspace through EOL conversion'), target 'P2 (design) / P5 (Windows)'",
+  "evidence": [
+   "reg/work_def1/autocrlf_worktree_repro.py (re-run 2026-10-19): SNAP create_git_worktree under core.autocrlf=true -> worktree CRLF vs workspace LF for 2/2 files (MEASURED)",
+   "reg/work_def1/repo plain git reproducer: git worktree add -> CRLF bytes, git status clean in both trees (MEASURED)",
+   "kriya/workflow/worktree.py:34 (_HOOKS_DISABLED only), :572/:580 (git worktree add --detach under the user's git config)",
+   "kriya/workflow/candidate_transaction.py:140-155 (commit base = workspace bytes) and :965-969/:1246-1255 (edit base = worktree file)",
+   "kriya/workflow/workflow.py:1533-1549 (_original_revision -> workspace raw digest used as expected_base_revision)",
+   "handover/PLATFORM_DEPENDENCY_AUDIT.md:65-70 (PLAT-022..027)"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "The row was filed and closed-out as Windows-only ('not a supported-backend defect'), but its PLAT-025 item is MEASURED on macOS with Kriya's real worktree producer: under a non-default but legitimate user git config the candidate/verified bytes differ from the workspace bytes, which contradicts the exact-bytes and evidence-binding contracts on a supported platform, so the row hides an A. The end-to-end consequence (CRLF rewrite committed vs a refusal) is TRACED/INFERRED, not executed; that sets severity, not class. Not B: the git profile is a fidelity guarantee of the existing worktree mechanism, not new functionality. Not E: no documented/tested contract says Kriya inherits user EOL config. The other four sub-items are Windows-only (B) and should be split into their own row; PLAT-024 overlaps R1 (fsync(parent directory) where supported).",
+  "reproducer": "git init; commit LF files with core.autocrlf=false; git config core.autocrlf true; python -c 'from kriya.workflow.worktree import create_git_worktree; create_git_worktree(ws)'; compare bytes of each tracked file in ws and ws/.kriya/worktree (saved as reg/work_def1/autocrlf_worktree_repro.py, run 2026-10-19). A regression test should then drive one scripted direct generate through the real worktree and assert the committed workspace file keeps LF and the verified tree equals the post-commit tree for untouched files.",
+  "architectural_owner": "REPOSITORY (kriya/repository: worktree.py after M2, the one git runner / RepositoryPort after M3)",
+  "proposed_closing_slice": "NEW: REPOSITORY git invocation profile (core.autocrlf=false, core.eol=lf, core.filemode/hooksPath from one constant shared with the POL-001-P3 recognizer, or a workspace-mirroring policy decided in design) applied by the single git runner to worktree creation and every Kriya git call; Windows-only PLAT-022/023/024/027 split to a B row",
+  "size": "MEDIUM",
+  "prerequisites": "M2, M3"
+ },
+ {
+  "id": "PLAT-WINDOWS-PROVIDERS-001",
+  "title": "Windows providers and certification: LockFileEx lock, Job Object process/resource control, account identity, CommandShellPort + host ShellTool, Python certification driver, per-platform lock file (pywin32/colorama), windows-latest runtime CI (PLAT-004/005/008/010/036/038)",
+  "registry_status": "DEFERRED",
+  "priority": "P2",
+  "proposed_class": "B",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED: kriya/platform/services.py:62-69 composes POSIX providers (PosixFlockLock, PosixRlimit, PosixUidGid, PosixProcessGroup) and, for the WINDOWS family, Unavailable* providers whose reason names this row; a required capability is refused with PlatformCapabilityUnavailable rather than degrading (tests/test_platform_workspace_lock_contract.py:100-128). PLAT-005/008 POSIX ports are done (PLATFORM_DEPENDENCY_AUDIT.md:194-196: e94ac2c, e52a755). fcntl is imported only in kriya/platform/posix_locking.py:8.",
+  "contract_ref": "handover/PLATFORM_ARCHITECTURE.md §13; handover/PLATFORM_MIGRATION_PLAN.md (Phases P5-P6); tests/test_platform_workspace_lock_contract.py:100-128",
+  "evidence": [
+   "kriya/platform/services.py:66 ('no {family} provider yet (Windows runtime is not supported; PLAT-WINDOWS-PROVIDERS-001)')",
+   "tests/test_platform_workspace_lock_contract.py:100-128 (WINDOWS family -> PlatformCapabilityUnavailable)",
+   "handover/PLATFORM_DEPENDENCY_AUDIT.md:47,48,51,53,79,81"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "Adding Windows providers, a shell port, a certification driver and Windows CI is new platform capability for a platform the product explicitly does not support; the missing providers fail closed with a typed refusal, which is tested. That is B. Not A: no POSIX behaviour is affected and the unsupported platform is refused at each capability. Not E: E would describe 'Windows unsupported' itself; this row is the work to add support."
+ },
+ {
+  "id": "PLAT-PORTABILITY-P3-001",
+  "title": "P3 portability debt: one KriyaHome resolver (9 copies), host-property probe placement, /dev/tty prompt, PowerShell completion, /tmp baseline normalization, dead '[::1]' literal, Windows test subset, docs that encode platform envelopes (PLAT-016/028..031/034/037/040)",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED, item by item: PLAT-016 DONE - the host probe now lives in kriya/platform/host_properties.py:43-82 (sysctl, /proc/meminfo, nvidia-smi). PLAT-031 DONE for macOS and Windows - validation_baseline.py:535-540 normalizes /private/var/folders, /var/folders, /tmp and the Windows AppData Temp path. PLAT-028 PARTLY DONE - D3 made kriya/config/environment.py the one reader of KRIYA_* and ~ (its docstring :1-13) but it keeps per-home expressions; R2 (planned) is the one state-directory resolver. PLAT-034 still present but behaviour-neutral: '[::1]' literal now at kriya/policy/egress.py:63 (dead, urlparse strips brackets; audit: 'Not a platform defect'). PLAT-029 /dev/tty with click.confirm fallback (cli.py:5107), PLAT-030 no PowerShell completion, PLAT-037 no Windows test subset, PLAT-040 docs remain.",
+  "contract_ref": "handover/PLATFORM_DEPENDENCY_AUDIT.md:59,71-77,80,83; handover/PLATFORM_ARCHITECTURE.md §13; SLICE-PLAN R2",
+  "evidence": [
+   "kriya/platform/host_properties.py:43,55-66,82 (PLAT-016 moved to PLATFORM)",
+   "kriya/workflow/validation_baseline.py:535-540 (PLAT-031 temp-path patterns incl. macOS and Windows)",
+   "kriya/config/environment.py:1-40 (D3 single environment/home reader)",
+   "kriya/policy/egress.py:63 (dead '[::1]' member)",
+   "kriya/cli.py:5107 (/dev/tty with fallback)"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "Three of the eight items are already overtaken (PLAT-016 by the platform package, PLAT-031 by the extended volatile patterns, PLAT-028 largely by D3, with R2 finishing the state-directory part), which would be C for those parts. What remains is PowerShell completion, a Windows CI subset and platform-envelope docs (Windows future capability, B) plus a dead set member with no behaviour (not a defect). No remaining item is a correctness defect on POSIX, so the row as a whole is B; recommend the registry record the C parts with their evidence and narrow the row."
+ },
+ {
+  "id": "LEAK-SIGKILL-RECOVERY-GAP-001",
+  "title": "Crash-recovery capability gap (not a cleanup defect): when the Kriya process is SIGKILLed, no cleanup can run, and Kriya has no next-run recovery (TRACED: nothing removes Docker objects left by a previous process; production_doctor only diffs its own probe). MEASURED residue: registry proxy (docker run -d, no --rm) and per-run network are permanent; a managed-service container persists until stopped; a foreground --rm container self-removes when its command ends; MCP (-i) left none. Safety characterization (user-directed, 2026-09-29): with that residue present and NOT cleaned, one normal run of each kind was safe and independent - a Maven-only registry run got Maven 200 / PyPI 403 beside a stale PyPI-only proxy (no authority adoption), removed only its own proxy/network/container and left the stale objects untouched; a managed-service verification passed its own probe beside a stale service on the same in-container port. No reuse, contamination or false success. Candidate hardening: label objects with an owner identity and have a run remove objects whose owner is dead",
+  "registry_status": "DEFERRED",
+  "priority": "P2",
+  "proposed_class": "AMBIGUOUS",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED unchanged at SNAP: the registry proxy is still started with 'docker run -d' and no --rm (kriya/tools/containment_oci.py:1412-1415) on a per-run network created at :1398; objects carry a 'kriya.authority=<authority_id>' label (:1398, :1415, :1499) but no owner-process identity, and nothing sweeps residue: the only docker listing in production_doctor is _kriya_containers (production_doctor.py:218-223, name filter kriya-oci-, used to diff its own probe); grep for --filter label/prune/reap in kriya: none. MEASURED earlier (LEAK_AUDIT_REPORT.md 47-58): with the residue present the next run adopted no authority (Maven 200 / PyPI 403 beside a stale PyPI-only proxy), removed only its own objects, and produced no false success.",
+  "contract_ref": "handover/LEAK_AUDIT_REPORT.md:26,47-58 (owner-approved deferral: 'new recovery machinery'); registry target_scope 'Crash-recovery hardening before KRIYA_PRODUCTION_CERTIFICATION'; no documented contract that Kriya reclaims crash residue",
+  "evidence": [
+   "kriya/tools/containment_oci.py:1398 (network create with kriya.authority label), :1412-1415 (proxy docker run -d, no --rm)",
+   "kriya/production_doctor.py:218-223 (doctor lists only kriya-oci-* names for its own probe)",
+   "grep '\"--filter\"|label=kriya|\"prune\"|reap|orphan' over containment_oci.py, production_doctor.py, kriya/platform -> only the doctor name filter",
+   "handover/LEAK_AUDIT_REPORT.md:47-58 (MEASURED residue + next-run safety)"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "The gap is real and unchanged (TRACED), and it is measured safe for authority and correctness, so it is not a hidden security defect. Whether it is A or B is a scope question the evidence cannot settle: the registry itself says it must be closed before KRIYA_PRODUCTION_CERTIFICATION (which reads as a reliability defect of the product: unbounded accumulation of host Docker objects across crashes, A), while the owner earlier approved deferring it as 'new recovery machinery' whose remedy deletes host Docker objects (a destructive host operation that needs owner authority, B). Not C/D: nothing fixed it and the residue is measured. Not E: there is no documented, tested contract that crash residue is the operator's job.",
+  "owner_question": "You approved this deferral as 'new recovery machinery, not a broken cleanup path'. Under the zero-known-gap rule, is next-run reclamation of a dead Kriya process's Docker objects (label each object with an owner identity - pid + boot/start id - and remove only objects whose owner is provably dead) a required reliability property of the current product (A, NEW EXECUTION/containment slice after L1), or a production-certification feature outside the modularization (B)? If A, do you authorize Kriya to remove host Docker objects it labelled itself?"
+ },
+ {
+  "id": "TEST-RESOURCEWARNING-HYGIENE-001",
+  "title": "About 70 tests leak files, sqlite connections or sockets that only surface under -W error::ResourceWarning (garbage-collection-timed, so attributed to whichever test runs); e.g. `with sqlite3.connect(...)` never closes",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "AMBIGUOUS",
+  "confidence": "MEDIUM",
+  "current_behaviour": "MEASURED by grep: 'with sqlite3.connect(' (the cited leak pattern: the context manager commits but never closes) occurs in 31 test files and in no product file (kriya/, plugins/). TRACED (sampled, not exhaustive): product sqlite sites close their connections - production_doctor.py:648-654, metrics/evidence.py:192-199, role_metrics.py:319-323, state_paths.py:155-168 (try/finally close), tools/knowledge.py:52-116 and context_certification.py:336 (contextlib.closing), the in-memory DependencyGraphs at planning_request.py:865/966-967 and review_context.py:307/421-422 (finally: graph.close()), and the long-lived stores expose close() (analyzer/graph.py:643, memory/vector.py:121/353, code_intel/store.py:61). The suite is green without -W error; under it ~71-73 tests fail, attribution GC-timed (evidence/provider-contract-001a/full_suite/README.md:9).",
+  "contract_ref": "none found for ResourceWarning cleanliness; related test-hazard items OI-45/OI-71 in handover/MODULARIZATION/OPEN-ITEMS.md:63,89 (E14 preflight)",
+  "evidence": [
+   "grep -rln 'with sqlite3.connect(' tests | wc -l -> 31; grep over kriya plugins -> 0 (MEASURED)",
+   "kriya/workflow/planning_request.py:966-967, kriya/workflow/review_context.py:421-422 (finally close)",
+   "evidence/provider-contract-001a/full_suite/README.md:9 (73 vs 71 failing under -W error::ResourceWarning, pre-existing)",
+   "No -W error::ResourceWarning run performed here (broad runs forbidden by the brief); product attribution of every warning is UNKNOWN"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "Not B (test hygiene is not a feature) and not E (no documented contract accepts leaking tests). Not D: the leaks are measured. The evidence points at the harness (the cited pattern exists only in tests; sampled product sites close), but the per-warning producer is UNKNOWN because the warnings are GC-attributed and no -W error run was made. Whether this is A depends on whether the zero-known-gap rule covers test-harness defects, which the classes (defined over the product) do not decide; the modularization already treats similar harness hazards as tracked items (OI-45/OI-71).",
+  "owner_question": "Does the zero-known-gap completion rule cover test-harness defects (then treat as A owned by tests/, closed by a NEW test-hygiene slice - with OI-45/OI-71 - that makes '-W error::ResourceWarning' green with tracemalloc attribution proving every leak is test-owned), or are harness-only items outside the product gap ledger (then keep it as a non-product hygiene row)?"
+ },
+ {
+  "id": "DEMO-TIME-BUDGET-001",
+  "title": "F-1 makes the whole run share one generation budget (a milestone unit or enforce subtask no longer gets a fresh one); generation_time_budget_seconds must be chosen from measured demo runs",
+  "registry_status": "DEFERRED",
+  "priority": "P2",
+  "proposed_class": "E",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED: one run-level clock (run_coordinator.claim_run_generation_clock, never reset) bounds every model call by autonomy.generation_time_budget_seconds; the field defaults to null (kriya/config/config.py:790, default_config.yaml:241: unbounded, reported deadline_bound=false) and is classified in config/authority.py:101; exhaustion is typed (INFERENCE_DEADLINE_EXHAUSTED / _EXCEEDED, generation_budget_exhausted) per PROVIDER_CONTRACT_001A.md:16-40. The remaining action is an operator measurement on the M1 Max before a live demo, not code. H4 will re-shape the budget into phases while keeping generation_time_budget_seconds as the ACTIVE budget (SLICE-PLAN §4 decision 2).",
+  "contract_ref": "handover/PROVIDER_CONTRACT_001A.md:16-40 (F-1 incl. 'Operational note ... choose generation_time_budget_seconds deliberately'); docs config default_config.yaml:212,241; SLICE-PLAN §4 decisions 2-3 (H4)",
+  "evidence": [
+   "kriya/config/config.py:790 (Optional[int], default None)",
+   "kriya/config/default_config.yaml:212,241",
+   "kriya/config/authority.py:101 (classified field)",
+   "tests/test_provider_contract_001a.py (pins the run-wide deadline and typed outcomes)",
+   "handover/MODULARIZATION/SLICE-PLAN.md H4 and §4 decision 2"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "One run-wide inference budget is a deliberate, documented and tested product contract (F-1 fixed the earlier defect where each unit got a fresh budget), and the default (unset) does not contradict any authority or correctness rule; the row's residual is an operator configuration choice, so E. Not A: no code path is wrong. Not B: nothing new is requested. Note: the demo value should be measured after H4 (phase budgets), since a value tuned before H4 would be stale.",
+  "e_contract": "Documented: handover/PROVIDER_CONTRACT_001A.md:16-40; kriya/config/default_config.yaml:212,241. Pinned: tests/test_provider_contract_001a.py."
+ },
+ {
+  "id": "PLAN-PRESERVED-REFERENCE-SOURCE-ATTRIBUTION-001",
+  "title": "Plan validation accepts a test file's reference to an unowned production file only when THAT test's own planned_files[].preserved_references names it (per-source attribution, find_missing_grounded_production_artifacts shape 4); a preservation of the same target declared on another planned source (P5-T2-r2: five files declared on s1 Element.java instead of s2 ElementTest.java in two repair drafts, repair prompt explicit) is not accepted, although the PRESERVED_REFERENCE obligation enforces byte identity of the target whatever the declaring source",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "E",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED: workflow_controller.find_missing_grounded_production_artifacts (:829-839) is a forwarder to planning_request.find_missing_grounded_production_artifacts (:996); shape 4 (PRESERVE) accepts an unowned target only when source_pf.preserved_references of the referencing test names it (planning_request.py:1100-1103) and then records a SATISFIED PRESERVED_REFERENCE obligation bound to the target's content hash (:1104-1115). A declaration on another source leaves the gap reported, the plan is refused and nothing is applied (fail closed; registry: 0 false success in P5-T2-r2).",
+  "contract_ref": "kriya/workflow/planning_request.py:1053-1075 docstring ('Declaration is per-source ... so one artifact's correct preservation claim never suppresses a genuine gap on a DIFFERENT source referencing the same target')",
+  "evidence": [
+   "kriya/workflow/workflow_controller.py:829-839 (forwarder, E11)",
+   "kriya/workflow/planning_request.py:1053-1075, 1100-1115",
+   "tests/test_workflow_controller_enforce.py:2418-2452 test_missing_grounded_production_artifact_preservation_is_per_source_not_path"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "Per-source attribution is an explicit, documented and tested design choice whose purpose is safety (one source's preservation claim must not mask another source's genuine omitted-owner gap); the observed failure is a fail-closed refusal caused by the model attributing the declaration to the wrong source, with an explicit repair prompt. That meets E. Not A: no correctness or authority defect - accepting plan-wide declarations would weaken the per-source guarantee and needs the docstring rationale re-examined, which is a design extension (B-like) requiring an owner decision, not a fix.",
+  "e_contract": "Documented: kriya/workflow/planning_request.py:1053-1075. Pinned: tests/test_workflow_controller_enforce.py::test_missing_grounded_production_artifact_preservation_is_per_source_not_path."
+ },
+ {
+  "id": "ENFORCE-UPSTREAM-WORK-PRESERVATION-001",
+  "title": "Shared pattern of C2-S2_A, C2-S4_A, C2-S4_B: a later unit that cannot progress for a reason outside its own write scope ends the run and the workspace is restored, discarding earlier units' accepted, applied work (twice a correct fix); the Batch-005 owner-reopen mechanism covers verification units only",
+  "registry_status": "DEFERRED",
+  "priority": "P2",
+  "proposed_class": "E",
+  "confidence": "LOW",
+  "current_behaviour": "TRACED: the enforce plan runs in an isolated plan-level worktree sandbox that is discarded unless the whole plan commits (enforce_loop.py:1538-1543, PRD-008 comment); on a non-completed plan sandbox-only completions are reset to pending (:3286-3300) and the worktree removed (:3302-3308) unless an UNCERTAIN commit must retain it. The three instances (C2-S2_A, C2-S4_A, C2-S4_B) each had their own root cause closed: CANDIDATE-GATE-BASELINE-POLICY-001 (b7824e6), FILE-RESOLUTION-SCOPE-ESCAPE-001 (3d9f2c3), ENFORCE-IDENTICAL-WRITE-COMPLETION-001 (6fc8d71/6650611). Owner reopen exists for verification units only (ENFORCE-VERIFICATION-UNIT-STOP-BEFORE-TERMINAL-GATE-001, CLOSED).",
+  "contract_ref": "kriya/workflow/enforce_loop.py:1538-1540 (sandbox 'discarded unless the whole plan commits', enforce path only); contrast handover/PRD-008A_CODING_HANDOVER.md:82: the unified ExecutionPlan (direct + milestone) uses commit_strategy incremental_work_unit and REFUSES atomic_plan (UNSUPPORTED_COMMIT_STRATEGY), so the direct/milestone paths keep upstream units' committed work while enforce alone discards it; tests pin the enforce behaviour",
+  "evidence": [
+   "kriya/workflow/enforce_loop.py:1538-1543, 3286-3308",
+   "tests/test_workflow_controller_enforce.py:5867 test_enforce_discards_successful_earlier_subtask_when_plan_fails",
+   "tests/test_workflow_controller_enforce.py:10253 test_enforce_terminal_gate_failure_discards_candidate_before_commit",
+   "handover/BACKLOG_REGISTRY.csv rows CANDIDATE-GATE-BASELINE-POLICY-001, FILE-RESOLUTION-SCOPE-ESCAPE-001, ENFORCE-IDENTICAL-WRITE-COMPLETION-001 (CLOSED)",
+   "handover/BACKEND_FINAL_CLOSURE_005_DESIGN.md:267-268"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "Discarding a failed plan's sandbox is the deliberate atomic-plan, fail-closed contract of the enforce path, documented at the code and pinned by tests; it never leaves a partially-verified tree in the workspace. The concrete causes that made later units fail were defects and are closed. The two options in target_scope (reopen implementation owners; stop with the accepted state preserved for review) are new recovery/product capabilities, so the pattern itself is E (with the extension being B). Confidence MEDIUM because the owner might regard 'a correct fix is thrown away' as a reliability defect; if so the preserve-for-review option is the authority-safe one. Confidence LOW because the atomic semantics are an enforce-only difference: PRD-008A's unified ExecutionPlan model refuses atomic_plan (UNSUPPORTED_COMMIT_STRATEGY) and commits per unit on the direct/milestone paths, so this E holds only if the owner keeps enforce as a separate orchestrator (see ENFORCE-EXECUTE-PLAN-CONVERGENCE-001's owner question). If enforce converges into execute_plan, its atomic semantics have no supported home and this row becomes a design decision folded into that convergence.",
+  "owner_question": "Answer together with ENFORCE-EXECUTE-PLAN-CONVERGENCE-001: is all-or-nothing discard of a failed enforce plan the intended contract (E), given that direct/milestone plans commit per unit and the unified plan model refuses atomic_plan? If enforce converges, which commit strategy should a STRUCTURED plan use?",
+  "e_contract": "Documented: kriya/workflow/enforce_loop.py:1538-1540 (code comment); no user-facing doc found - MISSING: a one-line statement in docs/user_guide.md that a failed enforce plan applies nothing. Pinned: tests/test_workflow_controller_enforce.py::test_enforce_discards_successful_earlier_subtask_when_plan_fails."
+ },
+ {
+  "id": "ENFORCE-FALSE-PREMISE-MUTATION-GUARD-001",
+  "title": "A REJECTED_FALSE_PREMISE disposition on the goal's defect statements does not stop the plan from mutating the file the false premise names; with the verified-no-change path refusing a correct NO_CHANGE for planner-authored acceptance criteria without deterministic coverage, Kriya rewrote a correct function (C2-S6_A); only D1 prevented that modified tree from being reported SUCCESS (latent false-success exposure, R2-F8)",
+  "registry_status": "DEFERRED",
+  "priority": "P2",
+  "proposed_class": "AMBIGUOUS",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: requirement dispositions are consumed only by the CLI binder (cli.py:3010-3018, 3160-3163) and the requirement ledger (requirements.py:962-968 record_requirement_disposition); by their documented semantics a whole-statement disposition removes the statement from the mandatory set and reports it DISPOSITIONED (requirement_disposition.py:1-20). Nothing in planning, write authority or the terminal gate reads a disposition to restrict mutation of the named file. The measured instance has since become GENUINE: after the second repair cycle D1b made NO_MUTATION_REQUIRED reachable and the final-12 run classified C2-S6_A GENUINE (BACKEND_FINAL_CLOSURE_005_DESIGN.md:482-486); ENFORCE-VERIFIED-NO-CHANGE-001 is CLOSED (88cc9a9).",
+  "contract_ref": "kriya/workflow/requirement_disposition.py:1-20 ('What a disposition does' / 'never does'); docs/user_guide.md requirements section",
+  "evidence": [
+   "grep requirement_disposition consumers -> kriya/cli.py and kriya/workflow/requirements.py only (MEASURED)",
+   "kriya/workflow/requirement_disposition.py:13-20",
+   "handover/BACKEND_FINAL_CLOSURE_005_DESIGN.md:269 (INFERRED latent false success) and :482-486 (S6_A GENUINE after D1b)",
+   "handover/BACKLOG_REGISTRY.csv ENFORCE-VERIFIED-NO-CHANGE-001 CLOSED 88cc9a9"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "Not C: the measured run is now GENUINE, but that came from the baseline-attribution and no-change fixes, not from any disposition-driven guard; the structural gap is TRACED. Not D: the gap exists. A vs B/E depends on the meaning of the operator's disposition: as documented it is a requirement-set authority only (then the guard is a B enhancement and the current behaviour is E), but if an operator-sealed REJECTED_FALSE_PREMISE is meant to be authority over what the model may change, a plan that rewrites the behaviour the operator declared correct is an authority/requirement-truth gap (A) whose remaining protection is only the gates.",
+  "owner_question": "Should an operator-sealed REJECTED_FALSE_PREMISE disposition constrain mutation (e.g. the files/symbols the premise names default to verified-no-change, and a mutation of them needs deterministic evidence or a new authority) - making today's behaviour an A authority gap in the KERNEL/AUTHORITY boundary - or does it remain, as documented, a requirement-set-only disposition (E now, guard = B feature)?"
+ },
+ {
+  "id": "LEAK-CHECK-SHARED-LINE-FALSE-POSITIVE-001",
+  "title": "kriya evidence leak-check derives hidden-only units from the hidden files minus the --public TEST files only, so goal.txt lines (the goal's own examples) and production-file lines that coincide with hidden-test lines register as hits: three LEAKED verdicts in cohort 2 (S1_A, S4_B, S6_A), every hit traced to goal text or a shown workspace file; no hidden content reached a model",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "A",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: kriya/core/attempt_evidence/leak_check.py:62-65 hidden_only_units subtracts only WHOLE-LINE equal units of the operator's --public files (any file is accepted, cli.py:1638-1656, not only tests), while hits are SUBSTRING matches of a unit in any model-facing blob (:101-105); the goal text and other model-facing workspace files are not taken from the sealed run, and hits carry no provenance. MEASURED (SNAP code, reg/work_def1): hidden line 'assertEquals(\"a.b\", parse(\"a.b\"));' stays a hidden-only unit with public=[test file] AND with public=[test file, the goal sentence 'Example: assertEquals(...)'] - it is removed only when the exact line is given as its own public line. So even passing goal.txt via --public does not prevent the false LEAKED verdict when the goal quotes the line inside prose. Direction is conservative (over-reports; no false CLEAN observed).",
+  "contract_ref": "kriya/core/attempt_evidence/leak_check.py:1-10 (method: 'collect the hidden-only units ... that is NOT a line of any public file ... intersect'); handover/BACKEND_FINAL_CLOSURE_005_DESIGN.md:269-270; R2-F6 provenance rule applied by hand",
+  "evidence": [
+   "kriya/core/attempt_evidence/leak_check.py:50-65 (_units line-equality, hidden_only_units), :101-105 (substring hit), :113-118 (verdict)",
+   "kriya/cli.py:1638-1656 (--public accepts any file)",
+   "reg/work_def1/leakcheck_units_repro.py against SNAP: three cases printed; the goal-sentence case kept both units (MEASURED)",
+   "registry: three LEAKED verdicts in cohort 2 (S1_A, S4_B, S6_A) each traced by hand to goal text or a shown file"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "This is a product CLI (kriya evidence leak-check) whose verdict is evidence for the hidden-oracle non-leak claim; it reports LEAKED where no hidden content reached the model, forcing manual provenance tracing, so it is an evidence defect of the current product (A), low severity because the error direction is conservative. Not D: the false positives are measured and the asymmetry (line-equality subtraction vs substring detection) is reproduced on SNAP. Not B: per-hit provenance is what the documented method needs to be trustworthy, not new functionality. Not E: no documentation says LEAKED may be a false positive. The fix must not weaken detection: subtract only content provably model-facing by construction (goal text and workspace files from the sealed run) and report each hit's provenance rather than silently dropping it.",
+  "reproducer": "from kriya.core.attempt_evidence.leak_check import hidden_only_units; hidden='assertEquals(\"a.b\", parse(\"a.b\"));\\n...'; hidden_only_units([hidden], ['class PublicTest {}', 'Example: assertEquals(\"a.b\", parse(\"a.b\"));']) still returns the line; a full test would seal a run whose model.request blob contains the goal sentence and assert check_run reports the hit with provenance goal_text (or CLEAN for hidden-only content) instead of LEAKED.",
+  "architectural_owner": "EVIDENCE (kriya/core/attempt_evidence/leak_check.py)",
+  "proposed_closing_slice": "NEW: EVIDENCE leak-check provenance - subtract goal text and model-facing workspace files recorded in the sealed run, report per-hit provenance (goal/workspace/hidden-only), keep the positive control and the LEAKED verdict for hidden-only hits",
+  "size": "SMALL",
+  "prerequisites": "none (D1 done)"
+ },
+ {
+  "id": "INTEGRATION-PASS-REQUIREMENT-POLICY-001",
+  "title": "The milestone plan's integration pass completes on its deterministic gates plus the plan-level original-requirement verification (PRD-020), which blocks an UNVERIFIED/UNKNOWN requirement only under autonomy.requirement_unverified_policy / requirement_unknown_policy = block (sealed by the production runtime profile; the twelve frozen readiness tasks run under it). Under the default record policies a milestone plan can end success with every original requirement UNVERIFIED (tests/test_prd024_baseline_auto_policy.py milestone-reuse test, exit 0). Flagged by the fourth scoped review of the second repair cycle (F2)",
+  "registry_status": "DEFERRED",
+  "priority": "P2",
+  "proposed_class": "E",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: the same blocking_requirements(policy) decision is applied on the direct path (development_loop.py:803-824) and the enforce/milestone terminal gate (terminal_gate_service.py:668-675); VIOLATED always blocks, UNKNOWN/UNVERIFIED block only under autonomy.requirement_unknown_policy / requirement_unverified_policy = block (defaults 'record', config/config.py:640-641), and an UNVERIFIED the verifier reported missing blocks whatever the policy (requirements.py:20-32). The milestone integration pass relies on that decision (milestones.py:1352-1360 caveat). UNVERIFIED is never reported SATISFIED (requirements.py:33-38). So the behaviour is symmetric across paths; the production profile seals both to block.",
+  "contract_ref": "docs/user_guide.md:722-726 ('A violated requirement always blocks success. ... record, the default, or block ... The production profile seals both to block. Both fields are SECURITY_AUTHORITY'); kriya/workflow/requirements.py:20-38",
+  "evidence": [
+   "kriya/workflow/development_loop.py:803-824 and kriya/workflow/terminal_gate_service.py:668-675 (same policy call on both paths)",
+   "kriya/config/config.py:640-641 (defaults record)",
+   "kriya/workflow/milestones.py:1352-1360 (caveat naming this row)",
+   "docs/user_guide.md:722-726",
+   "registry: tests/test_prd024_baseline_auto_policy.py milestone-reuse test exits 0 under record (incidental pin)"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "Requirement truth is preserved (UNVERIFIED is reported, never SATISFIED), the policy is explicit operator authority classified SECURITY_AUTHORITY, uniformly applied on the direct and plan paths, documented in the user guide and sealed to block by the production profile, so the behaviour is an intentional contract (E). Not A: no asymmetry between paths was found (the deciding check). Confidence MEDIUM: (1) the owner's decision (a) accept vs (b) require block for milestone plans is still recorded as pending, and (2) the pinning test is incidental - MISSING: an explicit test that a milestone plan under record ends success with every requirement reported UNVERIFIED (and under block fails typed REQUIREMENTS_UNRESOLVED).",
+  "e_contract": "Documented: docs/user_guide.md:722-726; kriya/workflow/requirements.py:20-38; caveat at kriya/workflow/milestones.py:1352-1360. Pinned: MISSING: explicit milestone-plan record-vs-block test (only an incidental pin in tests/test_prd024_baseline_auto_policy.py)."
+ },
+ {
+  "id": "SUREFIRE-RENDERER-FAILURE-DETAIL-001",
+  "title": "Diagnostic quality only: the Developer-facing blocking-regression renderer (validation_baseline.extract_test_failure_sections) isolates per-test failure detail from pytest's FAILURES layout only; for a Maven/Surefire run every confirmed test renders as 'FAILED <id> (failure detail unavailable in raw output)' (C2-S3_A-final: 16 entries), so a Maven repair prompt carries no failure text. Not a correctness or authority defect: attribution is decided before rendering and is unaffected",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "C",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED: extract_test_failure_sections (validation_baseline.py:1387-1427) now takes failure_details and renders 'FAILED <id>: <detail>' from the runner's structured report (:1421-1424) before falling back to 'unavailable'. failure_details comes from the JUnit-XML TestExecutionReport (tools/test_execution.py:532-540), collected for runner 'maven' from each module's target/surefire-reports (:409-414, :424-433). Both production callers pass it: attempt.py:2981-2982 and development_loop.py:1251-1255. MEASURED on SNAP (reg/work_def1/mvnrepro.py, binding.observed set by hand to stand in for a real Maven process): a Surefire TEST-com.x.FooTest.xml with one failure gives failure_details {'com.x.FooTest.testB': 'org.opentest4j.AssertionFailedError: expected: <1> but was: <2>'} and the rendered section carries that text; without details the old 'failure detail unavailable' line appears. Residual: a run with no structured report (custom test command) still has no per-test detail, by design (fail-closed path).",
+  "contract_ref": "handover/BACKLOG_REGISTRY.csv GRADLE-REGRESSION-DELTA-PER-TEST-001 (CLOSED 72cb2db: 'failing cases carry a bounded exception head used in the Developer-facing evidence'); tools/test_execution.py:76-79",
+  "evidence": [
+   "kriya/workflow/validation_baseline.py:1421-1425",
+   "kriya/tools/test_execution.py:409-414, 424-433, 532-540",
+   "kriya/tools/validate.py:1963-1977 (_test_runner returns the detecting Java build adapter's build_system, i.e. 'maven' for a pom.xml project; _bind_test_report -> test_execution.prepare(workspace, runner); used at :1891 and :1928) (TRACED producer)",
+   "kriya/workflow/attempt.py:2981-2982; kriya/workflow/development_loop.py:1251-1255",
+   "reg/work_def1/mvnrepro.py output: completeness COMPLETE, failure_details populated, rendered 'FAILED com.x.FooTest.testB: org.opentest4j.AssertionFailedError: ...' (MEASURED)",
+   "tests/test_backend_readiness_v2_gradle_regression.py:100-104 (asserts the detail is rendered and 'failure detail unavailable' is absent, Gradle JUnit XML)"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "The symptom (every Maven confirmed regression rendered without failure text) is removed on SNAP for runs with Surefire XML reports, by the BACKEND-READINESS-V2 change closed under GRADLE-REGRESSION-DELTA-PER-TEST-001 at 72cb2db, which routes the JVM report's per-case detail into the renderer; MEASURED with a Surefire report. The row's proposed mechanism (parsing console '<<< FAILURE!' blocks) is superseded by the structured report. Not E/D: it was a real gap at C2-S3_A. Residual caveat: the pinning test is Gradle-shaped; a Maven-shaped regression test would make the closure explicit.",
+  "fixing_evidence": "72cb2db (GRADLE-REGRESSION-DELTA-PER-TEST-001 closure, BACKEND-READINESS-V2, 2026-10-11) + current code validation_baseline.py:1421-1424, test_execution.py:532-540, callers attempt.py:2981 / development_loop.py:1255; MEASURED Maven Surefire reproducer on SNAP"
+ }
+]

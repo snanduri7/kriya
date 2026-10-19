@@ -1,0 +1,299 @@
+[
+ {
+  "id": "SUREFIRE-STABILITY-ENVELOPE-001",
+  "title": "Future robustness capability, not a current correctness defect: a REG-R1/R2 baseline behavior envelope for Maven/Surefire runs (deterministic replay of the untouched baseline, per-test Surefire XML evidence), so an environment-dependent test whose non-pass state or reason text is volatile on the untouched baseline can be excused the way the pytest path excuses it. Today the Maven path is whole-output + console per-test fingerprints with no stability measurement: ERROR<->FAIL and any reason-text change is CHANGED_FAILURE - intentional, fail-closed and safe; it must not be weakened without measured baseline volatility",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: a Maven run is compared by _whole_output_delta (Surefire 'Results:' fingerprint level1 + parse_surefire_structured_outcomes level2); a non-pass state change (ERROR<->FAIL) or a reason-text change of an existing failing test is CHANGED_FAILURE and blocking, with no stability replay (SNAP CLAUDE.md:377-389 'Scope. Non-pytest runners are byte-identical (_whole_output_delta)'). The pytest path has the REG-R1/R2 envelope (kriya/workflow/pytest_stability.py). A later S3_A run (the v2 store: 7 attempts, 1087 s - NOT the c3 run of the registry evidence, 5 attempts, 996.7 s) was root-caused by a stored-gate replay (BACKEND-READINESS-V2 doc 07:46): the 16 DNS tests were ERROR->ERROR and only the contained run's 12-hex hostname differed (CONFIRMED for that run); fixed by validation_baseline._LOCAL_HOST_FAILURE (validation_baseline.py:556) with BASELINE_COMPARISON_VERSION 3 (validation_baseline.py:124), test tests/test_backend_readiness_v2_container_host_fingerprint.py. For the c3 run itself the same mechanism is INFERRED (same 16 tests, contained hostname); the c3 store was not replayed (the fix's replay covered the v2/v2f stores only, doc 08:49).",
+  "contract_ref": "SNAP CLAUDE.md:377 (Maven runs) and :389 (Scope: non-pytest runners byte-identical); handover/BACKEND_FINAL_CLOSURE_005_DESIGN.md 13.4 (BY_DESIGN, owner 2026-10-09)",
+  "evidence": [
+   "kriya/workflow/validation_baseline.py:124 BASELINE_COMPARISON_VERSION = 3 (container-id host name is not failure identity)",
+   "kriya/workflow/validation_baseline.py:556 _LOCAL_HOST_FAILURE",
+   "handover/BACKEND-READINESS-V2/07_COMPREHENSIVE_FAILURE_DEEP_DIVE.md:46 (baseline-vs-baseline replay of the v2 S3_A store: ERROR->ERROR, fingerprint differed only by hostname; CONFIRMED for that run, INFERRED for c3)",
+   "handover/BACKEND-READINESS-V2/08_ROOT_CAUSE_PRIORITY_V2.md:21,46-49 (fix 3 IMPLEMENTED; replay over 67 stored PRE/POST pairs: only the 4 S3_A pairs change)",
+   "tests/test_reg_r1_pytest_regression_authority.py:182 test_06b pins FAIL->ERROR blocking on the PYTEST path only",
+   "grep tests for a Maven/Surefire ERROR<->FAIL CHANGED_FAILURE pin: none found (tests/test_baseline_surefire.py pins parsing and PRE_EXISTING, not the state-flip rule)",
+   "SNAP CLAUDE.md:377 still says 'BASELINE_COMPARISON_VERSION 2' (doc drift; code is 3)"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "The row asks for new functionality (per-test Surefire XML evidence + a Maven replay owner), not for a fix of behaviour that contradicts a stated contract: the documented scope says non-pytest runners are compared byte-identically and the result is fail-closed (never a false success). Not A: the only measured false-negative pressure (16 DNS tests on S3_A) is most likely (INFERRED for c3, CONFIRMED for the v2 run) a different, now-fixed defect (hostname in fingerprint), so the row's 'PRE error -> POST FAIL' premise is unverified rather than shown; no measured genuine Maven baseline volatility remains on record. Not C: the envelope itself is not built. Not E: the current Maven state-flip rule is documented but no Maven-path test pins it (only test_06b on the pytest path), so the E conditions are not fully met. The registry closure_evidence ('cause INFERRED; parity check pending') should cite doc 07/08: the discrimination check ran on the v2 store and the hostname fix shipped; for c3 it remains INFERRED. Registry update recommended: Cite doc 07:46 / 08:46-49 in closure_evidence (hostname mechanism CONFIRMED on the v2 store, fixed by BASELINE_COMPARISON_VERSION 3; INFERRED for c3 unless the c3 store is replayed); keep row as a B future capability; add a Maven ERROR<->FAIL pin test if the owner wants the current rule treated as contract (E)."
+ },
+ {
+  "id": "ENFORCE-CLOSURE-STABILITY-CACHE-REUSE-001",
+  "title": "Deferred P3 optimization, not a correctness defect (independent review of 6d97558, F5, BY_DESIGN): the enforce terminal suite-preservation closure runs the candidate suite once, captures the baseline lazily once and performs at most two bounded stability replays with a closure-local stability cache, because the terminal gate request carries no baseline or cache by design (13.2) - at most four full-suite executions per closure, no recursion. Threading the run's pytest_stability_cache through the terminal gate request would let enforce reuse the candidate-gate measurements",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED: TerminalGateRequest (kriya/workflow/terminal_gate_service.py:193-226) carries no baseline or stability cache; the enforce terminal gate calls close_requirements_by_suite_preservation (terminal_gate_service.py:543,650) without them, so requirement_closers.close_requirements_by_suite_preservation (requirement_closers.py:451-456, params suite_baseline/stability_cache default None) lazily captures one baseline and at most BASELINE_REPLAYS=2 replays with a closure-local cache. Bounded: at most four full-suite executions per closure, no recursion (design 13.2 F5 note). Attribution semantics are the same owner as the candidate gates.",
+  "contract_ref": "handover/BACKEND_FINAL_CLOSURE_005_DESIGN.md 13.2 (owner decision 2026-10-09: 'the enforce terminal gate passes none and the wrapper captures ... lazily'; F5 BY_DESIGN); tests/test_repair_003_p1_2_suite_preservation_attribution.py",
+  "evidence": [
+   "kriya/workflow/terminal_gate_service.py:193-226 (no stability/baseline field)",
+   "kriya/workflow/requirement_closers.py:451-500",
+   "kriya/workflow/workflow.py:1364-1378 (wrapper forwards suite_baseline/stability_cache)",
+   "design 13.2: mutants P1-P6 killed incl. 'P6 indeterminate-recaptured'"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "The behaviour is correct, bounded and deliberately designed (13.2); the request is to save up to ~3 suite executions by reusing measurements. That is a performance enhancement, so B. Not A: no wrong verdict or binding gap is shown - the lazy baseline is captured from the same original workspace with the same validator class/toolchain identity, and an indeterminate run baseline is reported unavailable, never re-captured. Not E: it is not a limitation users see, it is a cost. Note the modularization perf rule (provable waste only, separate commit, OI-58 hot spots): if taken, it belongs after H-wave typed budgets, not inside a PRESERVE slice."
+ },
+ {
+  "id": "MANAGED-SERVICE-ENV-STATE-BINDING-001",
+  "title": "Deferred P3 hardening observation, not a live defect (focused independent review of 6d97558..6169745, F3): attempt._execute_managed_service_verification reads validator.python_environment_error for every admission refusal, including the three contract-shape refusals _validate_and_convert_managed_service_contract returns before the interpreter resolver runs, so the stop is keyed on validator state rather than on this admission's own grounding evidence. The field is reset on every resolver return, the validator is per attempt, and any earlier setter already raised the typed stop at its own gate (test / acceptance), so a stale value is unreachable on every traced path; if reached the outcome would still be a fail-closed typed stop with the contract-shape reason suppressed",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "A",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: runtime_verification._execute_managed_service_verification (kriya/workflow/runtime_verification.py:1123-1170) reads validator.python_environment_error (line 1154) for EVERY invalid_reason, including the contract-shape refusals _validate_and_convert_managed_service_contract returns at lines 1034/1041/1043 before the interpreter resolver (line 1049) runs. MEASURED (reproducer, stub validator with a pre-set python_environment_error, managed_service={} and {'service_command': []}): the run takes the PYTHON_ENVIRONMENT_UNAVAILABLE environment stop and the MANAGED_SERVICE_CONTRACT_INVALID reason is suppressed; control with python_environment_error=None raises MANAGED_SERVICE_CONTRACT_INVALID. Production reachability: TRACED unreachable - every resolver return sets or resets the field (kriya/tools/validate.py:835,841,853), the candidate validator is constructed per gate call (gate_orchestrator.py:433), and earlier setters stop at their own gate (validate.py:1893-1897, capabilities/pip.py:163-170). Outcome if reached: still a fail-closed typed stop, with the wrong reason code.",
+  "contract_ref": "SNAP CLAUDE.md cross-cutting invariant 'Evidence binds to exact identity' and 'reason codes ... key policy on reason_code'; design 13.9 (focused review F3 CONFIRMED as binding/intent gap)",
+  "evidence": [
+   "kriya/workflow/runtime_verification.py:1146-1160",
+   "kriya/workflow/runtime_verification.py:1030-1051 (_validate_and_convert: three returns before _substitute_python_interpreter)",
+   "command: python -I reg/scripts_def2/envbind.py reg/work_def2 -> {} [('environment_stop','PYTHON_ENVIRONMENT_UNAVAILABLE','managed_service')]; control -> QualityGateFailure MANAGED_SERVICE_CONTRACT_INVALID",
+   "call sites: gate_orchestrator.py:1117 and runtime_verification.py:1476 both pass the gate's own validator"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "The review CONFIRMED the gap and the mechanism is now MEASURED: a stop decision is keyed on mutable shared validator state instead of this admission's own grounding evidence, which contradicts the evidence-binding/reason-code invariants of the current architecture. That makes it a latent evidence-attribution defect (A), not a disproved one: unreachable on every traced path is not the same as impossible. Not D: no deterministic proof of unreachability exists, only a trace. Not B/E: no feature is requested and the behaviour is not documented as intended. Severity is low (fail-closed either way, wrong reason code only), hence MEDIUM confidence and SMALL size; the owner's 2026-10-10 'reopen only on a live reproducer' decision conflicts with the zero-known-gap rule and should be explicitly revisited.",
+  "reproducer": "reg/scripts_def2/envbind.py (stub validator with stale python_environment_error + contract-shape-invalid managed_service; asserts environment stop replaces MANAGED_SERVICE_CONTRACT_INVALID). For a pytest regression: same shape against the real RuntimeDeps from attempt._runtime_deps().",
+  "architectural_owner": "KERNEL runtime verification (kriya/workflow/runtime_verification.py) over EXECUTION (PolymorphicValidator result typing)",
+  "proposed_closing_slice": "L1 (ExecutionPort: typed validator results; have the admission return its own environment evidence, set only on the resolver branch) - E9 is already complete in SNAP; alternatively NEW: micro-slice in W4b-style 'owner-approved correction' before F1",
+  "size": "SMALL",
+  "prerequisites": "E9 (done); L1 if folded there"
+ },
+ {
+  "id": "RECOVERY-UPSTREAM-OWNER-ROUTING-001",
+  "title": "Owner-recovery routing observation (C2-S4_A-c3): unit s2 (MalformedPathTest.java) stopped NO_AUTHORIZED_REPAIR_TARGET (kriya/workflow/retry_strategy.py ~1449-1464: fires only when plan_scope_conflict is None; failure_category unauthorized_generation_target) although the failure was grounded to PathCompiler.java, a real completed upstream owner (s1, applied at attempt 3); no upstream reopen happened and the run ended at s2 without s1 hearing s2's gate output. The code comment says a grounded implication naming a real existing file 'already routes' to owner recovery; why plan_scope_conflict stayed None is INFERRED, not established. No false success: s1's exported candidate fails the hidden tests 4/6 (same as the untouched base)",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "AMBIGUOUS",
+  "confidence": "LOW",
+  "current_behaviour": "TRACED: retry_strategy.py:1196-1240 sets state.plan_scope_conflict (owner-recovery/plan revision) only when attribution.tier is in DETERMINISTIC_ATTRIBUTION_TIERS (attribution.py:220-225: authoritative_deterministic, architectural_owner, locator, subtask_scope, subtask_dependency) or fail_type is misdirected_edit. retry_strategy.py:1449-1469 stops NO_AUTHORIZED_REPAIR_TARGET exactly when implicated files are outside an ALLOWLIST scope AND plan_scope_conflict is None, i.e. when the implication came from a NON-deterministic tier. So weak (heuristic/model) evidence can stop a run but cannot reopen an upstream owner; deterministic evidence reopens. Which tier produced the S4_A s2 implication is UNKNOWN: the raw result.json/generate.log are not in SNAP (only the CLASSIFICATION.md).",
+  "contract_ref": "PRV-17 recovery admission comment retry_strategy.py:1416-1448 (names test_handle_attempt_failure_scope_denial_with_real_existing_owner_is_unaffected); SNAP CLAUDE.md 'Model text is evidence, never authority'; SLICE-PLAN F1/F4 (provenance-ranked attribution, expansion rule)",
+  "evidence": [
+   "kriya/workflow/retry_strategy.py:1196-1240, 1449-1469",
+   "kriya/workflow/attribution.py:220-225",
+   "handover/evidence/backend-final-closure-005-repair-003/final-twelve/C2-S4_A-c3.CLASSIFICATION.md (MEASURED stop, plan_scope_conflict None; cause INFERRED)",
+   "external oracle: s1 candidate hidden 4/6 failing (same as base) - no false negative"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "If the S4_A implication was deterministic (e.g. a locator to PathCompiler.java) and plan_scope_conflict still stayed None, this is an A defect in recovery routing. If it was a non-deterministic tier, the stop is the intended asymmetry (model/heuristic evidence must not reopen another unit's scope) and the row is E - but that asymmetry is not documented as a contract nor pinned by a test from this direction. The discriminating evidence (the run's attribution tier) is not available in SNAP, so the A-vs-E choice cannot be made from evidence without a replay. Not B: it is not a feature request. Shares the underlying question with FIX-UNIT-BEHAVIOURAL-GATE-001 and TERMINAL-REQUIREMENT-FAILURE-NO-REPAIR-001.",
+  "owner_question": "Is it the intended contract that a failure implicating a COMPLETED UPSTREAM owner's file only through a NON-deterministic attribution tier ends the run (NO_AUTHORIZED_REPAIR_TARGET) rather than reopening that owner? If yes -> E, and F1 must document and pin it (and the S4_A sealed store should be replayed once to confirm the tier). If no -> A, closed by F4/F5 (retry-target expansion rule extended to upstream owners). Either way, authorize F1 to take the S4_A c3 s2 sequence as a recorded characterization case (needs the sealed store from ~/kriya-m1-live).",
+  "architectural_owner": "KERNEL attribution/retry-target (kriya/workflow/attribution.py, retry_target.py, retry_strategy.py)",
+  "proposed_closing_slice": "F1 (characterization: classify the producing tier) then F4/F5 if A",
+  "size": "MEDIUM",
+  "prerequisites": "F1"
+ },
+ {
+  "id": "LOCALIZATION-DEVELOPER-PATH-OVERLOAD-001",
+  "title": "The Developer retrieval path (graph_retrieval._code_intelligence_candidates) still counts each overload as a separate hit toward top_k, so a heavily overloaded name can crowd out distinct files there as it did on the Planner map; the fold was applied at the Planner boundary only because member hints and symbol loci are per-overload",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: graph_retrieval._code_intelligence_candidates (kriya/workflow/graph_retrieval.py:454-508) iterates the fused localization and treats the first top_k HITS as direct evidence (lines 492-496, comment: 'the top_k hits (not top_k distinct files) are the direct evidence'); overloads with the same lookup_key are not folded there. fold_overloads (graph_retrieval.py:131-145) is applied only to the Planner map (line ~564). No measured Developer-path loss exists (registry closure_evidence).",
+  "contract_ref": "graph_retrieval.py:492-493 (deliberate 'top_k hits' semantics); PLAN-TARGET-GROUNDING-001 notes in handover/BACKEND-READINESS-V2/01 (T2 overload flooding measured on the Planner map only)",
+  "evidence": [
+   "kriya/workflow/graph_retrieval.py:131-145, 454-508",
+   "handover/BACKEND-READINESS-V2/01_4_OF_12_ARCHITECTURE_ROOT_CAUSE.md:77 (Planner map: 15 overloads of Jsoup.parse filled LOCALIZATION_LIMIT=12)"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "This is a retrieval-quality heuristic choice, documented in the code, with no measured wrong outcome on the Developer path; changing it is an enhancement of context selection (B). Not A: retrieval ranking is advisory context, not authority or a verdict, and no reproducer shows a lost relevant file; per-overload loci are intentionally kept. Not E: not stated as a product contract. Not C/D: unchanged and not disproved."
+ },
+ {
+  "id": "PLAN-FORM-NORMALISATION-001",
+  "title": "Plan form friction: S2_A (2-file edit planned as 4 subtasks) failed on three different form errors in three repairs (unjustified runtime verification, undeclared depends_on for a unique provider, uncovered acceptance criterion, enum slip); REFACTOR_BASELINE_MISSING fired in 7/7 T3+S3_A runs because bug fixes are typed refactor",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED: plan_validation.validate_plan rejects a kind=refactor plan with a blank refactor_baseline (kriya/workflow/plan_validation.py:1222-1229, REFACTOR_BASELINE_MISSING) and the bounded Planner repair runs (planner_repair.py:131,527). plan_normalization.py has coalesce_same_file_owners, derive_verification_contracts, scope_verification_to_requirements, redirect_immutable_test_edits (lines 140-307) but nothing derives depends_on from a unique requires->provides edge or re-derives plan kind. The validator decisions are deterministic and consistent with the Planner contract.",
+  "contract_ref": "Planner contract in kriya/agents (plan schema) + kriya/workflow/plan_validation.py reason codes; handover/BACKEND-READINESS-V2/01 (3 of 44 runs ended in planner non-convergence)",
+  "evidence": [
+   "kriya/workflow/plan_validation.py:1222-1235",
+   "kriya/workflow/plan_normalization.py function list (no depends_on/kind derivation)",
+   "registry: normalisation alone would not have rescued S2_A (three distinct errors)"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "The validator correctly refuses malformed plans; the gap is Planner-model form errors and the absence of a Kriya-side canonicaliser - a planner-reliability enhancement (B). Not A: no validator decision is wrong, nothing fails open. Care for the future feature: re-deriving 'kind' from model text must not let model output change authority-bearing plan facts (Model text is evidence, never authority)."
+ },
+ {
+  "id": "FIX-UNIT-BEHAVIOURAL-GATE-001",
+  "title": "A fix unit planned before its test-writing unit is gated by compile only, so the fix is never exercised until the next unit writes a test, and that unit's failures ground to a file outside its write scope (S4_A: s1 hidden 4/6 failing, same as base, then NO_AUTHORIZED_REPAIR_TARGET); related RECOVERY-UPSTREAM-OWNER-ROUTING-001",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: each subtask runs the verification method its plan declares; a fix unit whose plan verification is compile has no behavioural check, and the tests that would exercise it are written by a later unit. When the later unit's failure grounds outside its write scope, retry_strategy.py:1449-1469 stops NO_AUTHORIZED_REPAIR_TARGET (non-deterministic tier) or the deterministic tiers route to owner recovery (retry_strategy.py:1196-1240); the verification-only-unit reopen exists (enforce_loop.py:1739-1741, once per run). The terminal gate still judges the whole candidate, so no false success (S4_A: oracle hidden 4/6 = base).",
+  "contract_ref": "none found that requires each implementation unit to carry a behavioural gate; plan verification methods are Planner-chosen and validated (plan_normalization.derive_verification_contracts)",
+  "evidence": [
+   "kriya/workflow/enforce_loop.py:1739-1741",
+   "kriya/workflow/retry_strategy.py:1449-1469",
+   "handover/BACKEND-READINESS-V2/01_4_OF_12_ARCHITECTURE_ROOT_CAUSE.md:135,165,193 (family D: 'yes but large')"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "No current contract promises a behavioural gate per fix unit or reproducer-first decomposition; adding one is a planning/decomposition capability (B, architecture-sized). Not A: the outcome is fail-closed and the verdict was right. The reopen part of this pattern is the open question recorded on RECOVERY-UPSTREAM-OWNER-ROUTING-001 (AMBIGUOUS), not here."
+ },
+ {
+  "id": "TEST-LAUNCH-APPROVAL-EXPIRY-TIMING-001",
+  "title": "tests/test_launch_approval.py::test_if_the_approval_cannot_be_recorded_nothing_is_approved failed once in the canonical parallel run with ApprovalRefused 'this review expired' (a wall-clock review TTL under 8-worker load); passed 3/3 in isolation",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "C",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED: tests/test_launch_approval.py:524 now monkeypatches approval.APPROVAL_WAIT_SECONDS to 5.0 with the comment 'was 0.5: under 8-way load the decision thread landed after the review expired (REVIEW_EXPIRED); this test is about a failed save, not expiry'; the assertion (line 531) is unchanged. Expiry is the wall-clock expires_at check in kriya/control/launch_approval.py:215-216 (requested + APPROVAL_WAIT_SECONDS, lines 94/117). MEASURED: the single test id passes (1 passed in 1.02 s) from a copy of SNAP.",
+  "contract_ref": "row target_scope: 'Inject a clock or widen the TTL margin in the test; never weaken the assertion'",
+  "evidence": [
+   "tests/test_launch_approval.py:504-531",
+   "kriya/control/launch_approval.py:57,94,117,215-216",
+   "command: cd reg/work_def2 && PYTHONPATH=. pytest -p no:cacheprovider -q tests/test_launch_approval.py::test_if_the_approval_cannot_be_recorded_nothing_is_approved -> 1 passed",
+   "handover/BACKEND-READINESS-V2/23_FINAL_BOUNDED_CYCLE.md:186 still describes the 0.5 s value, so the widening landed after that record"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "The fix the row asked for (widen the margin, keep the assertion) is in SNAP; the failure was a harness timing artifact, not a Kriya product defect (rule 10). Not A: the product refused correctly (REVIEW_EXPIRED is the right outcome for a late decision). Residual: it is a 10x margin, not an injected clock, so an extreme load could still flake; the parallel-load proof is the owner's canonical suite, not this single run.",
+  "fixing_evidence": "tests/test_launch_approval.py:524 (APPROVAL_WAIT_SECONDS 0.5 -> 5.0, assertion unchanged); fixing commit not identifiable without git history"
+ },
+ {
+  "id": "GOAL-EXAMPLE-COMPILER-COVERAGE-001",
+  "title": "The Java goal-example compiler (example_oracle_java.py) accepts only static Type.method(literal) -> literal|raises; MEASURED on the frozen twelve it accepts none of the examples for T3 (assertThat), S3_A (instance new X(..).m(..)), S4_B (non-literal argument), and S4_A's one example has a non-literal result, so the strongest deterministic gate is idle for the four failing cases",
+  "registry_status": "DEFERRED",
+  "priority": "P2",
+  "proposed_class": "B",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED + MEASURED: since the row, goal_example_forms.py added instance, no-throw and matcher forms; ENFORCED_FORMS = {java_instance_value, java_matcher_pass} (goal_example_forms.py:91) after shadow replay (comment lines 78-90); example_oracle_java._add_classified_forms (example_oracle_java.py:322-339) graduates enforced forms into the sealed class. MEASURED with classify_goal_examples on a scratch Java tree: 'new Foo().g(\"a\") -> 4' COMPILED enforced=True; 'Foo.f(BaseTest.JSON_DOCUMENT) -> 4' UNSUPPORTED ('every argument must be a Java literal'); 'Foo.f(\"a\") -> List.of(1, 2)' AMBIGUOUS. So the T3 (matcher) and S3_A (instance) shapes are covered; S4_B (non-literal argument) and S4_A (non-literal result) are still outside the grammar, by design fail-safe (UNSUPPORTED never rejects).",
+  "contract_ref": "kriya/workflow/goal_example_forms.py:1-30 module contract (COMPILED/AMBIGUOUS/UNSUPPORTED, graduation only via ENFORCED_FORMS); handover/BACKEND-READINESS-V2/15_STAGE_C_SOLVER_CHANGES.md:11,42,47",
+  "evidence": [
+   "kriya/workflow/goal_example_forms.py:78-91",
+   "kriya/workflow/example_oracle_java.py:322-339",
+   "command: python -I reg/scripts_def2/forms.py reg/work_def2 reg/work_def2/jrepo -> instance COMPILED enforced=True; non-literal arg UNSUPPORTED; collection result AMBIGUOUS",
+   "handover/BACKEND-READINESS-V2/15_STAGE_C_SOLVER_CHANGES.md:42 (0 of 60 false rejections in replay)"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "What remains is new grammar (bounded non-literal arguments/results), which is a capability extension of a fail-safe gate, so B. Not A: the gate never rejects what it cannot compile and no false success is attributed to the missing forms. Partly C: the instance and assertThat forms the row named are implemented and enforced, so the registry text overstates the gap and should be narrowed to non-literal args/results. Not E: the limitation is documented in the module but the owner tracks it as next-cycle work. Registry update recommended: Narrow the row to non-literal arguments/results (S4_B, S4_A); cite ENFORCED_FORMS (goal_example_forms.py:91) as closing the instance/matcher parts."
+ },
+ {
+  "id": "REPAIR-EQUIVALENCE-001",
+  "title": "Developer repair attempts re-propose a byte-identical candidate (S3_A attempts 3, 6, 7 share digests) and still spend a full gate round",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: the pre-call no-progress gate (kriya/workflow/repair_orchestrator.py:782-886) fingerprints the retry EVIDENCE (inputs: context tier, member grounding, normalized failure signature) and raises no_progress_retry when it repeats; nothing compares the candidate OUTPUT digest against earlier refused/failed digests in the generation loop (grep for repeated-candidate detection found only enforce_loop.py:2587-2602, the owner-recovery fingerprint). A repeated candidate is therefore re-gated.",
+  "contract_ref": "none found (no stated contract that a repeated candidate is refused); handover/BACKEND-READINESS-V2/08_ROOT_CAUSE_PRIORITY_V2.md:24 (DEFERRED, evidence recorded)",
+  "evidence": [
+   "kriya/workflow/repair_orchestrator.py:782-886",
+   "kriya/workflow/enforce_loop.py:2587-2602",
+   "handover/BACKEND-READINESS-V2/07_COMPREHENSIVE_FAILURE_DEEP_DIVE.md (S3_A attempts 3/6/7 share digests)"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "Re-gating the same bytes costs budget but each gate judges the actual bytes, and gate-state volatility on pytest is handled by the REG-R1/R2 envelope (Maven: whole-output, fail-closed), so a repeated candidate cannot become a false success through re-gating any more than a fresh one; this is an efficiency/repair-quality enhancement (B). Not A: no wrong verdict or authority path is involved. Note for the future feature: refusing by digest must not raise the retry budget and must bind to the exact staged bytes (G4 staged_identity)."
+ },
+ {
+  "id": "SEMANTIC-SAFETY-REPAIR-CONTINUITY-001",
+  "title": "A semantic-safety staging rejection (unsafe_exception_masking) reaches repair only as the LAST attempt's failure: after an intervening no-model no_progress_retry or a model switch the prohibition is absent from the Developer request (S4_A v6f: attempt 5 on the fallback model carried no 'do not widen a catch to Error/Throwable' text and repeated the masking; attempts 7-11 also lacked it), and the message never says the rejected edit was not applied (attempt 3 then tried to remove a catch that was never staged)",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "A",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED + MEASURED: the open-findings carry-over (kriya/workflow/open_findings.py, D1 2026-10-15) keeps one authoritative candidate finding until the next one replaces it. no_progress_retry (raised by repair_orchestrator.py:861-880, source='orchestrator', default authority='authoritative' per failure.py Failure.authority) reaches handle_attempt_failure -> RecoveryCoordinator.handle, which calls record_failure unconditionally (recovery_coordinator.py:341-348) -> _record_attempt_failure, no early return before update_open_findings (retry_strategy.py:483-549) - real path TRACED; categorize_failure('no_progress_retry') is UNCLASSIFIED, so is_candidate_finding is True and it REPLACES the unsafe_exception_masking finding. MEASURED: update_open_findings after masking -> ['unsafe_exception_masking']; after a following no_progress_retry -> ['no_progress_retry'] (the prohibition is gone); after an anchor miss -> masking kept. A fallback-model switch does not reset the set (only best_of_n.reset_state_for_independent_candidate does, best_of_n.py:82). The rejection message (attempt.py:759-781) gives guidance but no wording says the rejected edit was not applied / the file is unchanged (grep 'not applied|never staged|file is unchanged' in retry_prompts/repair_orchestrator/retry_package/attempt: none).",
+  "contract_ref": "kriya/workflow/open_findings.py: a candidate finding is by definition validator-owned ('what a validator said is wrong with the CANDIDATE'; 'A finding's subject ... is copied from the validator's own Failure'), while no_progress_retry is an orchestrator decision about retry evidence (source='orchestrator') and _NON_CANDIDATE_TYPES already excludes the same-kind orchestrator type plan_scope_conflict (open_findings.py:43); the 'unknown types default to remembered' rule (open_findings.py:39-41) is for unknown VALIDATOR types, not orchestrator stops; SLICE-PLAN G4 (refused proposals recorded, their findings stay OPEN; RepairPackage per finding)",
+  "evidence": [
+   "kriya/workflow/open_findings.py:27-45, 66-69, 93-100",
+   "kriya/workflow/repair_orchestrator.py:861-880",
+   "kriya/workflow/retry_strategy.py:540-549",
+   "kriya/workflow/attempt.py:759-781 (_reject_exception_masking message)",
+   "command: python -I reg/scripts_def2/mask.py reg/work_def2 -> after masking ['unsafe_exception_masking']; after no_progress_retry ['no_progress_retry']; after anchored_edit ['unsafe_exception_masking']",
+   "handover/BACKEND-READINESS-V2/22_FOUR_FAILURE_ROOT_CAUSE_CLOSURE.md section 5 (S4_A v6f: attempt 5 on the fallback model lacked the prohibition and repeated the masking; attempt 3 tried to remove a never-staged catch)"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "A Kriya-owned safety finding (the semantic-safety guard's rejection) is dropped from repair context by a Kriya-internal, non-candidate failure, contrary to the open-findings module's own definition of a candidate finding (validator-owned) and to its explicit exclusion of the analogous orchestrator type plan_scope_conflict, and the feedback misstates candidate state by omission. That is a reliability/evidence defect of the current repair-context contract, reproduced deterministically - A. The safety guard itself still blocks every masking attempt (no false success), which is why the owner deferred it as 'not proven causal'; causality for one cohort case does not change that the mechanism is wrong. Not B: carrying a finding across attempts is already the defined behaviour (D1), the gap is a misclassification. Not E: nothing documents dropping safety findings.",
+  "reproducer": "reg/scripts_def2/mask.py: update_open_findings([], unsafe_exception_masking) then update_open_findings(..., no_progress_retry) -> the masking finding is gone. Regression test sketch: the real _record_attempt_failure with a masking QualityGateFailure, then the real repair_orchestrator no-progress raise, then assert the next RetryPackage still renders the masking finding; plus assert the rejection text states the edit was not applied.",
+  "architectural_owner": "KERNEL repair context (kriya/workflow/open_findings.py, repair_orchestrator.py, retry_package.py)",
+  "proposed_closing_slice": "G4 (per-finding RepairPackage; refused proposals recorded with reason_code and their findings stay OPEN) - add an explicit control: an orchestrator-internal failure (no_progress_retry) never opens or replaces a candidate finding",
+  "size": "SMALL",
+  "prerequisites": "G1, G2, G3"
+ },
+ {
+  "id": "GOAL-EXAMPLE-LITERAL-BACKSLASH-001",
+  "title": "The legacy example_oracle_java._LITERAL rejects a single-backslash escape such as the T3 goal's own \"my\\tfoo\" example (the corrected goal_example_forms._LITERAL accepts it); unrelated to the latest T3 candidate's failure (example 3), found in the four-failure closure",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "A",
+  "confidence": "HIGH",
+  "current_behaviour": "MEASURED: example_oracle_java._LITERAL (kriya/workflow/example_oracle_java.py:46-47, raw string with doubled backslashes) rejects \"my\\tfoo\", \"q\\\"x\" and '\\n' and accepts only escapes spelled with two backslashes (\"a\\\\b\"); goal_example_forms._LITERAL (goal_example_forms.py:52-53) accepts all of them. TRACED consequence: recognize_java_examples rejects such a static line ('every argument must be a Java literal', example_oracle_java.py:205-207 / 227) and _add_classified_forms (322-339) then sees it as java_static_value COMPILED but NOT in ENFORCED_FORMS (MEASURED: enforced=False), so it becomes shadow evidence only. The gate fails in the safe direction (no false rejection) but the user's example is silently not enforced and the rejection reason is factually wrong.",
+  "contract_ref": "kriya/workflow/example_oracle_java.py:1-21 module contract ('Java literal arguments (int, long, double/float, String, char, boolean, null) and a Java literal result'); goal_example_forms.py:49-51 comment documents the defect",
+  "evidence": [
+   "kriya/workflow/example_oracle_java.py:46-47, 205-207, 227-229, 322-339",
+   "kriya/workflow/goal_example_forms.py:49-53, 91",
+   "command: python -I reg/scripts_def2/lit.py reg/work_def2 -> \"my\\tfoo\" legacy False forms True; \"a\\\\b\" True/True; '\\n' legacy False forms True; \"q\\\"x\" legacy False forms True",
+   "command: python -I reg/scripts_def2/forms.py -> 'Foo.f(\"my\\tfoo\") -> 3' java_static_value COMPILED enforced=False"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "The deterministic acceptance compiler contradicts its own documented contract (Java String/char literals) - a correctness defect in a requirement-truth component, reproduced deterministically: A. Wider than the row states: char literals ('\\n') and escaped quotes are also rejected, not only single-backslash string escapes. Not B: no new grammar is asked for, only the documented one. Not E: the module comment itself calls it a defect. Low blast radius (fail-safe direction), so SMALL; the fix must bump JAVA_EXAMPLE_COMPILER_VERSION (identity-bearing: sealed example classes are content-addressed) and add a replay that no recorded GENUINE candidate is newly rejected.",
+  "reproducer": "reg/scripts_def2/lit.py (legacy vs corrected _LITERAL on four literals); regression: recognize_java_examples on a goal line 'Type.m(\"my\\tfoo\") -> 3' must yield one FORM_JAVA_LITERAL example, not a rejection",
+  "architectural_owner": "KERNEL requirements/acceptance (kriya/workflow/example_oracle_java.py, goal_example_forms.py)",
+  "proposed_closing_slice": "NEW: acceptance-compiler hygiene micro-slice - unify the two literal grammars on goal_example_forms._LITERAL, bump JAVA_EXAMPLE_COMPILER_VERSION, replay recorded goals (no slice in SLICE-PLAN owns the example compilers)",
+  "size": "SMALL",
+  "prerequisites": "none (independent of the E/F/G waves; must not run inside a PRESERVE slice)"
+ },
+ {
+  "id": "TERMINAL-REQUIREMENT-FAILURE-NO-REPAIR-001",
+  "title": "A terminal original_requirements failure that carries a precise verifier detail (T3 v6f REQ-6: U+00A0/U+2003 not treated as whitespace) ends the run NOT_COMMITTED without a repair attempt, because every unit gate had passed and the terminal gate runs after the last unit",
+  "registry_status": "DEFERRED",
+  "priority": "P2",
+  "proposed_class": "AMBIGUOUS",
+  "confidence": "LOW",
+  "current_behaviour": "TRACED: the enforce loop runs the terminal gates once after all subtasks complete (kriya/workflow/enforce_loop.py:3201-3245, TerminalGateService.run incl. verify_original_requirements); if gate_report.commit_eligible is False the run ends NOT_COMMITTED with no transition back to any unit. The only upstream reopen before the terminal gate is the bounded verification-only-unit reopen (enforce_loop.py:1739-1741, once per owner per run) and deterministic-tier owner recovery. Per SNAP CLAUDE.md:339 a verifier verdict is MODEL_CLAIMED; only deterministic/human evidence closes or violates a requirement. Observed: T3 v6f REQ-6, also T5/S1_A (24_CLOSING_COHORT_RESULT.md:56: 'existing design, whether it should repair is UNKNOWN').",
+  "contract_ref": "PRD-030 terminal gate + commit services (single terminal pass; nothing found that states terminal failures are repair-eligible or explicitly final); SNAP CLAUDE.md:339 (verifier verdict authority)",
+  "evidence": [
+   "kriya/workflow/enforce_loop.py:1739-1741, 3201-3245",
+   "kriya/workflow/terminal_gate_service.py:193-233",
+   "handover/BACKEND-READINESS-V2/22_FOUR_FAILURE_ROOT_CAUSE_CLOSURE.md section 4 (T3: 'Kriya had the information'; terminal-only enforcement would change nothing)",
+   "handover/BACKEND-READINESS-V2/24_CLOSING_COHORT_RESULT.md:56(b)"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "The outcome is fail-closed and correct (no false success). Whether the defined state machine should have a terminal-gate -> owning-unit repair transition is a design-intent question no document answers: if the target architecture intends that deterministic terminal evidence may reopen the owning unit (as it already does for verification-only units and deterministic owner recovery), the missing transition is an A state-machine gap; if terminal gates are intentionally final, it is E but needs documentation and a pin test; if it is a new loop, B. Caution for any A/B outcome: only DETERMINISTIC terminal evidence (sealed acceptance/examples, named tests) may drive re-entry; a MODEL_CLAIMED verifier detail must not (Model text is evidence, never authority), and re-entry must not widen budgets (H-wave). Same underlying question as RECOVERY-UPSTREAM-OWNER-ROUTING-001.",
+  "owner_question": "Should a terminal-gate failure backed by DETERMINISTIC evidence (a sealed goal example / named test / acceptance case that names the failing requirement) re-enter bounded repair of the owning unit before NOT_COMMITTED? Yes -> A, owned by the enforce loop + H-wave budgets (NEW slice after H4: 'terminal deterministic-evidence re-entry, bounded, budgeted'). No -> E: document 'terminal gates are final' in the generation-pipeline notes and pin it with a test.",
+  "architectural_owner": "KERNEL enforce loop / terminal gate service (kriya/workflow/enforce_loop.py, terminal_gate_service.py) with BudgetLedger (H)",
+  "proposed_closing_slice": "owner decision first; if A: NEW slice after H4 (bounded terminal re-entry on deterministic evidence only)",
+  "size": "LARGE",
+  "prerequisites": "E12 (done), H4"
+ },
+ {
+  "id": "PLAN-EXTERNAL-PACKAGE-CAPABILITY-001",
+  "title": "CLASSIFIED PLANNER_MODEL_DEFECT (2026-10-14; secondary REPAIR_FEEDBACK_SEMANTICS_GAP fixed generically, deterministic reproducer tests/test_plan_external_package_capability_001.py): with qwen3-coder:30b as Planner, a Python goal naming pinned third-party packages in a workspace with a requirements.txt yields a plan whose first unit's file declares requires_capabilities=['tree-sitter-python'] although the Planner contract says that field names only a capability supplied by another planned subtask; the validator rejects it (PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED) and the same structure repeats through both repair rounds (6 of 6 recorded answers). Removing the entry or listing the package under environment_requirements validates. Observation, not classified: a literal reading of the repair feedback ('declare it in requires') is rejected again (SUBTASK_REQUIREMENT_UNPROVIDED), and the plan contract names no home for third-party libraries beyond environment_requirements",
+  "registry_status": "DEFERRED",
+  "priority": "P2",
+  "proposed_class": "C",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: the validator rejects a requires_capabilities entry no planned subtask provides (PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED / SUBTASK_REQUIREMENT_UNPROVIDED), consistent with the Planner contract; environment_requirements is the documented home for ambient/third-party dependencies (tests/test_plan_external_package_capability_001.py:143 test_E_any_external_dependency_in_environment_requirements_is_accepted). The Kriya-side secondary defect (misleading repair feedback) is fixed: kriya/workflow/planner_repair.py:262 typed UNPROVIDED_CAPABILITY block and one shared contract sentence. MEASURED: tests/test_plan_external_package_capability_001.py::test_the_contract_rule_is_one_concise_generic_sentence_present_wherever_the_dependency_fields_are_taught -> 1 passed; the file has 17 tests replaying six recorded bad plans.",
+  "contract_ref": "Planner contract sentence (pinned by test_the_contract_rule_is_one_concise_generic_sentence_present_wherever_the_dependency_fields_are_taught and test_the_legacy_planner_agent_prompt_states_the_same_rule); handover/DEMO-V2/FINDINGS.md F2",
+  "evidence": [
+   "kriya/workflow/planner_repair.py:262",
+   "tests/test_plan_external_package_capability_001.py (17 tests; :143, :155, :199, :209)",
+   "command: pytest -q tests/test_plan_external_package_capability_001.py::test_the_contract_rule_is_one_concise_generic_sentence_present_wherever_the_dependency_fields_are_taught (copy reg/work_def2) -> 1 passed"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "The only Kriya defect in the row (REPAIR_FEEDBACK_SEMANTICS_GAP) is fixed with a deterministic reproducer and mutants; the primary first wrong decision is the Planner model's, which is model behaviour, not a Kriya defect. So C for the Kriya part. Not A: the validator is consistent with its contract and the contract does name a home for third-party libraries (environment_requirements, pinned by test_E). Not B: nothing new is requested. Residual is live-effectiveness evidence (no live repair round has exercised the new block) - a qualification/evidence item, not an open defect; the registry row should be closed or retitled as a live-evidence follow-up.",
+  "fixing_evidence": "kriya/workflow/planner_repair.py:262 UNPROVIDED_CAPABILITY block + shared contract sentence (2026-10-14, per closure_evidence: 30 tests, 9 mutants killed); tests/test_plan_external_package_capability_001.py"
+ },
+ {
+  "id": "MANAGED-SERVICE-APPROVAL-001",
+  "title": "Managed-service runtime verification (a model-chosen long-running service) has no reviewable human approval subject. Demo V2 (owner decision 2026-10-15, option 1) FAILS CLOSED in human-in-the-loop mode with MANAGED_SERVICE_APPROVAL_UNSUPPORTED before the contract is admitted, before preparation and before any process starts; non-HITL modes are unchanged. A real approval needs a richer security subject than the finite RuntimeCommandSubject: service lifetime, ports/listeners, containment of the launched service (today only the build-preparation step is contained, and only with contained_execution_required), readiness, shutdown and network access.",
+  "registry_status": "DEFERRED",
+  "priority": "P2",
+  "proposed_class": "E",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: runtime_verification._managed_service_blocked_without_approval_subject (kriya/workflow/runtime_verification.py:1098-1120) is the single choke point both call sites route through; in human-in-the-loop mode it stops BEFORE admission/preparation/any process: required -> typed verification_infrastructure_failure MANAGED_SERVICE_APPROVAL_UNSUPPORTED; optional -> run_verification_declined. Other modes run the service without approval, which matches finite runtime commands (_runtime_commands_need_approval returns False outside HITL, runtime_verification.py:796-800). The registry's 'today only the build-preparation step is contained' is stale: service_runtime.run_managed_service_verification passes the containment profile/backend to controller.start_managed for the LAUNCHED service (kriya/tools/service_runtime.py:746-759, SEC-001-P6); the comment at runtime_verification.py:1173-1179 saying the opposite is stale too.",
+  "contract_ref": "docs/user_guide.md:323-326 (HITL stops with MANAGED_SERVICE_APPROVAL_UNSUPPORTED; other modes unchanged; tracked as MANAGED-SERVICE-APPROVAL-001); tests/test_managed_service_hitl_fail_closed.py; tests/test_runtime_verification.py:421,1107,1698; kriya/application/history.py:48 (BLOCKED_REASON_CODES); tests/test_kup_application_outcome.py:92",
+  "evidence": [
+   "kriya/workflow/runtime_verification.py:1095-1120, 1123-1141, 796-800",
+   "kriya/tools/service_runtime.py:746-759 (launched service contained when a profile is configured)",
+   "docs/user_guide.md:323-326",
+   "tests/test_managed_service_hitl_fail_closed.py (fail-closed pin)"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "Current behaviour satisfies every E condition: documented to users (user_guide 323-326), pinned by dedicated tests, fails closed in the only mode that promises human approval, consistent with the finite-command approval rule in other modes, and it does not block the target architecture (a typed managed-service review subject can be added to policy.approval later). Not A: no authority bypass - nothing runs in HITL without approval. The approval subject itself is a genuine future capability (B) the owner explicitly deferred; if the owner prefers to keep the row as that backlog item, B is the alternative label, not A. Housekeeping: fix the stale containment claim in the registry title and the stale comment in runtime_verification.py.",
+  "e_contract": "Documented: docs/user_guide.md:323-326. Pinned: tests/test_managed_service_hitl_fail_closed.py (+ tests/test_runtime_verification.py:421,1107,1698)."
+ }
+]

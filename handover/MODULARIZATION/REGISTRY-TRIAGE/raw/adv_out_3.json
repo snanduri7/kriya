@@ -1,0 +1,197 @@
+[
+ {
+  "id": "DIFF-APPLIED-BYTES-BINDING-001",
+  "verdict": "ALREADY_FIXED",
+  "confidence": "medium",
+  "evidence": [
+   "TRACED kriya/workflow/development_loop.py:606-613: state.verified_candidate_binding = _bind_direct_candidate(...) is taken when the candidate gates pass, BEFORE stage_apply.approval_gate shows the diff (stage_apply.py:359 approval_callback)",
+   "TRACED kriya/workflow/verification_binding.py:66-80: the binding entry is (relpath, operation, sha256 of exact bytes, MODE, base revision, base existence); binding_refusal (84-97) recomputes it from the batch about to be committed",
+   "TRACED kriya/workflow/terminal_commit.py:253-259: commit_terminal_candidate refuses VERIFIED_CANDIDATE_EVIDENCE_STALE/MISSING before any workspace byte; stage_apply.py:520,555 passes the batch materialized from the worktree (exact bytes + lstat mode, terminal_commit.py:132-175) and state.verified_candidate_binding",
+   "TRACED kriya/workflow/development_loop.py:922-939: held executing gates after the source approval run under post_source_review_guard / assert_candidate_unchanged_since_source_review (whole-binding digest, mode included)",
+   "TRACED tests/test_e14_pre_characterization.py::test_oi42_current_behaviour_an_approval_never_covers_bytes_changed_after_it (parametrized approval_callback / terminal_regression): bytes changed inside the approval callback -> CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW, bytes changed during the terminal regression -> VERIFIED_CANDIDATE_EVIDENCE_STALE, workspace unchanged in both",
+   "TRACED tests/test_candidate_verification_binding.py::test_every_entry_component_is_bound (mode=0o755 case) and ::test_a_candidate_changed_after_the_gates_is_never_committed[direct|milestone]",
+   "TRACED kriya/repository/snapshot.py:91-108: FileSnapshot.text calls require_mutable, which raises UNSUPPORTED_TEXT_ENCODING for a non-UTF-8 file ('the file is left untouched'); file_integrity.py:254-257 mutate_snapshot is the one edit engine and goes through snapshot.text/encode; new content is str.encode('utf-8') (snapshot.py:130), so candidate bytes are always valid UTF-8 and the errors='replace' display is lossless for them",
+   "TRACED tests/test_file_integrity_contract_001.py:364-368 test_issue7_unrepresentable_files_are_refused_and_left_untouched (latin-1 b'# caf\\xe9' -> UNSUPPORTED_TEXT_ENCODING)",
+   "TRACED mode at approval is never Developer-chosen: kriya/repository/commit.py:152-155 the staged write restores the base file's mode; a new file gets the umask default (commit.py:344-355); file_integrity.py VerificationTreeBinding binds mode + raw digest and a gate chmod is caught (tests/test_file_integrity_contract_001.py:1342-1344 test_f4_a_gate_changing_candidate_or_tracked_content_is_caught, 'mode change' case)",
+   "TRACED kriya/application/review.py:150-164: the GUI review's candidate_digest is over the displayed diff text (as the row says); it is a separate digest from the in-memory byte binding and the two are never compared, but the display is a lossless function of the bound bytes given the two facts above",
+   "NOT RUN: no probe or pytest executed for this row; deletion through the approval gate's open(worktree_file) (stage_apply.py:139-141) was not traced"
+  ],
+  "defect": null,
+  "pins": {
+   "documents": ["kriya/workflow/verification_binding.py:1-16 (CANDIDATE-VERIFIED-DIGEST-BINDING-001 docstring)", "handover/MODULARIZATION/E14-TRIAGE.md:55 (OI-42: tampering after approval refused in both windows)", "handover/DEMO-V2/PRODUCT-UX-COMPLETION.md:107 (the stale registration)"],
+   "tests": ["tests/test_e14_pre_characterization.py::test_oi42_current_behaviour_an_approval_never_covers_bytes_changed_after_it", "tests/test_candidate_verification_binding.py::test_every_entry_component_is_bound", "tests/test_candidate_verification_binding.py::test_a_candidate_changed_after_the_gates_is_never_committed", "tests/test_file_integrity_contract_001.py::test_issue7_unrepresentable_files_are_refused_and_left_untouched", "tests/test_file_integrity_contract_001.py::test_f4_a_gate_changing_candidate_or_tracked_content_is_caught"]
+  },
+  "reasoning": "The row's load-bearing claim is that 'no check ties the approved digest to the bytes finally written', so a post-approval edit or mode change is not covered. That is false at 8e0c90a (TRACED): an exact-bytes-and-mode binding is taken before the approval prompt, the post-approval held gates are guarded against any change to it, and the terminal commit recomputes it from the batch it writes and refuses on any difference. The registry's own closure test ('a worktree edit or mode change between approval and commit is refused') exists in substance: the E14 tamper test covers content in both windows and the binding unit test covers mode. Two things are still open but are NOT this row's defect. (a) The durable approval.decision record names no candidate digest. That is OI-68 / KERNEL-APPROVAL-RECORD-NO-CANDIDATE-DIGEST-001, already registered at P2. (b) The target_scope's third ask is to refuse non-UTF-8 or binary content for human approval, or show it as such. That is met structurally rather than at the gate (TRACED, pinned): the one edit engine refuses a non-UTF-8 file (UNSUPPORTED_TEXT_ENCODING), new content is always UTF-8, and a mode cannot differ from the base or the umask default because staging restores the base mode and a gate chmod is a typed stop. So the lossy, mode-less display cannot hide a byte or mode difference that is actually reachable. The row should be re-pointed or closed with the tests above, and the closure should state residual (a) explicitly so it is not lost."
+ },
+ {
+  "id": "GOAL-EXAMPLE-COMPILER-COVERAGE-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/workflow/example_oracle_java.py:1-21: only constrained static forms are compiled; 'anything else ... is rejected with a reason, never a guess'",
+   "TRACED kriya/workflow/example_oracle_java.py:322-338 (_add_classified_forms): the Stage C classifier (goal_example_forms) graduates COMPILED+enforced forms; every other classified line is shadow evidence that 'never rejects a candidate' and never closes a requirement",
+   "TRACED tests/test_backend_readiness_v2_goal_example_forms.py::test_instance_form_takes_constructor_and_call_arguments: the instance form new X(..).m(..) -> literal is now COMPILED, so the row title is partly stale; chained calls are UNSUPPORTED",
+   "TRACED tests/test_backend_readiness_v2_goal_example_forms.py::test_t2_style_prose_and_non_literal_constants_are_unsupported"
+  ],
+  "defect": null,
+  "pins": {
+   "documents": ["kriya/workflow/example_oracle_java.py:1-21"],
+   "tests": ["tests/test_backend_readiness_004_java_examples.py::test_01_recognizes_the_constrained_forms_and_rejects_everything_else", "tests/test_backend_readiness_v2_goal_example_forms.py::test_t2_style_prose_and_non_literal_constants_are_unsupported", "tests/test_backend_readiness_v2_goal_example_forms.py::test_overload_sensitive_literals_of_the_instance_form_are_not_enforced"]
+  },
+  "reasoning": "The compiler fails closed: a form it cannot compile is rejected with a reason or kept as shadow evidence. It never fabricates a verdict and never closes a requirement, so an uncovered example leaves its requirement unverified rather than wrongly PASS. The gap is coverage, meaning the strongest deterministic gate is idle for more goal shapes, and widening it to assertThat, non-literal arguments and results is new capability. Part of the requested widening (the instance construction form) already exists through goal_example_forms, so the title over-states the current gap. No wrong-truth path was found."
+ },
+ {
+  "id": "GUI-EVIDENCE-POLL-COST-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/kup/evidence_ops.py:70-142 evidence.records -> client.evidence.records (verifies on each call, by design)",
+   "MEASURED (recorded, not re-run) handover/GUI-RUN-COCKPIT-V1_1/08_M7_M8_CLOSURE.md:87: evidence.records polls 6-7 ms (live smoke median 8 ms)",
+   "TRACED 08_M7_M8_CLOSURE.md:58 P3-6 deferred with the rule that no verification weakening is allowed"
+  ],
+  "defect": null,
+  "pins": {"documents": ["handover/GUI-RUN-COCKPIT-V1_1/08_M7_M8_CLOSURE.md:58,87"], "tests": ["tests/test_kup_evidence_records.py (records verify the chain per call)"]},
+  "reasoning": "This is a pure cost concern: every poll re-verifies the full chain, which is the conservative and correct choice. No wrong result, no skipped verification and no authority issue exists. The measured poll cost is single-digit milliseconds on the live smoke. An incremental tail-verified read would be a new optimisation and must not weaken verification. That falls under the NOT Class A clause for performance optimisations."
+ },
+ {
+  "id": "GUI-EXEC-TOOLCHAIN-PATH-001",
+  "verdict": "NO_DEFECT_DOCUMENTED_CONTRACT",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/config/environment.py:194 child_environment (one owner of the child env)",
+   "TRACED kriya/tools/validate.py:1711-1716: a missing mvn returns success False ('Failed to invoke mvn validate'), not a PASS",
+   "TRACED owner decision recorded in registry closure_evidence (M7 DISPOSITION) and handover/GUI-RUN-COCKPIT-V1_1/08_M6_EXECUTION_SESSION.md:31"
+  ],
+  "defect": null,
+  "pins": {
+   "documents": ["handover/GUI-RUN-COCKPIT-V1_1/08_M6_EXECUTION_SESSION.md:31", "registry row closure_evidence (M7 DISPOSITION: PATH not widened, owner decision)"],
+   "tests": ["tests/test_kup_execution.py::test_the_preflight_reports_tool_visibility_under_the_processs_own_environment", "tests/test_kup_execution.py::test_tool_visibility_never_changes_the_environment_or_blocks_the_start", "tests/test_kup_execution.py::test_a_tool_that_exists_on_path_but_does_not_run_is_reported_unavailable_with_the_reason"]
+  },
+  "reasoning": "The fixed PATH is an explicit owner security decision: widening it would be a new security decision. The preflight reports tool visibility honestly and never changes the environment. The adversarial angle checked was whether a missing tool can be read as a pass. On the traced Maven path it is returned as a failure (success False), not a skip-pass. A per-project tool-path setting would be new capability. Residual, noted only: the separate generic `except Exception` branch at validate.py:1728-1730 returns success True 'skipped, not confirmed valid' for mvn validate. That is not a missing-tool path (FileNotFoundError is caught first) and is outside this row."
+ },
+ {
+  "id": "GUI-PHASE-OBSERVABILITY-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/core/attempt_evidence/model.py:44 declares phase.opened/phase.closed kinds; no production emitter (grep for emit of phase.opened in kriya/ finds none)",
+   "TRACED kriya/core/attempt_evidence/reader.py:222-230 reads explicit pairs when present",
+   "TRACED ui/kup/generated/java/kup/PhaseProvenance.java and ui/shared/src/cockpit/modules/timeline/index.tsx carry a DERIVED vs OBSERVED provenance, so derived groups are labelled, not presented as observed"
+  ],
+  "defect": null,
+  "pins": {"documents": ["handover/GUI-RUN-COCKPIT-V1_1/04_UI_READ_API_CONTRACT.md section 7", "owner decision Q-3 2026-10-10 (registry)"], "tests": ["MISSING (not located for the DERIVED provenance label in this review; ui tests exist under ui/shared/src/cockpit/shell/project_home.test.tsx but were not confirmed to pin it)"]},
+  "reasoning": "Emitting phase boundaries is new recorder behaviour that needs an owner-authorised workflow change. Today the cockpit labels its role-derived phases with a provenance, so it does not fabricate observed boundaries. The wrong-truth angle checked was whether derived data is shown as OBSERVED. The provenance type exists, so no wrong-truth defect was found. A specific UI test pinning the DERIVED label was not confirmed here."
+ },
+ {
+  "id": "GUI-RUN-ATTRIBUTION-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/application/evidence.py:173-187: a run is 'recorded' only when its evidence manifest names the workspace; no id, no store, unsupported schema, unreadable manifest or a store copied under another run id -> 'unattributed', never guessed",
+   "TRACED kriya/application/history.py:7: unattributed counts are reported",
+   "TRACED tests/test_kup_workspace.py:209-221 test_a_workspace_sees_only_the_runs_its_manifests_record (matched/other/unattributed counts asserted)"
+  ],
+  "defect": null,
+  "pins": {"documents": ["handover/GUI-RUN-COCKPIT-V1_1/evidence/m5-real/README.md", "kriya/application/history.py:1-10"], "tests": ["tests/test_kup_workspace.py::test_a_workspace_sees_only_the_runs_its_manifests_record", "tests/test_kup_evidence_corruption_matrix.py::test_a_store_copied_under_another_name_attributes_nothing_in_the_workspace_scope_or_the_launch_summary", "tests/test_kup_execution.py::test_a_launch_is_not_claimed_by_a_run_in_another_workspace"]},
+  "reasoning": "The read path is honest. Attribution comes only from a recorded workspace identity, everything else is counted as unattributed, and a copied store attributes nothing. GUI-started runs are deterministically attributed through the launch record. Recording the workspace on the trace row for terminal runs without an evidence store is a new recorder field, not a fix to a wrong result. The workspace identity is path-based (context/workspace_identity.py:26), so a folder recreated at the same path inherits history. That is noted only and does not change the verdict."
+ },
+ {
+  "id": "GUI-SKILLS-BUILD-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": ["TRACED registry: `kriya skills create` writes a skeleton; `kriya learn` indexes RAG memory (a different store); the GUI shows Skills read-only"],
+  "defect": null,
+  "pins": {"documents": ["handover/GUI-RUN-COCKPIT-V1_1/11_END_USER_EXPERIENCE.md"], "tests": ["MISSING (not needed for a capability absence)"]},
+  "reasoning": "Building a Skill from a document or URL is a capability Kriya does not have. Adding it needs a typed, provenance-recording backend operation and, for URLs, egress authority. The GUI correctly does not invent a second Skill system. No existing behaviour gives a wrong result."
+ },
+ {
+  "id": "HISTORY-STATE-DIR-PER-PROJECT-001",
+  "verdict": "NO_DEFECT_DOCUMENTED_CONTRACT",
+  "confidence": "medium",
+  "evidence": [
+   "TRACED handover/DEMO-V2/REOPENED-PROJECT-RUN-HISTORY-001.md:6,18: the authoritative history source is the state directory's trace snapshot scoped by manifest workspace_identity; 'first wrong decision: none in the history projection'",
+   "TRACED same doc :24: RecentRuns.tsx names the state directory read and its source when a folder has .kriya and no run",
+   "TRACED same doc :28-31: tests listed"
+  ],
+  "defect": null,
+  "pins": {"documents": ["handover/DEMO-V2/REOPENED-PROJECT-RUN-HISTORY-001.md:6,24,26"], "tests": ["tests/test_reopened_project_history.py (6 tests: isolation, restart/reopen, other state dir -> typed unavailable)", "ui project_home.test.tsx L (note shown only for .kriya folder with no runs)", "tests/test_kup_workspace.py"]},
+  "reasoning": "History belongs to the state directory by the documented architecture. Another state directory gives a typed unavailable result, and the project's control records are deliberately not used as a substitute, so nothing is fabricated. A history that follows the folder is a design decision and a new capability. Adversarial residual (INFERRED, not probed): when a folder has runs in BOTH the current and another state directory, the list is partial and the honesty note (shown only when zero runs are found) does not appear. That is a disclosure gap, not a wrong recorded fact, so it was not raised as Class A. It should be noted in the design decision the row already requires."
+ },
+ {
+  "id": "INTEGRATION-PASS-REQUIREMENT-POLICY-001",
+  "verdict": "NO_DEFECT_DOCUMENTED_CONTRACT",
+  "confidence": "medium",
+  "evidence": [
+   "TRACED kriya/workflow/milestones.py:1353-1361 caveat comment in complete_unit",
+   "TRACED kriya/config/config.py:640-648 requirement_unknown/unverified_policy default 'record', validated to record|block; kriya/config/authority.py:208 classifies both (SECURITY_AUTHORITY)",
+   "TRACED docs/user_guide.md:723-726: 'A violated requirement always blocks success. ... record, the default, or block ... The production profile seals both to block'",
+   "TRACED tests/test_prd020_requirement_lineage.py:403 test_the_record_policy_reports_an_unknown_requirement_without_blocking (result reports outcome 'unknown')",
+   "TRACED ui/shared/src/cockpit/core/presentation.ts:100,156-169: a passed run without positive requirement verification is shown as 'Requirement ledger: not fully verified', not as 'Requested behavior verified'"
+  ],
+  "defect": null,
+  "pins": {"documents": ["docs/user_guide.md:723-726", "kriya/workflow/milestones.py:1353-1361"], "tests": ["tests/test_prd020_requirement_lineage.py::test_the_record_policy_reports_an_unknown_requirement_without_blocking", "tests/test_prd024_baseline_auto_policy.py::test_a_milestone_reuses_the_previous_milestones_full_suite_run (milestone plan exit 0 under record)"]},
+  "reasoning": "The behaviour is an explicit operator policy that is documented in the user guide and sealed to block by the production profile. The result reports the unverified or unknown outcome rather than claiming verification, and the GUI qualifies it. A VIOLATED requirement always blocks, so no failed check is shown as PASS. Option (b) in the row (forcing block in milestone plans) would be a product-policy change, which is the owner's decision. Confidence is medium because no test was found that pins the milestone integration pass ending success with every requirement UNVERIFIED AND reporting each one as unverified. The cited milestone test pins exit 0 but was not read for its requirements assertions."
+ },
+ {
+  "id": "PLAN-EXTERNAL-PACKAGE-CAPABILITY-001",
+  "verdict": "ALREADY_FIXED",
+  "confidence": "medium",
+  "evidence": [
+   "TRACED kriya/workflow/planner_repair.py:262 typed UNPROVIDED_CAPABILITY repair block",
+   "TRACED tests/test_plan_external_package_capability_001.py (each recorded planner answer rejected with the live codes; literal-feedback path; F_* feedback tests; generic contract sentence tests)",
+   "TRACED plan_validation unchanged: a genuinely undeclared planned capability is still rejected (test_a_genuinely_undeclared_planned_capability_is_still_rejected_whatever_its_name)"
+  ],
+  "defect": null,
+  "pins": {"documents": ["handover/DEMO-V2/FINDINGS.md"], "tests": ["tests/test_plan_external_package_capability_001.py::test_F_the_repair_feedback_for_an_unprovided_capability_states_the_generic_distinction", "tests/test_plan_external_package_capability_001.py::test_E_any_external_dependency_in_environment_requirements_is_accepted", "tests/test_plan_external_package_capability_001.py::test_following_the_repair_feedback_literally_leads_to_a_different_rejection"]},
+  "reasoning": "The first wrong decision is the Planner model's. The validator correctly fails closed: the plan is rejected, never executed, and the rejection is deterministically reproduced. The one Kriya-side defect, misleading repair feedback, was fixed generically and pinned. environment_requirements is the documented home for third-party packages (test_E). What remains is live confirmation that the new feedback is effective. That is model-behaviour evidence, not a Kriya defect."
+ },
+ {
+  "id": "PLAT-PORTABILITY-P3-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "medium",
+  "evidence": [
+   "TRACED kriya/config/environment.py:93-120: one kriya_home/user_home resolver with named homes ('MODULE-CONTRACTS §3, each exactly its owner's expression'); grep finds no remaining expanduser('~')+'.kriya' copies, so PLAT-028 (9 copies) is already consolidated",
+   "TRACED kriya/workflow/validation_baseline.py:536-541: _VOLATILE_PATTERNS already normalize /private/var/folders, /var/folders, /tmp and Windows %TEMP%, so PLAT-031's macOS '(verify)' concern is resolved",
+   "TRACED kriya/policy/egress.py:63: '[::1]' member is dead but ::1 still goes through getaddrinfo + ipaddress.is_loopback (fail-closed except), harmless",
+   "TRACED handover/PLATFORM_DEPENDENCY_AUDIT.md:59,71-83: remaining items are Windows (unsupported) or documentation"
+  ],
+  "defect": null,
+  "pins": {"documents": ["handover/PLATFORM_DEPENDENCY_AUDIT.md:59-83", "registry closure_evidence (BACKEND-READINESS-004: Windows not a supported backend)"], "tests": ["MISSING for the consolidated resolver (not located)"]},
+  "reasoning": "The two items that could have affected the supported POSIX backend (the duplicated home resolver and the macOS temp-path normalization) were checked adversarially. Both are already addressed at 8e0c90a, so the row text is stale for them. What remains is the /dev/tty prompt (which falls back to click.confirm), PowerShell completion, a Windows test subset and docs on platform envelopes. That is Windows-certification work, a new capability, not a defect of the supported product. The dead '[::1]' literal does not change the outcome of the egress decision."
+ },
+ {
+  "id": "REPAIR-EQUIVALENCE-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "medium",
+  "evidence": [
+   "TRACED kriya/workflow/retry_strategy.py:270-295: PRD-026 progress vector (workspace hash, failure signature, evidence fingerprint) already exists for no-progress detection",
+   "TRACED registry: 'recorded evidence only, no measured outcome change'; retry budget is bounded and not raised"
+  ],
+  "defect": null,
+  "pins": {"documents": ["handover/BACKEND-READINESS-V2/07_COMPREHENSIVE_FAILURE_DEEP_DIVE.md"], "tests": ["MISSING (no test pins fail-fast on a repeated candidate digest; none is required for a no-wrong-result efficiency item)"]},
+  "reasoning": "Re-gating a byte-identical candidate spends budget, but deterministic gates on the same bytes produce the same verdict. No wrong result, authority or evidence issue was found, and the retry budget stays bounded. Detecting a repeated digest and changing strategy is a retry-strategy enhancement and efficiency work. Not verified: whether PRD-026's progress vector already stops on the consecutive repeat (attempts 6 and 7). Either way the item has no correctness impact."
+ },
+ {
+  "id": "STATIC-RULE-ID-IN-EVIDENCE-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": ["TRACED registry: the rule id is present in the recorded output blob; only the structured gate payload lacks a rule_id field"],
+  "defect": null,
+  "pins": {"documents": ["handover/DEMO-V2/DIRECT-PLAN-CORRECTNESS-CLOSURE.md"], "tests": ["MISSING (n/a)"]},
+  "reasoning": "The evidence is complete: the rule that fired is recorded in the output blob, and the gate outcome (failed) is correct. Adding a bounded rule_id to the payload and a closed UI table is a schema and UX enhancement. No result is wrong and no provenance is omitted."
+ },
+ {
+  "id": "TECHNICAL-VERIFICATION-BARE-ROWS-001",
+  "verdict": "UNKNOWN",
+  "confidence": "medium",
+  "evidence": [
+   "TRACED ui/shared/src/cockpit/core/selectors.ts:8,64: a missing or empty gate type becomes '(gate type not recorded)', never ''",
+   "TRACED ui/shared/src/cockpit/core/ResultParts.tsx:89-97: TechnicalVerification drops rows whose type is whitespace-only and omits the empty section; each row renders mark + readable name + exact type",
+   "TRACED ui/shared/src/cockpit/core/presentation.ts:108 comment says technical lists EVERY recorded gate ('nothing is dropped') while ResultParts.tsx:90 filters whitespace-only types (only reachable for a whitespace-only recorded type)",
+   "MEASURED (recorded, not re-run) handover/DEMO-V2/POST-LIVE-GREENFIELD-CLOSURE.md:26: the live run's 8 gate types are all non-empty; the cause is UNKNOWN"
+  ],
+  "defect": null,
+  "pins": {"documents": ["handover/DEMO-V2/POST-LIVE-GREENFIELD-CLOSURE.md:26"], "tests": ["ui/shared/src/cockpit/core/resultPresentation.test.tsx 'TechnicalVerification: no empty rows, no empty section'"]},
+  "reasoning": "No current data path can produce a bare row: an absent type renders as '(gate type not recorded)'. The defensive filter only hides a whitespace-only type, which the Python recorder was not shown to emit. The owner's observation is therefore unexplained. One possibility is that the window ran a stale build or read a different record than the one examined (INFERRED, not checked), which would be a display-truth concern if confirmed. The missing evidence is the DOM of a bare row, or confirmation from the rebuilt app. The comment that nothing is dropped (presentation.ts:108) slightly contradicts the whitespace filter, but this was not judged Class A."
+ }
+]

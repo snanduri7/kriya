@@ -1,0 +1,217 @@
+[
+ {
+  "id": "DEMO-TIME-BUDGET-001",
+  "verdict": "NO_DEFECT_DOCUMENTED_CONTRACT",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/config/config.py:790 generation_time_budget_seconds default None; kriya/config/default_config.yaml:238-241 (null = unbounded CLI run, harness sets it)",
+   "TRACED kriya/control/run_coordinator.py claim_run_generation_clock (one clock per mutating run) per handover/PROVIDER_CONTRACT_001A.md:16-37",
+   "TRACED kriya/core/llm.py:261 deadline = run clock + budget"
+  ],
+  "defect": null,
+  "pins": {
+   "documents": ["handover/PROVIDER_CONTRACT_001A.md:39 (Operational note: whole run shares one budget; choose the value from measured demo runs)", "kriya/config/default_config.yaml:238-241"],
+   "tests": ["tests/test_provider_contract_001a.py::test_the_run_clock_starts_once_and_is_shared_by_every_claim", "tests/test_provider_contract_001a.py::test_two_work_units_of_one_run_share_one_budget_clock"]
+  },
+  "reasoning": "The row asks the operator to pick a number from measured demo runs; it names no wrong behaviour. The shared run clock is the deliberate F-1 fix, and two tests pin it. The default is null (no budget), so nothing is silently cut short by default. Exhaustion is typed (INFERENCE_DEADLINE_EXHAUSTED/EXCEEDED -> time_budget_exhausted), so the result is never a wrong PASS. This is a configuration choice for the owner, not a product defect."
+ },
+ {
+  "id": "FIX-UNIT-BEHAVIOURAL-GATE-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "medium",
+  "evidence": [
+   "MEASURED (recorded) handover/BACKEND-READINESS-V2/01_4_OF_12_ARCHITECTURE_ROOT_CAUSE.md:131-136,165: S4_A ended SAFE_FAILURE / NO_AUTHORIZED_REPAIR_TARGET; nothing applied; the external oracle also rejected the candidate",
+   "TRACED: a unit's verifiers are the plan's declared verifiers; the terminal regression and requirement gates still run before apply (development_loop.py run_terminal_regression ~1025-1056)",
+   "TRACED: requirement verdicts that are not positively verified surface as 'not every requirement independently verified' (GREENFIELD-OWNER-UX-FINDINGS.md:293 B4 fix)"
+  ],
+  "defect": null,
+  "pins": {"documents": ["handover/BACKEND-READINESS-V2/01_4_OF_12_ARCHITECTURE_ROOT_CAUSE.md:184,193 (H12 / class D: fix unit has no behavioural gate; architecture-sized)"], "tests": ["MISSING (no test pins compile-only fix-unit ordering; it is plan-chosen)"]},
+  "reasoning": "The observed outcome was fail-closed: SAFE_FAILURE, 0 false success, nothing applied. The fix unit's weak gate is the Planner's verifier choice. Kriya still runs the terminal regression and requirement checks before apply, and reports requirements that were not independently verified honestly. Adding a behavioural gate to fix units, reordering reproducer-first, or reopening an upstream unit is a new planning/recovery capability. I found no path where a compile-only fix unit produces a wrong PASS or an unbound apply. Residual: a run whose plan never writes a test can succeed with the requirement unverified; that is stated in the UI, not hidden."
+ },
+ {
+  "id": "GUI-EVIDENCE-LARGE-RUN-LOAD-001",
+  "verdict": "NO_DEFECT_DOCUMENTED_CONTRACT",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/kup/evidence_ops.py:134-146 records(): each page verifies; the cursor encodes head_digest and is refused with EVIDENCE_HEAD_CHANGED when the head moved, so pages are consistent",
+   "MEASURED (recorded) handover/GUI-RUN-COCKPIT-V1_1/10_FINAL_HARDENING.md:27-37: 20.5k records 5.8 s; the window stays responsive; heap flat"
+  ],
+  "defect": null,
+  "pins": {
+   "documents": ["handover/GUI-RUN-COCKPIT-V1_1/04_UI_READ_API_CONTRACT.md:99-108,110-120 (verify cost note, head-bound cursor)", "handover/GUI-RUN-COCKPIT-V1_1/10_FINAL_HARDENING.md:37"],
+   "tests": ["tests/test_kup_serve.py::test_verification_is_recomputed_for_every_records_request_after_the_store_is_tampered"]
+  },
+  "reasoning": "This is pure latency at extreme sizes, with no wrong result. Per-read verification is a documented guarantee and a test pins it. A cache keyed by chain head is an optimisation that must not weaken that guarantee. I looked for a cross-page consistency hole and found none: the cursor binds head_digest, and a moved head is refused. Not Class A."
+ },
+ {
+  "id": "GUI-EXEC-STOP-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/cli.py:2942-2943 KeyboardInterrupt sealed as exit 130 FAILURE",
+   "TRACED kriya/workflow/terminal_commit.py:354-360 BaseException mid-commit settles IN_PROGRESS -> UNCERTAIN/ROLLED_BACK, then re-raises",
+   "TRACED kriya/control/launch_approval.py:136 an interrupted pending review closes undecided"
+  ],
+  "defect": null,
+  "pins": {
+   "documents": ["handover/GUI-RUN-COCKPIT-V1_1/08_M6_EXECUTION_SESSION.md (owner decision: no Stop in v1)"],
+   "tests": ["tests/test_prd008_recovery.py::test_interrupt_mid_apply_rolls_back_in_process_and_needs_no_recovery", "tests/test_prd008_recovery.py::test_interrupt_with_a_failed_rollback_keeps_the_candidate_for_complete_partial", "tests/test_kup_execution.py::test_an_interrupt_is_sealed_as_130", "ui/standalone/test/execution_real.test.ts:325 (quit interrupts like Ctrl-C)", "tests/test_launch_approval.py::test_a_run_interrupted_while_the_review_waits_closes_the_review_as_undecided"]
+  },
+  "reasoning": "A Stop/Pause/Resume/Retry button is new functionality, and the owner deferred it. To be adversarial, I checked whether the existing quit path (SIGINT) can leave a partial commit or report one wrongly. The terminal commit catches BaseException and settles to UNCERTAIN or ROLLED_BACK, and interrupt-mid-apply is tested. A pending review closes undecided. No Class A defect was found on the existing path."
+ },
+ {
+  "id": "GUI-NOTIFICATION-VISUAL-001",
+  "verdict": "NO_DEFECT_DOCUMENTED_CONTRACT",
+  "confidence": "high",
+  "evidence": ["TRACED ui/standalone/src/main/notification_host.ts; ui/standalone/test/notification_host.test.ts has 12 cases covering kinds, wording, focus, once, click->showRun and the sender check"],
+  "defect": null,
+  "pins": {
+   "documents": ["handover/GUI-RUN-COCKPIT-V1_1/11_END_USER_EXPERIENCE.md:64"],
+   "tests": ["ui/standalone/test/notification_host.test.ts ('not while the window is focused...', 'a finished/unsuccessful notification is sent once per launch', 'clicking a notification activates the window...')"]
+  },
+  "reasoning": "Only the pixels the OS draws are unasserted. The decision logic, wording, IPC and sender checks are covered. Being unable to automate an OS-owned banner cannot hide a Kriya product defect, because every decision that leads to it is tested. Not Class A."
+ },
+ {
+  "id": "GUI-RECOVERY-ACTION-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": ["TRACED kriya/application/run.py:98 typed RECOVERY_REQUIRED blocker that names `kriya runs recover`"],
+  "defect": null,
+  "pins": {
+   "documents": ["handover/GUI-RUN-COCKPIT-V1_1/10_FINAL_HARDENING.md (Phase G)"],
+   "tests": ["ui/standalone/test/execution_real.test.ts:559 (REOPEN after an abnormal exit ... honestly marked)", "ui/standalone/test/execution_real.test.ts:236 (killed mid-run ... never a success)", "ui/standalone/test/execution_real.test.ts:325 (quit -> exit 130)"]
+  },
+  "reasoning": "After a hard kill the state is typed and honest, and Start is blocked with a named recovery step. A GUI recovery button would be a new action. Nothing is hidden or silently retried, and real-process tests pin both quit -> CLEAN and kill -> RECOVERY_AVAILABLE."
+ },
+ {
+  "id": "GUI-RUNTIME-COMMAND-APPROVAL-001",
+  "verdict": "ALREADY_FIXED",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/cli.py:3059-3071 _runtime_command_decision: a desktop launch holds a typed pending review (request_runtime_command_approval) and returns an awaitable RuntimeCommandDecision",
+   "TRACED kriya/policy/approval.py:182-210 TypedApprovalCallback + ask(): unreviewable subjects are refused; the decision is fingerprint-bound (approval_matches)",
+   "TRACED kriya/workflow/runtime_verification.py:783-824: the subject is built from the resolved argv; approval is re-derived and compared before execution; the desktop never applies the exact-words exemption",
+   "TRACED kriya/workflow/runtime_verification.py:1572,1772: both runtime-command call sites await. The old 'attempt.py:6854' escalation site no longer exists (attempt.py is 4919 lines); its logic moved to runtime_verification.py",
+   "MEASURED (recorded) handover/DEMO-V2/DIRECT-PLAN-CORRECTNESS-CLOSURE.md 'Real-toolchain check': runtime-command review decided -> executed -> ApplicationOutcome EXECUTED"
+  ],
+  "defect": null,
+  "pins": {
+   "documents": ["handover/DEMO-V2/GREENFIELD-OWNER-UX-FINDINGS.md:256-279 (security case table)"],
+   "tests": ["tests/test_runtime_command_review_launch.py::test_the_pending_review_is_a_typed_runtime_command_subject_bound_to_the_fingerprint", "tests/test_runtime_command_review_launch.py::test_a_stale_fingerprint_is_refused_and_records_nothing", "tests/test_runtime_command_review_launch.py::test_inside_a_launch_that_cannot_hold_the_review_the_run_is_stopped_not_approved", "tests/test_runtime_command_authorization.py", "ui/standalone/test/runtime_command_real.test.ts", "tests/test_direct_plan_real_maven.py (real_toolchain tier)"]
+  },
+  "reasoning": "The row's closure criterion is met in SNAP: a desktop run reaches a typed command review showing the command, working directory and criterion, resumes on approve, and records EXECUTED. Stale, wrong-kind and invented decisions are refused. The registry row is still OPEN and its 'attempt.py:6854' pointer is stale, so it should be closed with the evidence above. Residual (TRACED, opt-in only, not Class A at default): kriya/workflow/spec_compliance.py:652 still calls approval_callback([], ...) for a PRD-023 contract escalation. Inside a launch, cli._approval_decision declines without asking, and the change is labelled CONTRACT_ESCALATION_DECLINED instead of CONTRACT_ESCALATION_UNAVAILABLE. This is a wrong-truth reason code, but it only fires with autonomy.contract_change_escalation='human' (default 'deny', config.py:631), and it fails closed (the change stays blocked). Similarly, stage_architecture.py:394 does not await the callback. It is safe only because _approval_decision returns a plain False for empty file lists (cli.py:3027 docstring), which makes it a latent hazard."
+ },
+ {
+  "id": "GUI-TOOLS-HEALTH-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/application/model.py:70-80 tools_summary: server names + declared capabilities, health 'not_checked'",
+   "TRACED kriya/tools/service.py:136 ToolDescriptor.reference = executable basename, argument_count, environment_variable_NAMES (no values)"
+  ],
+  "defect": null,
+  "pins": {
+   "documents": ["kriya/application/model.py:4-8 (docstring)", "handover/GUI-RUN-COCKPIT-V1_1/11_END_USER_EXPERIENCE.md"],
+   "tests": ["tests/test_kup_catalog.py::test_tools_list_never_carries_a_secret_or_a_path_and_validates_against_the_schema", "tests/test_tool_service.py::test_listing_never_starts_a_server_or_touches_the_network"]
+  },
+  "reasoning": "A bounded health read means starting servers, which is new and carries authority implications. Read-only visibility is the safe subset that exists today. Adversarial check on the 'never shows a command/argument/environment variable' claim: KUP tools.describe exposes the executable basename and the env-var NAMES. That contradicts the row text literally, but no values or credentials are exposed, and a test pins it. Not Class A. The row text should be corrected to 'names only'."
+ },
+ {
+  "id": "HITL-RESUME-DEFERRED-GATES-001",
+  "verdict": "FOUND_DEFECT",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/workflow/development_loop.py:866-871 candidate_checkpoint_fields[EFFECTIVE_LEDGER_KEY] = resolved_obligation_ledger.to_snapshot() is taken BEFORE the approval gate (:898) and the deferred executing gates (:909-941)",
+   "TRACED development_loop.py:943 the HITL candidate_gates_passed save reuses that stale snapshot; workflow.py:2889-2899 computes the resume fingerprint block at save time from the LIVE ledger. The autonomous path saves at :893 after the gates, and developer_success refreshes the snapshot at :979; only the deferred path lacks the refresh",
+   "MEASURED (real code, only the model transport scripted; spec_compliance_enabled=True as in kriya/config/default_config.yaml:257, mode human-in-the-loop as default_config.yaml:229): HITL candidate_gates_passed snapshot ledger revision 2 vs stored fingerprint revision 5 (MISMATCH). Autonomous: 5 vs 5 (MATCH). developer_success: MATCH in both",
+   "MEASURED consequence (validate_resume_against_reality + build_resume_plan fed exactly what workflow.py:2610-2620 computes): 'effective_obligation_ledger CHANGED' -> invalidated ('candidate','verification'), reused [design, knowledge_clearance, plan]: the verified candidate is discarded. Control (fingerprint equal): candidate reused",
+   "MEASURED predicted fix: refreshing the snapshot before :943 (one line) gives MATCH, and the resume reuses the candidate (work copy only, reverted)"
+  ],
+  "defect": {
+   "statement": "In human-in-the-loop mode, the candidate_gates_passed checkpoint stores an effective obligation ledger snapshot taken before the held gates ran (spec compliance requirement verdicts and requirement closers record into the ledger after approval). Its resume fingerprint is computed from the post-gate ledger, so the checkpoint is internally inconsistent. Every resume from it sees effective_obligation_ledger CHANGED and discards the verified, human-approved candidate. The documented promise that 'a candidate is reused together with the effective obligation ledger it was verified against' (workflow.py:2603-2607) is false on the default HITL path. Fail-closed: no wrong PASS and no unbound apply, but a durability/evidence-record defect hidden by the 'resume+deferral untested' gap that this row names.",
+   "file_line": "kriya/workflow/development_loop.py:943 (missing refresh of candidate_checkpoint_fields[deps.EFFECTIVE_LEDGER_KEY], compare :979)",
+   "reproducer": "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/bc971a42-dc25-4273-ba41-f653fa8c96f5/scratchpad/reg/work_adv2/tests/test_zz_adv2_probe.py::test_probe_spec_hitl (fails on SNAP), ::test_probe_spec_auto (control, passes), ::test_probe_spec_hitl_resume_consequence (prints the invalidation)",
+   "first_wrong_owner": "kriya/workflow/development_loop.py (the deferred-gate checkpoint save)",
+   "severity": "P3"
+  },
+  "pins": {"documents": ["handover/DEMO-V2/DIRECT-PLAN-CORRECTNESS-CLOSURE.md:58 (checkpoint saved after the held gates)"], "tests": ["tests/test_greenfield_direct_plan_runtime.py::test_gap_b_the_candidate_checkpoint_is_saved_only_after_the_held_runtime_verification (checks timing and gate types only, not the ledger snapshot/fingerprint consistency)"]},
+  "reasoning": "The row lists resume+deferral as untested. A probe through the real engine shows that this untested gap hides a concrete inconsistency. The HITL candidate checkpoint's ledger snapshot (revision 2) does not match the fingerprint it is saved with (revision 5). The resume path therefore always invalidates the candidate stage. The autonomous path and the developer_success save are correct, and that asymmetry discriminates against 'intentional'. The one-line refresh, mirroring :979, restores MATCH and candidate reuse. The impact is fail-closed: a crash or interrupt between candidate_gates_passed and developer_success (the terminal regression) loses the approved candidate, and a resume regenerates it and asks the person again. The rest of the row (Best-of-N N>1 inert in HITL; whether a pre-review checkpoint is wanted) remains an owner decision and new capability. Registry note: this finding should close with the row's own resume+deferral test."
+ },
+ {
+  "id": "MANAGED-SERVICE-APPROVAL-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": [
+   "TRACED kriya/workflow/runtime_verification.py:1098-1121 _managed_service_blocked_without_approval_subject: in HITL, refused before admission/preparation/process start; required -> typed verification_infrastructure_failure MANAGED_SERVICE_APPROVAL_UNSUPPORTED, optional -> declined",
+   "TRACED runtime_verification.py:1141 the guard is the first statement of _execute_managed_service_verification, the single choke point both call-site families use (runtime_verification.py:1476, gate_orchestrator.py:1117)",
+   "TRACED kriya/tools/service_runtime.py:747-759 (SEC-001-P6): the LAUNCHED service now gets the same containment as its build step"
+  ],
+  "defect": null,
+  "pins": {
+   "documents": ["handover/DEMO-V2/GREENFIELD-OWNER-UX-FINDINGS.md:196-208 (10-A resolution)"],
+   "tests": ["tests/test_managed_service_hitl_fail_closed.py::test_a1_hitl_managed_service_verification_only_unit_fails_closed", "tests/test_managed_service_hitl_fail_closed.py::test_a2_hitl_managed_service_inline_block_fails_closed", "tests/test_managed_service_hitl_fail_closed.py::test_e_hitl_managed_service_that_is_not_required_is_declined_not_failed_and_never_starts", "tests/test_managed_service_hitl_fail_closed.py::test_the_unsupported_failure_is_not_a_human_rejection_taxonomy", "tests/test_runtime_verification.py::test_a_blocked_managed_service_is_decided_before_admission_and_starts_nothing"]
+  },
+  "reasoning": "The security hole (a model-chosen service runs in HITL with no approval) is closed by a single fail-closed guard and pinned with killed mutants. What remains is a new typed service-review subject, which the owner explicitly deferred. In non-HITL modes services run without per-run review, exactly as finite commands do (_runtime_commands_need_approval returns False outside HITL). That is the documented autonomy contract. Stale-text note, safe direction: the row's 'today only the build-preparation step is contained' and the comment at runtime_verification.py:1173-1179 are contradicted by service_runtime.py:747, where the launched service IS contained when containment is on. The text should be corrected; it is not a defect."
+ },
+ {
+  "id": "PLAN-PRESERVED-REFERENCE-SOURCE-ATTRIBUTION-001",
+  "verdict": "NO_DEFECT_DOCUMENTED_CONTRACT",
+  "confidence": "high",
+  "evidence": ["TRACED kriya/workflow/planning_request.py:1049-1074 shape 4 docstring: declaration is per-source by design; PRESERVED_REFERENCE obligation enforces byte identity"],
+  "defect": null,
+  "pins": {
+   "documents": ["kriya/workflow/planning_request.py:1049-1074", "handover/BACKEND_FINAL_CLOSURE_005_DESIGN.md (P5-T2-r2 classification)"],
+   "tests": ["tests/test_workflow_controller_enforce.py::test_missing_grounded_production_artifact_preservation_is_per_source_not_path", "tests/test_workflow_controller_enforce.py::test_preserved_reference_lines_do_not_leak_across_sources"]
+  },
+  "reasoning": "The rule rejects, it never accepts, so it can only cause a fail-closed refusal (measured: 0 false success, nothing applied). Per-source attribution is documented and tested. Adversarial note: the docstring's rationale is weak, because the target's byte identity is enforced plan-wide, so a per-source miss hides no genuine gap. That makes the rule arguably over-strict, an efficiency/design question for the owner (PRV-11 architecture extension), not a correctness defect. The opposite risk raised in BACKEND-READINESS-V2:176,196 ('preserved_references accepted on unrelated files') can only add byte-identity constraints, so it cannot create a false success either."
+ },
+ {
+  "id": "PLAT-WINDOWS-PROVIDERS-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "high",
+  "evidence": ["TRACED kriya/platform/services.py:29-71 a non-POSIX family composes Unavailable* providers; kriya/platform/locking.py:52-59 every use raises PlatformCapabilityUnavailable (fail closed)"],
+  "defect": null,
+  "pins": {
+   "documents": ["handover/PLATFORM_MIGRATION_PLAN.md (P5-P6)", "kriya/platform/services.py:66"],
+   "tests": ["tests/test_platform_workspace_lock_contract.py::test_host_family_classification", "tests/test_platform_workspace_lock_contract.py::test_the_doctor_reports_an_unavailable_workspace_lock", "tests/test_platform_process_control_contract.py::test_the_posix_provider_reports_enforced_tree_termination_and_windows_reports_it_unavailable", "tests/test_platform_process_control_contract.py::test_without_tree_termination_run_starts_nothing", "tests/test_platform_resource_limits_contract.py::test_a_host_without_a_provider_refuses_requested_limits_and_reports_unavailable"]
+  },
+  "reasoning": "Windows is not a supported platform and no Windows claim is made. I checked that an unsupported host fails closed instead of running with weaker guarantees: every provider is an Unavailable stub that raises, process control starts nothing, and doctor reports UNAVAILABLE. The row lists new providers and certification, which is new capability."
+ },
+ {
+  "id": "RUN-ATTEMPT-GATE-EXTRACTION-001",
+  "verdict": "NO_DEFECT_NEW_CAPABILITY",
+  "confidence": "medium",
+  "evidence": [
+   "TRACED kriya/workflow/gate_orchestrator.py:1-46 (W4/E8): the gate sequence has already been moved out of run_attempt; attempt.py is now 4919 lines",
+   "TRACED gate_orchestrator.py:542,816 self-correction is gated off after the source review (post_source_review_guard) and byte bindings are checked (tree_binding.check :523)",
+   "TRACED development_loop.py:913-941 byte binding is asserted before and after the held gates"
+  ],
+  "defect": null,
+  "pins": {"documents": ["handover/PRD-031_CODING_HANDOVER.md", "kriya/workflow/gate_orchestrator.py:1-46"], "tests": ["tests/test_gate_orchestrator.py", "tests/golden/gates/*.json (golden gate sequences)", "tests/test_greenfield_direct_plan_runtime.py::test_gap_b_no_self_correction_edits_the_candidate_after_the_source_approval"]},
+  "reasoning": "The 'still inline in run_attempt' half of the row is stale: E8 extracted the gates into gate_orchestrator.py verbatim, with golden-sequence tests. What remains is the wish for a mutation-free VerificationCoordinator. In-gate self-correction writes are a designed feature, bounded by AuthorizedFileWriter and byte bindings, and disabled after a HITL source approval, so I found no wrong verification result from it. A further decomposition is an architecture extension. Lower confidence because I did not audit every self-correction path for re-binding in autonomous mode."
+ },
+ {
+  "id": "SUREFIRE-STABILITY-ENVELOPE-001",
+  "verdict": "FOUND_DEFECT",
+  "confidence": "medium",
+  "evidence": [
+   "TRACED kriya/workflow/development_loop.py:271-282 the PRE baseline validators (baseline_runner and baseline_suite_run) are built WITHOUT java_home_override",
+   "TRACED development_loop.py:1043-1052 the POST terminal full-regression validator sets java_home_override = _resolve_java_home_override(goal) (also gate_orchestrator.py:467 for candidate gates; requirement_closers.py:576,625 for suite-preservation POST runs)",
+   "TRACED kriya/tools/validate.py:1028-1040 java_home_override changes JAVA_HOME/PATH of every Maven subprocess; :1047-1066 under containment it re-resolves the OCI toolchain image",
+   "TRACED kriya/workflow/baseline_policy.py:150-179 baseline_environment_identity(goal=goal) computes the PRE identity WITH the goal-stated JDK override (resume_fingerprints.py toolchain_fingerprint applies _resolve_java_home_override(goal)); the PRD-024 NOT_COMPARABLE guard (validation_baseline.py:1335-1344) therefore sees PRE == POST",
+   "MEASURED (probe, host mode, simulated java/mvn mismatch, goal 'Use Java 17', brownfield_full_regression_baseline_policy=required): run_tests calls PRE-baseline java_home_override=None; POST-candidate full suite java_home_override='/fake/jdk-17'; classify_baseline_delta received identical PRE/POST environment fingerprints (SAME_ENV=True) and compared them as comparable"
+  ],
+  "defect": {
+   "statement": "PRE/POST full-suite parity gap. When the host's java and mvn resolve to different JDKs and the goal states the java-side version, the candidate's gates and terminal regression run Maven under the goal JDK, while the untouched baseline (PRE) runs under the default mvn JDK. Both runs record the same environment identity, because the identity applies the goal override that the PRE execution never applied. The PRD-024 'different environments are NOT_COMPARABLE' guard is bypassed, and PRE/POST results from different JDKs are compared as the same environment. Under containment the PRE record also misstates its toolchain image (TRACED, not run: needs Docker). The main effect is false negatives (spurious CHANGED_FAILURE/NEW failures block correct candidates) plus a baseline record whose environment provenance is wrong (rule 14 evidence binding). A PRE failure excusing a POST failure is theoretically possible only with equal normalized fingerprints across JDKs, which I judge unlikely (INFERRED).",
+   "file_line": "kriya/workflow/development_loop.py:278-282 (baseline_suite_run lacks the override that :1052 applies); kriya/workflow/baseline_policy.py:173 (identity applies the override the run did not)",
+   "reproducer": "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/bc971a42-dc25-4273-ba41-f653fa8c96f5/scratchpad/reg/work_adv2/tests/test_zz_adv2_parity.py::test_probe_pre_post_jdk_parity (prints the CALL lines and the DELTA SAME_ENV=True; a permanent regression should assert PRE.java_home_override == POST.java_home_override, or NOT_COMPARABLE)",
+   "first_wrong_owner": "kriya/workflow/development_loop.py (baseline capture wiring; state.java_home_override is resolved only after capture, at :1045/gate_orchestrator.py:467)",
+   "severity": "P2"
+  },
+  "pins": {
+   "documents": ["handover/BACKEND_FINAL_CLOSURE_005_DESIGN.md:683-708 (13.4 BY_DESIGN for the ERROR<->FAIL rule)", "handover/BACKEND-READINESS-V2/01_4_OF_12_ARCHITECTURE_ROOT_CAUSE.md:199-203 (parity check specified, not run)"],
+   "tests": ["tests/test_reg_r1_pytest_regression_authority.py test_06b (FAIL->ERROR blocks)", "MISSING: no test pins PRE/POST JDK-selection parity"]
+  },
+  "reasoning": "The envelope requested by this row (per-test Surefire evidence, Maven replay, stability excusal) is new capability, and its BY_DESIGN fail-closed rule is correct. But the row leaves open whether PRE and POST ran under the same conditions ('parity check pending'). Tracing that question found a concrete parity defect that the row's framing hides: baseline capture never applies the goal-stated JDK override that every candidate and terminal run applies, and the recorded environment identity claims it did. The probe measures the two JAVA_HOME selections side by side and shows the comparability guard accepting them as one environment. I do NOT attribute S3_A's 16 DNS ERROR->FAIL flips to this. That would need a host java/mvn mismatch plus a goal-stated version; S3_A's cause stays UNKNOWN, and the specified Surefire-text/network-policy parity check is still needed. Recommend a new registry row (e.g. BASELINE-JDK-PARITY-001) rather than reopening this deferred capability row. Confidence is medium because the reachability conditions are narrow (a host-JDK mismatch plus an explicit 'Java N' in the goal) and the contained-mode leg is TRACED only."
+ }
+]

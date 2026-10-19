@@ -1,0 +1,413 @@
+[
+ {
+  "id": "GUI-PHASE-OBSERVABILITY-001",
+  "title": "Explicit workflow phase observability for the GUI Run Cockpit: emit phase.opened / phase.closed (04 section 7 contract) so the cockpit can show OBSERVED phase boundaries instead of role-DERIVED groups; KnowledgeGuard and Commit boundaries are not recorded for historical runs and are never fabricated. Not on the GUI critical path (F-5).",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED: `phase.opened`/`phase.closed` exist in kriya/core/attempt_evidence/model.py:44 KINDS and the reader pairs them (reader.py:222-228), but no producer in kriya/ emits them (grep for the literal outside model/reader: zero hits). The cockpit shows role-DERIVED groups labelled as derived.",
+  "contract_ref": "handover/GUI-RUN-COCKPIT-V1_1/04_UI_READ_API_CONTRACT.md section 7 'Future phase observability (design only; not a prerequisite)'",
+  "evidence": [
+   "kriya/core/attempt_evidence/model.py:44",
+   "kriya/core/attempt_evidence/reader.py:222",
+   "grep -rn phase.opened kriya -> only model.py and reader.py",
+   "04_UI_READ_API_CONTRACT.md:255-268"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "The contract itself labels this design-only and not a prerequisite; the UI never fabricates boundaries (DERIVED provenance is explicit), so no evidence is misrepresented. Adding producers is new observability, i.e. a feature. Not A: no defined contract requires phase records today. Not E: it is wanted future work, not a declared permanent limit."
+ },
+ {
+  "id": "GUI-EXEC-GIT-SHIM-001",
+  "title": "On a machine where the Xcode developer-tools license is not accepted, /usr/bin/git is a stub that exits 69 and is FIRST on the GUI's fixed child PATH (/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin, owner decision M1 F-1/F-2). Every Kriya run creates its isolated generation sandbox with git, so a GUI-started run fails at its first step. MEASURED in the M8 live smoke on this Mac (real planner/architect calls, then 'Failed to create an isolated generation sandbox ... You have not agreed to the Xcode license agreements'). The cockpit now detects it in the execution preflight (first git on PATH, TOOL_UNAVAILABLE blocker with the reason and the working alternative) and refuses to start.",
+  "registry_status": "DEFERRED",
+  "priority": "P2",
+  "proposed_class": "E",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: the Electron host gives the real kriya child a fixed PATH '/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin' (ui/standalone/src/main/child_env.ts:16, owner decision F-1/F-2). Read paths skip a broken shim (kriya/tools/git_metadata.py:156-212 `_first_working_git`, GUI-GIT-SHIM-ENV-001 CLOSED), while a run executes the FIRST git on PATH; execution.preflight probes the first python3/git/node by running --version (kriya/platform/toolchain_locator.py:86,112) and refuses with a typed blocker. On a Mac without the accepted Xcode license the run cannot start (MEASURED in the M8 live smoke per 08_M7_M8_CLOSURE.md:66).",
+  "contract_ref": "ui/standalone/src/main/child_env.ts:1-16 (fixed approved PATH, never the operator's); handover/GUI-RUN-COCKPIT-V1_1/08_M7_M8_CLOSURE.md:66-120; tests/test_kup_execution.py:579-616 (shim reported unavailable even when a later copy works)",
+  "evidence": [
+   "ui/standalone/src/main/child_env.ts:16",
+   "kriya/platform/toolchain_locator.py:86,112",
+   "kriya/tools/git_metadata.py:156,191",
+   "tests/test_kup_execution.py:579-616",
+   "08_M7_M8_CLOSURE.md:66,69,98,120"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "The failure is caused by the host environment (an unaccepted Xcode license), and Kriya refuses closed with a typed preflight blocker that names the cause and the remedy. Choosing a later git automatically would let a user-writable directory shadow a system tool, which is a security decision the owner kept. Not A: no Kriya contract is broken, and the behaviour is fail-closed and tested. Not D: the limitation is real on this machine. Not B: the remaining item is an owner action/decision, not functionality. E fits: documented (child_env.ts, 08 closure), tested (test_kup_execution shim tests), consistent with the PATH authority decision. Caveat: the registry wording 'blocking: yes (on this machine)' should be read as an environment prerequisite.",
+  "e_contract": "child_env.ts docstring + 08_M7_M8_CLOSURE.md; pinned by tests/test_kup_execution.py (shim tests near lines 579-616)"
+ },
+ {
+  "id": "GUI-EVIDENCE-POLL-COST-001",
+  "title": "Polling a live run re-verifies the whole evidence chain (chain, blobs, seal) on every poll that sees new records (evidence.records verifies on each call, by design: no verified-state cache), so cost grows with run size on the single-threaded read process.",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "E",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: evidence.records/evidence.verify verify the chain, every referenced blob and the seal on every invocation and return `sealed_store` only for VERIFIED (kriya/kup/evidence_ops.py:42-67,147; 04 contract item 2). There is deliberately no verified-state cache in Kriya, so a poll that sees new records pays a full re-verification. The growth is INFERRED in the row; the large-run measurement in GUI-EVIDENCE-LARGE-RUN-LOAD-001 (about 220 ms per page at 20.5k records) gives its scale.",
+  "contract_ref": "04_UI_READ_API_CONTRACT.md item 2 (line 308: verify chain, blobs and seal in the same invocation) and line 107 (cost note); registry GUI-KRIYA-PROCESS-STARTUP-LATENCY-001 closure ('No verified-once cache: evidence operations recompute verification on every request')",
+  "evidence": [
+   "kriya/kup/evidence_ops.py:42,64-67,147",
+   "04_UI_READ_API_CONTRACT.md:107,308",
+   "tests/test_kup_evidence_records.py::test_sealed_store_is_a_sealed_store_observation_bound_to_the_head",
+   "tests/test_kup_evidence_verify.py"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "Per-read full verification is a documented evidence guarantee; the cost is the price of that guarantee. Nothing has shown a user-visible failure at typical sizes. The row itself forbids weakening verification. Not A: correctness is kept and the contract is met. Not B: an incremental tail-verified read would be a performance enhancement, and the modularization perf rule (no speculative tuning, hot spots to OI-58/Q2) leaves it as a measured-later item. Close as E unless Q2 profiling shows it matters. Same root as GUI-EVIDENCE-LARGE-RUN-LOAD-001; one decision should cover both.",
+  "e_contract": "04_UI_READ_API_CONTRACT.md item 2 + line 107; pinned by tests/test_kup_evidence_records.py / test_kup_evidence_verify.py (sealed_store only when verified in the same call)"
+ },
+ {
+  "id": "GUI-LAUNCH-RETENTION-001",
+  "title": "Launch records under <workspace>/.kriya/control/launches are never pruned, while RunRecords are pruned by retention; after retention a launch can point at a missing RunRecord (launch.status reports found:false, handled).",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "A",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: kriya/control/retention.py (prune_run_state:72, prune_after_run:180, workspace_run_references:162) prunes RunRecords and related run state. It has no reference to launch records (grep 'launch' in retention.py: no hits). Launch records under <workspace>/.kriya/control/launches/<id>.json (kriya/control/launch.py:10) are therefore never pruned and grow by one per GUI run. A launch whose RunRecord was pruned reports found:false (typed, handled).",
+  "contract_ref": "kriya/control/retention.py (RunRecord retention policy); MODULE-CONTRACTS.md section 6 STATE (RunRecord/launch record stores under ControlStore); no contract states that launch records are kept forever",
+  "evidence": [
+   "kriya/control/retention.py:72,162,180 (no launch handling)",
+   "kriya/control/launch.py:10",
+   "tests/test_kup_execution.py:23 (load_launch_record / load_run_record used for the found:false case)"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "A Kriya-owned persistent control record grows without bound, while its sibling record (which it points to) is retention-managed. The result is dangling references and monotonic growth. ENGINEERING_RULES section 21 separates bounded caches from unbounded growth, and 'one small file per run' is linear, not bounded, so the registry's 'bounded growth' wording is inaccurate. This is a small state/persistence reliability defect, not a feature. Not E: no documentation or test pins launch records as intentionally permanent. Low severity: the missing-RunRecord path is typed and tested. If the owner wants launch records kept as an audit trail, that would make it E and needs a documented retention statement (AMBIGUOUS fallback).",
+  "reproducer": "needs construction: create N launch records + RunRecords in a tmp workspace, run control.retention.prune_run_state with a policy that prunes the RunRecords, assert launch records remain (today) -> after fix, launch records of pruned runs are removed (or retained by an explicit documented policy)",
+  "architectural_owner": "STATE (kriya/control/retention.py + control/persistence launch store)",
+  "proposed_closing_slice": "NEW: attach launch-record retention to control/retention.prune_run_state with the RunRecord policy (CORRECT, mutant: skip-launch-prune)",
+  "size": "SMALL",
+  "prerequisites": "D2"
+ },
+ {
+  "id": "GUI-M1-STORED-PROMPT-001",
+  "title": "The retired M1 inspector could show the trace row's stored prompt_rendered (history.prompt) for runs that predate the attempt-evidence recorder. The cockpit shows what the model was shown through evidence.call_content, which needs an evidence store, so pre-recorder trace rows have no prompt view.",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED: the backend still serves the stored trace prompt via the KUP operation `history.prompt` (kriya/kup/policy.py:37, kriya/kup/serve.py:48, kriya/kup/cli_ops.py:60). Only the cockpit UI lacks a fallback view for pre-recorder rows that have no evidence store; new runs carry evidence.call_content.",
+  "contract_ref": "08_M7_M8_CLOSURE.md parity table; 04_UI_READ_API_CONTRACT.md (history.prompt operation)",
+  "evidence": [
+   "kriya/kup/policy.py:37",
+   "kriya/kup/serve.py:48",
+   "kriya/kup/cli_ops.py:60"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "This is a UI feature for legacy history only, and the backend operation already exists. No evidence or authority contract is broken: new runs show prompts through the evidence store. Not A, because there is no defect. Not C, because the UI fallback is absent. Not E, because it is not declared a permanent limit."
+ },
+ {
+  "id": "GUI-RUN-ATTRIBUTION-001",
+  "title": "The trace `runs` table records no workspace. A run belongs to a workspace only through its attempt-evidence manifest (workspace_identity) reached via its evidence.attempt_store event, so the GUI's workspace-scoped Runs list shows only attributable runs. MEASURED on the safe copy: of 354 trace rows 349 are UNATTRIBUTED (no evidence store: pre-recorder, pruned or capture off) and are listed for no workspace; they are counted, never guessed.",
+  "registry_status": "DEFERRED",
+  "priority": "P2",
+  "proposed_class": "B",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: the trace `runs` table schema has no workspace column (kriya/control/trace.py:32-46 plus additive columns). Workspace-scoped history attributes a run only through its evidence manifest `workspace_identity` (kriya/kup/workspace_ops.py scoped history; REOPENED-PROJECT-RUN-HISTORY-001.md:6). Anything else is counted `unattributed` and never guessed (tests/test_kup_workspace.py:5,221). GUI-started runs are deterministically attributed via the launch record (closure_evidence, 9767f7d). Evidence capture defaults to `full` (kriya/config/config.py:1480), so only capture-off, pruned-store and pre-recorder runs are unattributed.",
+  "contract_ref": "handover/DEMO-V2/REOPENED-PROJECT-RUN-HISTORY-001.md:6 (authoritative source = evidence manifest workspace_identity); MODULE-CONTRACTS.md section 6 invariant 'history is scoped to the active Kriya state directory'; tests/test_kup_workspace.py:5",
+  "evidence": [
+   "kriya/control/trace.py:32-46",
+   "kriya/config/config.py:1480 (capture default full)",
+   "tests/test_kup_workspace.py:5,221 (unattributed counted, never guessed)",
+   "handover/DEMO-V2/REOPENED-PROJECT-RUN-HISTORY-001.md:6,29",
+   "closure_evidence: GUI M6 9767f7d, tests/test_kup_execution.py, ui/standalone/test/execution_real.test.ts"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "The current behaviour fails closed for evidence: attribution comes only from bound evidence, and unattributable rows are counted honestly. That rules out A, since there is no false attribution and no broken evidence binding. What remains is recording the workspace identity on the trace row for runs with capture off or a pruned store. That is a new recording capability (a workflow/recorder change), so B. Historical rows can never be fixed without rewriting stored evidence, which is forbidden. E would also be defensible for the historical subset, but the open item is the new recording."
+ },
+ {
+  "id": "GUI-EXEC-STOP-001",
+  "title": "No Stop/Pause/Resume/Retry exists in the cockpit. The only existing cancellation is the terminal's SIGINT (KeyboardInterrupt -> RunRecord FAILURE, exit 130); the host uses it only when the person quits during a run. Its partial-commit safety is not established as a button action.",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED (from the row and 08_M6 doc): there is no Stop/Pause/Resume/Retry action. The host sends SIGINT only on a confirmed application quit (KeyboardInterrupt -> RunRecord FAILURE, exit 130). A hard kill leaves RECOVERY_AVAILABLE with a typed RECOVERY_REQUIRED blocker (pinned by ui/standalone/test/execution_real.test.ts per GUI-RECOVERY-ACTION-001). The commit path has durable intent plus recovery (kriya/workflow/terminal_commit.py begin_run_commit; kriya/control/recovery.py).",
+  "contract_ref": "handover/GUI-RUN-COCKPIT-V1_1/08_M6_EXECUTION_SESSION.md (owner decision 2026-10-10: no Stop in v1); 09_FINAL_APPROVAL_AND_CERTIFICATION.md section 7 known limits",
+  "evidence": [
+   "kriya/workflow/terminal_commit.py:283-300 (durable intent before first byte)",
+   "kriya/control/recovery.py",
+   "09_FINAL_APPROVAL_AND_CERTIFICATION.md section 7"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "A typed Stop action is new functionality. The owner explicitly decided against it for v1, and interrupt safety is handled by the existing durable-intent and recovery path rather than claimed for a button. Not A: no existing contract promises safe cancellation, and the quit path is not presented as one. The interrupt-at-every-phase evidence is a prerequisite of the future feature. UNKNOWN: whether every phase is interrupt-recoverable has not been measured here."
+ },
+ {
+  "id": "GUI-EXEC-TOOLCHAIN-PATH-001",
+  "title": "A GUI-started run inherits the M1 child environment (fixed PATH /usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin), so toolchains installed elsewhere (sdkman Java, pyenv, nvm) are invisible to the run's validators.",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "E",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED: a GUI-started run gets the fixed child PATH (ui/standalone/src/main/child_env.ts:16); the JDK is found through /usr/libexec/java_home (kriya/platform/toolchain_locator.py); execution.preflight reports which of python3/git/java/mvn/gradle/node/npm the run can see (kriya/kup/execution.py:33 tool_visibility), as information only. A missing tool during a run is Kriya's own typed failure.",
+  "contract_ref": "registry closure_evidence 'M7 DISPOSITION' + 08_M6_EXECUTION_SESSION.md; tests/test_kup_execution.py (toolchain visibility); ui shared execution.test.tsx",
+  "evidence": [
+   "ui/standalone/src/main/child_env.ts:16",
+   "kriya/kup/execution.py:33",
+   "kriya/platform/toolchain_locator.py:86,112",
+   "tests/test_kup_execution.py (tool visibility tests)"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "This is a deliberate security posture: PATH is never widened and no login shell runs. It is documented, it is tested (visibility reporting), and a missing tool fails typed. That meets every E criterion. Not A: nothing is silently approximated. Not B: widening would be a new security decision rather than a feature gap in the current contract.",
+  "e_contract": "child_env.ts + 08_M6_EXECUTION_SESSION.md + registry M7 disposition; pinned by tests/test_kup_execution.py toolchain-visibility tests and ui execution.test.tsx"
+ },
+ {
+  "id": "GUI-TRACE-ATTEMPTS-SEMANTICS-001",
+  "title": "The trace row's runs.attempts is the workflow's retry counter (retry_count + best_of_n_candidates_tried; early exits write 0), not the number of attempts made: a run with one attempt that stops at human approval stores 0 while its evidence proves Attempt 1.",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "A",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: the trace row is written with attempts = state.budgets.retry_count + state.budgets.best_of_n_candidates_tried (kriya/workflow/run_lifecycle.py:174), and early-exit rows write attempts=0 (run_lifecycle.py:209-218, run_trace.py:75). A run whose first attempt stops at human approval therefore stores 0. The CLI `kriya traces` prints that column under the header ATTEMPTS (kriya/cli.py:5401, header in the following lines), so a terminal user is told '0 attempts' for a run with an observed Attempt 1. The GUI side was corrected (registry closure).",
+  "contract_ref": "none found that defines runs.attempts as a retry counter (no doc in docs/ describes the column); the CLI header 'ATTEMPTS' is the de facto contract",
+  "evidence": [
+   "kriya/workflow/run_lifecycle.py:174,209-218",
+   "kriya/workflow/run_trace.py:75",
+   "kriya/cli.py:5401-5440 (ATTEMPTS column)",
+   "live evidence per row: run 20261011T090021-a3a5aff8 Runs list 0 attempts beside observed Attempt 1"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "A user-facing evidence/report value (the CLI ATTEMPTS column) misstates what happened. The GUI stopped presenting it, but the backend producer and the CLI consumer still do. That is a reporting-correctness defect of the current product, so A rather than B. Not E: the semantics are not documented or tested as a retry counter. The fix is small and additive: record attempts_made, or rename/document the column as retries. Stored rows are never rewritten. Low severity (no authority impact).",
+  "reproducer": "needs construction: scripted run_generation_workflow that stops at the approval gate after attempt 1 (existing state-machine harness), read traces.db runs.attempts -> 0, and `kriya traces` prints ATTEMPTS 0",
+  "architectural_owner": "STATE (kriya/control/trace.py schema, workflow/run_lifecycle.py producer) + CLI presentation",
+  "proposed_closing_slice": "NEW: trace attempts semantics - additive attempts_made column (or relabel CLI column as RETRIES + document), after D2/E2",
+  "size": "SMALL",
+  "prerequisites": "D2, E2"
+ },
+ {
+  "id": "GUI-REVIEW-APPLY-BINDING-001",
+  "title": "A review approves the diff Kriya PRESENTED (bound by review id, candidate digest and per-file diff digests). After approval the workflow runs its regression gates in the same sandbox and then applies; it does not re-digest the candidate against the approved digest before applying (independent review F4, TRACED as likely, not fully traced).",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "A",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: mostly mitigated, with a residual gap. (1) CANDIDATE-VERIFIED-DIGEST-BINDING-001: development_loop.py:606-613 binds the exact terminal batch (bytes sha256 + mode + base, kriya/workflow/verification_binding.py:63-83) BEFORE the approval gate (development_loop.py:898). terminal_commit.commit_terminal_candidate recomputes it from the batch it writes and refuses any difference with VERIFIED_CANDIDATE_EVIDENCE_STALE before the first workspace byte (terminal_commit.py:253-259, verification_binding.py:84-98; pinned by tests/test_authority_invariants.py:132). Any worktree edit or mode change after the binding, including between approval and commit, is refused. (2) In HITL, execution after source approval runs under a guard comparing against that binding (development_loop.py:922-940). Residual: the human approves a diff built from text-decoded worktree reads (stage_apply.py:136-153, errors='replace', no mode), bound by `candidate_digest` over diff text (kriya/policy/approval.py:247-250). No step compares the review's identity with the verified/applied binding, so reviewed==applied holds only transitively (same worktree read), not as an asserted identity. Non-UTF-8 bytes and mode are not visible in what was approved.",
+  "contract_ref": "handover/MODULARIZATION/MODULE-CONTRACTS.md section 4 `CandidateIdentity  # binds reviewed == built == tested == runtime == applied`; SLICE-PLAN C1 invariant; kriya/policy/authority.py:44-47 ARRIVES_LATER typed_approval_requests -> G4 ('the CandidateIdentity equality test')",
+  "evidence": [
+   "kriya/workflow/development_loop.py:606-613,898,922-940",
+   "kriya/workflow/verification_binding.py:63-98",
+   "kriya/workflow/terminal_commit.py:224-259",
+   "kriya/workflow/stage_apply.py:136-153",
+   "kriya/policy/approval.py:247-250",
+   "kriya/policy/authority.py:44-47 (G4 owns CandidateIdentity equality)",
+   "tests/test_authority_invariants.py:132-156",
+   "related open row DIFF-APPLIED-BYTES-BINDING-001 (P2, OPEN) - near duplicate"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "The target architecture explicitly defines one CandidateIdentity binding reviewed == built == tested == runtime == applied, and assigns its equality check to G4. Today the review record is not tied to that identity: the binding is enforced only from verification to apply, and the review/apply link is transitive. That is an evidence-binding gap in the defined architecture, so A, not B. The row's literal claim ('no re-digest before apply') is largely overtaken by CANDIDATE-VERIFIED-DIGEST-BINDING-001, so it is not fully A-as-written. It is not C either, because the reviewed identity is still unbound and the presented diff can hide bytes and mode. Exploitability in-process is INFERRED to be very low, since a change after the binding is refused at commit. It overlaps DIFF-APPLIED-BYTES-BINDING-001: close both together.",
+  "reproducer": "needs construction: in the run_direct harness (tests/test_greenfield_direct_plan_runtime.py), approve a review whose presented diff hides a non-UTF-8 byte or a mode bit; assert the review record's identity equals the applied CandidateIdentity (fails today: no such identity exists); plus a tamper-after-approval-before-commit case (expected refused today by VERIFIED_CANDIDATE_EVIDENCE_STALE)",
+  "architectural_owner": "AUTHORITY (kriya/policy/approval.py CandidateIdentity) + REPOSITORY commit (kriya/repository/commit.py, workflow/terminal_commit.py)",
+  "proposed_closing_slice": "G4",
+  "size": "SMALL",
+  "prerequisites": "E10, G2 (CandidateTransaction / staged identity), C1 (done)"
+ },
+ {
+  "id": "GUI-REVIEW-LOCAL-TRUST-001",
+  "title": "A decision file and the launch record are ordinary files under <folder>/.kriya/control/launches: a local actor with the same user's filesystem write access could write a bound-looking decision file (all identities are readable from the launch record) or run `kriya launch-decision` itself. Kriya cannot hold a secret a same-user process cannot read.",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "AMBIGUOUS",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED: decisions are files under <workspace>/.kriya/control/launches. control/launch_approval.decide (launch_approval.py:174-236) accepts a decision for any caller that presents the readable launch id, review id and candidate digest, while the waiting run's lock is held. Writes are exclusive (os.link) and the waiter re-checks bindings, expiry and the ownership stamp. The Developer's file writes cannot touch .kriya (kriya/policy/filesystem.py:116-117 TRUSTED_CONTROL_DIRECTORIES). But candidate code that Kriya itself EXECUTES (build/tests/runtime verification) runs inside <workspace>/.kriya/worktrees/candidate-* (kriya/workflow/worktree.py:45,89), and by default it is uncontained (autonomy.contained_execution_required=False, config.py:523; sandbox.py only restricts env and rlimits). INFERRED: such code, or a process it detaches, can reach ../../control/launches or run `kriya launch-decision` and answer a later pending review (the runtime-command review, or the next candidate's source review). Under OCI containment only the worktree is mounted RW (containment.py MountSpec / containment_oci.py), so .kriya/control would be out of reach (INFERRED, not run).",
+  "contract_ref": "registry closure_evidence ('same-user filesystem actors are already inside the trust boundary'); 09_FINAL_APPROVAL_AND_CERTIFICATION.md:70; kriya/tools/sandbox.py:11-19 (uncontained execution does not stop disk access); cross-cutting invariant 'Model text is evidence, never authority'",
+  "evidence": [
+   "kriya/control/launch_approval.py:174-236",
+   "kriya/policy/filesystem.py:116-117",
+   "kriya/workflow/worktree.py:36-45,89",
+   "kriya/config/config.py:523 (contained_execution_required default False)",
+   "kriya/tools/sandbox.py:11-19",
+   "kriya/tools/containment.py:125-160",
+   "09_FINAL_APPROVAL_AND_CERTIFICATION.md:70"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "If the threat model treats every same-user process as trusted, this is a documented intentional boundary (E). Consume-time checks are tested in tests/test_launch_approval.py, and uncontained executed code could in any case write the owner workspace directly. In that reading the decision forgery is subsumed by the documented uncontained-execution limitation. But the row's own framing ('a model/tool with write access to .kriya/control') points at a narrower actor. That actor is model-authored code that Kriya itself runs, in a worktree that sits under the same .kriya directory as the decision files. It could convert one human approval (of source) into a forged later approval (of a command or a new candidate), which would break 'model output is never authority' (A). Which reading applies is a threat-model choice the evidence cannot settle.",
+  "owner_question": "Is code that Kriya itself executes from a model-authored candidate (tests, runtime verification, possibly a detached child of them), running uncontained by default as the same user inside <workspace>/.kriya/worktrees, inside the trust boundary for HUMAN DECISIONS? If NO -> A (protect .kriya/control from executed candidate code: decision channel/key outside the workspace, or make containment default when a desktop review is pending; size MEDIUM, owner AUTHORITY + EXECUTION, slice NEW or L1). If YES -> E (document explicitly in the threat model that HITL decisions are only as strong as uncontained execution, and that contained_execution_required is the mitigation)."
+ },
+ {
+  "id": "GUI-EVIDENCE-LARGE-RUN-LOAD-001",
+  "title": "Selecting an extremely large run is slow: every evidence.records page re-verifies the whole store (chain, blobs, seal), so loading a run costs pages x verification. MEASURED in the real app: 5.2k records 0.7 s, 20.5k records 5.8 s (verification ~220 ms per page, 21 pages); the window stays responsive (max event-loop lag 126 / 491 ms), heap flat over 100 navigation cycles. The Timeline renders a node per event (61k DOM nodes at 20k records).",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "E",
+  "confidence": "MEDIUM",
+  "current_behaviour": "MEASURED (in the row, Hardening Phase E, evidence/m9/scale-run1 and scale-run2-5k): 5.2k records load in 0.7 s and 20.5k records in 5.8 s (about 220 ms verification per page, 21 pages). The window stays responsive (max event-loop lag 126/491 ms) and the heap stays flat over 100 cycles. TRACED: each evidence.records page re-verifies the whole store (kriya/kup/evidence_ops.py:147, 04 contract item 2). The Timeline renders one node per event.",
+  "contract_ref": "04_UI_READ_API_CONTRACT.md item 2 (line 308) + line 107 cost note; 10_FINAL_HARDENING.md",
+  "evidence": [
+   "kriya/kup/evidence_ops.py:147",
+   "04_UI_READ_API_CONTRACT.md:107,308",
+   "handover/GUI-RUN-COCKPIT-V1_1/10_FINAL_HARDENING.md (Phase E data)"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "The slowness follows directly from a documented evidence guarantee (verify in the same invocation as the answer, no verified-once cache). It is measured as non-failing and responsive, and it scales with run size. The proper improvements (verification keyed by chain head, larger pages, Timeline windowing) are performance enhancements. The modularization rule forbids doing them speculatively, so they belong to Q2 overhead measurement / OI-58. Not A: no correctness or reliability failure was observed. Not D: the cost is real. B is also possible for the windowing part. E was chosen because the cost is the stated price of the contract.",
+  "e_contract": "04_UI_READ_API_CONTRACT.md item 2; pinned by tests/test_kup_evidence_records.py::test_sealed_store_is_a_sealed_store_observation_bound_to_the_head and test_kup_evidence_verify.py"
+ },
+ {
+  "id": "GUI-RECOVERY-ACTION-001",
+  "title": "After a HARD kill of a run (crash, power loss, SIGKILL) the folder is RECOVERY_AVAILABLE and Start Run is blocked; the typed blocker names the recovery step (`kriya runs recover`, a Kriya terminal action). The GUI has no recovery capability. The app's own quit path (SIGINT) leaves the folder CLEAN and startable.",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED (from the row and its pinned tests): after a hard kill the folder is RECOVERY_AVAILABLE and Start Run is blocked with a typed RECOVERY_REQUIRED blocker naming `kriya runs recover`. The app's own quit (SIGINT) leaves the folder CLEAN. Both are pinned by ui/standalone/test/execution_real.test.ts. Kriya's recovery exists in kriya/control/recovery.py, and the `kriya runs recover` CLI is the only recovery entry point.",
+  "contract_ref": "10_FINAL_HARDENING.md (Phase G); ui/standalone/test/execution_real.test.ts",
+  "evidence": [
+   "kriya/control/recovery.py",
+   "ui/standalone/test/execution_real.test.ts (quit CLEAN; hard kill RECOVERY_AVAILABLE)",
+   "10_FINAL_HARDENING.md"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "The backend state is typed, honest and fail-closed, and nothing is silently retried. Only a GUI entry point to an existing Kriya action is missing, which makes this a new capability (B). Not A: no state or authority defect. Not E: it is wanted future work rather than a declared permanent limit."
+ },
+ {
+  "id": "GUI-NATIVE-MEMORY-DRIFT-001",
+  "title": "Over a 30-minute synthetic soak (359 cycles, 120 executions) the Electron main and renderer processes drift upward by tens of MB of NATIVE memory (quiet total 606 -> 637 MB) while the JS heap, DOM, timers, file descriptors and process count stay flat; the Python read process plateaus at ~87 MB. Whether the drift plateaus is not proven.",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "AMBIGUOUS",
+  "confidence": "LOW",
+  "current_behaviour": "MEASURED (in the row, Hardening Phase L, evidence/m9/soak-30min and soak-12min-attribution): over a 30-minute synthetic soak (359 cycles) Electron main+renderer native memory drifted from 606 to 637 MB, about 0.09 MB per cycle. JS heap, DOM, timers, FDs and process count stayed flat, and the Python read process plateaued at about 87 MB. Whether the drift plateaus is not measured. Owner: the Electron host (ui/standalone), not kriya/.",
+  "contract_ref": "10_FINAL_HARDENING.md (Phase L); ENGINEERING_RULES section 21 (leak classification)",
+  "evidence": [
+   "10_FINAL_HARDENING.md Phase L",
+   "registry closure_evidence: classified UNKNOWN (not a leak)"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "Per ENGINEERING_RULES section 21 the evidence is insufficient: there is a monotonic slope over 30 minutes and no plateau proof. The choice between A (KRIYA_PRODUCT_LEAK in the GUI host) and D/EXPECTED_BOUNDED_CACHE/MODEL_RUNTIME-like native residency cannot be made without the longer soak. This is A-vs-D rather than A-vs-B, but the brief forbids guessing.",
+  "owner_question": "Authorize the existing two-hour soak driver (KRIYA_UI_SOAK, evidence package) on the owner desktop? If native memory keeps a linear slope -> A (GUI host reliability, NEW slice outside kriya/ modularization or O3); if it plateaus -> D (EXPECTED_BOUNDED native residency). Until then it cannot be classified honestly."
+ },
+ {
+  "id": "GUI-SKILLS-BUILD-001",
+  "title": "Kriya has no operation that builds or compiles a Skill from a local document, folder or URL. `kriya learn` indexes text/files/URLs into the local RAG memory (a different store), and `kriya skills create` only writes an empty skeleton. The desktop therefore offers no Skill-from-document/URL action (building one in the GUI would be a second Skill system).",
+  "registry_status": "DEFERRED",
+  "priority": "P2",
+  "proposed_class": "B",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED (from the row and 11_END_USER_EXPERIENCE.md): no Kriya operation builds a Skill from a document, folder or URL. `kriya learn` indexes into RAG memory (a different store) and `kriya skills create` writes an empty skeleton. The GUI shows Skills read-only.",
+  "contract_ref": "11_END_USER_EXPERIENCE.md Phase 3",
+  "evidence": [
+   "11_END_USER_EXPERIENCE.md Phase 3",
+   "SLICE-PLAN J1 (SkillRegistry) has no build operation"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "This is a request for a new, provenance-recording, egress-governed backend capability. Nothing in the defined architecture promises it (J1 defines a registry, not a builder). Not A or E. The authority flag is set because a URL source would have to go through egress authority."
+ },
+ {
+  "id": "GUI-SKILLS-MUTATION-001",
+  "title": "Skill creation, approval/promotion of staged rules and unverify are CLI-only: each mutates skill files with git commits and judgement prompts; no safe typed action API exists, and Skills are selected automatically (no manual selection API).",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED (from the row): skill creation, staged-rule promotion and unverify are CLI-only, they mutate skill files with git commits and judgement prompts, and no typed action API exists. The cockpit is read-only. kup/catalog_ops exposes only reads (SLICE-PLAN B2: SkillCatalogService read-side).",
+  "contract_ref": "11_END_USER_EXPERIENCE.md Phase 3; SLICE-PLAN B2/J1",
+  "evidence": [
+   "kriya/kup/catalog_ops.py (read-only catalog)",
+   "SLICE-PLAN B2 (SkillCatalogService read-side), J1"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "Typed skill lifecycle actions with CLI-equal authority would be new functionality. Today's behaviour is the safe subset: there is no GUI mutation and so no bypass. Not A: no authority gap exists, because the GUI cannot mutate. The authority flag is set because any future action must carry the same authority as the CLI."
+ },
+ {
+  "id": "GUI-TOOLS-HEALTH-001",
+  "title": "MCP server health can only be learned by starting the server (`kriya mcp inspect`); tool configuration, invocation approval and secrets are operator-managed. The cockpit shows configured plugins and MCP server NAMES with their declared capability profile and marks health \"not checked\"; it never starts a server, shows a command/argument/environment variable or credential, or approves a tool.",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED (from the row): MCP health is only learned by starting the server (`kriya mcp inspect`). The cockpit shows configured plugin/MCP server names and their declared capability profiles with health 'not checked'. It never starts a server, never shows a command, argument, env var or credential, and never approves a tool.",
+  "contract_ref": "11_END_USER_EXPERIENCE.md Phase 3; TOOL-002/TOOL-003 invocation authority (operator-managed)",
+  "evidence": [
+   "11_END_USER_EXPERIENCE.md Phase 3",
+   "SLICE-PLAN K1 (ToolRegistry catalog)"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "A bounded, Kriya-owned health read would be a new capability. Current behaviour respects the authority boundary: starting servers is an operator action. Not A, not E."
+ },
+ {
+  "id": "GUI-RUN-REPORT-001",
+  "title": "Export Run Report (authorized Markdown of run id, workspace, routing, units/attempts, gates, change metadata, WHY, outcome, provenance) needs a Kriya-owned report operation composing evidence under content-visibility.",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED (from the row): no `run.report` operation exists. Copy Run ID, Copy failure details and Copy workspace path ship now. The export would need to compose evidence under content-visibility.",
+  "contract_ref": "11_END_USER_EXPERIENCE.md Phase 15 (deferred to v1.2 as instructed)",
+  "evidence": [
+   "11_END_USER_EXPERIENCE.md Phase 15",
+   "kriya/kup/policy.py operation list has no run.report"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "This is a new export feature explicitly scheduled for v1.2. No defect is involved."
+ },
+ {
+  "id": "GUI-APPEARANCE-001",
+  "title": "The cockpit is dark-only (color-scheme: dark); no light/auto appearance preference exists.",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "HIGH",
+  "current_behaviour": "MEASURED (grep): ui/shared/src/cockpit/design/cockpit.css:4 sets `color-scheme: dark`, with no light tokens for the cockpit. The older ui/shared/src/styles.css follows light/dark (line 1-2) but is not the cockpit design system.",
+  "contract_ref": "11_END_USER_EXPERIENCE.md Phase 17; ui/shared/src/cockpit/design/contrast.test.ts (WCAG-AA for dark tokens)",
+  "evidence": [
+   "ui/shared/src/cockpit/design/cockpit.css:4",
+   "ui/shared/src/cockpit/design/contrast.test.ts"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "This is a cosmetic preference feature with no safety or correctness impact."
+ },
+ {
+  "id": "GUI-NOTIFICATION-VISUAL-001",
+  "title": "Native macOS notification banners cannot be asserted by the automated harness (the OS draws them). Host logic (closed kinds, fixed text, current launch only, once, never while focused, click -> showRun), the renderer emission from durable state and the IPC are fully tested; the visible banner itself is confirmed by the live smoke.",
+  "registry_status": "DEFERRED",
+  "priority": "P3",
+  "proposed_class": "E",
+  "confidence": "MEDIUM",
+  "current_behaviour": "TRACED (from the row): host notification logic (closed kinds, fixed text, current launch only, once, never while focused, click -> showRun), the renderer emission from durable state and the IPC are covered by automated tests. Only the OS-drawn banner cannot be asserted, so it is confirmed by live smoke.",
+  "contract_ref": "11_END_USER_EXPERIENCE.md Phase 22",
+  "evidence": [
+   "11_END_USER_EXPERIENCE.md Phase 22"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "This is an inherent verification limit of the test harness (the OS draws the banner), not a product defect. It is documented and every Kriya-controlled part is tested. Not D: there is no claimed defect to disprove, only a coverage boundary. Not A or B.",
+  "e_contract": "11_END_USER_EXPERIENCE.md Phase 22; host logic pinned by the ui/standalone notification tests named there; MISSING: the exact test file ids were not verified in this pass"
+ },
+ {
+  "id": "GUI-REASON-CODES-IN-ERROR-STATES-001",
+  "title": "Reason codes still appear in primary UI text in error and blocked states: readiness blockers `(CODE)` and start refusals in GoalComposer, Project Setup / decision refusal lines (`(CODE: reason)`). They are acceptable to an expert and were already muted/small, but the product rule is that reason codes belong under Technical details.",
+  "registry_status": "OPEN",
+  "priority": "P3",
+  "proposed_class": "B",
+  "confidence": "MEDIUM",
+  "current_behaviour": "MEASURED (grep): reason codes are still interpolated into primary text, e.g. ui/shared/src/cockpit/core/catalogView.tsx:7,16 `${a.message} (${a.code})`, ui/shared/src/cockpit/modules/workspace/SetupSections.tsx:15, ui/shared/src/cockpit/core/runFactsHooks.ts:24. Registry status OPEN is accurate.",
+  "contract_ref": "handover/DEMO-V2/PRODUCT-UX-COMPLETION.md (product rule: reason codes under Technical details; row 19 table)",
+  "evidence": [
+   "ui/shared/src/cockpit/core/catalogView.tsx:7,16",
+   "ui/shared/src/cockpit/modules/workspace/SetupSections.tsx:15",
+   "ui/shared/src/cockpit/core/runFactsHooks.ts:24"
+  ],
+  "authority_security_flag": false,
+  "class_reasoning": "This is a presentation-polish deviation from a UX rule. The information shown is correct and fail-closed: the code is visible, not hidden or wrong. No authority, evidence or correctness contract is affected, so it is not A. It is UX conformance work (B), with closure 'Demo V2 polish or before production readiness'. The authority flag is false because moving the code into a disclosure changes no decision."
+ },
+ {
+  "id": "GUI-RUNTIME-COMMAND-APPROVAL-001",
+  "title": "Found by the Greenfield owner rehearsal replay (2026-10-15; MEASURED in tests/test_greenfield_runtime_verification_dropped.py). When runtime verification is required and the judge's command is inferred (or not grounded in the goal text), HITL mode asks approval_callback([], 'Kriya judged that this goal describes runtime behavior ... Allow Kriya to execute these command(s) inside the sandboxed worktree?') (attempt.py _execute_runtime_verification_directly and run_attempt's inline block). Its subject is a COMMAND (argv list, success criterion, the sandboxed worktree), not a file change. The desktop callback (cli._approval_decision) cannot represent it: every empty-file approval is recorded as other_approval and declined, so the run stops (human_rejected). A safe desktop representation needs a distinct typed review (argv, working directory, containment, success criterion, digest-bound decision), host path and UX; the in-process awaitable mechanism already exists for the two runtime-command call sites (they await the callback result) but not for the escalation site at attempt.py:6854. NOT a generic approval platform; owner approval required before building it.",
+  "registry_status": "OPEN",
+  "priority": "P2",
+  "proposed_class": "C",
+  "confidence": "HIGH",
+  "current_behaviour": "TRACED: implemented, with a stale registry row (status still OPEN). kriya/policy/approval.py:22-55 defines the typed RuntimeCommandSubject (final argv, cwd, input channel, stdin digest, unit, criterion) and a fingerprint of what runs. `approval_matches` re-derives the commands before execution (an approval of A never executes B). MAX_REVIEW_ROUNDS=2 handles drift. kriya/cli.py `_runtime_command_decision` (after `_approval_decision`, around line 3060) holds a desktop launch's runtime-command review as a typed pending review via control.launch.request_runtime_command_approval and returns an awaitable. kriya/control/launch_approval.decide accepts kind runtime_command bound to the fingerprint (launch_approval.py:174-236, WRONG_REVIEW_KIND). The KUP `runtime_command.review` operation shows the exact commands (kriya/kup/runtime_command_ops.py:1; kriya/application/review.py:3). Managed-service verification without an approval subject fails closed (kriya/workflow/runtime_verification.py:1098,1142, MANAGED_SERVICE_APPROVAL_UNSUPPORTED). Out of the row's subject and still declined on desktop: the contract-change escalation site (kriya/workflow/spec_compliance.py:652, approval_callback([], ...) -> other_approval -> declined, CONTRACT_ESCALATION_DECLINED).",
+  "contract_ref": "kriya/policy/approval.py module docstring (GUI-RUNTIME-COMMAND-APPROVAL-001 contract incl. 'Honest boundary'); MODULE-CONTRACTS.md section 4 RuntimeCommandApprovalRequest; host grammar ui/standalone/test/runtime_command_contract.test.ts; ui/kup/schema/host-contract.schema.json DecideRuntimeCommandRequest",
+  "evidence": [
+   "kriya/policy/approval.py:22-55,159-230",
+   "kriya/cli.py _approval_decision (~3025-3058) and _runtime_command_decision (~3061-3075)",
+   "kriya/control/launch_approval.py:174-236",
+   "kriya/kup/runtime_command_ops.py:1",
+   "kriya/workflow/runtime_verification.py:57-65,1098,1142",
+   "tests/test_runtime_command_approval.py, tests/test_runtime_command_review_launch.py::test_the_pending_review_is_a_typed_runtime_command_subject_bound_to_the_fingerprint / test_a_stale_fingerprint_is_refused_and_records_nothing, tests/test_kup_runtime_command_review.py, tests/test_authority_invariants.py::test_required_runtime_reject_cannot_succeed_or_apply",
+   "handover/DEMO-V2/evidence/runtime-approval/README.md (controlled packaged-app smoke: runtime command review 07, approve 09, reject 16, managed-service unsupported 18)",
+   "MEASURED: PYTHONPATH=reg/work_gui/snap (copy of SNAP) .venv/bin/python -m pytest -p no:cacheprovider --basetemp reg/work_gui/bt tests/test_runtime_command_review_launch.py::test_a_stale_fingerprint_is_refused_and_records_nothing -> 1 passed in 1.42s"
+  ],
+  "authority_security_flag": true,
+  "class_reasoning": "The row's closure criterion is met by the current implementation: a desktop run reaches the command approval, shows the exact command/cwd/criterion, resumes on approve and records the outcome. That criterion is covered by the typed subject, the digest-bound decision and the KUP review, with tests and controlled-smoke evidence. The registry status OPEN is stale and should be CLOSED citing these files (the fixing commit hash is UNKNOWN: git history is not in SNAP). Not A: the gap described no longer exists. Residuals to record separately, not reasons to keep this row open: (a) the contract-change escalation site is still declined on desktop (fail-closed, by design per GUI-EXEC-APPROVAL-001); (b) the documented honest boundary that the Python interpreter substitution and Kriya-owned build preparation run after the fingerprinted hand-off; (c) the native OS confirmation sheet has not been seen by automation. A live (non-controlled) desktop run reaching EXECUTED was not verified here.",
+  "fixing_evidence": "kriya/policy/approval.py (typed subject + fingerprint + approval_matches), kriya/cli.py::_runtime_command_decision, kriya/control/launch_approval.decide kind=runtime_command, kriya/kup/runtime_command_ops.py, kriya/workflow/runtime_verification.py managed-service fail-closed; tests listed in evidence; handover/DEMO-V2/evidence/runtime-approval/README.md"
+ }
+]
