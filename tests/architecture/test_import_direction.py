@@ -90,7 +90,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.cli", "kriya.analyzer.java_members"): ("O2", _O2),  # direction ADAPTER-CLI -> RETRIEVAL
     ("kriya.cli", "kriya.build_info"): ("P1", _P1),  # non-public FOUNDATION module
     ("kriya.cli", "kriya.config.authority"): ("O2", _O2),  # direction ADAPTER-CLI -> AUTHORITY
-    ("kriya.cli", "kriya.config.authority_approval"): ("O2", _O2),  # direction ADAPTER-CLI -> AUTHORITY
     ("kriya.cli", "kriya.control.commit_state"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     ("kriya.cli", "kriya.control.launch"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     ("kriya.cli", "kriya.control.persistence"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
@@ -151,6 +150,15 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.cli", "kriya.policy.approval"): ("O2", _O2 + " (moved count-neutral in C3 from cli -> workflow.runtime_command_approval, now a facade: the CLI imports the owner; ADAPTER-CLI may import only the composition modules from L2-L3)"),  # direction ADAPTER-CLI -> AUTHORITY
     ("kriya.cli", "kriya.workflow.untrusted_context"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.cli", "kriya.workflow.workflow_controller"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
+    # E14: the authority group's config.authority_approval edge MOVED (kriya.cli no longer imports it); three edges
+    # SPLIT (sites unchanged, entries +1 each; owner: the new module; removal slice O2 unchanged): config.authority
+    # (the typed operator errors; kriya.cli keeps the traces KUP config-error path's), core.logging_setup
+    # (LogDirectoryError among them; kriya.cli keeps its logging bootstrap) and core.state_paths (StateDirectoryError;
+    # kriya.cli keeps its own)
+    ("kriya.cli_commands.authority", "kriya.config.authority"): ("O2", _O2),  # direction ADAPTER-CLI -> AUTHORITY
+    ("kriya.cli_commands.authority", "kriya.config.authority_approval"): ("O2", _O2),  # direction ADAPTER-CLI -> AUTHORITY
+    ("kriya.cli_commands.authority", "kriya.core.logging_setup"): ("O2", _O2),  # non-public CONFIG module
+    ("kriya.cli_commands.authority", "kriya.core.state_paths"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     # E14: the metrics group's three kriya.metrics edges MOVED count-neutral with its bodies; two edges SPLIT (sites
     # unchanged, entries +1 each; owner: the new module; removal slice O2 unchanged): config.authority_approval (the
     # adjudication store's trust-path check; kriya.cli keeps the authority group's) and core.state_paths (the trace db;

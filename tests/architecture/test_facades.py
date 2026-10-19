@@ -211,6 +211,12 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
             "kriya.cli_commands.metrics", ("metrics_adjudicate", "metrics_adjudications", "metrics_group", "metrics_report"),
             "P1", "E14: the `kriya metrics` group owned by cli_commands.metrics, registered on main by kriya/cli.py; every "
             "moved name re-exported (the same object)"),
+        PartialFacade(
+            "kriya.cli_commands.authority",
+            ("_authority_fail", "_authority_local_path", "_authority_state", "_authority_user_errors", "_print_pending",
+             "authority_approve", "authority_group", "authority_inspect", "authority_revoke"), "P1",
+            "E14: the `kriya authority` group owned by cli_commands.authority, registered on main by kriya/cli.py; every "
+            "moved name re-exported (the same object; the MCP approval path that stays in kriya/cli.py calls _authority_fail)"),
     ),
     "kriya/workflow/terminal_commit.py": PartialFacade(
         "kriya.repository.commit", ("CandidateMaterializationError",), "P1",
