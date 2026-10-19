@@ -13,7 +13,7 @@ from __future__ import annotations
 import sys
 import threading
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Iterator, List, Optional
 
 from kriya.platform.capabilities import CapabilityReport
@@ -39,6 +39,9 @@ class PlatformServices:
     resource_limits: ResourceLimitPort
     host_identity: HostIdentityPort
     process_control: ProcessControlPort
+    # The host's ``sys.platform`` value the services were composed for (the family alone cannot tell a supported POSIX
+    # host from an unknown one). Not part of ``identity()``: certification evidence keys are unchanged.
+    platform: str = field(default_factory=lambda: sys.platform)
 
     def capabilities(self) -> List[CapabilityReport]:
         return [self.workspace_lock.capability(), *self.resource_limits.capabilities(),
@@ -54,7 +57,9 @@ class PlatformServices:
                 "capabilities": [report.to_dict() for report in self.capabilities()]}
 
 
-def compose(family: str) -> PlatformServices:
+def compose(family: str, platform_name: Optional[str] = None) -> PlatformServices:
+    """The services for ``family``; ``platform_name`` (default: this host's ``sys.platform``) is recorded on them."""
+    platform = sys.platform if platform_name is None else platform_name
     if family == POSIX:
         from kriya.platform.posix_host_identity import PosixUidGid
         from kriya.platform.posix_locking import PosixFlockLock
@@ -62,12 +67,12 @@ def compose(family: str) -> PlatformServices:
         from kriya.platform.posix_resource_limits import PosixRlimit
 
         return PlatformServices(family=family, workspace_lock=PosixFlockLock(), resource_limits=PosixRlimit(),
-                                host_identity=PosixUidGid(), process_control=PosixProcessGroup())
+                                host_identity=PosixUidGid(), process_control=PosixProcessGroup(), platform=platform)
     reason = f"no {family} provider yet (Windows runtime is not supported; PLAT-WINDOWS-PROVIDERS-001)"
     return PlatformServices(family=family, workspace_lock=UnavailableWorkspaceLock(reason),
                             resource_limits=UnavailableResourceLimits(reason),
                             host_identity=UnavailableHostIdentity(reason),
-                            process_control=UnavailableProcessControl(reason))
+                            process_control=UnavailableProcessControl(reason), platform=platform)
 
 
 _lock = threading.Lock()
