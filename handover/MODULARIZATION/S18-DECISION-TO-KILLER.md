@@ -87,6 +87,26 @@ test_planner_robust_001_repair, test_work_unit_stages, test_s16a_autonomy_mode_v
 | S18M30 | KILLED L1 | test_the_executor_stops_typed_on_an_unvalidated_mode |
 | S18M31 (revalidate_instances removed) | KILLED L1 | test_an_unvalidated_section_handed_to_appconfig_is_revalidated |
 
+Two orchestrator-named categories added after campaign 1 (campaign 20261019_200537_52adff93 at c5f98a0, VALID):
+- S18M32 (B3 reverted to `mode == "human-in-the-loop"`): SURVIVED = EQUIVALENT. `_execute_tool_subtask` calls `_autonomy_mode`
+  (the fail-closed reader) before B3 and returns NEEDS_REVIEW on AutonomyModeError, so B3 only ever sees None or a valid mode,
+  for which `is_human_in_the_loop(mode) == (mode == "human-in-the-loop")`. The reader call is kept (S16a's scan forbids literal
+  mode comparisons).
+- S18M33 (BaseTool.planned_governance default -> READ_ONLY): SURVIVED at c5f98a0 (the shipped table makes the default
+  unreachable for a planned call: every listed class declares, the seam requires a declaration); the contract default is now
+  pinned directly (afe2f73, test_the_contract_default_is_undeclared) and S18M33 is KILLED at L1 (campaign
+  20261019_200758_7124d08c at afe2f73, VALID).
+- Final: 33 mutants, 32 KILLED at L1, 1 EQUIVALENT (S18M32, proof above).
+
+Fix-removed controls (manual, archive of c5f98a0): with ShellTool declared READ_ONLY (S18M18 alone) the R80 pin fails (the plan
+validates and dispatches; the tool's own wall refuses) while the fsmonitor pin still passes (the second wall); with the
+declaration AND the wall removed (S18M18 + S18M16) both fail (the step COMPLETED; owner changed, gates saw the injection).
+
+OI-135 run level (scratch probe, MEASURED): a direct generate run and a real enforce run with `object.__setattr__(cfg.autonomy,
+"mode", "human-in-the-lop")` both end in a raised `AutonomyModeError: AUTONOMY_MODE_UNKNOWN` (typed, propagated, nothing
+swallowed); the immediate callers of every migrated site (development_loop.accept_candidate, owner_recovery,
+attempt.run_attempt x2, runtime_verification x3, application.run.build_preflight) have no enclosing try (TRACED, AST scan).
+
 Structural tripwires with planted controls: test_the_tripwire_sees_a_planted_validation_without_the_plannable_names /
 test_every_production_validation_passes_the_plannable_names; test_no_production_module_compares_the_mode_with_a_literal
 (planted tree) / S16a's scan now requires zero literal sites; tests/architecture tool_registry table (a registry listing
