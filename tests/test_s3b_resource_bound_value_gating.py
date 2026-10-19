@@ -122,11 +122,9 @@ def test_the_mcp_lifecycle_bounds_stay_security_authority(tmp_path, monkeypatch)
 
 
 # =========================================================================== EXPECTED TO FLIP (the measured defect)
+# strict-xfail at the characterization commit 3651aea (45 failing on the unfixed bytes with --runxfail); the correction
+# removed the marks.
 
-FLIP = pytest.mark.xfail(strict=True, raises=AssertionError, reason="S3b characterization: the measured defect (flips with the correction)")
-
-
-@FLIP
 @pytest.mark.parametrize("field", list(CEILINGS))
 def test_a_repository_kriya_yaml_cannot_raise_a_containment_bound(tmp_path, monkeypatch, field):
     _workspace(tmp_path, monkeypatch, {field: CEILINGS[field] + 1})
@@ -134,7 +132,6 @@ def test_a_repository_kriya_yaml_cannot_raise_a_containment_bound(tmp_path, monk
     assert _denied() == [f"autonomy.{field}"]
 
 
-@FLIP
 @pytest.mark.parametrize("value", [-1, 0, True, "100", 100.0, None, [1]], ids=["negative", "zero", "bool", "string", "float", "null", "list"])
 @pytest.mark.parametrize("field", MEASURED)
 def test_a_value_that_is_not_a_positive_int_within_the_ceiling_is_refused(tmp_path, monkeypatch, field, value):
@@ -144,7 +141,6 @@ def test_a_value_that_is_not_a_positive_int_within_the_ceiling_is_refused(tmp_pa
     assert _pending() == [f"autonomy.{field}"]
 
 
-@FLIP
 def test_authority_inspect_lists_a_raised_bound_as_pending(tmp_path, monkeypatch):
     from click.testing import CliRunner
 
@@ -155,7 +151,6 @@ def test_authority_inspect_lists_a_raised_bound_as_pending(tmp_path, monkeypatch
     assert "autonomy.sandbox_memory_mb" in out and "security_authority" in out
 
 
-@FLIP
 def test_an_explicit_config_outside_the_workspace_is_not_trusted_either(tmp_path, monkeypatch):
     _workspace(tmp_path, monkeypatch, {"sandbox_memory_mb": 1024})
     outside = tmp_path / "operator.yaml"
@@ -163,7 +158,6 @@ def test_an_explicit_config_outside_the_workspace_is_not_trusted_either(tmp_path
     assert _denied(str(outside)) == ["autonomy.sandbox_cpu_seconds"]
 
 
-@FLIP
 def test_an_approval_does_not_survive_a_further_raise(tmp_path, monkeypatch):
     ws = _workspace(tmp_path, monkeypatch, {"sandbox_cpu_seconds": 500})
     _approve()
@@ -172,7 +166,6 @@ def test_an_approval_does_not_survive_a_further_raise(tmp_path, monkeypatch):
     assert _denied() == ["autonomy.sandbox_cpu_seconds"]
 
 
-@FLIP
 def test_the_gate_is_the_s3_value_gate_with_a_ceiling():
     from kriya.config import authority
 

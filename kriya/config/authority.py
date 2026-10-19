@@ -122,8 +122,9 @@ _REPOSITORY_SAFE_FIELDS: frozenset = frozenset({
     # filesystem/policy authority of its own).
     ("autonomy", "developer_investigation_enabled"), ("autonomy", "developer_investigation_max_turns"),
     ("autonomy", "best_of_n_first_attempt"),
-    ("autonomy", "shell_command_timeout_seconds"),
-    ("autonomy", "run_verification_enabled"), ("autonomy", "run_verification_timeout_seconds"),
+    # S3b (OI-132): shell_command_timeout_seconds and run_verification_timeout_seconds are NOT here - see
+    # _VALUE_BOUNDED_FIELDS (a repository may lower them, never raise them).
+    ("autonomy", "run_verification_enabled"),
     # VAL-001 G1-R3 (2026-09-18): found never classified at all when af23008
     # introduced it - fell through to the fail-closed SECURITY_AUTHORITY
     # default, denying it from ANY non-packaged-default source including an
@@ -145,8 +146,7 @@ _REPOSITORY_SAFE_FIELDS: frozenset = frozenset({
     # section for the full writeup - that field stays unclassified
     # (fail-closed, approval-gated per workspace) on purpose.
     ("autonomy", "brownfield_full_regression_baseline_policy"),
-    ("autonomy", "sandbox_cpu_seconds"), ("autonomy", "sandbox_memory_mb"),
-    ("autonomy", "acquisition_cpu_seconds"), ("autonomy", "acquisition_memory_mb"),
+    # S3b (OI-132): sandbox_* / acquisition_* resource bounds are value-bounded, see _VALUE_BOUNDED_FIELDS.
     ("skills", "load_global"), ("skills", "load_cwd"),
     ("logging", "level"),
     # Turning log files off removes a capability; logging.directory is
@@ -269,6 +269,12 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     # widening it could mask an orphaned-container leak behind a longer
     # grace window.
     ("mcp_lifecycle", "container_cleanup_timeout_seconds"),
+    # S3b (OI-132): the containment resource bounds of the sandbox a repository's own code runs in - the
+    # mcp_lifecycle precedent above. Static class = SECURITY_AUTHORITY (a skipped value override fails CLOSED); a
+    # positive value at most the packaged ceiling is REPOSITORY_SAFE through value_gated_field_classification().
+    ("autonomy", "sandbox_cpu_seconds"), ("autonomy", "sandbox_memory_mb"),
+    ("autonomy", "acquisition_cpu_seconds"), ("autonomy", "acquisition_memory_mb"),
+    ("autonomy", "shell_command_timeout_seconds"), ("autonomy", "run_verification_timeout_seconds"),
 })
 
 # NOTE: there is currently no AppConfig field for an "LSP executable path" -
@@ -355,11 +361,36 @@ _VALUE_GATED_FIELDS: Dict[FieldPath, Any] = {
 }
 
 
+# S3b (OI-132): containment resource bounds of the sandbox a repository's own code runs in, mapped to their packaged
+# ceiling (the AutonomyConfig default; default_config.yaml does not set them - both pinned by
+# tests/test_s3b_resource_bound_value_gating.py). A repository may TIGHTEN a bound (a positive int at most the ceiling
+# grants nothing); a raise needs the human authority path, like every mcp_lifecycle.* bound. Exactly a positive int:
+# -1 is RLIM_INFINITY to setrlimit on Linux (a raise disguised as a lower number), 0 is not a bound, and a bool, string
+# or float (which pydantic would coerce) is not judged - all fail closed to SECURITY_AUTHORITY.
+#   sandbox_cpu_seconds / sandbox_memory_mb: target / generated code execution (RLIMIT_CPU, RLIMIT_AS or JVM bounds,
+#     OCI --memory); acquisition_*: dependency acquisition; shell_command_timeout_seconds: ShellTool wall clock;
+#     run_verification_timeout_seconds: the Runtime Verification Gate's wall clock (sibling audit: the same class as
+#     the shell timeout - the OCI backend honours cpu_seconds only as a rate cap, so the wall clock IS its time bound).
+_VALUE_BOUNDED_FIELDS: Dict[FieldPath, int] = {
+    ("autonomy", "sandbox_cpu_seconds"): 240,
+    ("autonomy", "sandbox_memory_mb"): 4096,
+    ("autonomy", "acquisition_cpu_seconds"): 300,
+    ("autonomy", "acquisition_memory_mb"): 2048,
+    ("autonomy", "shell_command_timeout_seconds"): 300,
+    ("autonomy", "run_verification_timeout_seconds"): 90,
+}
+
+
 def value_gated_field_classification(top_key: Optional[str], leaf_key: str, value: Any) -> Optional[FieldClassification]:
     """REPOSITORY_SAFE for a value-gated field set to exactly its restricting value (the bool ``False``, not a string
-    or a number that would coerce to it), SECURITY_AUTHORITY for any other value, None for a field that is not
-    value-gated (its static classification applies)."""
+    or a number that would coerce to it) and for a value-bounded field set to a positive int at most its packaged
+    ceiling (S3b), SECURITY_AUTHORITY for any other value, None for a field that is neither (its static classification
+    applies)."""
     key = (top_key, leaf_key)
+    if key in _VALUE_BOUNDED_FIELDS:
+        if type(value) is int and 1 <= value <= _VALUE_BOUNDED_FIELDS[key]:
+            return FieldClassification.REPOSITORY_SAFE
+        return FieldClassification.SECURITY_AUTHORITY
     if key not in _VALUE_GATED_FIELDS:
         return None
     restricting = _VALUE_GATED_FIELDS[key]

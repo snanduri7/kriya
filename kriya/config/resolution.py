@@ -482,6 +482,8 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                     # S3: a value-gated field (self_correction_loop_enabled,
                     # web_lookup_auto_approve) is REPOSITORY_SAFE only at its
                     # restricting value; any enabling value needs authority.
+                    # S3b: a containment resource bound only at a positive
+                    # value at most its packaged ceiling; a raise needs authority.
                     for _top_key, _section in user_data.items():
                         if isinstance(_section, dict):
                             for _leaf_key, _value in _section.items():

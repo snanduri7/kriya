@@ -207,10 +207,8 @@ from kriya.config import authority  # noqa: E402 - module-level after the charac
 
 # Every REPOSITORY_SAFE field, deliberately, with the S3 audit's reason (the owner rule: a field that ENABLES an
 # edit / execution / egress / authority behaviour is not repository-safe at its enabling value). A new safe field
-# fails here until it is argued.
+# fails here until it is argued. S3b (OI-132) removed the six containment resource bounds (value-bounded since).
 AUDITED_REPOSITORY_SAFE = {
-    "autonomy.acquisition_cpu_seconds": "resource bound, enables nothing (asymmetry with mcp_lifecycle.*: ledger)",
-    "autonomy.acquisition_memory_mb": "resource bound, enables nothing (ledger, as above)",
     "autonomy.auto_index_missing_dependency_graph": "index + embedding calls to the already-authorized endpoint; the conventions-Skill write is J1B/OI-120",
     "autonomy.best_of_n_first_attempt": "each candidate goes through run_attempt and its Gap B deferral (TRACED)",
     "autonomy.brownfield_full_regression_baseline_policy": "closed enum over EXISTING tests (VAL-001 G1-R3 argument)",
@@ -221,11 +219,7 @@ AUDITED_REPOSITORY_SAFE = {
     "autonomy.generation_time_budget_seconds": "time budget",
     "autonomy.max_consecutive_no_progress_attempts": "stop rule",
     "autonomy.run_verification_enabled": "default True: a repository can only restrict",
-    "autonomy.run_verification_timeout_seconds": "time bound",
-    "autonomy.sandbox_cpu_seconds": "resource bound (ledger, as above)",
-    "autonomy.sandbox_memory_mb": "resource bound (ledger, as above)",
     "autonomy.self_correction_loop_max_turns": "bound; matters only once enabling the loop is authorized",
-    "autonomy.shell_command_timeout_seconds": "time bound (ledger, as above)",
     "autonomy.spec_compliance_enabled": "a model review; edits/executes nothing",
     "autonomy.web_lookup_enabled": "search.base_url is SECURITY_AUTHORITY and each query is confirmed by a person",
     "embedding.model": "model choice", "engineering_triage.enabled": "classification only",
