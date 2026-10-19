@@ -3228,6 +3228,33 @@ of the stored row and the history pages redact the goal texts; `kriya traces` re
 stored row stays raw (digests bind the exact bytes; whether raw credentials may be RETAINED in stored evidence is OI-134,
 not decided here). The launch review reads each command whole (`redact_value(argv)`), so `--token x` is not offered.
 
+### S2c - redaction residuals, one endpoint rule, the two raw-content surfaces (2026-10-20, OI-144, OI-145, OI-146)
+
+Same owner, three more shapes (OI-144 (1)-(3)): a compound ALL-CAPS name without separators is secret-bearing when it
+ENDS in a long secret word (closed `_COMPOUND_SUFFIXES`: PASSWORD, PASSPHRASE, SECRET, TOKEN, CREDENTIAL(S), APIKEY,
+ACCESSKEY, PRIVATEKEY, SECRETKEY; suffix only, never infix; PWD/PASSWD left out because `OLDPWD`/`NOPASSWD` are not
+secrets; the cost - `NOTOKEN=` hidden - is pinned); the `_SHAPED_SECRETS` table grows by issuer-documented fixed-prefix
+formats (OpenAI project/service/admin and Anthropic `sk-...-`, Slack `xox?-`, GitLab `glpat-`, `npm_`, Stripe, Google
+`AIza`, Hugging Face `hf_`), closed and tripwire-tested; percent-encoding no longer hides a secret from detection: an
+escape of a NAME character joins the name and the name is unquoted for the word test only, an escape of a delimiter
+never joins a name (so `token%3Dabc%3Dxyz` keeps its pair) and a name may start right after one, and the userinfo of a
+percent-encoded URL (`scheme%3A%2F%2F...%40`) is hidden; output bytes are never decoded. The ledger's example
+`https://h/%75ser:pw@x` is NOT userinfo (the `@` follows the authority's `/`), consistent with the decoded form.
+OI-144 (4), positional secrets with no name or flag grammar, is an open owner question (command-grammar-aware argv
+redaction vs this documented limit): pinned strict-xfail, behaviour unchanged.
+OI-145: `safe_endpoint` (scheme, host, port, path; no userinfo, query or fragment) moved to the owner; `kriya.client`'s
+name was already the application's function (MEASURED: the same object), the real copy was the skill-source display,
+which now calls the owner with its own `unparseable-url` wording; no re-export remains. `endpoint_identity` stays apart.
+OI-146 (owner decision, INTENTIONAL_CONTRACT, strict scope): the change-review DIFF (`change_approval.review` and the
+terminal prompt; reviewed bytes are approved bytes) and the opt-in `evidence.call_content`/`change_content`
+(`content_visibility: on`; off/default WITHHOLDS with a typed refusal) are the only raw-content surfaces. What Kriya
+keeps about a review is identity (candidate digest, per-file digests and counts, decision); the review-diff sidecar under
+`.kriya/control/launches/` is the one raw copy, read only by the review after re-proving its digests. Survey fixes at the
+APPLICATION projection (the OI-131 rule): `launch.status` (a command refused for review because it carries a secret
+is recorded raw as `approval_required` details - the stored copy is S20's), `evidence.records` (free-text envelope
+payload fields; redacted before the page's byte budget is counted), the change review's reason and the terminal prompt's
+reason (one `_terminal_approval` helper now serves `kriya generate` and the approved-proposal execution).
+
 ### S3 - enabling fields need the human authority path (2026-10-19, OI-99, OWNER-RECOVERY-SELF-CORRECTION-REVIEW-001)
 
 Rule: a repository-controlled kriya.yaml cannot enable authority-sensitive behaviour without SEC-009's human authority

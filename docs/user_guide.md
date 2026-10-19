@@ -241,16 +241,35 @@ the desktop app's error messages and the audit records never show a secret. One 
   `Authorization:` header of any kind (`Token`, `Digest`, ...), `Cookie:`/`Set-Cookie:` headers, private-key PEM blocks,
   `name=value` / `name: value` pairs whose name is a secret name (`DB_PASSWORD=...`, `api_key = 'a b'`, `?access_token=`,
   `-Djavax.net.ssl.keyStorePassword=`), command arguments (`--password x`, `--token=x`, `-u user:password` keeps the
-  user), and AWS / `sk-` / GitHub token shapes (S2b).
+  user), and AWS / `sk-` / GitHub token shapes (S2b). S2c adds: environment-style names written as one capitalised word
+  (`PGPASSWORD=`, `GITHUBTOKEN:`, `AWSSECRETACCESSKEY=`; a name that merely ends in a secret word, `NOTOKEN=`, is hidden
+  too), the token formats of OpenAI/Anthropic (`sk-proj-`, `sk-ant-`), Slack (`xoxb-`, ...), GitLab (`glpat-`), npm
+  (`npm_`), Stripe (`sk_live_`, `rk_test_`), Google (`AIza`) and Hugging Face (`hf_`), and percent-encoded forms
+  (`%70assword=`, `api%5Fkey=`, a URL with a user/password inside another URL's parameter, `next=https%3A%2F%2Fu%3Apw%40h`);
+  the encoded bytes are shown as written around `***REDACTED***`, never decoded.
 - **Run history in the desktop app and `kriya traces`** (S2b): a run's detail (the recorded commands and their output,
   every section), its stored plan prompt and its goal are shown through the same rule. Only what is SHOWN is redacted:
   the stored run history keeps the exact bytes Kriya recorded. A launch review is not offered for a command a redaction
-  would change (you would not be reading what runs).
+  would change (you would not be reading what runs). The same rule applies (S2c) to a launch's status in the desktop app,
+  the recorded evidence records (`evidence.records`), the reason text of a change review and the reason line of the
+  terminal approval prompt.
+- **Where Kriya shows recorded content RAW, on purpose (S2c, owner decision OI-146)**: exactly two places. (1) The change
+  you are asked to approve (the desktop app's change review and the terminal approval prompt): you approve the exact
+  bytes, so you see the exact bytes, secrets included. (2) Recorded candidate changes and model requests, ONLY when you
+  set `evidence.attempt_recorder.content_visibility: on` (default `off`: the content is withheld - nothing is shown, not
+  a redacted copy). Neither copies that content into logs, run history, telemetry or other evidence views. The stored
+  review diff (`.kriya/control/launches/<launch>.review-diff-<review>.json`) keeps the exact bytes the review is bound to.
 - Readable on purpose: the host, port and path of a URL, hashes and commit SHAs, e-mail addresses, `git@host:repo`
   remotes, certificate PEM blocks, names that only contain a secret word (`max_tokens`, `--token-file`), Kriya's own
   reason codes (`SOURCE_CHANGED_SINCE_AUTHORIZATION: ...`). The approval record (`kriya authority approve`) never stored
   values; it keeps salted digests. Limit: a secret written WITHOUT quotes that itself contains a space, a quote or one
   of `& ; ,` is hidden only up to that character; quote such values.
+- **Limit: a password passed by POSITION is shown** (S2c, open question OI-144 (4)): `mysql -p<password>`,
+  `sshpass -p <password>`, `docker login -p <password>`, `npm config set //registry/:_authToken <token>` carry no
+  secret-looking name or flag that Kriya recognises, so they are shown as written (in history, logs, errors and a launch's
+  command review). Pass such secrets through an environment variable whose name says it is a secret (`MYSQL_PWD`,
+  `NPM_TOKEN`) or on standard input (`docker login --password-stdin`) instead. Also recorded: `pwd=` / `PWD=` values are hidden (a `pwd` name can be a
+  password), and an IPv6 endpoint is shown without its brackets (`http://::1:11434/v1`).
 
 ### 2.0a-2 Autonomy modes: a closed list (S16a)
 `autonomy.mode` has exactly two values, spelled exactly like this:
