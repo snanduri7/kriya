@@ -203,5 +203,72 @@ name), 0 Protocol classes.
   `RunState` Protocol declaring the attributes each contract reads; closing with the cycle-removal / typed-contract work (P2 or Q1), not
   E14 (Type A).
 
-## Part 3 - test-harness group (OI-34 / OI-43 / OI-45 / OI-53)
-(Filled in by the Part 3 commits; see below.)
+## Part 3 - test-harness group (OI-34 / OI-43 / OI-45 / OI-53), test-only, product semantics untouched
+Committed after Part 1+2 (e56cb26 pins, 157fd3d docs). No production byte, no existing golden byte changed
+(`git diff --diff-filter=M ed397d5 -- tests/golden` empty).
+
+### OI-53 - calendar-dependent golden (2e2ffaa)
+- Original symptom MEASURED at 157fd3d on 2026-10-19: the preservation gate's one failure is
+  `test_sm_kernel_golden[legacy_lessons_staged]` (1,570 passed + 1 failed).
+- Fix in the harness only: `_kernel_golden.golden_test_clock()` gives `kriya.knowledge.schema`'s `date.today()` the day the golden
+  was rendered (`GOLDEN_LESSON_DAY = 2026-10-17`) for the scenario's run; the scenario docstring (part of the golden bytes) unchanged.
+- Proof (MEASURED): the golden passes on 2026-10-19; under two simulated machine calendars (2026-01-02, 2027-12-31) it reproduces the
+  golden byte for byte and the staged fact carries 2026-10-17; NEGATIVE CONTROL with the clock removed: on 2026-01-02 the form differs
+  from the golden (the staged fact carries 2026-01-02) and on 2026-10-17 it equals it - the date is the scenario's only volatile input.
+  Tests: `test_the_lessons_scenario_keeps_its_golden_on_any_calendar_day` x2, `test_without_the_harness_clock_the_lessons_golden_follows_the_calendar` x2.
+
+### OI-34 - a golden that imported a test module; the first-import patch hazard (6c073be)
+- (a) MEASURED before (git-archive sandbox of 2e2ffaa): changing `PRODUCED_SOURCE` in tests/test_lr_r1_p4_verification_only_retry_reproducer.py
+  breaks `enforce_verification_only_failed` (1 failed); deleting that test file breaks it too (1 failed). Fix: the run moved verbatim to
+  `tests/_lr_r1_p4_run.py` (the golden, the reproducer and tests/test_lr_r1_p4_verification_retry_admission.py read it; the reproducer
+  only asserts). AFTER (sandbox of 6c073be): with the reproducer test file deleted the golden passes (1 passed); golden bytes unchanged.
+- (b) The first-import binding hazard, TRACED and MEASURED: importing the three kernel facades loads every KERNEL_OWNER_MODULES entry
+  except `kriya.workflow.enforce_loop` and `kriya.workflow.shadow_mode` (the E12 call-time accessors); they are the only kernel modules a
+  test can import first, mid-run; their module-level bindings (WorkflowControlContext, EngineeringPlan, Subtask, SubtaskResult,
+  VerificationReport) are patched by NO test (patch_sites scan, every recognized form): unreachable under today's suite. Tripwire
+  `tests/architecture/test_harness_import_hazards.py` (3 tests): no harness module imports a `test_*` module; the lazily imported kernel
+  set is exactly those two; no test patches a name either binds at import. Negative controls MEASURED in a sandbox of 6c073be:
+  re-adding the test-module import to the golden scenario fails test 1, an eager `import kriya.workflow.enforce_loop` in the controller
+  fails test 2; test 3 carries a planted three-form patch control.
+
+### OI-43 - build environment identity in run.opened (9ed7533)
+- MEASURED before (git-archive sandbox of 2e2ffaa at another path with a valid local `kriya/_build_info.json`): 43 failed, 15 passed
+  of tests/state_machine/test_sm_kernel_golden.py.
+- Fix in the harness only: every scenario runs inside `_kernel_golden.golden_build_environment()`: build_info's three probes see the
+  recorded identity (`GOLDEN_PYTHON = 3.14.6`, `GOLDEN_KRIYA_VERSION = 0.1.0`, no embedded build -> `build_provenance` unavailable).
+  Pinned as intended test identity (documented in the harness, not in the golden headers, which may not change); production
+  `version_report` unchanged; nothing normalized; install_path keeps HX1's typed canonicalization.
+- Proof (MEASURED): AFTER, the same sandbox setup at another path with the planted build file: 60 passed; a plain fresh git archive
+  of 9ed7533 at another path: test_sm_kernel_golden.py + test_outcome.py 147 passed; another interpreter/version/valid embedded build
+  keeps the golden and records the pinned identity; NEGATIVE CONTROL with the harness environment removed: the machine's identity
+  (3.14.7 / 9.9.9 / embedded) reaches run.opened and the golden breaks.
+
+### OI-45 - tests resolving ./memory in the checkout (030b75c; own bug fixed in ea4118e)
+- MEASURED before (audit probe `sys.addaudithook` on open / sqlite3.connect / os.mkdir under `<root>/memory`, attributed per test,
+  git-archive sandbox of 9ed7533 with NO ./memory at start): the 17 OI-45 files (318 tests, 43 s) created
+  `memory/dependency_graph.db` + `memory/knowledge_cache.db`; over the whole `-m "kernel and state_machine"` gate two MORE files did
+  (tests/test_generation_service.py, tests/test_repair_orchestrator.py - E6/E7 files added after the HX1 audit). 19 files.
+- Fix (harness only): tests/conftest.py `CHECKOUT_MEMORY_RESOLVING_FILES` (19 names) - each of their tests runs from a fresh working
+  directory holding an empty ./memory (monkeypatch.chdir; the relative `paths.memory = ./memory` and every config fingerprint
+  unchanged).
+- MEASURED after (sandbox of 030b75c, no ./memory at start, same probe): the kernel+state_machine gate and the 19 files: **0 accesses
+  by any test, no ./memory created**. Canonical checkout: `memory/` names, sizes and mtimes identical before and after the kernel gate
+  and before and after the adjacent run (listings in the SLICE-PLAN row).
+- OWN BUG (fixed in its own commit ea4118e): 030b75c also added a per-test tripwire (`_no_checkout_memory_access`, snapshot of the
+  root's ./memory). The E13 adjacent run at 030b75c then reported 15 teardown ERRORs (no call-phase failure): 49 more files of that
+  set still open the checkout's ./memory (OI-71, measured by a sandbox audit of the adjacent set) and their sqlite connections create
+  transient `-shm` sidecars that a concurrently running test's snapshot sees under xdist; the listing was nevertheless identical
+  before/after. No tripwire variant is safe until every such file is isolated (in a git-archive sandbox it would fail all of them, an
+  OI-64-class false kill), so it was removed; the 19-file isolation stays. OI-45 is therefore NOT complete beyond its 17 (+2) files:
+  the remaining 49 are OI-71.
+- New finding while measuring (OI-70): in ANY git-archive sandbox, including the untouched base ed397d5,
+  `tests/test_runtime_verification.py::test_engine_runtime_verification_trace` (5 ids) fails: a rendered prompt section's
+  `rendered_bytes/rendered_chars/rendered_sha256` depend on the checkout path length (186 vs 182 bytes). Pre-existing, not touched here;
+  it also means a mutrun campaign selecting that test reports a false kill (the OI-64 class). Also sandbox-only and pre-existing
+  (fails in a git-archive copy of ed397d5, passes in the canonical checkout): tests/test_demo_v2_spring_ignite.py::
+  test_post_check_passes_on_the_reference_and_leaves_the_project_untouched (cause not traced; noted in OI-70).
+- OI-71 (new, MEASURED by the same probe over the E13 adjacent set in a sandbox of 030b75c): 49 more files open/create ./memory in the
+  cwd (largest: tests/test_workflow.py 742 accesses, test_planner_robust_001_repair 57, test_lr_r1_m1_t6_fixes 48, test_prd008a_cross_path
+  45, test_prd020_requirement_lineage 33; full list in OPEN-ITEMS OI-71). In the canonical checkout they read the user's untracked
+  `memory/dependency_graph.db` (102 KB, with content) - the OI-41 hazard; the same set passes in a sandbox with no ./memory, so no outcome
+  dependence is measured today (INFERRED, not CONFIRMED).
