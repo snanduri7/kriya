@@ -652,3 +652,26 @@ def test_every_shipped_tool_declares_its_model_authority_and_only_the_governed_w
         writers = {(name, method) for method, calls in methods.items() if calls}
         assert writers <= FILESYSTEM_WRITERS, (name, writers)
     assert FILESYSTEM_WRITERS <= {(n, m) for n, ms in classes.items() for m, c in ms.items() if c}
+
+
+# The TOOL-002 MCP scenarios of tests/test_tool001_autonomous_tool_execution.py, re-run here UNDER THE REAL
+# human-in-the-loop default (that file now sets its mode to guardrails for its tool-mechanics tests): S1 must neither
+# refuse an operator-approved MCP call nor let an unapproved / drifted one through in human-in-the-loop.
+TOOL002_SCENARIOS_IN_HITL = (
+    "test_scenario_d_mcp_unapproved_autonomous_subtask_denied_zero_calls",
+    "test_scenario_e_mcp_approved_autonomous_subtask_exactly_one_call",
+    "test_scenario_drift_schema_change_invalidates_approval_zero_calls",
+    "test_dash_y_cannot_reach_or_manufacture_mcp_approval",
+)
+
+
+@pytest.mark.parametrize("scenario", TOOL002_SCENARIOS_IN_HITL)
+def test_the_tool002_mcp_scenarios_hold_in_human_in_the_loop(tmp_path, monkeypatch, scenario):
+    import test_tool001_autonomous_tool_execution as tool001
+
+    from kriya.config.config import AppConfig
+
+    assert AppConfig().autonomy.mode == HITL
+    monkeypatch.setenv("KRIYA_AUTHORITY_HOME", str(tmp_path / "_authority_home"))
+    monkeypatch.setenv("KRIYA_MCP_APPROVAL_HOME", str(tmp_path / "_mcp_approval_home"))
+    getattr(tool001, scenario)(tmp_path)  # the scenario body itself, without that module's mode fixture
