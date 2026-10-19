@@ -3247,6 +3247,20 @@ owner-recovery path, exactly as the three attempt-level micro-loops already are.
 operator-approved loop in `guardrails`/other modes (the same as the attempt-level loops). Every REPOSITORY_SAFE field
 was audited and is pinned with its reason in `tests/test_s3_config_authority_enabling_fields.py`.
 
+### S3b - containment resource bounds: lower freely, raise with authority (2026-10-19, OI-132)
+
+`autonomy.sandbox_cpu_seconds`, `sandbox_memory_mb`, `acquisition_cpu_seconds`, `acquisition_memory_mb`,
+`shell_command_timeout_seconds` and (sibling audit) `run_verification_timeout_seconds` bound the sandbox a repository's
+own code runs in - the `mcp_lifecycle.*` precedent, where every bound is SECURITY_AUTHORITY. They were REPOSITORY_SAFE,
+so a repository's kriya.yaml could raise them (x100 loaded with nothing pending, and so did `-1`, which `setrlimit` reads
+as RLIM_INFINITY on Linux). They are now VALUE-BOUNDED with the S3 mechanism: `value_gated_field_classification()`
+answers REPOSITORY_SAFE only for exactly a positive `int` at most the packaged ceiling (`_VALUE_BOUNDED_FIELDS`: the
+AutonomyConfig default, which `default_config.yaml` does not override; both pinned), SECURITY_AUTHORITY otherwise (a
+raise, 0, a negative, a bool, string or float that pydantic would coerce); the static table lists them as
+SECURITY_AUTHORITY so a skipped override fails closed. Outcome: the existing `ConfigAuthorityError` until `kriya
+authority approve` or a trust file covers the value (an approval is bound to the value: a further raise needs a new
+one). Migration: 8,969 YAML files under `~/kriya-*` scanned, 103 set one of these bounds, none above its ceiling.
+
 ### S5 - unsupported platforms are refused at entry (2026-10-19, OI-101, PLAT-WINDOWS-ENTRY-REFUSAL)
 
 The decision belongs to the OS-mechanism owner, `kriya/platform/services.py`: `PlatformServices.entry_refusal()` (the

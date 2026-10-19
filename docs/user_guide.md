@@ -112,7 +112,12 @@ autonomy:
   risk_threshold_lines: 500                # Pause for review if change size exceeds this many lines
   sandbox_execution: true                  # Restrict env vars + resource-limit quality-gate/shell subprocess execution
   run_verification_enabled: true           # After compile/test gates pass, actually run the app and LLM-grade its output
-  run_verification_timeout_seconds: 90     # Kill the run if it hangs past this many seconds
+  run_verification_timeout_seconds: 90     # Kill the run if it hangs past this many seconds. A repository's
+                                            # kriya.yaml may LOWER this and the other containment bounds
+                                            # (sandbox_cpu_seconds 240, sandbox_memory_mb 4096,
+                                            # acquisition_cpu_seconds 300, acquisition_memory_mb 2048,
+                                            # shell_command_timeout_seconds 300); a higher value (or 0, a
+                                            # negative or a non-integer) needs `kriya authority approve` (S3b).
   spec_compliance_enabled: true            # After every other gate passes, an LLM checks whether the goal's
                                             # LITERALLY named requirements (an exact field/method/class name, type,
                                             # or constant) actually appear in the generated code - catches a
