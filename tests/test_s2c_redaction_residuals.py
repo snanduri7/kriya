@@ -463,7 +463,6 @@ def test_there_is_one_endpoint_display_rule():
 
 # --------------------------------------------------------------------------- survey: projections the S2b table missed
 
-@FLIP
 def test_the_launch_status_the_gui_receives_hides_a_recorded_secret(tmp_path):
     """MEASURED (S2c channels): a runtime command carrying `--token x` is NOT offered for review (S2b), and the CLI callback
     then records it as `approval_required` details - raw - in the launch record; launch.status served that record as is.
@@ -496,7 +495,6 @@ def test_the_launch_status_the_gui_receives_hides_a_recorded_secret(tmp_path):
     assert S not in encode_response(envelope)
 
 
-@FLIP
 def test_the_evidence_records_the_gui_receives_hide_a_secret_in_a_record_payload():
     """MEASURED: a record's envelope payload is content-free by design, but a free-text field (tool.execution ``error``)
     can quote a credential; evidence.records served it raw. Redacted at the APPLICATION page (before the byte budget is
@@ -520,7 +518,6 @@ def test_the_evidence_records_the_gui_receives_hide_a_secret_in_a_record_payload
     assert S not in encode_response(envelope)
 
 
-@FLIP
 def test_the_change_review_reason_is_redacted_while_its_diff_stays_raw(tmp_path, monkeypatch):
     """Strict scope of OI-146: the DIFF is the raw surface; the review's reason (policy note + the automated review, model
     text) is not approval bytes (not in the candidate digest) and goes through the owner like every other display text."""
@@ -535,7 +532,6 @@ def test_the_change_review_reason_is_redacted_while_its_diff_stays_raw(tmp_path,
     assert data["policy_note"] == "Human-in-the-loop review policy" and f"DB_PASSWORD={S}1" in json.dumps(data)
 
 
-@FLIP
 def test_the_terminal_approval_prompt_redacts_its_reason_not_its_diff(monkeypatch, capsys):
     import click
 

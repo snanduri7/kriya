@@ -38,6 +38,7 @@ from kriya.control.persistence import UnreadableRunRecordError, load_launch_reco
 from kriya.control.recovery import STATUS_CLEAN, STATUS_RUN_ACTIVE, assess_recovery
 from kriya.control.run_ownership import probe_run_lock
 from kriya.core.state_paths import StateDirectoryError, resolve_state_directory, trace_db_path
+from kriya.foundation.redaction import redact_value
 
 logger = logging.getLogger(__name__)
 
@@ -144,11 +145,15 @@ def build_preflight(workspace: str, cockpit_state_directory: Optional[str], *, r
 
 
 def _launch_view(record: Dict[str, Any]) -> Dict[str, Any]:
+    """The launch record as SHOWN: through the one redaction owner (S2c survey, the OI-131 rule). A command a runtime review
+    refused because it carries a secret is recorded in ``approval_required`` as the CLI callback received it; the record
+    on disk keeps those bytes (raw retention is S20's, OI-134), the view never does. A pending runtime review's commands
+    are secret-free by construction (launch_approval.build_pending_runtime), so the view leaves them byte-identical."""
     keys = ("launch_id", "workspace", "requested_at", "goal", "options", "phase", "run", "ended", "history", "approval_required", "declined_decisions", "pending_approval", "approval_history")
     view = {key: record.get(key) for key in keys}
     process = record.get("process")
     view["process"] = {"pid": process.get("pid")} if isinstance(process, dict) else None
-    return view
+    return redact_value(view)
 
 
 def _run_record_view(workspace: str, run_id: str) -> Dict[str, Any]:

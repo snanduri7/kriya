@@ -41,6 +41,7 @@ from kriya.application.services import (
 from kriya.context.model import RequestContext
 from kriya.context.workspace_identity import workspace_identity
 from kriya.control.persistence import UnreadableRunRecordError, load_launch_record, load_launch_review_diff
+from kriya.foundation.redaction import redact_text
 from kriya.policy.approval import (
     KIND_RUNTIME,
     WORKING_DIRECTORY_KIND,
@@ -170,7 +171,10 @@ class ReviewService:
                 raise ApplicationRefusal(REVIEW_DIFF_UNAVAILABLE, "a file of the proposed change cannot be displayed as a diff, so the change is not offered for approval", reason="unrenderable")
             budget -= used
             files.append({"path": item["filepath"], "diff_sha256": _sha(item["content"]), **view})
-        reason = str(entry.get("reason") or "")
+        # OI-146 (owner decision 2026-10-20, strict scope): the DIFF above is the raw surface - reviewed bytes are approved
+        # bytes, never redacted. The reason (policy note + the automated review, model text) is not in the candidate digest
+        # and is shown through the one redaction owner like every other display text.
+        reason = redact_text(str(entry.get("reason") or ""))
         policy_note, review_summary = split_reason(reason)
         data = {
             "launch_id": launch_id, "review_id": review_id, "status": str(entry.get("status")), "candidate_digest": digest, "verified": True,

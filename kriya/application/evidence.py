@@ -33,6 +33,7 @@ from kriya.core.attempt_evidence import model as evidence_model
 from kriya.core.attempt_evidence import reader
 from kriya.core.state_paths import resolve_state_directory
 from kriya.foundation.ids import RUN_ID_RULE, is_valid_run_id
+from kriya.foundation.redaction import redact_value
 
 if TYPE_CHECKING:  # annotation only: the snapshot reader is imported when a manifest names a snapshot
     from kriya.control.history import Snapshot
@@ -216,7 +217,10 @@ def _matches(record: Dict[str, Any], filters: Dict[str, Any]) -> bool:
 
 def _page(chain: List[Dict[str, Any]], filters: Dict[str, Any], limit: int, first_seq: int, max_bytes: int) -> Tuple[List[Dict[str, Any]], bool, bool]:
     """(records served, stopped-by-byte-budget, more matching records follow) from the verified chain. ``chain[i]["seq"] == i + 1``
-    holds for a verified chain, so the start is a slice, not a scan. The first record is always served, whatever its size."""
+    holds for a verified chain, so the start is a slice, not a scan. The first record is always served, whatever its size.
+    A served record is a display copy through the one redaction owner (S2c survey, the OI-131 rule: an envelope payload is
+    content-free by design, but a free-text field such as ``tool.execution`` ``error`` can quote a credential), redacted
+    BEFORE its size is counted; the stored chain and its digests keep their bytes, content stays behind content_visibility."""
     ranges = reader.explicit_phase_ranges(chain)
     page: List[Dict[str, Any]] = []
     used = 0
@@ -225,7 +229,7 @@ def _page(chain: List[Dict[str, Any]], filters: Dict[str, Any], limit: int, firs
             continue
         if len(page) == limit:
             return page, False, True
-        served = {**record, "phase_provenance": reader.phase_provenance(record, ranges)}
+        served = redact_value({**record, "phase_provenance": reader.phase_provenance(record, ranges)})
         cost = len(json.dumps(served, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
         if page and used + cost > max_bytes:
             return page, True, True
