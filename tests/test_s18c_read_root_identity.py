@@ -32,9 +32,8 @@ from kriya.workflow.workflow_types import SubtaskStatus
 
 GUARDRAILS = "guardrails"
 CANDIDATE_VIEW_UNAVAILABLE = "TOOL_CANDIDATE_VIEW_UNAVAILABLE"  # a literal: the constant does not exist before S18c
-# Characterization: the group A after-pins fail on the unfixed bytes (MEASURED on eb58aa6: 21 failed - COMPLETED with the
-# enclosing repository's answer, FAILED untyped for blame, or the S18b no-root code); the correction removes this mark.
-GROUP_A_AFTER = pytest.mark.xfail(strict=True, reason="S18c group A (OI-148): fixed by the git identity correction")
+# The group A after-pins below (refused as not its own repository) failed on the unfixed bytes (MEASURED on eb58aa6:
+# 21 failed - COMPLETED with the enclosing repository's answer, FAILED untyped for blame, or the S18b no-root code).
 
 
 def _core():
@@ -253,7 +252,6 @@ def _refused_as_not_its_own_repository(result):
     assert "TOOL_WORKSPACE_ROOT_UNAVAILABLE" not in (result.error or "")
 
 
-@GROUP_A_AFTER
 @pytest.mark.parametrize("in_place", [False, True], ids=["one-root", "in-place"])
 @pytest.mark.parametrize("sub", list(GIT_COMMANDS))
 def test_a_nested_plain_folder_never_answers_for_the_enclosing_repository(three_state, sub, in_place):
@@ -264,7 +262,6 @@ def test_a_nested_plain_folder_never_answers_for_the_enclosing_repository(three_
     _refused_as_not_its_own_repository(planned_git(sub, (s.plain, s.plain) if in_place else (s.plain,)))
 
 
-@GROUP_A_AFTER
 @pytest.mark.parametrize("sub", list(GIT_COMMANDS))
 def test_a_nested_plain_folder_with_its_snapshot_candidate_is_refused_for_every_read(three_state, sub):
     """Two roots (the nested plain folder + its scoped snapshot): the owner-side log/branch/blame answered for the
@@ -273,7 +270,6 @@ def test_a_nested_plain_folder_with_its_snapshot_candidate_is_refused_for_every_
     _refused_as_not_its_own_repository(planned_git(sub, (s.plain, s.snapshot)))
 
 
-@GROUP_A_AFTER
 @pytest.mark.parametrize("sub", list(GIT_COMMANDS))
 def test_a_subfolder_of_a_repository_is_not_that_repository(three_state, sub):
     """The monorepo-subdirectory case on the owner side: a root that is a folder INSIDE a repository is refused (no
@@ -282,7 +278,6 @@ def test_a_subfolder_of_a_repository_is_not_that_repository(three_state, sub):
     _refused_as_not_its_own_repository(planned_git(sub, (os.path.join(s.owner, "pkg"),)))
 
 
-@GROUP_A_AFTER
 def test_without_roots_a_nested_process_folder_is_refused(three_state, monkeypatch):
     """Fail-closed choice for the no-roots case (unreachable from enforce, which always supplies roots): the process
     folder must itself be a repository top level, exactly like a supplied root."""

@@ -472,7 +472,7 @@ def test_a_planned_log_branch_or_blame_reads_the_owner_repository(tmp_path, sub)
 @pytest.mark.parametrize("sub", list(GIT_COMMANDS))
 def test_one_root_means_the_owner_is_the_candidate(tmp_path, sub, in_place):
     """With a single root, or a candidate that IS the owner folder (an in-place run), the owner folder is what the run
-    changes: every read uses it, with no candidate-view check."""
+    changes: every read uses it, with no base-revision check (S18c: it must still be its own repository top level)."""
     owner, _candidate = _diverged(tmp_path)
     result = _planned_git(sub, (owner, owner) if in_place else (owner,), **_args(sub))
     assert result.status == SubtaskStatus.COMPLETED, result.error
@@ -489,7 +489,8 @@ def test_a_candidate_with_no_base_revision_refuses_status_and_diff_typed(tmp_pat
     assert _git(candidate, "diff") == "" and "OUTSIDE_THE_WORKSPACE_SECRET" in _git(owner, "diff")
     result = _planned_git(sub, (owner, candidate))
     assert result.status == SubtaskStatus.NEEDS_REVIEW
-    assert result.reason_codes == ("TOOL_WORKSPACE_ROOT_UNAVAILABLE",)
+    # S18c (OI-148, owner pin): one cause, its own code; TOOL_WORKSPACE_ROOT_UNAVAILABLE means "no root supplied"
+    assert result.reason_codes == ("TOOL_CANDIDATE_VIEW_UNAVAILABLE",)
     assert result.tool_output is None
 
 
@@ -505,7 +506,8 @@ def test_a_candidate_folder_that_is_not_its_own_repository_is_refused(tmp_path, 
     assert _git(str(plain), "rev-parse", "--show-toplevel").strip() == os.path.realpath(owner)
     result = _planned_git(sub, (owner, str(plain)))
     assert result.status == SubtaskStatus.NEEDS_REVIEW
-    assert result.reason_codes == ("TOOL_WORKSPACE_ROOT_UNAVAILABLE",)
+    # S18c (OI-148, owner pin): one cause, its own code; TOOL_WORKSPACE_ROOT_UNAVAILABLE means "no root supplied"
+    assert result.reason_codes == ("TOOL_CANDIDATE_VIEW_UNAVAILABLE",)
 
 
 def test_a_planned_diff_after_a_model_subtask_shows_the_change_the_run_commits(tmp_path, monkeypatch):

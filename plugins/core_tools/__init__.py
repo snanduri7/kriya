@@ -29,8 +29,8 @@ from kriya.tools.containment import (
 )
 from kriya.tools.process import ProcessController
 from kriya.tools.tool import (
+    TOOL_CANDIDATE_VIEW_UNAVAILABLE,
     TOOL_OPERATOR_ONLY,
-    TOOL_WORKSPACE_ROOT_UNAVAILABLE,
     BaseTool,
     ModelInvocationRefused,
     ModelToolInvocation,
@@ -481,17 +481,20 @@ class GitTool(BaseTool):
     def authorize_model_invocation(self, args: GitArgs, invocation: ModelToolInvocation) -> GitArgs:
         """S1: a planned commit writes repository metadata in the owner folder, outside Kriya's commit service:
         model-directed write authority never reaches .git (PLAT-039), in every mode and whatever the policy mode.
-        Reads (status/diff/log/branch) are unchanged; blame's file is a model-requested read."""
+        blame's file is a model-requested read. S18c (OI-148): every planned read - status/diff/log/branch/blame, with
+        two roots, one root, in place or none - then runs only where its root IS a repository's top level
+        (_require_own_repository_view); path authorization answers first."""
         sub = args.subcommand.lower()
         if sub in self._MUTATING_SUBCOMMANDS:
             git_dir = os.path.join(invocation.roots[0], ".git") if invocation.roots else ".git"
             raise PolicyDeniedError(request=ActionRequest(action_type=ActionType.GIT_WRITE, command=("git", sub)),
                                     result=trusted_control_path_denial(git_dir))
         if sub == "blame" and args.file_path:
-            return args.model_copy(update={"file_path": _authorized_read(invocation, args.file_path)})
+            args = args.model_copy(update={"file_path": _authorized_read(invocation, args.file_path)})
         root = self._planned_read_root(sub, invocation)
-        if invocation.roots and os.path.realpath(root) != os.path.realpath(invocation.roots[0]):
-            self._require_own_repository_view(root)  # a separate candidate must be a view of the run's own changes
+        # S18b: a SEPARATE candidate must also have a base revision, or its status/diff is not the run's change.
+        separate = bool(invocation.roots) and os.path.realpath(root) != os.path.realpath(invocation.roots[0])
+        self._require_own_repository_view(root, sub, base_revision=separate)
         return args
 
     @classmethod
@@ -505,30 +508,35 @@ class GitTool(BaseTool):
             return invocation.roots[1]
         return invocation.roots[0]
 
-    def _require_own_repository_view(self, root: str) -> None:
-        """S18b (OI-140): a status/diff of a candidate ``root`` (separate from the owner workspace) is candidate truth
-        only when ``root`` is itself a repository's top level with a base revision. Otherwise git describes something
-        else - a scoped snapshot candidate (a workspace nested in an enclosing repository) has no commits, so its diff
-        is empty and its status lists every file as untracked whatever the run changed, and a folder that is not a
-        repository root reports the ENCLOSING repository - so the read is refused, typed, before git runs (never a
-        substitute view such as the owner folder). With one root (or the candidate IS the owner folder, an in-place
-        run) the owner folder is what the run changes and is read as before."""
+    def _require_own_repository_view(self, root: str, sub: str, *, base_revision: bool) -> None:
+        """S18c (OI-148): the explicit Kriya root is authoritative. git describes the repository it DISCOVERS from its
+        working folder, walking upward, so a planned read in ``root`` describes ``root`` only when
+        `git rev-parse --show-toplevel` is ``root`` itself (realpaths). A folder nested inside another repository (a
+        workspace in a monorepo subfolder, or any subfolder of a repository) is not its own repository: git would
+        answer for the ENCLOSING repository (MEASURED: its status listed ../outside.txt, its log the enclosing
+        history), so the read is refused, typed, before git runs - never an upward walk, never a substitute root, no
+        pathspec confinement. ``base_revision`` (S18b, a SEPARATE candidate's status/diff): it must also have a commit
+        (`HEAD^{commit}`); the scoped snapshot of a nested workspace has none (empty diff, everything untracked)."""
+        command = ["git", "rev-parse", "--show-toplevel", *(("HEAD^{commit}",) if base_revision else ())]
         profile = ContainmentProfile(trust_class=TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE, workspace_path=root)
         try:
             probe = ProcessController().run(
-                ["git", "rev-parse", "--show-toplevel", "HEAD^{commit}"], cwd=root,
-                timeout=self._GIT_COMMAND_TIMEOUT_SECONDS, containment_profile=profile,
+                command, cwd=root, timeout=self._GIT_COMMAND_TIMEOUT_SECONDS, containment_profile=profile,
                 containment_backend=resolve_containment_backend("none"),
             )
             lines = probe.stdout.splitlines() if probe.returncode == 0 and not probe.timeout else []
         except Exception as error:  # an unreadable repository is no view at all
             logger.warning("GitTool: the repository view of %r could not be read (%s)", root, error)
             lines = []
-        if len(lines) != 2 or os.path.realpath(lines[0]) != os.path.realpath(root):
+        # one line per argument: the top level, then (with base_revision) the commit
+        if len(lines) != (2 if base_revision else 1) or os.path.realpath(lines[0]) != os.path.realpath(root):
+            what = ("a repository top level with a base revision of its own, so it cannot describe what the run "
+                    "changed" if base_revision else "the top level of its own git repository, so git would describe "
+                    "an enclosing repository (or none) instead")
             raise ModelInvocationRefused(
-                TOOL_WORKSPACE_ROOT_UNAVAILABLE,
-                f"the run's working tree at {root!r} is not a repository with a base revision of its own, so a planned "
-                "git status/diff cannot describe what the run changed. Nothing was run.",
+                TOOL_CANDIDATE_VIEW_UNAVAILABLE,
+                f"a planned git {sub} needs the repository at {root!r} itself, and that folder is not {what}. "
+                "Nothing was run.",
             )
 
     async def _run(self, args: GitArgs) -> Any:

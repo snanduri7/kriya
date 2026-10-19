@@ -126,9 +126,13 @@ TOOL_WORKSPACE_ROOT_UNAVAILABLE = "TOOL_WORKSPACE_ROOT_UNAVAILABLE"
 # TOOL_MODEL_AUTHORITY_UNDECLARED: one concept, one code.
 TOOL_OPERATOR_ONLY = "TOOL_OPERATOR_ONLY"
 TOOL_GOVERNANCE_INVALID = "TOOL_GOVERNANCE_INVALID"
+# S18c (OI-148): a root WAS supplied (or the process folder is used) but it is not the repository view the planned read
+# needs: not its own repository top level (git would answer for an enclosing repository), or a separate candidate with no
+# base revision. Distinct from TOOL_WORKSPACE_ROOT_UNAVAILABLE, which keeps meaning "no workspace root was supplied".
+TOOL_CANDIDATE_VIEW_UNAVAILABLE = "TOOL_CANDIDATE_VIEW_UNAVAILABLE"
 MODEL_TOOL_REFUSAL_REASON_CODES = frozenset({
     TOOL_NOT_GOVERNED, TOOL_MODEL_AUTHORITY_UNDECLARED, TOOL_MUTATION_REVIEW_UNAVAILABLE, TOOL_WORKSPACE_ROOT_UNAVAILABLE,
-    TOOL_OPERATOR_ONLY, TOOL_GOVERNANCE_INVALID,
+    TOOL_OPERATOR_ONLY, TOOL_GOVERNANCE_INVALID, TOOL_CANDIDATE_VIEW_UNAVAILABLE,
 })
 
 

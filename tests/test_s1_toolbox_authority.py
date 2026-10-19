@@ -584,7 +584,9 @@ def test_the_toolbox_refusal_codes_are_a_closed_table():
         "TOOL_NOT_GOVERNED", "TOOL_MODEL_AUTHORITY_UNDECLARED", "TOOL_MUTATION_REVIEW_UNAVAILABLE",
         "TOOL_WORKSPACE_ROOT_UNAVAILABLE",
         # S18 (OI-127): the one governance resolution's two new refusals
-        "TOOL_OPERATOR_ONLY", "TOOL_GOVERNANCE_INVALID"}
+        "TOOL_OPERATOR_ONLY", "TOOL_GOVERNANCE_INVALID",
+        # S18c (OI-148, owner-approved): a supplied root that is not the repository view a planned git read needs
+        "TOOL_CANDIDATE_VIEW_UNAVAILABLE"}
     with pytest.raises(ValueError):
         ModelInvocationRefused("TOOL_SOMETHING_NEW", "x")
     # every ModelInvocationRefused(...) in Kriya names a code from the table (by constant)
