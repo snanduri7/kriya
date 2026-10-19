@@ -429,6 +429,20 @@ def parse_autonomy_mode(value: Any) -> str:
     raise AutonomyModeError(AUTONOMY_MODE_UNKNOWN)
 
 
+def autonomy_mode_of(config: Any) -> str:
+    """OI-135 (S18): the ONE fail-closed reader every autonomy-mode consumer calls. Re-checks the value at read time with
+    parse_autonomy_mode, so an instance that bypassed validation (pydantic ``model_construct``, ``object.__setattr__``)
+    is a typed AutonomyModeError, never a permissive reading. A configuration with no readable mode is AUTONOMY_MODE_NULL."""
+    return parse_autonomy_mode(getattr(getattr(config, "autonomy", None), "mode", None))
+
+
+def is_human_in_the_loop(mode: Any) -> bool:
+    """OI-135 (S18): whether ``mode`` (a value read from a configuration) is human-in-the-loop - after re-checking it with
+    parse_autonomy_mode, so anything outside the closed vocabulary raises AutonomyModeError instead of silently taking a
+    consumer's non-human-in-the-loop (permissive) branch. Every consumer compares through this, never against the literal."""
+    return parse_autonomy_mode(mode) == AUTONOMY_MODE_HUMAN_IN_THE_LOOP
+
+
 def agent_role_field_classification(role_value: object) -> FieldClassification:
     """agent_llms.<role> (planner/architect/reviewer/run_verifier/skill_gap/
     spec_compliance) is one atomic merge unit (AgentModelConfig) - the merge

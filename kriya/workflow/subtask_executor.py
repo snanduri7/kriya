@@ -59,7 +59,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, List, Optional, Sequence, Tuple
 
-from kriya.config.authority import AutonomyModeError
+from kriya.config.authority import AutonomyModeError, autonomy_mode_of, is_human_in_the_loop
 from kriya.core.registry import ComponentRegistryError
 from kriya.policy.errors import PolicyDeniedError
 from kriya.tools.tool import (
@@ -181,8 +181,12 @@ def plannable_tool_names(registry: Any, config: Any) -> PlannedToolNames:
 
 
 def _config_autonomy_mode(config: Any) -> Optional[str]:
-    mode = getattr(getattr(config, "autonomy", None), "mode", None)
-    return mode if isinstance(mode, str) else None
+    """OI-135: None when there is no configuration or no mode in it (the strictest reading downstream); otherwise the
+    mode through the one fail-closed reader - a mode outside the vocabulary (null included) raises AutonomyModeError."""
+    autonomy = getattr(config, "autonomy", None)
+    if autonomy is None or not hasattr(autonomy, "mode"):
+        return None  # no readable mode at all: the strictest reading downstream (never a permissive one)
+    return autonomy_mode_of(config)
 
 
 def _autonomy_mode(kernel: Any) -> Optional[str]:
@@ -193,7 +197,8 @@ def _autonomy_mode(kernel: Any) -> Optional[str]:
 
 def _hitl_blocks_tool_without_confirmation(tool: Any, kernel: Any) -> bool:
     """True when the tool asks for confirmation when an operator runs it and the run is human-in-the-loop (which has no per-run review for a planner-chosen tool call)."""
-    return bool(getattr(tool, "requires_confirmation", False)) and _autonomy_mode(kernel) == "human-in-the-loop"
+    mode = _autonomy_mode(kernel)
+    return bool(getattr(tool, "requires_confirmation", False)) and mode is not None and is_human_in_the_loop(mode)
 
 
 async def _execute_tool_subtask(subtask: Subtask, kernel: Any, tool_roots: Sequence[str] = ()) -> SubtaskResult:
@@ -208,6 +213,16 @@ async def _execute_tool_subtask(subtask: Subtask, kernel: Any, tool_roots: Seque
             subtask_id=subtask.id, status=SubtaskStatus.NEEDS_REVIEW,
             execution_method=ExecutionMethod.TOOL.value,
             error=f"tool_name {subtask.tool_name!r} not registered",
+        )
+
+    # OI-135 (S18): a malformed mode is a typed stop before anything else, never a permissive reading.
+    try:
+        _autonomy_mode(kernel)
+    except AutonomyModeError as e:
+        logger.warning(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} refused: {e}")
+        return SubtaskResult(
+            subtask_id=subtask.id, status=SubtaskStatus.NEEDS_REVIEW, execution_method=ExecutionMethod.TOOL.value,
+            error=str(e), reason_codes=(e.reason_code,),
         )
 
     # Review of the runtime-approval stack (2026-10-15), B3: a tool that asks to be confirmed when an operator runs it (`kriya tools execute` honours `requires_confirmation`) must not run unasked

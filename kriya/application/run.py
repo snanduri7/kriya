@@ -29,6 +29,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from kriya.application.evidence import store_summary
 from kriya.application.services import EVIDENCE_STORE_UNREADABLE, LAUNCH_NOT_FOUND, ApplicationRefusal
+from kriya.config.authority import AutonomyModeError, autonomy_mode_of, is_human_in_the_loop
 from kriya.config.service import ConfigService, ResolvedConfiguration
 from kriya.context.model import RequestContext
 from kriya.context.workspace_identity import workspace_identity
@@ -56,8 +57,11 @@ def _interaction(cfg: Any) -> Dict[str, Any]:
     """How a change is approved in a run here, from the RESOLVED configuration (shown, never changed): the autonomy mode is the operator's, the app has no selector."""
     if cfg is None:
         return {"approvals": "unknown", "autonomy_mode": None, "knowledge_policy": KNOWLEDGE_POLICY, "note": INTERACTION_UNKNOWN}
-    mode = str(cfg.autonomy.mode)
-    if mode == "human-in-the-loop":
+    try:
+        mode = autonomy_mode_of(cfg)  # OI-135: the fail-closed reader; a malformed mode is shown as unknown, never as a mode
+    except AutonomyModeError:
+        return {"approvals": "unknown", "autonomy_mode": None, "knowledge_policy": KNOWLEDGE_POLICY, "note": INTERACTION_UNKNOWN}
+    if is_human_in_the_loop(mode):
         return {"approvals": "change_review", "autonomy_mode": mode, "knowledge_policy": KNOWLEDGE_POLICY, "note": INTERACTION_REVIEW}
     return {"approvals": "configured_mode", "autonomy_mode": mode, "knowledge_policy": KNOWLEDGE_POLICY, "note": INTERACTION_NO_REVIEW.format(mode=mode)}
 DISCOVERY = ("Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` "

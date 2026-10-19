@@ -54,6 +54,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
 
+from kriya.config.authority import is_human_in_the_loop
 from kriya.policy.approval import (
     MAX_REVIEW_ROUNDS,
     RuntimeCommandSubject,
@@ -797,7 +798,7 @@ def _runtime_commands_need_approval(deps: RuntimeDeps, ctx: AttemptCtx, state: R
     """A human must approve, in human-in-the-loop mode, every command set that is not the user's own exact words (``commands_authored_in_goal``: judge-generated, inferred, expanded,
     reordered or substituted commands all need review; merely naming a tool in the goal is not authorization; the judge's ``command_source`` label is not trusted), unless the
     exact set that would run now is the one already approved in this run. ExecutionPolicy, the sandbox and containment still apply to every command, authored or approved."""
-    if autonomy_mode != "human-in-the-loop":
+    if not is_human_in_the_loop(autonomy_mode):  # OI-135: the fail-closed reader
         return False
     subject = deps._derive_runtime_command_subject(ctx, judgment, "")
     # A desktop launch (typed approval callback) always asks: the goal text it would be matched against is supplied by the window, so "the user's own words" cannot be trusted there, and the
@@ -1102,7 +1103,7 @@ def _managed_service_blocked_without_approval_subject(deps: RuntimeDeps, state: 
     (MANAGED_SERVICE_APPROVAL_UNSUPPORTED - an unsupported approval semantic, not a human rejection: nothing is asked and the existing classification stops the run without Developer
     retries); when it is NOT required it is recorded as a declined check (``run_verification_declined``) and nothing runs, exactly as an unavailable approval does for a finite command.
     Returns True when the service must not run. Every other autonomy mode keeps its behavior. The single choke point both runtime call sites route through."""
-    if ctx.kernel.config.autonomy.mode != "human-in-the-loop":
+    if not is_human_in_the_loop(ctx.kernel.config.autonomy.mode):  # OI-135: the fail-closed reader
         return False
     message = (
         f"{MANAGED_SERVICE_APPROVAL_UNSUPPORTED}: this goal requires Kriya to start a long-running service to verify it, and this version has no way to ask you to approve "

@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import AUTHORITATIVE_GOAL_SECTION_HEADER, PLANNED_IMPLEMENTATION_SECTION_HEADER
+from kriya.config.authority import is_human_in_the_loop
 from kriya.workflow.edit_safety import StagedFileWrite, content_revision
 from kriya.workflow.file_integrity import file_raw_digest
 from kriya.workflow.file_resolution import IncompleteGenerationError
@@ -645,7 +646,7 @@ async def _classify_and_escalate_contract_changes(
     autonomy = ctx.kernel.config.autonomy
     if not escalatable or autonomy.contract_change_escalation != "human":
         return violations, classifications, None
-    if autonomy.mode != "human-in-the-loop" or not ctx.approval_callback:
+    if not is_human_in_the_loop(autonomy.mode) or not ctx.approval_callback:  # OI-135: the fail-closed reader
         deps.logger.warning("Contract change needs human authorization but none can be asked - blocked: %s",
                        [c.id for c in escalatable])
         return violations, classifications, CONTRACT_ESCALATION_UNAVAILABLE

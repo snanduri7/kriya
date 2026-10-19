@@ -30,6 +30,7 @@ import re
 import uuid
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from kriya.config.authority import is_human_in_the_loop
 from kriya.control.run_coordinator import annotate_run
 from kriya.repository.atomic_write import atomic_write_file
 from kriya.repository.commit import CandidateMaterializationError
@@ -200,8 +201,10 @@ async def approval_gate(
     # Every non-empty change is approved exactly as before; the runtime-command approvals (attempt.py, approval_callback([], ...)) are a different subject and are
     # not touched here.
     has_source_mutation = bool(state.all_files_written)
+    # OI-135 (S18): the mode through the one fail-closed reader (a value outside the vocabulary raises, typed).
+    human_in_the_loop = is_human_in_the_loop(autonomy_cfg.mode)
     need_human_approval = has_source_mutation and (
-        autonomy_cfg.mode == "human-in-the-loop" or
+        human_in_the_loop or
         sensitive_match or
         total_diff_lines > autonomy_cfg.risk_threshold_lines or
         process_profile_requires_review
@@ -209,7 +212,7 @@ async def approval_gate(
 
     # PRD-033: why approval was required, for the approval.decision event.
     approval_triggers = [name for name, fired in (
-        ("human_in_the_loop", autonomy_cfg.mode == "human-in-the-loop"),
+        ("human_in_the_loop", human_in_the_loop),
         ("sensitive_path", bool(sensitive_match)),
         ("diff_size", total_diff_lines > autonomy_cfg.risk_threshold_lines),
         ("process_profile", process_profile_requires_review),

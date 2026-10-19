@@ -264,7 +264,9 @@ def defer_execution_until_source_review(enabled: bool, autonomy_mode: str, wrote
     with NO approver: the review can then never succeed, so the run ends at the approval gate (approval_required) having executed nothing. Never deferred: other autonomy modes
     (their approval policy - sensitive paths, size, process profile - is unchanged and out of this decision's scope) and an attempt that wrote no source (a verification-only unit
     has no source review)."""
-    return bool(enabled and autonomy_mode == "human-in-the-loop" and wrote_source)
+    from kriya.config.authority import is_human_in_the_loop  # OI-135: the fail-closed reader (same AUTHORITY module)
+
+    return bool(enabled and is_human_in_the_loop(autonomy_mode) and wrote_source)
 
 
 def stale(guard: Optional[Callable[[], bool]]) -> bool:

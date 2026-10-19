@@ -7,7 +7,7 @@ from typing import Any, Dict, Mapping, Optional, Tuple, Type
 
 from pydantic import BaseModel, ValidationError
 
-from kriya.config.authority import parse_autonomy_mode
+from kriya.config.authority import is_human_in_the_loop, parse_autonomy_mode
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +157,8 @@ class ModelToolInvocation:
 
     @property
     def reviews_every_change(self) -> bool:
-        return self.autonomy_mode is None or self.autonomy_mode == HUMAN_IN_THE_LOOP
+        # OI-135: unknown (None) is the strictest reading; any other value goes through the fail-closed reader.
+        return self.autonomy_mode is None or is_human_in_the_loop(self.autonomy_mode)
 
     def resolve(self, path: str) -> str:
         """The absolute path the tool's own effect would use (``os.path.abspath`` of it against the owner workspace:

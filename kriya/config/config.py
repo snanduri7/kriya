@@ -388,6 +388,11 @@ def _autonomy_mode(value: Any) -> str:
 class AutonomyConfig(BaseModel):
     # S16a (OI-130): a closed vocabulary (kriya.config.authority.AUTONOMY_MODES), validated at construction, on
     # assignment and on a model_copy update; a malformed value is AutonomyModeError, never a mode.
+    # OI-135 (S18): an instance handed to AppConfig(autonomy=...) is re-validated too (a model_construct'd section is
+    # refused, typed). MEASURED cost: +5.7 us per AppConfig(autonomy=<instance>) (40.2 -> 45.9 us); AppConfig() and
+    # model_copy unchanged. Reads are re-checked by kriya.config.authority.autonomy_mode_of / is_human_in_the_loop.
+    model_config = ConfigDict(revalidate_instances="always")
+
     mode: str = Field(default="human-in-the-loop")
 
     @field_validator("mode", mode="before")

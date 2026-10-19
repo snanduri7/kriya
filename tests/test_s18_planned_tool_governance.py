@@ -626,3 +626,11 @@ def test_a_registry_listing_failure_in_a_real_enforce_run_admits_no_tool(tmp_pat
     assert legacy["reason_codes"][0] == "UNREGISTERED_TOOL_NAME", legacy
     assert [r for r in observed.result.subtask_results if r.subtask_id == "s0"] == []
     search_runs.assert_not_called()
+
+
+def test_an_unvalidated_section_handed_to_appconfig_is_revalidated():
+    """OI-135 part 1: AppConfig(autonomy=<model_construct'd section>) used to keep the invalid mode (instances were not
+    revalidated); AutonomyConfig now revalidates instances (MEASURED cost +5.7 us per such construction)."""
+    with pytest.raises(AutonomyModeError):
+        AppConfig(autonomy=AutonomyConfig.model_construct(mode="autonomous"))
+    assert AppConfig(autonomy=AutonomyConfig(mode=GUARDRAILS)).autonomy.mode == GUARDRAILS
