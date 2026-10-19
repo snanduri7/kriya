@@ -283,3 +283,250 @@ def test_without_roots_a_nested_process_folder_is_refused(three_state, monkeypat
     folder must itself be a repository top level, exactly like a supplied root."""
     monkeypatch.chdir(three_state.plain)
     _refused_as_not_its_own_repository(planned_git("status", ()))
+
+
+# =====================================================================================================================
+# Group B (OI-147): planned filesystem / search / ast read roots
+# =====================================================================================================================
+#
+# The intended repository identity of a planned read comes from the plan's own declared data flow, never from a new
+# per-step flag: a step that declares (transitively, through depends_on) that it runs after a MODEL step reasons about
+# the run's CANDIDATE as that step left it; a step with no MODEL step among its dependencies is a BASELINE read and keeps
+# the owner workspace (the immutable pre-run state). Execution position cannot be the signal: the executor's topological
+# order breaks ties by id, so the Planner's worked example B ("Find the existing callers of load_settings BEFORE it
+# changes", depends_on []) runs after the MODEL steps (MEASURED below) and must still describe the baseline.
+
+GROUP_B_AFTER = pytest.mark.xfail(strict=True, reason="S18c group B (OI-147): fixed by the read-root correction")
+
+READS = {
+    "read": ("filesystem", {"operation": "read", "path": "app.py"}),
+    "list": ("filesystem", {"operation": "list", "path": "."}),
+    "search": ("search", {"pattern": "ORIGIN", "path": "."}),
+    "ast": ("ast", {"file_path": "app.py"}),
+}
+
+
+def _identity(read, output, origin):
+    """The answer names ``origin`` ('OWNER', 'CANDIDATE', 'SNAPSHOT', ...) for this read."""
+    if read == "list":
+        names = set(output)
+        marker = {"OWNER": "owner_untracked_after.py", "CANDIDATE": "candidate_only.py"}.get(origin)
+        return marker in names if marker else None
+    if read == "ast":
+        return f"def {origin.lower()}_fn" in output
+    if read == "search":
+        return f"app.py:1: ORIGIN = 'ORIGIN_{origin}'" in output.splitlines()
+    return f"ORIGIN = 'ORIGIN_{origin}'" in output
+
+
+def test_the_read_states_really_differ(three_state):
+    s = three_state
+    texts = [Path(root, "app.py").read_text() for root in (s.owner, s.candidate, s.plain, s.snapshot)]
+    assert len(set(texts)) == 4
+    owner_names, candidate_names = set(os.listdir(s.owner)), set(os.listdir(s.candidate))
+    assert "owner_untracked_after.py" in owner_names - candidate_names
+    assert "candidate_only.py" in candidate_names - owner_names
+
+
+# -- behaviour that must not change (pass before and after) -----------------------------------------------------------
+
+@pytest.mark.parametrize("read", list(READS))
+def test_a_read_with_no_model_step_among_its_dependencies_reads_the_owner_baseline(three_state, read):
+    s = three_state
+    tool, arguments = READS[read]
+    result = planned(tool, arguments, (s.owner, s.candidate))
+    assert result.status == SubtaskStatus.COMPLETED, result.error
+    assert _identity(read, result.tool_output, "OWNER") and not _identity(read, result.tool_output, "CANDIDATE")
+
+
+def test_the_example_b_shape_runs_after_the_change_and_still_reads_the_baseline(three_state):
+    """MEASURED order: a depends_on [] search runs AFTER both MODEL steps (sorted-id tie-break); it is the Planner's
+    baseline example ("before it changes") and keeps describing the owner baseline."""
+    from kriya.workflow.subtask_checkpoint import topological_subtask_order
+
+    s = three_state
+    m2 = Subtask(id="m2", description="change more", execution_method=ExecutionMethod.MODEL, depends_on=["m1"],
+                 planned_files=[{"path": "app.py", "action": "modify"}])
+    step = Subtask(id="t9", description="callers before the change", execution_method=ExecutionMethod.TOOL,
+                   tool_name="search", tool_arguments={"pattern": "ORIGIN"})
+    model = Subtask(id="m1", description="change app.py", execution_method=ExecutionMethod.MODEL,
+                    planned_files=[{"path": "app.py", "action": "modify"}])
+    assert topological_subtask_order(EngineeringPlan(plan_id="p", kind=ChangeKind.TASK,
+                                                     subtasks=[model, m2, step])) == ["m1", "m2", "t9"]
+    result = planned("search", {"pattern": "ORIGIN"}, (s.owner, s.candidate), extra_subtasks=[m2])
+    assert result.status == SubtaskStatus.COMPLETED, result.error
+    assert _identity("search", result.tool_output, "OWNER") and not _identity("search", result.tool_output, "CANDIDATE")
+
+
+@pytest.mark.parametrize("read", list(READS))
+def test_a_read_after_only_tool_steps_reads_the_owner_baseline(three_state, read):
+    """Reads change nothing: depending only on another TOOL step is still a baseline read."""
+    s = three_state
+    tool, arguments = READS[read]
+    first = Subtask(id="t0", description="an earlier read", execution_method=ExecutionMethod.TOOL,
+                    tool_name="search", tool_arguments={"pattern": "x"})
+    result = planned(tool, arguments, (s.owner, s.candidate), depends_on=["t0"], extra_subtasks=[first])
+    assert result.status == SubtaskStatus.COMPLETED, result.error
+    assert _identity(read, result.tool_output, "OWNER")
+
+
+@pytest.mark.parametrize("in_place", [False, True], ids=["one-root", "in-place"])
+@pytest.mark.parametrize("read", list(READS))
+def test_with_one_root_a_read_after_a_model_step_reads_that_root(three_state, read, in_place):
+    """With one root (or the candidate IS the owner folder) that folder is what the run changes."""
+    s = three_state
+    tool, arguments = READS[read]
+    result = planned(tool, arguments, (s.owner, s.owner) if in_place else (s.owner,), depends_on=["m1"])
+    assert result.status == SubtaskStatus.COMPLETED, result.error
+    assert _identity(read, result.tool_output, "OWNER")
+
+
+@pytest.mark.parametrize("sub", list(GIT_COMMANDS))
+def test_git_keeps_its_per_subject_roots_whatever_the_dependencies(three_state, sub):
+    """S18b's accepted per-subject classification is not reopened: status/diff = candidate, log/branch/blame = owner
+    (blame's file is resolved in the owner repository it runs in), with or without a MODEL dependency."""
+    s = three_state
+    expected = git(s.candidate if sub in CANDIDATE_TRUTH else s.owner, *GIT_COMMANDS[sub])
+    for depends_on in ((), ("m1",)):
+        result = planned("git", {"subcommand": sub, **GIT_ARGS.get(sub, {})}, (s.owner, s.candidate),
+                         depends_on=depends_on)
+        assert result.status == SubtaskStatus.COMPLETED, (depends_on, result.error)
+        assert result.tool_output == expected, depends_on
+
+
+@pytest.mark.parametrize("depends_on", [(), ("m1",)], ids=["baseline", "after-model"])
+@pytest.mark.parametrize("path, code", [("out_link.txt", "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS"),
+                                        ("deploy.pem", "SENSITIVE_PATH_DENIED")])
+def test_authorization_holds_on_whichever_root_is_read(three_state, depends_on, path, code):
+    """A symlink leading out of the root and a credential-shaped file are refused in both views (the link and the
+    file exist in owner AND candidate)."""
+    s = three_state
+    result = planned("filesystem", {"operation": "read", "path": path}, (s.owner, s.candidate), depends_on=depends_on)
+    assert result.status == SubtaskStatus.FAILED and result.reason_codes == (code,), result
+    assert result.tool_output is None
+
+
+@pytest.mark.parametrize("depends_on", [(), ("m1",)], ids=["baseline", "after-model"])
+def test_an_absolute_in_root_symlink_resolves_to_the_owner_bytes_in_both_views(three_state, depends_on):
+    """Characterized snapshot difference: git stores an absolute symlink's target text, so the candidate's abs_link.py
+    points at the OWNER's app.py - what every process in the candidate (the gates included) reads too."""
+    s = three_state
+    assert os.path.realpath(os.path.join(s.candidate, "abs_link.py")) == os.path.join(s.owner, "app.py")
+    result = planned("filesystem", {"operation": "read", "path": "abs_link.py"}, (s.owner, s.candidate),
+                     depends_on=depends_on)
+    assert result.status == SubtaskStatus.COMPLETED and "ORIGIN_OWNER" in result.tool_output
+
+
+@pytest.mark.parametrize("depends_on", [(), ("m1",)], ids=["baseline", "after-model"])
+def test_files_present_in_both_views_read_the_same(three_state, depends_on):
+    """Untracked files that existed when the candidate was created are synced into it; a file the enclosing
+    repository ignores is copied into the scoped snapshot."""
+    s = three_state
+    for roots, path, marker in (((s.owner, s.candidate), "untracked_before.py", "UNTRACKED_BEFORE"),
+                                ((s.plain, s.snapshot), "x.log", "ENCLOSING_IGNORED_LOG")):
+        result = planned("filesystem", {"operation": "read", "path": path}, roots, depends_on=depends_on)
+        assert result.status == SubtaskStatus.COMPLETED and marker in result.tool_output, (path, result.error)
+
+
+# -- the defect: a read after a MODEL step reported the owner (strict-xfail on the unfixed bytes) ---------------------
+
+@GROUP_B_AFTER
+@pytest.mark.parametrize("read", list(READS))
+def test_a_read_after_a_model_step_reads_the_candidate(three_state, read):
+    """OI-147 (MEASURED on eb58aa6): a planned read declared after the MODEL step reported the OWNER's app.py."""
+    s = three_state
+    tool, arguments = READS[read]
+    result = planned(tool, arguments, (s.owner, s.candidate), depends_on=["m1"])
+    assert result.status == SubtaskStatus.COMPLETED, result.error
+    assert _identity(read, result.tool_output, "CANDIDATE") and not _identity(read, result.tool_output, "OWNER")
+
+
+@GROUP_B_AFTER
+@pytest.mark.parametrize("read", list(READS))
+def test_a_read_after_a_model_step_through_another_step_reads_the_candidate(three_state, read):
+    """Transitive: t9 depends on a read t0 that depends on the MODEL step m1."""
+    s = three_state
+    tool, arguments = READS[read]
+    between = Subtask(id="t0", description="an intermediate read", execution_method=ExecutionMethod.TOOL,
+                      tool_name="search", tool_arguments={"pattern": "x"}, depends_on=["m1"])
+    result = planned(tool, arguments, (s.owner, s.candidate), depends_on=["t0"], extra_subtasks=[between])
+    assert result.status == SubtaskStatus.COMPLETED, result.error
+    assert _identity(read, result.tool_output, "CANDIDATE")
+
+
+@GROUP_B_AFTER
+def test_a_file_the_model_step_created_is_read_from_the_candidate(three_state):
+    """MEASURED on eb58aa6: FAILED ("does not exist") - the read looked in the owner folder."""
+    s = three_state
+    result = planned("filesystem", {"operation": "read", "path": "candidate_only.py"}, (s.owner, s.candidate),
+                     depends_on=["m1"])
+    assert result.status == SubtaskStatus.COMPLETED and result.tool_output == "CANDIDATE_ONLY = 1\n", result.error
+
+
+@GROUP_B_AFTER
+@pytest.mark.parametrize("path", ["ignored.env", "doomed.py", "owner_untracked_after.py"])
+def test_files_absent_from_the_candidate_are_absent_for_a_read_after_a_model_step(three_state, path):
+    """Characterized snapshot differences: the candidate holds no git-ignored file (ignored.env), not a file the run
+    deleted (doomed.py) and not an untracked file created after the candidate (owner_untracked_after.py). A read
+    reasoning about the candidate reports it absent - what the run's gates see - instead of the owner's copy."""
+    s = three_state
+    assert os.path.exists(os.path.join(s.owner, path)) and not os.path.exists(os.path.join(s.candidate, path))
+    result = planned("filesystem", {"operation": "read", "path": path}, (s.owner, s.candidate), depends_on=["m1"])
+    assert result.status == SubtaskStatus.FAILED and "does not exist" in result.error, result
+    assert result.tool_output is None
+
+
+@GROUP_B_AFTER
+def test_a_relative_symlink_in_the_candidate_resolves_inside_the_candidate(three_state):
+    s = three_state
+    result = planned("filesystem", {"operation": "read", "path": "rel_link.py"}, (s.owner, s.candidate),
+                     depends_on=["m1"])
+    assert result.status == SubtaskStatus.COMPLETED and "ORIGIN_CANDIDATE" in result.tool_output
+
+
+@GROUP_B_AFTER
+def test_the_scoped_snapshot_is_read_after_a_model_step_with_its_kriya_markers(three_state):
+    """A nested plain workspace's candidate is the scoped snapshot: a read after the MODEL step describes it - and,
+    characterized, its listing carries the two Kriya-made entries the owner folder lacks (.git, the sentinel)."""
+    s = three_state
+    read = planned("filesystem", {"operation": "read", "path": "app.py"}, (s.plain, s.snapshot), depends_on=["m1"])
+    assert read.status == SubtaskStatus.COMPLETED and "ORIGIN_SNAPSHOT" in read.tool_output
+    listing = planned("filesystem", {"operation": "list", "path": "."}, (s.plain, s.snapshot), depends_on=["m1"])
+    assert {".git", ".kriya-scoped-snapshot"} <= set(listing.tool_output)
+    assert not {".git", ".kriya-scoped-snapshot"} & set(os.listdir(s.plain))
+
+
+@GROUP_B_AFTER
+def test_an_enforce_run_reads_the_candidate_after_its_model_step_and_the_baseline_for_example_b(tmp_path, monkeypatch):
+    """The real scenario, end to end (production enforce loop): s1 caches the service in the candidate; s3 reads the
+    service file (depends_on s1) and must show the cached version the run commits; s4 is the example-B shape (search
+    for lru_cache, depends_on []), which runs after s1-s3 and must still describe the baseline (no match)."""
+    import _t6_harness
+    import test_enforce_verified_no_change as shape
+    from _chaos_harness import chaos_config
+
+    def plan():
+        document = shape._plan(shape.TOOL_CRITERION).model_dump()
+        common = {"relevant_global_invariant_ids": ["gi1"], "acceptance_criteria_ids": [], "verification": []}
+        document["subtasks"].append({"id": "s3", "description": "show the cached service", "execution_method": "tool",
+                                     "tool_name": "filesystem",
+                                     "tool_arguments": {"operation": "read", "path": shape.SERVICE},
+                                     "depends_on": ["s1"], "provides": ["service_shown"], **common})
+        document["subtasks"].append({"id": "s4", "description": "find lru_cache uses before the change",
+                                     "execution_method": "tool", "tool_name": "search",
+                                     "tool_arguments": {"pattern": "lru_cache"}, "depends_on": [],
+                                     "provides": ["baseline_uses"], **common})
+        return EngineeringPlan.model_validate(document)
+
+    core = _core()
+    cfg = chaos_config()
+    cfg.autonomy.mode = GUARDRAILS
+    observed = _t6_harness.enforce_run(tmp_path, monkeypatch, _t6_harness.shop_responder, _t6_harness.shop_files(),
+                                       shape.GOAL, [plan], cfg=cfg,
+                                       tools={"filesystem": core.FilesystemTool(), "search": core.SearchTool()})
+    assert observed.result.legacy_result["status"] == "success", observed.result.legacy_result
+    steps = {r.subtask_id: r for r in observed.result.subtask_results}
+    assert [r.subtask_id for r in observed.result.subtask_results][-1] == "s4"
+    assert steps["s3"].status == SubtaskStatus.COMPLETED and steps["s3"].tool_output == shape.SERVICE_SRC
+    assert steps["s4"].status == SubtaskStatus.COMPLETED and steps["s4"].tool_output == "No matches found."
+    assert (observed.workspace / shape.SERVICE).read_text() == shape.SERVICE_SRC  # the change s3 described
