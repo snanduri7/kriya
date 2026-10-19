@@ -7792,6 +7792,9 @@ _CODES_WITH_TARGETED_GUIDANCE = {
     # targeted_correction block (build_structured_plan_repair_prompt) -
     # same corrective action (point at the real tool catalog).
     "UNREGISTERED_TOOL_NAME",
+    # S18 (OI-127): a registered tool the planned-tool governance resolution does not admit; targeted guidance in
+    # build_structured_plan_repair_prompt names the plannable tools and the model-subtask / verification[] alternative.
+    "PLANNED_TOOL_NOT_PLANNABLE",
     "MODEL_SUBTASK_MISSING_PLANNED_FILES",
     "STRUCTURED_PLAN_SCHEMA_INVALID",
     "SUBTASK_REQUIREMENT_UNPROVIDED",

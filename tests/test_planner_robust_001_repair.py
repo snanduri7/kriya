@@ -31,6 +31,7 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
+from _plugin_test_support import load_core_tools_module
 
 from kriya.agents.agent import PlannerAgent
 from kriya.config import AppConfig
@@ -211,10 +212,10 @@ async def test_a_valid_model_subtask_with_nested_verification_tool_is_accepted(t
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
-        _tool_subtask_missing_toolname_plan(subtask_tool_name="validate_refactor"),
+        _tool_subtask_missing_toolname_plan(subtask_tool_name="search"),
         "Design: modify pkg/module.py", "OK",
     ])
-    kernel.registry.register("tool", "validate_refactor", object())
+    kernel.registry.register("tool", "search", load_core_tools_module().SearchTool())  # S18: a plannable shipped tool
     we = WorkflowEngine(kernel, llm)
     planner_run = _wrap_planner_run(we)
 
@@ -229,10 +230,10 @@ async def test_b_valid_registered_top_level_tool_subtask_accepted_by_legacy_path
     cfg = AppConfig()
     cfg.paths.skills = str(tmp_path / "skills")
     kernel = Kernel(config=cfg)
-    kernel.registry.register("tool", "validate_refactor", object())
+    kernel.registry.register("tool", "search", load_core_tools_module().SearchTool())  # S18: a plannable shipped tool
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
-        _tool_subtask_missing_toolname_plan(subtask_tool_name="validate_refactor"),
+        _tool_subtask_missing_toolname_plan(subtask_tool_name="search"),
         "Design: modify pkg/module.py", "OK",
     ])
     we = WorkflowEngine(kernel, llm)
@@ -367,13 +368,16 @@ async def test_f_invented_tool_name_on_repaired_response_is_rejected_not_silentl
 
 @pytest.mark.asyncio
 async def test_g_runtime_registered_tool_automatically_advertised_and_accepted(tmp_path):
+    """A plannable tool registered at runtime is advertised and accepted with zero workflow-source changes. S18 (OI-127,
+    orchestrator decision 2026-10-19): the vehicle is a shipped READ_ONLY tool registered under its own name; an
+    arbitrary new plugin tool is no longer advertised (test_g2 below) - the removed capability."""
     cfg = AppConfig()
     cfg.paths.skills = str(tmp_path / "skills")
     kernel = Kernel(config=cfg)
-    kernel.registry.register("tool", "widget_tool", object())  # simulates a new plugin registering
+    kernel.registry.register("tool", "search", load_core_tools_module().SearchTool())
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
-        _tool_subtask_missing_toolname_plan(subtask_tool_name="widget_tool"),
+        _tool_subtask_missing_toolname_plan(subtask_tool_name="search"),
         "Design: modify pkg/module.py", "OK",
     ])
     we = WorkflowEngine(kernel, llm)
@@ -382,8 +386,29 @@ async def test_g_runtime_registered_tool_automatically_advertised_and_accepted(t
 
     planner_prompt = llm.complete.call_args_list[0][0][1]
     assert "Registered Kriya tools available" in planner_prompt
-    assert "widget_tool" in planner_prompt
+    assert "search" in planner_prompt.split("Registered Kriya tools available", 1)[1]
     assert res.get("status") != "planner_output_schema_invalid"
+
+
+@pytest.mark.asyncio
+async def test_g2_an_undeclared_plugin_tool_is_registered_but_never_advertised_or_accepted(tmp_path):
+    """S18: a new plugin registering a tool that has no honoured planned-call declaration (here not even a BaseTool) is
+    never shown to the Planner and a plan naming it is refused (PLANNED_TOOL_NOT_PLANNABLE, then bounded repair)."""
+    cfg = AppConfig()
+    cfg.paths.skills = str(tmp_path / "skills")
+    kernel = Kernel(config=cfg)
+    kernel.registry.register("tool", "widget_tool", object())  # simulates a new plugin registering
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=_tool_subtask_missing_toolname_plan(subtask_tool_name="widget_tool"))
+    we = WorkflowEngine(kernel, llm)
+    planner_run = _wrap_planner_run(we)
+
+    res = await we.run_generation_workflow(goal="Fix the bug", workspace_path=str(tmp_path))
+
+    planner_prompt = llm.complete.call_args_list[0][0][1]
+    assert "widget_tool" not in planner_prompt
+    assert res["status"] == "planner_output_schema_invalid"
+    assert planner_run.call_count == 1 + STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS
 
 
 @pytest.mark.asyncio
@@ -450,10 +475,10 @@ async def test_j_valid_first_plan_incurs_zero_repair_calls(tmp_path):
     cfg = AppConfig()
     cfg.paths.skills = str(tmp_path / "skills")
     kernel = Kernel(config=cfg)
-    kernel.registry.register("tool", "validate_refactor", object())
+    kernel.registry.register("tool", "search", load_core_tools_module().SearchTool())  # S18: a plannable shipped tool
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
-        _tool_subtask_missing_toolname_plan(subtask_tool_name="validate_refactor"),
+        _tool_subtask_missing_toolname_plan(subtask_tool_name="search"),
         "Design: modify pkg/module.py", "OK",
     ])
     we = WorkflowEngine(kernel, llm)
@@ -475,11 +500,11 @@ async def test_k_g1_shape_recovers_via_bounded_repair_and_proceeds_to_architect(
     cfg = AppConfig()
     cfg.paths.skills = str(tmp_path / "skills")
     kernel = Kernel(config=cfg)
-    kernel.registry.register("tool", "validate_refactor", object())
+    kernel.registry.register("tool", "search", load_core_tools_module().SearchTool())  # S18: a plannable shipped tool
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
         _tool_subtask_missing_toolname_plan(subtask_tool_name=None),
-        _tool_subtask_missing_toolname_plan(subtask_tool_name="validate_refactor"),
+        _tool_subtask_missing_toolname_plan(subtask_tool_name="search"),
         "Design: modify pkg/module.py", "OK",
     ])
     we = WorkflowEngine(kernel, llm)
@@ -527,12 +552,12 @@ async def test_l_repaired_response_introducing_unauthorized_path_is_rejected_not
     cfg = AppConfig()
     cfg.paths.skills = str(tmp_path / "skills")
     kernel = Kernel(config=cfg)
-    kernel.registry.register("tool", "validate_refactor", object())
+    kernel.registry.register("tool", "search", load_core_tools_module().SearchTool())  # S18: a plannable shipped tool
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
         _tool_subtask_missing_toolname_plan(subtask_tool_name=None, planned_file_path="pkg/module.py"),
         _tool_subtask_missing_toolname_plan(
-            subtask_tool_name="validate_refactor", planned_file_path="/abs/workspace/pkg/module.py",
+            subtask_tool_name="search", planned_file_path="/abs/workspace/pkg/module.py",
         ),
     ])
     we = WorkflowEngine(kernel, llm)
@@ -549,12 +574,12 @@ async def test_l_repaired_response_widening_via_path_traversal_is_also_rejected(
     cfg = AppConfig()
     cfg.paths.skills = str(tmp_path / "skills")
     kernel = Kernel(config=cfg)
-    kernel.registry.register("tool", "validate_refactor", object())
+    kernel.registry.register("tool", "search", load_core_tools_module().SearchTool())  # S18: a plannable shipped tool
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
         _tool_subtask_missing_toolname_plan(subtask_tool_name=None, planned_file_path="pkg/module.py"),
         _tool_subtask_missing_toolname_plan(
-            subtask_tool_name="validate_refactor", planned_file_path="../../etc/passwd",
+            subtask_tool_name="search", planned_file_path="../../etc/passwd",
         ),
     ])
     we = WorkflowEngine(kernel, llm)

@@ -32,6 +32,7 @@ import sys
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from _planned_tool_seam import admit_planned_test_tool
 from _plugin_test_support import load_core_tools_module
 from _strict_doubles import strict_kernel
 from pydantic import BaseModel, ConfigDict
@@ -50,7 +51,7 @@ from kriya.mcp.invocation_approval import (
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import MCPToolIdentity, compute_mcp_schema_digest
-from kriya.tools.tool import BaseTool, ToolExecutionError
+from kriya.tools.tool import TOOL_OPERATOR_ONLY, BaseTool, ToolExecutionError, ToolGovernance
 from kriya.workflow import subtask_executor
 from kriya.workflow import workflow_controller as wc_module
 from kriya.workflow.context_package import build_context_package
@@ -67,6 +68,9 @@ def _tool_mechanics_not_hitl_gate(monkeypatch):
     inside the tools, so the mode itself is what is set). The human-in-the-loop refusals are pinned in
     tests/test_tool_subtask_hitl_confirmation.py and tests/test_s1_toolbox_authority.py."""
     monkeypatch.setattr("kriya.workflow.subtask_executor._autonomy_mode", lambda kernel: "guardrails")
+    # S18: _RecordingTool is a mechanics double, admitted through the test-only seam (tests/_planned_tool_seam.py); which
+    # tools are plannable at all is pinned in tests/test_s18_planned_tool_governance.py.
+    admit_planned_test_tool(monkeypatch, _RecordingTool)
 
 
 class _RecordingArgs(BaseModel):
@@ -83,6 +87,10 @@ class _RecordingTool(BaseTool):
 
     def __init__(self, **calls_kwargs):
         self.calls = AsyncMock(**calls_kwargs)
+
+    @property
+    def planned_governance(self):
+        return ToolGovernance.READ_ONLY
 
     async def _run(self, args):
         return await self.calls(**args.model_dump())
@@ -111,6 +119,19 @@ def _model_subtask(**overrides):
 
 def _plan(*subtasks):
     return EngineeringPlan(plan_id="p1", kind=ChangeKind.TASK, subtasks=list(subtasks))
+
+
+async def _assert_planned_shell_refused(tool, command):
+    """S18 (OI-127, Option B): the PLANNED path to ShellTool is a typed refusal before anything runs, in every mode -
+    nothing executed, the reason recorded, no retry/fallback (one SubtaskResult, NEEDS_REVIEW)."""
+    subtask = _tool_subtask(tool_name="shell", tool_arguments={"command": command})
+    kernel = strict_kernel()
+    kernel.registry.get = MagicMock(return_value=tool)
+    result = await subtask_executor.execute(subtask=subtask, plan=_plan(subtask), context=build_context_package(),
+                                            kernel=kernel)
+    assert result.status == SubtaskStatus.NEEDS_REVIEW and result.reason_codes == (TOOL_OPERATOR_ONLY,), result
+    assert result.tool_output is None
+    return result
 
 
 def _docker_reachable() -> bool:
@@ -262,20 +283,18 @@ def test_tool_arguments_pass_through_unmodified_no_extra_authority_inferred():
 
 @pytest.mark.asyncio
 async def test_scenario_c_policy_denial_zero_side_effect(tmp_path):
+    """S18 re-home: the POL-001 hard invariant (sudo) is proven on the path that can still run a shell command - the
+    operator's own BaseTool.execute() - and the planned path never reaches it (TOOL_OPERATOR_ONLY, nothing ran)."""
     ShellTool = load_core_tools_module().ShellTool
 
     sentinel = tmp_path / "sudo_ran.txt"
-    subtask = _tool_subtask(tool_name="shell", tool_arguments={"command": f"sudo touch {sentinel}"})
-    kernel = strict_kernel()
-    kernel.registry.get = MagicMock(return_value=ShellTool())
+    with pytest.raises(ToolExecutionError) as denied:
+        await ShellTool().execute(command=f"sudo touch {sentinel}")
+    assert isinstance(denied.value.__cause__, PolicyDeniedError)
+    assert denied.value.__cause__.result.reason_code == "COMMAND_SUDO_DENIED"
+    assert not sentinel.exists()
 
-    result = await subtask_executor.execute(
-        subtask=subtask, plan=_plan(subtask), context=build_context_package(), kernel=kernel,
-    )
-
-    assert result.status == SubtaskStatus.FAILED
-    assert "COMMAND_SUDO_DENIED" in result.error
-    assert result.reason_codes == ("COMMAND_SUDO_DENIED",)
+    await _assert_planned_shell_refused(ShellTool(), f"sudo touch {sentinel}")
     assert not sentinel.exists()
 
 
@@ -291,23 +310,21 @@ async def test_policy_exception_fails_closed():
     tool = ShellTool()
     tool._execution_policy = ExecutionPolicy()
 
-    async def _raise(*a, **kw):
-        raise RuntimeError("simulated broken policy engine")
-
-    subtask = _tool_subtask(tool_name="shell", tool_arguments={"command": "echo hi"})
-    kernel = strict_kernel()
-    kernel.registry.get = MagicMock(return_value=tool)
     # enforce_hard_invariants swallows non-PolicyDeniedError exceptions by
     # design (documented "fails open on a broken check only" - unrelated
     # to network/containment authority) - so to prove a genuinely broken
     # downstream stays a real failure, break the actual subprocess spawn
-    # instead, which has no such swallow.
+    # instead, which has no such swallow. S18 re-home: proven on the operator
+    # path (the only path that still runs a shell command); the planned path
+    # is refused before the spawn could even be reached.
+    spawn = AsyncMock(side_effect=RuntimeError("boom"))
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("kriya.tools.process.ProcessController.run_async", AsyncMock(side_effect=RuntimeError("boom")))
-        result = await subtask_executor.execute(
-            subtask=subtask, plan=_plan(subtask), context=build_context_package(), kernel=kernel,
-        )
-    assert result.status == SubtaskStatus.FAILED
+        mp.setattr("kriya.tools.process.ProcessController.run_async", spawn)
+        with pytest.raises(ToolExecutionError):
+            await tool.execute(command="echo hi")
+        assert spawn.await_count == 1
+        await _assert_planned_shell_refused(tool, "echo hi")
+        assert spawn.await_count == 1  # the planned call never reached the spawn
 
 
 # =====================================================================
@@ -498,17 +515,12 @@ def test_scenario_f_mcp_approved_contained_malicious_action_hidden_effects_block
 
 @pytest.mark.asyncio
 async def test_scenario_g_shelltool_ordinary_command_unaffected_when_uncontained():
+    """S18 re-home: the operator path runs an ordinary command unchanged; the planned path is refused."""
     ShellTool = load_core_tools_module().ShellTool
 
-    subtask = _tool_subtask(tool_name="shell", tool_arguments={"command": "echo hi"})
-    kernel = strict_kernel()
-    kernel.registry.get = MagicMock(return_value=ShellTool())  # default AppConfig().autonomy
-
-    result = await subtask_executor.execute(
-        subtask=subtask, plan=_plan(subtask), context=build_context_package(), kernel=kernel,
-    )
-
-    assert result.status == SubtaskStatus.COMPLETED
+    output = await ShellTool().execute(command="echo hi")  # default AppConfig().autonomy
+    assert output["exit_code"] == 0 and output["stdout"].strip() == "hi"
+    await _assert_planned_shell_refused(ShellTool(), "echo hi")
 
 
 @pytest.mark.asyncio
@@ -526,14 +538,10 @@ async def test_scenario_g_shelltool_maven_registry_scoped_when_contained():
     orig = core_tools_module.resolve_containment_backend
     core_tools_module.resolve_containment_backend = lambda name: backend
     try:
-        subtask = _tool_subtask(tool_name="shell", tool_arguments={"command": "mvn clean install"})
-        kernel = strict_kernel()
-        kernel.registry.get = MagicMock(return_value=ShellTool(autonomy_cfg=cfg.autonomy))
-
-        result = await subtask_executor.execute(
-            subtask=subtask, plan=_plan(subtask), context=build_context_package(), kernel=kernel,
-        )
-        assert result.status == SubtaskStatus.COMPLETED
+        # S18 re-home: SEC-005 registry scoping proven on the operator path; the planned path never prepares a profile.
+        await _assert_planned_shell_refused(ShellTool(autonomy_cfg=cfg.autonomy), "mvn clean install")
+        assert backend.prepared_profiles == []
+        await ShellTool(autonomy_cfg=cfg.autonomy).execute(command="mvn clean install")
         profile = backend.prepared_profiles[-1]
         assert profile.network == NetworkAuthority.DEPENDENCY_REGISTRY_ONLY
         assert profile.network_destinations == ("repo.maven.apache.org",)
@@ -555,14 +563,10 @@ async def test_scenario_g_shelltool_unmapped_manager_denied_when_contained():
     orig = core_tools_module.resolve_containment_backend
     core_tools_module.resolve_containment_backend = lambda name: backend
     try:
-        subtask = _tool_subtask(tool_name="shell", tool_arguments={"command": "npm install left-pad"})
-        kernel = strict_kernel()
-        kernel.registry.get = MagicMock(return_value=ShellTool(autonomy_cfg=cfg.autonomy))
-
-        result = await subtask_executor.execute(
-            subtask=subtask, plan=_plan(subtask), context=build_context_package(), kernel=kernel,
-        )
-        assert result.status == SubtaskStatus.COMPLETED  # the no-exec backend: npm never runs on the host
+        # S18 re-home: the unmapped-manager denial proven on the operator path; the planned path prepares nothing.
+        await _assert_planned_shell_refused(ShellTool(autonomy_cfg=cfg.autonomy), "npm install left-pad")
+        assert backend.prepared_profiles == []
+        await ShellTool(autonomy_cfg=cfg.autonomy).execute(command="npm install left-pad")  # the no-exec backend
         profile = backend.prepared_profiles[-1]
         assert profile.network == NetworkAuthority.DENIED
     finally:
@@ -570,9 +574,10 @@ async def test_scenario_g_shelltool_unmapped_manager_denied_when_contained():
 
 
 @pytestmark_docker
-def test_scenario_g_real_pip_through_autonomous_path_authorized_vs_unauthorized():
-    """Real-Docker proof through the autonomous SubtaskExecutor path -
-    reuses SEC-005's own registry-scoped mechanism unchanged."""
+def test_scenario_g_real_pip_through_the_operator_path_authorized_vs_unauthorized():
+    """Real-Docker proof of SEC-005's registry-scoped mechanism, unchanged. S18 (OI-127, Option B): re-homed from the
+    autonomous SubtaskExecutor path (a planned shell step is now TOOL_OPERATOR_ONLY, pinned below and in
+    test_scenario_g_planned_pip_is_refused_before_any_container) to the operator's own BaseTool.execute()."""
     ShellTool = load_core_tools_module().ShellTool
 
     def contained_shell_tool(registry_hosts):
@@ -590,23 +595,27 @@ def test_scenario_g_real_pip_through_autonomous_path_authorized_vs_unauthorized(
 
     async def run_case(hosts, target_host):
         tool = contained_shell_tool(hosts)
-        kernel = strict_kernel()
-        kernel.registry.get = MagicMock(return_value=tool)
-        subtask = _tool_subtask(
-            tool_name="shell",
-            tool_arguments={"command": f"pip3 install --dry-run nonexistent-kriya-x >/dev/null 2>&1 ; {probe.format(host=target_host)}"},
-        )
-        return await subtask_executor.execute(
-            subtask=subtask, plan=_plan(subtask), context=build_context_package(), kernel=kernel,
-        )
+        return await tool.execute(
+            command=f"pip3 install --dry-run nonexistent-kriya-x >/dev/null 2>&1 ; {probe.format(host=target_host)}")
 
     authorized = asyncio.run(run_case(["pypi.org", "files.pythonhosted.org"], "pypi.org"))
-    assert authorized.status == SubtaskStatus.COMPLETED
-    assert "200" in authorized.tool_output["stdout"]
+    assert "200" in authorized["stdout"]
 
     denied = asyncio.run(run_case(["pypi.org", "files.pythonhosted.org"], "example.com"))
-    assert denied.status == SubtaskStatus.COMPLETED  # shell command itself still "succeeds" (prints 403)
-    assert "403" in denied.tool_output["stdout"]
+    assert "403" in denied["stdout"]  # the shell command itself still "succeeds" (prints 403)
+
+
+def test_scenario_g_planned_pip_is_refused_before_any_container(monkeypatch):
+    """S18: the same contained pip command as a PLANNED step never prepares a backend (no container, no network)."""
+    core_tools_module = load_core_tools_module()
+    prepared = []
+    monkeypatch.setattr(core_tools_module, "resolve_containment_backend", lambda name: prepared.append(name))
+    c = AppConfig()
+    c.autonomy.contained_execution_required = True
+    c.autonomy.containment_backend = "oci"
+    asyncio.run(_assert_planned_shell_refused(core_tools_module.ShellTool(autonomy_cfg=c.autonomy),
+                                              "pip3 install --dry-run nonexistent-kriya-x"))
+    assert prepared == []
 
 
 # =====================================================================

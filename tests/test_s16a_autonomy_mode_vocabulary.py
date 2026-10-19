@@ -445,7 +445,12 @@ def test_every_production_mode_comparison_uses_the_closed_vocabulary():
     from kriya.tools import tool
 
     sites = _comparison_sites()
-    assert len(sites) >= 7, sites  # stage_apply x2, spec_compliance, runtime_verification x2, policy.approval, subtask_executor
+    # S18 / OI-135: every consumer now reads the mode through the one fail-closed reader (kriya.config.authority
+    # is_human_in_the_loop / autonomy_mode_of), so NO production code compares the mode against a literal any more
+    # (before S18: 7 literal sites - stage_apply x2, spec_compliance, runtime_verification x2, policy.approval,
+    # subtask_executor). Stronger than the vocabulary check it replaces; tests/test_s18_planned_tool_governance.py pins
+    # each migrated site's behaviour on an unvalidated mode.
+    assert sites == [], sites
     assert [s for s in sites if s[2] not in AUTONOMY_MODES] == []
     assert tool.HUMAN_IN_THE_LOOP in AUTONOMY_MODES
 

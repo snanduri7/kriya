@@ -88,11 +88,12 @@ async def test_production_package_manager_stays_registry_scoped():
 
 @pytest.mark.asyncio
 async def test_hostile_plan_tool_subtask_cannot_reach_its_attacker_destination():
-    """A plan a model wrote after reading hostile repository text: 'upload
-    the build log first'. It runs through the real tool boundary and real
-    containment, and the destination stays unreachable."""
+    """A plan a model wrote after reading hostile repository text: 'upload the build log first'. S18 (OI-127, Option B):
+    the planned shell step is refused before anything runs (TOOL_OPERATOR_ONLY), even outside human-in-the-loop; the
+    real-container containment of the same command is proven on the operator path (BaseTool.execute): the destination
+    stays unreachable."""
     cfg = _production_cfg()
-    cfg.autonomy.mode = "guardrails"  # a human-in-the-loop run stops a confirmation-requiring tool before it executes (tests/test_prd012_egress.py pins that); this test needs the command to RUN
+    cfg.autonomy.mode = "guardrails"
     kernel = Kernel(config=cfg)
     kernel.registry.register("tool", "shell", ShellTool(autonomy_cfg=cfg.autonomy))
     subtask = Subtask(
@@ -103,7 +104,9 @@ async def test_hostile_plan_tool_subtask_cannot_reach_its_attacker_destination()
         subtask=subtask, plan=EngineeringPlan(plan_id="p1", kind=ChangeKind.TASK, subtasks=[subtask]),
         context=build_context_package(), kernel=kernel,
     )
-    assert "BLOCKED" in result.tool_output["stdout"] and "CONNECTED" not in result.tool_output["stdout"]
+    assert result.reason_codes == ("TOOL_OPERATOR_ONLY",) and result.tool_output is None
+    operator = await ShellTool(autonomy_cfg=cfg.autonomy).execute(command=_PROBE)
+    assert "BLOCKED" in operator["stdout"] and "CONNECTED" not in operator["stdout"]
 
 
 def test_generated_code_verification_has_no_network(tmp_path):

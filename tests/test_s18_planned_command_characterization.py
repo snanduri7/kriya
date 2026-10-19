@@ -1,10 +1,9 @@
-"""S18 PHASE 1 (measured preflight) characterization pins: planned (model-authored) command authority, OI-127 / OI-88.
+"""S18 planned (model-authored) command authority, OI-127 / OI-88: the PHASE 1 pins, flipped by the correction.
 
-Characterization is not contract (TEST-MATRIX section 3a). Every test below is written as the behaviour BOTH candidate
-S18 designs require (Option A on the `none` backend refuses, because `none` is not containment; Option B refuses planned
-shell / validate_refactor outright) and is marked strict-xfail: on the unfixed bytes each one FAILS because the planned
-action ran (measured in handover/MODULARIZATION/S18-PREFLIGHT.md, reproducers R01-R11, R40, R80). The S18 correction
-removes the marks. Only `none`-backend shapes live here (no Docker); the OCI measurements are in the preflight document.
+Written at 25997b2 as strict-xfail characterization (each FAILED on the unfixed bytes because the planned action ran;
+measured in handover/MODULARIZATION/S18-PREFLIGHT.md, reproducers R01-R11, R40, R80). The S18 correction (Option B:
+planned shell / validate_refactor are OPERATOR_ONLY; undeclared tools unplannable) removed the marks and tightened each
+assertion to the exact typed refusal. Only `none`-backend shapes live here (no Docker).
 
 The process works in the OWNER folder, as the CLI and the desktop launch do (ShellTool and ValidationTool act on the
 process working directory).
@@ -27,7 +26,7 @@ from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, Subtask
 from kriya.workflow.triage import ChangeKind
 from kriya.workflow.workflow_types import SubtaskStatus
 
-DEFECT = "S18 (OI-127): a planned command outside human-in-the-loop runs in the owner folder, unconfined; measured"
+OPERATOR_ONLY = ("TOOL_OPERATOR_ONLY",)
 
 
 def _git(cwd, *args):
@@ -85,7 +84,6 @@ def _fingerprint(path):
     return path.read_bytes() if path.exists() else None
 
 
-@pytest.mark.xfail(strict=True, reason=DEFECT)
 @pytest.mark.parametrize("label, template, watched", SHELL_SHAPES, ids=[s[0] for s in SHELL_SHAPES])
 def test_a_planned_shell_step_on_the_none_backend_runs_nothing(tmp_path, monkeypatch, label, template, watched):
     """`none` is not containment: a planned shell step outside human-in-the-loop is a typed refusal and changes
@@ -97,10 +95,9 @@ def test_a_planned_shell_step_on_the_none_backend_runs_nothing(tmp_path, monkeyp
     command = template.format(owner=owner, candidate=candidate, outside=outside)
     result = _dispatch(_shell(), "shell", {"command": command}, (str(owner), str(candidate)))
     assert _fingerprint(target) == before, label
-    assert result.status != SubtaskStatus.COMPLETED and result.reason_codes, (label, result)
+    assert result.status == SubtaskStatus.NEEDS_REVIEW and result.reason_codes == OPERATOR_ONLY, (label, result)
 
 
-@pytest.mark.xfail(strict=True, reason=DEFECT)
 def test_a_planned_shell_step_cannot_plant_a_hook_that_kriyas_own_git_then_runs(tmp_path, monkeypatch):
     """[R11] The planned step appends core.fsmonitor to the owner's .git/config (shared by the candidate worktree);
     Kriya's own next host-side git call over the candidate (the file-integrity untracked listing) executes it."""
@@ -110,7 +107,8 @@ def test_a_planned_shell_step_cannot_plant_a_hook_that_kriyas_own_git_then_runs(
     monkeypatch.chdir(owner)
     marker = outside / "FSMONITOR_RAN"
     command = f"printf '[core]\\n\\tfsmonitor = \"touch {marker}; false\"\\n' >> .git/config"
-    _dispatch(_shell(), "shell", {"command": command}, (str(owner), str(candidate)))
+    result = _dispatch(_shell(), "shell", {"command": command}, (str(owner), str(candidate)))
+    assert result.reason_codes == OPERATOR_ONLY, result
     # The plant itself (fails on every git version): the planned step must not reach the shared repository config.
     assert "fsmonitor" not in (owner / ".git" / "config").read_text()
     assert not marker.exists()  # the planted hook has not run yet: only Kriya's own git below can run it
@@ -118,7 +116,6 @@ def test_a_planned_shell_step_cannot_plant_a_hook_that_kriyas_own_git_then_runs(
     assert not marker.exists()
 
 
-@pytest.mark.xfail(strict=True, reason=DEFECT)
 def test_planned_validate_refactor_never_builds_the_owner_folder_with_default_containment(tmp_path, monkeypatch):
     """[R40] ValidationTool builds PolymorphicValidator(".") with a default AutonomyConfig: the OWNER folder, backend
     `none`, whatever the run's containment configuration. Required: refused, or never rooted at the owner folder and
@@ -140,9 +137,11 @@ def test_planned_validate_refactor_never_builds_the_owner_folder_with_default_co
          patch.object(validate.PolymorphicValidator, "run_compile_check", lambda self, files: {"success": True,
                                                                                                "output": ""}), \
          patch.object(validate.PolymorphicValidator, "run_tests", lambda self, *a, **k: {"success": True, "output": ""}):
-        _dispatch(tool, "validate_refactor", {"files": ["src.py"], "run_tests": True}, (str(owner), str(candidate)),
-                  containment_backend="oci", contained_execution_required=True)
-    assert all(root != str(owner) and backend == "oci" and contained for root, backend, contained in seen), seen
+        result = _dispatch(tool, "validate_refactor", {"files": ["src.py"], "run_tests": True},
+                           (str(owner), str(candidate)), containment_backend="oci", contained_execution_required=True)
+    # Option B: refused before any validator exists (the measured defect: one built at the owner folder, backend none).
+    assert result.status == SubtaskStatus.NEEDS_REVIEW and result.reason_codes == OPERATOR_ONLY, result
+    assert seen == []
 
 
 class _UndeclaredArgs(BaseModel):
@@ -172,16 +171,15 @@ class _UndeclaredPluginTool(BaseTool):
         return "ok"
 
 
-@pytest.mark.xfail(strict=True, reason="S18 (OI-127 Q2, owner 2026-10-19): an undeclared plugin tool is unplannable")
 def test_an_undeclared_plugin_tool_is_refused_by_the_executor_in_every_mode(tmp_path):
     """Executor recheck of the one governance resolution: missing declaration = fail closed (measured today:
     COMPLETED and written in guardrails; tests/test_s1_toolbox_authority.py pins today's behaviour)."""
     target = tmp_path / "written.txt"
     result = _dispatch(_UndeclaredPluginTool(target), "plugin_writer", {"note": "n"}, (str(tmp_path),))
-    assert result.status != SubtaskStatus.COMPLETED and not target.exists(), result
+    assert result.status == SubtaskStatus.NEEDS_REVIEW and not target.exists(), result
+    assert result.reason_codes == ("TOOL_MODEL_AUTHORITY_UNDECLARED",)
 
 
-@pytest.mark.xfail(strict=True, reason=DEFECT)
 def test_a_planned_shell_step_in_a_real_enforce_run_never_reaches_the_gates_or_the_owner(tmp_path, monkeypatch):
     """[R80] Through the real WorkflowController enforce loop (guardrails, `none`): the planned step appends to the
     candidate's source through the owner-relative path `.kriya/worktree/...` and to the owner's own source. Measured
@@ -229,12 +227,25 @@ def test_a_planned_shell_step_in_a_real_enforce_run_never_reaches_the_gates_or_t
     cfg = chaos_config()
     cfg.autonomy.mode = "guardrails"
     tool = load_core_tools_module().ShellTool(autonomy_cfg=cfg.autonomy, execution_policy_cfg=cfg.execution_policy)
+    from kriya.workflow.planner_repair import STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS
+
+    # The Planner keeps proposing the same plan (the initial answer and every bounded repair).
     observed = _t6_harness.enforce_run(tmp_path, monkeypatch, _t6_harness.shop_responder, _t6_harness.shop_files(),
-                                       shape.GOAL, [plan], cfg=cfg, tools={"shell": tool})
-    (s0,) = [r for r in observed.result.subtask_results if r.subtask_id == "s0"]
+                                       shape.GOAL, [plan] * (1 + STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS), cfg=cfg,
+                                       tools={"shell": tool})
+    executed = [r for r in observed.result.subtask_results if r.subtask_id == "s0"]
     facts = {"owner_source_changed": "S18-OWNER" in (seen["ws"] / shape.CONTROLLER).read_text(),
              "a_gate_ran_over_the_injected_source": any(gate_saw_injection),
-             "planned_step_completed": s0.status == SubtaskStatus.COMPLETED}
+             "planned_step_completed": any(r.status == SubtaskStatus.COMPLETED for r in executed)}
     assert facts == {"owner_source_changed": False, "a_gate_ran_over_the_injected_source": False,
-                     "planned_step_completed": False}, (facts, gate_saw_injection, s0)
-    assert s0.reason_codes, s0
+                     "planned_step_completed": False}, (facts, gate_saw_injection, executed)
+    # S18: the plan never validates (the shell tool is registered but not plannable), so the step is never dispatched;
+    # had it been (a stale plan), the executor recheck answers TOOL_OPERATOR_ONLY (pinned in the tests above).
+    assert executed == [], executed
+    legacy = observed.result.legacy_result
+    assert legacy["status"] == "needs_review" and legacy["files"] == [], legacy
+    assert legacy["reason_codes"][0] == "PLANNED_TOOL_NOT_PLANNABLE", legacy
+    # The bounded repair is told which tools a planned step may use: none here (shell is registered, never plannable).
+    transcript = observed.runtime.transcript()
+    assert "No tool can be run by a planned step in this run" in transcript
+    assert "A planned step's tool_name may only be one of" not in transcript

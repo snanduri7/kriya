@@ -251,7 +251,9 @@ def test_planned_validate_refactor_is_refused_in_human_in_the_loop(tmp_path, mon
                side_effect=lambda *a, **k: calls.append("tests") or {"success": True, "output": ""}):
         result = _dispatch(_validation_tool(), HITL, "validate_refactor", {"files": ["a.py"], "run_tests": True})
     assert result.status == SubtaskStatus.NEEDS_REVIEW, result
-    assert result.reason_codes == ("TOOL_MUTATION_REVIEW_UNAVAILABLE",)
+    # S18 (OI-127): validate_refactor is OPERATOR_ONLY; the one governance resolution answers before the tool's own
+    # human-in-the-loop refusal (was TOOL_MUTATION_REVIEW_UNAVAILABLE).
+    assert result.reason_codes == ("TOOL_OPERATOR_ONLY",)
     assert calls == []
 
 
@@ -295,13 +297,13 @@ def test_an_undeclared_tool_is_refused_in_human_in_the_loop(tmp_path, name):
     assert not target.exists()
 
 
-def test_an_undeclared_tool_in_a_non_hitl_mode_keeps_its_own_authority(tmp_path):
-    """PIN of the UNDECIDED case (report question 2): outside human-in-the-loop a third-party plugin tool keeps the
-    TOOL-001 contract (its own authority governs the call; the equivalence scenarios pin t6_echo completing under
-    guardrails). Unchanged by S1; refusing it is an owner decision."""
+def test_an_undeclared_tool_in_a_non_hitl_mode_is_refused_too(tmp_path):
+    """S18 (OI-127 Q2, decided: undeclared plugin tools are unplannable). Before S18 this pinned the UNDECIDED case:
+    outside human-in-the-loop a third-party plugin tool kept its own authority and wrote (the removed capability)."""
     target = tmp_path / "outside.txt"
     result = _dispatch(_writing_plugin_tool(target), "guardrails", "plugin_writer", {"note": "n"})
-    assert result.status == SubtaskStatus.COMPLETED and target.read_text() == "n"
+    assert result.status == SubtaskStatus.NEEDS_REVIEW and result.reason_codes == ("TOOL_MODEL_AUTHORITY_UNDECLARED",)
+    assert not target.exists()
 
 
 # -- direct BaseTool execution from model-authored code (negative control f) -------------------------------------------
@@ -382,10 +384,19 @@ def test_shell_in_human_in_the_loop_is_still_stopped_by_b3(tmp_path):
     assert not marker.exists()
 
 
-def test_shell_hard_invariants_still_govern_outside_human_in_the_loop(tmp_path):
+def test_shell_hard_invariants_still_govern_the_operator_and_a_planned_shell_never_runs(tmp_path):
+    """S18 re-home: POL-001's sudo hard invariant is proven on the operator path (the only path that runs a shell
+    command now); outside human-in-the-loop the planned call is TOOL_OPERATOR_ONLY (was: ran, then COMMAND_SUDO_DENIED)."""
+    from kriya.policy.errors import PolicyDeniedError
+    from kriya.tools.tool import ToolExecutionError
+
     marker = tmp_path / "sudo_ran"
+    with pytest.raises(ToolExecutionError) as denied:
+        asyncio.run(_core().ShellTool().execute(command=f"sudo touch {marker}"))
+    assert isinstance(denied.value.__cause__, PolicyDeniedError)
+    assert denied.value.__cause__.result.reason_code == "COMMAND_SUDO_DENIED"
     result = _dispatch(_core().ShellTool(), "guardrails", "shell", {"command": f"sudo touch {marker}"})
-    assert result.status == SubtaskStatus.FAILED and result.reason_codes == ("COMMAND_SUDO_DENIED",)
+    assert result.status == SubtaskStatus.NEEDS_REVIEW and result.reason_codes == ("TOOL_OPERATOR_ONLY",)
     assert not marker.exists()
 
 
@@ -483,7 +494,10 @@ def test_git_reads_still_run_in_every_mode(tmp_path, monkeypatch, mode):
     assert result.status == SubtaskStatus.COMPLETED and "a.txt" in result.tool_output
 
 
-def test_validate_refactor_outside_hitl_keeps_its_own_authority_and_reads_only_inside(tmp_path, monkeypatch):
+def test_validate_refactor_outside_hitl_is_refused_too(tmp_path, monkeypatch):
+    """S18 (OI-127, Option B): validate_refactor is OPERATOR_ONLY. Before S18, outside human-in-the-loop it kept its own
+    authority (named files authorized as reads) and BUILT the owner folder with a default (uncontained) configuration
+    (S18-PREFLIGHT R40) - the removed capability. Now every planned call is refused before anything is built."""
     ws, cand, out = _ws(tmp_path)
     monkeypatch.chdir(ws)
     seen = []
@@ -494,8 +508,8 @@ def test_validate_refactor_outside_hitl_keeps_its_own_authority_and_reads_only_i
                             {"files": [str(out / "foreign.py")], "run_tests": False}, tool_roots=(str(ws), str(cand)))
         inside = _dispatch(_validation_tool(), "guardrails", "validate_refactor",
                            {"files": ["in.py"], "run_tests": False}, tool_roots=(str(ws), str(cand)))
-    assert outside.reason_codes == ("PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",)
-    assert inside.status == SubtaskStatus.COMPLETED and seen == [[str(ws / "in.py")]]
+    assert outside.reason_codes == ("TOOL_OPERATOR_ONLY",) and inside.reason_codes == ("TOOL_OPERATOR_ONLY",)
+    assert inside.status == SubtaskStatus.NEEDS_REVIEW and seen == []
 
 
 def test_a_non_tool_object_is_never_dispatched():
@@ -568,7 +582,9 @@ def test_the_toolbox_refusal_codes_are_a_closed_table():
 
     assert MODEL_TOOL_REFUSAL_REASON_CODES == {
         "TOOL_NOT_GOVERNED", "TOOL_MODEL_AUTHORITY_UNDECLARED", "TOOL_MUTATION_REVIEW_UNAVAILABLE",
-        "TOOL_WORKSPACE_ROOT_UNAVAILABLE"}
+        "TOOL_WORKSPACE_ROOT_UNAVAILABLE",
+        # S18 (OI-127): the one governance resolution's two new refusals
+        "TOOL_OPERATOR_ONLY", "TOOL_GOVERNANCE_INVALID"}
     with pytest.raises(ValueError):
         ModelInvocationRefused("TOOL_SOMETHING_NEW", "x")
     # every ModelInvocationRefused(...) in Kriya names a code from the table (by constant)
@@ -579,6 +595,8 @@ def test_the_toolbox_refusal_codes_are_a_closed_table():
             if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", None)) == \
                     "ModelInvocationRefused":
                 first = node.args[0]
+                if isinstance(first, ast.Attribute) and ast.unparse(first) == "decision.reason_code":
+                    continue  # S18: the governance decision's code; ModelInvocationRefused itself rejects any code outside the table
                 used.add(first.id if isinstance(first, ast.Name) else repr(ast.literal_eval(first)))
     assert used and all(getattr(tool_module, name, None) in MODEL_TOOL_REFUSAL_REASON_CODES for name in used), used
 
@@ -586,11 +604,11 @@ def test_the_toolbox_refusal_codes_are_a_closed_table():
 # Every BaseTool subclass Kriya ships, and how a model-authored call to it is governed (the inventory in the S1 report).
 DECLARED_MODEL_AUTHORITY = {
     "FilesystemTool": "read/list: AuthorizedFileReader; any other operation: AuthorizedFileWriter DENY_ALL (refused)",
-    "ShellTool": "human-in-the-loop: refused (B3 first); else its own POL-001/SEC-005/containment authority",
+    "ShellTool": "OPERATOR_ONLY (S18): every planned call refused (B3 first in human-in-the-loop)",
     "GitTool": "commit: trusted-control-path denial (refused); blame file: AuthorizedFileReader; reads: unchanged",
     "SearchTool": "directory and every walked file: AuthorizedFileReader",
     "ASTTool": "file: AuthorizedFileReader",
-    "ValidationTool": "human-in-the-loop: refused; else the validator's own authority, files via AuthorizedFileReader",
+    "ValidationTool": "OPERATOR_ONLY (S18): every planned call refused",
     "MCPTool": "TOOL-002 durable approval + TOOL-003 containment in _run (unchanged)",
 }
 # The one place a Kriya tool writes the filesystem: FilesystemTool._run, reachable from a model-authored call only after
@@ -688,7 +706,8 @@ def test_the_toolbox_entry_refuses_on_its_own_without_the_executor(tmp_path):
     with pytest.raises(ModelInvocationRefused) as refused:
         asyncio.run(execute_model_authored(_core().ShellTool(), {"command": f"touch {marker}"},
                                            ModelToolInvocation(roots=(str(ws),), autonomy_mode=HITL)))
-    assert refused.value.reason_code == "TOOL_MUTATION_REVIEW_UNAVAILABLE" and not marker.exists()
+    # S18: the entry's own governance recheck answers first (was TOOL_MUTATION_REVIEW_UNAVAILABLE, the tool's own refusal)
+    assert refused.value.reason_code == "TOOL_OPERATOR_ONLY" and not marker.exists()
     for mode in MODES:
         with pytest.raises(ToolExecutionError) as denied:
             asyncio.run(execute_model_authored(_core().FilesystemTool(),

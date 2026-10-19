@@ -312,14 +312,17 @@ def test_the_bounded_plan_repair_uses_the_injected_bound(tmp_path):
 def test_a_predetermined_plan_skips_the_planner(tmp_path):
     engine, steps, lineage = _engine(tmp_path), [], []
     planner = _Planner([])
-    engine.kernel.registry.register("tool", "compile", object())
+    # S18: the Planner is shown only plannable tools; a shipped READ_ONLY tool is the vehicle (an `object()` is not one)
+    from _plugin_test_support import load_core_tools_module
+
+    engine.kernel.registry.register("tool", "search", load_core_tools_module().SearchTool())
     ctx = _ctx(tmp_path, predetermined_plan="Step 1: add mul", step_callback=lambda name, text: steps.append(name),
                record_requirement_lineage=lambda stage, text: lineage.append((stage, text)),
                save_stage_checkpoint=lambda *a, **k: pytest.fail("a predetermined plan is never checkpointed"))
     assert asyncio.run(plan_work_unit(ctx, _planning_deps(engine, planner))) is None
     assert planner.prompts == [] and ctx.plan == "Step 1: add mul" and ctx.state.planner_calls == 0
     assert steps == ["Plan"] and lineage == [("plan", "Step 1: add mul")]
-    assert 'Subtask.tool_name must be exactly one of these, never invented): compile.' in ctx.plan_prompt
+    assert 'Subtask.tool_name must be exactly one of these, never invented): search.' in ctx.plan_prompt
     assert ctx.owner_candidates == [] and ctx.ownership_findings == []
 
 

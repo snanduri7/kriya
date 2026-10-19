@@ -81,6 +81,12 @@ def enforce_run(tmp_path: Path, monkeypatch, responder: Callable, files: Mapping
     with RuntimeRegistration(runtime):
         engine = chaos_engine(cfg)
         for name, tool in dict(tools).items():
+            if getattr(type(tool), "ADMIT_FOR_PLANNING_IN_TESTS", False):
+                # S18: an explicitly opted-in mechanics double (the echo tool), admitted through the test-only seam
+                # (tests/_planned_tool_seam.py) for this run only.
+                from _planned_tool_seam import admit_planned_test_tool
+
+                admit_planned_test_tool(monkeypatch, type(tool))
             engine.kernel.registry.register("tool", name, tool)
         with mock_patch("kriya.workflow.workflow_controller.parse_planner_structured_output",
                         return_value=(object(), None)), \
@@ -149,7 +155,7 @@ def shop_enforce(tmp_path, monkeypatch, *, plans=None, responder=shop_responder,
 def echo_tool(*, fail: bool = False):
     from pydantic import BaseModel
 
-    from kriya.tools.tool import BaseTool
+    from kriya.tools.tool import BaseTool, ToolGovernance
 
     class _Args(BaseModel):
         pass
@@ -158,6 +164,11 @@ def echo_tool(*, fail: bool = False):
         name = "t6_echo"
         description = "echo (T6 test tool)"
         arguments_schema = _Args
+        ADMIT_FOR_PLANNING_IN_TESTS = True  # S18: an evidence-mechanics double; enforce_run admits it via the test seam
+
+        @property
+        def planned_governance(self):
+            return ToolGovernance.READ_ONLY
 
         async def _run(self, args):
             if fail:

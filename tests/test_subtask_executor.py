@@ -4,11 +4,12 @@ pytest coverage for this module."""
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from _planned_tool_seam import admit_planned_test_tool
 from _strict_doubles import strict_kernel
 from pydantic import BaseModel, ConfigDict
 
 from kriya.core.registry import ComponentRegistryError
-from kriya.tools.tool import BaseTool, ToolExecutionError
+from kriya.tools.tool import BaseTool, ToolExecutionError, ToolGovernance
 from kriya.workflow import subtask_executor
 from kriya.workflow.context_package import build_context_package
 from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask
@@ -23,6 +24,7 @@ def _tool_mechanics_not_hitl_gate(monkeypatch):
     human-in-the-loop refusals are pinned in tests/test_tool_subtask_hitl_confirmation.py and
     tests/test_s1_toolbox_authority.py."""
     monkeypatch.setattr("kriya.workflow.subtask_executor._autonomy_mode", lambda kernel: "guardrails")
+    admit_planned_test_tool(monkeypatch, _RecordingTool)  # S18: a mechanics double (tests/_planned_tool_seam.py)
 
 
 class _RecordingArgs(BaseModel):
@@ -38,6 +40,10 @@ class _RecordingTool(BaseTool):
 
     def __init__(self, **calls_kwargs):
         self.calls = AsyncMock(**calls_kwargs)
+
+    @property
+    def planned_governance(self):
+        return ToolGovernance.READ_ONLY
 
     async def _run(self, args):
         return await self.calls(**args.model_dump())

@@ -206,6 +206,11 @@ def _enforce_observe(tmp_path: Path, monkeypatch, variant: str, plans: List[Call
     engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
     engine.planner.run = AsyncMock(return_value="structured plan")
     for name, tool in tools().items():
+        if getattr(type(tool), "ADMIT_FOR_PLANNING_IN_TESTS", False):
+            # S18: the opted-in echo double is admitted through the test-only seam (tests/_planned_tool_seam.py)
+            from _planned_tool_seam import admit_planned_test_tool
+
+            admit_planned_test_tool(monkeypatch, type(tool))
         engine.kernel.registry.register("tool", name, tool)
     from kriya.workflow.workflow_controller import WorkflowController
 
