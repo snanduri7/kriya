@@ -454,3 +454,11 @@ def test_a_real_generate_with_a_malformed_mode_runs_nothing(tmp_path):
     """Post-fix only (on the unfixed bytes this would start a real run against the model): the main group refuses
     before the subcommand, so no process, database, socket or write happens."""
     test_a_malformed_mode_stops_before_anything_runs_or_is_read(tmp_path, ["generate", "add a function"])
+
+
+@pytest.mark.parametrize("value, code", ONE_PER_CODE, ids=_ids(ONE_PER_CODE))
+def test_an_unvalidated_autonomy_object_cannot_be_swapped_in_through_model_copy(value, code):
+    """``model_construct`` validates nothing (pydantic's contract; no production caller): an AutonomyConfig built that
+    way is still refused when it is put into an AppConfig through ``model_copy(update=...)``."""
+    smuggled = AutonomyConfig.model_construct(mode=value)
+    _typed(lambda: AppConfig().model_copy(update={"autonomy": smuggled}), code)
