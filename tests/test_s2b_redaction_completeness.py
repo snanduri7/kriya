@@ -60,6 +60,13 @@ def test_values_without_a_secret_stay_identical(value):
     assert redact_value(value) == value
 
 
+@pytest.mark.parametrize("text, expected", [(f"PassWord={S}", f"PassWord={R}"), (f"PASSWORD: {S}", f"PASSWORD: {R}")])
+def test_a_mixed_case_secret_name_stays_hidden(text, expected):
+    """Green before (the S2 text rule was case-insensitive); the S2b word rule must not lose it ("PassWord" is one word)."""
+    assert redact_text(text) == expected
+    assert redact_value({"PassWord": S}) == {"PassWord": R}
+
+
 def test_redact_value_never_mutates_its_input():
     value = {"a": ["--token", S], "b": {"password": S}, "c": json.dumps({"api_key": S}), "d": (f"DB_PASSWORD={S}",)}
     before = copy.deepcopy(value)
@@ -148,8 +155,8 @@ def test_the_durable_approval_record_holds_no_configured_value(tmp_path, monkeyp
 
 
 # =========================================================================== EXPECTED TO FLIP (the measured defect)
-
-FLIP = pytest.mark.xfail(strict=True, raises=AssertionError, reason="S2b characterization: the measured leak (flips with the correction)")
+# strict-xfail at the characterization commits f4e8665 / 7b9da2f (48 failing on the unfixed bytes with --runxfail);
+# the correction removed the marks.
 
 LEAKING_TEXT = [
     ("auth-token-scheme", f"Authorization: Token {S}", f"Authorization: {R} {R}"),
@@ -190,13 +197,11 @@ LEAKING_TEXT = [
 ]
 
 
-@FLIP
 @pytest.mark.parametrize("text, expected", [(t, e) for _, t, e in LEAKING_TEXT], ids=[i for i, _, _ in LEAKING_TEXT])
 def test_every_measured_shape_is_hidden_and_the_rest_kept(text, expected):
     assert redact_text(text) == expected
 
 
-@FLIP
 @pytest.mark.parametrize("value, expected", [
     (["run.sh", "--token", S], ["run.sh", "--token", R]),
     (["run.sh", "--password", S, "--port", "8080"], ["run.sh", "--password", R, "--port", "8080"]),
@@ -228,7 +233,6 @@ def _cli(args, stdin=None):
     return CliRunner().invoke(main, args, input=stdin, catch_exceptions=False).output
 
 
-@FLIP
 def test_authority_inspect_and_approve_hide_every_shape(tmp_path, monkeypatch):
     _workspace(tmp_path, monkeypatch)
     inspect, approve = _cli(["authority", "inspect"]), _cli(["authority", "approve"], stdin="n\n")
@@ -236,7 +240,6 @@ def test_authority_inspect_and_approve_hide_every_shape(tmp_path, monkeypatch):
     assert S not in inspect and S not in approve
 
 
-@FLIP
 def test_the_log_file_hides_every_shape(tmp_path):
     from kriya.core import logging_setup
 
@@ -249,7 +252,6 @@ def test_the_log_file_hides_every_shape(tmp_path):
     assert "launch run.sh --password" in text and S not in text, text
 
 
-@FLIP
 def test_a_kup_error_envelope_and_the_cli_error_text_hide_every_shape():
     from kriya.cli_commands.common import _user_error_text
     from kriya.kup.inspect import error_envelope
@@ -259,7 +261,6 @@ def test_a_kup_error_envelope_and_the_cli_error_text_hide_every_shape():
     assert S not in _user_error_text(RuntimeError(message))
 
 
-@FLIP
 def test_the_gui_receives_a_history_detail_with_every_secret_hidden():
     """OI-131: through the KUP adapter (the bytes written to Electron), both forms - the stored JSON text blob in
     ``fields`` and the parsed section - and the derived application outcome."""
@@ -276,6 +277,19 @@ def test_the_gui_receives_a_history_detail_with_every_secret_hidden():
     assert redact_value(data) == data                                                  # the projection is a fixed point
 
 
+def test_the_gui_receives_a_history_prompt_with_every_secret_hidden():
+    """Same defect as OI-131 on the sibling read (the stored plan prompt; MEASURED leaking before, scratch channels.txt)."""
+    from kriya.config import AppConfig
+    from kriya.core.state_paths import trace_db_path
+    from kriya.core.trace import TraceLogger
+
+    TraceLogger(trace_db_path(AppConfig())).log_run(run_id="r-p", goal="g", duration_sec=1.0, attempts=1, status="SUCCESS",
+                                                    files_modified=[], prompt_rendered=f"use DB_PASSWORD={S} and plan the change")
+    snap = _kup("snapshot.acquire")[0]["data"]["snapshot_id"]
+    envelope, wire = _kup("history.prompt", snapshot_id=snap, run_id="r-p")
+    assert envelope["data"]["prompt_rendered"] == f"use DB_PASSWORD={R} and plan the change" and S not in wire
+
+
 def _runtime_review(*argv):
     from kriya.control.launch_approval import build_pending_runtime
     from kriya.policy.approval import RuntimeCommandSubject
@@ -288,7 +302,6 @@ def test_a_plain_runtime_command_is_still_offered_for_review():
     assert _runtime_review("python", "-u", "server.py", "--user", "alice") is not None
 
 
-@FLIP
 @pytest.mark.parametrize("argv", [("run.sh", "--token", S), ("run.sh", "--password", S), ("curl", "-u", f"al:{S}", "http://h"),
                                   ("run.sh", f"DB_PASSWORD={S}")], ids=["token-space", "password-space", "curl-user", "env-style"])
 def test_a_runtime_command_carrying_a_secret_argument_is_not_offered_for_review(argv):
@@ -297,7 +310,6 @@ def test_a_runtime_command_carrying_a_secret_argument_is_not_offered_for_review(
     assert _runtime_review(*argv) is None
 
 
-@FLIP
 def test_the_history_list_and_the_traces_table_hide_a_secret_in_the_goal(tmp_path, monkeypatch):
     _, snap = _snapshot()
     _, wire = _kup("history.list", snapshot_id=snap)

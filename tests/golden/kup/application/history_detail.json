@@ -105,7 +105,7 @@
    },
    "gate_outcomes": {
     "availability": "recorded",
-    "data": "[{\"attempt\": 1, \"type\": \"compile\", \"success\": true}, {\"attempt\": 1, \"type\": \"run_verification\", \"success\": true, \"steps\": [{\"command\": [\"java\", \"-jar\", \"app.jar\", \"--token=hunter2supersecret\"], \"exit_code\": 0, \"stdout\": \"Hello\\n\", \"stderr\": \"\", \"timed_out\": false}]}]",
+    "data": "[{\"attempt\": 1, \"type\": \"compile\", \"success\": true}, {\"attempt\": 1, \"type\": \"run_verification\", \"success\": true, \"steps\": [{\"command\": [\"java\", \"-jar\", \"app.jar\", \"--token=***REDACTED***\"], \"exit_code\": 0, \"stdout\": \"Hello\\n\", \"stderr\": \"\", \"timed_out\": false}]}]",
     "provenance": "runs.gate_outcomes",
     "reason": null
    },
@@ -150,7 +150,7 @@
         "java",
         "-jar",
         "app.jar",
-        "--token=hunter2supersecret"
+        "--token=***REDACTED***"
        ],
        "exit_code": 0,
        "stderr": "",

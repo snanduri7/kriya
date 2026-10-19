@@ -4783,7 +4783,7 @@ def traces(ctx: click.Context, limit: Optional[int], show_all: bool, migrate_leg
         kind_str = dominant_category(entries) or ""
         click.echo(
             f"{ts:<20} | {status_styled} | {category_str:<22} | {kind_str:<22} | "
-            f"{att:<8} | {dur_str:<10} | {goal[:40]:<40}"
+            f"{att:<8} | {dur_str:<10} | {redact_text(goal)[:40]:<40}"  # S2b: redact BEFORE the cut (S2M24)
         )
 
     if not show_all and total > len(rows):

@@ -32,7 +32,7 @@ from kriya.control.persistence import (
     save_launch_review_decision,
 )
 from kriya.control.run_ownership import probe_run_lock
-from kriya.foundation.redaction import redact_text
+from kriya.foundation.redaction import redact_text, redact_value
 
 # Moved to AUTHORITY's approval owner (kriya/policy/approval.py) in slice C3, re-exported here as themselves for this module's importers. Removed in P1.
 from kriya.policy.approval import KIND_CHANGE as KIND_CHANGE
@@ -107,7 +107,8 @@ def build_pending_runtime(launch_id: str, workspace_identity_value: str, sequenc
     what would run. Secret stdin/environment values never enter the record: only ``stdin_present`` / the stdin digest and environment NAMES do. ``review`` is the subject's
     fingerprint/reviewability owner (AUTHORITY's ``kriya.policy.approval``; slice C3: a parameter, not a lazy import of the kernel-side module)."""
     commands = [list(c) for c in subject.commands]
-    if not review.reviewable(subject) or any(redact_text(a) != a for c in commands for a in c):
+    # S2b: each command is read WHOLE (``--token`` then its value is a secret pair; neither element alone is one).
+    if not review.reviewable(subject) or any(redact_value(c) != c for c in commands):
         return None
     digest = review.fingerprint_of(subject.working_directory, subject.commands, subject.input_channel, subject.stdin_sha256)
     requested = _now()

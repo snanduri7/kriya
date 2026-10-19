@@ -13,7 +13,8 @@ process had to be killed) and ``steps``: per command ``command`` (argv), ``exit_
 projection only reads those recorded fields. What it never does: invent a command, derive one from a build file, execute anything, or
 claim success the record does not carry. ``succeeded`` is true only when the gate outcome says success AND the last step exited 0
 without timing out. A run whose goal never triggered the gate is ``NOT_APPLICABLE`` - there is no authoritative "how to start it" in
-Kriya, so none is offered. Command and output are passed through the existing secret scrub (kriya/policy/telemetry.py) and bounded.
+Kriya, so none is offered. Command and output are passed through the one redaction owner (kriya/foundation/redaction.py) and bounded; since S2b (OI-131) the whole
+detail projection is (``HistoryService.detail``).
 
 The trace snapshot is read through the ``TraceHistory`` port (kriya/application/services.py), implemented by STATE's snapshot reader
 (``kriya.control.history.SnapshotTrace``); nothing here opens a database. Since D2 the service also owns the snapshot use cases the KUP
@@ -35,7 +36,7 @@ from kriya.context.model import RequestContext
 from kriya.context.workspace_identity import workspace_identities, workspace_identity
 from kriya.control.history import RETAIN_SNAPSHOTS, SNAPSHOT_CORRUPT, Snapshot
 from kriya.control.history.port import HistoryLocation, HistoryStore
-from kriya.foundation.redaction import redact_text
+from kriya.foundation.redaction import redact_text, redact_value
 
 # ------------------------------------------------------------------ application outcome (moved from kriya/kup/application_outcome.py)
 
@@ -176,6 +177,16 @@ def scoped_history_list(cfg, trace: TraceHistory, n: int, cursor: Optional[str],
                                 "truncated": truncated}}
 
 
+def _display_page(page: Dict[str, Any]) -> Dict[str, Any]:
+    """A history page for display (S2b): each run's goal texts through the one redaction owner. Only the goal fields -
+    the page also carries an opaque cursor whose bytes must not change."""
+    for run in page["runs"]:
+        for key in ("goal", "display_goal"):
+            if isinstance(run.get(key), str):
+                run[key] = redact_text(run[key])
+    return page
+
+
 @dataclass(frozen=True)
 class SnapshotAnswer:
     """A snapshot use case's answer: the data the adapter serializes and the published snapshot it concerns (its source block)."""
@@ -254,27 +265,31 @@ class HistoryService:
     # -- history of one published snapshot
 
     def list(self, ctx: RequestContext, cfg, snapshot: Snapshot, *, limit: Optional[int], cursor: Optional[str]) -> Dict[str, Any]:
-        """One page of runs, newest first (the snapshot reader validates ``limit`` and ``cursor``)."""
+        """One page of runs, newest first (the snapshot reader validates ``limit`` and ``cursor``); goals redacted for display."""
         with store_refusals():
-            return self.store.trace(snapshot).page(limit, cursor)
+            return _display_page(self.store.trace(snapshot).page(limit, cursor))
 
     def list_in_workspace(self, ctx: RequestContext, cfg, snapshot: Snapshot, *, limit: int, cursor: Optional[str], workspace: str) -> Dict[str, Any]:
-        """One page of the runs whose evidence manifest records ``workspace`` (GUI M5)."""
+        """One page of the runs whose evidence manifest records ``workspace`` (GUI M5); goals redacted for display."""
         with store_refusals():
-            return scoped_history_list(cfg, self.store.trace(snapshot), limit, cursor, workspace)
+            return _display_page(scoped_history_list(cfg, self.store.trace(snapshot), limit, cursor, workspace))
 
     def detail(self, ctx: RequestContext, cfg, snapshot: Snapshot, run_id: str) -> Dict[str, Any]:
-        """The stored row of one run plus the derived ``application_outcome`` section of its recorded gate outcomes."""
+        """The stored row of one run plus the derived ``application_outcome`` section of its recorded gate outcomes, as a
+        DISPLAY projection: S2b (OI-131) - every section, the stored JSON text blobs and their parsed forms alike, goes
+        through the one redaction owner here, before any adapter (KUP, and so the GUI) sees it. The stored row is not
+        touched: authoritative evidence stays raw (digests bind its exact bytes)."""
         with store_refusals():
             detail = self.store.trace(snapshot).detail(run_id)
         gates = detail["gate_outcomes"]
         outcome = application_outcome(gates["data"] if gates["availability"] == "recorded" else None)
         detail["application_outcome"] = {"availability": "recorded", "provenance": APPLICATION_OUTCOME_PROVENANCE, "reason": None, "data": outcome}
-        return detail
+        return redact_value(detail)
 
     def prompt(self, ctx: RequestContext, cfg, snapshot: Snapshot, run_id: str) -> Dict[str, Any]:
+        """The run's stored plan prompt as a DISPLAY projection (S2b: through the one redaction owner, as ``detail``)."""
         with store_refusals():
-            return self.store.trace(snapshot).prompt(run_id)
+            return redact_value(self.store.trace(snapshot).prompt(run_id))
 
 
 __all__ = ["APPLICATION_OUTCOME_PROVENANCE", "BLOCKED_REASON_CODES", "HistoryService", "MAX_SCANNED_RUNS", "OUTPUT_MAX_CHARS",
