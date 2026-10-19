@@ -79,10 +79,12 @@ class ASTArgs(BaseModel):
 _ALLOWED = (PolicyDecision.ALLOW, PolicyDecision.ALLOW_SANDBOXED)
 
 
-def _authorized_read(invocation: ModelToolInvocation, path: str) -> str:
-    """The path a model-authored read may use: resolved exactly as the tool's effect resolves it, then authorized by
-    AuthorizedFileReader over the invocation's roots (canonical containment, symlinks resolved, credential stores)."""
-    target = invocation.resolve(path)
+def _authorized_read(invocation: ModelToolInvocation, path: str, *, in_owner: bool = False) -> str:
+    """The path a model-authored read may use: resolved exactly as the tool's effect resolves it (S18c, OI-147: against
+    the invocation's read root - the candidate for a step that follows a MODEL step, else the owner workspace; or the
+    owner workspace when ``in_owner``), then authorized by AuthorizedFileReader over the invocation's roots (canonical
+    containment, symlinks resolved, credential stores) - the same reader whichever root the path landed in."""
+    target = invocation.resolve(path, in_owner=in_owner)
     AuthorizedFileReader(invocation.roots[0], invocation.roots[1:]).raise_if_denied(target)
     return target
 
@@ -121,7 +123,7 @@ class FilesystemTool(BaseTool):
         TOOL write should exist is the owner question in the S1 report."""
         if args.operation.lower() in ("read", "list"):
             return args.model_copy(update={"path": _authorized_read(invocation, args.path)})
-        target = invocation.resolve(args.path)
+        target = invocation.resolve(args.path, in_owner=True)  # refused below whatever it names
         writer = AuthorizedFileWriter(invocation.roots[0], invocation.roots[1:], write_scope_mode=WriteScopeMode.DENY_ALL)
         raise PolicyDeniedError(request=ActionRequest(action_type=ActionType.WRITE_FILE, target=target),
                                 result=writer.authorize(target))
@@ -490,7 +492,8 @@ class GitTool(BaseTool):
             raise PolicyDeniedError(request=ActionRequest(action_type=ActionType.GIT_WRITE, command=("git", sub)),
                                     result=trusted_control_path_denial(git_dir))
         if sub == "blame" and args.file_path:
-            args = args.model_copy(update={"file_path": _authorized_read(invocation, args.file_path)})
+            # blame runs in the owner repository (S18b, A), so its file is that repository's, whatever the dependencies
+            args = args.model_copy(update={"file_path": _authorized_read(invocation, args.file_path, in_owner=True)})
         root = self._planned_read_root(sub, invocation)
         # S18b: a SEPARATE candidate must also have a base revision, or its status/diff is not the run's change.
         separate = bool(invocation.roots) and os.path.realpath(root) != os.path.realpath(invocation.roots[0])

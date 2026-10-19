@@ -296,7 +296,6 @@ def test_without_roots_a_nested_process_folder_is_refused(three_state, monkeypat
 # order breaks ties by id, so the Planner's worked example B ("Find the existing callers of load_settings BEFORE it
 # changes", depends_on []) runs after the MODEL steps (MEASURED below) and must still describe the baseline.
 
-GROUP_B_AFTER = pytest.mark.xfail(strict=True, reason="S18c group B (OI-147): fixed by the read-root correction")
 
 READS = {
     "read": ("filesystem", {"operation": "read", "path": "app.py"}),
@@ -430,7 +429,6 @@ def test_files_present_in_both_views_read_the_same(three_state, depends_on):
 
 # -- the defect: a read after a MODEL step reported the owner (strict-xfail on the unfixed bytes) ---------------------
 
-@GROUP_B_AFTER
 @pytest.mark.parametrize("read", list(READS))
 def test_a_read_after_a_model_step_reads_the_candidate(three_state, read):
     """OI-147 (MEASURED on eb58aa6): a planned read declared after the MODEL step reported the OWNER's app.py."""
@@ -441,7 +439,6 @@ def test_a_read_after_a_model_step_reads_the_candidate(three_state, read):
     assert _identity(read, result.tool_output, "CANDIDATE") and not _identity(read, result.tool_output, "OWNER")
 
 
-@GROUP_B_AFTER
 @pytest.mark.parametrize("read", list(READS))
 def test_a_read_after_a_model_step_through_another_step_reads_the_candidate(three_state, read):
     """Transitive: t9 depends on a read t0 that depends on the MODEL step m1."""
@@ -454,7 +451,6 @@ def test_a_read_after_a_model_step_through_another_step_reads_the_candidate(thre
     assert _identity(read, result.tool_output, "CANDIDATE")
 
 
-@GROUP_B_AFTER
 def test_a_file_the_model_step_created_is_read_from_the_candidate(three_state):
     """MEASURED on eb58aa6: FAILED ("does not exist") - the read looked in the owner folder."""
     s = three_state
@@ -463,7 +459,6 @@ def test_a_file_the_model_step_created_is_read_from_the_candidate(three_state):
     assert result.status == SubtaskStatus.COMPLETED and result.tool_output == "CANDIDATE_ONLY = 1\n", result.error
 
 
-@GROUP_B_AFTER
 @pytest.mark.parametrize("path", ["ignored.env", "doomed.py", "owner_untracked_after.py"])
 def test_files_absent_from_the_candidate_are_absent_for_a_read_after_a_model_step(three_state, path):
     """Characterized snapshot differences: the candidate holds no git-ignored file (ignored.env), not a file the run
@@ -476,7 +471,6 @@ def test_files_absent_from_the_candidate_are_absent_for_a_read_after_a_model_ste
     assert result.tool_output is None
 
 
-@GROUP_B_AFTER
 def test_a_relative_symlink_in_the_candidate_resolves_inside_the_candidate(three_state):
     s = three_state
     result = planned("filesystem", {"operation": "read", "path": "rel_link.py"}, (s.owner, s.candidate),
@@ -484,7 +478,6 @@ def test_a_relative_symlink_in_the_candidate_resolves_inside_the_candidate(three
     assert result.status == SubtaskStatus.COMPLETED and "ORIGIN_CANDIDATE" in result.tool_output
 
 
-@GROUP_B_AFTER
 def test_the_scoped_snapshot_is_read_after_a_model_step_with_its_kriya_markers(three_state):
     """A nested plain workspace's candidate is the scoped snapshot: a read after the MODEL step describes it - and,
     characterized, its listing carries the two Kriya-made entries the owner folder lacks (.git, the sentinel)."""
@@ -496,7 +489,6 @@ def test_the_scoped_snapshot_is_read_after_a_model_step_with_its_kriya_markers(t
     assert not {".git", ".kriya-scoped-snapshot"} & set(os.listdir(s.plain))
 
 
-@GROUP_B_AFTER
 def test_an_enforce_run_reads_the_candidate_after_its_model_step_and_the_baseline_for_example_b(tmp_path, monkeypatch):
     """The real scenario, end to end (production enforce loop): s1 caches the service in the candidate; s3 reads the
     service file (depends_on s1) and must show the cached version the run commits; s4 is the example-B shape (search

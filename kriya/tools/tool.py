@@ -154,25 +154,35 @@ class ModelToolInvocation:
     ``roots``: the workspace roots this call may touch, the owner workspace first (a relative path resolves against it,
     exactly where the tool would have resolved it from the run's working folder), then any further readable root (the
     run's candidate worktree). Empty = unknown, and every path-bearing call is refused.
-    ``autonomy_mode``: the run's ``autonomy.mode``; unknown (None) counts as human-in-the-loop (the strictest)."""
+    ``autonomy_mode``: the run's ``autonomy.mode``; unknown (None) counts as human-in-the-loop (the strictest).
+    ``follows_model_step`` (S18c, OI-147): the planned step declares, through its dependencies, that it runs after a
+    MODEL step - its reads describe the run's candidate as that step left it (``read_root``); otherwise it is a baseline
+    read of the owner workspace. Supplied by the executor from the plan, never by the model's arguments."""
 
     roots: Tuple[str, ...] = ()
     autonomy_mode: Optional[str] = None
+    follows_model_step: bool = False
 
     @property
     def reviews_every_change(self) -> bool:
         # OI-135: unknown (None) is the strictest reading; any other value goes through the fail-closed reader.
         return self.autonomy_mode is None or is_human_in_the_loop(self.autonomy_mode)
 
-    def resolve(self, path: str) -> str:
-        """The absolute path the tool's own effect would use (``os.path.abspath`` of it against the owner workspace:
-        lexical ``..``/``.``/separator normalization, ``~`` literal), so what is authorized is exactly what runs."""
+    def read_root(self) -> str:
+        """S18c (OI-147): the root a planned read's relative path describes - the candidate (second root) for a step
+        that follows a MODEL step, the owner workspace (first root) for a baseline read or when only one root exists."""
+        return self.roots[1] if self.follows_model_step and len(self.roots) > 1 else self.roots[0]
+
+    def resolve(self, path: str, *, in_owner: bool = False) -> str:
+        """The absolute path the tool's own effect would use (``os.path.abspath`` of it against ``read_root()``, or
+        the owner workspace when ``in_owner``: lexical ``..``/``.``/separator normalization, ``~`` literal), so what is
+        authorized is exactly what runs."""
         if not self.roots:
             raise ModelInvocationRefused(
                 TOOL_WORKSPACE_ROOT_UNAVAILABLE,
                 f"no workspace root was supplied for this planned tool call, so its path {path!r} cannot be authorized.",
             )
-        return os.path.abspath(os.path.join(self.roots[0], path))
+        return os.path.abspath(os.path.join(self.roots[0] if in_owner else self.read_root(), path))
 
 
 # =====================================================================

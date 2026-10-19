@@ -201,7 +201,28 @@ def _hitl_blocks_tool_without_confirmation(tool: Any, kernel: Any) -> bool:
     return bool(getattr(tool, "requires_confirmation", False)) and mode is not None and is_human_in_the_loop(mode)
 
 
-async def _execute_tool_subtask(subtask: Subtask, kernel: Any, tool_roots: Sequence[str] = ()) -> SubtaskResult:
+def follows_model_step(subtask: Subtask, plan: EngineeringPlan) -> bool:
+    """S18c (OI-147): whether ``subtask`` declares - through its depends_on, transitively - that it runs after a MODEL
+    step. That is the plan's own data flow, the one signal of which repository state a planned read reasons about: such a
+    read describes the run's candidate as the MODEL step left it; a read with no MODEL step among its dependencies is a
+    baseline read of the owner workspace, whatever position the executor's order gives it (its id tie-break runs the
+    Planner's worked example B, "before it changes", after the MODEL steps). No per-step flag exists or is inferred from
+    text. An id the plan does not hold contributes nothing (plan validation already refuses one)."""
+    by_id = {candidate.id: candidate for candidate in plan.subtasks}
+    pending, seen = list(subtask.depends_on), set()
+    while pending:
+        dependency = by_id.get(pending.pop())
+        if dependency is None or dependency.id in seen:
+            continue
+        if dependency.execution_method == ExecutionMethod.MODEL:
+            return True
+        seen.add(dependency.id)
+        pending.extend(dependency.depends_on)
+    return False
+
+
+async def _execute_tool_subtask(subtask: Subtask, kernel: Any, tool_roots: Sequence[str],
+                                plan: EngineeringPlan) -> SubtaskResult:
     try:
         tool = kernel.registry.get("tool", subtask.tool_name)
     except (ComponentRegistryError, Exception) as e:
@@ -237,7 +258,8 @@ async def _execute_tool_subtask(subtask: Subtask, kernel: Any, tool_roots: Seque
 
     # S1: the model-authored entry point - authorized by the tool's own declaration over these roots before anything
     # runs; a refusal is typed (TOOLBOX code, NEEDS_REVIEW) or the reused authority's PolicyDeniedError (FAILED, below).
-    invocation = ModelToolInvocation(roots=tuple(tool_roots), autonomy_mode=_autonomy_mode(kernel))
+    invocation = ModelToolInvocation(roots=tuple(tool_roots), autonomy_mode=_autonomy_mode(kernel),
+                                     follows_model_step=follows_model_step(subtask, plan))
     try:
         output = await execute_model_authored(tool, subtask.tool_arguments, invocation)
     except AutonomyModeError as e:  # S18 / OI-135: a malformed mode is a typed stop, never a permissive reading
@@ -304,11 +326,12 @@ async def execute(
 
     ``tool_roots`` (S1): the workspace roots a TOOL subtask's model-authored
     call may touch, the owner workspace first; empty refuses every
-    path-bearing call (TOOL_WORKSPACE_ROOT_UNAVAILABLE)."""
+    path-bearing call (TOOL_WORKSPACE_ROOT_UNAVAILABLE). S18c (OI-147): ``plan``
+    decides which root a TOOL read describes (follows_model_step)."""
     if subtask.execution_method == ExecutionMethod.TOOL:
         if kernel is None:
             raise ValueError(f"subtask {subtask.id!r} is execution_method=tool but no kernel was supplied")
-        return await _execute_tool_subtask(subtask, kernel, tool_roots)
+        return await _execute_tool_subtask(subtask, kernel, tool_roots, plan)
 
     if developer_agent is None:
         raise ValueError(f"subtask {subtask.id!r} is execution_method=model but no developer_agent was supplied")
