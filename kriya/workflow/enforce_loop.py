@@ -514,12 +514,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # S18 (OI-127): ONE snapshot of the planned-tool catalogue (subtask_executor.plannable_tool_names, the projection
         # of the one governance resolution). A registry that cannot be listed admits no tool (fail closed); every
         # validate_plan below checks TOOL subtasks against the plannable names and repair prompts show only those.
-        available_tool_names = None
-        planned_tool_names = None
-        if kernel is not None:
-            tool_catalogue = plannable_tool_names(getattr(kernel, "registry", None), getattr(kernel, "config", None))
-            available_tool_names = list(tool_catalogue.registered)
-            planned_tool_names = list(tool_catalogue.plannable)
+        # S18b (OI-143): a run without a kernel has no registry, so it admits no tool either (the same validation, never
+        # skipped); a TOOL subtask is refused at validation instead of reaching dispatch.
+        tool_catalogue = plannable_tool_names(getattr(kernel, "registry", None), getattr(kernel, "config", None))
+        available_tool_names = list(tool_catalogue.registered)
+        planned_tool_names = list(tool_catalogue.plannable)
 
         # Subtask-spanning resume (MA5.9 finally wired to something,
         # 2026-08-24) - opt-in only, same convention as

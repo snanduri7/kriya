@@ -493,6 +493,21 @@ def test_a_candidate_with_no_base_revision_refuses_status_and_diff_typed(tmp_pat
     assert result.tool_output is None
 
 
+@pytest.mark.parametrize("sub", CANDIDATE_TRUTH)
+def test_a_candidate_folder_that_is_not_its_own_repository_is_refused(tmp_path, sub):
+    """A separate candidate root that is a plain folder inside a repository with commits (not its own top level): git
+    would answer for the ENCLOSING repository (here the owner's own, with its candidate-only change invisible), so the
+    read is refused rather than presented as the candidate's state."""
+    owner, _candidate = _diverged(tmp_path)
+    plain = Path(owner) / "plain_folder"
+    plain.mkdir()
+    (plain / "new.py").write_text("y = 2\n")
+    assert _git(str(plain), "rev-parse", "--show-toplevel").strip() == os.path.realpath(owner)
+    result = _planned_git(sub, (owner, str(plain)))
+    assert result.status == SubtaskStatus.NEEDS_REVIEW
+    assert result.reason_codes == ("TOOL_WORKSPACE_ROOT_UNAVAILABLE",)
+
+
 def test_a_planned_diff_after_a_model_subtask_shows_the_change_the_run_commits(tmp_path, monkeypatch):
     """The real scenario, end to end: an enforce run whose s1 caches the service in the candidate, then a planned
     `git diff` step (depends_on s1). Before S18b it returned '' (the owner folder, untouched until the commit) while
@@ -527,7 +542,6 @@ def test_a_planned_diff_after_a_model_subtask_shows_the_change_the_run_commits(t
 # OI-143: a kernel-less enforce run validates TOOL subtasks against the same (empty) catalogue
 # =====================================================================================================================
 
-@pytest.mark.xfail(strict=True, reason="S18b: expected to flip with the OI-143 correction (kernel-less validation)")
 def test_a_kernel_less_enforce_run_refuses_a_tool_subtask_at_validation(tmp_path, monkeypatch):
     """Before S18b the validation was skipped (available_tool_names=None) and the run crashed later with an untyped
     ValueError at dispatch ("no kernel was supplied"). Now: no registry = no tool (the S18 listing-failure rule), the
