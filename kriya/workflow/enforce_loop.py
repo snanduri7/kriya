@@ -1826,8 +1826,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # LR-R1-M1: the action as its own evidence unit (observational).
                 with deps.attempt_evidence_scope.tool_unit(getattr(kernel, "config", None), subtask.id,
                                                       subtask.tool_name) as evidence:
-                    # S1: the model-authored call may touch only the owner workspace (relative paths resolve
-                    # there, as from the run's working folder) and this plan's candidate worktree.
+                    # S1: the model-authored call may touch only the owner workspace and this plan's candidate
+                    # worktree; S18c: a relative read path resolves in the candidate when the step depends on a MODEL
+                    # step (subtask_executor.follows_model_step), else in the owner workspace.
                     result = await deps.subtask_executor.execute(
                         subtask=subtask, plan=plan, context=tool_context, kernel=kernel,
                         tool_roots=(workspace_path, plan_workspace_path),

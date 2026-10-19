@@ -607,7 +607,8 @@ def test_the_toolbox_refusal_codes_are_a_closed_table():
 DECLARED_MODEL_AUTHORITY = {
     "FilesystemTool": "read/list: AuthorizedFileReader; any other operation: AuthorizedFileWriter DENY_ALL (refused)",
     "ShellTool": "OPERATOR_ONLY (S18): every planned call refused (B3 first in human-in-the-loop)",
-    "GitTool": "commit: trusted-control-path denial (refused); blame file: AuthorizedFileReader; reads: unchanged",
+    "GitTool": "commit: trusted-control-path denial (refused); blame file: AuthorizedFileReader; reads: only where the "
+               "root is its own repository top level (S18c, TOOL_CANDIDATE_VIEW_UNAVAILABLE)",
     "SearchTool": "directory and every walked file: AuthorizedFileReader",
     "ASTTool": "file: AuthorizedFileReader",
     "ValidationTool": "OPERATOR_ONLY (S18): every planned call refused",

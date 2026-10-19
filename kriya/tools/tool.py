@@ -151,9 +151,9 @@ class ModelInvocationRefused(ToolExecutionError):
 class ModelToolInvocation:
     """The authority context the model-authored caller supplies.
 
-    ``roots``: the workspace roots this call may touch, the owner workspace first (a relative path resolves against it,
-    exactly where the tool would have resolved it from the run's working folder), then any further readable root (the
-    run's candidate worktree). Empty = unknown, and every path-bearing call is refused.
+    ``roots``: the workspace roots this call may touch, the owner workspace first, then any further readable root (the
+    run's candidate worktree). A relative path resolves against ``read_root()`` (S18c: the owner workspace unless the step
+    follows a MODEL step). Empty = unknown, and every path-bearing call is refused.
     ``autonomy_mode``: the run's ``autonomy.mode``; unknown (None) counts as human-in-the-loop (the strictest).
     ``follows_model_step`` (S18c, OI-147): the planned step declares, through its dependencies, that it runs after a
     MODEL step - its reads describe the run's candidate as that step left it (``read_root``); otherwise it is a baseline
