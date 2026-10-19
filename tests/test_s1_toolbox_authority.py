@@ -122,7 +122,7 @@ def _enforce_lazy(tmp_path, monkeypatch, mode, prep, holder, operation="write", 
 
     outside = Path(os.path.realpath(tmp_path)) / "outside"
     outside.mkdir()
-    (outside / "secret.txt").write_text("outside-secret\n")
+    (outside / "data.txt").write_text("outside-secret\n")  # not a credential-store name: containment alone decides
     seen = {}
     real_git_workspace = _t6_harness.git_workspace
 
@@ -154,9 +154,9 @@ def _enforce_lazy(tmp_path, monkeypatch, mode, prep, holder, operation="write", 
 
 
 READ_FORMS = [
-    ("absolute-outside", lambda ws, out: str(out / "secret.txt"), None, "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS"),
-    ("dotdot-escape", lambda ws, out: "../outside/secret.txt", None, "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS"),
-    ("symlink-inside-to-outside", lambda ws, out: "link/secret.txt", _link_outside,
+    ("absolute-outside", lambda ws, out: str(out / "data.txt"), None, "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS"),
+    ("dotdot-escape", lambda ws, out: "../outside/data.txt", None, "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS"),
+    ("symlink-inside-to-outside", lambda ws, out: "link/data.txt", _link_outside,
      "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS"),
     ("sensitive-in-workspace", lambda ws, out: ".env", lambda ws, out: (ws / ".env").write_text("TOKEN=outside-secret\n"),
      "SENSITIVE_PATH_DENIED"),
@@ -399,8 +399,8 @@ def _ws(tmp_path):
         d.mkdir()
     (ws / "in.py").write_text("NEEDLE = 1\n")
     (cand / "c.py").write_text("NEEDLE = 2\n")
-    (out / "secret.py").write_text("NEEDLE = 'outside-secret'\n")
-    os.symlink(out / "secret.py", ws / "linked.py")
+    (out / "foreign.py").write_text("NEEDLE = 'outside-secret'\n")
+    os.symlink(out / "foreign.py", ws / "linked.py")  # names that are not credential stores
     return ws, cand, out
 
 
@@ -465,7 +465,7 @@ def test_operator_search_is_unchanged(tmp_path):
 @pytest.mark.parametrize("mode", MODES)
 def test_ast_and_git_blame_read_only_inside(tmp_path, mode):
     ws, cand, out = _ws(tmp_path)
-    ast_out = _dispatch(_core().ASTTool(), mode, "ast", {"file_path": str(out / "secret.py")},
+    ast_out = _dispatch(_core().ASTTool(), mode, "ast", {"file_path": str(out / "foreign.py")},
                         tool_roots=(str(ws), str(cand)))
     assert ast_out.reason_codes == ("PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",)
     ast_in = _dispatch(_core().ASTTool(), mode, "ast", {"file_path": "in.py"}, tool_roots=(str(ws), str(cand)))
@@ -491,7 +491,7 @@ def test_validate_refactor_outside_hitl_keeps_its_own_authority_and_reads_only_i
                side_effect=lambda self_files, *a, **k: seen.append(self_files) or {"success": True, "output": "ok"},
                autospec=False):
         outside = _dispatch(_validation_tool(), "guardrails", "validate_refactor",
-                            {"files": [str(out / "secret.py")], "run_tests": False}, tool_roots=(str(ws), str(cand)))
+                            {"files": [str(out / "foreign.py")], "run_tests": False}, tool_roots=(str(ws), str(cand)))
         inside = _dispatch(_validation_tool(), "guardrails", "validate_refactor",
                            {"files": ["in.py"], "run_tests": False}, tool_roots=(str(ws), str(cand)))
     assert outside.reason_codes == ("PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",)
