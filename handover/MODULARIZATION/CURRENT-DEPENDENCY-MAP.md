@@ -180,3 +180,42 @@ Owning fast suites that already exist (by file-name family, MEASURED counts): ku
 | triage of orchestrator notices | `_tier_triage` is reached for any failure with >1 known file and no earlier tier, including `Failure(type="time_budget_exhausted", source="orchestrator")` | 1056-1224 |
 | repair prompt shape | `attempt._retry_package_for_attempt` -> `retry_package.build_retry_package` (`RetryPackage(failure_type, authoritative_error, advisory_context, target_files, ...)`) + `agents/agent.py` "Repair exactly one existing file X ... ONLY" + `agents/response_protocol.parse_structured` (block must name X: `INVALID_EDIT_PROTOCOL`) | |
 | evidence kinds | `core/attempt_evidence/model.py::KINDS` has `recovery.decision`, `fallback.decision`, `retry.delta`, `candidate.change`, `gate.result`; there is NO `attribution.*`, `retry_target.*`, `candidate_transaction.*`, `budget.*` kind | 41-62 |
+
+## 10. E14 (end of W4) completion report (MEASURED at f218b04 vs the E14 base 8e0c90a; the plan's a91157f in brackets)
+
+Method (scratch tool completion_metrics.py): physical lines; distinct kriya modules imported at module level / only
+function-locally; state-mutation sites = an assignment rooted at a name `state` (`state.x = / state.x[k] = / state.x +=`),
+a mutating call (append/extend/add/update/pop/setdefault/clear/remove/insert/discard) on an attribute rooted at `state`,
+and `state.record_*(...)`.
+
+| module | lines before -> after | kriya imports (module level / fn-local only) | state-mutation sites | public entry points | largest definitions after |
+|---|---|---|---|---|---|
+| kriya/workflow/attempt.py | 4,919 -> 4,193 [a91157f: 11,314] | 58/15 -> 57/15 [57/17] | 75 -> 57 [242] | 8 -> 8 (AttemptContext, run_attempt, apply_pre_review_candidate_corrections, defer_execution_until_source_review, assert_candidate_unchanged_since_source_review, exit_authority_text, find_in_process_terminating_test_invocations, find_ungrounded_java_child_process_tests: the last two now forwarders) | run_attempt 1,615; AttemptContext 248; _diagnosis_mismatch_bypass_reason 137 |
+| kriya/workflow/workflow_controller.py | 1,917 -> 1,852 | 59/8 -> 59/6 | 0 -> 0 | 32 -> 32 | WorkflowController 659; _enforce_deps 121; EstablishedProvenance 52 |
+| kriya/cli.py | 5,517 -> 4,868 | 20/72 -> 25/60 | n/a | 80 -> 62 defined here (+18 re-exported, same objects) | _generate_impl 797; review 272; doctor 239 |
+
+Responsibilities remaining in attempt.py: run_attempt (one attempt's control flow: mode dispatch, Developer call
+assembly per retry family, the transaction phases' caller, the NO CHANGE attribution dispute, RESTORE_PUBLIC_CONTRACT,
+the hold decision, the post-commit API-contract recovery checks), AttemptContext (OI-46), the composition of every
+owner (the Deps builders and 148 forwarders), and the OI-74 residue (`_grounded_output_expectations`,
+`_lower_output_protocol_retry`, `_diagnosis_mismatch_bypass_reason`) plus the helpers triage v3 did not class
+(`_run_contract_feedback_gate`, `_build_java_package_map`, `_record_self_correction_scope_conflict`,
+`_attribute_candidate_suite`, `_changed_test_sources`, `_sync_active_repair_contract`, `_brownfield_owner_contract_block`,
+the retry-member-hint family, `_ensure_generation_time_budget` (H2)). It is no longer a ~10k-line module, but
+run_attempt (1,615 lines) still owns several unrelated decisions in one function (retry-family branching, attribution
+disputes, restoration, recovery checks): a judgment for the owner (E15+ or the F/G/H slices that own those decisions);
+E14 does not decide it.
+
+Cycles affected: none. All-import SCCs unchanged (67, 7, 7, 6, 4, 3, 3, 2, 2, 2 - baseline.json untouched); every new
+owner (process_boundary, the cli_commands modules) is outside every cycle (tests/architecture/test_patch_points.py
+owner-cycle rule, tests/architecture/test_cli_commands.py back-import rule).
+
+Owning test file per extracted concern: process_boundary -> tests/test_e14_characterization.py (+ test_workflow.py's
+process-boundary tests); gate seams -> tests/test_e14_characterization.py, tests/test_gate_orchestrator.py,
+tests/test_fs1a_test_execution_evidence.py; repair recorders -> tests/test_e14_characterization.py,
+tests/test_repair_orchestrator.py; staging helpers -> tests/test_e14_characterization.py,
+tests/test_candidate_transaction.py; enforce verdict/transition -> tests/test_e14_characterization.py,
+tests/test_e12_enforce_characterization.py; CLI groups -> tests/test_e14_cli_characterization.py,
+tests/test_cli_registration.py, tests/architecture/test_cli_commands.py and the groups' own suites
+(test_sec009_p2_authority_approval, test_authority_cli_refusal, test_prd033_events_and_cli, test_prd008_recovery,
+test_prd031a_static_analysis).
