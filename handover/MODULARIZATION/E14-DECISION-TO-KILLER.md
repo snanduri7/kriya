@@ -11,6 +11,7 @@ Campaigns (all MEASURED):
 - pre1 `20261019_092132_10f7bc03` (8e0c90a, the EXISTING tests: L1 = every test file naming the symbol): stopped by me
   after 32 of 166 Part 1 mutants (L1 runs of the 855-test test_workflow.py made it ~4 h); 18 killed, 14 survived
   (pb06 pb09 pb10 pb12 pb16 pb19 pb20 pb22 pb25 pb26 pb28 pb30 pb31 pb32): the existing suite leaves real gaps here.
+- exist1 `20261019_112747_91337dd7` (8e0c90a, the EXISTING owner-module tests only - L1 = test_gate_orchestrator / test_fs1a / test_repair_orchestrator / test_generation_service / test_candidate_transaction / test_p3c / test_e12_enforce_characterization, no grep so test_workflow.py excluded - for the 120 non-pb Part 1 mutants): VALID, 40 killed, 80 survived. Per class killed/total: repair 6/14, gate 15/40, test-delta 12/15, as 0/1, candidate 5/31, enforce 2/19. Before E14 most of these moved decisions were pinned only by test_workflow.py or not at all; the E14 pins close every gap except the two equivalents.
 - pin1 `20261019_100049_e70fd753` (8245ea3 = pre-move bytes + tests/test_e14_characterization.py; L1 = the E14 pins,
   L2 = the owner-module tests): 166 mutants, 150 killed L1, 12 killed L2, 4 survived (u06 u07 u09 c28).
 - pin2 `20261019_101438_36dc699a` (a20a5ba, + pins for u06/u07/u09; plus the 60 CLI mutants on the PRE-move kriya/cli.py,
