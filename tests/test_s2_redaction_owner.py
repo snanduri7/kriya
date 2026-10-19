@@ -434,3 +434,35 @@ def test_every_kriya_log_handler_formats_through_the_owner(tmp_path):
         assert "tb1" not in handler.formatter.format(record) and "RuntimeError" in handler.formatter.format(record)
     finally:
         handler.close()
+
+
+def test_a_kup_host_refusal_never_carries_url_credentials():
+    from kriya.kup import serve
+
+    refusal = serve._refusal("r1", "HOST_ERROR", f"internal fault: ConnectError for {LLM_URL}")
+    assert refusal["error"]["code"] == "HOST_ERROR" and "127.0.0.1:9" in refusal["error"]["message"]
+    assert _leaked(json.dumps(refusal)) == []
+
+
+def test_the_kup_configuration_refusal_redacts_before_its_300_character_cut():
+    """The message is cut at 300 characters: redacting after the cut would leave a userinfo without its '@' (unmatched)."""
+    from kriya.application import configuration
+    from kriya.application.services import ApplicationRefusal
+
+    class Unreadable:
+        def resolution_state(self):
+            raise ValueError("x" * 265 + f" endpoint http://alice:{PW}LONGTAIL@127.0.0.1:9/v1")
+
+    with pytest.raises(ApplicationRefusal) as refused:
+        configuration._state(Unreadable())
+    assert "endpoint http://" in str(refused.value) and "s3cret" not in str(refused.value), str(refused.value)
+
+
+def test_a_served_model_pin_refusal_never_carries_url_credentials():
+    from kriya.core.model_runtime import pin_served_configuration
+    from kriya.core.provider_contract import ProviderContractError
+
+    with pytest.raises(ProviderContractError) as refused:
+        pin_served_configuration(base_url="http://alice:" + PW + "@8.8.8.8/v1", model="m", extra_body=None,
+                                 requested_context_window=8192)
+    assert "8.8.8.8" in str(refused.value) and PW not in str(refused.value), str(refused.value)
