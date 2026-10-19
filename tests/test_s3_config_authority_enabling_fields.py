@@ -110,7 +110,7 @@ def test_a_trust_file_outside_the_workspace_enables_it(tmp_path, monkeypatch):
     assert load_config(trust_file=str(trust)).autonomy.self_correction_loop_enabled is True
 
 
-def _owner_recovery(mode, tmp_path):
+def _owner_recovery(mode, tmp_path, enabled=True):
     from test_e11_owner_modules import st
 
     from kriya.workflow import workflow_controller as wc
@@ -125,13 +125,19 @@ def _owner_recovery(mode, tmp_path):
         ran.append(kwargs["worktree_path"])
         return Result()
 
-    kernel = strict_kernel(strict_config(autonomy={"self_correction_loop_enabled": True, "self_correction_loop_max_turns": 2,
+    kernel = strict_kernel(strict_config(autonomy={"self_correction_loop_enabled": enabled, "self_correction_loop_max_turns": 2,
                                                    "mode": mode}))
     with patch("kriya.workflow.self_correction.run_self_correction_loop", side_effect=loop):
         result = asyncio.run(wc._attempt_owner_recovery_self_correction(
             kernel=kernel, developer_llm=None, plan_workspace_path=str(tmp_path), workspace_path=str(tmp_path),
             owner=st("s1", ["pom.xml"]), required_owner_files=["pom.xml"], scope_conflict={"raw_evidence": "ERR"}))
     return result, ran
+
+
+@pytest.mark.parametrize("mode", ["guardrails", "full-auto", HITL])
+def test_a_disabled_loop_never_runs_in_any_mode(tmp_path, mode):
+    result, ran = _owner_recovery(mode, tmp_path, enabled=False)
+    assert ran == [] and result is None
 
 
 @pytest.mark.parametrize("mode", ["guardrails", "full-auto"])
