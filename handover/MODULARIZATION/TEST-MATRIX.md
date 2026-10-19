@@ -86,6 +86,7 @@ Conventions: `P=.venv/bin/pytest -q`; Tier 1 is the exact file(s) the slice adds
 | K1-K2 | `P tests/contracts/test_tool_registry_contract.py tests/test_tool_execution_delegation.py tests/test_tool001_autonomous_tool_execution.py` | `P -m "tools or authority"` |
 | L1-L2 | `P tests/contracts/test_execution_port_contract.py tests/test_structured_findings.py tests/test_platform_architecture_guard.py` | `P -m execution` (Docker cases pinned to the `docker` xdist group as today) |
 | N1-N2 | `P tests/test_qualification_service.py tests/test_inf001_runtime_port.py` | `P -m qualification` |
+| N1-CY (CORRECT, Type D, after the accepted N1, before N2) | `P tests/test_agents.py tests/test_agent_contracts.py tests/test_developer_*.py tests/test_qual*.py tests/test_prd014_model_qualification.py tests/test_file_integrity_contract_001.py tests/architecture` + the helper differential corpus (success/error/exception) + the cycle checkpoint (`tests/architecture/test_cycles.py`, agents modules in SCCs = 0) | `P -m "qualification or architecture"` |
 | O1-O3 | `P tests/test_adapters_thin.py tests/test_electron_chain_pin.py tests/test_kup_serve.py` + `cd ui/kup && npm test` (cross-language pin) | `P -m "adapters or application"` |
 | P1-P2 | `P tests/architecture` | `P -m architecture`; the modules whose facades were removed |
 | Q1-Q2 | `P tests/architecture tests/contracts` | Tier 3 once: `scripts/run_full_suite.py` (owner) |

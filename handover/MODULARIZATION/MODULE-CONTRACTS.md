@@ -374,7 +374,7 @@ class QualificationService(Protocol):
     def status(self, ctx, binding) -> QualificationStatus; def certify(self, ctx, candidate: ReleaseCandidate) -> CertificationRecord
     def doctor(self, ctx, *, production: bool) -> DoctorReport            # production_doctor probes
 ```
-Consumes PROVIDER (`InferenceRuntimePort`), EXECUTION (`ExecutionPort`), KERNEL (`DeveloperAgent` through `agents` public surface), never `workflow.attempt` internals.
+Consumes PROVIDER (`InferenceRuntimePort`), EXECUTION (`ExecutionPort`), KERNEL (pure payload parsing from `agents.response_protocol`; never the concrete `DeveloperAgent`, owner correction 2026-10-19), never `workflow.attempt` internals.
 
 ## 14. KNOWLEDGE (`kriya/knowledge/`)
 
