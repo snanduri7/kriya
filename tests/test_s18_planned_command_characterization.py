@@ -111,6 +111,8 @@ def test_a_planned_shell_step_cannot_plant_a_hook_that_kriyas_own_git_then_runs(
     marker = outside / "FSMONITOR_RAN"
     command = f"printf '[core]\\n\\tfsmonitor = \"touch {marker}; false\"\\n' >> .git/config"
     _dispatch(_shell(), "shell", {"command": command}, (str(owner), str(candidate)))
+    # The plant itself (fails on every git version): the planned step must not reach the shared repository config.
+    assert "fsmonitor" not in (owner / ".git" / "config").read_text()
     assert not marker.exists()  # the planted hook has not run yet: only Kriya's own git below can run it
     untracked_repository_paths(str(candidate))
     assert not marker.exists()
