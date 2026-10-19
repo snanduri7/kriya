@@ -57,6 +57,7 @@ from kriya.workflow.edit_safety import (
     find_structural_corruption,
     read_file_revision,
 )
+from kriya.workflow.exception_masking import find_unsafe_exception_masking
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.file_integrity import (
     DETERMINISTIC_FILE_INTEGRITY_STOPS,
@@ -68,6 +69,7 @@ from kriya.workflow.file_integrity import (
     raw_digest,
     read_shown_text,
 )
+from kriya.workflow.file_resolution import find_explanatory_prose_contamination
 from kriya.workflow.run_events import EventAuthority, RunEvent
 
 RunState = Any    # kriya.workflow.state.GenerationState
@@ -137,6 +139,10 @@ class CandidateDeps:
     _reject_explanatory_prose: Callable[..., Any]
     _request_fallback_for_rejected_authoritative_target: Callable[..., Any]
     _target_exists: Callable[..., Any]
+    # E14: what the bodies moved here in E14 read beyond the fields above - attempt.py's fallback-routing view and the
+    # loader of the Code Intelligence opener's function-local kriya.workflow.graph_retrieval import (all-import cycle)
+    _fallback_routing: Callable[..., Any]
+    load_open_code_intelligence: Callable[[], Any]
 
 
 def _capture_original(state: RunState, ctx: AttemptCtx, relpath: str) -> None:
@@ -1586,3 +1592,177 @@ class CandidateTransaction:
                 proposal, edit_result="identical" if relpath in self._state.identical_rewrites else "staged",
                 staged_digest=self._state.candidate_digests.get(relpath))
         self.decision = "staged"
+
+
+# ----------------------------------------------------------------------------- E14 (OI-58, OI-50): moved verbatim from
+# kriya/workflow/attempt.py - the staging loop's pre-flight checks and the NO CHANGE / no-op attribution helpers it shares
+# with run_attempt, the baseline restoration write, the target-exists check, the Developer request's D1 patch-only set
+# and the read-only Code Intelligence opener (CandidateDeps, GenerationDeps, FallbackDeps, SpecDeps and run_attempt
+# reach them through attempt.py's forwarders).
+
+def _baseline_restoration_write(state: RunState, target_path: str, relpath: str) -> StagedFileWrite:
+    """Restore ``relpath`` to its exact original bytes, based on the target's
+    current raw revision (re-checked by the batch commit)."""
+    original = state.all_original_raw.get(relpath)
+    data = original if original is not None else state.all_original_contents[relpath].encode("utf-8")
+    return StagedFileWrite(
+        target_path=target_path, content=display_text(data), base_path=target_path,
+        expected_base_revision=file_raw_digest(target_path), content_bytes=data,
+    )
+
+
+def _file_integrity_stop(state: RunState, filepath: str, error: Any) -> "QualityGateFailure":
+    """FILE-INTEGRITY-CONTRACT-001: a file the edit engine cannot mutate
+    byte-exactly (not UTF-8, mixed line endings, a symbolic link). No
+    Developer retry can change the file itself, so this is a deterministic
+    stop (retry_strategy: ``file_integrity_unsupported``), never a retry."""
+    message = str(error)
+    failure = Failure(
+        type="file_integrity_unsupported", message=message, raw_output=message,
+        source="orchestrator", authority="deterministic", attempt=state.attempt_number,
+        file_locations=[FileLocation(filepath=filepath)], likely_files=[filepath],
+        diagnostics={"reason_code": getattr(error, "reason_code", None)},
+    )
+    state.record_gate_outcome(failure.to_gate_outcome())
+    return QualityGateFailure(failure)
+
+
+def _target_exists(ctx: AttemptCtx, filepath: str) -> bool:
+    return os.path.exists(os.path.join(ctx.worktree_path, filepath)) or os.path.exists(
+        os.path.join(ctx.workspace_path, filepath)
+    )
+
+
+def _preserved_authoritative_locator_files(
+    state: RunState, target_files: List[str], self_diagnosed: List[str],
+) -> List[str]:
+    """Return current targets backed by the preceding authoritative locator.
+
+    Developer analysis is advisory and cannot erase deterministic evidence.
+    A different file explicitly named by current-turn analysis is allowed to
+    redirect (root cause and surfacing location may differ), so preservation
+    applies only when there is no such alternate.  Intersecting with this
+    attempt's actual targets prevents stale locator evidence from widening or
+    redirecting a later, unrelated repair.
+    """
+    prior_attribution = state.last_attribution
+    prior_failure = state.last_failure
+    if (
+        self_diagnosed
+        or state.last_attempt_mode not in ("targeted", "fallback_targeted")
+        or prior_attribution is None
+        or getattr(prior_attribution, "tier", None) != "locator"
+        or prior_failure is None
+        or getattr(prior_failure, "authority", None) != "authoritative"
+    ):
+        return []
+    return [
+        filepath for filepath in getattr(prior_attribution, "files", [])
+        if filepath in target_files
+    ]
+
+
+def _request_fallback_for_rejected_authoritative_target(
+    deps: CandidateDeps,
+    state: RunState, ctx: AttemptCtx, preserved_files: List[str],
+) -> None:
+    if (
+        preserved_files
+        and state.last_attempt_mode == "targeted"
+        and deps._fallback_routing(state, ctx).available
+        and not state.budgets.fallback_targeted_attempted
+    ):
+        state.budgets.fallback_targeted_requested = True
+
+
+def _reject_explanatory_prose(
+    state: RunState, filepath: str, content: str, baseline: Optional[str],
+) -> None:
+    """``baseline``: the file before this write (None for a new file); only
+    what the candidate added is judged (P3-C)."""
+    contamination = find_explanatory_prose_contamination(filepath, content, baseline)
+    if not contamination:
+        return
+    failure = Failure(
+        type="prose_contamination",
+        message=(
+            f"SOURCE PROSE CONTAMINATION in {filepath}: obvious explanatory text "
+            "was emitted as executable source; return code only or use the "
+            "language's comment syntax for genuine documentation."
+        ),
+        raw_output=contamination,
+        file_locations=[FileLocation(filepath=filepath)],
+        likely_files=[filepath], failed_content={filepath: content},
+        attempt=state.attempt_number,
+    )
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
+def _reject_exception_masking(
+    state: RunState, filepath: str, content: str, baseline: Optional[str],
+) -> None:
+    """BACKEND-READINESS-V2 (S4_A): a candidate that newly catches/swallows ``Error``/``Throwable`` hides the crash it
+    was asked to fix. ``baseline``: the file before this write; the pristine run-start content wins when known, so a
+    masking clause an earlier attempt introduced is still the candidate's. Runs on every attempt, repairs included."""
+    pristine = state.all_original_contents.get(filepath, baseline)
+    masking = find_unsafe_exception_masking(filepath, content, pristine)
+    if not masking:
+        return
+    guidance = (
+        "Catching Error/Throwable hides the failure instead of fixing the code that raises it; fix the cause "
+        "(for a StackOverflowError, the unbounded recursion or loop) and do not widen a catch to Error/Throwable."
+    )
+    failure = Failure(
+        type="unsafe_exception_masking",
+        message=f"UNSAFE EXCEPTION MASKING in {filepath}: {masking}. {guidance}",
+        raw_output=f"{masking}. {guidance}",
+        file_locations=[FileLocation(filepath=filepath)],
+        likely_files=[filepath], failed_content={filepath: content},
+        attempt=state.attempt_number,
+    )
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
+def _preserved_attribution_diagnostics(preserved_files: List[str]) -> Optional[dict]:
+    if not preserved_files:
+        return None
+    return {
+        "preserved_prior_attribution": {
+            "tier": "locator",
+            "files": list(preserved_files),
+        }
+    }
+
+
+def _code_intelligence_for(deps: CandidateDeps, ctx: AttemptCtx) -> Any:
+    """The repository's Code Intelligence index (read-only T1-T3 context),
+    or None when there is none of the current parser identity."""
+    open_code_intelligence = deps.load_open_code_intelligence()
+
+    memory = getattr(getattr(getattr(ctx.kernel, "config", None), "paths", None), "memory", None)
+    if not isinstance(memory, str):
+        return None
+    try:
+        return open_code_intelligence(ctx.workspace_path, os.path.join(memory, "dependency_graph.db"))
+    except Exception as error:  # read-only enrichment; T0 never depends on it
+        deps.logger.warning("Code Intelligence index unavailable for known-target context: %s", error)
+        return None
+
+
+def _patch_required_files(deps: CandidateDeps, state: RunState, ctx: AttemptCtx, kwargs: Dict[str, Any]) -> List[str]:
+    """Existing files this Developer call may only patch: the completeness
+    gate (D1) downgraded their whole-file operation because no complete,
+    exact current source was shown, so a whole-file answer would be rejected
+    after the call."""
+    required = []
+    for path, operation in (kwargs.get("operation_by_file") or {}).items():
+        if operation != deps.CodeOperation.REPAIR_WITH_PATCH or not deps._target_exists(ctx, path):
+            continue
+        gated, mandatory = deps._completeness_gated_operation(
+            path, deps.CodeOperation.REPAIR_WITH_FULL_FILE, file_exists=True, ctx=ctx, state=state,
+        )
+        if mandatory and gated == deps.CodeOperation.REPAIR_WITH_PATCH:
+            required.append(path)
+    return required

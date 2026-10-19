@@ -110,7 +110,6 @@ from kriya.workflow.edit_safety import (
     StagedFileWrite,
     apply_anchored_edits,
 )
-from kriya.workflow.exception_masking import find_unsafe_exception_masking
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import (
     _capture_failed_content,
@@ -122,8 +121,6 @@ from kriya.workflow.failure_grounding import (
 from kriya.workflow.fallback_decision import _fallback_rejection as _fallback_rejection
 from kriya.workflow.file_integrity import (
     VerificationTreeBinding,
-    display_text,
-    file_raw_digest,
     read_shown_text,
 )
 from kriya.workflow.file_resolution import (
@@ -132,7 +129,6 @@ from kriya.workflow.file_resolution import (
     artifact_resolution_scope,
     extract_target_test,
     find_brownfield_public_api_changes,
-    find_explanatory_prose_contamination,
     find_missing_expected_files,
     find_protected_api_reference_changes,
     find_runnable_test_files,
@@ -328,36 +324,18 @@ def _capture_original(state: GenerationState, ctx: "AttemptContext", relpath: st
 
 
 def _baseline_restoration_write(state: GenerationState, target_path: str, relpath: str) -> StagedFileWrite:
-    """Restore ``relpath`` to its exact original bytes, based on the target's
-    current raw revision (re-checked by the batch commit)."""
-    original = state.all_original_raw.get(relpath)
-    data = original if original is not None else state.all_original_contents[relpath].encode("utf-8")
-    return StagedFileWrite(
-        target_path=target_path, content=display_text(data), base_path=target_path,
-        expected_base_revision=file_raw_digest(target_path), content_bytes=data,
-    )
+    """The body is kriya/workflow/candidate_transaction.py (E14)."""
+    return candidate_transaction._baseline_restoration_write(state, target_path, relpath)
 
 
 def _file_integrity_stop(state: GenerationState, filepath: str, error: Any) -> "QualityGateFailure":
-    """FILE-INTEGRITY-CONTRACT-001: a file the edit engine cannot mutate
-    byte-exactly (not UTF-8, mixed line endings, a symbolic link). No
-    Developer retry can change the file itself, so this is a deterministic
-    stop (retry_strategy: ``file_integrity_unsupported``), never a retry."""
-    message = str(error)
-    failure = Failure(
-        type="file_integrity_unsupported", message=message, raw_output=message,
-        source="orchestrator", authority="deterministic", attempt=state.attempt_number,
-        file_locations=[FileLocation(filepath=filepath)], likely_files=[filepath],
-        diagnostics={"reason_code": getattr(error, "reason_code", None)},
-    )
-    state.record_gate_outcome(failure.to_gate_outcome())
-    return QualityGateFailure(failure)
+    """The body is kriya/workflow/candidate_transaction.py (E14)."""
+    return candidate_transaction._file_integrity_stop(state, filepath, error)
 
 
 def _target_exists(ctx: "AttemptContext", filepath: str) -> bool:
-    return os.path.exists(os.path.join(ctx.worktree_path, filepath)) or os.path.exists(
-        os.path.join(ctx.workspace_path, filepath)
-    )
+    """The body is kriya/workflow/candidate_transaction.py (E14)."""
+    return candidate_transaction._target_exists(ctx, filepath)
 
 
 def _brownfield_owner_contract_block(ctx: "AttemptContext", target_files: Optional[List[str]]) -> str:
@@ -606,30 +584,8 @@ def _operation_map(
 def _preserved_authoritative_locator_files(
     state: GenerationState, target_files: List[str], self_diagnosed: List[str],
 ) -> List[str]:
-    """Return current targets backed by the preceding authoritative locator.
-
-    Developer analysis is advisory and cannot erase deterministic evidence.
-    A different file explicitly named by current-turn analysis is allowed to
-    redirect (root cause and surfacing location may differ), so preservation
-    applies only when there is no such alternate.  Intersecting with this
-    attempt's actual targets prevents stale locator evidence from widening or
-    redirecting a later, unrelated repair.
-    """
-    prior_attribution = state.last_attribution
-    prior_failure = state.last_failure
-    if (
-        self_diagnosed
-        or state.last_attempt_mode not in ("targeted", "fallback_targeted")
-        or prior_attribution is None
-        or getattr(prior_attribution, "tier", None) != "locator"
-        or prior_failure is None
-        or getattr(prior_failure, "authority", None) != "authoritative"
-    ):
-        return []
-    return [
-        filepath for filepath in getattr(prior_attribution, "files", [])
-        if filepath in target_files
-    ]
+    """The body is kriya/workflow/candidate_transaction.py (E14)."""
+    return candidate_transaction._preserved_authoritative_locator_files(state, target_files, self_diagnosed)
 
 
 def _fallback_routing(state: GenerationState, ctx: "AttemptContext") -> Any:
@@ -643,37 +599,15 @@ def _fallback_routing(state: GenerationState, ctx: "AttemptContext") -> Any:
 def _request_fallback_for_rejected_authoritative_target(
     state: GenerationState, ctx: "AttemptContext", preserved_files: List[str],
 ) -> None:
-    if (
-        preserved_files
-        and state.last_attempt_mode == "targeted"
-        and _fallback_routing(state, ctx).available
-        and not state.budgets.fallback_targeted_attempted
-    ):
-        state.budgets.fallback_targeted_requested = True
+    """The body is kriya/workflow/candidate_transaction.py (E14)."""
+    return candidate_transaction._request_fallback_for_rejected_authoritative_target(_candidate_deps(), state, ctx, preserved_files)
 
 
 def _reject_explanatory_prose(
     state: GenerationState, filepath: str, content: str, baseline: Optional[str],
 ) -> None:
-    """``baseline``: the file before this write (None for a new file); only
-    what the candidate added is judged (P3-C)."""
-    contamination = find_explanatory_prose_contamination(filepath, content, baseline)
-    if not contamination:
-        return
-    failure = Failure(
-        type="prose_contamination",
-        message=(
-            f"SOURCE PROSE CONTAMINATION in {filepath}: obvious explanatory text "
-            "was emitted as executable source; return code only or use the "
-            "language's comment syntax for genuine documentation."
-        ),
-        raw_output=contamination,
-        file_locations=[FileLocation(filepath=filepath)],
-        likely_files=[filepath], failed_content={filepath: content},
-        attempt=state.attempt_number,
-    )
-    state.record_gate_outcome(failure.to_gate_outcome())
-    raise QualityGateFailure(failure)
+    """The body is kriya/workflow/candidate_transaction.py (E14)."""
+    return candidate_transaction._reject_explanatory_prose(state, filepath, content, baseline)
 
 
 def _run_contract_feedback_gate(state: GenerationState, ctx: "AttemptContext") -> None:
@@ -715,38 +649,13 @@ def _run_contract_feedback_gate(state: GenerationState, ctx: "AttemptContext") -
 def _reject_exception_masking(
     state: GenerationState, filepath: str, content: str, baseline: Optional[str],
 ) -> None:
-    """BACKEND-READINESS-V2 (S4_A): a candidate that newly catches/swallows ``Error``/``Throwable`` hides the crash it
-    was asked to fix. ``baseline``: the file before this write; the pristine run-start content wins when known, so a
-    masking clause an earlier attempt introduced is still the candidate's. Runs on every attempt, repairs included."""
-    pristine = state.all_original_contents.get(filepath, baseline)
-    masking = find_unsafe_exception_masking(filepath, content, pristine)
-    if not masking:
-        return
-    guidance = (
-        "Catching Error/Throwable hides the failure instead of fixing the code that raises it; fix the cause "
-        "(for a StackOverflowError, the unbounded recursion or loop) and do not widen a catch to Error/Throwable."
-    )
-    failure = Failure(
-        type="unsafe_exception_masking",
-        message=f"UNSAFE EXCEPTION MASKING in {filepath}: {masking}. {guidance}",
-        raw_output=f"{masking}. {guidance}",
-        file_locations=[FileLocation(filepath=filepath)],
-        likely_files=[filepath], failed_content={filepath: content},
-        attempt=state.attempt_number,
-    )
-    state.record_gate_outcome(failure.to_gate_outcome())
-    raise QualityGateFailure(failure)
+    """The body is kriya/workflow/candidate_transaction.py (E14)."""
+    return candidate_transaction._reject_exception_masking(state, filepath, content, baseline)
 
 
 def _preserved_attribution_diagnostics(preserved_files: List[str]) -> Optional[dict]:
-    if not preserved_files:
-        return None
-    return {
-        "preserved_prior_attribution": {
-            "tier": "locator",
-            "files": list(preserved_files),
-        }
-    }
+    """The body is kriya/workflow/candidate_transaction.py (E14)."""
+    return candidate_transaction._preserved_attribution_diagnostics(preserved_files)
 
 
 def _retry_package_for_attempt(
@@ -921,20 +830,8 @@ def _developer_request_profile(ctx: "AttemptContext", model_override: Optional[s
 
 
 def _patch_required_files(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> List[str]:
-    """Existing files this Developer call may only patch: the completeness
-    gate (D1) downgraded their whole-file operation because no complete,
-    exact current source was shown, so a whole-file answer would be rejected
-    after the call."""
-    required = []
-    for path, operation in (kwargs.get("operation_by_file") or {}).items():
-        if operation != CodeOperation.REPAIR_WITH_PATCH or not _target_exists(ctx, path):
-            continue
-        gated, mandatory = _completeness_gated_operation(
-            path, CodeOperation.REPAIR_WITH_FULL_FILE, file_exists=True, ctx=ctx, state=state,
-        )
-        if mandatory and gated == CodeOperation.REPAIR_WITH_PATCH:
-            required.append(path)
-    return required
+    """The body is kriya/workflow/candidate_transaction.py (E14)."""
+    return candidate_transaction._patch_required_files(_candidate_deps(), state, ctx, kwargs)
 
 
 def _record_fallback_selection(state: GenerationState, *, phase: str, requested: str, selected: Optional[str],
@@ -1015,18 +912,8 @@ def _target_package_with_window_reserve(
 
 
 def _code_intelligence_for(ctx: "AttemptContext") -> Any:
-    """The repository's Code Intelligence index (read-only T1-T3 context),
-    or None when there is none of the current parser identity."""
-    from kriya.workflow.graph_retrieval import open_code_intelligence
-
-    memory = getattr(getattr(getattr(ctx.kernel, "config", None), "paths", None), "memory", None)
-    if not isinstance(memory, str):
-        return None
-    try:
-        return open_code_intelligence(ctx.workspace_path, os.path.join(memory, "dependency_graph.db"))
-    except Exception as error:  # read-only enrichment; T0 never depends on it
-        logger.warning("Code Intelligence index unavailable for known-target context: %s", error)
-        return None
+    """The body is kriya/workflow/candidate_transaction.py (E14)."""
+    return candidate_transaction._code_intelligence_for(_candidate_deps(), ctx)
 
 
 def _stop_on_environment_gate_result(state: GenerationState, result: Any, gate: str) -> None:
@@ -1488,6 +1375,13 @@ def _load_verify_insertion() -> Any:
     return verify_insertion
 
 
+def _load_open_code_intelligence() -> Any:
+    # E14: candidate_transaction._code_intelligence_for's function-local import (graph_retrieval: all-import cycle),
+    # done where the body imported it.
+    from kriya.workflow.graph_retrieval import open_code_intelligence
+    return open_code_intelligence
+
+
 def _candidate_deps() -> "candidate_transaction.CandidateDeps":
     """The moved candidate-staging code's collaborators (kriya/workflow/candidate_transaction.py), resolved
     through this module NOW (at call time: a forwarder's call, each transaction phase), so a test patch of any of
@@ -1524,6 +1418,7 @@ def _candidate_deps() -> "candidate_transaction.CandidateDeps":
         _record_authority_snapshot=_record_authority_snapshot, _reject_explanatory_prose=_reject_explanatory_prose,
         _request_fallback_for_rejected_authoritative_target=_request_fallback_for_rejected_authoritative_target,
         _target_exists=_target_exists,
+        _fallback_routing=_fallback_routing, load_open_code_intelligence=_load_open_code_intelligence,
     )
 
 
