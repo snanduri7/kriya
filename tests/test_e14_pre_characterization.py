@@ -201,7 +201,7 @@ def test_oi42_current_behaviour_the_autonomous_twin_produces_the_rejected_candid
     and the last failing candidate; ``review_included_in_approval`` is False. Discriminates the reuse above from 'no
     review at all'."""
     def autonomous(cfg):
-        cfg.autonomy.mode = "autonomous"
+        cfg.autonomy.mode = "guardrails"
     run = _Hitl(tmp_path, lambda model, n, text: kg._oscillating(n), configure=autonomous).run()
     attempts = len(run.test_runs)
     assert run.approvals == [] and attempts >= 2

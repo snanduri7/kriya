@@ -171,7 +171,7 @@ def _engine_form(outcome: "kg.Outcome", tmp_path: Path, **extra: Any) -> Dict[st
 
 
 def _autonomous(cfg: Any) -> None:
-    cfg.autonomy.mode = "autonomous"
+    cfg.autonomy.mode = "guardrails"
 
 
 SYNTAX_ERROR = kg.BASE + "\n\ndef mul(a, b)\n    return a * b\n"

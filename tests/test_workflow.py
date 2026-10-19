@@ -8709,7 +8709,7 @@ async def test_workflow_stops_retrying_immediately_on_environment_failure(tmp_pa
     gap during golden-use-case validation: the same JVM-startup crash recurred
     identically across 3 real retry attempts before a human had to intervene."""
     cfg = AppConfig()
-    cfg.autonomy.mode = "autonomous"   # about gate/categorization behavior, not approval: in human-in-the-loop with no approver nothing is built or tested (Demo V2 Gap B)
+    cfg.autonomy.mode = "guardrails"   # about gate/categorization behavior, not approval: in human-in-the-loop with no approver nothing is built or tested (Demo V2 Gap B)
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -8776,7 +8776,7 @@ async def test_workflow_failure_category_quality_gates_exhausted(tmp_path):
     caller can always ask 'why did this fail' the same way regardless of
     which specific failure mode it was."""
     cfg = AppConfig()
-    cfg.autonomy.mode = "autonomous"   # about gate/categorization behavior, not approval: in human-in-the-loop with no approver nothing is built or tested (Demo V2 Gap B)
+    cfg.autonomy.mode = "guardrails"   # about gate/categorization behavior, not approval: in human-in-the-loop with no approver nothing is built or tested (Demo V2 Gap B)
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -8860,7 +8860,7 @@ async def test_workflow_failure_report_wires_real_failures_through_categorize_fa
     'why did the loop stop' answer AND a per-attempt 'what kind of thing
     kept failing' answer now coexist on the same result."""
     cfg = AppConfig()
-    cfg.autonomy.mode = "autonomous"   # about gate/categorization behavior, not approval: in human-in-the-loop with no approver nothing is built or tested (Demo V2 Gap B)
+    cfg.autonomy.mode = "guardrails"   # about gate/categorization behavior, not approval: in human-in-the-loop with no approver nothing is built or tested (Demo V2 Gap B)
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -9234,7 +9234,7 @@ async def test_workflow_heavy_process_profile_requires_approval(tmp_path):
     two pre-existing triggers fires - isolating that the process-profile
     trigger alone is what forces approval."""
     cfg = AppConfig()
-    cfg.autonomy.mode = "autonomous"
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.engineering_triage.enabled = True
     cfg.engineering_triage.shadow_mode = False
@@ -9282,7 +9282,7 @@ async def test_workflow_process_profiles_disabled_by_default_does_not_add_approv
     NOT require approval on its own - confirms the new trigger is genuinely
     opt-in, not accidentally always-on once engineering_triage is enabled."""
     cfg = AppConfig()
-    cfg.autonomy.mode = "autonomous"
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.engineering_triage.enabled = True
     cfg.engineering_triage.shadow_mode = False
@@ -22787,7 +22787,7 @@ async def test_workflow_heavy_context_depth_widens_retrieval_top_k(tmp_path):
     from kriya.memory.vector import LocalVectorStore
 
     cfg = AppConfig()
-    cfg.autonomy.mode = "autonomous"
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.paths.memory = str(tmp_path / "memory")
     cfg.paths.skills = str(tmp_path / "skills")
@@ -22841,7 +22841,7 @@ async def test_workflow_heavy_process_profile_records_telemetry_only(tmp_path):
     verification_tier is observational only. generation_metrics still
     records process_profile with heavy_extended_checks_not_yet_available."""
     cfg = AppConfig()
-    cfg.autonomy.mode = "autonomous"
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.engineering_triage.enabled = True
     cfg.engineering_triage.shadow_mode = False
@@ -22883,7 +22883,7 @@ async def test_workflow_context_depth_disabled_by_default_keeps_top_k_five(tmp_p
     from kriya.memory.vector import LocalVectorStore
 
     cfg = AppConfig()
-    cfg.autonomy.mode = "autonomous"
+    cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.paths.memory = str(tmp_path / "memory")
     cfg.paths.skills = str(tmp_path / "skills")

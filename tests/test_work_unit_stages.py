@@ -538,8 +538,8 @@ _NO_HELD_GATES = _AttemptCtx()
 
 @pytest.mark.parametrize("mode, threshold, written, triggers, reason_start", [
     ("human-in-the-loop", 100, ("calc.py",), ["human_in_the_loop"], "Human-in-the-loop review policy"),
-    ("autonomous", 1, ("calc.py",), ["diff_size"], "Risk threshold exceeded ("),
-    ("autonomous", 100, ("config/secrets.py",), ["sensitive_path"], "Sensitive path matched: config/secrets.py"),
+    ("guardrails", 1, ("calc.py",), ["diff_size"], "Risk threshold exceeded ("),
+    ("guardrails", 100, ("config/secrets.py",), ["sensitive_path"], "Sensitive path matched: config/secrets.py"),
 ])
 def test_an_approval_trigger_asks_the_person_with_the_review_attached(tmp_path, mode, threshold, written, triggers,
                                                                         reason_start):
@@ -603,7 +603,7 @@ def test_no_trigger_and_no_source_mutation_ask_nobody(tmp_path):
     approval, no pre-approval review, no decision record."""
     from kriya.workflow.stage_apply import approval_gate
 
-    for mode, written in (("autonomous", ("calc.py",)), ("human-in-the-loop", ())):
+    for mode, written in (("guardrails", ("calc.py",)), ("human-in-the-loop", ())):
         engine = _reviewing_engine(tmp_path / mode, mode=mode)
         callback = MagicMock(return_value=True)
         ctx = _apply_ctx(tmp_path / mode, written=written, approval_callback=callback)

@@ -1308,7 +1308,7 @@ def legacy_approval_required_no_callback(tmp_path: Path) -> Outcome:
 def legacy_autonomous_success(tmp_path: Path) -> Outcome:
     """Autonomous mode, a small diff: no approval asked, no pre-approval review, the Reviewer runs once at stage 5."""
     def autonomous(cfg):
-        cfg.autonomy.mode = "autonomous"
+        cfg.autonomy.mode = "guardrails"
     return _apply_run(tmp_path, configure=autonomous)
 
 
@@ -1317,7 +1317,7 @@ def legacy_approval_diff_size_trigger(tmp_path: Path) -> Outcome:
     """Autonomous mode, but the diff exceeds risk_threshold_lines: approval is asked (the diff_size trigger, with the
     pre-approval review attached) and granted; success."""
     def risky(cfg):
-        cfg.autonomy.mode = "autonomous"
+        cfg.autonomy.mode = "guardrails"
         cfg.autonomy.risk_threshold_lines = 1
     return _apply_run(tmp_path, configure=risky)
 
@@ -1352,7 +1352,7 @@ def legacy_rejected_candidate_review(tmp_path: Path) -> Outcome:
     regression (after the held gates passed): the last pre-approval review is reused as the final review
     (legacy_gates_exhausted; OPEN-ITEMS OI-42)."""
     def autonomous(cfg):
-        cfg.autonomy.mode = "autonomous"
+        cfg.autonomy.mode = "guardrails"
 
     def diagnostic(n: int, system: str, user: str) -> str:
         return ("REJECTED CANDIDATE DIAGNOSTIC\nThe add() body raises.\nHow to run: python -m pytest\n")

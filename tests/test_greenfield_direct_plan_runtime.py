@@ -371,7 +371,7 @@ def test_gap_b_a_changed_candidate_after_source_approval_is_never_executed_or_ap
 
 def test_gap_b_other_autonomy_modes_keep_their_existing_order_and_policy(tmp_path):
     """Pinned so the deferral is not global: outside human-in-the-loop nothing asks for a source or a runtime review (unchanged) and the application still runs once."""
-    run = run_direct(tmp_path, mode="autonomous")
+    run = run_direct(tmp_path, mode="guardrails")
     assert run.person.seen == []
     assert len(run.executed) == 1 and _succeeded(run.result)
     assert _applied(run) == set(FILES)
@@ -416,7 +416,7 @@ def test_gap_b_runtime_verification_held_for_a_review_that_is_not_asked_fails_cl
     """Defence in depth: if the deferral were ever armed where no source review is asked, nothing may run unreviewed."""
     from kriya.workflow import attempt as attempt_module  # noqa: PLC0415
     with patch.object(attempt_module, "defer_execution_until_source_review", new=lambda state, ctx: True):
-        run = run_direct(tmp_path, mode="autonomous")
+        run = run_direct(tmp_path, mode="guardrails")
     assert run.executed == [] and not _succeeded(run.result) and _applied(run) == set()
     assert any("EXECUTION_DEFERRED_WITHOUT_SOURCE_REVIEW" in str(g.get("output")) for g in run.gate_outcomes)
 

@@ -635,10 +635,10 @@ def test_preflight_reports_the_configured_autonomy_mode_and_never_changes_it():
 
     assert _interaction(AppConfig())["approvals"] == "change_review"
     autonomous = AppConfig()
-    autonomous.autonomy.mode = "autonomous"
+    autonomous.autonomy.mode = "guardrails"
     shown = _interaction(autonomous)
-    assert shown["approvals"] == "configured_mode" and shown["autonomy_mode"] == "autonomous" and "autonomous" in shown["note"]
-    assert autonomous.autonomy.mode == "autonomous", "the report must not alter the configuration"
+    assert shown["approvals"] == "configured_mode" and shown["autonomy_mode"] == "guardrails" and "guardrails" in shown["note"]
+    assert autonomous.autonomy.mode == "guardrails", "the report must not alter the configuration"
     assert _interaction(None)["approvals"] == "unknown"
 
 

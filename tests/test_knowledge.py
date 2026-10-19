@@ -344,7 +344,7 @@ def test_workflow_auto_accrual(tmp_path):
         mock_analyzer.analyze.return_value.model_dump_json.return_value = "{}"
 
         # Disable human approval to auto-apply
-        cfg.autonomy.mode = "autonomous"
+        cfg.autonomy.mode = "guardrails"
         cfg.autonomy.risk_threshold_lines = 1000
 
         import asyncio
@@ -424,7 +424,7 @@ def test_workflow_auto_accrual_skipped_when_suggestion_never_actually_used(tmp_p
         mock_analyzer.analyze.return_value.frameworks = []
         mock_analyzer.analyze.return_value.model_dump_json.return_value = "{}"
 
-        cfg.autonomy.mode = "autonomous"
+        cfg.autonomy.mode = "guardrails"
         cfg.autonomy.risk_threshold_lines = 1000
 
         import asyncio

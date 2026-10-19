@@ -303,7 +303,7 @@ class _Engine:
             cfg.autonomy.run_verification_enabled = True
             cfg.autonomy.self_correction_loop_enabled = False
             if self.autonomous:
-                cfg.autonomy.mode = "autonomous"
+                cfg.autonomy.mode = "guardrails"
             if self.configure is not None:
                 self.configure(cfg)
         eng, llm, self.cfg = engine(chain=False, configure=configure)
@@ -526,7 +526,7 @@ class _Repair:
 def _config(**autonomy: Any):
     """Runtime verification on, a non-default run timeout (so the timeout handed to every process is visible)."""
     return strict_config(autonomy={"run_verification_enabled": True, "spec_compliance_enabled": False,
-                                   "self_correction_loop_enabled": False, "mode": "autonomous",
+                                   "self_correction_loop_enabled": False, "mode": "guardrails",
                                    "run_verification_timeout_seconds": 37, **autonomy})
 
 
@@ -1516,7 +1516,7 @@ def test_the_runtime_seams_are_resolved_through_the_attempt_module(tmp_path):
         await _approve_and_execute(run)
         run.state.run_verification_approved_fingerprint = None      # the direct path asks for its own review
         await _directly(run)
-        run.cfg.autonomy.mode = "autonomous"                         # a managed service has no review subject
+        run.cfg.autonomy.mode = "guardrails"                         # a managed service has no review subject
         run.state.cached_run_verification_judgment = None              # judged again: a managed service this time
         await _directly(run)
 

