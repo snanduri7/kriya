@@ -411,6 +411,6 @@ def test_worktree_locations_are_decided_only_by_worktree_py():
                 offenders.append(f"{relative}:{node.lineno}:{node.value}")
     # kriya/tools/git_metadata.py names "worktrees" as a git-directory ENTRY the sanitized export must not carry
     # (OD-1, BACKEND-FINAL-CLOSURE-005) - an export boundary, never a managed worktree location.
-    assert offenders == ["kriya/production_doctor.py:697:worktree", "kriya/tools/git_metadata.py:74:worktrees",
+    assert offenders == ["kriya/production_doctor.py:699:worktree", "kriya/tools/git_metadata.py:74:worktrees",
                          "kriya/static_analysis/operator_scan.py:70:worktree",
                          "kriya/static_analysis/operator_scan.py:77:worktree"], offenders
