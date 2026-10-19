@@ -56,16 +56,25 @@ GATES = [{"attempt": 1, "type": "run_verification", "success": False, "output": 
                      "stdout": f"DB_PASSWORD={S}4\n", "stderr": "", "timed_out": False}]}]
 
 
+# One plant per stored column (each redaction site is killed on its own by a missing column marker).
+COLUMN_MARKERS = {"gate_outcomes": ("1", "2", "3", "4"), "goal": ("5",), "retrieved_chunks": ("6",), "prompt_rendered": ("7",),
+                  "model_hops": ("8",), "run_events": ("9",), "evidence_records": ("10",), "generation_metrics": ("11",),
+                  "failure_report": ("12",), "files_modified": ("13",), "active_skills": ("14",),
+                  "milestone_plans.validation_failures": ("15",), "milestone_plans.repository_topology": ("16",)}
+
+
 def _log_secret_row(db):
     from kriya.control.trace import TraceLogger
 
-    TraceLogger(db).log_run(
+    logger = TraceLogger(db)
+    logger.log_run(
         run_id="r-s20", goal=f"deploy with api_key={S}5 please", duration_sec=1.0, attempts=1, status="failed",
-        files_modified=["a.py"], retrieved_chunks=[{"text": f"token: {S}6"}], active_skills=["s"],
+        files_modified=["a.py", f"token={S}13"], retrieved_chunks=[{"text": f"token: {S}6"}], active_skills=["s", f"api_key={S}14"],
         prompt_rendered=f"=== Goal ===\nAuthorization: Bearer {S}7", gate_outcomes=GATES,
         model_hops=[{"error": f"http://u:{S}8@h/v1 refused"}], run_events=[{"kind": "k", "message": f"secret={S}9"}],
         evidence_records=[{"kind": "gate", "payload": {"raw_output": f"api_key={S}10"}}],
         generation_metrics={"note": f"token={S}11"}, failure_report=[{"failure_type": "x", "message": f"password={S}12"}])
+    logger.log_milestone_plan("g-s20", "rejected", 3, 1, 0, 0, 0, 1, [f"password={S}15"], {"note": f"secret={S}16"})
 
 
 def _row(db):
@@ -77,11 +86,12 @@ def _row(db):
         conn.close()
 
 
-def test_the_trace_row_stores_no_secret(tmp_path):
+@pytest.mark.parametrize("column", sorted(COLUMN_MARKERS))
+def test_the_trace_row_stores_no_secret(tmp_path, column):
     db = str(tmp_path / "traces.db")
     _log_secret_row(db)
-    stored = _bytes_under(tmp_path)
-    assert S.encode() not in stored                    # main db, -wal, -shm: no planted value in any column
+    stored = _bytes_under(tmp_path)                    # main db, -wal, -shm: no planted value in any column
+    assert [n for n in COLUMN_MARKERS[column] if f"{S}{n}".encode() in stored] == [], column
 
 
 def test_the_trace_row_keeps_its_non_secret_structure(tmp_path):
@@ -92,7 +102,7 @@ def test_the_trace_row_keeps_its_non_secret_structure(tmp_path):
     row = _row(db)
     gates = json.loads(row["gate_outcomes"])
     assert [g["type"] for g in gates] == ["run_verification"] and gates[0]["steps"][0]["command"][:2] == ["run.sh", "--token"]
-    assert gates[0]["steps"][0]["exit_code"] == 1 and row["status"] == "failed" and row["files_modified"] == "a.py"
+    assert gates[0]["steps"][0]["exit_code"] == 1 and row["status"] == "failed" and row["files_modified"].startswith("a.py,token=")
     assert row["goal"].startswith("deploy with api_key=") and row["goal"].endswith(" please")
     assert json.loads(row["failure_report"])[0]["failure_type"] == "x"
 
@@ -144,7 +154,7 @@ def _store(tmp_path):
     return str(tmp_path / "state"), payload
 
 
-@FLIP
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason="S20 GOLDEN STOP: held with the stamp (I-3); ready patch in the S20 report")
 def test_the_evidence_envelope_stores_no_secret(tmp_path):
     state, _ = _store(tmp_path)
     records = open(os.path.join(state, "attempt-evidence", "s20-rec", "records.jsonl"), "rb").read()
@@ -152,7 +162,8 @@ def test_the_evidence_envelope_stores_no_secret(tmp_path):
     assert f"Authorization: {R} {R}".encode() in records
 
 
-@FLIP
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason="S20 GOLDEN STOP: the stamp \"2\" moves tests/golden/kup/application/"
+                   "evidence_manifest(.json|_from_trace.json); held for the owner with the envelope redaction (I-3)")
 def test_the_evidence_manifest_names_the_applied_policy(tmp_path):
     from kriya.core.attempt_evidence import reader
 
@@ -284,7 +295,8 @@ def test_the_decision_ledger_file_stores_no_secret(tmp_path):
     ledger = DecisionLedger()
     decision = ledger.record_and_persist(str(ws), "triage", kind="x", note=f"token={S}40", count=3)
     line = json.loads(open(decision_ledger_path(str(ws)), encoding="utf-8").read().splitlines()[0])
-    assert line["note"] == f"token={R}" and line["kind"] == "x" and line["count"] == 3 and line["type"] == "triage"
+    assert line["note"] == f"token={R}"
+    assert (line["kind"], line["count"], line["type"]) == ("x", 3, "triage")
     assert decision.fields["note"] == f"token={S}40"          # the in-memory decision is the caller's, unchanged
 
 
@@ -301,7 +313,8 @@ def test_the_planning_diagnostic_stores_no_secret(tmp_path):
     text = open(path, encoding="utf-8").read()
     assert S not in text
     line = json.loads(text.splitlines()[0])
-    assert line["planner_request"] == f"goal: deploy with api_key={R}" and line["reason_codes"] == ["RC"]
+    assert line["planner_request"] == f"goal: deploy with api_key={R}"
+    assert line["reason_codes"] == ["RC"] and line["validation_errors"] == ["E1"]
 
 
 # =========================================================================== the original symptom: a real scripted run
