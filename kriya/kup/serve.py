@@ -28,6 +28,7 @@ from typing import Any, BinaryIO, Dict, Optional
 
 from kriya.foundation.redaction import redact_text
 from kriya.kup import policy
+from kriya.platform.services import ENTRY_REFUSED_EXIT_CODE, entry_refusal
 
 PROTOCOL = "kriya-kup-stdio/1"
 MAX_REQUEST_BYTES = 64 * 1024
@@ -186,7 +187,12 @@ def serve(stdin: BinaryIO, stdout: BinaryIO, config_path: Optional[str] = None, 
 
 
 def run(config_path: Optional[str], trust_file: Optional[str]) -> int:
-    """Entry point for the CLI command: protocol lines go to the ORIGINAL stdout, everything else that prints goes to stderr."""
+    """Entry point for the CLI command: protocol lines go to the ORIGINAL stdout, everything else that prints goes to stderr.
+    S5: on a platform Kriya does not support, nothing is served (typed refusal on stderr, ENTRY_REFUSED_EXIT_CODE)."""
+    refusal = entry_refusal()
+    if refusal is not None:
+        sys.stderr.write(f"{refusal}\n")
+        return ENTRY_REFUSED_EXIT_CODE
     sys.dont_write_bytecode = True
     out = os.fdopen(os.dup(1), "wb")
     os.dup2(2, 1)

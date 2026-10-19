@@ -25,6 +25,31 @@ from kriya.platform.resource_limits import ResourceLimitPort, UnavailableResourc
 POSIX = "posix"
 WINDOWS = "windows"
 
+# S5 (OI-101, PLAT-WINDOWS-ENTRY-REFUSAL): the platforms Kriya may run on (handover/PLATFORM_ARCHITECTURE.md §13:
+# Linux PRODUCTION_CERTIFIED, macOS DEVELOPMENT_AND_TARGET_CERTIFIED). Every other platform is refused at every entry
+# (CLI, KUP server, MCP server) before anything reads the workspace or applies policy. Exact ``sys.platform`` values.
+SUPPORTED_RUNTIME_PLATFORMS = frozenset({"linux", "darwin"})
+PLATFORM_WINDOWS_UNSUPPORTED = "PLATFORM_WINDOWS_UNSUPPORTED"
+PLATFORM_UNKNOWN_UNSUPPORTED = "PLATFORM_UNKNOWN_UNSUPPORTED"
+# The closed refusal table: reason code -> operator message (``{platform}`` is the sys.platform value).
+ENTRY_REFUSAL_REASONS = {
+    PLATFORM_WINDOWS_UNSUPPORTED: ("Kriya is not supported on Windows ({platform}): the Windows runtime is not "
+                                   "implemented (PLAT-WINDOWS-PROVIDERS-001). Run Kriya on Linux or macOS."),
+    PLATFORM_UNKNOWN_UNSUPPORTED: ("Kriya is not supported on this platform ({platform!r}): only Linux and macOS are "
+                                   "supported. Run Kriya on Linux or macOS."),
+}
+# sysexits EX_UNAVAILABLE; no Kriya command exits with it for any other reason.
+ENTRY_REFUSED_EXIT_CODE = 69
+
+
+class PlatformEntryRefused(RuntimeError):
+    """This host's platform is not one Kriya may run on: a typed refusal at entry, never a partial run."""
+
+    def __init__(self, reason_code: str, platform: str) -> None:
+        self.reason_code = reason_code
+        self.platform = platform
+        super().__init__(f"{reason_code}: " + ENTRY_REFUSAL_REASONS[reason_code].format(platform=platform))
+
 
 def host_family(platform_name: Optional[str] = None) -> str:
     """The provider family for a ``sys.platform`` value."""
@@ -46,6 +71,15 @@ class PlatformServices:
     def capabilities(self) -> List[CapabilityReport]:
         return [self.workspace_lock.capability(), *self.resource_limits.capabilities(),
                 self.host_identity.capability(), self.process_control.capability()]
+
+    def entry_refusal(self) -> Optional[PlatformEntryRefused]:
+        """None on a supported platform; otherwise the typed refusal every entry raises before doing anything. The
+        family decides first (a Windows family is refused whatever name it carries), then the exact platform name."""
+        if self.family == WINDOWS:
+            return PlatformEntryRefused(PLATFORM_WINDOWS_UNSUPPORTED, self.platform)
+        if self.platform not in SUPPORTED_RUNTIME_PLATFORMS:
+            return PlatformEntryRefused(PLATFORM_UNKNOWN_UNSUPPORTED, self.platform)
+        return None
 
     def identity(self) -> Dict[str, object]:
         """Provider identity: mechanism evidence for certification records."""
@@ -89,6 +123,11 @@ def platform_services() -> PlatformServices:
             if _services is None:
                 _services = compose(host_family())
     return _services
+
+
+def entry_refusal() -> Optional[PlatformEntryRefused]:
+    """This process's entry decision (the composed - or test-overridden - services)."""
+    return platform_services().entry_refusal()
 
 
 @contextmanager

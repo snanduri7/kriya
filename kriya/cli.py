@@ -56,6 +56,8 @@ from kriya.core.kernel import Kernel
 from kriya.core.logging_setup import LogDirectoryError, configure_logging
 from kriya.core.state_paths import trace_db_path
 from kriya.foundation.redaction import redact_text, redact_value
+from kriya.platform.services import ENTRY_REFUSED_EXIT_CODE
+from kriya.platform.services import entry_refusal as platform_entry_refusal
 from kriya.plugins.plugin import PluginManager
 from kriya.policy.approval import TypedApprovalCallback
 from kriya.prompt import PromptEngine
@@ -126,7 +128,20 @@ def _print_version(ctx: click.Context, _param: click.Parameter, value: bool) -> 
         ctx.exit()
 
 
-@click.group(invoke_without_command=True)
+class _EntryGuardedGroup(click.Group):
+    """S5 (OI-101): the platform decision (kriya.platform, the OS-mechanism owner) runs before click parses anything -
+    ``--config`` is a ``click.Path(exists=True)`` that stats its file while parsing and ``--version`` is eager - so on an
+    unsupported platform nothing reads the workspace or applies policy. The group's registration is unchanged."""
+
+    def main(self, *args: Any, **kwargs: Any) -> Any:
+        refusal = platform_entry_refusal()
+        if refusal is not None:
+            click.echo(str(refusal), err=True)
+            sys.exit(ENTRY_REFUSED_EXIT_CODE)
+        return super().main(*args, **kwargs)
+
+
+@click.group(cls=_EntryGuardedGroup, invoke_without_command=True)
 @click.option('--version', is_flag=True, expose_value=False, is_eager=True, callback=_print_version,
               help='Print the Kriya version and the exact source it was built from, then exit.')
 @click.option('--config', '-c', type=click.Path(exists=True), help='Path to Kriya configuration YAML file.')

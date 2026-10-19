@@ -3,6 +3,7 @@ import fnmatch
 import logging
 import os
 import re
+import sys
 
 # Let's import MCPServer from the mcp SDK (formerly FastMCP, renamed in mcp>=2.0.0)
 from mcp.server.mcpserver import MCPServer
@@ -159,7 +160,13 @@ def search_code(pattern: str, path: str = ".", file_glob: str = "*") -> str:
 # =====================================================================
 
 def main() -> None:
-    """CLI script entrypoint to run the MCP tool server."""
+    """CLI script entrypoint to run the MCP tool server. S5: refused, typed, on a platform Kriya does not support."""
+    from kriya.platform.services import ENTRY_REFUSED_EXIT_CODE, entry_refusal
+
+    refusal = entry_refusal()
+    if refusal is not None:
+        sys.stderr.write(f"{refusal}\n")
+        sys.exit(ENTRY_REFUSED_EXIT_CODE)
     mcp.run()
 
 if __name__ == "__main__":
