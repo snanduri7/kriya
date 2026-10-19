@@ -116,11 +116,11 @@ ENDPOINTS = [
     ("https://tok@github.com/o/r", "https://github.com/o/r"), ("HTTP://User:Pw@LOCALHOST:11434/V1/", "http://localhost:11434/V1/"),
     ("http://a:p%40w@h/x?api_key=k#frag", "http://h/x"), ("http://a:p@w@h/x", "http://h/x"), ("http://h/v1?token=x", "http://h/v1"),
     ("ftp://u:p@h", "ftp://h"), ("//u:p@h/p", "//h/p"), ("http://u@h:1/v1", "http://h:1/v1"), ("https://user:pa ss@h/v1", "https://h/v1"),
-    ("http://h:8080", "http://h:8080"), ("https://h:443/v1", "https://h:443/v1"), ("http://h:0/v1", "http://h/v1"),
+    ("http://h:8080", "http://h:8080"), ("https://h:443/v1", "https://h:443/v1"), ("http://h:0/v1", "http://h:0/v1"),
     ("http://h:99999/v1", "(unparseable endpoint)"), ("http://h:abc/v1", "(unparseable endpoint)"),
-    # Display quirks of the rule, pinned byte-for-byte (OI-145 must not change bytes; reported, not fixed here): an IPv6 host
-    # loses its brackets, a port 0 is dropped, an empty authority loses its '//', a newline is dropped by urlsplit.
-    ("http://[::1]:11434/v1", "http://::1:11434/v1"), ("unix:///var/run/ollama.sock", "unix:/var/run/ollama.sock"),
+    # Display quirks of the rule, pinned byte-for-byte: an empty authority loses its '//', a newline is dropped by urlsplit.
+    # S20 (OI-152, deliberate pin change): an IPv6 host keeps its brackets and an explicit port 0 is shown (both were dropped).
+    ("http://[::1]:11434/v1", "http://[::1]:11434/v1"), ("unix:///var/run/ollama.sock", "unix:/var/run/ollama.sock"),
     ("http://h\n/v1", "http://h/v1"), ("localhost:11434", "localhost:11434"), ("", ""), ("no scheme at all", "no scheme at all"),
     ("mailto:a@b", "mailto:a@b"), ("http://ünï.example/v1", "http://ünï.example/v1"),
 ]
@@ -139,7 +139,7 @@ def test_the_endpoint_display_rule_keeps_its_bytes(url, shown):
 @pytest.mark.parametrize("source, shown", [
     ("human_url:http://alice:pw@127.0.0.1:9/v1", "human_url:http://127.0.0.1:9/v1"),
     ("human_url:https://tok@github.com/o/r?x=1#f", "human_url:https://github.com/o/r"),
-    ("human_url:http://h:99999/v1", "human_url:unparseable-url"), ("human_url:http://[::1]:11434/v1", "human_url:http://::1:11434/v1"),
+    ("human_url:http://h:99999/v1", "human_url:unparseable-url"), ("human_url:http://[::1]:11434/v1", "human_url:http://[::1]:11434/v1"),
     ("https://u:p@h/x", "https://h/x"), ("human_url://u:p@h/p", "human_url:p"), ("human_file:/Users/a/secret.md", "human_file:secret.md"),
     ("plain words", "plain words"),
 ])

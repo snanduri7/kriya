@@ -293,11 +293,17 @@ def safe_endpoint(url: str, unparseable: str = "(unparseable endpoint)") -> str:
     """An endpoint (or any ``scheme://`` URL) as it may be SHOWN: scheme, host, port and path, with any ``user:password@``,
     query and fragment dropped; ``unparseable`` when the URL cannot be split (an out-of-range or non-numeric port).
     The ONE display rule (S2c, OI-145: it had a second copy in the skill-source display). Not the identity canonicalizer
-    ``core.model_runtime.endpoint_identity`` (digest input: it also lower-cases and drops a trailing '/'; kept apart)."""
+    ``core.model_runtime.endpoint_identity`` (digest input: it also lower-cases and drops a trailing '/'; kept apart).
+    S20 (OI-152): an IPv6 host keeps its brackets (``http://[::1]:11434/v1``, never the ambiguous ``http://::1:11434``),
+    an explicit port 0 is shown, and an unset endpoint (None) is shown as ""."""
+    if url is None:
+        return ""
     try:
         parts = urlsplit(url)
         host = parts.hostname or ""
-        netloc = f"{host}:{parts.port}" if parts.port else host
+        if ":" in host:
+            host = f"[{host}]"
+        netloc = f"{host}:{parts.port}" if parts.port is not None else host
         return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
     except ValueError:
         return unparseable

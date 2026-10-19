@@ -370,7 +370,6 @@ def test_a_scripted_run_keeps_no_planted_secret_in_its_trace_row(tmp_path, monke
     ("http://[::1]:11434/v1", "http://[::1]:11434/v1"), ("http://u:p@[::1]/v1", "http://[::1]/v1"),
     ("http://[FE80::1]:8080/x?k=v", "http://[fe80::1]:8080/x"), ("http://h:0/v1", "http://h:0/v1"), (None, ""),
 ])
-@FLIP
 def test_the_endpoint_display_keeps_ipv6_brackets_and_port_zero(url, shown):
     from kriya.foundation.redaction import safe_endpoint
 

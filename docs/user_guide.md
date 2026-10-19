@@ -269,7 +269,7 @@ the desktop app's error messages and the audit records never show a secret. One 
   secret-looking name or flag that Kriya recognises, so they are shown as written (in history, logs, errors and a launch's
   command review). Pass such secrets through an environment variable whose name says it is a secret (`MYSQL_PWD`,
   `NPM_TOKEN`) or on standard input (`docker login --password-stdin`) instead. Also recorded: `pwd=` / `PWD=` values are hidden (a `pwd` name can be a
-  password), and an IPv6 endpoint is shown without its brackets (`http://::1:11434/v1`).
+  password). An endpoint is shown as scheme, host, port and path; an IPv6 host keeps its brackets (`http://[::1]:11434/v1`).
 
 ### 2.0a-2 Autonomy modes: a closed list (S16a)
 `autonomy.mode` has exactly two values, spelled exactly like this:
