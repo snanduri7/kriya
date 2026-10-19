@@ -377,7 +377,7 @@ def test_every_secret_shape_is_hidden_in_free_text(text, hidden, kept):
 
 @pytest.mark.parametrize("text", ["http://localhost:11434/v1", "https://e.com/a@b?q=c@d", "dev@example.com",
                                   "git@github.com:org/repo.git", "sha256:" + "ab" * 32, "1c2cfe2a4b9e8f0d3c5a7b6e9f1d2c3b",
-                                  "Basic setup done", "mvn -Dmaven.compiler.showWarnings=true", "", "plain words"])
+                                  "Basic setup done", "Basic authentication is not configured", "mvn -Dmaven.compiler.showWarnings=true", "", "plain words"])
 def test_text_without_a_secret_is_returned_unchanged(text):
     assert redaction.redact_text(text) == text
 
