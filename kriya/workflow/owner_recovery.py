@@ -43,6 +43,7 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
+from kriya.policy import approval as source_review
 from kriya.workflow.obligations import (
     ObligationAuthority,
     ObligationKind,
@@ -920,6 +921,10 @@ def build_recovery_execution_plan(
     )
 
 
+# S3 (OI-99): the typed reason the owner-recovery self-correction loop was not run (logged on the controller logger).
+OWNER_RECOVERY_SELF_CORRECTION_HELD_FOR_SOURCE_REVIEW = "OWNER_RECOVERY_SELF_CORRECTION_HELD_FOR_SOURCE_REVIEW"
+
+
 async def _attempt_owner_recovery_self_correction(
     deps: OwnerRecoveryDeps,
     *,
@@ -978,8 +983,23 @@ async def _attempt_owner_recovery_self_correction(
     _invoke_bounded_subtask(execution_role="owner_recovery") path) when: the
     feature flag is off, there is no raw compiler/failure evidence to seed
     the loop, or self-correction did not resolve/modify anything within its
-    own bounded turns."""
+    own bounded turns, or (S3, OI-99) the run is one whose model-authored
+    candidate content may not execute before the person's source review
+    (human-in-the-loop, Gap B owner decision 2026-10-15): the loop's validator
+    compiles the model-written owner files in the plan worktree and nothing
+    here asks for a review, so it is held - the same decision that turns the
+    three attempt-level self-correction micro-loops off in that mode - and
+    the owner recovery continues through the governed Developer path.
+    The decision is AUTHORITY's (kriya.policy.approval), not a mode string
+    compared here."""
     if not getattr(kernel.config.autonomy, "self_correction_loop_enabled", False):
+        return None
+    if source_review.defer_execution_until_source_review(True, kernel.config.autonomy.mode, True):
+        deps.logger.info(
+            "%s owner=%s files=%s: the self-correction loop executes model-written bytes before any source review; "
+            "the governed owner-recovery path runs instead",
+            OWNER_RECOVERY_SELF_CORRECTION_HELD_FOR_SOURCE_REVIEW, owner.id, sorted(required_owner_files),
+        )
         return None
     raw_evidence = scope_conflict.get("raw_evidence") or ""
     if not raw_evidence.strip():

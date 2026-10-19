@@ -221,6 +221,7 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
         compute_violations,
         explicit_config_source,
         path_field_classification,
+        value_gated_field_classification,
     )
 
     config_dict: Dict[str, Any] = {}
@@ -476,6 +477,16 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                     if isinstance(user_data.get("agent_llms"), dict):
                         for role, role_val in user_data["agent_llms"].items():
                             classification_overrides[("agent_llms", role)] = agent_role_field_classification(role_val)
+
+                    # S3: a value-gated field (self_correction_loop_enabled,
+                    # web_lookup_auto_approve) is REPOSITORY_SAFE only at its
+                    # restricting value; any enabling value needs authority.
+                    for _top_key, _section in user_data.items():
+                        if isinstance(_section, dict):
+                            for _leaf_key, _value in _section.items():
+                                _gated = value_gated_field_classification(_top_key, _leaf_key, _value)
+                                if _gated is not None:
+                                    classification_overrides[(_top_key, _leaf_key)] = _gated
 
                     # logging.directory: null (the canonical default) grants
                     # nothing; any directory is a filesystem write target and

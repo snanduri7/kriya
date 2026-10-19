@@ -818,7 +818,9 @@ def test_unrelated_recovery_owners_are_ordered_by_file_role_before_id():
 def _Kernel(enabled):
     from _strict_doubles import strict_config, strict_kernel
 
-    return strict_kernel(strict_config(autonomy={"self_correction_loop_enabled": enabled,
+    # S3 (OI-99): outside human-in-the-loop, where the loop may run (tests/test_s3_config_authority_enabling_fields.py
+    # pins the human-in-the-loop hold).
+    return strict_kernel(strict_config(autonomy={"self_correction_loop_enabled": enabled, "mode": "guardrails",
                                                  "self_correction_loop_max_turns": 3}))
 
 

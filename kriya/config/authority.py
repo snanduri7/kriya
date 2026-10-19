@@ -104,11 +104,17 @@ _REPOSITORY_SAFE_FIELDS: frozenset = frozenset({
     ("autonomy", "spec_compliance_enabled"),
     ("autonomy", "max_consecutive_no_progress_attempts"),
     ("autonomy", "auto_index_missing_dependency_graph"),
-    ("autonomy", "web_lookup_enabled"), ("autonomy", "web_lookup_auto_approve"),
-    ("autonomy", "self_correction_loop_enabled"), ("autonomy", "self_correction_loop_max_turns"),
-    # DEV-INV-001 (2026-09-19): the strictly-read-only sibling of
-    # self_correction_loop_enabled immediately above - same risk shape
-    # (controls only whether/how many bounded, already-governed read-only
+    # web_lookup_enabled alone sends nothing unattended: search.base_url is
+    # SECURITY_AUTHORITY and every query is confirmed by a person unless
+    # web_lookup_auto_approve (value-gated below, S3) is authorized.
+    ("autonomy", "web_lookup_enabled"),
+    # S3 (OI-99): self_correction_loop_enabled and web_lookup_auto_approve are
+    # NOT here - see _VALUE_GATED_FIELDS. The turn bound stays: it only
+    # matters once enabling the loop has been authorized.
+    ("autonomy", "self_correction_loop_max_turns"),
+    # DEV-INV-001 (2026-09-19): strictly read-only (unlike the self-correction
+    # loop, which edits and compiles - S3 corrected the old "same risk shape"
+    # claim): controls only whether/how many bounded, already-governed read-only
     # lookups the Developer may request; every lookup still passes through
     # AuthorizedFileReader's own real containment/sensitive-path enforcement
     # regardless of this flag's value, and grants no new execution/network/
@@ -214,6 +220,9 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     ("autonomy", "risk_threshold_lines"),
     # "human-in-the-loop" -> a more permissive mode removes the approval gate
     ("autonomy", "mode"),
+    # S3 (OI-99): enabling values only (see _VALUE_GATED_FIELDS; the restricting
+    # value is REPOSITORY_SAFE through value_gated_field_classification()).
+    ("autonomy", "self_correction_loop_enabled"), ("autonomy", "web_lookup_auto_approve"),
     ("llm", "base_url"), ("embedding", "base_url"), ("search", "base_url"),
     # INF-001: which runtime adapter serves the model - which native identity
     # endpoints are probed and whether a context window is sent.
@@ -325,6 +334,35 @@ def path_field_classification(leaf_key: str, resolved_value: str, container_root
     same repository/workspace that is under attack."""
     # PLAT-PATH-CONTAINMENT-001: filesystem identity, never a lexical prefix (case/normalization aliases).
     if path_relation(container_root, resolved_value) is PathRelation.WITHIN:
+        return FieldClassification.REPOSITORY_SAFE
+    return FieldClassification.SECURITY_AUTHORITY
+
+
+# S3 (OI-99, OWNER-RECOVERY-SELF-CORRECTION-REVIEW-001): fields that ENABLE an
+# authority-sensitive behaviour, mapped to their one restricting value. A
+# repository may set the restricting value (it grants nothing - `kriya init`
+# writes it); any other value is SECURITY_AUTHORITY and needs the human
+# authority path (P2 approval / trust file).
+#   self_correction_loop_enabled: a model edit loop whose validator compiles
+#     model-written files (the controller's owner-recovery path runs it in the
+#     plan worktree, outside the per-attempt source review);
+#   web_lookup_auto_approve: removes the per-query human confirmation of an
+#     outbound live-lookup search.
+_VALUE_GATED_FIELDS: Dict[FieldPath, Any] = {
+    ("autonomy", "self_correction_loop_enabled"): False,
+    ("autonomy", "web_lookup_auto_approve"): False,
+}
+
+
+def value_gated_field_classification(top_key: Optional[str], leaf_key: str, value: Any) -> Optional[FieldClassification]:
+    """REPOSITORY_SAFE for a value-gated field set to exactly its restricting value (the bool ``False``, not a string
+    or a number that would coerce to it), SECURITY_AUTHORITY for any other value, None for a field that is not
+    value-gated (its static classification applies)."""
+    key = (top_key, leaf_key)
+    if key not in _VALUE_GATED_FIELDS:
+        return None
+    restricting = _VALUE_GATED_FIELDS[key]
+    if value is restricting:
         return FieldClassification.REPOSITORY_SAFE
     return FieldClassification.SECURITY_AUTHORITY
 

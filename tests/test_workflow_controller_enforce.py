@@ -4778,7 +4778,10 @@ def test_order_recovery_groups_fails_closed_on_cycle():
 
 def _fake_kernel(*, self_correction_enabled=True, max_turns=4):
     # These tests are about owner recovery, not PRD-020's terminal requirement verifier.
+    # S3 (OI-99): the loop runs only outside human-in-the-loop (it executes model-written bytes before any source
+    # review); these tests exercise it, so the mode is set explicitly instead of the human-in-the-loop default.
     return strict_kernel(strict_config(autonomy={
+        "mode": "guardrails",
         "self_correction_loop_enabled": self_correction_enabled,
         "self_correction_loop_max_turns": max_turns,
         "spec_compliance_enabled": False,
