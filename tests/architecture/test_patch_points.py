@@ -89,7 +89,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # name reaches the GateDeps field.
     # E14 pin2 (written before the moves, for the pin1 survivors u07/u09): +2 sites, the test-delta covering run's
     # judgment scope and its attribution evidence through this name.
-    (A, '_judge_candidate_suite'): P(4, A, ((A, 2),), ()),
+    # E14: 2 -> 1 lookup: the test-delta covering run (_raise_unexecuted_test_delta) moved to gate_orchestrator and reads
+    # GateDeps._judge_candidate_suite (the one load in attempt._gate_deps).
+    (A, '_judge_candidate_suite'): P(4, A, ((A, 1),), ()),
     (A, '_maybe_run_developer_investigation'): P(1, A, ((A, 1),), ()),
     # E9 characterization: +1 site (tests/test_runtime_verification.py: the dynamic proof that both runtime call sites
     # resolve it through this module at call time).

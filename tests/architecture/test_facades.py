@@ -164,9 +164,12 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
             "generation_service receives through GenerationDeps)"),
         PartialFacade(
             "kriya.workflow.gate_orchestrator",
-            ("SPEC_COMPLIANCE_MODEL_ADVISORY", "SPEC_MODEL_INDETERMINATE", "SPEC_MODEL_REPORTED_MISSING"), "P1",
+            ("SPEC_COMPLIANCE_MODEL_ADVISORY", "SPEC_MODEL_INDETERMINATE", "SPEC_MODEL_REPORTED_MISSING",
+             "_PROCESS_BOUNDARY_RECURRENCE_ESCALATION", "_TEST_VERIFIERS"), "P1",
             "E8: the candidate-gate orchestration owned by gate_orchestrator; attempt.py keeps 11 forwarders that inject "
-            "its collaborators (GateDeps) and re-exports the goal-spec gate's three advisory statuses"),
+            "its collaborators (GateDeps) and re-exports the goal-spec gate's three advisory statuses. E14: +10 forwarders "
+            "(the gate seams OI-54/OI-50 placed here) and the re-exports of their two constants (GateDeps binds the "
+            "recurrence escalation text by attempt.py's name; the test-verifier set moved with its only reader)"),
         PartialFacade(
             "kriya.workflow.process_boundary",
             ("_INITIAL_TEST_PROCESS_BOUNDARY_CONSTRAINT", "_NONZERO_PROCESS_EXIT_RE", "_TERMINATING_CASE_MARKERS"), "P1",

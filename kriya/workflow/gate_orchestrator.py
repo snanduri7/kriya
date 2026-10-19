@@ -46,7 +46,7 @@ state module is not imported; AttemptContext lives in attempt.py, OI-46).
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode
@@ -82,7 +82,9 @@ from kriya.workflow.file_resolution import (
 )
 from kriya.workflow.migration import MigrationResolutionStatus, MigrationValidationScope, find_migration_incomplete
 from kriya.workflow.obligations import ObligationAuthority, ObligationKind, ObligationRecord, ObligationStatus
+from kriya.workflow.repair_contract import RepairContractStatus
 from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.test_delta import TEST_EXECUTION_EVIDENCE_INDETERMINATE, judge_test_delta
 from kriya.workflow.toolchain import _pin_exec_plugin_executable_to_resolved_jdk, _strip_jdk_incompatible_jvm_flags
 from kriya.workflow.verification_authority import deterministic_sequence_kind
 from kriya.workflow.verification_coordinator import VerificationCoordinator, VerificationRequest
@@ -123,7 +125,8 @@ class GateDeps:
     _judge_candidate_suite: Callable[..., Any]
     _approve_and_execute_runtime_verification: Callable[..., Any]
     _execute_managed_service_verification: Callable[..., Any]
-    # attempt.py's own names that stay there (E9: the runtime execution; E14: the rest)
+    # attempt.py's own names (E9: the runtime execution; some of them are E14's moved bodies, still bound as attempt.py's
+    # forwarders)
     _PROCESS_BOUNDARY_RECURRENCE_ESCALATION: str
     _as_developer: Callable[..., Any]
     _build_java_main_class_map: Callable[..., Any]
@@ -165,6 +168,23 @@ class GateDeps:
     _new_candidate_validator: Callable[..., Any]
     _resolve_candidate_toolchain: Callable[..., Any]
     _run_executing_candidate_gates: Callable[..., Any]
+    # E14: what the bodies moved here in E14 read - the suite_attribution scope and the test_execution module (names
+    # attempt.py imports: an all-import-cycle module and an allowlisted EXECUTION edge), the loaders of their
+    # function-local kriya.analyzer.graph / kriya.core.role_metrics imports, and attempt.py's helpers and the moved
+    # siblings' forwarders
+    SCOPE_TEST_DELTA_COVERING_RUN: str
+    test_execution: Any
+    load_dependency_graph: Callable[[], Any]
+    load_model_role: Callable[[], Any]
+    _attribute_candidate_suite: Callable[..., Any]
+    _changed_test_sources: Callable[..., Any]
+    _dependency_graph_db_path: Callable[..., Any]
+    _extract_class_names_best_effort: Callable[..., Any]
+    _process_boundary_obligation_id: Callable[..., Any]
+    _runtime_contract_requirements: Callable[..., Any]
+    _sync_active_repair_contract: Callable[..., Any]
+    find_in_process_terminating_test_invocations: Callable[..., Any]
+    find_ungrounded_java_child_process_tests: Callable[..., Any]
 
 
 def _apply_candidate_pom_corrections(
@@ -1686,3 +1706,387 @@ async def _run_deferred_executing_gates(
     deps._run_pom_validation_gate(state, ctx, tree_binding)
     await deps._run_executing_candidate_gates(state, ctx, skipping_candidate_gates, tree_binding, active_code_context)
 
+
+# ----------------------------------------------------------------------------- E14 (OI-54, OI-50): moved verbatim from
+# kriya/workflow/attempt.py - the candidate-gate seams the moved gates (and run_attempt) reach through GateDeps: the
+# developer-role wrapper, the environment stop, the test-verification declaration, the process-boundary obligation,
+# the two process-boundary test-candidate checks, the test-delta integrity check, the workspace type index and the
+# suite judgment. attempt.py keeps a forwarder (or a re-export) for every name; GateDeps keeps binding those.
+
+async def _as_developer(deps: GateDeps, awaitable: Any) -> Any:
+    """Await ``awaitable`` with its model calls attributed to the developer
+    role (PRD-018): the compile/test self-correction loop is the Developer's
+    repair, run outside _run_developer_generation."""
+    model_role = deps.load_model_role()
+
+    with model_role("developer"):
+        return await awaitable
+
+
+def _stop_on_environment_gate_result(state: RunState, result: Any, gate: str) -> None:
+    """GRADLE-WRAPPER-CONTAINMENT-001: a gate result whose verification tool
+    could not start carries a typed ``environment_reason_code`` (the
+    validator sets it from a structured outcome, never from text). It is
+    raised as the existing ``verification_infrastructure_failure``
+    (retry_strategy: STOP_ENVIRONMENT - no budget reset, no fallback
+    escalation, the environment banner), never as a compile/test failure of
+    the candidate: nothing about the candidate was observed."""
+    code = result.get("environment_reason_code") if isinstance(result, dict) else None
+    if not code:
+        return
+    output = str(result.get("output") or "")
+    failure = Failure(
+        type="verification_infrastructure_failure",
+        message=(f"VERIFICATION_INFRASTRUCTURE_FAILURE: the {gate} gate's verification tool could not start "
+                 f"({code}); nothing about the candidate was observed, so this is not a code failure.\n{output}"),
+        raw_output=output, source="orchestrator", attempt=state.attempt_number,
+        diagnostics={"reason_code": code, "gate": gate, "gradle_distribution": result.get("gradle_distribution")},
+    )
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
+_TEST_VERIFIERS = frozenset({"test", "tests", "regression"})
+
+
+def _declares_test_verification(required_verification: Iterable[Dict[str, Any]]) -> bool:
+    """The stage's declared verification includes a test-suite verifier."""
+    return any(item.get("type") == "tool" and item.get("tool_name") in _TEST_VERIFIERS
+               for item in required_verification or ())
+
+
+def _process_boundary_obligation_id(subtask_id: str) -> str:
+    return f"attempt.subtask.{subtask_id}.process_boundary_compatibility"
+
+
+_PROCESS_BOUNDARY_RECURRENCE_ESCALATION = (
+    "\n\nRECURRING FAILURE: this exact process-boundary obligation was already recorded "
+    "VIOLATED on an earlier attempt for this subtask and is still unresolved. Toggling the "
+    "same call between two states again (e.g. undoing a previous attempt's fix) will not "
+    "resolve it - propose the structural separation (or out-of-process verification) "
+    "described above instead of repeating a change already tried."
+)
+
+
+def _record_process_boundary_obligation(
+    deps: GateDeps,
+    ctx: AttemptCtx, state: RunState, *, violated: bool, evidence: Dict[str, Any],
+) -> bool:
+    """PRV-06 (2026-08-28): records ObligationKind.PROCESS_BOUNDARY_COMPATIBILITY
+    when a test_process_terminated failure fires (violated=True), and clears
+    it back to SATISFIED the next time this subtask's test gate passes
+    (violated=False) - the same VIOLATED->SATISFIED tracking shape already
+    established for PLAN_STRUCTURAL_VALIDITY, giving this failure class real
+    cross-attempt identity instead of looking like a fresh, unrelated defect
+    every retry.
+
+    Returns True when violated=True and this exact obligation was ALREADY on
+    record as VIOLATED before this call - i.e. the SAME process-boundary
+    conflict recurring on a later attempt for the SAME subtask, never a
+    different subtask or an earlier-but-since-SATISFIED occurrence (prior
+    must itself be VIOLATED, not merely "violated at some point in this
+    obligation's history" - a subtask that fixed this and later broke it a
+    different way starts a fresh, non-recurrent record; recurrence means
+    "still unresolved between two consecutive checks," not "has a violated
+    entry somewhere in its past"). Callers use this to escalate the next
+    repair message with _PROCESS_BOUNDARY_RECURRENCE_ESCALATION instead of
+    silently repeating the same generic guidance every attempt - this is
+    what actually closes the oscillation PRV-06 hit live (the Developer
+    flipped System.exit <-> return for 11 attempts because nothing
+    distinguished "first occurrence" from "still unresolved"; recording the
+    obligation alone would only have made that observable in the ledger, not
+    prevented it). Recurrence is also written into the RECORD's own
+    `evidence` (recurrence/prior_violation_attempt/current_attempt) - a
+    durable control-plane fact inspectable from the ledger itself, not just
+    baked into a transient message string; the escalation text is only how
+    that fact gets exposed to the Developer, not the fact's only home.
+
+    Deliberately scoped to a structured/enforce subtask only
+    (ctx.current_subtask_id is the natural revision-tracked owner here, same
+    reasoning as every other owner_subtask_id in this module family) - a
+    plain Legacy run has no subtask id to anchor cross-attempt identity on
+    and doesn't consume obligation tracking today either. A SATISFIED record
+    is only written when this exact obligation was already VIOLATED for this
+    subtask, so an ordinary subtask that never hit this failure never
+    accumulates a needless record. Different subtasks get different
+    obligation ids (the subtask id is baked into the id itself) and one
+    ObligationLedger is scoped to one workflow run (see its own class
+    docstring) - recurrence can never fire across an unrelated subtask or an
+    unrelated run."""
+    if ctx.obligation_ledger is None or not ctx.current_subtask_id:
+        return False
+    obligation_id = deps._process_boundary_obligation_id(ctx.current_subtask_id)
+    prior = ctx.obligation_ledger.current(obligation_id)
+    if not violated and prior is None:
+        return False
+    is_recurrence = violated and prior is not None and prior.status == ObligationStatus.VIOLATED
+    record_evidence = dict(evidence)
+    if violated:
+        record_evidence["recurrence"] = is_recurrence
+        record_evidence["current_attempt"] = state.attempt_number
+        if is_recurrence:
+            record_evidence["prior_violation_attempt"] = prior.revision
+    record = ObligationRecord(
+        id=obligation_id, kind=ObligationKind.PROCESS_BOUNDARY_COMPATIBILITY,
+        status=ObligationStatus.VIOLATED if violated else ObligationStatus.SATISFIED,
+        authority=ObligationAuthority.DETERMINISTIC,
+        description="subtask's test execution must not trigger process/fork termination "
+                    "in already-written production code invoked in-process by a test",
+        source="attempt.run_attempt", revision=state.attempt_number,
+        evidence=record_evidence, owner_subtask_id=ctx.current_subtask_id, terminal_required=False,
+    )
+    ctx.obligation_ledger.record(record)
+    # MA9 (2026-08-29): a VIOLATED record is the trigger to (re)derive a
+    # coordinated RepairContract; a SATISFIED record closes whichever
+    # contract this exact obligation opened, if any - see
+    # kriya/workflow/repair_contract.py's own module docstring. Neither
+    # branch does anything when build_repair_contract()/evidence extraction
+    # can't unambiguously classify this - state.repair_contract simply stays
+    # whatever it already was (None for every run that never hits this).
+    if violated:
+        deps._sync_active_repair_contract(ctx, state, record)
+    elif state.repair_contract is not None and obligation_id in state.repair_contract.source_obligation_ids:
+        state.repair_contract.status = RepairContractStatus.SATISFIED
+        state.record_event(RunEvent(
+            kind="repair_contract_satisfied", attempt=state.attempt_number, source="attempt.run_attempt",
+            authority=EventAuthority.ADVISORY,
+            message=f"RepairContract '{state.repair_contract.id}' satisfied - originating obligation resolved.",
+            details={"repair_contract_id": state.repair_contract.id, "obligation_id": obligation_id},
+        ))
+    return is_recurrence
+
+
+def _raise_unsafe_process_boundary_test_candidate(
+    deps: GateDeps,
+    state: RunState, ctx: AttemptCtx, test_files: List[str],
+) -> None:
+    known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+    java_files = [path for path in known_files if path.endswith(".java")]
+    entrypoints = sorted(set(deps._build_java_main_class_map(java_files, ctx).values()))
+    findings = deps.find_in_process_terminating_test_invocations(
+        deps._runtime_contract_requirements(ctx), ctx.worktree_path, test_files, entrypoints,
+    )
+    if not findings:
+        return
+    offending_files = sorted({item["test_file"] for item in findings})
+    detail_lines = [
+        f"- {item['test_file']}:{item['line']}"
+        + (f" method={item['test_method']}" if item.get("test_method") else "")
+        + f" invokes {item['entrypoint_call']} for {item['terminating_case']}"
+        for item in findings
+    ]
+    message = (
+        "PROCESS_TERMINATING_BEHAVIOR_TESTED_IN_PROCESS: generated test code invokes an "
+        "application entrypoint in the test runner process for behavior the structured "
+        "runtime/process-boundary contract requires to terminate with a non-zero exit.\n"
+        + "\n".join(detail_lines)
+        + "\nPreserve the product's required process-terminating behavior. Repair the TEST only: "
+        "remove the in-process case or execute it through a child process and assert exit "
+        "code/stdout/stderr. The application_runtime verifier remains responsible for the "
+        "required exit-code behavior."
+    )
+    failure = Failure(
+        type="process_terminating_behavior_tested_in_process",
+        message=message,
+        raw_output=message,
+        file_locations=[
+            FileLocation(filepath=item["test_file"], line=item["line"])
+            for item in findings
+        ],
+        likely_files=offending_files,
+        failed_content=_capture_failed_content(ctx.worktree_path, offending_files),
+        diagnostics={
+            "reason_code": "PROCESS_TERMINATING_BEHAVIOR_TESTED_IN_PROCESS",
+            "repair_owner": "test",
+            "findings": findings,
+        },
+        attempt=state.attempt_number,
+    )
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
+def _raise_unexecuted_test_delta(
+    deps: GateDeps,
+    state: RunState, ctx: AttemptCtx, validator: Any,
+    accepted_result: Optional[Dict[str, Any]], selected_test: Optional[str],
+) -> None:
+    """FS-1A test-execution integrity for a subtask explicitly responsible
+    for tests (kriya/workflow/test_delta.py): its changed test sources must
+    have produced test identities that executed and passed in the accepted
+    gate invocation's own structured report. When that invocation did not
+    run every changed test source (a single targeted file) or carries no
+    structured report (a self-corrected result), one covering run supplies
+    the evidence. TEST_NOT_EXECUTED / TEST_NOT_PASSED is a repairable
+    test-acceptance failure naming the identities; INDETERMINATE evidence is
+    a typed stop, never a pass."""
+    changed = deps._changed_test_sources(state, ctx)
+    if not changed:
+        return
+    covered = selected_test is None or set(changed) == {selected_test}
+    result = accepted_result
+    if not covered or deps.test_execution.report_from_result(result) is None:
+        targeted = validator.stack == "python"
+        result = validator.run_tests(target_test=sorted(changed)) if targeted else validator.run_tests()
+        deps._stop_on_environment_gate_result(state, result, "test")
+        # A targeted run executes only the changed tests - its failures are the candidate's own; a full-suite
+        # run is attributed against the frozen baseline (CANDIDATE-GATE-BASELINE-POLICY-001).
+        blocking, evidence, extra = ((not result.get("success"), result.get("output", ""), {}) if targeted
+                                     else deps._judge_candidate_suite(state, ctx, result, deps.SCOPE_TEST_DELTA_COVERING_RUN))
+        if blocking:
+            failure = _build_test_quality_gate_failure(
+                "test", f"TEST FAILURE:\n{evidence}",
+                evidence, ctx.worktree_path, state.all_files_written, state.attempt_number,
+            )
+            failure.diagnostics = {**(failure.diagnostics or {}), **extra}
+            state.record_gate_outcome({**failure.to_gate_outcome(), **extra})
+            raise QualityGateFailure(failure)
+    report = deps.test_execution.report_from_result(result)
+    verdict = judge_test_delta(changed, report)
+    state.record_gate_outcome({
+        "attempt": state.attempt_number, "type": "test_delta", "success": verdict.satisfied,
+        "reason_code": verdict.reason_code, "test_delta": verdict.to_dict(),
+        "test_execution": report.summary() if report is not None else None,
+    })
+    if verdict.satisfied:
+        return
+    if verdict.reason_code == TEST_EXECUTION_EVIDENCE_INDETERMINATE:
+        failure = Failure(
+            type="verification_infrastructure_failure",
+            message=f"{TEST_EXECUTION_EVIDENCE_INDETERMINATE}: {verdict.detail}",
+            raw_output=verdict.detail, likely_files=sorted(changed), attempt=state.attempt_number,
+            diagnostics={"reason_code": verdict.reason_code, "test_delta": verdict.to_dict()},
+        )
+    else:
+        failure = Failure(
+            type="test_acceptance",
+            message=(
+                f"TEST ACCEPTANCE FAILURE ({verdict.reason_code}): the goal requires tests, and the "
+                f"changed test code must run as tests and pass. {verdict.detail}. A test the runner "
+                "does not execute (for example a method without its test annotation, or a function "
+                "the runner does not collect) verifies nothing."
+            ),
+            raw_output=verdict.detail, likely_files=sorted(changed), attempt=state.attempt_number,
+            diagnostics={"reason_code": verdict.reason_code, "test_delta": verdict.to_dict()},
+        )
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
+def _raise_ungrounded_child_process_test_candidate(
+    deps: GateDeps,
+    state: RunState, ctx: AttemptCtx, test_files: List[str],
+) -> None:
+    known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+    java_files = [path for path in known_files if path.endswith(".java")]
+    findings = deps.find_ungrounded_java_child_process_tests(
+        deps._runtime_contract_requirements(ctx), ctx.worktree_path, test_files,
+        deps._build_java_main_class_map(java_files, ctx), known_files,
+    )
+    if not findings:
+        return
+    offending = sorted({item["test_file"] for item in findings})
+    details = "\n".join(
+        f"- {item['test_file']}: " + "; ".join(item["reasons"])
+        for item in findings
+    )
+    exemplar = findings[0]
+    message = (
+        "VERIFICATION_INFRASTRUCTURE_FAILURE: generated child-process verification "
+        "does not use Kriya's grounded application launch.\n" + details
+        + "\nRepair the TEST/verification mechanism only; preserve application behavior. "
+        f"Use main class {exemplar['entrypoint']} with classpath "
+        f"{exemplar['classes_dir']}, launch a distinct child, wait for it, and capture "
+        "stdout/stderr/exit code. A child launch/setup failure is not evidence against "
+        "the application source."
+    )
+    failure = Failure(
+        type="test_verification_infrastructure_failure",
+        message=message, raw_output=message,
+        likely_files=offending, attempt=state.attempt_number,
+        diagnostics={
+            "reason_code": "UNGROUNDED_CHILD_PROCESS_LAUNCH",
+            "grounded_entrypoint": exemplar["entrypoint"],
+            "grounded_classpath": exemplar["classes_dir"],
+        },
+    )
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
+def _build_workspace_type_index(deps: GateDeps, state: RunState, ctx: AttemptCtx) -> Dict[str, List[str]]:
+    """Workspace-wide simple-class-name -> [filepaths] index for the
+    duplicate-type-across-files pre-flight check below and
+    find_cross_package_symbol_mismatch() (see their own docstrings for the
+    live incidents this exists to prevent). Two layers:
+
+    1. DependencyGraph.get_class_symbol_locations() - the persisted baseline,
+       covering pre-existing repo content and every earlier-completed
+       milestone's already-applied output, PROVIDED `kriya analyze` has ever
+       actually been run against this workspace. Found live, 2026-08-22
+       (ignite_qpid_protocol): this baseline is NOT populated automatically
+       by run_generation_workflow() at all - index_repository() (the only
+       thing that ever writes real rows into dependency_graph.db's symbols
+       table) is called exclusively from the explicit `kriya analyze`/
+       `kriya analyze --vectors` CLI path (kriya/cli.py) - a milestone-
+       decomposition project that never had that command run against it has
+       a genuinely EMPTY persisted baseline for its entire lifetime, however
+       many milestones have completed. Best-effort by construction regardless
+       (no dependency_graph.db yet, or any DB error, degrades to an empty
+       baseline for this layer) - this is exactly why layer 2 below is not
+       optional supplementary coverage, it is THE primary coverage for any
+       project that has never been explicitly `kriya analyze`-d.
+    2. Every file in state.all_files_written UNION ctx.established_files,
+       read fresh (worktree first, workspace fallback - same lookup order
+       used throughout this module) and parsed via
+       DependencyGraph.extract_class_names() (no DB write). Found live,
+       2026-08-22, the SAME "established_files blind spot" class of bug
+       already fixed three times this session at other call sites
+       (RunVerifierAgent.judge()'s files_written, self-diagnosis
+       attribution): this layer previously covered ONLY state.
+       all_files_written (files THIS attempt itself wrote), so an earlier,
+       already-completed milestone's file was invisible to both the
+       duplicate-type gate and find_cross_package_symbol_mismatch() unless
+       `kriya analyze` happened to have indexed it into layer 1 - for a
+       project that never had that command run, EVERY earlier milestone's
+       file was invisible to this whole index, silently, for this session's
+       entire live-validation effort."""
+    db_path = deps._dependency_graph_db_path(ctx)
+    try:
+        DependencyGraph = deps.load_dependency_graph()
+        graph = DependencyGraph(db_path)
+        try:
+            index = graph.get_class_symbol_locations()
+        finally:
+            graph.close()
+        for written_path in sorted(set(state.all_files_written) | set(ctx.established_files)):
+            full_path = os.path.join(ctx.worktree_path, written_path)
+            if not os.path.exists(full_path):
+                full_path = os.path.join(ctx.workspace_path, written_path)
+            if not os.path.exists(full_path):
+                continue
+            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                written_content = fh.read()
+            for name in deps._extract_class_names_best_effort(db_path, written_path, written_content):
+                paths = index.setdefault(name, [])
+                if written_path not in paths:
+                    paths.append(written_path)
+        return index
+    except Exception as e:
+        deps.logger.debug(f"_build_workspace_type_index: skipping duplicate-type check for this attempt: {e}")
+        return {}
+
+
+def _judge_candidate_suite(
+    deps: GateDeps,
+    state: RunState, ctx: AttemptCtx, result: Dict[str, Any], scope: str,
+) -> Tuple[bool, str, Dict[str, Any]]:
+    """(blocking, Developer-facing evidence, gate-outcome evidence) for one
+    full-suite run: attributed against the frozen baseline when one was
+    captured, else the raw ``success`` rule exactly as before."""
+    attribution = deps._attribute_candidate_suite(state, ctx, result, scope)
+    if attribution is None:
+        return not result["success"], result.get("output", ""), {}
+    evidence = attribution.evidence_text(state.validation_baseline_full_regression, result.get("output", ""),
+                                         deps.test_execution.failure_details(result))
+    return attribution.blocking, evidence, {"regression_attribution": attribution.gate_evidence()}
