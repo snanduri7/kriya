@@ -321,9 +321,10 @@ embedding:
   base_url: "http://localhost:11434/v1"    # OpenAI-compatible client as llm above.
 
 autonomy:
-  mode: "human-in-the-loop"                # Any value other than "human-in-the-loop" behaves as "guardrails" -
-                                            # approval is then only triggered by a sensitive-path match or
-                                            # risk_threshold_lines, not on every change.
+  mode: "human-in-the-loop"                # Exactly "human-in-the-loop" (default) or "guardrails" - approval
+                                            # is then only triggered by a sensitive-path match or
+                                            # risk_threshold_lines, not on every change. Any other value is a
+                                            # typed configuration error (S16a), never a mode.
   egress_policy: "local_only"              # Rejects any base_url that doesn't resolve to loopback/private/.local
   sensitive_paths:                         # Your own list is ADDED to, never replaces, a baseline force-appended
     - ".*\\.env$"                          # regardless of config: .env, secrets, .github/workflows/, Jenkinsfile,

@@ -100,9 +100,10 @@ llm_chain:
 
 # Data safety & egress boundaries
 autonomy:
-  mode: "human-in-the-loop"                # Any other value behaves as "guardrails" - approval then only
-                                            # triggers on a sensitive-path match or risk_threshold_lines, not
-                                            # on every change.
+  mode: "human-in-the-loop"                # Exactly "human-in-the-loop" (the default) or "guardrails" (approval
+                                            # then only triggers on a sensitive-path match, risk_threshold_lines
+                                            # or a process profile, not on every change). Anything else is a
+                                            # typed error (S16a, section 2.0a-2).
   egress_policy: "local_only"              # Enforce local boundaries; blocks remote endpoints
   sensitive_paths:                         # ADDED to, never replaces, a baseline force-appended regardless of
     - ".*\\.env$"                          # config: .env, secrets, .github/workflows/, Jenkinsfile, credentials,
@@ -235,6 +236,24 @@ the desktop app's error messages and the audit records never show a secret. One 
   GitHub token shapes.
 - Readable on purpose: the host, port and path of a URL, hashes and commit SHAs, e-mail addresses, `git@host:repo`
   remotes. The approval record (`kriya authority approve`) never stored values; it keeps salted digests.
+
+### 2.0a-2 Autonomy modes: a closed list (S16a)
+`autonomy.mode` has exactly two values, spelled exactly like this:
+- **`human-in-the-loop`** (the default, also when the key is absent): every change is held for your review, nothing
+  the model wrote is built, tested or run before you approved its source, a command set you did not write yourself is
+  shown to you before it runs, and a planned tool step that cannot be reviewed is refused.
+- **`guardrails`**: a change is held for review only when it touches a sensitive path, exceeds
+  `risk_threshold_lines` or a process profile asks for review.
+
+Any other value stops Kriya before it does anything else - before any approval is consulted, any tool runs or any run
+starts - with a typed error that names the field and the allowed values (the value itself is never shown):
+`AUTONOMY_MODE_UNKNOWN` (a typo or an unknown mode such as `full-autonomy`), `AUTONOMY_MODE_NOT_CANONICAL` (a
+case or surrounding-whitespace variant such as `Human-in-the-loop` or `"guardrails "`; Kriya never repairs it for
+you), `AUTONOMY_MODE_EMPTY`, `AUTONOMY_MODE_NULL` (`mode: null`; remove the key for the default) and
+`AUTONOMY_MODE_NOT_A_STRING`. This applies wherever the value comes from (a repository `kriya.yaml`, `--config`,
+the desktop app) and to `kriya authority inspect` / `approve` too: an invalid mode cannot be approved, and an approval
+or trust file recorded for one earlier no longer makes it load. Before S16a any other string was accepted and behaved
+as `guardrails`, so a one-letter typo of `human-in-the-loop` silently switched the review off.
 
 ### 2.0b Where run history goes (`paths.state`)
 `traces.db` is the run history behind `kriya traces`. It is persistent state, not log output, so it has its own

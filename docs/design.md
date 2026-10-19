@@ -3242,3 +3242,25 @@ anything, so neither `--config`'s exists-stat nor the eager `--version` runs; th
 unchanged), `kriya.kup.serve.run` and `kriya.mcp.server.main`. Importing Kriya on Windows is unchanged (the
 windows-latest CI job). Windows parity stays future work (PLAT-WINDOWS-POLICY-PARITY-001, PLAT-WINDOWS-PROVIDERS-001).
 
+### S16a - autonomy.mode is a closed vocabulary (2026-10-19, OI-130, AUTONOMY-MODE-FAIL-OPEN)
+
+Derivation (every production comparison site, the schema and packaged default, `kriya init`, CLI, environment, KUP/GUI,
+documentation and tests): the production code compares the mode only against `human-in-the-loop` (stage_apply x2,
+spec_compliance, runtime_verification x2, policy.approval, subtask_executor, tools.tool, application.run); every other
+value takes the else branch, which the documentation names `guardrails`. No environment variable, CLI option or KUP
+operation sets the mode; `full-autonomy` is produced and consumed nowhere. The vocabulary is therefore
+{`guardrails`, `human-in-the-loop`}, default `human-in-the-loop`.
+
+Owner: the config authority, `kriya/config/authority.py` (`AUTONOMY_MODES`, `parse_autonomy_mode`,
+`AutonomyModeError` - a `KriyaError`, deliberately not a `ValueError`, so pydantic propagates it unwrapped - with the
+closed reason table `AUTONOMY_MODE_REASONS`: NULL, NOT_A_STRING, EMPTY, NOT_CANONICAL, UNKNOWN; the message names the
+field and the allowed set, never the value). Exact match only: no strip, no case folding. Ingress: `resolve_config_state`
+validates the EFFECTIVE value (any layer) before classification, so `load_config`, `kriya authority inspect|approve`, the
+desktop configuration operations and the release-candidate identity all refuse it before SEC-009 is consulted - an
+invalid value cannot be approved, and a durable approval or trust file recorded for one is never read; `AutonomyConfig`
+validates on construction (before-validator), attribute assignment and `model_copy(update=)`, and `AppConfig.model_copy`
+checks a replaced `autonomy`. `autonomy.mode` stays SECURITY_AUTHORITY. Consumers are unchanged: with every ingress
+validated, only pydantic's explicitly unvalidated `model_construct` (no production caller) can still deliver another
+string; `tools.tool.ModelToolInvocation` and `subtask_executor` keep treating an unreadable mode as human-in-the-loop.
+A test tripwire fails if a production comparison names a value outside the vocabulary.
+
