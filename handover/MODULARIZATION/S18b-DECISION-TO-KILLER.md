@@ -8,7 +8,8 @@ Commits: f29fd26 characterization (before pins + strict-xfail after pins, MEASUR
 not-own-repository control); docs/notes commit after.
 
 L1 = tests/test_s18b_planned_tool_contracts.py. Campaign 20261019_224109_59ec7834 (mutrun v2, rev 1371d77, VALID, 83 s,
-no stragglers, no tree diff): 17/17 KILLED at L1, 0 survivors.
+no stragglers, no tree diff): 17/17 KILLED at L1, 0 survivors. After the own-bug fix 72cd5ae (the kernel-less test now runs
+through _t6_harness.enforce_run) S18bM17 was re-run alone at 72cd5ae: KILLED L1 (VALID).
 
 ## OI-140 classification (operation | consumer | A/B | evidence | decision)
 
