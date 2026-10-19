@@ -479,40 +479,13 @@ def _record_retry_projection_context_items(
 
 
 def _record_omitted_members(state: GenerationState, omitted: Iterable[Dict[str, Any]]) -> None:
-    """CONTEXT-EDIT-PROTOCOL-LARGE-FILE-001: the grounded members a package
-    omitted, per path, with the lines and revision the entry recorded
-    (make_omitted_entry); an entry without them records nothing. The record
-    is replaced wholesale by every package build (a path shown whole in a
-    later attempt has no omission any more)."""
-    by_path: Dict[str, List[Tuple[int, int, str]]] = {}
-    for entry in omitted:
-        if entry.get("member_id") is None or not entry.get("revision") or entry.get("start_line") is None:
-            continue
-        boundary = (int(entry["start_line"]), int(entry["end_line"]), str(entry["revision"]))
-        members = by_path.setdefault(entry["path"], [])
-        if boundary not in members:
-            members.append(boundary)
-    state.known_target_omitted_members = by_path
+    """The body is kriya/workflow/repair_orchestrator.py (E14)."""
+    return repair_orchestrator._record_omitted_members(state, omitted)
 
 
 def _record_known_target_package(state: GenerationState, items: Iterable[ContextItem]) -> None:
-    """Record a known-target or retry-member package per path. A package
-    can render several member_exact units for one file (every member
-    localization grounded, every overload of an ambiguous name), listed in
-    rank order: the path's record is its highest-ranked member - never
-    whichever unit happened to be listed last - and every member unit is kept
-    in ``known_target_member_items`` for edit authority. A path without
-    member units records its last (broadest) item, as before."""
-    by_path: Dict[str, List[ContextItem]] = {}
-    for item in items:
-        by_path.setdefault(item.path, []).append(item)
-    for path, path_items in by_path.items():
-        members = [item for item in path_items if item.tier == "member_exact" and item.member_id is not None]
-        state.known_target_context_items[path] = members[0] if members else path_items[-1]
-        if members:
-            state.known_target_member_items[path] = members
-        else:
-            state.known_target_member_items.pop(path, None)
+    """The body is kriya/workflow/repair_orchestrator.py (E14)."""
+    return repair_orchestrator._record_known_target_package(state, items)
 
 
 def exit_authority_text(ctx: "AttemptContext") -> str:
@@ -525,33 +498,13 @@ def exit_authority_text(ctx: "AttemptContext") -> str:
 
 
 def _escalation_authorized_paths(ctx: "AttemptContext", target_files: Iterable[str]) -> Tuple[str, ...]:
-    """PRD-028: the write scope a member-authority expansion must already
-    sit inside - never widened by it. DENY_ALL authorizes nothing; an
-    ALLOWLIST authorizes only its listed targets; UNRESTRICTED top-level
-    generation authorizes the retry's own grounded targets."""
-    targets = tuple(dict.fromkeys(target_files or ()))
-    if ctx.write_scope_mode is WriteScopeMode.DENY_ALL:
-        return ()
-    if ctx.write_scope_mode is WriteScopeMode.ALLOWLIST:
-        allowed = set(ctx.allowed_write_relpaths)
-        return tuple(path for path in targets if path in allowed)
-    return targets
+    """The body is kriya/workflow/repair_orchestrator.py (E14)."""
+    return repair_orchestrator._escalation_authorized_paths(ctx, target_files)
 
 
 def _record_authority_expansions(state: GenerationState, expansions: Iterable[Any]) -> None:
-    for expansion in expansions:
-        state.authority_expansions.append(expansion)
-        state.record_event(RunEvent(
-            kind="authority.expansion",
-            attempt=state.attempt_number,
-            source="authority_escalation",
-            authority=EventAuthority.ADVISORY,
-            message=(
-                f"Member authority {expansion.outcome} for {expansion.path}::{expansion.member_id} "
-                f"({expansion.reason_code}, origin {expansion.source_origin})."
-            ),
-            details=expansion.to_dict(),
-        ))
+    """The body is kriya/workflow/repair_orchestrator.py (E14)."""
+    return repair_orchestrator._record_authority_expansions(state, expansions)
 
 
 def _effective_retry_temperature(ctx: "AttemptContext", model_identity: str) -> Optional[float]:
