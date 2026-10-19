@@ -220,6 +220,7 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
         agent_role_field_classification,
         compute_violations,
         explicit_config_source,
+        parse_autonomy_mode,
         path_field_classification,
         value_gated_field_classification,
     )
@@ -582,6 +583,14 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                     continue
             config_dict.setdefault(top, {})[leaf] = value
             provenance[(top, leaf)] = derived_source
+
+    # S16a (OI-130): autonomy.mode is a closed vocabulary. The EFFECTIVE value (whichever layer set it: packaged default,
+    # workspace or install-dir kriya.yaml, explicit --config) is validated BEFORE classification, so a malformed mode is a
+    # typed AutonomyModeError for load_config, `kriya authority inspect|approve` and the desktop's configuration operations
+    # alike: there is nothing to approve, and an approval of it (a trust file, a stale local store) is never consulted.
+    autonomy_section = config_dict.get("autonomy")
+    if isinstance(autonomy_section, dict) and "mode" in autonomy_section:
+        parse_autonomy_mode(autonomy_section["mode"])
 
     violations = compute_violations(provenance, classification_overrides)
     return ConfigResolutionState(config_dict=config_dict, workspace_root=workspace_root, violations=violations,

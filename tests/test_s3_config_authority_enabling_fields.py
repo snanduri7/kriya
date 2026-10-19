@@ -134,13 +134,13 @@ def _owner_recovery(mode, tmp_path, enabled=True):
     return result, ran
 
 
-@pytest.mark.parametrize("mode", ["guardrails", "full-auto", HITL])
+@pytest.mark.parametrize("mode", ["guardrails", HITL])
 def test_a_disabled_loop_never_runs_in_any_mode(tmp_path, mode):
     result, ran = _owner_recovery(mode, tmp_path, enabled=False)
     assert ran == [] and result is None
 
 
-@pytest.mark.parametrize("mode", ["guardrails", "full-auto"])
+@pytest.mark.parametrize("mode", ["guardrails"])
 def test_an_approved_loop_outside_human_in_the_loop_still_runs(tmp_path, mode):
     result, ran = _owner_recovery(mode, tmp_path)
     assert ran == [str(tmp_path)] and result == {"status": "success", "quality_gates_passed": True, "files": ["pom.xml"]}

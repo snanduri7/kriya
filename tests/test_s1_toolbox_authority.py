@@ -35,9 +35,9 @@ from kriya.workflow.triage import ChangeKind
 from kriya.workflow.workflow_types import SubtaskStatus
 
 HITL = "human-in-the-loop"
-# Every value other than "human-in-the-loop" behaves as "guardrails" in the product (docs/user_guide.md); an arbitrary
-# value is exercised too, because the mode is an open string (S16 owns its vocabulary).
-MODES = (HITL, "guardrails", "full-auto")
+# autonomy.mode is the closed vocabulary {guardrails, human-in-the-loop} since S16a (OI-130): the arbitrary third value
+# ("full-auto") these pins used while the mode was an open string is now a typed configuration error, never a mode.
+MODES = (HITL, "guardrails")
 
 def _core():
     return load_core_tools_module()

@@ -31,7 +31,7 @@ from kriya.workflow.state import GenerationState
 
 CODE = "MANAGED_SERVICE_APPROVAL_UNSUPPORTED"
 HITL = "human-in-the-loop"
-NON_HITL = "guardrails"  # the documented non-HITL mode (docs/user_guide.md: any other value behaves as guardrails)
+NON_HITL = "guardrails"  # the documented non-HITL mode (S16a: autonomy.mode is the closed vocabulary {guardrails, human-in-the-loop})
 FINITE = {
     "should_run": True, "run_commands": [["java", "-cp", "target/classes", "com.example.App"]],
     "command_source": "inferred", "success_criteria": "prints HELLO",

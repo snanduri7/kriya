@@ -377,8 +377,34 @@ class EmbeddingConfig(BaseModel):
     model: str = Field(default="nomic-embed-text:latest")
     base_url: str = Field(default="http://localhost:11434/v1")
 
+def _autonomy_mode(value: Any) -> str:
+    """S16a: the config authority's one parser (kriya.config.authority.parse_autonomy_mode); lazy, as load_config's
+    authority import (CONFIG -> AUTHORITY is the restricted edge into exactly that module)."""
+    from kriya.config.authority import parse_autonomy_mode
+
+    return parse_autonomy_mode(value)
+
+
 class AutonomyConfig(BaseModel):
+    # S16a (OI-130): a closed vocabulary (kriya.config.authority.AUTONOMY_MODES), validated at construction, on
+    # assignment and on a model_copy update; a malformed value is AutonomyModeError, never a mode.
     mode: str = Field(default="human-in-the-loop")
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _closed_mode_vocabulary(cls, value: Any) -> str:
+        return _autonomy_mode(value)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "mode":
+            value = _autonomy_mode(value)
+        super().__setattr__(name, value)
+
+    def model_copy(self, *, update: Optional[Dict[str, Any]] = None, deep: bool = False) -> "AutonomyConfig":
+        if update and "mode" in update:
+            _autonomy_mode(update["mode"])
+        return super().model_copy(update=update, deep=deep)
+
     egress_policy: str = Field(default="local_only")
     sensitive_paths: List[str] = Field(default_factory=lambda: [
         r".*\.env$", r".*secrets.*", r"\.github/workflows/.*", r"Jenkinsfile",
@@ -1552,6 +1578,15 @@ class AppConfig(BaseModel):
     # configuration, recorded by the run as model.route events. Not a
     # configuration field.
     _routing_plan: Any = PrivateAttr(default=None)
+
+    def model_copy(self, *, update: Optional[Dict[str, Any]] = None, deep: bool = False) -> "AppConfig":
+        """S16a: an ``autonomy`` replaced through ``update`` (pydantic validates nothing there) carries a valid mode."""
+        autonomy = (update or {}).get("autonomy")
+        if isinstance(autonomy, AutonomyConfig):
+            _autonomy_mode(autonomy.mode)
+        elif isinstance(autonomy, dict) and "mode" in autonomy:
+            _autonomy_mode(autonomy["mode"])
+        return super().model_copy(update=update, deep=deep)
 
     @field_validator("runtime_profile")
     @classmethod

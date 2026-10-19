@@ -52,7 +52,6 @@ INVALID = [
 STRING_INVALID = [(v, c) for v, c in INVALID if isinstance(v, str)]
 # one representative per reason code, for the expensive ingress paths (CLI, KUP, fresh interpreter)
 ONE_PER_CODE = [("human-in-the-lop", UNKNOWN), ("human-in-the-loop ", NOT_CANONICAL), ("", EMPTY), (None, NULL), (1, NOT_A_STRING)]
-FLIP = pytest.mark.xfail(strict=True, reason="S16a expected-to-flip: the unfixed bytes accept the value (or refuse it untyped)")
 
 
 @pytest.fixture(autouse=True)
@@ -191,7 +190,6 @@ def test_the_consumers_decide_the_same_for_each_valid_value():
 
 # =========================================================================== EXPECTED TO FLIP (the measured defect)
 
-@FLIP
 @pytest.mark.parametrize("value, code", INVALID, ids=_ids(INVALID))
 def test_resolution_refuses_an_invalid_mode_before_any_authority_comparison(tmp_path, monkeypatch, value, code):
     """resolve_config_state is what load_config, `kriya authority inspect|approve` and the desktop's configuration
@@ -200,7 +198,6 @@ def test_resolution_refuses_an_invalid_mode_before_any_authority_comparison(tmp_
     _typed(resolve_config_state, code)
 
 
-@FLIP
 @pytest.mark.parametrize("inside", [True, False], ids=["inside", "outside"])
 @pytest.mark.parametrize("value, code", ONE_PER_CODE, ids=_ids(ONE_PER_CODE))
 def test_an_explicit_config_is_refused_the_same_way(tmp_path, monkeypatch, value, code, inside):
@@ -211,7 +208,6 @@ def test_an_explicit_config_is_refused_the_same_way(tmp_path, monkeypatch, value
     _typed(lambda: load_config(str(path)), code)
 
 
-@FLIP
 @pytest.mark.parametrize("value, code", INVALID, ids=_ids(INVALID))
 def test_an_approval_does_not_make_an_invalid_mode_valid(tmp_path, monkeypatch, value, code):
     """A digest-valid durable approval of the invalid value (stale, granted before the vocabulary was closed) is never
@@ -221,7 +217,6 @@ def test_an_approval_does_not_make_an_invalid_mode_valid(tmp_path, monkeypatch, 
     _typed(load_config, code)
 
 
-@FLIP
 @pytest.mark.parametrize("value, code", ONE_PER_CODE, ids=_ids(ONE_PER_CODE))
 def test_a_trust_file_does_not_make_an_invalid_mode_valid(tmp_path, monkeypatch, value, code):
     ws = _workspace(tmp_path, monkeypatch, {"mode": value})
@@ -231,7 +226,6 @@ def test_a_trust_file_does_not_make_an_invalid_mode_valid(tmp_path, monkeypatch,
     _typed(load_config, code)
 
 
-@FLIP
 @pytest.mark.parametrize("value, code", INVALID, ids=_ids(INVALID))
 def test_programmatic_construction_refuses_an_invalid_mode(value, code):
     _typed(lambda: AppConfig(autonomy={"mode": value}), code)
@@ -240,7 +234,6 @@ def test_programmatic_construction_refuses_an_invalid_mode(value, code):
     _typed(lambda: strict_config(autonomy={"mode": value}), code)
 
 
-@FLIP
 @pytest.mark.parametrize("value, code", INVALID, ids=_ids(INVALID))
 def test_assignment_refuses_an_invalid_mode_and_keeps_the_old_value(value, code):
     cfg = AppConfig(autonomy={"mode": GUARDRAILS})
@@ -251,14 +244,12 @@ def test_assignment_refuses_an_invalid_mode_and_keeps_the_old_value(value, code)
     assert cfg.autonomy.mode == GUARDRAILS
 
 
-@FLIP
 @pytest.mark.parametrize("value, code", INVALID, ids=_ids(INVALID))
 def test_model_copy_updates_refuse_an_invalid_mode(value, code):
     _typed(lambda: AppConfig().autonomy.model_copy(update={"mode": value}), code)
     _typed(lambda: AppConfig().model_copy(update={"autonomy": {"mode": value}}), code)
 
 
-@FLIP
 @pytest.mark.parametrize("value, code", ONE_PER_CODE, ids=_ids(ONE_PER_CODE))
 def test_the_cli_refuses_typed_and_approves_nothing(tmp_path, monkeypatch, value, code):
     from click.testing import CliRunner
@@ -275,7 +266,6 @@ def test_the_cli_refuses_typed_and_approves_nothing(tmp_path, monkeypatch, value
     assert open(store, "rb").read() == before  # `approve` wrote nothing
 
 
-@FLIP
 @pytest.mark.parametrize("value, code", ONE_PER_CODE, ids=_ids(ONE_PER_CODE))
 def test_the_desktop_configuration_paths_refuse_typed(tmp_path, monkeypatch, value, code):
     from kriya.config.service import CONFIG_LOAD_FAILED, ConfigService
@@ -318,7 +308,6 @@ with open(out_path, "w") as handle:
 '''
 
 
-@FLIP
 @pytest.mark.parametrize("argv", [["config"], ["generate", "--help"], ["authority", "approve", "--confirm"]],
                          ids=["config", "generate", "approve"])
 def test_a_malformed_mode_stops_before_anything_runs_or_is_read(tmp_path, argv):
@@ -349,3 +338,119 @@ def test_a_malformed_mode_stops_before_anything_runs_or_is_read(tmp_path, argv):
     touched = {(event, os.path.basename(target)) for event, target, _mode in result["events"]}
     assert touched <= {("open", "kriya.yaml")}, result["events"]
     assert all(mode in ("r", "rb", "None") for event, _t, mode in result["events"] if event == "open"), result["events"]
+
+
+# =========================================================================== the correction's own contract (S16a)
+
+def test_the_vocabulary_and_the_reason_table_are_closed():
+    from kriya.config import authority
+
+    assert authority.AUTONOMY_MODES == (GUARDRAILS, HITL)
+    assert authority.AUTONOMY_MODE_DEFAULT == HITL == AutonomyConfig.model_fields["mode"].default
+    assert set(authority.AUTONOMY_MODE_REASONS) == {NULL, NOT_A_STRING, EMPTY, NOT_CANONICAL, UNKNOWN}
+    for code in authority.AUTONOMY_MODE_REASONS:
+        assert getattr(authority, code) == code
+    with pytest.raises(ValueError):
+        authority.AutonomyModeError("AUTONOMY_MODE_SOMETHING_ELSE")
+    assert not issubclass(authority.AutonomyModeError, ValueError)  # pydantic must not wrap it into an untyped error
+    from kriya.foundation.errors import KriyaError
+    assert issubclass(authority.AutonomyModeError, KriyaError)
+
+
+@pytest.mark.parametrize("mode", VALID)
+def test_the_parser_returns_exactly_the_valid_value(mode):
+    from kriya.config.authority import parse_autonomy_mode
+
+    assert parse_autonomy_mode(mode) == mode and type(parse_autonomy_mode(mode)) is str
+
+
+def test_a_str_subclass_is_not_a_mode():
+    from kriya.config.authority import parse_autonomy_mode
+
+    class Sneaky(str):
+        pass
+    _typed(lambda: parse_autonomy_mode(Sneaky(HITL)), NOT_A_STRING)
+
+
+@pytest.mark.parametrize("value, code", INVALID, ids=_ids(INVALID))
+def test_the_error_names_the_field_and_the_allowed_set_never_the_value(value, code):
+    from kriya.config.authority import AutonomyModeError, parse_autonomy_mode
+
+    with pytest.raises(AutonomyModeError) as caught:
+        parse_autonomy_mode(value)
+    text = str(caught.value)
+    assert caught.value.reason_code == code and text.startswith(f"{code}: autonomy.mode ")
+    assert "'guardrails', 'human-in-the-loop'" in text and caught.value.field == "autonomy.mode"
+    assert caught.value.allowed == (GUARDRAILS, HITL)
+
+
+def test_a_secret_looking_value_is_never_echoed(tmp_path, monkeypatch):
+    secret = "sk-live-0123456789abcdef"
+    _workspace(tmp_path, monkeypatch, {"mode": secret})
+    from kriya.config.authority import AutonomyModeError
+    with pytest.raises(AutonomyModeError) as caught:
+        resolve_config_state()
+    assert secret not in str(caught.value) and secret not in repr(caught.value.args)
+
+
+def test_the_case_and_whitespace_hint_names_the_canonical_value():
+    from kriya.config.authority import AutonomyModeError, parse_autonomy_mode
+
+    for value, canonical in (("Guardrails", GUARDRAILS), (" human-in-the-loop", HITL)):
+        with pytest.raises(AutonomyModeError) as caught:
+            parse_autonomy_mode(value)
+        assert f"differs from {canonical!r} only in letter case or surrounding whitespace" in str(caught.value)
+
+
+def _comparison_sites():
+    """Every production comparison of an autonomy mode with a string literal: ``<...autonomy...>.mode <op> "x"``,
+    ``autonomy_mode <op> "x"`` and ``_autonomy_mode(...) <op> "x"`` (``in`` tuples included)."""
+    import ast
+
+    def is_mode(node):
+        if isinstance(node, ast.Attribute) and node.attr == "mode" and "autonomy" in ast.unparse(node.value):
+            return True
+        if isinstance(node, ast.Name) and node.id == "autonomy_mode":
+            return True
+        return isinstance(node, ast.Call) and "autonomy_mode" in ast.unparse(node.func)
+
+    def literals(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return [node.value]
+        if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+            return [e.value for e in node.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+        return []
+
+    sites = []
+    for base in ("kriya", os.path.join("plugins", "core_tools")):
+        for directory, _dirs, names in os.walk(os.path.join(REPO_ROOT, base)):
+            for name in names:
+                if not name.endswith(".py"):
+                    continue
+                path = os.path.join(directory, name)
+                with open(path, encoding="utf-8") as handle:
+                    tree = ast.parse(handle.read())
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Compare):
+                        operands = [node.left, *node.comparators]
+                        if any(is_mode(o) for o in operands):
+                            for operand in operands:
+                                sites.extend((os.path.relpath(path, REPO_ROOT), node.lineno, lit) for lit in literals(operand))
+    return sites
+
+
+def test_every_production_mode_comparison_uses_the_closed_vocabulary():
+    """A consumer comparing against a value outside the vocabulary (e.g. "full-autonomy") could never be true: a tripwire."""
+    from kriya.config.authority import AUTONOMY_MODES
+    from kriya.tools import tool
+
+    sites = _comparison_sites()
+    assert len(sites) >= 7, sites  # stage_apply x2, spec_compliance, runtime_verification x2, policy.approval, subtask_executor
+    assert [s for s in sites if s[2] not in AUTONOMY_MODES] == []
+    assert tool.HUMAN_IN_THE_LOOP in AUTONOMY_MODES
+
+
+def test_a_real_generate_with_a_malformed_mode_runs_nothing(tmp_path):
+    """Post-fix only (on the unfixed bytes this would start a real run against the model): the main group refuses
+    before the subcommand, so no process, database, socket or write happens."""
+    test_a_malformed_mode_stops_before_anything_runs_or_is_read(tmp_path, ["generate", "add a function"])

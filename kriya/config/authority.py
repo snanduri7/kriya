@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
+from kriya.foundation.errors import KriyaError
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 
@@ -365,6 +366,67 @@ def value_gated_field_classification(top_key: Optional[str], leaf_key: str, valu
     if value is restricting:
         return FieldClassification.REPOSITORY_SAFE
     return FieldClassification.SECURITY_AUTHORITY
+
+
+# S16a (OI-130, AUTONOMY-MODE-FAIL-OPEN): autonomy.mode is a CLOSED vocabulary, owned here. Derived from every production
+# comparison site (they all compare against "human-in-the-loop"; every other mode takes their else branch), the schema
+# default, the packaged default, `kriya init`, KUP/GUI (display only) and the documentation ("guardrails": approval only
+# on a sensitive path, the risk threshold or a process profile). No other value is a mode: before S16a any other string
+# was accepted and silently behaved as guardrails, so a typo of human-in-the-loop turned every human-in-the-loop guarantee
+# off. One parser (parse_autonomy_mode) is called at every ingress - configuration resolution (every YAML layer, before
+# classification, so nothing invalid can be approved), AutonomyConfig construction, attribute assignment and model_copy
+# updates. No normalization: case or whitespace variants are refused, never repaired.
+AUTONOMY_MODE_HUMAN_IN_THE_LOOP = "human-in-the-loop"
+AUTONOMY_MODE_GUARDRAILS = "guardrails"
+AUTONOMY_MODES: Tuple[str, ...] = (AUTONOMY_MODE_GUARDRAILS, AUTONOMY_MODE_HUMAN_IN_THE_LOOP)
+AUTONOMY_MODE_DEFAULT = AUTONOMY_MODE_HUMAN_IN_THE_LOOP  # an absent key; the schema and the packaged default carry it
+AUTONOMY_MODE_FIELD = "autonomy.mode"
+
+AUTONOMY_MODE_NULL = "AUTONOMY_MODE_NULL"
+AUTONOMY_MODE_NOT_A_STRING = "AUTONOMY_MODE_NOT_A_STRING"
+AUTONOMY_MODE_EMPTY = "AUTONOMY_MODE_EMPTY"
+AUTONOMY_MODE_NOT_CANONICAL = "AUTONOMY_MODE_NOT_CANONICAL"
+AUTONOMY_MODE_UNKNOWN = "AUTONOMY_MODE_UNKNOWN"
+# The closed reason-code table (a code outside it is refused at construction). The texts never contain the value.
+AUTONOMY_MODE_REASONS: Dict[str, str] = {
+    AUTONOMY_MODE_NULL: "is null (remove the key for the default {default!r})",
+    AUTONOMY_MODE_NOT_A_STRING: "is a {kind}, not a string",
+    AUTONOMY_MODE_EMPTY: "is empty",
+    AUTONOMY_MODE_NOT_CANONICAL: "differs from {canonical!r} only in letter case or surrounding whitespace; write it exactly",
+    AUTONOMY_MODE_UNKNOWN: "is not a Kriya autonomy mode",
+}
+
+
+class AutonomyModeError(KriyaError):
+    """A malformed ``autonomy.mode``: a typed configuration error raised before any authority comparison, workflow or tool
+    execution. Deliberately NOT a ValueError, so pydantic propagates it unchanged from a validator. Never echoes the value."""
+
+    def __init__(self, reason_code: str, *, kind: Optional[str] = None, canonical: Optional[str] = None) -> None:
+        if reason_code not in AUTONOMY_MODE_REASONS:
+            raise ValueError(f"unknown autonomy.mode reason code {reason_code!r}")
+        detail = AUTONOMY_MODE_REASONS[reason_code].format(kind=kind, canonical=canonical, default=AUTONOMY_MODE_DEFAULT)
+        allowed = ", ".join(repr(mode) for mode in AUTONOMY_MODES)
+        super().__init__(reason_code, f"{reason_code}: {AUTONOMY_MODE_FIELD} {detail}. Allowed values (exact, case-sensitive): {allowed}.")
+        self.field = AUTONOMY_MODE_FIELD
+        self.allowed = AUTONOMY_MODES
+
+
+def parse_autonomy_mode(value: Any) -> str:
+    """The one validator of ``autonomy.mode``: the value itself when it is exactly one of AUTONOMY_MODES, else
+    AutonomyModeError. A str subclass, a bool or any other type is not a mode; nothing is stripped or lower-cased."""
+    if value is None:
+        raise AutonomyModeError(AUTONOMY_MODE_NULL)
+    if type(value) is not str:
+        raise AutonomyModeError(AUTONOMY_MODE_NOT_A_STRING, kind=type(value).__name__)
+    if value in AUTONOMY_MODES:
+        return value
+    stripped = value.strip()
+    if not stripped:
+        raise AutonomyModeError(AUTONOMY_MODE_EMPTY)
+    for mode in AUTONOMY_MODES:
+        if stripped.casefold() == mode:
+            raise AutonomyModeError(AUTONOMY_MODE_NOT_CANONICAL, canonical=mode)
+    raise AutonomyModeError(AUTONOMY_MODE_UNKNOWN)
 
 
 def agent_role_field_classification(role_value: object) -> FieldClassification:
