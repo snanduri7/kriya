@@ -126,9 +126,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.cli", "kriya.memory.embedding"): ("O2", _O2),  # direction ADAPTER-CLI -> RETRIEVAL
     ("kriya.cli", "kriya.memory.learned_knowledge"): ("O2", _O2),  # direction ADAPTER-CLI -> KNOWLEDGE
     ("kriya.cli", "kriya.memory.vector"): ("O2", _O2),  # direction ADAPTER-CLI -> RETRIEVAL
-    ("kriya.cli", "kriya.metrics.adjudication"): ("O2", _O2),  # non-public METRICS module
-    ("kriya.cli", "kriya.metrics.evidence"): ("O2", _O2),  # non-public METRICS module
-    ("kriya.cli", "kriya.metrics.thresholds"): ("O2", _O2),  # non-public METRICS module
     ("kriya.cli", "kriya.plugins.plugin"): ("O2", _O2),  # direction ADAPTER-CLI -> TOOLBOX
     ("kriya.cli", "kriya.prompt"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.cli", "kriya.skills"): ("O2", _O2),  # direction ADAPTER-CLI -> SKILLS
@@ -154,6 +151,15 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.cli", "kriya.policy.approval"): ("O2", _O2 + " (moved count-neutral in C3 from cli -> workflow.runtime_command_approval, now a facade: the CLI imports the owner; ADAPTER-CLI may import only the composition modules from L2-L3)"),  # direction ADAPTER-CLI -> AUTHORITY
     ("kriya.cli", "kriya.workflow.untrusted_context"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.cli", "kriya.workflow.workflow_controller"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
+    # E14: the metrics group's three kriya.metrics edges MOVED count-neutral with its bodies; two edges SPLIT (sites
+    # unchanged, entries +1 each; owner: the new module; removal slice O2 unchanged): config.authority_approval (the
+    # adjudication store's trust-path check; kriya.cli keeps the authority group's) and core.state_paths (the trace db;
+    # kriya.cli keeps its own state-path reads)
+    ("kriya.cli_commands.metrics", "kriya.metrics.adjudication"): ("O2", _O2),  # non-public METRICS module
+    ("kriya.cli_commands.metrics", "kriya.metrics.evidence"): ("O2", _O2),  # non-public METRICS module
+    ("kriya.cli_commands.metrics", "kriya.metrics.thresholds"): ("O2", _O2),  # non-public METRICS module
+    ("kriya.cli_commands.metrics", "kriya.config.authority_approval"): ("O2", _O2),  # direction ADAPTER-CLI -> AUTHORITY
+    ("kriya.cli_commands.metrics", "kriya.core.state_paths"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     # E14: the static-analysis group's four edges MOVED count-neutral with its bodies (kriya.cli no longer
     # imports these modules); same removal slice and reason
     ("kriya.cli_commands.static_analysis", "kriya.static_analysis.doctor"): ("O2", _O2),  # direction ADAPTER-CLI -> EXECUTION

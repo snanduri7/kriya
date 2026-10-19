@@ -207,6 +207,10 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
              "static_analysis_status", "static_analysis_waive", "static_analysis_waivers"), "P1",
             "E14: the `kriya static-analysis` group owned by cli_commands.static_analysis, registered on main by "
             "kriya/cli.py; every moved name re-exported (the same object)"),
+        PartialFacade(
+            "kriya.cli_commands.metrics", ("metrics_adjudicate", "metrics_adjudications", "metrics_group", "metrics_report"),
+            "P1", "E14: the `kriya metrics` group owned by cli_commands.metrics, registered on main by kriya/cli.py; every "
+            "moved name re-exported (the same object)"),
     ),
     "kriya/workflow/terminal_commit.py": PartialFacade(
         "kriya.repository.commit", ("CandidateMaterializationError",), "P1",

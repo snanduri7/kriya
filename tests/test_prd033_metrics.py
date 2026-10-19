@@ -255,7 +255,8 @@ def test_only_the_operator_cli_writes_adjudications():
         if any(isinstance(node, ast.Call) and getattr(node.func, "attr", getattr(node.func, "id", None))
                == "record_adjudication" for node in ast.walk(ast.parse(path.read_text())))
     )
-    assert callers == ["kriya/cli.py"]
+    # E14: the operator CLI's metrics group moved verbatim from kriya/cli.py to its own command module
+    assert callers == ["kriya/cli_commands/metrics.py"]
 
 
 def test_workflow_never_imports_the_metrics_package():
