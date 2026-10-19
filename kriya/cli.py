@@ -2800,13 +2800,8 @@ def _approval_decision(files: List[Dict[str, str]], reason: str, yes: bool) -> A
         return awaiting
     if note_approval_required("change_approval" if files else "other_approval", reason, {"files": [str(f.get("filepath", "")) for f in files][:50]}):
         return False  # a desktop launch never approves on its own and never prompts: declining stops the run cleanly (human_rejected)
-    return _terminal_approval(files, reason, yes)
-
-
-def _terminal_approval(files: List[Dict[str, str]], reason: str, yes: bool) -> bool:
-    """The terminal approval prompt (``kriya generate`` outside a desktop launch, and the approved-proposal execution).
-    OI-146 (owner decision 2026-10-20): the diff lines are the approval surface and are shown as they are; the reason is
-    display text and goes through the one redaction owner."""
+    # OI-146 (owner decision 2026-10-20): the diff lines are the approval surface and are shown as they are; the reason is
+    # display text and goes through the one redaction owner (the same rule as `kriya proposal execute`'s prompt).
     if yes:
         click.secho(f"\n[Auto-Approving] Reason: {redact_text(reason)}", bold=True, fg="green")
         return True
@@ -4129,7 +4124,20 @@ def proposal_execute(ctx: click.Context, proposal_id: str, yes: bool) -> None:
         sys.stdout.flush()
 
     def on_approval(files: List[Dict[str, str]], reason: str) -> bool:
-        return _terminal_approval(files, reason, yes)
+        # OI-146: the reason is display text (redacted); the diff lines are the approval surface, shown as they are.
+        if yes:
+            click.secho(f"\n[Auto-Approving] Reason: {redact_text(reason)}", bold=True, fg="green")
+            return True
+        click.secho(f"\n[Escalation Review Needed] Reason: {redact_text(reason)}", bold=True, fg="yellow")
+        for f in files:
+            filepath = f.get("filepath", "")
+            content = f.get("content", "")
+            click.secho(f"\n--- Proposed changes for: {filepath} ---", bold=True, fg="cyan")
+            lines = content.splitlines()
+            click.echo("\n".join(lines[:15]))
+            if len(lines) > 15:
+                click.echo(f"... and {len(lines) - 15} more lines.")
+        return click.confirm("\nDo you approve applying these changes to the codebase?")
 
     async def run_execution() -> Dict[str, Any]:
         await kernel.start()

@@ -543,3 +543,27 @@ def test_the_terminal_approval_prompt_redacts_its_reason_not_its_diff(monkeypatc
     out = capsys.readouterr().out
     assert f"{S}9" not in out and f"{S}8" not in out and f"DB_PASSWORD={R}" in out and f"+DB_PASSWORD={S}1" in out
 
+
+
+@pytest.mark.parametrize("yes", [False, True], ids=["prompt", "yes"])
+def test_the_proposal_execution_prompt_redacts_its_reason_not_its_diff(tmp_path, monkeypatch, yes):
+    """`kriya proposal execute` keeps its own copy of the terminal prompt (kept inline: tests/test_kup_execution.py reads
+    `_approval_decision`'s source for the record-before-prompt order); it follows the same OI-146 rule. Driven through the
+    CLI with the promotion use case replaced by one that asks the callback exactly as the generation workflow would."""
+    from click.testing import CliRunner
+
+    import kriya.workflow.proposal_promotion as promotion
+    from kriya.cli import main
+
+    seen = {}
+
+    async def fake_execute(proposal_id, workspace, we, **kwargs):
+        seen["approved"] = kwargs["approval_callback"](SECRET_FILES, f"review: DB_PASSWORD={S}9")
+        return {"quality_gates_passed": True}
+
+    monkeypatch.setattr(promotion, "execute_approved_proposal", fake_execute)
+    monkeypatch.chdir(tmp_path)
+    args = ["proposal", "execute", "p1"] + (["-y"] if yes else [])
+    out = CliRunner().invoke(main, args, input="n\n", catch_exceptions=False).output
+    assert seen["approved"] is yes and f"{S}9" not in out and f"DB_PASSWORD={R}" in out
+    assert (f"+DB_PASSWORD={S}1" in out) is (not yes)                     # the diff lines are shown raw when prompted
