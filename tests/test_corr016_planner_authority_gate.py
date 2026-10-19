@@ -115,8 +115,8 @@ def test_derive_direct_contract_authorizations_has_exactly_known_production_call
     SAME grounding_goal-only derivation twice (once per its own two
     derivation functions) rather than re-parsing goal text a second time,
     which is exactly what Invariant 5 requires (one requirement-authority
-    derivation, never a second parallel one). `workflow_controller.py`
-    (PRD-029) is the enforce commit's ContractRegistry transition, which
+    derivation, never a second parallel one). `enforce_loop.py` (PRD-029;
+    moved from workflow_controller.py in E14) is the enforce commit's ContractRegistry transition, which
     records the same DIRECT authorizations from the user's goal for the
     committed plan."""
     hits = {}
@@ -135,7 +135,8 @@ def test_derive_direct_contract_authorizations_has_exactly_known_production_call
     assert hits == {
         "kriya/workflow/attempt.py": 1,
         "kriya/workflow/workflow.py": 1,
-        "kriya/workflow/workflow_controller.py": 1,
+        # E14: the enforce commit's transition builder (_enforce_contract_transition) moved verbatim to enforce_loop.py
+        "kriya/workflow/enforce_loop.py": 1,
         "kriya/workflow/semantic_scope_derivation.py": 4,
     }, f"unexpected/changed call-site set for derive_direct_contract_authorizations: {hits}"
 
