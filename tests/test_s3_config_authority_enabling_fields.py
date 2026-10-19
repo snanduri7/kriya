@@ -16,7 +16,6 @@ can still enable it" is the durable approval path (``kriya authority approve`` /
 other SECURITY_AUTHORITY field.
 """
 import asyncio
-import os
 import subprocess
 from unittest.mock import patch
 
