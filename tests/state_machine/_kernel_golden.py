@@ -786,7 +786,7 @@ def enforce_verification_only_failed(tmp_path: Path) -> Outcome:
     """The LR-R1-P4 reproducer's run (tests/test_lr_r1_p4_verification_only_retry_reproducer.py::_enforce): a
     verification-only unit whose test gate fails with no mutation possible - one verification, no retry, owner
     reopened once, terminal no_progress."""
-    from test_lr_r1_p4_verification_only_retry_reproducer import _enforce as p4_enforce
+    from _lr_r1_p4_run import _enforce as p4_enforce  # OI-34: the shared harness, never a test module
 
     from kriya.config import AppConfig
 

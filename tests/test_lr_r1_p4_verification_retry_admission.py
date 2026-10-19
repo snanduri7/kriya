@@ -5,8 +5,8 @@ something can change what the next verification sees
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import _lr_r1_p4_run as repro  # the reproducer's run (OI-34: a harness, not the test module)
 import pytest
-import test_lr_r1_p4_verification_only_retry_reproducer as repro
 
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.workflow.failure import Failure
