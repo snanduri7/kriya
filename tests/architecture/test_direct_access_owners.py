@@ -181,7 +181,11 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         "kriya.tools.validate": (5, "P2", _P2),
         "kriya.workflow.acceptance_jvm": (1, "P2", _P2),
         "kriya.workflow.acceptance_oracle": (2, "P2", _P2),
-        "kriya.workflow.attempt": (2, "P2", _P2),
+        # E14: one of attempt.py's 2 sites moved with find_ungrounded_java_child_process_tests (the default grounded
+        # classpath `.kriya/runtime-verification/classes`) to process_boundary: the entry SPLIT (sites unchanged, entries
+        # +1; owner: the new module; removal slice P2 unchanged); the other (_PYTHON_RUNTIME_GROUNDING_EXCLUDED_DIRS) stays
+        "kriya.workflow.attempt": (1, "P2", _P2),
+        "kriya.workflow.process_boundary": (1, "P2", _P2),
         "kriya.workflow.authority_bundle": (2, "P2", _P2),
         "kriya.workflow.baseline_policy": (1, "P2", _P2),
         "kriya.workflow.checkpoint": (1, "M2", "the `git rm --cached -- .kriya` argv of compute_workspace_content_hash (re-tagged in D2: the checkpoint store and its CHECKPOINT_DIR moved to control.checkpoint, STATE; the git helper moves to kriya/repository)"),

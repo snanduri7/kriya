@@ -168,6 +168,12 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
             "E8: the candidate-gate orchestration owned by gate_orchestrator; attempt.py keeps 11 forwarders that inject "
             "its collaborators (GateDeps) and re-exports the goal-spec gate's three advisory statuses"),
         PartialFacade(
+            "kriya.workflow.process_boundary",
+            ("_INITIAL_TEST_PROCESS_BOUNDARY_CONSTRAINT", "_NONZERO_PROCESS_EXIT_RE", "_TERMINATING_CASE_MARKERS"), "P1",
+            "E14 (OI-57): the process-boundary test-candidate facts and the dependency-graph readers owned by "
+            "process_boundary; attempt.py keeps 14 forwarders (ProcessBoundaryDeps) and re-exports the three constants "
+            "the moved bodies read (tests/test_e14_characterization.py reads the initial constraint from attempt)"),
+        PartialFacade(
             "kriya.workflow.runtime_verification",
             ("MANAGED_SERVICE_APPROVAL_UNSUPPORTED", "_DISTRUST_DISCLOSURE_NOTE", "_MANAGED_SERVICE_FORBIDDEN_LEADING_EXECUTABLES",
              "_MANAGED_SERVICE_PROBE_KINDS", "_MANAGED_SERVICE_READINESS_KINDS", "_MANAGED_SERVICE_SHELL_MARKERS",

@@ -467,7 +467,9 @@ KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_life
                         # E12: the shadow run and the enforce run's trace row (WorkflowController methods)
                         "kriya.workflow.shadow_mode",
                         # E12: the structured enforce run (WorkflowController._run_structured_enforce)
-                        "kriya.workflow.enforce_loop")
+                        "kriya.workflow.enforce_loop",
+                        # E14: the process-boundary test-candidate facts and the dependency-graph readers (OI-57)
+                        "kriya.workflow.process_boundary")
 FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
 
 
