@@ -26,6 +26,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import sqlite3
 
 import pytest
@@ -54,6 +55,9 @@ def _bytes_under(root) -> bytes:
 GATES = [{"attempt": 1, "type": "run_verification", "success": False, "output": f"connect failed: password={S}1",
           "steps": [{"command": ["run.sh", "--token", f"{S}2", f"--password={S}3"], "exit_code": 1,
                      "stdout": f"DB_PASSWORD={S}4\n", "stderr": "", "timed_out": False}]}]
+# Frozen text of GATES: a writer that rewrote the caller's list in place would also rewrite the module constant (every
+# test passes copies; the non-mutation test compares against this text, never against the shared object).
+GATES_TEXT = json.dumps(GATES, sort_keys=True)
 
 
 # One plant per stored column (each redaction site is killed on its own by a missing column marker).
@@ -70,7 +74,7 @@ def _log_secret_row(db):
     logger.log_run(
         run_id="r-s20", goal=f"deploy with api_key={S}5 please", duration_sec=1.0, attempts=1, status="failed",
         files_modified=["a.py", f"token={S}13"], retrieved_chunks=[{"text": f"token: {S}6"}], active_skills=["s", f"api_key={S}14"],
-        prompt_rendered=f"=== Goal ===\nAuthorization: Bearer {S}7", gate_outcomes=GATES,
+        prompt_rendered=f"=== Goal ===\nAuthorization: Bearer {S}7", gate_outcomes=json.loads(GATES_TEXT),
         model_hops=[{"error": f"http://u:{S}8@h/v1 refused"}], run_events=[{"kind": "k", "message": f"secret={S}9"}],
         evidence_records=[{"kind": "gate", "payload": {"raw_output": f"api_key={S}10"}}],
         generation_metrics={"note": f"token={S}11"}, failure_report=[{"failure_type": "x", "message": f"password={S}12"}])
@@ -91,7 +95,8 @@ def test_the_trace_row_stores_no_secret(tmp_path, column):
     db = str(tmp_path / "traces.db")
     _log_secret_row(db)
     stored = _bytes_under(tmp_path)                    # main db, -wal, -shm: no planted value in any column
-    assert [n for n in COLUMN_MARKERS[column] if f"{S}{n}".encode() in stored] == [], column
+    leaked = [n for n in COLUMN_MARKERS[column] if re.search(re.escape(f"{S}{n}").encode() + rb"(?![0-9])", stored)]
+    assert leaked == [], column                        # (?![0-9]): marker 1 is not a prefix hit of marker 13
 
 
 def test_the_trace_row_keeps_its_non_secret_structure(tmp_path):
@@ -132,11 +137,12 @@ def test_a_trace_row_without_secrets_is_byte_identical_to_the_unredacted_seriali
 def test_the_trace_writer_never_mutates_what_the_caller_passed(tmp_path):
     from kriya.control.trace import TraceLogger
 
-    gates = json.loads(json.dumps(GATES))
+    gates = json.loads(GATES_TEXT)
     events = [{"kind": "k", "message": f"secret={S}9"}]
     TraceLogger(str(tmp_path / "traces.db")).log_run(run_id="r", goal="g", duration_sec=1.0, attempts=1, status="s",
                                                      files_modified=[], gate_outcomes=gates, run_events=events)
-    assert gates == GATES and events == [{"kind": "k", "message": f"secret={S}9"}]
+    assert json.dumps(gates, sort_keys=True) == GATES_TEXT and f"{S}2" in GATES_TEXT
+    assert events == [{"kind": "k", "message": f"secret={S}9"}]
 
 
 # =========================================================================== I-3 / I-4: the attempt-evidence store
