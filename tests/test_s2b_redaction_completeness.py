@@ -43,6 +43,11 @@ READABLE_TEXT = [
     "Authorization required", "git@github.com:org/repo.git", "the cookie jar is empty", "set the password in your vault",
     json.dumps({"command": ["java", "-jar", "app.jar"], "exit_code": 0}), json.dumps({"env_keys": ["API_TOKEN", "OTHER"]}),
     "Basic setup done", "sha256:" + "ab" * 32, "http://localhost:11434/v1", "dev@example.com", "",
+    # Kriya's own reason codes and prose that end in a secret WORD but carry no credential (S2b readability):
+    "SOURCE_CHANGED_SINCE_AUTHORIZATION: '/ws/a.txt' changed since the mutation was authorized",
+    "CONTRACT CHANGE NEEDS YOUR AUTHORIZATION: the change below alters a public signature",
+    # JSON that json.dumps did not write (other spacing) is never re-serialized; a URL ends at its closing quote:
+    '{"command":["java"],  "n": 1}', "url='http://h',user='a@b'",
 ]
 
 
@@ -288,6 +293,14 @@ def test_the_gui_receives_a_history_prompt_with_every_secret_hidden():
     snap = _kup("snapshot.acquire")[0]["data"]["snapshot_id"]
     envelope, wire = _kup("history.prompt", snapshot_id=snap, run_id="r-p")
     assert envelope["data"]["prompt_rendered"] == f"use DB_PASSWORD={R} and plan the change" and S not in wire
+
+
+def test_the_traces_table_redacts_before_its_40_character_cut(tmp_path, monkeypatch):
+    """Cut first and the quoted value loses its closing quote, so nothing recognises it (the S2M24 lesson)."""
+    _snapshot(goal=f"run: api_key = 'zz {S} tail tail tail tail'")
+    monkeypatch.chdir(tmp_path)
+    table = _cli(["traces"])
+    assert "run: api_key = '" in table and S not in table, table
 
 
 def _runtime_review(*argv):
