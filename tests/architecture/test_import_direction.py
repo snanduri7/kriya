@@ -133,10 +133,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.cli", "kriya.prompt"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.cli", "kriya.skills"): ("O2", _O2),  # direction ADAPTER-CLI -> SKILLS
     ("kriya.cli", "kriya.skills.skill"): ("O2", _O2),  # direction ADAPTER-CLI -> SKILLS
-    ("kriya.cli", "kriya.static_analysis.doctor"): ("O2", _O2),  # direction ADAPTER-CLI -> EXECUTION
-    ("kriya.cli", "kriya.static_analysis.operator_scan"): ("O2", _O2),  # direction ADAPTER-CLI -> EXECUTION
-    ("kriya.cli", "kriya.static_analysis.service"): ("O2", _O2),  # direction ADAPTER-CLI -> EXECUTION
-    ("kriya.cli", "kriya.static_analysis.waivers"): ("O2", _O2),  # direction ADAPTER-CLI -> EXECUTION
     ("kriya.cli", "kriya.tools.knowledge"): ("O2", _O2),  # direction ADAPTER-CLI -> KNOWLEDGE
     ("kriya.cli", "kriya.tools.lsp"): ("O2", _O2),  # direction ADAPTER-CLI -> EXECUTION
     ("kriya.cli", "kriya.tools.validate"): ("O2", _O2),  # direction ADAPTER-CLI -> EXECUTION
@@ -158,6 +154,12 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.cli", "kriya.policy.approval"): ("O2", _O2 + " (moved count-neutral in C3 from cli -> workflow.runtime_command_approval, now a facade: the CLI imports the owner; ADAPTER-CLI may import only the composition modules from L2-L3)"),  # direction ADAPTER-CLI -> AUTHORITY
     ("kriya.cli", "kriya.workflow.untrusted_context"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.cli", "kriya.workflow.workflow_controller"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
+    # E14: the static-analysis group's four edges MOVED count-neutral with its bodies (kriya.cli no longer
+    # imports these modules); same removal slice and reason
+    ("kriya.cli_commands.static_analysis", "kriya.static_analysis.doctor"): ("O2", _O2),  # direction ADAPTER-CLI -> EXECUTION
+    ("kriya.cli_commands.static_analysis", "kriya.static_analysis.operator_scan"): ("O2", _O2),  # direction ADAPTER-CLI -> EXECUTION
+    ("kriya.cli_commands.static_analysis", "kriya.static_analysis.service"): ("O2", _O2),  # direction ADAPTER-CLI -> EXECUTION
+    ("kriya.cli_commands.static_analysis", "kriya.static_analysis.waivers"): ("O2", _O2),  # direction ADAPTER-CLI -> EXECUTION
     ("kriya.cli", "kriya.workflow.worktree"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.code_intel.store", "kriya.core.db"): ("P2", _P2),  # non-public FOUNDATION module
     ("kriya.config.config", "kriya.config.authority_approval"): ("P2", _P2),  # non-public AUTHORITY module

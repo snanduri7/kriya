@@ -196,6 +196,18 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
             "forwarders that inject its collaborators (CandidateDeps) and re-exports the edit-capability locus bound "
             "(test_context_edit_protocol_large_file_001 reads it from attempt) and the response-validity failure family"),
     ),
+    "kriya/cli.py": (
+        PartialFacade(
+            "kriya.cli_commands.common", ("_user_error_text",), "P1",
+            "E14: the operator-error text shared by kriya/cli.py and the moved command groups, owned by "
+            "cli_commands.common (no command module may import kriya.cli: kriya.cli <-> kriya.repl is a cycle)"),
+        PartialFacade(
+            "kriya.cli_commands.static_analysis",
+            ("_static_analysis_workspace", "static_analysis_group", "static_analysis_revoke", "static_analysis_scan",
+             "static_analysis_status", "static_analysis_waive", "static_analysis_waivers"), "P1",
+            "E14: the `kriya static-analysis` group owned by cli_commands.static_analysis, registered on main by "
+            "kriya/cli.py; every moved name re-exported (the same object)"),
+    ),
     "kriya/workflow/terminal_commit.py": PartialFacade(
         "kriya.repository.commit", ("CandidateMaterializationError",), "P1",
         "M1: the materialization error owned by repository.commit (static_analysis.service imports it there, which removes the "

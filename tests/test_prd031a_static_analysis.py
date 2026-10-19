@@ -734,9 +734,10 @@ def _calls(name):
 
 
 def test_only_the_operator_cli_writes_or_revokes_waivers():
-    assert [p for p, _ in _calls("write_waiver")] == ["kriya/cli.py"]
-    assert [p for p, _ in _calls("revoke_waiver")] == ["kriya/cli.py"]
-    assert [p for p, _ in _calls("new_waiver")] == ["kriya/cli.py"]
+    # E14: the operator CLI's static-analysis group moved verbatim from kriya/cli.py to its own command module
+    assert [p for p, _ in _calls("write_waiver")] == ["kriya/cli_commands/static_analysis.py"]
+    assert [p for p, _ in _calls("revoke_waiver")] == ["kriya/cli_commands/static_analysis.py"]
+    assert [p for p, _ in _calls("new_waiver")] == ["kriya/cli_commands/static_analysis.py"]
 
 
 def test_every_production_commit_passes_a_config_built_guard():
