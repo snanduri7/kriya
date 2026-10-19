@@ -38,6 +38,7 @@ import asyncio
 import contextlib
 import dataclasses
 import enum
+import functools
 import hashlib
 import json
 import os
@@ -600,12 +601,48 @@ def _tiny_budget(cfg) -> None:
     cfg.autonomy.generation_time_budget_seconds = 1
 
 
+# OI-43 (E14 preflight) - the build ENVIRONMENT the goldens recorded, owned by the harness. run.opened's kriya_build embeds
+# three values that describe the machine, not the kernel: ``python`` (the interpreter's patch version), ``version`` (the
+# installed distribution's metadata: the editable install's dist-info / the checkout's untracked kriya.egg-info) and the
+# embedded build identity probed from the untracked kriya/_build_info.json (absent -> commit/tree UNKNOWN, dirty None,
+# build_provenance "unavailable"; a local setup.py build writes it). Any of them changed every run.opened digest. Every
+# scenario now runs with these three inputs fixed to the recorded identity (no golden byte changes; nothing is
+# normalized; install_path keeps its HX1 typed canonicalization). The values are pinned as intended test identity;
+# production's version_report is unchanged and is pinned by tests/test_kriya_version_001.py.
+GOLDEN_PYTHON = "3.14.6"
+GOLDEN_KRIYA_VERSION = "0.1.0"
+GOLDEN_BUILD_INFO_FILE = "/nonexistent-kriya-golden-environment/_build_info.json"   # never present: "unavailable"
+
+
+@contextlib.contextmanager
+def golden_build_environment() -> Iterator[None]:
+    """kriya.foundation.build_info sees the recorded interpreter version, distribution version and no embedded build
+    identity for the duration of the block (its three probes: ``platform.python_version``, ``package_version``,
+    ``BUILD_INFO_FILE``); everything else is the real module."""
+    import types
+
+    from kriya.foundation import build_info
+
+    saved = (build_info.platform, build_info.package_version, build_info.BUILD_INFO_FILE)
+    build_info.platform = types.SimpleNamespace(python_version=lambda: GOLDEN_PYTHON)
+    build_info.package_version = lambda: GOLDEN_KRIYA_VERSION
+    build_info.BUILD_INFO_FILE = GOLDEN_BUILD_INFO_FILE
+    try:
+        yield
+    finally:
+        build_info.platform, build_info.package_version, build_info.BUILD_INFO_FILE = saved
+
+
 SCENARIOS: Dict[str, Callable[[Path], Outcome]] = {}
 
 
 def scenario(name: str):
     def register(fn):
-        SCENARIOS[name] = fn
+        @functools.wraps(fn)
+        def in_golden_environment(tmp_path: Path) -> Outcome:
+            with golden_build_environment():
+                return fn(tmp_path)
+        SCENARIOS[name] = in_golden_environment
         return fn
     return register
 
