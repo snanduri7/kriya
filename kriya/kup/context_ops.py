@@ -18,8 +18,8 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict
 
-from kriya.client import safe_endpoint
 from kriya.core.llm import is_local_url
+from kriya.foundation.redaction import safe_endpoint
 from kriya.kup.execution import _CWD_LOCK, _load_in
 from kriya.kup.inspect import envelope, live_consistency
 from kriya.kup.workspace_ops import validated_workspace

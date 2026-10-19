@@ -3,7 +3,8 @@
 ``KriyaClient`` (kriya/client/contract.py) is the Protocol; ``LocalKriyaClient`` (kriya/client/local.py) the in-process implementation.
 The adapters see the application only through this package: besides the client, it carries the contract vocabulary an adapter needs to
 translate a request (the typed refusal ``ApplicationRefusal`` it maps 1:1 onto its error envelope, the closed evidence ``RECORD_KINDS`` a
-records filter may name, and ``safe_endpoint``, the one rule for showing an endpoint without its credential).
+records filter may name). The rule for showing an endpoint without its credential is the redaction owner's
+``kriya.foundation.redaction.safe_endpoint`` (S2c, OI-145), imported there by every caller - not re-exported here.
 
 Names are resolved lazily (PEP 562), like ``kriya.application``: the KUP child pays only for the operation it answers.
 """
@@ -21,7 +22,6 @@ _EXPORTS = {
     "ApplicationRefusal": "kriya.application.services",
     "REFUSAL_CODES": "kriya.application.services",
     "RECORD_KINDS": "kriya.application",
-    "safe_endpoint": "kriya.application",
 }
 
 __all__ = sorted(_EXPORTS)

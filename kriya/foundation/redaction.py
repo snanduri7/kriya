@@ -62,7 +62,7 @@ from __future__ import annotations
 import json
 import re
 from typing import Any, List, Match, Optional
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 REDACTED = "***REDACTED***"
 
@@ -289,6 +289,20 @@ def redact_text(text: str) -> str:
     return redacted
 
 
+def safe_endpoint(url: str, unparseable: str = "(unparseable endpoint)") -> str:
+    """An endpoint (or any ``scheme://`` URL) as it may be SHOWN: scheme, host, port and path, with any ``user:password@``,
+    query and fragment dropped; ``unparseable`` when the URL cannot be split (an out-of-range or non-numeric port).
+    The ONE display rule (S2c, OI-145: it had a second copy in the skill-source display). Not the identity canonicalizer
+    ``core.model_runtime.endpoint_identity`` (digest input: it also lower-cases and drops a trailing '/'; kept apart)."""
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        netloc = f"{host}:{parts.port}" if parts.port else host
+        return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
+    except ValueError:
+        return unparseable
+
+
 def _hide(value: Any) -> Any:
     """A secret-bearing value: every non-empty leaf hidden, the structure (dict keys, list length) kept."""
     if isinstance(value, dict):
@@ -342,4 +356,4 @@ def redact_value(value: Any) -> Any:
     return value
 
 
-__all__ = ("REDACTED", "is_secret_key", "redact_text", "redact_value")
+__all__ = ("REDACTED", "is_secret_key", "redact_text", "redact_value", "safe_endpoint")

@@ -29,7 +29,6 @@ _EXPORTS = {
     "ToolCatalogService": "kriya.application.catalog",
     "ProjectService": "kriya.application.project",
     "ModelService": "kriya.application.model",
-    "safe_endpoint": "kriya.application.model",
     "HealthService": "kriya.application.health",
     "Capabilities": "kriya.application.health",
     "ConfigurationService": "kriya.application.configuration",

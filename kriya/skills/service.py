@@ -17,8 +17,8 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlsplit, urlunsplit
 
+from kriya.foundation.redaction import safe_endpoint
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.skills.skill import Skill, SkillEngine, get_global_skills_dir, load_rule_provenance
 
@@ -122,13 +122,7 @@ def _safe_source(value: Any) -> Optional[str]:
             prefix, text = candidate, text[len(candidate):]
             break
     if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", text):
-        try:
-            parts = urlsplit(text)
-            host = parts.hostname or ""
-            netloc = f"{host}:{parts.port}" if parts.port else host
-            return prefix + urlunsplit((parts.scheme, netloc, parts.path, "", ""))
-        except ValueError:
-            return prefix + "unparseable-url"
+        return prefix + safe_endpoint(text, unparseable="unparseable-url")  # the one display rule (S2c, OI-145)
     if prefix == "human_file:" or text.startswith(("/", "~", "file:")) or re.match(r"^[A-Za-z]:[\\/]", text):
         return prefix + (re.split(r"[\\/]", text.rstrip("/\\"))[-1] or "file")
     return prefix + text

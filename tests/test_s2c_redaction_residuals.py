@@ -436,7 +436,6 @@ def test_a_percent_encoded_secret_is_found_and_never_shown_decoded(text, expecte
     assert redact_text(text) == expected
 
 
-@FLIP
 def test_there_is_one_endpoint_display_rule():
     """OI-145: ONE implementation at the redaction owner (``kriya.client.safe_endpoint`` was already the application's
     function through two lazy tables - MEASURED; the real second copy was kriya/skills/service.py::_safe_source). No

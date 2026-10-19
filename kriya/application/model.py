@@ -15,24 +15,13 @@ from __future__ import annotations
 
 import concurrent.futures
 from typing import Any, Callable, Dict, List
-from urllib.parse import urlsplit, urlunsplit
 
 from kriya.context.model import RequestContext
+from kriya.foundation.redaction import safe_endpoint
 from kriya.skills.service import MAX_SKILLS, SkillService
 
 ROLES = ("planner", "architect", "developer", "reviewer", "run_verifier", "skill_gap", "spec_compliance")
 ProbeEndpoint = Callable[[str, str, str], Dict[str, Any]]  # (endpoint_url, api_key, egress_policy) -> {endpoint, state, reason, models}
-
-
-def safe_endpoint(url: str) -> str:
-    """The endpoint with any ``user:password@`` removed - an endpoint is shown, a credential never is."""
-    try:
-        parts = urlsplit(url)
-        host = parts.hostname or ""
-        netloc = f"{host}:{parts.port}" if parts.port else host
-        return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
-    except ValueError:
-        return "(unparseable endpoint)"
 
 
 def routing(cfg) -> List[Dict[str, Any]]:
@@ -133,4 +122,4 @@ class ModelService:
                 "note": "A single bounded GET /models per distinct local endpoint, made now. It proves the server answered and lists the models it serves; it does not prove a model can complete a request."}
 
 
-__all__ = ["ModelService", "ProbeEndpoint", "ROLES", "routing", "safe_endpoint", "skills_summary", "tools_summary"]
+__all__ = ["ModelService", "ProbeEndpoint", "ROLES", "routing", "skills_summary", "tools_summary"]

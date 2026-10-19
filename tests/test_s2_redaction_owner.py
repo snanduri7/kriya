@@ -121,8 +121,8 @@ def test_the_durable_approval_artifact_never_stores_a_configured_value(tmp_path,
 
 
 def test_the_endpoint_canonicalizers_already_drop_userinfo_and_keep_their_bytes():
-    from kriya.client import safe_endpoint
     from kriya.core.model_runtime import endpoint_identity
+    from kriya.foundation.redaction import safe_endpoint
 
     assert safe_endpoint(LLM_URL) == "http://127.0.0.1:9/v1"
     assert endpoint_identity("http://user:secret@LOCALHOST:11434/v1/?k=v#x") == "http://localhost:11434/v1"
