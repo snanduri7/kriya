@@ -232,10 +232,20 @@ the desktop app's error messages and the audit records never show a secret. One 
   still see it is unset. Names are matched by word: `max_tokens` is not a secret.
 - **Every value of an MCP server's `env`** is hidden; the variable names stay visible.
 - **A secret by its shape, anywhere in a value or message**: the user/password part of a URL
-  (`http://***REDACTED***@host:11434/v1`), `Bearer`/`Basic` credentials, `password=...`-style pairs, and AWS / `sk-` /
-  GitHub token shapes.
+  (`http://***REDACTED***@host:11434/v1`, also `//user:password@host`), `Bearer`/`Basic` credentials, an
+  `Authorization:` header of any kind (`Token`, `Digest`, ...), `Cookie:`/`Set-Cookie:` headers, private-key PEM blocks,
+  `name=value` / `name: value` pairs whose name is a secret name (`DB_PASSWORD=...`, `api_key = 'a b'`, `?access_token=`,
+  `-Djavax.net.ssl.keyStorePassword=`), command arguments (`--password x`, `--token=x`, `-u user:password` keeps the
+  user), and AWS / `sk-` / GitHub token shapes (S2b).
+- **Run history in the desktop app and `kriya traces`** (S2b): a run's detail (the recorded commands and their output,
+  every section), its stored plan prompt and its goal are shown through the same rule. Only what is SHOWN is redacted:
+  the stored run history keeps the exact bytes Kriya recorded. A launch review is not offered for a command a redaction
+  would change (you would not be reading what runs).
 - Readable on purpose: the host, port and path of a URL, hashes and commit SHAs, e-mail addresses, `git@host:repo`
-  remotes. The approval record (`kriya authority approve`) never stored values; it keeps salted digests.
+  remotes, certificate PEM blocks, names that only contain a secret word (`max_tokens`, `--token-file`), Kriya's own
+  reason codes (`SOURCE_CHANGED_SINCE_AUTHORIZATION: ...`). The approval record (`kriya authority approve`) never stored
+  values; it keeps salted digests. Limit: a secret written WITHOUT quotes that itself contains a space, a quote or one
+  of `& ; ,` is hidden only up to that character; quote such values.
 
 ### 2.0a-2 Autonomy modes: a closed list (S16a)
 `autonomy.mode` has exactly two values, spelled exactly like this:

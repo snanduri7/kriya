@@ -3211,6 +3211,23 @@ launch-approval reviewability decision (a command a redaction would alter is not
 kept apart on purpose: the SEC-009 approval digest input (salted per-value digests, so a rotated secret still
 invalidates an approval) and the identity canonicalizer `endpoint_identity` (digest input; drops userinfo itself).
 
+### S2b - redaction completeness and the history display (2026-10-19, OI-98, OI-131)
+
+The same owner now covers every shape the S2 verification measured leaking: `Authorization`/`Proxy-Authorization` of
+any scheme (the header name spelled as a header; `SOURCE_CHANGED_SINCE_AUTHORIZATION:` reason codes and all-capitals
+prose stay readable), `Cookie`/`Set-Cookie`, private-key PEM blocks (also cut or with escaped newlines), scheme-relative
+`//user:pw@`, argv flag pairs (`--password x`, `-u user:pw` keeps the user; in a list, the element after a secret flag),
+and `name<sep>value` pairs judged by `is_secret_key` on the whole NAME (one word rule for keys and text; text adds a
+one-word `auth` and one-word plurals; `PassWord` matches by a second, plain split), with spaces around the separator,
+quoted names (JSON, a Python repr), `-D` properties and `%3D`. A quoted value is hidden whole; a bare one stops at
+whitespace, a quote, a backslash or `& ; ,`, so the enclosing structure survives (S2's `\S+` ate the rest of a JSON
+text). A text that is exactly a `json.dumps` document is parsed, redacted as a structure and dumped the same way: the
+stored JSON text and its parsed form always agree, and anything else is never re-serialized. OI-131 (owner decision):
+the APPLICATION projection redacts, before any adapter - `HistoryService.detail` and `.prompt` return `redact_value(...)`
+of the stored row and the history pages redact the goal texts; `kriya traces` redacts before its 40-character cut; the
+stored row stays raw (digests bind the exact bytes; whether raw credentials may be RETAINED in stored evidence is OI-134,
+not decided here). The launch review reads each command whole (`redact_value(argv)`), so `--token x` is not offered.
+
 ### S3 - enabling fields need the human authority path (2026-10-19, OI-99, OWNER-RECOVERY-SELF-CORRECTION-REVIEW-001)
 
 Rule: a repository-controlled kriya.yaml cannot enable authority-sensitive behaviour without SEC-009's human authority
