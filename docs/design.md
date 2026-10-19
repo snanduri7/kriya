@@ -3256,6 +3256,26 @@ payload fields; redacted before the page's byte budget is counted), the change r
 both terminal prompts (`kriya generate`'s `_approval_decision` and `kriya proposal execute`'s own inline copy; their diff
 lines stay raw).
 
+### S20 - stored-evidence redaction, first ingress; endpoint display (2026-10-20, OI-134, OI-152; STOPPED at the first golden move)
+
+OBS-003 / KRP-025 (REQUIRED) say secrets are redacted in logs, traces and evidence. The preflight
+(`handover/MODULARIZATION/S20-PREFLIGHT.md`) MEASURED 14 persisted surfaces holding a planted credential raw, and split
+them by binding:
+- unbound rows (traces.db, the attempt-evidence envelope, launch-record notes, the decision ledger, planning
+  diagnostics);
+- content-addressed or resume-bound stores (evidence content blobs, verification contracts, checkpoints, RunRecord
+  plans, scanner evidence: owner question Q1);
+- the approval diff sidecar (raw by design, OI-146; Q2).
+
+Delivered: `TraceLogger.log_run` (the one writer of the traces.db `runs` / `milestone_plans` rows) stores every column
+through the one redactor. The caller's objects are never mutated, and text without a secret shape is byte-identical.
+
+Stopped: the envelope redaction in `AttemptEvidenceWriter.append` needs the manifest stamp `redaction_policy_version`
+"1" -> "2", and that moves two KUP goldens (`evidence_manifest*.json`). It is held for the owner, together with the
+launch-record, decision-ledger and planning-diagnostics ingresses.
+
+OI-152: `safe_endpoint` keeps an IPv6 host's brackets, shows an explicit port 0, and shows an unset endpoint as "".
+
 ### S3 - enabling fields need the human authority path (2026-10-19, OI-99, OWNER-RECOVERY-SELF-CORRECTION-REVIEW-001)
 
 Rule: a repository-controlled kriya.yaml cannot enable authority-sensitive behaviour without SEC-009's human authority

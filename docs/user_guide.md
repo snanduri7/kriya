@@ -248,8 +248,12 @@ the desktop app's error messages and the audit records never show a secret. One 
   (`%70assword=`, `api%5Fkey=`, a URL with a user/password inside another URL's parameter, `next=https%3A%2F%2Fu%3Apw%40h`);
   the encoded bytes are shown as written around `***REDACTED***`, never decoded.
 - **Run history in the desktop app and `kriya traces`** (S2b): a run's detail (the recorded commands and their output,
-  every section), its stored plan prompt and its goal are shown through the same rule. Only what is SHOWN is redacted:
-  the stored run history keeps the exact bytes Kriya recorded. A launch review is not offered for a command a redaction
+  every section), its stored plan prompt and its goal are shown through the same rule. Since S20 (OI-134) the run
+  history row itself (`traces.db`) is STORED redacted: a credential in a goal, a command, its output or an event never
+  reaches the database (no digest binds that row). Still stored with their exact bytes (open owner question, S20): the
+  attempt-evidence store's record envelopes and content (`<state>/attempt-evidence/`, owner-only files), checkpoints,
+  run records, verification contracts, a launch record's notes and the decision ledger under `.kriya/`; they are
+  redacted wherever they are SHOWN. A launch review is not offered for a command a redaction
   would change (you would not be reading what runs). The same rule applies (S2c) to a launch's status in the desktop app,
   the recorded evidence records (`evidence.records`), the reason text of a change review and the reason line of the
   terminal approval prompt.

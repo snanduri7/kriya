@@ -1,5 +1,36 @@
 # S20 PHASE 1: measured preflight (TYPE D, raw credential retention in stored evidence; OI-134, OI-152)
 
+> **2026-10-20 STOP ADDENDUM (the text below is the original preflight, kept as written; rules section 20).**
+>
+> Phase 2 STOPPED at the FIRST golden move, as the owner rule requires. Committed: OI-152 (c0837a7), and I-1, the
+> traces.db row redacted at write by its one writer (ee6e9f6). Both moved no golden: the targeted golden predictor
+> ran 993 passed, and the trace-reader suites 1,090 passed.
+>
+> **Where it stopped: I-3.** I-3 (the envelope `payload` redacted in `AttemptEvidenceWriter.append` and the stamp
+> `redaction_policy_version` "1" -> "2") moved two KUP goldens. MEASURED with I-3 applied: 1,583 passed and exactly
+> two failed, `tests/test_application_services.py::test_every_read_side_operation_answers_the_pre_extraction_envelope`
+> and `::test_the_normalization_keeps_every_identity_and_decision_field`. The semantic diff, and nothing else, is:
+> - `tests/golden/kup/application/evidence_manifest.json:14` `"redaction_policy_version": "1"` -> `"2"`;
+> - `tests/golden/kup/application/evidence_manifest_from_trace.json:23` `"redaction_policy_version": "1"` -> `"2"`.
+>
+> The payload redaction itself moved nothing. Over-redaction is MEASURED as 0 `***REDACTED***` in `records.jsonl` of an
+> unplanted scripted run, at both capture modes.
+>
+> **Disposition of I-3.** It was reverted, not split. Keeping the payload redaction while still stamping "1" would put
+> two policies under one stamp. The ready patch is saved in the S20 scratch at `out/I3_held.patch`, and its pins stay
+> strict-xfail naming the stop.
+>
+> **Not started, waiting on the owner:** I-9, I-11 and I-12. Their pins are committed (strict-xfail; `--runxfail`
+> makes each fail on the secret comparison). "No golden move" is PREDICTED for them, not measured.
+>
+> **My own measurement weakness.** The prediction for I-3 ("no golden moves") was WRONG. The stamp-consumer grep covered
+> `.py` files only (`grep -rn redaction_policy_version kriya tests`). It missed that `evidence.manifest` serves the
+> manifest to KUP, and that the two JSON goldens pin it. The table row "no consumer" is wrong for the KUP projection:
+> the stamp IS served, though no code branches on it.
+>
+> **TYPE.** The delivered work applies the existing OBS-003 contract at one ingress plus a display fix, which is TYPE C.
+> The held stamp change (I-3) is the TYPE D part.
+
 **VERDICT.** Raw credential retention in stored run evidence is NOT allowed by the contract. OBS-003 (REQUIRED, "Secret
 redaction in logs/traces/evidence") and KRP-025 say so, and no contract text grants an exemption beyond the two OI-146
 approval surfaces. It is MEASURED on 14 persisted surfaces (table below).

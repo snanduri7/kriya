@@ -2,8 +2,14 @@
 
 Owner rule (2026-10-19): URL userinfo and every secret-bearing value are never displayed or logged; one owner, no
 per-field special cases. Every display, log, record and error-message channel that can carry a configuration value or
-recorded run evidence asks this module; nothing else in Kriya decides what is secret. It REDACTS A COPY for display:
-stored authoritative evidence keeps its raw bytes (digests bind exact bytes; S2b, OI-131).
+recorded run evidence asks this module; nothing else in Kriya decides what is secret. It always returns a REDACTED COPY
+(the input is never mutated). Where it runs on stored evidence (S20, OI-134, OBS-003; handover/MODULARIZATION/
+S20-PREFLIGHT.md): the traces.db row is redacted AT WRITE by its one writer (``kriya.control.trace.TraceLogger``; no
+digest binds it). Stores whose digests bind the exact bytes or whose consumers need them (attempt-evidence content
+blobs, verification contracts, checkpoints, RunRecord plans, scanner evidence) keep their raw bytes and are redacted at
+the projection only (S2b, OI-131) - an open owner question (S20 Q1). The attempt-evidence envelope, the launch record's
+free text, the decision ledger and the planning diagnostics are still stored raw (S20 stopped at its first golden move;
+OI-134). The approval diff is raw by design (OI-146).
 
 Why FOUNDATION: the callers sit in every layer - CONFIG (logging_setup, authority_approval), AUTHORITY (policy
 telemetry/egress, launch approval), PROVIDER (core.llm, model_runtime, embedding), APPLICATION, ADAPTER-KUP and
