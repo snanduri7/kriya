@@ -93,7 +93,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.cli", "kriya.control.commit_state"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     ("kriya.cli", "kriya.control.launch"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     ("kriya.cli", "kriya.control.persistence"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
-    ("kriya.cli", "kriya.control.recovery"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     ("kriya.cli", "kriya.control.retention"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     ("kriya.cli", "kriya.control.run_coordinator"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     ("kriya.cli", "kriya.control.run_ownership"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
@@ -150,6 +149,13 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.cli", "kriya.policy.approval"): ("O2", _O2 + " (moved count-neutral in C3 from cli -> workflow.runtime_command_approval, now a facade: the CLI imports the owner; ADAPTER-CLI may import only the composition modules from L2-L3)"),  # direction ADAPTER-CLI -> AUTHORITY
     ("kriya.cli", "kriya.workflow.untrusted_context"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.cli", "kriya.workflow.workflow_controller"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
+    # E14: the runs group's control.recovery edge MOVED (kriya.cli no longer imports it); two edges SPLIT (sites
+    # unchanged, entries +1 each; owner: the new module; removal slice O2 unchanged): control.retention (run-state
+    # pruning; kriya.cli keeps evidence prune's) and control.run_ownership (WorkspaceLockHeldError; kriya.cli keeps its
+    # own)
+    ("kriya.cli_commands.runs", "kriya.control.recovery"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
+    ("kriya.cli_commands.runs", "kriya.control.retention"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
+    ("kriya.cli_commands.runs", "kriya.control.run_ownership"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     # E14: the authority group's config.authority_approval edge MOVED (kriya.cli no longer imports it); three edges
     # SPLIT (sites unchanged, entries +1 each; owner: the new module; removal slice O2 unchanged): config.authority
     # (the typed operator errors; kriya.cli keeps the traces KUP config-error path's), core.logging_setup
