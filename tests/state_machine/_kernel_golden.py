@@ -1327,13 +1327,43 @@ def legacy_rejected_candidate_review(tmp_path: Path) -> Outcome:
     return outcome
 
 
+# OI-53 (E14 preflight): the staged fact's ``added_at`` is the calendar day the run happens on (kriya/knowledge/schema.py
+# KnowledgeFact: ``date.today()``), and the golden stores the digest of the staged bytes, so the scenario was
+# calendar-dependent (MEASURED failing on every day but 2026-10-17; CONFIRMED: the run's bytes with the date replaced by
+# 2026-10-17 reproduce the golden digest). The harness owns the scenario's clock: the run sees GOLDEN_LESSON_DAY, the day
+# the golden was rendered. Production date semantics and the golden bytes are unchanged; no date field is normalized.
+GOLDEN_LESSON_DAY = (2026, 10, 17)
+
+
+@contextlib.contextmanager
+def golden_test_clock(day: tuple = GOLDEN_LESSON_DAY) -> Iterator[None]:
+    """The deterministic calendar of a scenario: ``date.today()`` as kriya.knowledge.schema reads it returns ``day``
+    for the duration of the block (every other ``date`` behaviour is the real class's)."""
+    import datetime
+
+    from kriya.knowledge import schema
+
+    class _GoldenDate(datetime.date):
+        @classmethod
+        def today(cls):
+            return cls(*day)
+
+    real = schema.date
+    schema.date = _GoldenDate
+    try:
+        yield
+    finally:
+        schema.date = real
+
+
 @scenario("legacy_lessons_staged")
 def legacy_lessons_staged(tmp_path: Path) -> Outcome:
     """A fallback-model rescue (hard-won): after the terminal commit the live-failure channel extracts a fact and it is
     staged under the skills directory (skills/auto-<repo>/)."""
     from _scripted_run import FALLBACK
-    return _apply_run(tmp_path, chain=True, developer=lambda m, n, t: GOOD if m == FALLBACK else _oscillating(n),
-                      lessons=lambda n: APPLY_FACTS)
+    with golden_test_clock():
+        return _apply_run(tmp_path, chain=True, developer=lambda m, n, t: GOOD if m == FALLBACK else _oscillating(n),
+                          lessons=lambda n: APPLY_FACTS)
 
 
 @scenario("legacy_dependency_skill_accrued")

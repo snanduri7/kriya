@@ -12,8 +12,10 @@ writes the forms to ``<dir>`` (and fails, so a write is never mistaken for a pas
 HX1 (OI-41) made them portable: they pass at any absolute checkout path, under load and without the checkout's untracked
 ``./memory`` (the controls at the end of this file pin each normalization and the isolation).
 """
+import contextlib
 import json
 import os
+import re
 from pathlib import Path
 
 import _kernel_golden as kg
@@ -321,3 +323,50 @@ def test_the_request_elapsed_contract_is_pinned_outside_the_goldens():
     """The golden hides the elapsed_request_ms VALUE; the field itself is pinned by a direct contract test."""
     source = (Path(__file__).resolve().parents[1] / "test_provider_contract_001a.py").read_text(encoding="utf-8")
     assert "def test_elapsed_request_ms_is_the_request_interval(" in source
+
+
+# --- OI-53 (E14 preflight): the lessons scenario's calendar is the harness's, never the machine's ---------------------
+
+LESSONS_SCENARIO = "legacy_lessons_staged"
+
+
+def _system_calendar(monkeypatch, day: tuple) -> None:
+    """Simulate the machine's calendar on ``day``: kriya.knowledge.schema's ``date.today()`` (KnowledgeFact.added_at)."""
+    import datetime
+
+    from kriya.knowledge import schema
+
+    class _SystemDate(datetime.date):
+        @classmethod
+        def today(cls):
+            return cls(*day)
+    monkeypatch.setattr(schema, "date", _SystemDate)
+
+
+def _staged_added_at(outcome) -> list:
+    """The added_at of every fact the run staged (read back from the staged files; never digested away)."""
+    found = []
+    for path in sorted(p for p in (Path(outcome.workspace).parent / "skills").rglob("*") if p.is_file()):
+        found.extend(re.findall(r"added_at\W+(\d{4}-\d{2}-\d{2})", path.read_text(encoding="utf-8", errors="replace")))
+    return found
+
+
+@pytest.mark.parametrize("day", [(2026, 1, 2), (2027, 12, 31)])
+def test_the_lessons_scenario_keeps_its_golden_on_any_calendar_day(tmp_path, monkeypatch, day):
+    """OI-53: on two machine calendars other than the golden's day the scenario reproduces its golden byte for byte; the
+    staged fact carries the harness's day (kg.GOLDEN_LESSON_DAY), never the machine's."""
+    _system_calendar(monkeypatch, day)
+    outcome = kg.SCENARIOS[LESSONS_SCENARIO](tmp_path)
+    assert set(_staged_added_at(outcome)) == {"%04d-%02d-%02d" % kg.GOLDEN_LESSON_DAY}
+    assert kg.render(kg.capture(outcome, tmp_path, LESSONS_SCENARIO)) == _golden(LESSONS_SCENARIO)
+
+
+@pytest.mark.parametrize("day, keeps_golden", [((2026, 1, 2), False), (kg.GOLDEN_LESSON_DAY, True)])
+def test_without_the_harness_clock_the_lessons_golden_follows_the_calendar(tmp_path, monkeypatch, day, keeps_golden):
+    """OI-53 negative control: with the harness clock removed, the same scenario breaks its golden on another day and
+    keeps it only on the golden's own day - the calendar date is the scenario's only volatile input."""
+    monkeypatch.setattr(kg, "golden_test_clock", contextlib.nullcontext)
+    _system_calendar(monkeypatch, day)
+    outcome = kg.SCENARIOS[LESSONS_SCENARIO](tmp_path)
+    assert set(_staged_added_at(outcome)) == {"%04d-%02d-%02d" % day}
+    assert (kg.render(kg.capture(outcome, tmp_path, LESSONS_SCENARIO)) == _golden(LESSONS_SCENARIO)) is keeps_golden
