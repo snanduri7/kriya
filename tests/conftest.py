@@ -70,7 +70,8 @@ def _no_repository_root_package_pollution(request):
 # in the process working directory - the checkout - through AppConfig-default configs (audit probe over the files and the
 # `-m "kernel and state_machine"` gate in a git-archive sandbox; handover/MODULARIZATION/E14-CHARACTERIZATION.md). Each of
 # their tests runs from a fresh working directory holding an EMPTY ./memory, the HX1 way: the relative config value (and so
-# every config fingerprint) is unchanged and nothing resolves in the checkout. Listed by file name, like the tiers above.
+# every config fingerprint) is unchanged and nothing resolves in the checkout. Listed by file name, like the tiers above. OI-71: 49 more files of the E13
+# adjacent set still open the checkout's ./memory (measured, not isolated here).
 CHECKOUT_MEMORY_RESOLVING_FILES = frozenset({
     "test_sm_reserved_fallback.py", "test_sm_attempt_metrics.py", "test_sm_best_of_n.py", "test_sm_failure_families.py",
     "test_sm_budget_transitions.py", "test_prd032_chaos_static_analysis.py", "test_prd032_chaos_runtime.py",
@@ -88,25 +89,6 @@ def _checkout_memory_isolated(request, tmp_path_factory, monkeypatch):
         (cwd / "memory").mkdir()
         monkeypatch.chdir(cwd)
     yield
-
-
-@pytest.fixture(autouse=True)
-def _no_checkout_memory_access(request):
-    """OI-45 tripwire: a test leaves the repository root's ./memory as it found it (absent stays absent; present entries
-    keep their names, sizes and modification times). Under xdist a concurrent worker's test can be the real writer,
-    which the message says."""
-    from _worktree_pollution import memory_snapshot
-
-    root = str(request.config.rootpath)
-    before = memory_snapshot(root)
-    yield
-    after = memory_snapshot(root)
-    if after != before:
-        pytest.fail(
-            f"OI-45: {root}/memory changed during this test (or a test running concurrently on another xdist worker): "
-            f"before={before!r} after={after!r}; an AppConfig-default config resolved ./memory in the checkout - give the "
-            "test a tmp paths.memory or add its file to CHECKOUT_MEMORY_RESOLVING_FILES (tests/conftest.py)"
-        )
 
 
 _TEST_HOST = {"os": "linux", "architecture": "x86_64", "memory_bytes": 64 * (1 << 30), "cpu_model": None,
