@@ -220,8 +220,12 @@ def git_metadata_mount_args(profile: ContainmentProfile, workspace_host: str) ->
     points at the export mounted beside the workspace; a real ``.git``
     directory is hidden entirely under the export; a Kriya-owned copy without
     ``.git`` (an authority run) gets the export as its ``.git``. Without an
-    export: exactly the pre-existing dangling-gitfile mask. The host's own
-    ``.git`` is never mounted."""
+    export: exactly the pre-existing dangling-gitfile mask, which hides only a
+    gitfile pointing OUTSIDE the mount. Without an export, a real ``.git``
+    DIRECTORY inside the mounted workspace stays mounted read-write (MEASURED,
+    S18-PREFLIGHT.md R22: a ShellTool profile never binds an export and mounts
+    the process folder); with an export bound it is hidden under the export.
+    Behaviour unchanged here; the claim is corrected (S18)."""
     mount = profile.git_metadata
     if mount is None:
         return dangling_gitfile_mask(workspace_host)
