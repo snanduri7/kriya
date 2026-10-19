@@ -288,7 +288,7 @@ def test_the_desktop_configuration_paths_refuse_typed(tmp_path, monkeypatch, val
     assert resolved.failure["code"] == CONFIG_LOAD_FAILED and code in resolved.failure["message"], resolved.failure
     status = run_kup_operation(None, {"operation": "configuration.approval_status", "workspace": str(ws)})
     assert status["error"]["code"] == CONFIG_LOAD_FAILED and code in status["error"]["message"], status
-    approve = run_kup_operation(None, {"operation": "configuration.approve", "workspace": str(ws), "fingerprint": "x"})
+    approve = run_kup_operation(None, {"operation": "configuration.approve", "workspace": str(ws), "fingerprint": "sha256:" + "0" * 64})
     assert approve["error"]["code"] == CONFIG_LOAD_FAILED and code in approve["error"]["message"], approve
     line = json.loads(serve.answer({"id": "r1", "operation": "execution.context", "arguments": {"workspace": str(ws)}}, None, None))
     assert line["envelope"]["error"]["code"] == "CONFIG_LOAD_FAILED" and code in line["envelope"]["error"]["message"], line
