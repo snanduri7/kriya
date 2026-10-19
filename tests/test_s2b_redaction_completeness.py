@@ -276,6 +276,27 @@ def test_the_gui_receives_a_history_detail_with_every_secret_hidden():
     assert redact_value(data) == data                                                  # the projection is a fixed point
 
 
+def _runtime_review(*argv):
+    from kriya.control.launch_approval import build_pending_runtime
+    from kriya.policy.approval import RuntimeCommandSubject
+
+    return build_pending_runtime("l", "w", 1, RuntimeCommandSubject("u1", "criterion", "/ws", (tuple(argv),), "none", None, "reason"))
+
+
+def test_a_plain_runtime_command_is_still_offered_for_review():
+    assert _runtime_review("java", "-jar", "app.jar", "--port", "8080") is not None
+    assert _runtime_review("python", "-u", "server.py", "--user", "alice") is not None
+
+
+@FLIP
+@pytest.mark.parametrize("argv", [("run.sh", "--token", S), ("run.sh", "--password", S), ("curl", "-u", f"al:{S}", "http://h"),
+                                  ("run.sh", f"DB_PASSWORD={S}")], ids=["token-space", "password-space", "curl-user", "env-style"])
+def test_a_runtime_command_carrying_a_secret_argument_is_not_offered_for_review(argv):
+    """The S2 rule (launch_approval.build_pending_runtime): the review is not offered when redaction would alter what the
+    person reads - it must see the argv as a whole (``--token`` then its value), not each element alone."""
+    assert _runtime_review(*argv) is None
+
+
 @FLIP
 def test_the_history_list_and_the_traces_table_hide_a_secret_in_the_goal(tmp_path, monkeypatch):
     _, snap = _snapshot()
