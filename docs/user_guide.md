@@ -6,6 +6,11 @@ This guide describes how to install, configure, optimize, and use Kriya for code
 
 ## 1. Installation & Setup
 
+**Supported platforms: Linux and macOS.** On any other platform every entry (`kriya`, `kriya kup-stdio`, the desktop
+app's server, `kriya-mcp`) stops before it reads anything, with exit code 69 and a typed reason:
+`PLATFORM_WINDOWS_UNSUPPORTED` (Windows, including Cygwin/MSYS) or `PLATFORM_UNKNOWN_UNSUPPORTED` (any other
+platform). Windows support is planned, not available (S5).
+
 1.  **Clone the Repository**:
     ```bash
     git clone https://github.com/your-repo/kriya.git

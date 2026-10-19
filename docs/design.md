@@ -3230,3 +3230,15 @@ owner-recovery path, exactly as the three attempt-level micro-loops already are.
 operator-approved loop in `guardrails`/other modes (the same as the attempt-level loops). Every REPOSITORY_SAFE field
 was audited and is pinned with its reason in `tests/test_s3_config_authority_enabling_fields.py`.
 
+### S5 - unsupported platforms are refused at entry (2026-10-19, OI-101, PLAT-WINDOWS-ENTRY-REFUSAL)
+
+The decision belongs to the OS-mechanism owner, `kriya/platform/services.py`: `PlatformServices.entry_refusal()` (the
+services now record the `sys.platform` value they were composed for; `identity()` is unchanged) answers
+`PLATFORM_WINDOWS_UNSUPPORTED` for the Windows family (win32, cygwin, msys - decided by family first) and
+`PLATFORM_UNKNOWN_UNSUPPORTED` for any platform not in `SUPPORTED_RUNTIME_PLATFORMS` = {linux, darwin} (§13 of
+handover/PLATFORM_ARCHITECTURE.md), from the closed table `ENTRY_REFUSAL_REASONS`; `ENTRY_REFUSED_EXIT_CODE` is 69
+(EX_UNAVAILABLE). Entries ask it first: the `kriya` click group (a Group subclass whose `main()` runs before click parses
+anything, so neither `--config`'s exists-stat nor the eager `--version` runs; the registration and help tree are
+unchanged), `kriya.kup.serve.run` and `kriya.mcp.server.main`. Importing Kriya on Windows is unchanged (the
+windows-latest CI job). Windows parity stays future work (PLAT-WINDOWS-POLICY-PARITY-001, PLAT-WINDOWS-PROVIDERS-001).
+
