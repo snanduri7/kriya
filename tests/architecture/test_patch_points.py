@@ -87,7 +87,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # the test-delta covering run keeps its own. The patch site above is the dynamic proof (all three paths).
     # E14 characterization (tests/test_e14_characterization.py, written before the moves): +1 site, the dynamic proof that a patch of this
     # name reaches the GateDeps field.
-    (A, '_judge_candidate_suite'): P(2, A, ((A, 2),), ()),
+    # E14 pin2 (written before the moves, for the pin1 survivors u07/u09): +2 sites, the test-delta covering run's
+    # judgment scope and its attribution evidence through this name.
+    (A, '_judge_candidate_suite'): P(4, A, ((A, 2),), ()),
     (A, '_maybe_run_developer_investigation'): P(1, A, ((A, 1),), ()),
     # E9 characterization: +1 site (tests/test_runtime_verification.py: the dynamic proof that both runtime call sites
     # resolve it through this module at call time).
@@ -421,7 +423,8 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # _code_intelligence_for, _judge_candidate_suite and _reject_exception_masking; 4 new rows with 9 sites:
     # _attribute_candidate_suite 2, _fallback_routing 1, _has_authoritative_full_source 1, _sync_active_repair_contract 5)
     # and +1 C site (_evaluate_subtask_verification)
-    assert totals == {A: 112, W: 93, C: 383}
+    # E14 pin2: +2 A sites (_judge_candidate_suite: the test-delta covering run's scope and attribution evidence)
+    assert totals == {A: 114, W: 93, C: 383}
     assert len(PATCH_POINTS) == 132
 
 

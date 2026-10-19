@@ -586,6 +586,68 @@ def test_the_developer_wrapper_attributes_model_calls_to_the_developer_role():
     assert asyncio.run(attempt._as_developer(probe())) == "developer"
 
 
+PY_BASE = "def test_existing():\n    assert True\n"
+
+
+class _Validator:
+    def __init__(self, result, stack="java"):
+        self.stack, self.result, self.calls = stack, result, []
+
+    def run_tests(self, target_test=None):
+        self.calls.append(target_test)
+        return self.result
+
+
+def _delta_case(tmp_path, covering, stack="java"):
+    """A changed test source whose accepted invocation carried no structured report: one covering run decides."""
+    ctx = _ctx(tmp_path)
+    _write(ctx.workspace_path, "tests/test_calc.py", PY_BASE)
+    _write(ctx.worktree_path, "tests/test_calc.py", PY_BASE + "\n\ndef test_new():\n    assert True\n")
+    return _state("tests/test_calc.py"), ctx, _Validator(covering, stack)
+
+
+def _report_result(identities, success=True):
+    from kriya.tools import test_execution
+    from kriya.tools.test_execution import COMPLETE, TestCaseResult, TestExecutionReport
+
+    report = TestExecutionReport(gate_id="g1", runner="pytest", workspace="/w", completeness=COMPLETE, reason=None,
+                                 cases=[TestCaseResult(i, i.rsplit(".", 1)[0], i.rsplit(".", 1)[1], "passed")
+                                        for i in identities])
+    assert test_execution.report_from_result({"test_execution": report.to_dict()}) is not None
+    return {"success": success, "output": "suite output", "test_execution": report.to_dict()}
+
+
+def test_a_covering_run_whose_tool_cannot_start_is_an_environment_stop(tmp_path):
+    state, ctx, validator = _delta_case(tmp_path, {"success": False, "output": "no wrapper",
+                                                   "environment_reason_code": "GRADLE_WRAPPER_UNAVAILABLE"})
+    with pytest.raises(QualityGateFailure) as raised:
+        attempt._raise_unexecuted_test_delta(state, ctx, validator, {"success": True, "output": ""}, None)
+    assert validator.calls == [None]                                  # the java covering run is the whole suite
+    failure = raised.value.failure
+    assert failure.type == "verification_infrastructure_failure"
+    assert failure.diagnostics == {"reason_code": "GRADLE_WRAPPER_UNAVAILABLE", "gate": "test", "gradle_distribution": None}
+
+
+def test_a_full_suite_covering_run_is_judged_in_its_own_scope_and_its_attribution_is_kept(tmp_path):
+    from kriya.workflow.suite_attribution import SCOPE_TEST_DELTA_COVERING_RUN
+
+    passing = _report_result(["tests.test_calc.test_existing", "tests.test_calc.test_new"])
+    state, ctx, validator = _delta_case(tmp_path, passing)
+    with patch("kriya.workflow.attempt._judge_candidate_suite", return_value=(False, "", {})) as judge:
+        assert attempt._raise_unexecuted_test_delta(state, ctx, validator, {"success": True, "output": ""}, None) is None
+    assert judge.call_args.args == (state, ctx, passing, SCOPE_TEST_DELTA_COVERING_RUN)
+    assert [o["type"] for o in state.gate_outcomes] == ["test_delta"] and state.gate_outcomes[0]["success"] is True
+    (tmp_path / "blocking").mkdir()
+    state, ctx, validator = _delta_case(tmp_path / "blocking", passing)
+    with patch("kriya.workflow.attempt._judge_candidate_suite",
+               return_value=(True, "attributed evidence", {"regression_attribution": {"blocking": True}})), \
+            pytest.raises(QualityGateFailure) as raised:
+        attempt._raise_unexecuted_test_delta(state, ctx, validator, {"success": True, "output": ""}, None)
+    assert raised.value.failure.diagnostics["regression_attribution"] == {"blocking": True}
+    assert state.gate_outcomes[-1]["regression_attribution"] == {"blocking": True}
+    assert "attributed evidence" in raised.value.failure.message
+
+
 # =============================================================================================== staging helpers (OI-58, OI-50)
 
 def test_a_baseline_restoration_writes_the_exact_original_bytes_over_the_current_revision(tmp_path):
