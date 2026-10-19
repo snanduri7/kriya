@@ -35,6 +35,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import httpx
 
+from kriya.foundation.redaction import redact_text
+
 logger = logging.getLogger(__name__)
 
 ADAPTER_ID = "ollama-native-embed/1"
@@ -201,7 +203,7 @@ class OllamaEmbeddingClient:
 
             if not is_local_url(self.base_url):
                 raise EgressViolationError(
-                    f"Egress violation: embedding request to external endpoint '{self.base_url}' "
+                    f"Egress violation: embedding request to external endpoint '{redact_text(self.base_url)}' "
                     "blocked under 'local_only' policy."
                 )
 

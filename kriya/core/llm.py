@@ -16,6 +16,7 @@ from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.inference_runtime import ChatRequest, InferenceRuntimePort, RuntimeErrorKind, runtime_for_binding
 from kriya.core.inference_settings import request_settings
 from kriya.core.model_runtime import context_window_overrides, request_extra_body
+from kriya.foundation.redaction import redact_text
 
 # The local/private-address definition the hard egress boundary below and ExecutionPolicy's egress stage share: owned by AUTHORITY since
 # slice C3 (it was defined here and imported back lazily by kriya/policy/execution.py), re-exported as itself for its importers. Removed in P1.
@@ -853,7 +854,7 @@ class LLMClient:
         if self.config.autonomy.egress_policy == "local_only":
             if not is_local_url(url_to_check):
                 raise EgressViolationError(
-                    f"Egress violation: Request to external API '{url_to_check}' blocked under 'local_only' policy."
+                    f"Egress violation: Request to external API '{redact_text(url_to_check)}' blocked under 'local_only' policy."
                 )
 
         model = model_override or self.model
@@ -1188,7 +1189,7 @@ class LLMClient:
         if self.config.autonomy.egress_policy == "local_only":
             if not is_local_url(url_to_check):
                 raise EgressViolationError(
-                    f"Egress violation: Request to external API '{url_to_check}' blocked under 'local_only' policy."
+                    f"Egress violation: Request to external API '{redact_text(url_to_check)}' blocked under 'local_only' policy."
                 )
 
         model = model_override or self.model

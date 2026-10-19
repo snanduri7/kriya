@@ -26,6 +26,7 @@ import sys
 import traceback
 from typing import Any, BinaryIO, Dict, Optional
 
+from kriya.foundation.redaction import redact_text
 from kriya.kup import policy
 
 PROTOCOL = "kriya-kup-stdio/1"
@@ -76,7 +77,7 @@ assert set(ARGUMENTS) == set(policy.OPERATIONS), "every KUP operation has an arg
 
 
 def _refusal(request_id: Optional[str], code: str, message: str) -> Dict[str, Any]:
-    return {"id": request_id, "ok": False, "error": {"code": code, "message": message}}
+    return {"id": request_id, "ok": False, "error": {"code": code, "message": redact_text(message)}}
 
 
 def _scalar_or_strings(value: Any) -> bool:

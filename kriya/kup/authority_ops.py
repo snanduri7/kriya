@@ -13,7 +13,7 @@ explicit request, writes the approval through the SAME function the CLI uses (``
 Boundaries, each pinned by a test:
 
 * ``approval_status`` is read-only and returns protected FIELD NAMES, their classification and source, and a review fingerprint. It returns NO configuration
-  value: existing display redaction covers ``env`` and ``api_key`` only, and there is no authoritative per-field "safe to show" metadata, so none is shown.
+  value (a design choice kept after S2: the CLI shows values through the one redaction owner, kriya.foundation.redaction; the GUI shows none).
 * ``approve`` takes ``{workspace, fingerprint}`` and nothing else: no fields, no values, no path, no digest to trust, no store location. It re-resolves the
   configuration fresh and refuses (``APPROVAL_STALE``, nothing written) unless the fingerprint of what it now sees equals the one the person reviewed.
 * A trust file in effect (``KRIYA_TRUST_FILE``) or a store that would resolve inside the workspace is a typed ``APPROVAL_UNAVAILABLE``: the local store would not

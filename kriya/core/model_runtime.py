@@ -48,6 +48,7 @@ from kriya.core.inference_runtime import (
     RuntimeErrorKind,
     register_runtime_adapter,
 )
+from kriya.foundation.redaction import redact_text
 
 logger = logging.getLogger(__name__)
 
@@ -345,7 +346,7 @@ def _http_json(url: str, payload: Optional[Dict[str, Any]], api_key: str) -> Dic
             decoded = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
         error.close()  # its response stream is released now, never left to the garbage collector
-        raise ValueError(f"HTTP {error.code} from {url}") from None
+        raise ValueError(f"HTTP {error.code} from {redact_text(url)}") from None
     if not isinstance(decoded, dict):
         raise ValueError("endpoint response was not a JSON object")
     return decoded
@@ -960,7 +961,7 @@ def pin_served_configuration(*, base_url: str, model: str, extra_body: Optional[
     if create:
         if not is_local_url(base_url):
             raise ProviderContractError(PROVIDER_SETTING_UNSUPPORTED,
-                                        f"{base_url} is not a local endpoint; a served model is pinned only locally")
+                                        f"{redact_text(base_url)} is not a local endpoint; a served model is pinned only locally")
         (transport or _http_json)(f"{_native_root(base_url)}/api/create",
                                   {"model": name, "from": model, "parameters": parameters, "stream": False}, api_key)
         pin["created"] = True

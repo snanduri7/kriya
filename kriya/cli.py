@@ -55,6 +55,7 @@ from kriya.core import LLMClient
 from kriya.core.kernel import Kernel
 from kriya.core.logging_setup import LogDirectoryError, configure_logging
 from kriya.core.state_paths import trace_db_path
+from kriya.foundation.redaction import redact_text, redact_value
 from kriya.plugins.plugin import PluginManager
 from kriya.policy.approval import TypedApprovalCallback
 from kriya.prompt import PromptEngine
@@ -73,28 +74,6 @@ def _get_global_skills_dir() -> str:
     risk writing test data into the real shared skills on disk."""
     kriya_install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     return os.path.join(kriya_install_dir, "skills")
-
-def _redact_secrets(data: Any) -> Any:
-    """Recursively redacts credential-carrying values before a config dump is
-    ever displayed. Covers every api_key field regardless of where it's nested
-    (top-level llm, llm_chain entries, each agent_llms role's own llm/llm_chain)
-    without needing to enumerate each location by shape - and every value inside
-    an MCP server's env dict, since those commonly carry real tokens passed to
-    the MCP subprocess (key names are kept so the user can still see which env
-    vars are configured, just not their values)."""
-    if isinstance(data, dict):
-        redacted = {}
-        for key, value in data.items():
-            if key == "api_key" and isinstance(value, str) and value:
-                redacted[key] = "***REDACTED***"
-            elif key == "env" and isinstance(value, dict):
-                redacted[key] = {k: ("***REDACTED***" if v else v) for k, v in value.items()}
-            else:
-                redacted[key] = _redact_secrets(value)
-        return redacted
-    if isinstance(data, list):
-        return [_redact_secrets(item) for item in data]
-    return data
 
 async def _initialize_plugins_tolerant(kernel: Kernel, pm: PluginManager) -> Dict[str, Optional[Exception]]:
     """Attempts each discovered plugin's initialize() independently, so one
@@ -292,7 +271,7 @@ def completion(shell: str) -> None:
 def config(ctx: click.Context) -> None:
     """Display current Kriya configuration."""
     cfg: AppConfig = ctx.obj['config']
-    click.echo(json.dumps(_redact_secrets(cfg.model_dump(mode="json")), indent=2))
+    click.echo(json.dumps(redact_value(cfg.model_dump(mode="json")), indent=2))
 
 @main.command()
 @click.option("--production", is_flag=True, help="Run the fail-closed production deployment preflight.")
@@ -417,7 +396,7 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
     base_url = cfg.llm.base_url
     model = cfg.llm.model
     click.echo(f"  - Provider: {provider}")
-    click.echo(f"  - Base URL: {base_url}")
+    click.echo(f"  - Base URL: {redact_text(base_url)}")
     click.echo(f"  - Model: {model}")
     click.echo("  - Testing connection...")
     try:
@@ -454,18 +433,18 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
         else:
             click.secho(f"  - [WARNING] Connected to local server, but got status code {status_code}.", fg="yellow")
     except urllib.error.URLError as e:
-        click.secho(f"  - [ERROR] Could not connect to local LLM server at {base_url}: {e.reason}", fg="red")
+        click.secho(redact_text(f"  - [ERROR] Could not connect to local LLM server at {base_url}: {e.reason}"), fg="red")
         click.echo("    Ensure your local LLM server (e.g. Ollama, LM Studio) is running and accessible.")
         errors_found = True
     except Exception as e:
-        click.secho(f"  - [ERROR] Connectivity test encountered an error: {e}", fg="red")
+        click.secho(redact_text(f"  - [ERROR] Connectivity test encountered an error: {e}"), fg="red")
         errors_found = True
 
     # 2.5. Check local Embedding connection
     click.echo("\nChecking Embedding provider connectivity:")
     embed_url = cfg.embedding.base_url
     embed_model = cfg.embedding.model
-    click.echo(f"  - Base URL: {embed_url}")
+    click.echo(f"  - Base URL: {redact_text(embed_url)}")
     click.echo(f"  - Model: {embed_model}")
     click.echo("  - Testing connection...")
 
@@ -476,7 +455,7 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
         emb = asyncio.run(configured_client(cfg).get_embedding("test connectivity"))
         click.secho(f"  - [SUCCESS] Connected and successfully generated embedding of dimension {len(emb)}", fg="green")
     except Exception as e:
-        click.secho(f"  - [ERROR] Could not connect or failed to generate test embedding: {e}", fg="red")
+        click.secho(redact_text(f"  - [ERROR] Could not connect or failed to generate test embedding: {e}"), fg="red")
         click.echo("    Ensure your embedding provider (e.g. local Ollama) is running and model is pulled.")
         errors_found = True
 
@@ -3041,7 +3020,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         # reaching this callback at all when that opt-in is set.
         if yes:
             click.secho(
-                f"\n[Auto-Skipping Live Lookup] would search for {terms} via {base_url} - skipped under "
+                f"\n[Auto-Skipping Live Lookup] would search for {terms} via {redact_text(base_url)} - skipped under "
                 "-y (set autonomy.web_lookup_auto_approve: true to allow this unattended)",
                 dim=True
             )
@@ -3050,7 +3029,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         click.secho("\n[Live Lookup] Kriya wants to search for reference material on:", bold=True, fg="yellow")
         for t in terms:
             click.echo(f"  - {t}")
-        click.echo(f"via: {base_url}")
+        click.echo(f"via: {redact_text(base_url)}")
         return click.confirm(
             "\nSend this search? (only these bare technology-name terms are sent - "
             "never goal/design/code/error text)"

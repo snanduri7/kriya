@@ -12,6 +12,7 @@ import sqlite3
 from typing import Any, Dict, Optional
 
 from kriya.foundation.ids import RUN_ID_RULE, is_valid_run_id
+from kriya.foundation.redaction import redact_text
 from kriya.kup import policy
 from kriya.kup.store import SnapshotError
 
@@ -40,7 +41,8 @@ def envelope(operation: str, request_id: str, *, data: Any = None, error: Option
 
 
 def error_envelope(operation: str, request_id: str, code: str, message: str, database_state: Optional[str] = None, **extra: Any) -> Dict[str, Any]:
-    err: Dict[str, Any] = {"code": code, "message": message, "database_state": database_state}
+    # S2: an error message can echo a configured value (a URL with userinfo, a pydantic input_value); the envelope carries it redacted.
+    err: Dict[str, Any] = {"code": code, "message": redact_text(message), "database_state": database_state}
     err.update(extra)
     return envelope(operation, request_id, error=err)
 

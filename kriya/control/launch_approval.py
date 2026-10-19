@@ -32,6 +32,7 @@ from kriya.control.persistence import (
     save_launch_review_decision,
 )
 from kriya.control.run_ownership import probe_run_lock
+from kriya.foundation.redaction import redact_text
 
 # Moved to AUTHORITY's approval owner (kriya/policy/approval.py) in slice C3, re-exported here as themselves for this module's importers. Removed in P1.
 from kriya.policy.approval import KIND_CHANGE as KIND_CHANGE
@@ -105,10 +106,8 @@ def build_pending_runtime(launch_id: str, workspace_identity_value: str, sequenc
     fingerprint). None - the review is not offered - when the commands cannot be shown faithfully: a secret scrub that would alter any argument means what the person would read is not
     what would run. Secret stdin/environment values never enter the record: only ``stdin_present`` / the stdin digest and environment NAMES do. ``review`` is the subject's
     fingerprint/reviewability owner (AUTHORITY's ``kriya.policy.approval``; slice C3: a parameter, not a lazy import of the kernel-side module)."""
-    from kriya.policy.telemetry import scrub_potential_secrets
-
     commands = [list(c) for c in subject.commands]
-    if not review.reviewable(subject) or any(scrub_potential_secrets(a) != a for c in commands for a in c):
+    if not review.reviewable(subject) or any(redact_text(a) != a for c in commands for a in c):
         return None
     digest = review.fingerprint_of(subject.working_directory, subject.commands, subject.input_channel, subject.stdin_sha256)
     requested = _now()
@@ -116,7 +115,7 @@ def build_pending_runtime(launch_id: str, workspace_identity_value: str, sequenc
         "review_id": review_identity(launch_id, workspace_identity_value, sequence, digest, subject.reason), "sequence": sequence, "kind": KIND_RUNTIME,
         "status": STATUS_PENDING, "requested_at": _stamp(requested), "expires_at": _stamp(requested + timedelta(seconds=APPROVAL_WAIT_SECONDS)),
         "candidate_digest": digest, "command_fingerprint": digest, "unit_id": subject.unit_id,
-        "criterion": scrub_potential_secrets(subject.criterion)[:CRITERION_MAX_CHARS], "commands": commands,
+        "criterion": redact_text(subject.criterion)[:CRITERION_MAX_CHARS], "commands": commands,
         "working_directory": subject.working_directory, "working_directory_kind": WORKING_DIRECTORY_KIND, "input_channel": subject.input_channel,
         "stdin_present": subject.stdin_sha256 is not None, "stdin_sha256": subject.stdin_sha256, "environment_names": list(subject.environment_names),
         "reason_sha256": _sha(subject.reason), "decision": None,

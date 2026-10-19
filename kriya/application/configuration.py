@@ -6,8 +6,8 @@ configuration are all ``kriya.config.authority`` / ``kriya.config.authority_appr
 the service only orders those calls. It is ONE MORE CLIENT of that subsystem:
 
 * ``approval_status`` is read-only and returns protected FIELD NAMES, their classification and source, and a review fingerprint. It
-  returns NO configuration value: existing display redaction covers ``env`` and ``api_key`` only, and there is no authoritative
-  per-field "safe to show" metadata, so none is shown.
+  returns NO configuration value (kept after S2: the CLI shows values through the one redaction owner, kriya.foundation.redaction;
+  this read model shows none).
 * ``approve`` refuses (``APPROVAL_STALE``, nothing written) unless the fingerprint of the configuration it is given equals the one the
   person reviewed, and writes through the SAME function the CLI uses (``grant_local_approval``, reached through
   ``AuthorityPort.grant_config_approval`` since C1; before C1 the KUP caller passed it in as ``grant``).
@@ -27,6 +27,7 @@ from kriya.application.services import APPROVAL_STALE, APPROVAL_UNAVAILABLE, CON
 from kriya.config.service import ConfigService
 from kriya.context.model import RequestContext
 from kriya.context.workspace_identity import workspace_identity
+from kriya.foundation.redaction import redact_text
 from kriya.policy.authority import (
     ApprovalArtifactError,
     AuthorityPort,
@@ -89,7 +90,7 @@ def _state(config: ConfigService):
     try:
         return config.resolution_state()
     except Exception as error:  # noqa: BLE001 - a malformed or unreadable kriya.yaml is a typed refusal, never a traceback (as execution.preflight)
-        raise ApplicationRefusal(CONFIG_LOAD_FAILED, f"the configuration cannot be read: {type(error).__name__}: {str(error)[:300]}") from error
+        raise ApplicationRefusal(CONFIG_LOAD_FAILED, f"the configuration cannot be read: {type(error).__name__}: {redact_text(str(error))[:300]}") from error
 
 
 class ConfigurationService:

@@ -8,7 +8,9 @@ Characterization FIRST (S1 method). Two kinds of test live here:
     the key names kept, the approval artifact never storing a value, the identity/display canonicalizers that already
     drop userinfo, the readable values the telemetry scrubber promises to keep, launch-approval reviewability);
   * EXPECTED-TO-FLIP pins: the measured defect (every channel below printed or logged `user:password@`), written as
-    the corrected behaviour and marked strict-xfail (AssertionError only) at the characterization commit.
+    the corrected behaviour and marked strict-xfail (AssertionError only) at the characterization commit 9e24597,
+    shown failing on the unfixed bytes (--runxfail: 22 failed, each printing the secret); the correction removed the marks;
+  * (added with the correction) the owner's own rule contracts and the one-owner tripwire the mutants run against.
 Every channel is driven through its production entry (the CLI command, the record builder, the handler formatter, the
 KUP envelope), never through a private helper, so the pins survive the removal of the three old redactors.
 """
@@ -28,9 +30,6 @@ from click.testing import CliRunner
 from kriya.config import authority_approval as aa
 from kriya.config.authority import ConfigAuthorityViolation, ConfigSource, FieldClassification
 from kriya.config.config import AppConfig, resolve_config_state
-
-FLIP = pytest.mark.xfail(strict=True, raises=AssertionError,
-                         reason="S2 expected-to-flip: the measured credential leak (removed by the correction commit)")
 
 PW = "s3cretPW"
 EMB_PW = "emb3dPW"
@@ -163,7 +162,6 @@ def test_values_without_a_secret_stay_readable_in_the_authority_display(value):
 
 # =========================================================================== EXPECTED TO FLIP (the measured defect)
 
-@FLIP
 def test_authority_inspect_never_prints_url_credentials(tmp_path, monkeypatch):
     _credential_workspace(tmp_path, monkeypatch)
     out = _cli(["authority", "inspect"]).output
@@ -171,7 +169,6 @@ def test_authority_inspect_never_prints_url_credentials(tmp_path, monkeypatch):
     assert _leaked(out) == [], out
 
 
-@FLIP
 def test_authority_approve_never_prints_url_credentials(tmp_path, monkeypatch):
     _credential_workspace(tmp_path, monkeypatch)
     out = _cli(["authority", "approve"], stdin="n\n").output
@@ -179,7 +176,6 @@ def test_authority_approve_never_prints_url_credentials(tmp_path, monkeypatch):
     assert _leaked(out) == [], out
 
 
-@FLIP
 def test_the_config_command_never_prints_url_credentials(tmp_path, monkeypatch):
     _credential_workspace(tmp_path, monkeypatch)
     _approve()
@@ -189,7 +185,6 @@ def test_the_config_command_never_prints_url_credentials(tmp_path, monkeypatch):
     assert _leaked(out) == [], out
 
 
-@FLIP
 def test_doctor_never_prints_url_credentials(tmp_path, monkeypatch):
     import kriya.tools.validate as validate
 
@@ -201,7 +196,6 @@ def test_doctor_never_prints_url_credentials(tmp_path, monkeypatch):
     assert _leaked(out) == [], out
 
 
-@FLIP
 def test_the_production_report_never_carries_url_credentials():
     from kriya import production_doctor as pd
 
@@ -216,7 +210,6 @@ def test_the_production_report_never_carries_url_credentials():
     assert "8.8.8.8" in text and _leaked(text) == [], text
 
 
-@FLIP
 def test_the_log_handlers_never_write_url_credentials(tmp_path):
     from kriya.core import logging_setup
 
@@ -231,7 +224,6 @@ def test_the_log_handlers_never_write_url_credentials(tmp_path):
     assert _leaked(text) == [], text
 
 
-@FLIP
 def test_the_console_log_never_writes_url_credentials(tmp_path):
     """A fresh interpreter: configure_logging is a no-op under pytest (the root logger already has handlers)."""
     code = ("import logging; from kriya.config.config import AppConfig; from kriya.core.logging_setup import configure_logging; "
@@ -254,7 +246,6 @@ def _validation_error():
     raise AssertionError("expected a validation error")
 
 
-@FLIP
 def test_a_configuration_error_message_never_echoes_url_credentials():
     from kriya.cli_commands.common import _user_error_text
 
@@ -262,7 +253,6 @@ def test_a_configuration_error_message_never_echoes_url_credentials():
     assert "temperature" in text and _leaked(text) == [], text
 
 
-@FLIP
 def test_a_kup_error_envelope_never_carries_url_credentials():
     from kriya.kup.inspect import error_envelope
 
@@ -271,7 +261,6 @@ def test_a_kup_error_envelope_never_carries_url_credentials():
     assert "CONFIG_LOAD_FAILED" in text and "temperature" in text and _leaked(text) == [], text
 
 
-@FLIP
 def test_policy_records_never_carry_url_credentials():
     from kriya.policy.egress import EgressCapability, EgressDecision
 
@@ -281,7 +270,6 @@ def test_policy_records_never_carry_url_credentials():
     assert "127.0.0.1:9" in text and _leaked(text) == [], text
 
 
-@FLIP
 def test_a_runtime_command_carrying_url_credentials_is_not_offered_for_review():
     from kriya.control.launch_approval import build_pending_runtime
     from kriya.policy.approval import RuntimeCommandSubject
@@ -290,7 +278,6 @@ def test_a_runtime_command_carrying_url_credentials_is_not_offered_for_review():
     assert build_pending_runtime("l", "w", 1, subject) is None
 
 
-@FLIP
 def test_egress_violation_messages_never_carry_url_credentials(monkeypatch):
     from kriya.core.llm import EgressViolationError, LLMClient
     from kriya.memory.embedding import OllamaEmbeddingClient
@@ -308,7 +295,6 @@ def test_egress_violation_messages_never_carry_url_credentials(monkeypatch):
         assert "8.8.8.8" in str(error) and PW not in str(error), str(error)
 
 
-@FLIP
 def test_provider_probe_errors_never_carry_url_credentials(monkeypatch):
     import kriya.core.model_runtime as mr
 
@@ -321,7 +307,6 @@ def test_provider_probe_errors_never_carry_url_credentials(monkeypatch):
     assert "HTTP 401" in str(failed.value) and PW not in str(failed.value), str(failed.value)
 
 
-@FLIP
 def test_the_routing_error_never_carries_url_credentials():
     from kriya.memory.embedding import EmbeddingError
     from kriya.routing import Router, RoutingModelUnavailable
@@ -335,7 +320,6 @@ def test_the_routing_error_never_carries_url_credentials():
     assert "127.0.0.1:9" in str(failed.value) and EMB_PW not in str(failed.value), str(failed.value)
 
 
-@FLIP
 @pytest.mark.parametrize("value, readable", [
     ({"base_url": LLM_URL}, "127.0.0.1:9"),                                            # user:pass@host
     ({"url": f"https://{KEY}@github.com/org/repo.git"}, "github.com"),                  # token-as-username user@host
@@ -349,3 +333,104 @@ def test_the_routing_error_never_carries_url_credentials():
 def test_every_secret_bearing_value_is_hidden_in_the_authority_display(value, readable):
     shown = json.dumps(_pending({"mcp": {"srv": value}}, "mcp.srv"))
     assert readable in shown and _leaked(shown) == [], shown
+
+
+# =========================================================================== the owner's rules (S2 correction)
+
+from kriya.foundation import redaction  # noqa: E402 - the owner exists from the correction commit on
+
+
+@pytest.mark.parametrize("key", ["api_key", "API_KEY", "ApiKey", "openai-api-key", "password", "dbPassword", "DB_PASSWD",
+                                 "pwd", "passphrase", "client_secret", "Secret", "token", "Auth-Token", "github_token",
+                                 "authorization", "Authorization", "credentials", "credential", "access_key", "privateKey",
+                                 "secret_key", "authKey", "cookie", "x-api-key"])
+def test_a_secret_bearing_key_is_recognized_by_word(key):
+    assert redaction.is_secret_key(key)
+
+
+@pytest.mark.parametrize("key", ["max_tokens", "planner_max_tokens", "token_budget", "tokenizer", "secretary", "keyboard",
+                                 "passage", "author", "authority_source", "env_keys", "monkey", "key", "base_url", "",
+                                 "__", 3, None])
+def test_a_key_that_merely_contains_a_secret_word_is_not_secret(key):
+    assert not redaction.is_secret_key(key)
+
+
+@pytest.mark.parametrize("text, hidden, kept", [
+    ("http://alice:pw1@127.0.0.1:9/v1", "pw1", "http://***REDACTED***@127.0.0.1:9/v1"),
+    ("HTTPS://tok123@github.com/o/r", "tok123", "HTTPS://***REDACTED***@github.com/o/r"),
+    ("http://a:p%40w@h", "p%40w", "http://***REDACTED***@h"),
+    ("http://a:p@w@h/x", "p@w", "http://***REDACTED***@h/x"),
+    ("see git+ssh://u:pw2@host/r and more", "pw2", "see git+ssh://***REDACTED***@host/r and more"),
+    ("Authorization: Bearer abc.def", "abc.def", "Authorization: ***REDACTED*** ***REDACTED***"),
+    ("Basic dXNlcjpwYXNz", "dXNlcjpwYXNz", "Basic ***REDACTED***"),
+    ("--password=hunter2", "hunter2", "--password=***REDACTED***"),
+    ("credentials: c0ffee", "c0ffee", "credentials: ***REDACTED***"),
+    ("key AKIAABCDEFGHIJKLMNOP x", "AKIAABCDEFGHIJKLMNOP", "key ***REDACTED*** x"),
+    ("sk-abcdefghijklmnopqrstuvwx1234", "abcdefghijklmnopqrstuvwx", "***REDACTED***"),
+    ("ghp_abcdefghijklmnopqrstuvwxyz012345", "abcdefghijklmnopqrstuvwxyz", "***REDACTED***"),
+], ids=["userinfo", "username-token", "pct", "at-in-password", "embedded", "bearer", "basic", "kv", "kv-plural", "aws",
+        "sk", "gh"])
+def test_every_secret_shape_is_hidden_in_free_text(text, hidden, kept):
+    out = redaction.redact_text(text)
+    assert hidden not in out and out == kept
+
+
+@pytest.mark.parametrize("text", ["http://localhost:11434/v1", "https://e.com/a@b?q=c@d", "dev@example.com",
+                                  "git@github.com:org/repo.git", "sha256:" + "ab" * 32, "1c2cfe2a4b9e8f0d3c5a7b6e9f1d2c3b",
+                                  "Basic setup done", "mvn -Dmaven.compiler.showWarnings=true", "", "plain words"])
+def test_text_without_a_secret_is_returned_unchanged(text):
+    assert redaction.redact_text(text) == text
+
+
+def test_structures_hide_secret_keys_and_containers_with_names_kept_and_falsy_values_shown():
+    value = {"llm": {"api_key": "k1", "API_KEY": "", "model": "m", "max_tokens": 5, "base_url": "http://u:p9@h/v1"},
+             "mcp": {"s": {"env": {"A": "x1", "B": None, "C": 0}, "args": ["--x", "http://u:p8@h"], "env_keys": ["A"]}},
+             "headers": ({"Authorization": "Bearer z1"},), "credentials": {"user": "u1", "port": 0, "nested": ["n1"]}}
+    out = redaction.redact_value(value)
+    assert out == {
+        "llm": {"api_key": "***REDACTED***", "API_KEY": "", "model": "m", "max_tokens": 5,
+                "base_url": "http://***REDACTED***@h/v1"},
+        "mcp": {"s": {"env": {"A": "***REDACTED***", "B": None, "C": 0}, "args": ["--x", "http://***REDACTED***@h"],
+                      "env_keys": ["A"]}},
+        "headers": [{"Authorization": "***REDACTED***"}], "credentials": {"user": "***REDACTED***", "port": 0,
+                                                                          "nested": ["***REDACTED***"]}}
+    assert value["llm"]["api_key"] == "k1"                                   # never mutates its input
+    assert redaction.redact_value({"env": "not-a-container"}) == {"env": "not-a-container"}
+    assert redaction.redact_value(7) == 7 and redaction.redact_value(None) is None
+
+
+def test_there_is_one_redaction_owner():
+    """The three old redactors are gone (no delegate, no re-export) and no other kriya module carries a redaction literal
+    or a credential pattern of its own."""
+    import kriya.cli
+    import kriya.config.authority_approval
+    import kriya.policy.authority
+    import kriya.policy.telemetry
+
+    assert not hasattr(kriya.cli, "_redact_secrets")
+    assert not hasattr(kriya.config.authority_approval, "_redact_display_value")
+    assert not hasattr(kriya.policy.telemetry, "scrub_potential_secrets")
+    assert not hasattr(kriya.policy.authority, "scrub_potential_secrets")
+    offenders = []
+    for directory, _, files in os.walk(os.path.join(REPO_ROOT, "kriya")):
+        for name in files:
+            path = os.path.join(directory, name)
+            if not name.endswith(".py") or path.endswith(os.path.join("foundation", "redaction.py")):
+                continue
+            source = open(path, encoding="utf-8").read()
+            if '= "***REDACTED***"' in source or "Bearer\\s+" in source or "AKIA[0-9A-Z]" in source:
+                offenders.append(os.path.relpath(path, REPO_ROOT))
+    assert offenders == []
+
+
+def test_every_kriya_log_handler_formats_through_the_owner(tmp_path):
+    from kriya.core import logging_setup
+
+    handler = logging_setup._open_file_handler(str(tmp_path / "l" / "k.log"), logging.INFO)
+    try:
+        assert isinstance(handler.formatter, logging_setup.RedactingFormatter)
+        error = RuntimeError("connect http://u:tb1@h failed")
+        record = logging.LogRecord("k", logging.ERROR, __file__, 1, "boom", (), (RuntimeError, error, None))
+        assert "tb1" not in handler.formatter.format(record) and "RuntimeError" in handler.formatter.format(record)
+    finally:
+        handler.close()

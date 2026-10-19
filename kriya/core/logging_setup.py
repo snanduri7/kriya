@@ -14,6 +14,12 @@ merely because Kriya ran there.
   attached by kriya/control/run_coordinator.py::begin_mutating_run for the
   lifetime of one mutating run.
 
+Every handler Kriya attaches formats through ``RedactingFormatter`` (S2): a
+record never reaches the console or a log file with URL userinfo or another
+secret-bearing value in it (the one redaction owner is
+kriya/foundation/redaction.py). Logging done by a library caller that never
+calls configure_logging() is that caller's own handler, not covered here.
+
 There is no per-file path setting; the retired one is rejected at load with
 a typed error (kriya/config/config.py::REMOVED_LOGGING_FILE_MESSAGE).
 """
@@ -29,6 +35,7 @@ from typing import Iterator, List, Optional, Tuple
 from kriya.config.environment import Environment, default_log_dir, expand_user
 from kriya.config.environment import log_dir as environment_log_dir
 from kriya.foundation.ids import is_control_id
+from kriya.foundation.redaction import redact_text
 
 ENV_LOG_DIR = "KRIYA_LOG_DIR"
 APPLICATION_LOG_FILENAME = "kriya.log"
@@ -39,6 +46,13 @@ LOG_DIR_SOURCE_CONFIG = "config"
 LOG_DIR_SOURCE_DEFAULT = "default"
 
 _FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+
+class RedactingFormatter(logging.Formatter):
+    """The whole formatted record (message, arguments, exception text, stack) through the redaction owner."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact_text(super().format(record))
 
 
 class LogDirectoryError(ValueError):
@@ -103,7 +117,7 @@ def _open_file_handler(path: str, level: int) -> logging.FileHandler:
     except OSError as error:
         raise LogDirectoryError(f"Cannot write log file {path!r}: {error}") from error
     handler.setLevel(level)
-    handler.setFormatter(logging.Formatter(_FORMAT))
+    handler.setFormatter(RedactingFormatter(_FORMAT))
     return handler
 
 
@@ -122,7 +136,7 @@ def configure_logging(cfg, file_logging: bool = True) -> None:
     level = getattr(logging, cfg.logging.level.upper(), logging.INFO)
     handlers: List[logging.Handler] = []
     console = logging.StreamHandler(sys.stderr)
-    console.setFormatter(logging.Formatter(_FORMAT))
+    console.setFormatter(RedactingFormatter(_FORMAT))
     handlers.append(console)
 
     settings: Optional[_RunLogSettings] = None

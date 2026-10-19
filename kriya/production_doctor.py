@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 from kriya.config.config import PRODUCTION_FIXED_RUNTIME_GUARANTEES, AppConfig
+from kriya.foundation.redaction import redact_text, redact_value
 
 MIN_FREE_BYTES = 1 * 1024 * 1024 * 1024
 
@@ -66,7 +67,8 @@ def _check(
     evidence: Optional[Dict[str, Any]] = None,
     remediation: str = "No remediation required.",
 ) -> DoctorCheck:
-    return DoctorCheck(check_id, status, required, evidence or {}, remediation)
+    # S2: every check's evidence (endpoints, error text) is shown through the one redaction owner.
+    return DoctorCheck(check_id, status, required, redact_value(evidence or {}), remediation)
 
 
 def _json_request(
@@ -102,7 +104,7 @@ def probe_llm_runtime(cfg: AppConfig) -> Dict[str, Any]:
 
     if cfg.autonomy.egress_policy == "local_only" and not is_local_url(cfg.llm.base_url):
         # PRD-012: never probe (or send the API key to) a refused endpoint.
-        raise EgressViolationError(f"llm.base_url {cfg.llm.base_url!r} is not local under local_only; not probed")
+        raise EgressViolationError(f"llm.base_url {redact_text(cfg.llm.base_url)!r} is not local under local_only; not probed")
     # INF-001: discovery and identity through the primary binding's adapter.
     adapter = runtime_for_binding(cfg.llm)
     models = adapter.list_models(cfg.llm.base_url, cfg.llm.api_key, _json_request)

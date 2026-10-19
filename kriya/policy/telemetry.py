@@ -44,24 +44,20 @@ Two decisions here are deliberate and load-bearing:
    reasons about (that decision is made entirely, independently, at MCP
    server start time - see kriya/mcp/mcp.py).
 
-2. `scrub_potential_secrets()` is a narrow, high-confidence redaction - the
-   same "high-confidence, avoid false-positiving" principle MA4.12's
-   injection detector already established, applied here to a different
-   problem. It redacts recognizable credential key=value pairs, Bearer
-   headers, and a few well-known cloud/API token SHAPES (AWS access key
-   IDs, OpenAI-style sk- keys, GitHub token prefixes). It deliberately does
-   NOT blanket-redact "any long hex or base64-looking string" - a SHA-256
-   manifest hash (kriya/policy/approved_sources.py) or a git commit SHA is
-   exactly that shape and is legitimate, non-secret policy-relevant data;
-   redacting it on sight would make telemetry less useful, not more safe.
+2. Redaction is NOT decided here (S2, OI-98): every summarized field goes
+   through the one redaction owner, kriya/foundation/redaction.py::
+   redact_text() - the same narrow, high-confidence rules this module used
+   to own (credential-named key=value pairs, Bearer headers, well-known
+   token shapes; SHA-256 digests and commit SHAs stay readable) plus URL
+   userinfo, which the old local scrubber let through.
 """
 
 import json
-import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from kriya.foundation.redaction import redact_text
 from kriya.policy.model import (
     ActionRequest,
     MCPCapabilityProfileIdentity,
@@ -71,42 +67,12 @@ from kriya.policy.model import (
 )
 
 _SUMMARY_MAX_CHARS = 300
-_REDACTED = "***REDACTED***"
-
-# Key=value / key: value shaped credentials - the key name is the signal,
-# not the value's shape, so this catches an arbitrary secret regardless of
-# what it looks like as long as it's named like one.
-_KEY_VALUE_SECRET_PATTERN = re.compile(
-    r"(?i)\b(password|secret|token|api[_-]?key|access[_-]?key|auth(?:orization)?|credential)s?"
-    r"([:=]\s*)(\S+)"
-)
-_BEARER_PATTERN = re.compile(r"(?i)\bBearer\s+\S+")
-
-# Well-known credential SHAPES, matched even with no adjacent key name.
-_SHAPED_SECRET_PATTERNS = (
-    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),  # AWS access key ID
-    re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"),  # OpenAI-style API key
-    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),  # GitHub token prefixes
-)
-
-
-def scrub_potential_secrets(text: str) -> str:
-    """Read-only: returns a new string, never mutates the input. Deliberately
-    conservative - see module docstring for what this intentionally does
-    NOT redact (long hex/base64 strings with no credential-shaped name or
-    known token prefix, e.g. a SHA-256 hash or commit SHA)."""
-
-    scrubbed = _KEY_VALUE_SECRET_PATTERN.sub(lambda m: f"{m.group(1)}{m.group(2)}{_REDACTED}", text)
-    scrubbed = _BEARER_PATTERN.sub(f"Bearer {_REDACTED}", scrubbed)
-    for pattern in _SHAPED_SECRET_PATTERNS:
-        scrubbed = pattern.sub(_REDACTED, scrubbed)
-    return scrubbed
 
 
 def _summarize(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
-    return scrub_potential_secrets(value)[:_SUMMARY_MAX_CHARS]
+    return redact_text(value)[:_SUMMARY_MAX_CHARS]
 
 
 @dataclass(frozen=True)

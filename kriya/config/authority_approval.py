@@ -18,9 +18,9 @@ copy rather than imported across the config->workflow layer boundary,
 since kriya/config/ is a lower layer than kriya/workflow/ and nothing else
 in kriya/config/ imports from kriya/workflow/); kriya/control/
 workspace_identity.py::workspace_identity() for workspace binding, unchanged;
-kriya/cli.py::_redact_secrets()'s "keep key names, hide values" convention
-for env-var display, mirrored (not imported, to avoid a config->cli
-reverse-layer import) as _redact_display_value() below.
+and, for every displayed value, the one redaction owner
+kriya/foundation/redaction.py::redact_value() (S2: URL userinfo and every
+secret-bearing key/value hidden, key names kept).
 
 STORAGE LOCATION - the load-bearing security property of this module:
 the local approval store lives OUTSIDE the workspace entirely (by default
@@ -65,14 +65,13 @@ from typing import Any, Dict, List, Optional, Tuple
 from kriya.config.authority import ConfigAuthorityViolation, get_field_value
 from kriya.config.environment import Environment, authority_home
 from kriya.context.workspace_identity import workspace_identity
+from kriya.foundation.redaction import redact_value
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 AUTHORITY_SCHEMA_VERSION = 1
 
 ENV_HOME_OVERRIDE = "KRIYA_AUTHORITY_HOME"
 ENV_TRUST_FILE = "KRIYA_TRUST_FILE"
-
-_REDACTED = "***REDACTED***"
 
 
 class TrustPathInsideWorkspaceError(ValueError):
@@ -128,9 +127,9 @@ def _utc_now_iso() -> str:
 # --- Security subset: canonicalizing values without persisting secrets -----
 
 def _redact_env_values(value: Any, salt: str, field_path: str) -> Any:
-    """Mirrors kriya/cli.py::_redact_secrets()'s "keep key names, hide
-    values" convention for mcp.*.env, but for DIGEST input rather than
-    display: each env value is replaced by a salted, field-and-key-scoped
+    """The "keep key names, hide values" convention for mcp.*.env, but for
+    DIGEST input rather than display (display is
+    kriya/foundation/redaction.py::redact_value, S2): each env value is replaced by a salted, field-and-key-scoped
     digest of itself (not a fixed "***REDACTED***" placeholder) so a
     rotated secret still changes the resulting value_digest - an approval
     must become invalid if a secret changes, even though the secret itself
@@ -509,25 +508,6 @@ def review_fingerprint(violations: List[ConfigAuthorityViolation], config_dict: 
 
 # --- Display: safe, redacted representation for inspect/approve CLI --------
 
-def _redact_display_value(field_path: str, value: Any) -> Any:
-    """Mirrors kriya/cli.py::_redact_secrets() - env values become
-    "***REDACTED***" (key names kept), api_key values too. Kept as a local
-    copy (see module docstring) rather than an import across layers."""
-    if isinstance(value, dict):
-        redacted = {}
-        for k, v in value.items():
-            if k == "api_key" and isinstance(v, str) and v:
-                redacted[k] = _REDACTED
-            elif k == "env" and isinstance(v, dict):
-                redacted[k] = {ek: (_REDACTED if ev else ev) for ek, ev in v.items()}
-            else:
-                redacted[k] = _redact_display_value(field_path, v)
-        return redacted
-    if isinstance(value, list):
-        return [_redact_display_value(field_path, item) for item in value]
-    return value
-
-
 @dataclass(frozen=True)
 class PendingFieldDisplay:
     field_path: str
@@ -551,6 +531,6 @@ def describe_pending(violations: List[ConfigAuthorityViolation], config_dict: Di
         value = get_field_value(config_dict, top_key, leaf_key)
         out.append(PendingFieldDisplay(
             field_path=v.field_path, classification=v.classification.value, source=v.source.value,
-            redacted_value=_redact_display_value(v.field_path, value),
+            redacted_value=redact_value(value),
         ))
     return out

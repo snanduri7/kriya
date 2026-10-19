@@ -41,7 +41,8 @@ def _mcp_home(tmp_path, monkeypatch):
 
 
 def test_the_public_names_are_the_owners_objects():
-    owners = {"scrub_potential_secrets": "kriya.policy.telemetry", **{name: "kriya.config.authority_approval" for name in (
+    # S2: redaction is not on the AUTHORITY surface (its one owner is kriya.foundation.redaction, importable by every layer).
+    owners = {**{name: "kriya.config.authority_approval" for name in (
         "ApprovalArtifactError", "TrustPathInsideWorkspaceError", "default_local_approval_path", "is_approval_current_for",
         "load_approval_artifact", "resolve_with_approval", "review_fingerprint", "validate_trust_path_outside_workspace")}}
     for name, owner in owners.items():

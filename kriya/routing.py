@@ -34,6 +34,7 @@ from typing import Dict, List, Optional, Tuple
 
 from kriya.config import AppConfig
 from kriya.core.llm import LLMClient
+from kriya.foundation.redaction import redact_text
 from kriya.memory.embedding import EmbeddingError
 from kriya.memory.vector import OllamaEmbeddingClient
 
@@ -198,14 +199,14 @@ class Router:
             except EmbeddingError as error:
                 raise RoutingModelUnavailable(
                     f"Could not fetch embeddings from routing.embed_model="
-                    f"'{self._cfg.routing.embed_model}' at {self._cfg.embedding.base_url} ({error}). "
+                    f"'{self._cfg.routing.embed_model}' at {redact_text(self._cfg.embedding.base_url)} ({redact_text(str(error))}). "
                     f"Pull it first (e.g. `ollama pull {self._cfg.routing.embed_model}`) "
                     "or set routing.enabled: false."
                 ) from error
             if not embeddings or not embeddings[0]:
                 raise RoutingModelUnavailable(
                     f"Could not fetch embeddings from routing.embed_model="
-                    f"'{self._cfg.routing.embed_model}' at {self._cfg.embedding.base_url}. "
+                    f"'{self._cfg.routing.embed_model}' at {redact_text(self._cfg.embedding.base_url)}. "
                     f"Pull it first (e.g. `ollama pull {self._cfg.routing.embed_model}`) "
                     "or set routing.enabled: false."
                 )

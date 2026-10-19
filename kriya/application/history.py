@@ -35,7 +35,7 @@ from kriya.context.model import RequestContext
 from kriya.context.workspace_identity import workspace_identities, workspace_identity
 from kriya.control.history import RETAIN_SNAPSHOTS, SNAPSHOT_CORRUPT, Snapshot
 from kriya.control.history.port import HistoryLocation, HistoryStore
-from kriya.policy.authority import scrub_potential_secrets
+from kriya.foundation.redaction import redact_text
 
 # ------------------------------------------------------------------ application outcome (moved from kriya/kup/application_outcome.py)
 
@@ -52,14 +52,14 @@ APPLICATION_OUTCOME_PROVENANCE = "derived:runs.gate_outcomes"
 
 
 def _bounded(text: Any) -> Dict[str, Any]:
-    value = scrub_potential_secrets(text) if isinstance(text, str) else ""
+    value = redact_text(text) if isinstance(text, str) else ""
     return {"text": value[:OUTPUT_MAX_CHARS], "truncated": len(value) > OUTPUT_MAX_CHARS}
 
 
 def _command(argv: Any) -> Optional[str]:
     if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
         return None
-    return scrub_potential_secrets(" ".join(argv))
+    return redact_text(" ".join(argv))
 
 
 def _blocked_reason(gate_outcomes: List[Any]) -> Optional[str]:

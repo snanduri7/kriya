@@ -37,7 +37,7 @@ from enum import Enum
 from typing import Any, Dict, Mapping, Optional, Tuple
 from urllib.parse import urlparse
 
-from kriya.policy.telemetry import scrub_potential_secrets
+from kriya.foundation.redaction import redact_text
 
 logger = logging.getLogger(__name__)
 
@@ -141,8 +141,8 @@ class EgressDecision:
             "capability": self.capability.value,
             "allowed": self.allowed,
             "authority_source": self.authority_source,
-            "destinations": [scrub_potential_secrets(d) for d in self.destinations],
-            "reason": scrub_potential_secrets(self.reason),
+            "destinations": [redact_text(d) for d in self.destinations],
+            "reason": redact_text(self.reason),
         }
         if self.containment is not None:
             record["containment"] = dict(self.containment)

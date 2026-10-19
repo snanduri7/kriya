@@ -10,8 +10,9 @@ The module-level names below are AUTHORITY's public surface for modules in other
 cross-module imports go through a public contract module): each is the owner's object, re-exported as itself.
 
 The heavier owners (``control.launch_approval`` imports the edit engine, ``workflow.verification_binding``,
-``mcp.invocation_approval``, ``policy.filesystem``) are imported inside the methods: the KUP read path that imports
-``scrub_potential_secrets`` from here loads nothing it did not load before C1.
+``mcp.invocation_approval``, ``policy.filesystem``) are imported inside the methods. Redaction is not on this surface
+(S2): its one owner is ``kriya.foundation.redaction``, importable by every layer, so AUTHORITY re-exporting it would only
+be a second public name for the same decision.
 
 Not on the port yet (``ARRIVES_LATER``): what needs either a body move or a new type, both outside C1's no-behaviour scope.
 
@@ -36,7 +37,6 @@ from kriya.policy import approval as _approval
 from kriya.policy.approval import RuntimeCommandReviewPort
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, MCPCapabilityProfileIdentity, MCPToolIdentity, PolicyResult
-from kriya.policy.telemetry import scrub_potential_secrets as scrub_potential_secrets
 
 # MODULE-CONTRACTS §4 members that are NOT on the C1 port, and the slice that brings each (closed; tests/test_authority_port.py
 # asserts every slice exists in the plan and is not done yet).
@@ -154,6 +154,6 @@ class AuthorityPort:
 
 __all__ = [
     "ARRIVES_LATER", "ApprovalArtifactError", "AuthorityPort", "TrustPathInsideWorkspaceError", "default_local_approval_path",
-    "is_approval_current_for", "load_approval_artifact", "resolve_with_approval", "review_fingerprint", "scrub_potential_secrets",
+    "is_approval_current_for", "load_approval_artifact", "resolve_with_approval", "review_fingerprint",
     "validate_trust_path_outside_workspace",
 ]
