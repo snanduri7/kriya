@@ -41,6 +41,9 @@ from kriya.workflow.plan_schema import (
 # fails - see each caller's own comment for how it flows into their
 # respective repair-guidance/terminal-classification vocabulary.
 UNREGISTERED_TOOL_NAME_REASON_CODE = "UNREGISTERED_TOOL_NAME"
+# S18 (OI-127): a TOOL subtask naming a REGISTERED tool that the one planned-tool governance resolution does not admit
+# as a planned step's tool (planned shell / validate_refactor, an undeclared or non-shipped plugin tool).
+PLANNED_TOOL_NOT_PLANNABLE_REASON_CODE = "PLANNED_TOOL_NOT_PLANNABLE"
 
 
 @dataclass
@@ -67,6 +70,7 @@ def validate_tool_capability_membership(
     plan: EngineeringPlan,
     *,
     available_tool_names: Optional[Iterable[str]],
+    plannable_tool_names: Optional[Iterable[str]] = None,
 ) -> ToolCapabilityValidationResult:
     """available_tool_names=None SKIPS this check entirely (mirrors
     validate_plan()'s own pre-existing convention for this exact
@@ -98,10 +102,19 @@ def validate_tool_capability_membership(
         return ToolCapabilityValidationResult(valid=True)
 
     available = {name.lower() for name in available_tool_names}
+    # S18: plannable_tool_names (kriya/workflow/subtask_executor.plannable_tool_names, the one projection of the planned-tool
+    # governance resolution) narrows which REGISTERED tools a TOOL subtask may name; every production caller passes it
+    # (tests/test_s18_planned_tool_governance.py tripwire). verification[] / acceptance tool names keep registry membership.
+    plannable = None if plannable_tool_names is None else {name.lower() for name in plannable_tool_names}
     errors: List[str] = []
+    not_plannable: List[str] = []
     for st in plan.subtasks:
         if st.execution_method == ExecutionMethod.TOOL and (st.tool_name or "").lower() not in available:
             errors.append(f"subtask {st.id!r} references unregistered tool_name {st.tool_name!r}")
+        elif st.execution_method == ExecutionMethod.TOOL and plannable is not None and (st.tool_name or "").lower() not in plannable:
+            not_plannable.append(
+                f"subtask {st.id!r} names tool {st.tool_name!r}, which a planned step may not run (only an operator "
+                "may run it, or it declares no planned-call governance); use a plannable tool or a model subtask")
         for vm in st.verification:
             if (
                 vm.type == VerificationMethodType.TOOL
@@ -120,4 +133,7 @@ def validate_tool_capability_membership(
             errors.append(f"acceptance criterion {ac.id!r} references unregistered tool_name {ac.tool_name!r}")
 
     reason_codes = [UNREGISTERED_TOOL_NAME_REASON_CODE] if errors else []
+    if not_plannable:
+        reason_codes.append(PLANNED_TOOL_NOT_PLANNABLE_REASON_CODE)
+    errors.extend(not_plannable)
     return ToolCapabilityValidationResult(valid=not errors, errors=errors, reason_codes=reason_codes)

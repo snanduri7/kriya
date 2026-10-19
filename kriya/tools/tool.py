@@ -2,9 +2,12 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Dict, Mapping, Optional, Tuple, Type
 
 from pydantic import BaseModel, ValidationError
+
+from kriya.config.authority import parse_autonomy_mode
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +41,14 @@ class BaseTool(ABC):
     def requires_confirmation(self) -> bool:
         """Whether callers (e.g. the CLI) should prompt for confirmation before executing this tool."""
         return False
+
+    @property
+    def planned_governance(self) -> Any:
+        """S18: how a PLANNED (model-authored) call to this tool is governed - one ``ToolGovernance`` value. None (this
+        default) = undeclared = unplannable. A declaration is honoured only for the shipped tools listed in
+        ``_SHIPPED_PLANNED_DECLARATIONS`` (resolve_planned_tool_governance); any other tool, whatever it declares, is
+        treated as undeclared. The operator's own invocation (`kriya tools execute`) never consults it."""
+        return None
 
     def mutates_workspace(self, arguments: Dict[str, Any]) -> bool:
         """PRD-006: whether this call may change files, so a direct CLI
@@ -110,8 +121,14 @@ TOOL_NOT_GOVERNED = "TOOL_NOT_GOVERNED"
 TOOL_MODEL_AUTHORITY_UNDECLARED = "TOOL_MODEL_AUTHORITY_UNDECLARED"
 TOOL_MUTATION_REVIEW_UNAVAILABLE = "TOOL_MUTATION_REVIEW_UNAVAILABLE"
 TOOL_WORKSPACE_ROOT_UNAVAILABLE = "TOOL_WORKSPACE_ROOT_UNAVAILABLE"
+# S18 (OI-127): a tool whose declaration is OPERATOR_ONLY (planned shell / validate_refactor) and a declaration that is not
+# a ToolGovernance value. An undeclared tool (or a non-shipped tool, whatever it declares) keeps
+# TOOL_MODEL_AUTHORITY_UNDECLARED: one concept, one code.
+TOOL_OPERATOR_ONLY = "TOOL_OPERATOR_ONLY"
+TOOL_GOVERNANCE_INVALID = "TOOL_GOVERNANCE_INVALID"
 MODEL_TOOL_REFUSAL_REASON_CODES = frozenset({
     TOOL_NOT_GOVERNED, TOOL_MODEL_AUTHORITY_UNDECLARED, TOOL_MUTATION_REVIEW_UNAVAILABLE, TOOL_WORKSPACE_ROOT_UNAVAILABLE,
+    TOOL_OPERATOR_ONLY, TOOL_GOVERNANCE_INVALID,
 })
 
 
@@ -153,6 +170,105 @@ class ModelToolInvocation:
         return os.path.abspath(os.path.join(self.roots[0], path))
 
 
+# =====================================================================
+# S18 (OI-127, OI-88): the ONE planned-tool governance resolution
+# =====================================================================
+#
+# Every tool declares how a PLANNED call to it is governed (BaseTool.planned_governance). One resolver below turns that
+# declaration, the invocation origin (this resolver is for model-authored calls only; the operator's `kriya tools
+# execute` is a separate authority and never consults it), the run's autonomy mode and the current containment backend
+# into one decision. The Planner catalogue projects it, plan validation enforces it and the executor rechecks it
+# (kriya/workflow/subtask_executor.plannable_tool_names and execute_model_authored below). There is no other policy.
+#
+# Option B (S18 preflight, handover/MODULARIZATION/S18-PREFLIGHT.md): planned shell / validate_refactor are OPERATOR_ONLY
+# because no backend available today can prove that a planned command's effect stays out of later evidence. A
+# declaration is honoured only for the shipped tools in _SHIPPED_PLANNED_DECLARATIONS, and only when the declaring
+# property is defined on that exact class in the shipped file. Any other tool (a third-party plugin or a subclass),
+# whatever it declares, is undeclared = unplannable until a plugin-approval path exists. Plugins run in-process: this
+# stops a plugin from declaring itself plannable through the tool contract; it is not a defence against hostile
+# in-process code.
+
+
+class ToolGovernance(str, Enum):
+    READ_ONLY = "read_only"  # reads only; each path-bearing call is still authorized by its own reader
+    GOVERNED_SIDE_EFFECT = "governed_side_effect"  # a side effect whose every call passes its own durable authority (TOOL-002)
+    OPERATOR_ONLY = "operator_only"  # only an operator may invoke it; never plannable
+
+
+PLANNABLE_TOOL_GOVERNANCE = frozenset({ToolGovernance.READ_ONLY, ToolGovernance.GOVERNED_SIDE_EFFECT})
+
+_DISTRIBUTION_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+_CORE_TOOLS_FILE = os.path.join(_DISTRIBUTION_ROOT, "plugins", "core_tools", "__init__.py")
+# The closed table of tools whose planned-call declaration is honoured: class name -> the shipped file that must define
+# that class's planned_governance.
+_SHIPPED_PLANNED_DECLARATIONS: Dict[str, str] = {
+    "FilesystemTool": _CORE_TOOLS_FILE,
+    "ShellTool": _CORE_TOOLS_FILE,
+    "GitTool": _CORE_TOOLS_FILE,
+    "SearchTool": _CORE_TOOLS_FILE,
+    "ASTTool": _CORE_TOOLS_FILE,
+    "ValidationTool": os.path.join(_DISTRIBUTION_ROOT, "plugins", "core_tools", "validation_tool.py"),
+    "MCPTool": os.path.join(_DISTRIBUTION_ROOT, "kriya", "mcp", "mcp.py"),
+}
+
+
+def _shipped_declaration(tool: Any) -> bool:
+    """True only when ``tool``'s exact class is listed and defines planned_governance itself, in its shipped file."""
+    cls = type(tool)
+    expected = _SHIPPED_PLANNED_DECLARATIONS.get(cls.__qualname__)
+    if expected is None:
+        return False
+    declared = cls.__dict__.get("planned_governance")
+    code = getattr(getattr(declared, "fget", declared), "__code__", None)
+    return code is not None and os.path.realpath(code.co_filename) == expected
+
+
+@dataclass(frozen=True)
+class ToolGovernanceDecision:
+    """The one decision on whether a tool may be the subject of a planned step, with every input it was made from."""
+
+    plannable: bool
+    governance: Optional[ToolGovernance]
+    reason_code: Optional[str]
+    autonomy_mode: Optional[str]
+    containment_backend: Optional[str]
+    explanation: str
+
+
+def resolve_planned_tool_governance(tool: Any, *, autonomy_mode: Optional[str],
+                                    containment_backend: Optional[str] = None) -> ToolGovernanceDecision:
+    """THE governance resolution for a planned (model-authored) tool call. ``autonomy_mode``: the run's mode, None when
+    no configuration is readable (the strictest reading); any other non-mode value raises AutonomyModeError (typed).
+    ``containment_backend`` is recorded; under Option B it decides nothing (no backend proves a planned command's
+    effect stays out of later evidence). Never raises for a tool: an unreadable declaration is TOOL_GOVERNANCE_INVALID."""
+    mode = None if autonomy_mode is None else parse_autonomy_mode(autonomy_mode)
+
+    def decide(governance: Optional[ToolGovernance], reason_code: Optional[str], explanation: str) -> ToolGovernanceDecision:
+        return ToolGovernanceDecision(plannable=reason_code is None, governance=governance, reason_code=reason_code,
+                                      autonomy_mode=mode, containment_backend=containment_backend,
+                                      explanation=explanation)
+
+    if not isinstance(tool, BaseTool):
+        return decide(None, TOOL_NOT_GOVERNED, f"{type(tool).__name__} is not a Kriya tool.")
+    if not _shipped_declaration(tool):
+        return decide(None, TOOL_MODEL_AUTHORITY_UNDECLARED,
+                      f"tool {type(tool).__name__!r} has no honoured planned-call declaration (only Kriya's shipped "
+                      "tools and MCP tools can be planned); it can be run by an operator, never by a planned step.")
+    try:
+        declared = tool.planned_governance
+    except Exception as error:  # a broken declaration is refused, never guessed
+        return decide(None, TOOL_GOVERNANCE_INVALID, f"its planned-call declaration could not be read: {error}")
+    if declared is None:
+        return decide(None, TOOL_MODEL_AUTHORITY_UNDECLARED, "it declares no planned-call governance.")
+    if type(declared) is not ToolGovernance:
+        return decide(None, TOOL_GOVERNANCE_INVALID, "its planned-call declaration is not a ToolGovernance value.")
+    if declared not in PLANNABLE_TOOL_GOVERNANCE:
+        return decide(declared, TOOL_OPERATOR_ONLY,
+                      "it runs commands or builds whose effects Kriya cannot keep out of the run's evidence, so only "
+                      "an operator may run it (`kriya tools execute`); a planned step never does.")
+    return decide(declared, None, "plannable")
+
+
 async def execute_model_authored(tool: Any, arguments: Mapping[str, Any], invocation: ModelToolInvocation) -> Any:
     """The one entry point for a MODEL-AUTHORED tool call: validate, authorize (the tool's own declaration, every mode),
     then run. Raises ModelInvocationRefused (TOOLBOX refusal), or ToolExecutionError whose ``__cause__`` is the reused
@@ -162,6 +278,12 @@ async def execute_model_authored(tool: Any, arguments: Mapping[str, Any], invoca
         raise ModelInvocationRefused(
             TOOL_NOT_GOVERNED, f"{type(tool).__name__} is not a Kriya tool; a planned step reaches tools only through "
                                "the governed tool boundary.")
+    # S18: the executor's recheck of the one governance resolution, before arguments are even validated.
+    decision = resolve_planned_tool_governance(tool, autonomy_mode=invocation.autonomy_mode)
+    if not decision.plannable:
+        raise ModelInvocationRefused(
+            decision.reason_code, f"tool {tool.name!r} cannot be run by a planned step: {decision.explanation} "
+                                  "Nothing was run.")
     try:
         validated = tool.arguments_schema(**dict(arguments))
     except ValidationError as ve:

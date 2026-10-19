@@ -32,6 +32,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.plan_schema import EngineeringPlan
+from kriya.workflow.subtask_executor import plannable_tool_names
 from kriya.workflow.workflow_types import SubtaskResult, VerificationReport
 
 
@@ -181,16 +182,18 @@ class ShadowMode:
         deps.record_plan_created(ledger, plan)
 
         kernel = getattr(deps.workflow_engine, "kernel", None)
+        # S18 (OI-127): the one planned-tool catalogue snapshot (see enforce_loop); a listing failure admits no tool.
         available_tool_names = None
+        planned_tool_names = None
         if kernel is not None:
-            try:
-                available_tool_names = kernel.registry.list_components("tool")
-            except Exception as e:
-                deps.logger.debug(f"WorkflowController shadow run {run_id!r}: could not list registered tools: {e}")
+            tool_catalogue = plannable_tool_names(getattr(kernel, "registry", None), getattr(kernel, "config", None))
+            available_tool_names = list(tool_catalogue.registered)
+            planned_tool_names = list(tool_catalogue.plannable)
+            deps.logger.debug(f"WorkflowController shadow run {run_id!r}: plannable tools {planned_tool_names}")
 
         shadow_stack_contract = deps.derive_stack_contract(goal)
         validation = await deps.validate_plan(
-            plan, workspace_path=workspace_path, available_tool_names=available_tool_names,
+            plan, workspace_path=workspace_path, available_tool_names=available_tool_names, plannable_tool_names=planned_tool_names,
             route=route, triage_service=deps.workflow_engine.engineering_triage,
             runtime_verification_required=deps.goal_requires_runtime_behavior(goal),
             stack_contract=shadow_stack_contract,

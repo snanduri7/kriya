@@ -20,6 +20,7 @@ from kriya.workflow.requirements import requirements_prompt_block
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.run_lifecycle import persist_early_exit_trace, stage_run_trace
 from kriya.workflow.stage_context import StageContext, StageDeps
+from kriya.workflow.subtask_executor import plannable_tool_names
 from kriya.workflow.triage import ChangeKind
 from kriya.workflow.untrusted_context import outside_untrusted_reference
 
@@ -102,16 +103,17 @@ async def plan_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[st
     # for the schema-level distinction this pairs with (Subtask.
     # tool_name vs. a verification[] entry's own, differently-
     # vocabularied tool_name).
-    try:
-        available_tool_names = sorted(deps.registry.list_components("tool"))
-    except Exception as e:
-        available_tool_names = []
-        logger.debug(f"Could not list registered tools for the Planner prompt: {e}")
-    if available_tool_names:
+    # S18 (OI-127): the Planner is shown only the tools the one planned-tool governance resolution admits
+    # (subtask_executor.plannable_tool_names; a registry that cannot be listed admits none); the completeness checks
+    # below validate against the SAME snapshot.
+    tool_catalogue = plannable_tool_names(deps.registry, deps.config)
+    available_tool_names = list(tool_catalogue.registered)
+    planned_tool_names = list(tool_catalogue.plannable)
+    if planned_tool_names:
         plan_prompt += (
             "\n\nRegistered Kriya tools available for a subtask's own execution_method=\"tool\" "
             f"(Subtask.tool_name must be exactly one of these, never invented): "
-            f"{', '.join(available_tool_names)}."
+            f"{', '.join(planned_tool_names)}."
         )
 
     # PRE-PLAN GROUNDING (2026-09-19, VAL-001 G1 follow-up): the real,
@@ -260,7 +262,8 @@ async def plan_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[st
     # legacy path share WorkflowController's own tool-capability
     # membership semantics (kriya/workflow/planner_validation.py) for
     # the first time - previously this path had no such check at all.
-    plan_completeness = classify_plan_completeness(plan, available_tool_names=available_tool_names)
+    plan_completeness = classify_plan_completeness(plan, available_tool_names=available_tool_names,
+                                                   plannable_tool_names=planned_tool_names)
     if plan_response_model is not None:
         record_planner_outcome(deps.planner, planner_outcome_for_completeness(plan_completeness.classification),
                                model=plan_response_model)
@@ -326,7 +329,7 @@ async def plan_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[st
             goal, plan,
             [plan_completeness.reason or "structured plan schema validation failed"],
             repair_reason_codes, legacy_plan_repair_attempts + 1,
-            available_tool_names=available_tool_names,
+            available_tool_names=planned_tool_names,
         )
         legacy_plan_repair_attempts += 1
         state.record_event(RunEvent(
@@ -354,7 +357,8 @@ async def plan_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[st
         # against the identical catalog, never a re-read that could
         # have drifted mid-operation (P5: no weaker validation path
         # for a repaired plan than for the initial one).
-        plan_completeness = classify_plan_completeness(plan, available_tool_names=available_tool_names)
+        plan_completeness = classify_plan_completeness(plan, available_tool_names=available_tool_names,
+                                                   plannable_tool_names=planned_tool_names)
         record_planner_outcome(deps.planner, planner_outcome_for_completeness(plan_completeness.classification),
                                model=plan_response_model)
         state.record_event(RunEvent(

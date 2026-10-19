@@ -2473,6 +2473,7 @@ class PlanCompletenessResult:
 
 def classify_plan_completeness(
     plan_text: str, *, available_tool_names: Optional[Iterable[str]] = None,
+    plannable_tool_names: Optional[Iterable[str]] = None,
 ) -> PlanCompletenessResult:
     """The real completeness/authority classification MA6.3 Stage A's own
     parse_planner_structured_output() now feeds as PRIMARY evidence (VAL-001
@@ -2513,7 +2514,7 @@ def classify_plan_completeness(
     structured, structured_issue = parse_planner_structured_output(plan_text)
     if structured is not None:
         capability_result = validate_tool_capability_membership(
-            structured, available_tool_names=available_tool_names,
+            structured, available_tool_names=available_tool_names, plannable_tool_names=plannable_tool_names,
         )
         if not capability_result.valid:
             reason = (

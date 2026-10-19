@@ -154,13 +154,9 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
     },
     "tool_registry": {
         "kriya.cli": (5, "K2", "ToolRegistry.execute / catalog (cli tools list/execute)"),
-        # moved count-neutral in E3 (kriya.workflow.workflow -> stage_planning, with the Planner prompt's tool catalog)
-        "kriya.workflow.stage_planning": (1, "K1", "available tool names through ToolRegistry"),
-        # E12: the controller's entry (2 sites) SPLIT with its two users: the shadow run's tool listing moved to
-        # shadow_mode, the enforce run's to enforce_loop (sites unchanged, entries +1; owners: the two new modules;
-        # removal slice K1 unchanged)
-        "kriya.workflow.enforce_loop": (1, "K1", "available tool names through ToolRegistry"),
-        "kriya.workflow.shadow_mode": (1, "K1", "available tool names through ToolRegistry"),
+        # S18 (OI-127): the stage_planning / enforce_loop / shadow_mode entries (1 each, removal slice K1) are REMOVED:
+        # their registry listing moved into the owner, kriya.workflow.subtask_executor.plannable_tool_names (the one
+        # projection of the planned-tool governance resolution). 3 entries fewer.
     },
     "kriya_dir": {
         "kriya.analyzer.analyzer": (1, "P2", _P2),

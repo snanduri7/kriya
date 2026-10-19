@@ -40,6 +40,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.plan_schema import EngineeringPlan, Subtask, VerificationMethodType
+from kriya.workflow.subtask_executor import plannable_tool_names
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus, VerificationReport
 
 
@@ -510,12 +511,15 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 raise deps.VerificationAuthorityUnavailable(verification_contract, baseline_report)
             if baseline_report is not None and baseline_report.no_mutation_required:
                 raise deps.NoMutationRequired(verification_contract, baseline_report)
+        # S18 (OI-127): ONE snapshot of the planned-tool catalogue (subtask_executor.plannable_tool_names, the projection
+        # of the one governance resolution). A registry that cannot be listed admits no tool (fail closed); every
+        # validate_plan below checks TOOL subtasks against the plannable names and repair prompts show only those.
         available_tool_names = None
+        planned_tool_names = None
         if kernel is not None:
-            try:
-                available_tool_names = kernel.registry.list_components("tool")
-            except Exception as e:
-                deps.logger.debug(f"WorkflowController enforce run {run_id!r}: could not list registered tools: {e}")
+            tool_catalogue = plannable_tool_names(getattr(kernel, "registry", None), getattr(kernel, "config", None))
+            available_tool_names = list(tool_catalogue.registered)
+            planned_tool_names = list(tool_catalogue.plannable)
 
         # Subtask-spanning resume (MA5.9 finally wired to something,
         # 2026-08-24) - opt-in only, same convention as
@@ -873,7 +877,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 
                     validation = await deps.validate_plan(
                         plan, workspace_path=workspace_path,
-                        available_tool_names=available_tool_names,
+                        available_tool_names=available_tool_names, plannable_tool_names=planned_tool_names,
                         route=route, triage_service=deps.workflow_engine.engineering_triage,
                         resuming_own_established_progress=has_own_established_progress,
                         require_model_planned_files=True,
@@ -1161,7 +1165,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     repository_candidates=planning_repository_candidates,
                     must_preserve=must_preserve,
                     validation_evidence=prompt_validation_evidence,
-                    available_tool_names=available_tool_names,
+                    available_tool_names=planned_tool_names,
                 )
                 repair_prompts = planner_prompts(repair_prompt)
                 if repair_prompts is not None:
@@ -1887,7 +1891,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     prerequisite_validation = await deps.validate_plan(
                         prerequisite_revision,
                         workspace_path=plan_workspace_path,
-                        available_tool_names=available_tool_names,
+                        available_tool_names=available_tool_names, plannable_tool_names=planned_tool_names,
                         route=route,
                         triage_service=deps.workflow_engine.engineering_triage,
                         resuming_own_established_progress=True,
@@ -2028,7 +2032,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         gap_validation = await deps.validate_plan(
                             gap_revision,
                             workspace_path=plan_workspace_path,
-                            available_tool_names=available_tool_names,
+                            available_tool_names=available_tool_names, plannable_tool_names=planned_tool_names,
                             route=route,
                             triage_service=deps.workflow_engine.engineering_triage,
                             resuming_own_established_progress=True,
@@ -2235,7 +2239,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 revision_validation = await deps.validate_plan(
                     revised_plan,
                     workspace_path=plan_workspace_path,
-                    available_tool_names=available_tool_names,
+                    available_tool_names=available_tool_names, plannable_tool_names=planned_tool_names,
                     route=route,
                     triage_service=deps.workflow_engine.engineering_triage,
                     resuming_own_established_progress=True,

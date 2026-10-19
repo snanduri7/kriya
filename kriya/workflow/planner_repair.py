@@ -106,7 +106,7 @@ PLANNER_MALFORMED_OUTPUT_CODES = frozenset({"STRUCTURED_PLAN_PARSE_FAILED"})
 # already validated. Decided from the plan alone.
 PLANNER_VALIDATION_FAILURE_CODES = frozenset({
     "STRUCTURED_PLAN_SCHEMA_INVALID", "STRUCTURED_PLAN_EMPTY", "TOOL_SUBTASK_MISSING_TOOL_NAME",
-    "UNREGISTERED_TOOL_NAME", "PLAN_GLOBAL_INVARIANTS_MISSING", "SUBTASK_SEMANTIC_CONTRACT_MISSING",
+    "UNREGISTERED_TOOL_NAME", "PLANNED_TOOL_NOT_PLANNABLE", "PLAN_GLOBAL_INVARIANTS_MISSING", "SUBTASK_SEMANTIC_CONTRACT_MISSING",
     "SUBTASK_GLOBAL_INVARIANTS_MISSING", "DUPLICATE_SUBTASK_ID", "SUBTASK_DEPENDS_ON_UNKNOWN_ID",
     "SUBTASK_DEPENDENCY_CYCLE", "AMBIGUOUS_PLANNED_FILE_OWNERSHIP", "AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER",
     "UNKNOWN_GLOBAL_INVARIANT", "SUBTASK_REQUIREMENT_UNPROVIDED", "SEMANTIC_DEPENDENCY_EDGE_MISSING",
@@ -462,6 +462,23 @@ def build_structured_plan_repair_prompt(
                 "run, so execution_method=tool has no valid tool_name to set at all right now - use "
                 "execution_method=model instead.\n"
             )
+    if "PLANNED_TOOL_NOT_PLANNABLE" in reason_codes:
+        # S18 (OI-127): the tool exists but a planned step may not run it (shell / validate_refactor are operator-only;
+        # a plugin tool without an honoured declaration is unplannable). Building, testing and editing are the model
+        # subtasks' and Kriya's own gates' job.
+        targeted_correction += (
+            "- A subtask names a registered tool that a planned step may not run (for example shell or "
+            "validate_refactor: only an operator may run those). Do not plan it. To change files use "
+            "execution_method=model with planned_files; to build or test, give the subtask a verification[] entry "
+            "(tool_name=compile or tool_name=test) - Kriya runs those checks itself.\n"
+        )
+        if available_tool_names:
+            targeted_correction += (
+                "- A planned step's tool_name may only be one of: "
+                f"{json.dumps(sorted(available_tool_names))}.\n"
+            )
+        else:
+            targeted_correction += "- No tool can be run by a planned step in this run; use execution_method=model.\n"
     if "MODEL_SUBTASK_MISSING_PLANNED_FILES" in reason_codes:
         targeted_correction += (
             "- For each named unscoped MODEL subtask: if it is a non-editing build/test/run/output "

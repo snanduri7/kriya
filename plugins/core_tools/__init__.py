@@ -29,11 +29,12 @@ from kriya.tools.containment import (
 )
 from kriya.tools.process import ProcessController
 from kriya.tools.tool import (
-    TOOL_MUTATION_REVIEW_UNAVAILABLE,
+    TOOL_OPERATOR_ONLY,
     BaseTool,
     ModelInvocationRefused,
     ModelToolInvocation,
     ToolExecutionError,
+    ToolGovernance,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,16 +86,6 @@ def _authorized_read(invocation: ModelToolInvocation, path: str) -> str:
     return target
 
 
-def _refuse_unreviewed_execution(tool_name: str, invocation: ModelToolInvocation) -> None:
-    """Human-in-the-loop executes nothing a human has not reviewed; a planned tool step has no review subject."""
-    if invocation.reviews_every_change:
-        raise ModelInvocationRefused(
-            TOOL_MUTATION_REVIEW_UNAVAILABLE,
-            f"tool {tool_name!r} executes or changes things, this run reviews every change, and a planned step cannot "
-            "ask you. Nothing was run.",
-        )
-
-
 # =====================================================================
 # 3. Tool Implementations
 # =====================================================================
@@ -106,6 +97,11 @@ class FilesystemTool(BaseTool):
     @property
     def name(self) -> str:
         return "filesystem"
+
+    @property
+    def planned_governance(self) -> ToolGovernance:
+        """S18: planned reads/lists only; every planned write stays refused per call (AuthorizedFileWriter DENY_ALL, OI-128)."""
+        return ToolGovernance.READ_ONLY
 
     @property
     def description(self) -> str:
@@ -204,6 +200,12 @@ class ShellTool(BaseTool):
         return "shell"
 
     @property
+    def planned_governance(self) -> ToolGovernance:
+        """S18 (OI-127, Option B): a planned shell command runs in the owner folder and no backend proves its effects stay
+        out of the run's evidence (S18-PREFLIGHT.md R01-R31, R80); only an operator may run it."""
+        return ToolGovernance.OPERATOR_ONLY
+
+    @property
     def description(self) -> str:
         return "Execute arbitrary shell commands on the local machine."
 
@@ -216,11 +218,11 @@ class ShellTool(BaseTool):
         return True
 
     def authorize_model_invocation(self, args: ShellArgs, invocation: ModelToolInvocation) -> ShellArgs:
-        """S1: refused in human-in-the-loop (behind the subtask executor's B3 stop, which answers first with
-        TOOL_CONFIRMATION_UNSUPPORTED); elsewhere this tool's own authority in _run governs (POL-001 hard invariants,
-        SEC-005 network authority, containment), unchanged."""
-        _refuse_unreviewed_execution(self.name, invocation)
-        return args
+        """S18 (OI-127, Option B): OPERATOR_ONLY - a planned call is refused in every mode. execute_model_authored's
+        governance recheck answers first (TOOL_OPERATOR_ONLY; in human-in-the-loop the executor's B3 stop answers
+        before that); this is the tool's own second wall for any caller that reaches it directly."""
+        raise ModelInvocationRefused(TOOL_OPERATOR_ONLY, f"tool {self.name!r} is operator-only; a planned step never "
+                                                         "runs it. Nothing was run.")
 
     async def _run(self, args: ShellArgs) -> Any:
         # POL-001: parsed best-effort the same way a real argv-based caller
@@ -419,6 +421,11 @@ class GitTool(BaseTool):
         return "git"
 
     @property
+    def planned_governance(self) -> ToolGovernance:
+        """S18: planned status/diff/log/branch/blame read; a planned commit stays refused per call (PLAT-039)."""
+        return ToolGovernance.READ_ONLY
+
+    @property
     def description(self) -> str:
         return "Perform basic Git operations like status, diff, log, commit, branch, and blame."
 
@@ -478,6 +485,15 @@ class GitTool(BaseTool):
         return args
 
     async def _run(self, args: GitArgs) -> Any:
+        return await self._run_in(args, os.getcwd())
+
+    async def _run_model_authored(self, args: GitArgs, invocation: ModelToolInvocation) -> Any:
+        """S18 (OI-129 item 3): a planned git read runs in the invocation's owner-workspace root, named explicitly
+        (the enforce loop supplies it first; it is the folder the process works in, so behaviour is unchanged). With no
+        roots it keeps the process folder, as before."""
+        return await self._run_in(args, invocation.roots[0] if invocation.roots else os.getcwd())
+
+    async def _run_in(self, args: GitArgs, cwd: str) -> Any:
         sub = args.subcommand.lower()
         cmd = ["git"]
 
@@ -525,11 +541,11 @@ class GitTool(BaseTool):
         # process-tree cleanup, which this tool had neither of before.
         profile = ContainmentProfile(
             trust_class=TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE,
-            workspace_path=os.getcwd(),
+            workspace_path=cwd,
         )
         try:
             result = await ProcessController().run_async(
-                cmd, cwd=os.getcwd(), timeout=self._GIT_COMMAND_TIMEOUT_SECONDS,
+                cmd, cwd=cwd, timeout=self._GIT_COMMAND_TIMEOUT_SECONDS,
                 containment_profile=profile, containment_backend=resolve_containment_backend("none"),
             )
             if result.timeout:
@@ -554,6 +570,10 @@ class SearchTool(BaseTool):
     @property
     def name(self) -> str:
         return "search"
+
+    @property
+    def planned_governance(self) -> ToolGovernance:
+        return ToolGovernance.READ_ONLY
 
     @property
     def description(self) -> str:
@@ -624,6 +644,10 @@ class ASTTool(BaseTool):
     @property
     def name(self) -> str:
         return "ast"
+
+    @property
+    def planned_governance(self) -> ToolGovernance:
+        return ToolGovernance.READ_ONLY
 
     @property
     def description(self) -> str:

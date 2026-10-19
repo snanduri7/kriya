@@ -410,6 +410,7 @@ async def validate_plan(
     *,
     workspace_path: str,
     available_tool_names: Optional[Iterable[str]] = None,
+    plannable_tool_names: Optional[Iterable[str]] = None,
     route: Optional[EngineeringRoute] = None,
     triage_service: Optional[EngineeringTriageService] = None,
     context_files: Optional[Iterable[str]] = None,
@@ -433,6 +434,12 @@ async def validate_plan(
     (`kernel.registry.list_components("tool")`) so MA6 invariant 3's
     "an unregistered tool_name must be REJECTED at validation time" is
     actually enforced, not silently bypassed by omission.
+
+    plannable_tool_names (S18, OI-127): the names the planned-tool governance
+    resolution admits (kriya/workflow/subtask_executor.plannable_tool_names,
+    which also supplies available_tool_names); a TOOL subtask naming a
+    registered but non-plannable tool is PLANNED_TOOL_NOT_PLANNABLE. Every
+    production caller passes both, from the one snapshot.
 
     context_files=None similarly skips the "planned files match context"
     check - only meaningful once a caller has an actual ContextPackage
@@ -1250,9 +1257,14 @@ async def validate_plan(
     # validation defect. UNREGISTERED_TOOL_NAME is a new, real reason code
     # this pass adds (see _CODES_WITH_TARGETED_GUIDANCE in
     # tests/test_workflow_controller_enforce.py).
-    capability_result = validate_tool_capability_membership(plan, available_tool_names=available_tool_names)
+    capability_result = validate_tool_capability_membership(
+        plan, available_tool_names=available_tool_names, plannable_tool_names=plannable_tool_names)
     errors.extend(capability_result.errors)
-    if not capability_result.valid:
+    if "PLANNED_TOOL_NOT_PLANNABLE" in capability_result.reason_codes:
+        # S18 (OI-127): a registered tool the planned-tool governance resolution does not admit (literal for the
+        # reason-code completeness scan, as below).
+        reason_codes.append("PLANNED_TOOL_NOT_PLANNABLE")
+    if "UNREGISTERED_TOOL_NAME" in capability_result.reason_codes:
         # Literal `reason_codes.append("...")` kept HERE (not merely
         # `.extend(capability_result.reason_codes)`) deliberately -
         # tests/test_workflow_controller_enforce.py's own

@@ -56,11 +56,19 @@ own per-subtask loop for the full account.
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Optional, Sequence
+from dataclasses import dataclass
+from typing import Any, List, Optional, Sequence, Tuple
 
+from kriya.config.authority import AutonomyModeError
 from kriya.core.registry import ComponentRegistryError
 from kriya.policy.errors import PolicyDeniedError
-from kriya.tools.tool import ModelInvocationRefused, ModelToolInvocation, ToolExecutionError, execute_model_authored
+from kriya.tools.tool import (
+    ModelInvocationRefused,
+    ModelToolInvocation,
+    ToolExecutionError,
+    execute_model_authored,
+    resolve_planned_tool_governance,
+)
 from kriya.workflow.context_package import ContextPackage
 from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, Subtask
 from kriya.workflow.subtask_context_projection import project_for_subtask
@@ -137,11 +145,50 @@ async def _execute_model_subtask(
 TOOL_CONFIRMATION_UNSUPPORTED = "TOOL_CONFIRMATION_UNSUPPORTED"
 
 
+@dataclass(frozen=True)
+class PlannedToolNames:
+    """S18: ONE snapshot of the tool registry for one planning operation. ``registered``: every registered tool name
+    (verification[] / acceptance tool_name membership keeps checking these); ``plannable``: the names the one governance
+    resolution (kriya.tools.tool.resolve_planned_tool_governance) admits as a planned step's tool - the only names the
+    Planner is shown and the only names plan validation accepts for a TOOL subtask."""
+
+    registered: Tuple[str, ...]
+    plannable: Tuple[str, ...]
+
+
+def plannable_tool_names(registry: Any, config: Any) -> PlannedToolNames:
+    """S18: the ONE projection of the planned-tool governance resolution, used by the Planner catalogue
+    (stage_planning, planner_repair prompts), plan validation (enforce_loop, shadow_mode, stage_planning) and - through
+    execute_model_authored - rechecked by the executor. A registry that cannot be listed admits NO tool (fail closed:
+    both tuples empty, so every TOOL subtask is refused at validation). Raises AutonomyModeError for a malformed mode."""
+    try:
+        registered = tuple(sorted(registry.list_components("tool")))
+    except Exception as e:
+        logger.warning(f"SubtaskExecutor: the tool registry could not be listed ({e}); no tool is plannable this time")
+        return PlannedToolNames(registered=(), plannable=())
+    mode = _config_autonomy_mode(config)
+    containment = getattr(getattr(config, "autonomy", None), "containment_backend", None)
+    plannable = []
+    for name in registered:
+        try:
+            tool = registry.get("tool", name)
+        except Exception as e:
+            logger.warning(f"SubtaskExecutor: registered tool {name!r} could not be resolved ({e}); not plannable")
+            continue
+        if resolve_planned_tool_governance(tool, autonomy_mode=mode, containment_backend=containment).plannable:
+            plannable.append(name)
+    return PlannedToolNames(registered=registered, plannable=tuple(plannable))
+
+
+def _config_autonomy_mode(config: Any) -> Optional[str]:
+    mode = getattr(getattr(config, "autonomy", None), "mode", None)
+    return mode if isinstance(mode, str) else None
+
+
 def _autonomy_mode(kernel: Any) -> Optional[str]:
     """The run's autonomy.mode, None when the kernel carries no readable one (the invocation then counts as
     human-in-the-loop, the strictest)."""
-    mode = getattr(getattr(getattr(kernel, "config", None), "autonomy", None), "mode", None)
-    return mode if isinstance(mode, str) else None
+    return _config_autonomy_mode(getattr(kernel, "config", None))
 
 
 def _hitl_blocks_tool_without_confirmation(tool: Any, kernel: Any) -> bool:
@@ -178,6 +225,12 @@ async def _execute_tool_subtask(subtask: Subtask, kernel: Any, tool_roots: Seque
     invocation = ModelToolInvocation(roots=tuple(tool_roots), autonomy_mode=_autonomy_mode(kernel))
     try:
         output = await execute_model_authored(tool, subtask.tool_arguments, invocation)
+    except AutonomyModeError as e:  # S18 / OI-135: a malformed mode is a typed stop, never a permissive reading
+        logger.warning(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} refused: {e}")
+        return SubtaskResult(
+            subtask_id=subtask.id, status=SubtaskStatus.NEEDS_REVIEW, execution_method=ExecutionMethod.TOOL.value,
+            error=str(e), reason_codes=(e.reason_code,),
+        )
     except ModelInvocationRefused as e:
         logger.warning(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} refused: {e}")
         return SubtaskResult(

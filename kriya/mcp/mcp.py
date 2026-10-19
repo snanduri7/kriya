@@ -38,7 +38,7 @@ from kriya.policy.model import (
 from kriya.policy.telemetry import build_decision_record
 from kriya.tools.containment import ContainmentSetupError, resolve_containment_backend
 from kriya.tools.sandbox import build_restricted_env
-from kriya.tools.tool import BaseTool, ToolExecutionError
+from kriya.tools.tool import BaseTool, ToolExecutionError, ToolGovernance
 
 logger = logging.getLogger(__name__)
 
@@ -745,6 +745,12 @@ class MCPTool(BaseTool):
     @property
     def arguments_schema(self) -> Type[BaseModel]:
         return self._schema
+
+    @property
+    def planned_governance(self) -> ToolGovernance:
+        """S18: every call (planned or operator) passes TOOL-002's durable, identity-bound operator approval and TOOL-003's
+        capability containment in _run below."""
+        return ToolGovernance.GOVERNED_SIDE_EFFECT
 
     def authorize_model_invocation(self, args: BaseModel, invocation: Any) -> BaseModel:
         """S1: a model-authored MCP call is governed by exactly the authority every MCP call already passes in _run
