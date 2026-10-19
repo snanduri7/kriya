@@ -360,17 +360,23 @@ COMPOUND = [
 ]
 
 
-@FLIP
 @pytest.mark.parametrize("text, expected", [(t, e) for _, t, e in COMPOUND], ids=[i for i, _, _ in COMPOUND])
 def test_a_compound_all_caps_secret_name_is_hidden(text, expected):
     assert redact_text(text) == expected
 
 
-@FLIP
 def test_a_compound_all_caps_secret_key_is_hidden_in_a_structure():
     assert redact_value({"PGPASSWORD": S, "PGHOST": "db", "argv": ["--GITHUBTOKEN", S]}) == {
         "PGPASSWORD": R, "PGHOST": "db", "argv": ["--GITHUBTOKEN", R]}
 
+
+
+@pytest.mark.parametrize("text, expected", [("NOTOKEN=1", f"NOTOKEN={R}"), ("TOPSECRET=x", f"TOPSECRET={R}"), ("MAXTOKEN=5", f"MAXTOKEN={R}"),
+                                            ("token%3Dabc%3Dxyz", f"token%3D{R}"), ("x%3Dpassword%3Dsecret", f"x%3Dpassword%3D{R}")])
+def test_the_measured_cost_of_the_new_rules_is_fail_closed(text, expected):
+    """The price of the compound rule (a compound name that merely ENDS in a long secret word is hidden) and the proof
+    that an encoded separator never joins a name, so a secret pair is never swallowed by a longer non-secret name."""
+    assert redact_text(text) == expected
 
 VENDOR = [
     ("slack-bot", f"token xoxb-1234567890-0987654321-{S}abcd", f"token {R}"),
@@ -386,13 +392,11 @@ VENDOR = [
 ]
 
 
-@FLIP
 @pytest.mark.parametrize("text, expected", [(t, e) for _, t, e in VENDOR], ids=[i for i, _, _ in VENDOR])
 def test_a_vendor_token_shape_is_hidden(text, expected):
     assert redact_text(text) == expected
 
 
-@FLIP
 def test_the_token_shape_and_compound_name_tables_are_closed():
     """Tripwire: adding, widening or dropping a shape or a compound suffix is a reviewed change of this table."""
     from kriya.foundation import redaction
@@ -425,7 +429,6 @@ ENCODED = [
 ]
 
 
-@FLIP
 @pytest.mark.parametrize("text, expected", [(t, e) for _, t, e in ENCODED], ids=[i for i, _, _ in ENCODED])
 def test_a_percent_encoded_secret_is_found_and_never_shown_decoded(text, expected):
     """Decode for DETECTION only: the output keeps the bytes as written around the marker, never a decoded copy. An encoded
