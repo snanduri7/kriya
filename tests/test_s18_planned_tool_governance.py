@@ -91,20 +91,37 @@ class _SelfDeclared(_Undeclared):
         return args
 
 
-def _shipped_subclass():
-    class SearchTool(_core().SearchTool):  # same class NAME as a shipped tool, redeclaring - but not the shipped class
-        @property
-        def planned_governance(self):
-            return ToolGovernance.READ_ONLY
+_CORE_TOOLS = load_core_tools_module()
 
-    return SearchTool()
+
+class ASTTool(_CORE_TOOLS.ASTTool):
+    """Module-level, so its qualname IS a shipped name ("ASTTool"): it redeclares, in THIS file - never honoured."""
+
+    @property
+    def planned_governance(self):
+        return ToolGovernance.READ_ONLY
+
+
+class SearchTool(_CORE_TOOLS.SearchTool):
+    """Module-level, qualname "SearchTool": it INHERITS the shipped declaration - never honoured (own class only)."""
+
+
+def _shipped_subclass():
+    return ASTTool()
 
 
 def _inheriting_subclass():
-    class SearchTool(_core().SearchTool):  # same class NAME, INHERITING the shipped declaration
-        pass
-
     return SearchTool()
+
+
+def test_the_subclass_doubles_really_carry_shipped_names():
+    """Guard for the two doubles above: the table lookup sees a shipped name, so only the own-class and file checks
+    can refuse them (otherwise the subclass pins would pass vacuously on the name alone)."""
+    from kriya.tools import tool as tool_contract
+
+    assert ASTTool.__qualname__ in tool_contract._SHIPPED_PLANNED_DECLARATIONS
+    assert SearchTool.__qualname__ in tool_contract._SHIPPED_PLANNED_DECLARATIONS
+    assert "planned_governance" not in SearchTool.__dict__ and "planned_governance" in ASTTool.__dict__
 
 
 class _DeclaresNone(_Undeclared):
@@ -315,8 +332,9 @@ def test_the_enforce_and_shadow_runs_validate_against_the_one_catalogue():
 ], ids=["undeclared", "self-declared-plugin", "subclass-named-like-a-shipped-tool", "subclass-inheriting"])
 @pytest.mark.parametrize("mode", MODES)
 def test_the_executor_refuses_an_unplannable_tool_before_it_runs(tmp_path, tool, code, mode):
-    result = _dispatch(tool, mode, tool.name, {"note": "n"} if not isinstance(tool, _core().SearchTool) else
-                       {"pattern": "x"}, (str(tmp_path),))
+    arguments = ({"pattern": "x"} if isinstance(tool, _core().SearchTool) else
+                 {"file_path": "a.py"} if isinstance(tool, _core().ASTTool) else {"note": "n"})
+    result = _dispatch(tool, mode, tool.name, arguments, (str(tmp_path),))
     assert result.status == SubtaskStatus.NEEDS_REVIEW and result.reason_codes == (code,)
     if hasattr(tool, "calls"):
         tool.calls.assert_not_called()
