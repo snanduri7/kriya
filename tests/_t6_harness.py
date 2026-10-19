@@ -67,7 +67,8 @@ def direct_run(tmp_path: Path, monkeypatch, responder: Callable, files: Mapping[
 
 
 def enforce_run(tmp_path: Path, monkeypatch, responder: Callable, files: Mapping[str, str], goal: str,
-                plans: Sequence[Callable[[], Any]], *, cfg=None, tools: Mapping[str, Any] = ()) -> Observed:
+                plans: Sequence[Callable[[], Any]], *, cfg=None, tools: Mapping[str, Any] = (),
+                prepare_engine: Optional[Callable[[Any], None]] = None, read_evidence: bool = True) -> Observed:
     from kriya.workflow.workflow_controller import WorkflowController
 
     state = tmp_path / "state"
@@ -88,11 +89,15 @@ def enforce_run(tmp_path: Path, monkeypatch, responder: Callable, files: Mapping
 
                 admit_planned_test_tool(monkeypatch, type(tool))
             engine.kernel.registry.register("tool", name, tool)
+        if prepare_engine is not None:
+            prepare_engine(engine)  # S18b: e.g. an engine whose kernel is None (OI-143)
         with mock_patch("kriya.workflow.workflow_controller.parse_planner_structured_output",
                         return_value=(object(), None)), \
              mock_patch("kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
                         side_effect=[build() for build in plans]):
             result = asyncio.run(WorkflowController(engine).execute(goal, str(workspace), migration_mode="enforce"))
+    if not read_evidence:  # S18b: a kernel-less run has no configuration, so it records no attempt evidence
+        return Observed(result, {}, [], runtime, workspace)
     explained, records, run = _read(state)
     return Observed(result, explained, records, runtime, workspace, run)
 

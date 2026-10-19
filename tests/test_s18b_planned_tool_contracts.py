@@ -548,10 +548,6 @@ def test_a_kernel_less_enforce_run_refuses_a_tool_subtask_at_validation(tmp_path
     TOOL plan is refused at validation (UNREGISTERED_TOOL_NAME) after the bounded repair, typed, nothing dispatched."""
     import _t6_harness as harness
     import test_enforce_verified_no_change as shape
-    from _chaos_harness import ChaosRuntime, RuntimeRegistration, chaos_config, chaos_engine, git_workspace
-
-    from kriya.core.state_paths import ENV_STATE_DIR
-    from kriya.workflow.workflow_controller import WorkflowController
 
     def plan():
         document = shape._plan(shape.TOOL_CRITERION).model_dump()
@@ -561,12 +557,6 @@ def test_a_kernel_less_enforce_run_refuses_a_tool_subtask_at_validation(tmp_path
                                         "acceptance_criteria_ids": [], "verification": []})
         return EngineeringPlan.model_validate(document)
 
-    state = tmp_path / "state"
-    state.mkdir()
-    monkeypatch.setenv(ENV_STATE_DIR, str(state))
-    workspace = git_workspace(tmp_path, harness.shop_files())
-    cfg = chaos_config()
-    cfg.paths.skills, cfg.paths.memory = str(tmp_path / "skills"), str(tmp_path / "memory")
     dispatched = []
     real_execute = subtask_executor.execute
 
@@ -575,14 +565,14 @@ def test_a_kernel_less_enforce_run_refuses_a_tool_subtask_at_validation(tmp_path
         return await real_execute(**kwargs)
 
     monkeypatch.setattr(subtask_executor, "execute", spy)
-    with RuntimeRegistration(ChaosRuntime(harness.shop_responder)):
-        engine = chaos_engine(cfg)
+
+    def without_kernel(engine):
         engine.kernel = None  # an embedder / double whose engine carries no kernel
-        with mock_patch("kriya.workflow.workflow_controller.parse_planner_structured_output",
-                        return_value=(object(), None)), \
-             mock_patch("kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
-                        side_effect=[plan() for _ in range(1 + STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS)]):
-            result = asyncio.run(WorkflowController(engine).execute(shape.GOAL, str(workspace), migration_mode="enforce"))
+
+    observed = harness.enforce_run(tmp_path, monkeypatch, harness.shop_responder, harness.shop_files(), shape.GOAL,
+                                   [plan] * (1 + STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS), prepare_engine=without_kernel,
+                                   read_evidence=False)
+    result = observed.result
     legacy = result.legacy_result
     assert legacy["reason_codes"][0] == "UNREGISTERED_TOOL_NAME", legacy
     assert result.subtask_results == () or all(r.subtask_id != "s0" for r in result.subtask_results)
