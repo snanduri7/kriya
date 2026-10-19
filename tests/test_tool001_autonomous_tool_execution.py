@@ -34,6 +34,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from _plugin_test_support import load_core_tools_module
 from _strict_doubles import strict_kernel
+from pydantic import BaseModel, ConfigDict
 
 from kriya.config.config import AppConfig, AutonomyConfig, MCPLifecycleConfig
 from kriya.context.workspace_identity import workspace_identity
@@ -49,7 +50,7 @@ from kriya.mcp.invocation_approval import (
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import MCPToolIdentity, compute_mcp_schema_digest
-from kriya.tools.tool import ToolExecutionError
+from kriya.tools.tool import BaseTool, ToolExecutionError
 from kriya.workflow import subtask_executor
 from kriya.workflow import workflow_controller as wc_module
 from kriya.workflow.context_package import build_context_package
@@ -61,8 +62,30 @@ from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus
 
 @pytest.fixture(autouse=True)
 def _tool_mechanics_not_hitl_gate(monkeypatch):
-    """These tests exercise the tool-execution MECHANICS under the default config; the human-in-the-loop refusal of confirmation-requiring tools is pinned in tests/test_tool_subtask_hitl_confirmation.py."""
-    monkeypatch.setattr("kriya.workflow.subtask_executor._hitl_blocks_tool_without_confirmation", lambda tool, kernel: False)
+    """These tests exercise the tool-execution MECHANICS outside human-in-the-loop: the executor reads the run's mode as
+    "guardrails" (before S1 this patched only the B3 stop; S1 also refuses mutating planned steps in human-in-the-loop
+    inside the tools, so the mode itself is what is set). The human-in-the-loop refusals are pinned in
+    tests/test_tool_subtask_hitl_confirmation.py and tests/test_s1_toolbox_authority.py."""
+    monkeypatch.setattr("kriya.workflow.subtask_executor._autonomy_mode", lambda kernel: "guardrails")
+
+
+class _RecordingArgs(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
+class _RecordingTool(BaseTool):
+    """A real BaseTool double (S1: the model-authored entry refuses anything that is not a BaseTool); ``calls`` records
+    the arguments the governed boundary ran it with."""
+
+    name = "lint"
+    description = "a deterministic test tool"
+    arguments_schema = _RecordingArgs
+
+    def __init__(self, **calls_kwargs):
+        self.calls = AsyncMock(**calls_kwargs)
+
+    async def _run(self, args):
+        return await self.calls(**args.model_dump())
 
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -137,9 +160,10 @@ def isolated_homes(tmp_path, monkeypatch):
 # kriya/cli.py::tools_execute does) plus one behavioral check.
 # =====================================================================
 
-def test_execute_tool_subtask_calls_the_same_base_tool_execute_boundary():
+def test_execute_tool_subtask_calls_the_governed_model_authored_entry():
+    """S1: the dispatch is the model-authored entry point, never the operator's BaseTool.execute()."""
     source = inspect.getsource(subtask_executor._execute_tool_subtask)
-    assert "await tool.execute(" in source
+    assert "await execute_model_authored(" in source and "tool.execute(" not in source
     assert "kernel.registry.get(\"tool\"" in source
     # Never a second execution primitive - no subprocess/MCPClient
     # reference of its own anywhere in this module.
@@ -152,8 +176,7 @@ def test_execute_tool_subtask_calls_the_same_base_tool_execute_boundary():
 @pytest.mark.asyncio
 async def test_scenario_a_benign_deterministic_tool_executes_through_real_path():
     subtask = _tool_subtask(tool_arguments={"path": "a.py"})
-    tool = MagicMock()
-    tool.execute = AsyncMock(return_value={"lint": "clean"})
+    tool = _RecordingTool(return_value={"lint": "clean"})
     kernel = strict_kernel()
     kernel.registry.get = MagicMock(return_value=tool)
 
@@ -163,7 +186,7 @@ async def test_scenario_a_benign_deterministic_tool_executes_through_real_path()
 
     assert result.status == SubtaskStatus.COMPLETED
     assert result.tool_output == {"lint": "clean"}
-    tool.execute.assert_awaited_once_with(path="a.py")
+    tool.calls.assert_awaited_once_with(path="a.py")
     kernel.registry.get.assert_called_once_with("tool", "lint")
 
 
@@ -227,8 +250,9 @@ def test_tool_arguments_pass_through_unmodified_no_extra_authority_inferred():
     assert "subtask.description" not in source
     assert "subtask.tool_arguments" in source
     # Confirms the exact pass-through shape - no merging in extra kwargs
-    # derived from anywhere else.
-    assert "tool.execute(**subtask.tool_arguments)" in source
+    # derived from anywhere else; S1: the arguments travel as ONE mapping,
+    # never spread into keyword parameters an argument key could bind to.
+    assert "execute_model_authored(tool, subtask.tool_arguments, invocation)" in source
 
 
 # =====================================================================
@@ -638,12 +662,18 @@ def test_tool_subtask_unsupported_in_enforce_reason_code_no_longer_exists():
 
 
 def test_exactly_one_tool_execute_call_site_in_subtask_executor():
+    """S1: the one tool dispatch is the governed model-authored entry point; no operator-path .execute() remains."""
     tree = ast.parse(inspect.getsource(subtask_executor))
     calls = [
         n for n in ast.walk(tree)
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "execute"
     ]
-    assert len(calls) == 1, f"expected exactly one tool.execute() call site, found {len(calls)}"
+    governed = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "execute_model_authored"
+    ]
+    assert len(calls) == 0, f"expected no tool.execute() call site, found {len(calls)}"
+    assert len(governed) == 1, f"expected exactly one execute_model_authored() call site, found {len(governed)}"
 
 
 def test_enforce_loop_dispatches_tool_subtasks_only_through_subtask_executor():
@@ -680,8 +710,7 @@ async def test_scenario_h_tool_failure_at_most_one_call_no_retry_widening():
         call_log.append(kwargs)
         raise ToolExecutionError("simulated denial")
 
-    tool = MagicMock()
-    tool.execute = AsyncMock(side_effect=_tracking_execute)
+    tool = _RecordingTool(side_effect=_tracking_execute)
     kernel = strict_kernel()
     kernel.registry.get = MagicMock(return_value=tool)
 
@@ -757,9 +786,7 @@ def test_reason_codes_captured_from_policy_denied_error_cause():
     policy_result = PolicyResult(decision=PolicyDecision.DENY, reason_code="COMMAND_SUDO_DENIED", explanation="x")
     cause = PolicyDeniedError(request=request, result=policy_result)
 
-    tool = MagicMock()
-    tool.execute = AsyncMock(side_effect=ToolExecutionError("Tool execution failed: x") )
-    tool.execute.side_effect.__cause__ = cause
+    tool = _RecordingTool(side_effect=cause)  # the tool's own run raises the denial; the boundary wraps it
     kernel = strict_kernel()
     kernel.registry.get = MagicMock(return_value=tool)
 

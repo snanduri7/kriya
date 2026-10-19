@@ -1813,13 +1813,21 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # (BaseTool.execute()'s own arguments_schema validation);
                 # nothing here inspects or trusts subtask.description,
                 # planner rationale, or any other free-form field as an
-                # authority signal.
+                # authority signal. S1 (OI-88): the call is MODEL-AUTHORED, never
+                # the operator's - subtask_executor dispatches it through
+                # kriya.tools.tool.execute_model_authored() with the roots
+                # below, where each tool's own authorize_model_invocation()
+                # (the existing reader/writer/control-path/TOOL-002 authority)
+                # decides before anything runs.
                 tool_context = deps.project_for_subtask(execution_context, subtask)
                 # LR-R1-M1: the action as its own evidence unit (observational).
                 with deps.attempt_evidence_scope.tool_unit(getattr(kernel, "config", None), subtask.id,
                                                       subtask.tool_name) as evidence:
+                    # S1: the model-authored call may touch only the owner workspace (relative paths resolve
+                    # there, as from the run's working folder) and this plan's candidate worktree.
                     result = await deps.subtask_executor.execute(
                         subtask=subtask, plan=plan, context=tool_context, kernel=kernel,
+                        tool_roots=(workspace_path, plan_workspace_path),
                     )
                     evidence["result"] = result
                 subtask_results.append(result)

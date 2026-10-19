@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import shlex
-from typing import Any, Optional, Tuple, Type
+from typing import Any, Callable, Optional, Tuple, Type
 
 from pydantic import BaseModel, Field
 
@@ -13,6 +13,12 @@ from kriya.plugins.plugin import BasePlugin
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy, classify_shell_acquisition_command
+from kriya.policy.filesystem import (
+    AuthorizedFileReader,
+    AuthorizedFileWriter,
+    WriteScopeMode,
+    trusted_control_path_denial,
+)
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision
 from kriya.tools.containment import (
     ContainmentProfile,
@@ -22,7 +28,13 @@ from kriya.tools.containment import (
     resolve_containment_backend,
 )
 from kriya.tools.process import ProcessController
-from kriya.tools.tool import BaseTool, ToolExecutionError
+from kriya.tools.tool import (
+    TOOL_MUTATION_REVIEW_UNAVAILABLE,
+    BaseTool,
+    ModelInvocationRefused,
+    ModelToolInvocation,
+    ToolExecutionError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +66,37 @@ class ASTArgs(BaseModel):
     file_path: str = Field(description="The path to the Python or Java file to analyze")
 
 # =====================================================================
-# 2. Tool Implementations
+# 2. Model-authored call authority (S1, OI-88)
+# =====================================================================
+# A planner-emitted TOOL subtask reaches these tools through kriya.tools.tool.execute_model_authored(), which calls each
+# tool's authorize_model_invocation() first. Each one reuses the EXISTING authority for the equivalent agent-generated
+# effect - never a second policy engine: AuthorizedFileReader (DEV-INV-001, the Developer's own model-requested reads),
+# AuthorizedFileWriter (the model-directed write choke point), the PLAT-039 trusted-control-path denial. The operator's
+# own `kriya tools execute` keeps calling BaseTool.execute(), untouched.
+
+_ALLOWED = (PolicyDecision.ALLOW, PolicyDecision.ALLOW_SANDBOXED)
+
+
+def _authorized_read(invocation: ModelToolInvocation, path: str) -> str:
+    """The path a model-authored read may use: resolved exactly as the tool's effect resolves it, then authorized by
+    AuthorizedFileReader over the invocation's roots (canonical containment, symlinks resolved, credential stores)."""
+    target = invocation.resolve(path)
+    AuthorizedFileReader(invocation.roots[0], invocation.roots[1:]).raise_if_denied(target)
+    return target
+
+
+def _refuse_unreviewed_execution(tool_name: str, invocation: ModelToolInvocation) -> None:
+    """Human-in-the-loop executes nothing a human has not reviewed; a planned tool step has no review subject."""
+    if invocation.reviews_every_change:
+        raise ModelInvocationRefused(
+            TOOL_MUTATION_REVIEW_UNAVAILABLE,
+            f"tool {tool_name!r} executes or changes things, this run reviews every change, and a planned step cannot "
+            "ask you. Nothing was run.",
+        )
+
+
+# =====================================================================
+# 3. Tool Implementations
 # =====================================================================
 
 class FilesystemTool(BaseTool):
@@ -72,6 +114,20 @@ class FilesystemTool(BaseTool):
     @property
     def arguments_schema(self) -> Type[BaseModel]:
         return FilesystemArgs
+
+    def authorize_model_invocation(self, args: FilesystemArgs, invocation: ModelToolInvocation) -> FilesystemArgs:
+        """S1: a planned read/list is a model-requested read (AuthorizedFileReader). Every other operation is a write
+        and is refused in every mode by AuthorizedFileWriter in DENY_ALL scope: outside the roots
+        (PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS), into .git/.kriya under any spelling (TRUSTED_CONTROL_PATH_DENIED),
+        otherwise WRITE_SCOPE_DENY_ALL - a planned tool write lands in the owner folder outside the candidate, its
+        gates and its review (nothing reaches the owner workspace before apply). Whether a governed in-candidate
+        TOOL write should exist is the owner question in the S1 report."""
+        if args.operation.lower() in ("read", "list"):
+            return args.model_copy(update={"path": _authorized_read(invocation, args.path)})
+        target = invocation.resolve(args.path)
+        writer = AuthorizedFileWriter(invocation.roots[0], invocation.roots[1:], write_scope_mode=WriteScopeMode.DENY_ALL)
+        raise PolicyDeniedError(request=ActionRequest(action_type=ActionType.WRITE_FILE, target=target),
+                                result=writer.authorize(target))
 
     async def _run(self, args: FilesystemArgs) -> Any:
         path = os.path.abspath(args.path)
@@ -158,6 +214,13 @@ class ShellTool(BaseTool):
     @property
     def requires_confirmation(self) -> bool:
         return True
+
+    def authorize_model_invocation(self, args: ShellArgs, invocation: ModelToolInvocation) -> ShellArgs:
+        """S1: refused in human-in-the-loop (behind the subtask executor's B3 stop, which answers first with
+        TOOL_CONFIRMATION_UNSUPPORTED); elsewhere this tool's own authority in _run governs (POL-001 hard invariants,
+        SEC-005 network authority, containment), unchanged."""
+        _refuse_unreviewed_execution(self.name, invocation)
+        return args
 
     async def _run(self, args: ShellArgs) -> Any:
         # POL-001: parsed best-effort the same way a real argv-based caller
@@ -401,6 +464,19 @@ class GitTool(BaseTool):
         # DENY, or REQUIRE_APPROVAL with no reachable approval path: fail closed.
         raise PolicyDeniedError(request=request, result=result)
 
+    def authorize_model_invocation(self, args: GitArgs, invocation: ModelToolInvocation) -> GitArgs:
+        """S1: a planned commit writes repository metadata in the owner folder, outside Kriya's commit service:
+        model-directed write authority never reaches .git (PLAT-039), in every mode and whatever the policy mode.
+        Reads (status/diff/log/branch) are unchanged; blame's file is a model-requested read."""
+        sub = args.subcommand.lower()
+        if sub in self._MUTATING_SUBCOMMANDS:
+            git_dir = os.path.join(invocation.roots[0], ".git") if invocation.roots else ".git"
+            raise PolicyDeniedError(request=ActionRequest(action_type=ActionType.GIT_WRITE, command=("git", sub)),
+                                    result=trusted_control_path_denial(git_dir))
+        if sub == "blame" and args.file_path:
+            return args.model_copy(update={"file_path": _authorized_read(invocation, args.file_path)})
+        return args
+
     async def _run(self, args: GitArgs) -> Any:
         sub = args.subcommand.lower()
         cmd = ["git"]
@@ -487,7 +563,21 @@ class SearchTool(BaseTool):
     def arguments_schema(self) -> Type[BaseModel]:
         return SearchArgs
 
+    def authorize_model_invocation(self, args: SearchArgs, invocation: ModelToolInvocation) -> SearchArgs:
+        """S1: the searched directory is a model-requested read (AuthorizedFileReader); so is every file the walk
+        opens (_run_model_authored)."""
+        return args.model_copy(update={"path": _authorized_read(invocation, args.path)})
+
+    async def _run_model_authored(self, args: SearchArgs, invocation: ModelToolInvocation) -> Any:
+        reader = AuthorizedFileReader(invocation.roots[0], invocation.roots[1:])
+        return self._search(args, admit=lambda file_path: reader.authorize(file_path).decision in _ALLOWED)
+
     async def _run(self, args: SearchArgs) -> Any:
+        return self._search(args)
+
+    def _search(self, args: SearchArgs, admit: Optional[Callable[[str], bool]] = None) -> Any:
+        """``admit`` (model-authored calls): a file it rejects - e.g. a symlink resolving outside the roots or a
+        credential store - is skipped unread."""
         base_dir = os.path.abspath(args.path)
         if not os.path.exists(base_dir) or not os.path.isdir(base_dir):
             raise ToolExecutionError(f"Search directory '{args.path}' does not exist.")
@@ -511,6 +601,8 @@ class SearchTool(BaseTool):
                     continue
 
                 file_path = os.path.join(root, file)
+                if admit is not None and not admit(file_path):
+                    continue
                 try:
                     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                         for line_num, line in enumerate(f, 1):
@@ -540,6 +632,10 @@ class ASTTool(BaseTool):
     @property
     def arguments_schema(self) -> Type[BaseModel]:
         return ASTArgs
+
+    def authorize_model_invocation(self, args: ASTArgs, invocation: ModelToolInvocation) -> ASTArgs:
+        """S1: the analyzed file is a model-requested read (AuthorizedFileReader)."""
+        return args.model_copy(update={"file_path": _authorized_read(invocation, args.file_path)})
 
     async def _run(self, args: ASTArgs) -> Any:
         path = os.path.abspath(args.file_path)
@@ -624,7 +720,7 @@ class ASTTool(BaseTool):
 
 
 # =====================================================================
-# 3. Core Tools Plugin Declaration
+# 4. Core Tools Plugin Declaration
 # =====================================================================
 
 class CoreToolsPlugin(BasePlugin):

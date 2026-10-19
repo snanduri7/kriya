@@ -9,7 +9,8 @@ Characterization FIRST (S1 method). Three kinds of test live here:
   * pins of today's governed paths, green before and after the correction (the operator path, the B3 shell stop, the
     shell hard invariants, the undecided guardrails plugin case);
   * EXPECTED-TO-FLIP pins: the measured defect, written as the corrected behaviour and marked strict-xfail at the
-    characterization commit, so they are shown to FAIL on the unfixed bytes; the correction commit removes the marks;
+    characterization commit (568e62e), shown to FAIL on the unfixed bytes (43 failed with --runxfail, each because the
+    action COMPLETED); the correction commit removed the marks;
   * (added with the correction) the precise unit-level contracts the mutants are run against.
 
 The end-to-end pins go through the real enforce controller (tests/_t6_harness.enforce_run): the TOOL dispatch, the roots
@@ -37,11 +38,6 @@ HITL = "human-in-the-loop"
 # Every value other than "human-in-the-loop" behaves as "guardrails" in the product (docs/user_guide.md); an arbitrary
 # value is exercised too, because the mode is an open string (S16 owns its vocabulary).
 MODES = (HITL, "guardrails", "full-auto")
-
-_EXPECTED_TO_FLIP = pytest.mark.xfail(
-    strict=True, reason="S1 expected-to-flip pin: the measured defect (an unauthorized model-authored TOOL action "
-                        "succeeds); the correction commit removes this mark")
-
 
 def _core():
     return load_core_tools_module()
@@ -95,7 +91,6 @@ def _nothing_written(workspace, outside):
     return [str(p) for p in candidates if p.exists()]
 
 
-@_EXPECTED_TO_FLIP
 @pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("label, path, prepare, code", WRITE_FORMS, ids=[f[0] for f in WRITE_FORMS])
 def test_a_planned_filesystem_write_is_refused_and_writes_nothing(tmp_path, monkeypatch, mode, label, path, prepare,
@@ -168,7 +163,6 @@ READ_FORMS = [
 ]
 
 
-@_EXPECTED_TO_FLIP
 @pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("label, path, prepare, code", READ_FORMS, ids=[f[0] for f in READ_FORMS])
 def test_a_planned_filesystem_read_outside_the_workspace_is_refused(tmp_path, monkeypatch, mode, label, path, prepare,
@@ -233,7 +227,6 @@ def _head(repo):
     return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout
 
 
-@_EXPECTED_TO_FLIP
 @pytest.mark.parametrize("mode", MODES)
 def test_a_planned_git_commit_is_refused_in_every_mode(tmp_path, monkeypatch, mode):
     """GitTool commit mutates repository metadata (.git, a trusted control path: PLAT-039 says model-directed write
@@ -247,7 +240,6 @@ def test_a_planned_git_commit_is_refused_in_every_mode(tmp_path, monkeypatch, mo
     assert _head(repo) == before
 
 
-@_EXPECTED_TO_FLIP
 def test_planned_validate_refactor_is_refused_in_human_in_the_loop(tmp_path, monkeypatch):
     """validate_refactor builds and runs the repository's tests in the owner folder; in human-in-the-loop nothing is
     built, tested or run before the human's review, and a planned step has no review subject."""
@@ -292,7 +284,6 @@ def _writing_plugin_tool(target, *, name="plugin_writer", declared_non_mutating=
     return _PluginWriter()
 
 
-@_EXPECTED_TO_FLIP
 @pytest.mark.parametrize("name", ["plugin_writer", "fixture_write_file"])
 def test_an_undeclared_tool_is_refused_in_human_in_the_loop(tmp_path, name):
     """A tool that does not declare how a model-authored call to it is governed is refused in human-in-the-loop,
@@ -349,7 +340,6 @@ def test_the_bypass_finder_sees_a_planted_direct_call():
     assert [kind for _n, _l, kind in _workflow_tool_execute_calls(planted)] == ["execute", "execute", "_run"]
 
 
-@_EXPECTED_TO_FLIP
 def test_no_model_authored_code_path_reaches_a_tool_outside_the_governed_entry():
     """kriya/workflow (every model-authored caller) never calls tool.execute()/_run() itself: the one dispatch is the
     governed model-authored entry point, so direct BaseTool execution cannot skip the authority."""
@@ -397,3 +387,268 @@ def test_shell_hard_invariants_still_govern_outside_human_in_the_loop(tmp_path):
     result = _dispatch(_core().ShellTool(), "guardrails", "shell", {"command": f"sudo touch {marker}"})
     assert result.status == SubtaskStatus.FAILED and result.reason_codes == ("COMMAND_SUDO_DENIED",)
     assert not marker.exists()
+
+
+# -- unit-level contracts at the governed boundary (the S1 mutants run against these) ---------------------------------
+
+def _ws(tmp_path):
+    """(workspace, candidate, outside), canonical; a file in each, a symlinked file in the workspace pointing outside."""
+    base = Path(os.path.realpath(tmp_path))
+    ws, cand, out = base / "ws", base / "cand", base / "outside"
+    for d in (ws, cand, out):
+        d.mkdir()
+    (ws / "in.py").write_text("NEEDLE = 1\n")
+    (cand / "c.py").write_text("NEEDLE = 2\n")
+    (out / "secret.py").write_text("NEEDLE = 'outside-secret'\n")
+    os.symlink(out / "secret.py", ws / "linked.py")
+    return ws, cand, out
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("operation", ["write", "WRITE", "Write", "append", "delete"])
+def test_every_non_read_filesystem_operation_is_a_refused_write(tmp_path, mode, operation):
+    """No operation spelling escapes the write authority: anything that is not read/list is refused as a write."""
+    ws, cand, _out = _ws(tmp_path)
+    result = _dispatch(_core().FilesystemTool(), mode, "filesystem",
+                       {"operation": operation, "path": "new.txt", "content": "x"}, tool_roots=(str(ws), str(cand)))
+    assert result.status == SubtaskStatus.FAILED and result.reason_codes == ("WRITE_SCOPE_DENY_ALL",), result
+    assert not (ws / "new.txt").exists()
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_listing_outside_the_workspace_is_refused(tmp_path, mode):
+    ws, cand, out = _ws(tmp_path)
+    result = _dispatch(_core().FilesystemTool(), mode, "filesystem", {"operation": "list", "path": str(out)},
+                       tool_roots=(str(ws), str(cand)))
+    assert result.reason_codes == ("PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",) and result.tool_output is None
+    inside = _dispatch(_core().FilesystemTool(), mode, "filesystem", {"operation": "list", "path": "."},
+                       tool_roots=(str(ws), str(cand)))
+    assert inside.status == SubtaskStatus.COMPLETED and "in.py" in inside.tool_output
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_the_candidate_worktree_is_a_readable_root_and_relative_paths_resolve_in_the_owner_workspace(tmp_path, mode):
+    ws, cand, _out = _ws(tmp_path)
+    read = _dispatch(_core().FilesystemTool(), mode, "filesystem", {"operation": "read", "path": str(cand / "c.py")},
+                     tool_roots=(str(ws), str(cand)))
+    assert read.status == SubtaskStatus.COMPLETED and read.tool_output == "NEEDLE = 2\n"
+    relative = _dispatch(_core().FilesystemTool(), mode, "filesystem", {"operation": "read", "path": "in.py"},
+                         tool_roots=(str(ws), str(cand)))
+    assert relative.status == SubtaskStatus.COMPLETED and relative.tool_output == "NEEDLE = 1\n"
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_without_roots_a_path_bearing_call_is_refused(tmp_path, mode):
+    ws, _cand, _out = _ws(tmp_path)
+    result = _dispatch(_core().FilesystemTool(), mode, "filesystem", {"operation": "read", "path": str(ws / "in.py")})
+    assert result.status == SubtaskStatus.NEEDS_REVIEW and result.reason_codes == ("TOOL_WORKSPACE_ROOT_UNAVAILABLE",)
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_search_never_reads_through_a_symlink_or_outside(tmp_path, mode):
+    ws, cand, out = _ws(tmp_path)
+    found = _dispatch(_core().SearchTool(), mode, "search", {"pattern": "NEEDLE", "path": "."},
+                      tool_roots=(str(ws), str(cand)))
+    assert found.status == SubtaskStatus.COMPLETED
+    assert "in.py:1" in found.tool_output and "outside-secret" not in found.tool_output, found.tool_output
+    outside = _dispatch(_core().SearchTool(), mode, "search", {"pattern": "NEEDLE", "path": str(out)},
+                        tool_roots=(str(ws), str(cand)))
+    assert outside.reason_codes == ("PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",) and outside.tool_output is None
+
+
+def test_operator_search_is_unchanged(tmp_path):
+    ws, _cand, _out = _ws(tmp_path)
+    out = asyncio.run(_core().SearchTool().execute(pattern="NEEDLE", path=str(ws)))
+    assert "outside-secret" in out  # the operator's own search follows the symlinked file, as before S1
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_ast_and_git_blame_read_only_inside(tmp_path, mode):
+    ws, cand, out = _ws(tmp_path)
+    ast_out = _dispatch(_core().ASTTool(), mode, "ast", {"file_path": str(out / "secret.py")},
+                        tool_roots=(str(ws), str(cand)))
+    assert ast_out.reason_codes == ("PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",)
+    ast_in = _dispatch(_core().ASTTool(), mode, "ast", {"file_path": "in.py"}, tool_roots=(str(ws), str(cand)))
+    assert ast_in.status == SubtaskStatus.COMPLETED
+    blame = _dispatch(_core().GitTool(), mode, "git", {"subcommand": "blame", "file_path": "linked.py"},
+                      tool_roots=(str(ws), str(cand)))
+    assert blame.reason_codes == ("PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",)
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_git_reads_still_run_in_every_mode(tmp_path, monkeypatch, mode):
+    repo = _repo_with_staged_change(tmp_path)
+    monkeypatch.chdir(repo)
+    result = _dispatch(_core().GitTool(), mode, "git", {"subcommand": "status"}, tool_roots=(str(repo),))
+    assert result.status == SubtaskStatus.COMPLETED and "a.txt" in result.tool_output
+
+
+def test_validate_refactor_outside_hitl_keeps_its_own_authority_and_reads_only_inside(tmp_path, monkeypatch):
+    ws, cand, out = _ws(tmp_path)
+    monkeypatch.chdir(ws)
+    seen = []
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
+               side_effect=lambda self_files, *a, **k: seen.append(self_files) or {"success": True, "output": "ok"},
+               autospec=False):
+        outside = _dispatch(_validation_tool(), "guardrails", "validate_refactor",
+                            {"files": [str(out / "secret.py")], "run_tests": False}, tool_roots=(str(ws), str(cand)))
+        inside = _dispatch(_validation_tool(), "guardrails", "validate_refactor",
+                           {"files": ["in.py"], "run_tests": False}, tool_roots=(str(ws), str(cand)))
+    assert outside.reason_codes == ("PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",)
+    assert inside.status == SubtaskStatus.COMPLETED and seen == [[str(ws / "in.py")]]
+
+
+def test_a_non_tool_object_is_never_dispatched():
+    double = MagicMock()
+    result = _dispatch(double, "guardrails", "lint", {"path": "a.py"})
+    assert result.status == SubtaskStatus.NEEDS_REVIEW and result.reason_codes == ("TOOL_NOT_GOVERNED",)
+    double.execute.assert_not_called()
+    double._run.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_planner_argument_keys_cannot_supply_authority(tmp_path, mode):
+    """The arguments travel as one mapping validated by the tool's schema: a planner key named like the authority
+    context (roots, autonomy_mode, invocation) is not a parameter and widens nothing."""
+    ws, cand, out = _ws(tmp_path)
+    result = _dispatch(_core().FilesystemTool(), mode, "filesystem",
+                       {"operation": "write", "path": str(out / "W.txt"), "content": "x", "roots": ["/"],
+                        "autonomy_mode": "guardrails", "invocation": {"roots": ["/"]}},
+                       tool_roots=(str(ws), str(cand)))
+    assert result.reason_codes == ("PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",) and not (out / "W.txt").exists()
+
+
+def test_an_unreadable_mode_counts_as_human_in_the_loop(tmp_path):
+    from kriya.tools.tool import ModelToolInvocation
+
+    assert ModelToolInvocation(roots=(), autonomy_mode=None).reviews_every_change
+    assert ModelToolInvocation(roots=(), autonomy_mode=HITL).reviews_every_change
+    assert not ModelToolInvocation(roots=(), autonomy_mode="guardrails").reviews_every_change
+    target = tmp_path / "outside.txt"
+    subtask = Subtask(id="s1", description="d", execution_method=ExecutionMethod.TOOL, tool_name="plugin_writer",
+                      tool_arguments={"note": "n"})
+    kernel = MagicMock(spec=["registry"])  # no config at all
+    kernel.registry.get = MagicMock(return_value=_writing_plugin_tool(target))
+    result = asyncio.run(subtask_executor.execute(subtask=subtask, plan=_plan_of(subtask),
+                                                  context=build_context_package(), kernel=kernel))
+    assert result.reason_codes == ("TOOL_MODEL_AUTHORITY_UNDECLARED",) and not target.exists()
+
+
+def test_mcp_tools_keep_their_own_tool002_authority_in_every_mode():
+    """MCPTool declares that its TOOL-002/TOOL-003 gate (in _run, identical for operator and model) governs a planned
+    call: S1 adds no refusal and no permission for MCP (the tool001 / tool002 suites prove that gate)."""
+    from kriya.mcp.mcp import MCPTool
+    from kriya.tools.tool import ModelToolInvocation
+
+    class _Args(BaseModel):
+        message: str = "hi"
+
+    args = _Args()
+    tool = MCPTool.__new__(MCPTool)
+    for mode in (*MODES, None):
+        assert tool.authorize_model_invocation(args, ModelToolInvocation(roots=(), autonomy_mode=mode)) is args
+
+
+def test_the_enforce_loop_hands_the_owner_workspace_and_the_candidate_as_the_roots():
+    import inspect
+
+    from kriya.workflow.enforce_loop import EnforceLoop
+
+    source = inspect.getsource(EnforceLoop.run)
+    assert source.count("tool_roots=(workspace_path, plan_workspace_path)") == 1
+
+
+# -- closed tables and structural tripwires ----------------------------------------------------------------------------
+
+def test_the_toolbox_refusal_codes_are_a_closed_table():
+    import ast
+
+    from kriya.tools import tool as tool_module
+    from kriya.tools.tool import MODEL_TOOL_REFUSAL_REASON_CODES, ModelInvocationRefused
+
+    assert MODEL_TOOL_REFUSAL_REASON_CODES == {
+        "TOOL_NOT_GOVERNED", "TOOL_MODEL_AUTHORITY_UNDECLARED", "TOOL_MUTATION_REVIEW_UNAVAILABLE",
+        "TOOL_WORKSPACE_ROOT_UNAVAILABLE"}
+    with pytest.raises(ValueError):
+        ModelInvocationRefused("TOOL_SOMETHING_NEW", "x")
+    # every ModelInvocationRefused(...) in Kriya names a code from the table (by constant)
+    root = Path(__file__).resolve().parent.parent
+    used = set()
+    for path in [*sorted((root / "kriya").rglob("*.py")), *sorted((root / "plugins").rglob("*.py"))]:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", None)) == \
+                    "ModelInvocationRefused":
+                first = node.args[0]
+                used.add(first.id if isinstance(first, ast.Name) else repr(ast.literal_eval(first)))
+    assert used and all(getattr(tool_module, name, None) in MODEL_TOOL_REFUSAL_REASON_CODES for name in used), used
+
+
+# Every BaseTool subclass Kriya ships, and how a model-authored call to it is governed (the inventory in the S1 report).
+DECLARED_MODEL_AUTHORITY = {
+    "FilesystemTool": "read/list: AuthorizedFileReader; any other operation: AuthorizedFileWriter DENY_ALL (refused)",
+    "ShellTool": "human-in-the-loop: refused (B3 first); else its own POL-001/SEC-005/containment authority",
+    "GitTool": "commit: trusted-control-path denial (refused); blame file: AuthorizedFileReader; reads: unchanged",
+    "SearchTool": "directory and every walked file: AuthorizedFileReader",
+    "ASTTool": "file: AuthorizedFileReader",
+    "ValidationTool": "human-in-the-loop: refused; else the validator's own authority, files via AuthorizedFileReader",
+    "MCPTool": "TOOL-002 durable approval + TOOL-003 containment in _run (unchanged)",
+}
+# The one place a Kriya tool writes the filesystem: FilesystemTool._run, reachable from a model-authored call only after
+# authorize_model_invocation, which refuses every write (DENY_ALL) - the operator's own path is unchanged.
+FILESYSTEM_WRITERS = {("FilesystemTool", "_run")}
+_MUTATING_CALLS = {"makedirs", "mkdir", "remove", "unlink", "rmdir", "rmtree", "rename", "replace", "write_text",
+                   "write_bytes", "copy", "copyfile", "copy2", "copytree", "move", "symlink", "link", "truncate"}
+
+
+def _base_tool_classes(sources):
+    """{class name: {method name: [mutating call names]}} for every class deriving from BaseTool in the sources."""
+    import ast
+
+    found = {}
+    for source in sources:
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.ClassDef) and any(getattr(b, "id", getattr(b, "attr", None)) == "BaseTool"
+                                                      for b in node.bases):
+                methods = {}
+                for item in node.body:
+                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        calls = []
+                        for call in ast.walk(item):
+                            if not isinstance(call, ast.Call):
+                                continue
+                            name = getattr(call.func, "id", getattr(call.func, "attr", None))
+                            if name in _MUTATING_CALLS:
+                                calls.append(name)
+                            elif name == "open" and any(
+                                    isinstance(a, ast.Constant) and isinstance(a.value, str)
+                                    and set(a.value) & set("wax+") for a in [*call.args[1:2],
+                                                                             *(k.value for k in call.keywords
+                                                                               if k.arg == "mode")]):
+                                calls.append("open-for-write")
+                        methods[item.name] = calls
+                found[node.name] = methods
+    return found
+
+
+def _shipped_tool_sources():
+    root = Path(__file__).resolve().parent.parent
+    return [p.read_text() for p in [*sorted((root / "kriya").rglob("*.py")), *sorted((root / "plugins").rglob("*.py"))]]
+
+
+def test_the_tripwire_sees_a_planted_undeclared_writing_tool():
+    planted = ("class Sneaky(BaseTool):\n"
+               "    async def _run(self, args):\n"
+               "        open(args.path, 'w').write('x')\n"
+               "        os.makedirs(args.dir)\n")
+    assert {k: {m: sorted(c) for m, c in v.items()} for k, v in _base_tool_classes([planted]).items()} == \
+        {"Sneaky": {"_run": ["makedirs", "open-for-write"]}}
+
+
+def test_every_shipped_tool_declares_its_model_authority_and_only_the_governed_writer_writes():
+    classes = _base_tool_classes(_shipped_tool_sources())
+    assert set(classes) == set(DECLARED_MODEL_AUTHORITY), sorted(classes)
+    for name, methods in classes.items():
+        assert "authorize_model_invocation" in methods, f"{name} does not declare its model-authored authority"
+        writers = {(name, method) for method, calls in methods.items() if calls}
+        assert writers <= FILESYSTEM_WRITERS, (name, writers)
+    assert FILESYSTEM_WRITERS <= {(n, m) for n, ms in classes.items() for m, c in ms.items() if c}

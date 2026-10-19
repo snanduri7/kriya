@@ -5,9 +5,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from _strict_doubles import strict_kernel
+from pydantic import BaseModel, ConfigDict
 
 from kriya.core.registry import ComponentRegistryError
-from kriya.tools.tool import ToolExecutionError
+from kriya.tools.tool import BaseTool, ToolExecutionError
 from kriya.workflow import subtask_executor
 from kriya.workflow.context_package import build_context_package
 from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask
@@ -17,8 +18,29 @@ from kriya.workflow.workflow_types import SubtaskStatus
 
 @pytest.fixture(autouse=True)
 def _tool_mechanics_not_hitl_gate(monkeypatch):
-    """These tests exercise the tool-execution MECHANICS under the default config; the human-in-the-loop refusal of confirmation-requiring tools is pinned in tests/test_tool_subtask_hitl_confirmation.py."""
-    monkeypatch.setattr("kriya.workflow.subtask_executor._hitl_blocks_tool_without_confirmation", lambda tool, kernel: False)
+    """These tests exercise the tool-execution MECHANICS outside human-in-the-loop (the executor reads the mode as
+    "guardrails"; S1 refuses undeclared and mutating planned steps in human-in-the-loop inside the tool boundary). The
+    human-in-the-loop refusals are pinned in tests/test_tool_subtask_hitl_confirmation.py and
+    tests/test_s1_toolbox_authority.py."""
+    monkeypatch.setattr("kriya.workflow.subtask_executor._autonomy_mode", lambda kernel: "guardrails")
+
+
+class _RecordingArgs(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
+class _RecordingTool(BaseTool):
+    """A real BaseTool double: S1's model-authored entry refuses anything that is not a BaseTool."""
+
+    name = "lint"
+    description = "a deterministic test tool"
+    arguments_schema = _RecordingArgs
+
+    def __init__(self, **calls_kwargs):
+        self.calls = AsyncMock(**calls_kwargs)
+
+    async def _run(self, args):
+        return await self.calls(**args.model_dump())
 
 
 
@@ -131,8 +153,7 @@ async def test_model_subtask_passes_known_target_files_from_planned_files():
 @pytest.mark.asyncio
 async def test_tool_subtask_completes_with_tool_output():
     subtask = _tool_subtask(tool_arguments={"path": "a.py"})
-    tool = MagicMock()
-    tool.execute = AsyncMock(return_value={"lint": "clean"})
+    tool = _RecordingTool(return_value={"lint": "clean"})
     kernel = strict_kernel()
     kernel.registry.get = MagicMock(return_value=tool)
 
@@ -141,7 +162,7 @@ async def test_tool_subtask_completes_with_tool_output():
     assert result.status == SubtaskStatus.COMPLETED
     assert result.execution_method == ExecutionMethod.TOOL.value
     assert result.tool_output == {"lint": "clean"}
-    tool.execute.assert_awaited_once_with(path="a.py")
+    tool.calls.assert_awaited_once_with(path="a.py")
 
 
 @pytest.mark.asyncio
@@ -159,12 +180,12 @@ async def test_tool_subtask_unregistered_tool_yields_needs_review():
 @pytest.mark.asyncio
 async def test_tool_subtask_execution_error_yields_failed():
     subtask = _tool_subtask()
-    tool = MagicMock()
-    tool.execute = AsyncMock(side_effect=ToolExecutionError("bad args"))
+    tool = _RecordingTool(side_effect=ToolExecutionError("bad args"))
     kernel = strict_kernel()
     kernel.registry.get = MagicMock(return_value=tool)
 
     result = await subtask_executor.execute(subtask=subtask, plan=_plan(subtask), context=build_context_package(), kernel=kernel)
 
     assert result.status == SubtaskStatus.FAILED
-    assert result.error == "bad args"
+    # The boundary wraps a run failure exactly as BaseTool.execute() does (the old bare-MagicMock double skipped it).
+    assert result.error == "Tool execution failed: bad args"

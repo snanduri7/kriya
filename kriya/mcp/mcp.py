@@ -746,6 +746,12 @@ class MCPTool(BaseTool):
     def arguments_schema(self) -> Type[BaseModel]:
         return self._schema
 
+    def authorize_model_invocation(self, args: BaseModel, invocation: Any) -> BaseModel:
+        """S1: a model-authored MCP call is governed by exactly the authority every MCP call already passes in _run
+        below - TOOL-002's durable, identity-bound operator approval (an explicit decision, never inferred) and
+        TOOL-003's capability containment - in every mode; this declaration adds nothing and widens nothing."""
+        return args
+
     async def _run(self, args: BaseModel) -> Any:
         # TOOL-002 P1 (Invariant 1/2/8/9/10): a deterministic Kriya
         # authority decision, ALWAYS REAL ENFORCEMENT regardless of

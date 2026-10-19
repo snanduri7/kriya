@@ -17,28 +17,30 @@ through here).
 
 TOOL-tagged subtasks: never invoke the Developer/LLM at all (MA6 invariant
 3) - resolves subtask.tool_name directly through the kernel's
-ComponentRegistry("tool", ...) and calls tool.execute(**subtask.
-tool_arguments). An unregistered tool_name should already have been
+ComponentRegistry("tool", ...) and calls the governed MODEL-AUTHORED entry
+point kriya.tools.tool.execute_model_authored(tool, subtask.tool_arguments,
+invocation) (S1, see below). An unregistered tool_name should already have been
 rejected by plan_validation.py (MA6.2) before a plan reaches this module;
 if one somehow still shows up here (a stale plan, a validator bypassed by
 a caller error), execute() fails closed with NEEDS_REVIEW rather than
 crashing or silently skipping the subtask.
 
-CALLER RESPONSIBILITY, not enforced here: a TOOL subtask's execution IS a
-real side effect (unlike a MODEL subtask, which only returns content this
-module never itself applies) - "shell"/"git"/registered MCP tools are
-capable of arbitrary command execution / real git mutation / MCP tool
-invocation, and this module DELIBERATELY consults no policy engine of its
-own before running one - `tool.execute(**subtask.tool_arguments)` calls
-the exact same `BaseTool.execute()` boundary direct CLI tool execution
-(`kriya tools execute`) already goes through, and each tool implementation
-owns its own authorization/containment (ExecutionPolicy's hard invariants
-for ShellTool/GitTool, TOOL-002's durable MCP invocation approval +
-TOOL-003's OCI capability containment for MCPTool, SEC-005's registry-
-scoped network authority for ShellTool package-manager commands) -
-duplicating any of that HERE would be a second, competing policy engine
-(Invariant: one security decision, one authoritative owner), not
-stronger security. Any caller that isn't itself an authoritative, real
+A TOOL subtask's execution IS a real side effect (unlike a MODEL subtask,
+which only returns content this module never itself applies), and its tool
+and arguments are MODEL OUTPUT. S1 (OI-88, owner contract 2026-10-19): a
+model-authored call is never the operator's call. `kriya tools execute`
+(a person) keeps calling BaseTool.execute(); this module calls ONLY
+execute_model_authored(), which hands the tool the invocation's roots (the
+owner workspace and the plan's candidate worktree, supplied by the enforce
+loop) and the run's autonomy mode, and runs nothing until the tool's own
+authorize_model_invocation() allowed it - each tool reusing the existing
+authority for the equivalent agent-generated effect (AuthorizedFileReader /
+AuthorizedFileWriter / the trusted-control-path denial for the core tools,
+TOOL-002/TOOL-003 for MCPTool, POL-001/SEC-005 inside ShellTool), and a tool
+that declares nothing refused in human-in-the-loop. This module still
+consults no policy engine of its own and never matches tool names
+(Invariant: one security decision, one authoritative owner); it only says
+WHO authored the call and over WHICH roots, and records the typed refusal. Any caller that isn't itself an authoritative, real
 execution path (e.g. an observational/shadow context whose own contract
 requires no mutation) MUST still decide not to route a TOOL-tagged
 subtask into this function's real dispatch at all - see
@@ -54,11 +56,11 @@ own per-subtask loop for the full account.
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Sequence
 
 from kriya.core.registry import ComponentRegistryError
 from kriya.policy.errors import PolicyDeniedError
-from kriya.tools.tool import ToolExecutionError
+from kriya.tools.tool import ModelInvocationRefused, ModelToolInvocation, ToolExecutionError, execute_model_authored
 from kriya.workflow.context_package import ContextPackage
 from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, Subtask
 from kriya.workflow.subtask_context_projection import project_for_subtask
@@ -135,13 +137,19 @@ async def _execute_model_subtask(
 TOOL_CONFIRMATION_UNSUPPORTED = "TOOL_CONFIRMATION_UNSUPPORTED"
 
 
+def _autonomy_mode(kernel: Any) -> Optional[str]:
+    """The run's autonomy.mode, None when the kernel carries no readable one (the invocation then counts as
+    human-in-the-loop, the strictest)."""
+    mode = getattr(getattr(getattr(kernel, "config", None), "autonomy", None), "mode", None)
+    return mode if isinstance(mode, str) else None
+
+
 def _hitl_blocks_tool_without_confirmation(tool: Any, kernel: Any) -> bool:
     """True when the tool asks for confirmation when an operator runs it and the run is human-in-the-loop (which has no per-run review for a planner-chosen tool call)."""
-    mode = getattr(getattr(getattr(kernel, "config", None), "autonomy", None), "mode", None)
-    return bool(getattr(tool, "requires_confirmation", False)) and mode == "human-in-the-loop"
+    return bool(getattr(tool, "requires_confirmation", False)) and _autonomy_mode(kernel) == "human-in-the-loop"
 
 
-async def _execute_tool_subtask(subtask: Subtask, kernel: Any) -> SubtaskResult:
+async def _execute_tool_subtask(subtask: Subtask, kernel: Any, tool_roots: Sequence[str] = ()) -> SubtaskResult:
     try:
         tool = kernel.registry.get("tool", subtask.tool_name)
     except (ComponentRegistryError, Exception) as e:
@@ -165,8 +173,17 @@ async def _execute_tool_subtask(subtask: Subtask, kernel: Any) -> SubtaskResult:
             reason_codes=(TOOL_CONFIRMATION_UNSUPPORTED,),
         )
 
+    # S1: the model-authored entry point - authorized by the tool's own declaration over these roots before anything
+    # runs; a refusal is typed (TOOLBOX code, NEEDS_REVIEW) or the reused authority's PolicyDeniedError (FAILED, below).
+    invocation = ModelToolInvocation(roots=tuple(tool_roots), autonomy_mode=_autonomy_mode(kernel))
     try:
-        output = await tool.execute(**subtask.tool_arguments)
+        output = await execute_model_authored(tool, subtask.tool_arguments, invocation)
+    except ModelInvocationRefused as e:
+        logger.warning(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} refused: {e}")
+        return SubtaskResult(
+            subtask_id=subtask.id, status=SubtaskStatus.NEEDS_REVIEW, execution_method=ExecutionMethod.TOOL.value,
+            error=str(e), reason_codes=(e.reason_code,),
+        )
     except ToolExecutionError as e:
         logger.info(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} failed: {e}")
         # TOOL-001 (2026-09-13): BaseTool.execute() always wraps the REAL
@@ -201,6 +218,7 @@ async def execute(
     context: ContextPackage,
     kernel: Optional[Any] = None,
     developer_agent: Optional[Any] = None,
+    tool_roots: Sequence[str] = (),
     **run_generation_kwargs: Any,
 ) -> SubtaskResult:
     """Executes exactly one Subtask. `plan` is accepted (and not otherwise
@@ -214,11 +232,15 @@ async def execute(
     requires `developer_agent` (both Optional only because they're
     mutually irrelevant to the other execution_method - passing neither
     for the wrong kind is a caller error, surfaced as a clear ValueError
-    rather than a confusing AttributeError deeper in the call)."""
+    rather than a confusing AttributeError deeper in the call).
+
+    ``tool_roots`` (S1): the workspace roots a TOOL subtask's model-authored
+    call may touch, the owner workspace first; empty refuses every
+    path-bearing call (TOOL_WORKSPACE_ROOT_UNAVAILABLE)."""
     if subtask.execution_method == ExecutionMethod.TOOL:
         if kernel is None:
             raise ValueError(f"subtask {subtask.id!r} is execution_method=tool but no kernel was supplied")
-        return await _execute_tool_subtask(subtask, kernel)
+        return await _execute_tool_subtask(subtask, kernel, tool_roots)
 
     if developer_agent is None:
         raise ValueError(f"subtask {subtask.id!r} is execution_method=model but no developer_agent was supplied")
