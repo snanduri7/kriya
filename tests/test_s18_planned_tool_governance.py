@@ -652,3 +652,11 @@ def test_an_unvalidated_section_handed_to_appconfig_is_revalidated():
     with pytest.raises(AutonomyModeError):
         AppConfig(autonomy=AutonomyConfig.model_construct(mode="autonomous"))
     assert AppConfig(autonomy=AutonomyConfig(mode=GUARDRAILS)).autonomy.mode == GUARDRAILS
+
+
+def test_the_contract_default_is_undeclared():
+    """The tool contract's own default is None (= undeclared). Today the shipped table makes the default unreachable for
+    a planned call (every shipped class declares; the seam requires a declaration), so this pins the contract itself:
+    a future shipped tool that forgets to declare must not become plannable by default (mutant S18M33)."""
+    assert _Undeclared().planned_governance is None
+    assert BaseTool.__dict__["planned_governance"].fget(_Undeclared()) is None
