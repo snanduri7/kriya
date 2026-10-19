@@ -337,7 +337,7 @@ PROMPT_DIGESTS = {
     'architect': 'b700554a5f27eb26',
     'developer': '0cf65910968d7ddc',
     'milestone_planner': 'cb527719618db602',
-    'planner': '6e6b6128feb3ac84',
+    'planner': '82e5d5e184212032',  # S18b (OI-138, owner-approved): worked example B names search, not validate_refactor
     'planner_closed_vocabularies': '4080a03cff893701',
     'rejected_markers': '25e6823c7da3b148',
     'requirement_verdicts_schema': '46ede08410a070df',

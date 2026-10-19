@@ -120,7 +120,6 @@ def _example_b(prompt: str):
     return obj
 
 
-@pytest.mark.xfail(strict=True, reason="S18b: expected to flip with the OI-138 correction (worked example B)")
 def test_every_tool_the_planner_examples_teach_is_plannable():
     """OI-138 contract (b): parsed from the prompt itself, so a new example naming an operator-only tool fails here."""
     prompt = _planner_prompt()
@@ -180,7 +179,6 @@ def _plan_following(tmp_path, example_subtask):
     return stopped, planner, ctx
 
 
-@pytest.mark.xfail(strict=True, reason="S18b: expected to flip with the OI-138 correction (worked example B)")
 def test_a_plan_following_the_worked_tool_example_is_accepted_first_time(tmp_path):
     """OI-138 reproduction (after): the Planner copies worked example B verbatim - accepted, ONE Planner call."""
     stopped, planner, ctx = _plan_following(tmp_path, _example_b(_planner_prompt()))

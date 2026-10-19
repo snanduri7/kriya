@@ -182,7 +182,9 @@ def test_worked_example_b_is_genuinely_tool_executed_with_top_level_tool_name():
     idx_b = prompt.index("Worked example B")
     example_b = prompt[idx_b:]
     assert '"execution_method": "tool"' in example_b
-    assert '"tool_name": "validate_refactor"' in example_b
+    # S18b (OI-138): the example names a tool a planned step can run (validate_refactor is operator-only since S18;
+    # tests/test_s18b_planned_tool_contracts.py checks every example tool against the governance resolver).
+    assert '"tool_name": "search"' in example_b
 
 
 # =====================================================================

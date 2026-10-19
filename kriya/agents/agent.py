@@ -505,14 +505,15 @@ class PlannerAgent(BaseAgent):
             "\n"
             "Worked example B (a genuine direct tool-executed subtask, rare - only when a real registered "
             "Kriya tool listed for you elsewhere in this prompt should run directly, with no model call): "
-            '{"id": "s4", "description": "Run the registered refactor-validation tool directly", '
-            '"execution_method": "tool", "tool_name": "validate_refactor", "execution_role": '
-            '"verification", "depends_on": ["s2"], "planned_files": [], "provides": [], "requires": [], '
-            '"relevant_global_invariant_ids": ["gi1"], "acceptance_criteria_ids": ["ac1"], "verification": '
-            '[]} - note the subtask\'s own top-level tool_name ("validate_refactor") is set here, to an '
-            "exact name from the registered-tools list given to you elsewhere in this prompt, never a "
+            '{"id": "s4", "description": "Find the existing callers of load_settings before it changes", '
+            '"execution_method": "tool", "tool_name": "search", "tool_arguments": {"pattern": '
+            '"load_settings"}, "depends_on": [], "planned_files": [], "provides": ["callers.load_settings"], '
+            '"requires": [], "relevant_global_invariant_ids": ["gi1"], "acceptance_criteria_ids": [], '
+            '"verification": []} - note the subtask\'s own top-level tool_name ("search") is set here, to an '
+            "exact name from the tools list given to you elsewhere in this prompt (only the tools listed "
+            "there can run as a planned step), never a "
             "verifier keyword like \"test\"/\"compile\"/\"pytest\" (those are not valid Subtask.tool_name "
-            "values) and never a name you are not certain is actually registered this run.\n"
+            "values) and never a name you are not certain is actually listed this run.\n"
             "\n"
             f"{PLANNER_CLOSED_VOCABULARIES}\n"
             "execution_role is WHAT the subtask is for, separate from execution_method (HOW it runs): "
