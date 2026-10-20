@@ -176,22 +176,23 @@ def test_the_measured_cost_of_the_grammar_is_fail_closed(text, expected):
 def test_unclosed_quoted_values_cost_linear_time():
     """Own bug of 09e63ae (MEASURED, scratch s2d/perf_after.txt): 200 KB of `sshpass -p 'a ` took 30.5 s - every value that
     opened a quote it never closed scanned the rest of the line (quadratic). Bound for 100 KB: 1.5 s (MEASURED quadratic
-    ~7.6 s; linear well under 0.2 s). Each value is still hidden on its own."""
+    ~7.6 s; linear well under 0.2 s). The first value opens a quote no later word closes, so it runs to the end of the line."""
     import time
 
     count = 100_000 // 14
     started = time.perf_counter()
     out = redact_text("sshpass -p 'a " * count)
     elapsed = time.perf_counter() - started
-    assert out == f"sshpass -p '{R} " * count
+    assert out == f"sshpass -p '{R} "
     assert elapsed < 1.5, elapsed
 
 
 @pytest.mark.parametrize("text, expected", [
     (f"sshpass -p 'a {S}' ssh h; sshpass -p 'b {S}' ssh h", f"sshpass -p '{R}' ssh h; sshpass -p '{R}' ssh h"),
+    (f"sshpass -p 'a {S}\nb' ssh h", f"sshpass -p '{R}\nb' ssh h"),
     (f'docker login -p "a {S} b" r', f'docker login -p "{R}" r'),
     (f"mysql -p'a {S}' db", f"mysql -p'{R}' db"),
-], ids=["two-quoted-values", "double-quoted", "attached-quoted"])
+], ids=["two-quoted-values", "quote-not-closed-on-the-line", "double-quoted", "attached-quoted"])
 def test_a_quoted_value_with_spaces_is_hidden_to_its_closing_quote_on_the_same_line(text, expected):
     assert redact_text(text) == expected
 

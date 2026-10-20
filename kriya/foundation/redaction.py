@@ -358,14 +358,17 @@ def _split_word(token: str) -> Tuple[str, str, str]:
 
 def _closing_words(text: str, matches: List[Match], parts: List[Tuple[str, str, str]]) -> Dict[str, List[Optional[int]]]:
     """For each quote character and each word: the index of the first LATER word on the same line whose trailing separators
-    hold that quote, or None. One right-to-left pass (a scan per value was quadratic: S2d own bug, 200 KB took 30 s)."""
+    hold that quote, else the LAST word of the line (a quote never closed runs to the line's end: fail-closed). One
+    right-to-left pass (a scan per value was quadratic: S2d own bug, 200 KB took 30 s)."""
     closing: Dict[str, List[Optional[int]]] = {"'": [None] * len(matches), '"': [None] * len(matches)}
     nearest: Dict[str, Optional[int]] = {"'": None, '"': None}
+    line_end = len(matches) - 1
     for index in range(len(matches) - 1, -1, -1):
         if index + 1 < len(matches) and "\n" in text[matches[index].end():matches[index + 1].start()]:
             nearest = {"'": None, '"': None}
+            line_end = index
         for quote, later in nearest.items():
-            closing[quote][index] = later
+            closing[quote][index] = line_end if later is None else later
         for quote in nearest:
             if quote in parts[index][2]:
                 nearest[quote] = index
@@ -375,7 +378,7 @@ def _closing_words(text: str, matches: List[Match], parts: List[Tuple[str, str, 
 def _quoted_value_end(parts: List[Tuple[str, str, str]], closing: Dict[str, List[Optional[int]]], index: int, offset: int) -> Tuple[str, int]:
     """(opening quote kept in the output, index of the word that ends the value). A value that opens a quote it does not
     close in its own word (``-p 'a b'``, ``-p'a b'``, an escaped ``\\"a b\\"``) runs to the first later word on the same line
-    whose trailing separators close it; otherwise it is this word alone."""
+    whose trailing separators close it, or to the end of the line when none does."""
     lead, word, trail = parts[index]
     if offset == 0 and lead[-1:] in ("'", '"'):
         quote, opened, rest = lead[-1], "", trail
@@ -383,8 +386,7 @@ def _quoted_value_end(parts: List[Tuple[str, str, str]], closing: Dict[str, List
         quote, opened, rest = word[offset], word[offset], word[offset + 1:] + trail
     else:
         return "", index
-    later = None if quote in rest else closing[quote][index]
-    return ("", index) if later is None else (opened, later)
+    return ("", index) if quote in rest else (opened, closing[quote][index])
 
 
 def _redact_commands(text: str) -> str:
