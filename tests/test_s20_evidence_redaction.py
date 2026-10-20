@@ -201,6 +201,101 @@ def test_the_evidence_envelope_keeps_its_readable_fields_and_the_caller_payload(
     assert payload["error"] == f"curl -H 'Authorization: Token {S}20' failed"     # the caller's object is never mutated
 
 
+# S20r: the store's other free text (the gap record's error and the seal's degraded reasons) and the order redact -> cut.
+STAMP1 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "s20r_stamp1_evidence")
+
+
+def _records_bytes(state, run_id="s20-rec"):
+    return open(os.path.join(state, "attempt-evidence", run_id, "records.jsonl"), "rb").read()
+
+
+def _gap_store(tmp_path):
+    """A record the store refuses (it names another run) becomes a ``recorder.gap`` whose error quotes the refused value,
+    and the seal lists the degradation. The quoted value carries a URL credential whose password straddles the 500-char
+    cut of the gap's error: hidden whole only when the text is redacted BEFORE it is cut."""
+    from kriya.core.attempt_evidence import model
+    from kriya.core.attempt_evidence.writer import AttemptEvidenceWriter
+
+    writer = AttemptEvidenceWriter(str(tmp_path / "state"), "s20-rec", capture=model.CAPTURE_FULL, manifest={})
+    writer.append("run.opened", {})
+    # ValueError("record for run '<offered>' offered to the store of 's20-rec'"): the offered id starts at character 16
+    offered = "x" * 470 + f" https://u:{S}60zzzzzzzzzzzz@h/x password={S}61"
+    assert writer.record("diagnosis", {"x": 1}, identity={"run_id": offered}) is None
+    assert writer.seal("run_closed") is True
+    return str(tmp_path / "state")
+
+
+@FLIP
+def test_the_gap_record_and_the_seal_store_no_secret(tmp_path):
+    state = _gap_store(tmp_path)
+    stored = _records_bytes(state) + open(os.path.join(state, "attempt-evidence", "s20-rec", "seal.json"), "rb").read()
+    assert f"{S}60".encode() not in stored and f"{S}61".encode() not in stored
+    gap = [json.loads(line) for line in _records_bytes(state).splitlines()][-1]
+    assert gap["kind"] == "recorder.gap" and gap["payload"]["lost_kind"] == "diagnosis" and gap["payload"]["error_type"] == "ValueError"
+    assert len(gap["payload"]["error"]) == 500 and f"https://{R}@" in gap["payload"]["error"]
+
+
+def test_a_freshly_written_chain_verifies_and_hashes_each_line_as_stored(tmp_path):
+    """Before AND after: the hash chain binds the STORED line - every ``prev`` is the digest of the previous line as it is
+    on disk, the seal's head is the last stored line's digest, and the store VERIFIES (after S20r the stored line is the
+    redacted one, so the chain is computed after redaction)."""
+    from kriya.core.attempt_evidence import model, reader
+
+    state, _ = _store(tmp_path)
+    lines = _records_bytes(state).splitlines()
+    prev = model.GENESIS_PREV
+    for line in lines:
+        assert json.loads(line)["prev"] == prev
+        prev = model.digest(line)
+    run = reader.open_run(state, "s20-rec")
+    assert len(lines) == 2 and run.seal()["head_digest"] == prev and run.verify().status == reader.VERIFIED
+
+
+def test_an_envelope_without_a_secret_is_stored_byte_identical(tmp_path):
+    """Before AND after: a payload with no secret shape (``max_tokens``, ``token_budget``, a digest, a commit SHA, an
+    e-mail address, an argv with ``--token-file``) is stored exactly as its unredacted canonical serialization."""
+    from kriya.core.attempt_evidence import model
+    from kriya.core.attempt_evidence.writer import AttemptEvidenceWriter
+
+    payload = {"tool_name": "shell", "status": "OK", "max_tokens": 4096, "token_budget": 10, "path": "src/a.py",
+               "after_digest": "sha256:" + "a" * 64, "command": ["pytest", "-q", "--token-file", "t.txt"], "nested": {"x": [1, None, True]},
+               "reason_codes": ["R"], "message": "commit 0123456789abcdef0123456789abcdef01234567 by dev@example.com"}
+    writer = AttemptEvidenceWriter(str(tmp_path / "state"), "s20-rec", capture=model.CAPTURE_FULL, manifest={})
+    writer.append("tool.execution", payload)
+    assert writer.seal("run_closed")
+    stored = json.loads(_records_bytes(str(tmp_path / "state")).splitlines()[0])
+    assert model.canonical_bytes(stored["payload"]) == model.canonical_bytes(payload)
+
+
+def test_a_stamp_1_store_written_before_s20r_still_verifies_reads_and_is_served_redacted():
+    """Before AND after: old evidence is never rewritten. A store written by the pre-S20r writer (the fixture bytes were
+    produced by AttemptEvidenceWriter at 6fd5933: stamp "1", its envelope RAW) still VERIFIES and reads as recorded, its
+    manifest is served with the stamp it was written with, and the KUP projection still hides its secret (the read-side
+    redaction stays for exactly these stores)."""
+    import shutil
+
+    from kriya.config import AppConfig
+    from kriya.core.attempt_evidence import reader
+    from kriya.core.state_paths import resolve_state_directory
+    from kriya.kup.cli_ops import run_kup_operation
+    from kriya.kup.inspect import encode_response
+
+    state = resolve_state_directory(AppConfig())[0]
+    shutil.copytree(os.path.join(STAMP1, "attempt-evidence", "s20r-stamp1"), os.path.join(state, "attempt-evidence", "s20r-stamp1"))
+    run = reader.open_run(state, "s20r-stamp1")
+    assert run.manifest()["redaction_policy_version"] == "1"
+    assert run.verify().status == reader.VERIFIED
+    record = [r for r in run.records() if r["kind"] == "tool.execution"][0]
+    assert record["payload"]["error"] == "curl -H 'Authorization: Token Zq9S20RSTAMP1' failed"      # read as recorded
+    assert run.blob(record["blobs"]["tool_output"]) == b"DB_PASSWORD=Zq9S20RSTAMP1blob"
+    records = run_kup_operation(AppConfig(), {"operation": "evidence.records", "run_id": "s20r-stamp1"})
+    assert records["error"] is None, records["error"]
+    assert [r["kind"] for r in records["data"]["records"]] == ["run.opened", "tool.execution"]
+    assert "Zq9S20RSTAMP1" not in encode_response(records)
+    manifest = run_kup_operation(AppConfig(), {"operation": "evidence.manifest", "run_id": "s20r-stamp1"})
+    assert manifest["error"] is None and manifest["data"]["manifest"]["redaction_policy_version"] == "1"
+
+
 # =========================================================================== I-9 / I-10: the launch record
 
 LID = "20261020T101010-abcdef01"
@@ -251,10 +346,16 @@ def test_the_launch_record_stores_no_redactable_secret(tmp_path):
 
 @FLIP
 def test_the_launch_record_holds_the_redacted_free_text(tmp_path):
+    """S20r changed this pin's ``approval_required`` lines (they encoded the shape before S2d): the `--token` refusal is
+    S2d's (OI-153 (c)) - the fixed refusal text, the REDACTED command and the fingerprint of the exact bytes. The other
+    lines are I-9's."""
+    from kriya.policy.approval import RUNTIME_COMMAND_SECRET_REFUSAL
+
     ws = _launch(tmp_path)
     record = json.loads(_launch_text(ws))
     assert record["approval_required"]["details"]["commands"] == [f"run.sh --token {R}"]
-    assert record["approval_required"]["reason"] == f"run it; token: {R}"
+    assert record["approval_required"]["reason"] == RUNTIME_COMMAND_SECRET_REFUSAL
+    assert record["approval_required"]["details"]["command_fingerprint"].startswith("sha256:")
     assert record["declined_decisions"][0]["reason"] == f"lookup with secret={R}"
     assert record["declined_decisions"][0]["details"] == {"terms": [f"api_key={R}"]}
     assert record["ended"]["error"] == f"boom Authorization: {R} {R}"
@@ -290,6 +391,146 @@ def test_a_positional_secret_is_not_offered_for_review_nor_recorded(tmp_path):
     assert [e["commands"] for e in runtime] == [] and f"{S}34" not in _launch_text(ws)
 
 
+# S20r (I-9): the notes S2d does not write, the order redact -> cut, OI-153 part B, and the non-secret control.
+LID2 = "20261020T101011-abcdef02"
+
+
+def _session_at(ws_path, launch_id):
+    from kriya.context.workspace_identity import workspace_identity
+    from kriya.control.launch import LaunchSession
+
+    session = LaunchSession(ws_path, workspace_identity(ws_path), launch_id, "goal", {"ready": True}, {})
+    session.open()
+    return session
+
+
+def _workspace(tmp_path):
+    from kriya.context.workspace_identity import canonical_workspace
+
+    ws = tmp_path / "proj"
+    ws.mkdir(exist_ok=True)
+    return canonical_workspace(str(ws))
+
+
+@FLIP
+def test_a_note_s2d_does_not_write_is_stored_redacted(tmp_path):
+    """The NON-secret refusal path: an unreviewable (empty) command set whose reason quotes a positional secret, and an
+    ``other_approval`` note whose details carry a flag secret - S2d records neither; both are stored redacted."""
+    from kriya.cli import _runtime_command_decision
+    from kriya.control import launch as launch_module
+    from kriya.policy.approval import RuntimeCommandSubject
+
+    ws = _workspace(tmp_path)
+    session = _session_at(ws, LID)
+    try:
+        _runtime_command_decision(RuntimeCommandSubject("u9", "c", ws, (), "none", None, f"run mysql -u root -p{S}70 db"), False)
+    finally:
+        session.finish(0, None, None)
+    session = _session_at(ws, LID2)
+    try:
+        assert launch_module.note_approval_required("other_approval", f"needs token: {S}71", {"files": [f"--password {S}72"]})
+    finally:
+        session.finish(0, None, None)
+    first, second = json.loads(_launch_text(ws)), json.loads(_launch_text_of(ws, LID2))
+    assert first["approval_required"]["reason"] == f"run mysql -u root -p{R} db"
+    assert first["approval_required"]["details"] == {"commands": []}
+    assert second["approval_required"]["reason"] == f"needs token: {R}"
+    assert second["approval_required"]["details"] == {"files": [f"--password {R}"]}
+
+
+def _launch_text_of(ws, launch_id):
+    from kriya.control.persistence import launch_record_path
+
+    return open(launch_record_path(ws, launch_id), encoding="utf-8").read()
+
+
+def _straddling(limit, marker):
+    """A text whose URL password straddles the ``limit``-char cut: cut first, the ``@`` is gone and the userinfo rule no
+    longer matches, so the stored prefix of the password would leak; redacted first, it is hidden whole."""
+    head = "x" * (limit - 30) + " https://u:"
+    return head + marker + "z" * 40 + "@h/x"
+
+
+@FLIP
+def test_each_launch_note_is_redacted_before_it_is_cut(tmp_path, monkeypatch):
+    from kriya.control import launch as launch_module
+    from kriya.control import launch_approval
+
+    monkeypatch.setattr(launch_approval, "REASON_MAX_CHARS", 500)
+    ws = _workspace(tmp_path)
+    session = _session_at(ws, LID)
+    try:
+        assert launch_module.note_approval_required("other_approval", _straddling(400, f"{S}73"), {})
+        assert launch_module.decline_decision("skill_gap_decision", _straddling(300, f"{S}74"), {"skills": ["a"]})
+        awaiting = launch_module.request_change_approval([{"filepath": "a.py", "content": "+x = 1\n"}], _straddling(500, f"{S}75"))
+        assert awaiting is not None
+        awaiting.close()
+    finally:
+        session.finish(1, {"status": "failed", "error": _straddling(400, f"{S}76")}, None)
+    text = _launch_text(ws)
+    for n in (73, 74, 75, 76):
+        assert f"{S}{n}" not in text, n
+    record = json.loads(text)
+    change = record["pending_approval"]
+    assert len(record["approval_required"]["reason"]) == 400 and len(record["declined_decisions"][0]["reason"]) == 300
+    assert len(record["ended"]["error"]) == 400 and len(change["reason"]) == 500 and change["reason_truncated"] is True
+    assert f"https://{R}@" in record["approval_required"]["reason"]
+
+
+@FLIP
+def test_a_positional_secret_launch_leaves_no_raw_secret_under_the_launch_dir_or_the_state_dir(tmp_path):
+    """OI-153 part B (S2d display/review + S20r I-9): a desktop launch reaches a runtime command carrying a RECOGNIZED
+    positional secret (S2d grammar: ``sshpass -p <pw>``); its reason quotes the command, and the run ends with an error that
+    quotes it too. Every file under the launch record's directory and the state directory is free of the secret; the
+    record holds the redacted command and the digest of the exact bytes (the subject's fingerprint), never the raw bytes."""
+    from kriya.cli import _runtime_command_decision
+    from kriya.config import AppConfig
+    from kriya.control.persistence import launch_record_path
+    from kriya.core.state_paths import resolve_state_directory
+    from kriya.policy.approval import RuntimeCommandSubject
+
+    secret = f"{S}77"
+    ws = _workspace(tmp_path)
+    subject = RuntimeCommandSubject("u1", "c", ws, (("sshpass", "-p", secret, "ssh", "h"),), "none", None, f"run sshpass -p {secret} ssh h")
+    session = _session_at(ws, LID)
+    try:
+        decision = _runtime_command_decision(subject, yes=False)
+        assert decision.approved_fingerprint is None
+    finally:
+        session.finish(1, {"status": "failed", "error": f"verification declined: sshpass -p {secret} ssh h was not run"}, None)
+    launch_dir = os.path.dirname(launch_record_path(ws, LID))
+    state = resolve_state_directory(AppConfig())[0]
+    assert os.listdir(launch_dir) and secret.encode() not in _bytes_under(launch_dir) + _bytes_under(state)
+    assert secret.encode() not in _bytes_under(os.path.join(ws, ".kriya"))
+    record = json.loads(_launch_text(ws))
+    assert record["approval_required"]["details"] == {"commands": [f"sshpass -p {R} ssh h"], "command_fingerprint": subject.fingerprint}
+    assert record["ended"]["error"] == f"verification declined: sshpass -p {R} ssh h was not run"
+
+
+def test_launch_notes_without_a_secret_are_stored_as_given(tmp_path):
+    """Before AND after: notes with no secret shape are stored byte-identical (``max_tokens``, a digest, a path, a review
+    reason with the section header)."""
+    from kriya.control import launch as launch_module
+
+    reason = "Human-in-the-loop review policy\n\n=== Automated Code Review ===\nLooks right; max_tokens=4096 kept."
+    ws = _workspace(tmp_path)
+    session = _session_at(ws, LID)
+    try:
+        assert launch_module.note_approval_required("other_approval", "a policy action needs approval", {"files": ["src/a.py"], "n": 2})
+        assert launch_module.decline_decision("web_lookup_query", "Kriya wants to send a live-lookup search", {"terms": ["pydantic v2 model_dump"]})
+        awaiting = launch_module.request_change_approval([{"filepath": "a.py", "content": "+x = 1\n"}], reason)
+        awaiting.close()
+    finally:
+        session.finish(1, {"status": "failed", "error": "gate failed: sha256:" + "a" * 64}, None)
+    record = json.loads(_launch_text(ws))
+    assert record["approval_required"]["reason"] == "a policy action needs approval"
+    assert record["approval_required"]["details"] == {"files": ["src/a.py"], "n": 2}
+    assert record["declined_decisions"][0]["reason"] == "Kriya wants to send a live-lookup search"
+    assert record["declined_decisions"][0]["details"] == {"terms": ["pydantic v2 model_dump"]}
+    assert record["pending_approval"]["reason"] == reason
+    assert record["ended"]["error"] == "gate failed: sha256:" + "a" * 64
+
+
 # =========================================================================== I-11 / I-12: decision ledger, planning diagnostics
 
 @FLIP
@@ -322,6 +563,49 @@ def test_the_planning_diagnostic_stores_no_secret(tmp_path):
     line = json.loads(text.splitlines()[0])
     assert line["planner_request"] == f"goal: deploy with api_key={R}"
     assert line["reason_codes"] == ["RC"] and line["validation_errors"] == ["E1"]
+
+
+@FLIP
+def test_the_planning_diagnostic_is_redacted_before_it_is_bounded(tmp_path):
+    from kriya.workflow.planning_diagnostics import _MAX_TEXT_CHARS, persist_planning_attempt_diagnostic
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    path = persist_planning_attempt_diagnostic(
+        str(ws), "r1", attempt=1, planner_request=_straddling(_MAX_TEXT_CHARS, f"{S}53"), planner_system_prompt="sys",
+        raw_plan_response="{}", plan=None, validation_errors=[], reason_codes=[], repository_evidence=[], repair_prompt=None)
+    line = json.loads(open(path, encoding="utf-8").read().splitlines()[0])
+    assert f"{S}53" not in line["planner_request"]
+    assert line["planner_request"].endswith("...[truncated]") and f"https://{R}@" in line["planner_request"]
+
+
+def test_a_planning_diagnostic_without_a_secret_is_stored_as_given(tmp_path):
+    """Before AND after: text without a secret shape is stored byte-identical (``max_tokens``, digests, paths)."""
+    from kriya.workflow.planning_diagnostics import persist_planning_attempt_diagnostic
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    request = "goal: add sub to calc.py; keep max_tokens=4096; base sha256:" + "a" * 64
+    path = persist_planning_attempt_diagnostic(
+        str(ws), "r1", attempt=2, planner_request=request, planner_system_prompt="sys", raw_plan_response='{"subtasks": []}',
+        plan=None, validation_errors=["E1 src/a.py"], reason_codes=["RC"], repository_evidence=[{"path": "src/a.py", "exists": True}],
+        repair_prompt="retry with the token_budget kept")
+    line = json.loads(open(path, encoding="utf-8").read().splitlines()[0])
+    assert (line["planner_request"], line["raw_plan_response"], line["repair_prompt"]) == (request, '{"subtasks": []}', "retry with the token_budget kept")
+    assert line["validation_errors"] == ["E1 src/a.py"] and line["repository_evidence"] == [{"path": "src/a.py", "exists": True}]
+
+
+def test_a_decision_line_without_a_secret_is_stored_as_given(tmp_path):
+    """Before AND after: a ledger line without a secret shape is the decision's dict plus the ownership stamp, unchanged."""
+    from kriya.context.workspace_identity import workspace_identity
+    from kriya.control.decisions import DecisionLedger
+    from kriya.control.persistence import decision_ledger_path
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    decision = DecisionLedger().record_and_persist(str(ws), "triage", kind="x", note="max_tokens=4096 kept", count=3, files=["a.py"])
+    line = json.loads(open(decision_ledger_path(str(ws)), encoding="utf-8").read().splitlines()[0])
+    assert line == {**decision.to_dict(), "_workspace_id": workspace_identity(str(ws))}
 
 
 # =========================================================================== the original symptom: a real scripted run
