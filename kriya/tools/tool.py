@@ -152,16 +152,17 @@ class ModelToolInvocation:
     """The authority context the model-authored caller supplies.
 
     ``roots``: the workspace roots this call may touch, the owner workspace first, then any further readable root (the
-    run's candidate worktree). A relative path resolves against ``read_root()`` (S18c: the owner workspace unless the step
-    follows a MODEL step). Empty = unknown, and every path-bearing call is refused.
+    run's candidate worktree). A relative path resolves against ``read_root()`` (S18c/S18d: the owner workspace unless the
+    step reads the candidate). Empty = unknown, and every path-bearing call is refused.
     ``autonomy_mode``: the run's ``autonomy.mode``; unknown (None) counts as human-in-the-loop (the strictest).
-    ``follows_model_step`` (S18c, OI-147): the planned step declares, through its dependencies, that it runs after a
-    MODEL step - its reads describe the run's candidate as that step left it (``read_root``); otherwise it is a baseline
-    read of the owner workspace. Supplied by the executor from the plan, never by the model's arguments."""
+    ``reads_candidate`` (S18c OI-147, S18d OI-150 a): the planned step's dependencies include a MODEL unit that observably
+    changed the candidate - its reads describe the candidate as that unit left it (``read_root``); otherwise it is a
+    baseline read of the owner workspace. Supplied by the executor from the plan and Kriya's own record of what each
+    unit applied (subtask_executor.reads_candidate_view), never by the model's arguments or a label."""
 
     roots: Tuple[str, ...] = ()
     autonomy_mode: Optional[str] = None
-    follows_model_step: bool = False
+    reads_candidate: bool = False
 
     @property
     def reviews_every_change(self) -> bool:
@@ -169,9 +170,9 @@ class ModelToolInvocation:
         return self.autonomy_mode is None or is_human_in_the_loop(self.autonomy_mode)
 
     def read_root(self) -> str:
-        """S18c (OI-147): the root a planned read's relative path describes - the candidate (second root) for a step
-        that follows a MODEL step, the owner workspace (first root) for a baseline read or when only one root exists."""
-        return self.roots[1] if self.follows_model_step and len(self.roots) > 1 else self.roots[0]
+        """S18c/S18d: the root a planned read's relative path describes - the candidate (second root) for a step that
+        reads the candidate, the owner workspace (first root) for a baseline read or when only one root exists."""
+        return self.roots[1] if self.reads_candidate and len(self.roots) > 1 else self.roots[0]
 
     def resolve(self, path: str, *, in_owner: bool = False) -> str:
         """The absolute path the tool's own effect would use (``os.path.abspath`` of it against ``read_root()``, or

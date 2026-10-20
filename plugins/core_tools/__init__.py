@@ -83,7 +83,7 @@ _ALLOWED = (PolicyDecision.ALLOW, PolicyDecision.ALLOW_SANDBOXED)
 
 def _authorized_read(invocation: ModelToolInvocation, path: str, *, in_owner: bool = False) -> str:
     """The path a model-authored read may use: resolved exactly as the tool's effect resolves it (S18c, OI-147: against
-    the invocation's read root - the candidate for a step that follows a MODEL step, else the owner workspace; or the
+    the invocation's read root - the candidate for a step that reads the candidate (S18d), else the owner workspace; or the
     owner workspace when ``in_owner``), then authorized by AuthorizedFileReader over the invocation's roots (canonical
     containment, symlinks resolved, credential stores) - the same reader whichever root the path landed in."""
     target = invocation.resolve(path, in_owner=in_owner)

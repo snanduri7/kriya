@@ -1829,11 +1829,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 with deps.attempt_evidence_scope.tool_unit(getattr(kernel, "config", None), subtask.id,
                                                       subtask.tool_name) as evidence:
                     # S1: the model-authored call may touch only the owner workspace and this plan's candidate
-                    # worktree; S18c: a relative read path resolves in the candidate when the step depends on a MODEL
-                    # step (subtask_executor.follows_model_step), else in the owner workspace.
+                    # worktree; S18c/S18d: a relative read path resolves in the candidate when the step depends on a
+                    # MODEL unit that observably changed it - this run's own record of what each unit applied
+                    # (control_state.subtask_written_files) - else in the owner workspace
+                    # (subtask_executor.reads_candidate_view).
                     result = await deps.subtask_executor.execute(
                         subtask=subtask, plan=plan, context=tool_context, kernel=kernel,
                         tool_roots=(workspace_path, plan_workspace_path),
+                        candidate_writes=control_state.subtask_written_files,
                     )
                     evidence["result"] = result
                 subtask_results.append(result)

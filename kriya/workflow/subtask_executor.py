@@ -57,7 +57,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.config.authority import AutonomyModeError, autonomy_mode_of, is_human_in_the_loop
 from kriya.core.registry import ComponentRegistryError
@@ -201,20 +201,39 @@ def _hitl_blocks_tool_without_confirmation(tool: Any, kernel: Any) -> bool:
     return bool(getattr(tool, "requires_confirmation", False)) and mode is not None and is_human_in_the_loop(mode)
 
 
-def follows_model_step(subtask: Subtask, plan: EngineeringPlan) -> bool:
-    """S18c (OI-147): whether ``subtask`` declares - through its depends_on, transitively - that it runs after a MODEL
-    step. That is the plan's own data flow, the one signal of which repository state a planned read reasons about: such a
-    read describes the run's candidate as the MODEL step left it; a read with no MODEL step among its dependencies is a
-    baseline read of the owner workspace, whatever position the executor's order gives it (its id tie-break runs the
-    Planner's worked example B, "before it changes", after the MODEL steps). No per-step flag exists or is inferred from
-    text. An id the plan does not hold contributes nothing (plan validation already refuses one)."""
+# S18d (OI-150 a): per MODEL subtask id, the files that unit actually applied to the run's candidate - Kriya's own
+# record of the candidate transaction (ControlState.subtask_written_files, from the attempt's all_files_written: a write
+# that left the bytes unchanged is not a change). The enforce loop passes it; None = no evidence.
+CandidateWrites = Mapping[str, Sequence[str]]
+
+
+def _changed_the_candidate(subtask_id: str, candidate_writes: Optional[CandidateWrites]) -> bool:
+    """Whether the MODEL unit ``subtask_id`` changed the candidate, by the observed record only - never its label,
+    role, name or description. No record for it (no evidence passed, a resumed or unknown unit) counts as a change:
+    the S18c rule, fail closed."""
+    if candidate_writes is None or subtask_id not in candidate_writes:
+        return True
+    return bool(candidate_writes[subtask_id])
+
+
+def reads_candidate_view(subtask: Subtask, plan: EngineeringPlan,
+                         candidate_writes: Optional[CandidateWrites] = None) -> bool:
+    """S18c (OI-147) + S18d (OI-150 a): whether a planned read in ``subtask`` describes the run's candidate. Its
+    depends_on (transitively) is the plan's own data flow, the one signal of which repository state the read reasons
+    about; along it, a MODEL unit that observably changed the candidate (``candidate_writes``) means the candidate as
+    that unit left it. A MODEL unit that changed nothing (a verification unit, a verified NO CHANGE) and a TOOL step
+    (reads change nothing) are walked through to their own dependencies. No change-producing ancestry = a baseline
+    read of the owner workspace, whatever position the executor's order gives it (its id tie-break runs the Planner's
+    worked example B, "before it changes", after the MODEL steps). No per-step flag exists or is inferred from text. An
+    id the plan does not hold contributes nothing (plan validation already refuses one)."""
     by_id = {candidate.id: candidate for candidate in plan.subtasks}
     pending, seen = list(subtask.depends_on), set()
     while pending:
         dependency = by_id.get(pending.pop())
         if dependency is None or dependency.id in seen:
             continue
-        if dependency.execution_method == ExecutionMethod.MODEL:
+        if dependency.execution_method == ExecutionMethod.MODEL and _changed_the_candidate(dependency.id,
+                                                                                            candidate_writes):
             return True
         seen.add(dependency.id)
         pending.extend(dependency.depends_on)
@@ -222,7 +241,7 @@ def follows_model_step(subtask: Subtask, plan: EngineeringPlan) -> bool:
 
 
 async def _execute_tool_subtask(subtask: Subtask, kernel: Any, tool_roots: Sequence[str],
-                                plan: EngineeringPlan) -> SubtaskResult:
+                                plan: EngineeringPlan, candidate_writes: Optional[CandidateWrites]) -> SubtaskResult:
     try:
         tool = kernel.registry.get("tool", subtask.tool_name)
     except (ComponentRegistryError, Exception) as e:
@@ -259,7 +278,7 @@ async def _execute_tool_subtask(subtask: Subtask, kernel: Any, tool_roots: Seque
     # S1: the model-authored entry point - authorized by the tool's own declaration over these roots before anything
     # runs; a refusal is typed (TOOLBOX code, NEEDS_REVIEW) or the reused authority's PolicyDeniedError (FAILED, below).
     invocation = ModelToolInvocation(roots=tuple(tool_roots), autonomy_mode=_autonomy_mode(kernel),
-                                     follows_model_step=follows_model_step(subtask, plan))
+                                     reads_candidate=reads_candidate_view(subtask, plan, candidate_writes))
     try:
         output = await execute_model_authored(tool, subtask.tool_arguments, invocation)
     except AutonomyModeError as e:  # S18 / OI-135: a malformed mode is a typed stop, never a permissive reading
@@ -309,6 +328,7 @@ async def execute(
     kernel: Optional[Any] = None,
     developer_agent: Optional[Any] = None,
     tool_roots: Sequence[str] = (),
+    candidate_writes: Optional[CandidateWrites] = None,
     **run_generation_kwargs: Any,
 ) -> SubtaskResult:
     """Executes exactly one Subtask. `plan` is accepted (and not otherwise
@@ -327,11 +347,13 @@ async def execute(
     ``tool_roots`` (S1): the workspace roots a TOOL subtask's model-authored
     call may touch, the owner workspace first; empty refuses every
     path-bearing call (TOOL_WORKSPACE_ROOT_UNAVAILABLE). S18c (OI-147): ``plan``
-    decides which root a TOOL read describes (follows_model_step)."""
+    decides which root a TOOL read describes; S18d (OI-150 a): with ``candidate_writes``,
+    the observed effect of each MODEL ancestor (reads_candidate_view). A MODEL
+    subtask ignores it."""
     if subtask.execution_method == ExecutionMethod.TOOL:
         if kernel is None:
             raise ValueError(f"subtask {subtask.id!r} is execution_method=tool but no kernel was supplied")
-        return await _execute_tool_subtask(subtask, kernel, tool_roots, plan)
+        return await _execute_tool_subtask(subtask, kernel, tool_roots, plan, candidate_writes)
 
     if developer_agent is None:
         raise ValueError(f"subtask {subtask.id!r} is execution_method=model but no developer_agent was supplied")

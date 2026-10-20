@@ -530,7 +530,7 @@ def test_an_enforce_run_reads_the_candidate_after_its_model_step_and_the_baselin
 def _walk_in_a_thread(subtask, plan):
     import threading
     outcome = {}
-    worker = threading.Thread(target=lambda: outcome.setdefault("value", subtask_executor.follows_model_step(subtask, plan)),
+    worker = threading.Thread(target=lambda: outcome.setdefault("value", subtask_executor.reads_candidate_view(subtask, plan)),
                               daemon=True)
     worker.start()
     worker.join(timeout=10)

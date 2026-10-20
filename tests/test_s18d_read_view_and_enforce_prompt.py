@@ -197,16 +197,22 @@ READ_VIEW_CASES = {
 
 
 # The rows whose view differs from the S18c rule (any MODEL ancestor -> candidate) are the defect: a MODEL ancestry that
-# changed nothing. The other rows are pinned before and after (the unfixed executor accepts and ignores the evidence
-# keyword - it lands in **run_generation_kwargs - and answers by the S18c rule, which agrees with them).
+# changed nothing - MEASURED failing on the unfixed bytes (strict-xfail in 8faf487). The other rows were pinned before and
+# after (the unfixed executor accepted and ignored the evidence keyword in **run_generation_kwargs and answered by the
+# S18c rule, which agrees with them).
 DEFECT_CASES = ("verification-unit-changed-nothing", "no-change-implementation-unit",
                 "verification-unit-after-a-no-change-unit")
-_AFTER_PIN_A = pytest.mark.xfail(strict=True, reason="S18d after-pin (OI-150 a): MEASURED failing on the unfixed bytes")
+
+
+def test_the_defect_rows_are_exactly_those_the_s18c_rule_answers_wrongly():
+    """Guard: the three defect rows (a MODEL ancestry that changed nothing) expect the owner; every other row with a
+    MODEL ancestor expects the candidate (what S18c answered)."""
+    for case, (_steps, depends_on, _writes, expected) in READ_VIEW_CASES.items():
+        assert (expected == "OWNER" and bool(depends_on)) == (case in DEFECT_CASES), case
 
 
 @pytest.mark.parametrize("read", list(READS))
-@pytest.mark.parametrize("case", [pytest.param(case, marks=_AFTER_PIN_A) if case in DEFECT_CASES else case
-                                  for case in READ_VIEW_CASES])
+@pytest.mark.parametrize("case", list(READ_VIEW_CASES))
 def test_the_read_view_follows_the_observed_effect_of_the_model_ancestry(three_state, case, read):
     s = three_state
     steps, depends_on, writes, expected = READ_VIEW_CASES[case]
@@ -309,7 +315,6 @@ def test_an_enforce_run_reads_the_candidate_after_a_change_and_through_a_no_chan
     assert (views["r1"], views["r2"], views["r5"]) == (True, True, False)
 
 
-@pytest.mark.xfail(strict=True, reason="S18d after-pin (OI-150 a): MEASURED failing on the unfixed bytes")
 def test_an_enforce_run_reads_the_baseline_after_units_that_changed_nothing(tmp_path, monkeypatch):
     """OI-150 (a), MEASURED on the unfixed bytes: r3 (after a verification unit) and r4 (after a NO CHANGE unit), neither
     with any change in their ancestry, saw the candidate."""
