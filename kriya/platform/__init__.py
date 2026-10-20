@@ -18,12 +18,18 @@ from typing import List, Sequence
 # - core.fsmonitor: a repository-supplied command run on every index refresh (status, add, diff, ls-files, checkout);
 # - core.hooksPath=/dev/null: no repository hook (post-index-change, post-checkout, reference-transaction, commit hooks);
 # - commit.gpgSign=false: Kriya's own commits never sign, so no repository gpg.program runs (owner question Q2; the
-#   fail-closed choice).
+#   fail-closed choice);
+# - log.showSignature=false (S19 P1e): a repository's log.showSignature=true made GitTool's `log` verify a commit's
+#   (forged) gpgsig / mergetag signature through the repository's gpg.program, gpg.openpgp.program, gpg.ssh.program or
+#   gpg.x509.program (MEASURED, git 2.54.0: every format fired); Kriya's other commit readers (rev-list,
+#   for-each-ref, cat-file, blame, status, rev-parse) ran no signature program (MEASURED). No Kriya site runs merge or
+#   pull (merge.verifySignatures; TRACED).
 # Command-line options outrank every configuration file and reach child gits (submodules) through
 # GIT_CONFIG_PARAMETERS. Content-filter drivers (filter.<x>.clean|smudge|process) are NOT neutralised here: blanking
 # them moves Kriya's content/evidence hashes. Owner decision Q1 (2026-10-20): a repository-defined filter is REFUSED,
 # typed, before the git call - kriya.repository.git.refuse_repository_content_filters (S19 Q1).
-GIT_INVOCATION_OPTIONS = ("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false")
+GIT_INVOCATION_OPTIONS = ("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false",
+                          "-c", "log.showSignature=false")
 
 
 def git_argv(argv: Sequence[str]) -> List[str]:

@@ -313,7 +313,7 @@ def test_the_seam_inserts_the_options_after_the_executable_and_returns_a_new_lis
     from kriya.platform import GIT_INVOCATION_OPTIONS, git_argv
 
     assert GIT_INVOCATION_OPTIONS == ("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
-                                      "-c", "commit.gpgSign=false")
+                                      "-c", "commit.gpgSign=false", "-c", "log.showSignature=false")   # S19 P1e
     audited = ["git", "-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-m", "m"]
     spawned = git_argv(audited)
     assert spawned == ["git", *GIT_INVOCATION_OPTIONS, "-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-m", "m"]
@@ -370,5 +370,77 @@ def test_every_git_process_kriya_spawns_carries_the_options(owner, tmp_path, mon
     git_metadata.describe_checkout(str(owner))
     git_metadata.export_git_metadata(str(owner), str(tmp_path / "state"), identity_path=str(owner))
     production_doctor._check_git_worktree(production_doctor._Context(cfg=AppConfig(), workspace=str(owner)))
-    assert len(spawned) > 40
+    _gittool("log")(owner)                                                  # S19 P1e: the signature reader
+    assert len(spawned) > 40 and any("log" in argv for argv in spawned)
     assert [argv for argv in spawned if tuple(argv[1:1 + len(GIT_INVOCATION_OPTIONS)]) != GIT_INVOCATION_OPTIONS] == []
+    # The seam invariants themselves (S19, S19 P1e): each neutralisation is a `-c key=value` pair of EVERY spawn.
+    for argv in spawned:
+        pairs = {argv[i + 1] for i in range(1, 1 + len(GIT_INVOCATION_OPTIONS), 2) if argv[i] == "-c"}
+        assert REQUIRED_NEUTRALISATIONS <= pairs, argv
+
+
+# The neutralisations every Kriya git spawn must carry (kriya.platform.GIT_INVOCATION_OPTIONS), each with the pin that
+# shows what it stops: dropping one from the seam fails the dynamic twin above AND its own reproducer.
+REQUIRED_NEUTRALISATIONS = frozenset({
+    "core.fsmonitor=false",          # test_a_repository_fsmonitor_never_runs_through_kriya_git
+    "core.hooksPath=/dev/null",      # test_a_repository_index_hook_never_runs
+    "commit.gpgSign=false",          # test_the_skill_commit_never_runs_a_repository_gpg_program
+    "log.showSignature=false",       # test_gittool_log_never_runs_a_repository_signature_program
+})
+
+
+# --------------------------------------------------------------------------------- S19 P1e: signature verification on log
+
+_FORGED_SIGNATURES = {
+    "openpgp": "-----BEGIN PGP SIGNATURE-----\n \n AAAA\n -----END PGP SIGNATURE-----",
+    "ssh": "-----BEGIN SSH SIGNATURE-----\n AAAA\n -----END SSH SIGNATURE-----",
+    "x509": "-----BEGIN SIGNED MESSAGE-----\n AAAA\n -----END SIGNED MESSAGE-----",
+}
+
+
+def _forge_signed_head(repo: Path, signature: str, *, mergetag: bool) -> None:
+    """HEAD becomes a commit carrying a forged ``gpgsig`` header (or, as a merge, a ``mergetag`` whose tag carries the
+    signature): no real key is needed - git hands the bytes to the configured program to verify."""
+    tree = _setup(repo, "rev-parse", "HEAD^{tree}").strip()
+    parents = [_setup(repo, "rev-parse", "HEAD").strip()]
+    lines = [f"tree {tree}"]
+    if mergetag:
+        _setup(repo, "commit", "-q", "--allow-empty", "-m", "side")
+        parents.append(_setup(repo, "rev-parse", "HEAD").strip())
+    lines += [f"parent {parent}" for parent in parents]
+    lines += ["author P <p@e.invalid> 2000000000 +0000", "committer P <p@e.invalid> 2000000000 +0000"]
+    if mergetag:
+        tag = (f"object {parents[1]}\ntype commit\ntag t\ntagger P <p@e.invalid> 2000000000 +0000\n\nt\n"
+               + signature.replace("\n ", "\n"))
+        lines.append("mergetag " + tag.replace("\n", "\n "))
+    else:
+        lines.append("gpgsig " + signature)
+    body = repo.parent / "forged-commit.txt"
+    body.write_text("\n".join(lines) + "\n\nsigned\n")
+    oid = _setup(repo, "hash-object", "-t", "commit", "-w", "--literally", str(body)).strip()
+    _setup(repo, "update-ref", "HEAD", oid)
+
+
+@pytest.mark.parametrize("signature_format, program_key, mergetag", [
+    ("openpgp", "gpg.program", False),
+    ("openpgp", "gpg.openpgp.program", False),
+    ("openpgp", "gpg.program", True),
+    ("ssh", "gpg.ssh.program", False),
+    ("x509", "gpg.x509.program", False),
+    ("x509", "gpg.x509.program", True),
+], ids=["gpg", "openpgp", "gpg-mergetag", "ssh", "x509", "x509-mergetag"])
+def test_gittool_log_never_runs_a_repository_signature_program(owner, signature_format, program_key, mergetag):
+    """S19 P1e (MEASURED, git 2.54.0 Apple and Homebrew): a repository's log.showSignature=true plus a signature
+    program key made GitTool's `log -n 5 --oneline` run that program on a forged signature; every format fired."""
+    marker = owner.parent / "SIGNATURE_PROGRAM_RAN"
+    _forge_signed_head(owner, _FORGED_SIGNATURES[signature_format], mergetag=mergetag)
+    _setup(owner, "config", "log.showSignature", "true")
+    if signature_format != "openpgp":
+        _setup(owner, "config", "gpg.format", signature_format)
+    if signature_format == "ssh":                       # git asks its ssh program only with an allowed-signers file
+        (owner.parent / "allowed_signers").write_text("p@e.invalid ssh-ed25519 AAAA\n")
+        _setup(owner, "config", "gpg.ssh.allowedSignersFile", str(owner.parent / "allowed_signers"))
+    _setup(owner, "config", program_key, _marker_script(owner.parent / "signature.sh", marker, exit_code=1))
+    output = _gittool("log")(owner)
+    assert not marker.exists(), f"GitTool log ran the repository's {program_key}"
+    assert output.splitlines()[0].endswith(" signed")                    # and the log is still git's own answer
