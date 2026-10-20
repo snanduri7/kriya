@@ -7951,7 +7951,7 @@ _TARGETED_CORRECTION_END_MARKER = (
     # historical wording known to be false; this marker is updated to the
     # new, truthful, always-present trailer line verbatim.
     "- A TOOL-execution-method subtask is valid only when it is directly dispatched to a "
-    "real, currently registered Kriya tool named in its own top-level tool_name (never "
+    "plannable Kriya tool named in its own top-level tool_name (never "
     "invented) - never confuse this with a verification[] entry's own tool_name, a separate "
     "field naming a deterministic check. Ordinary verification-only work should normally use "
     "execution_method=model with a concrete verification[] entry instead.\n"

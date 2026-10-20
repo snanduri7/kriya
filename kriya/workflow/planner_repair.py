@@ -919,7 +919,7 @@ def build_structured_plan_repair_prompt(
         # Planner's own system prompt states in full, never reproducing
         # PlannerAgent.system_prompt's own worked examples here.
         + "- A TOOL-execution-method subtask is valid only when it is directly dispatched to a "
-        "real, currently registered Kriya tool named in its own top-level tool_name (never "
+        "plannable Kriya tool named in its own top-level tool_name (never "
         "invented) - never confuse this with a verification[] entry's own tool_name, a separate "
         "field naming a deterministic check. Ordinary verification-only work should normally use "
         "execution_method=model with a concrete verification[] entry instead.\n"
