@@ -14,8 +14,16 @@ Moved here unchanged (bodies, names, messages and reason codes):
 reviewability, decision type): it no longer imports the kernel-side module lazily. ``RUNTIME_COMMAND_REVIEW`` (this module's own
 functions, looked up at call time) is the default every caller gets.
 
-This module imports nothing from Kriya: it is a leaf of AUTHORITY, so ``control.launch_approval`` and the kernel may import it at module
-level without a cycle.
+This module imports nothing from Kriya but the FOUNDATION redaction owner (pure, standard library only; S2d): it is a leaf of
+AUTHORITY, so ``control.launch_approval`` and the kernel may import it at module level without a cycle.
+
+S2d (OI-153, owner decision 2026-10-20 (c)): a runtime-command subject whose exact bytes carry a value the one redaction owner
+hides (``commands_carry_secret``: a positional ``mysql -p<pw>``, ``sshpass -p <pw>``, a ``--token <pw>`` pair, ...) can be
+reviewed faithfully by nobody - shown raw it discloses the secret, shown redacted it is not what runs - so it is never offered:
+a plain (legacy) callback is not asked (``ask``), the desktop review is not recorded (``control.launch_approval``), and the
+CLI's typed channel refuses with ``RUNTIME_COMMAND_SECRET_REFUSAL``. The operator's own authority is not a review and is
+unchanged in what it may run: ``kriya generate --yes`` outside a launch, an autonomy mode without review, and (legacy
+channel) a command the person wrote in the goal (``commands_authored_in_goal``, never asked).
 
 --- moved from kriya/workflow/runtime_command_approval.py ---
 
@@ -42,12 +50,17 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
 import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
+
+from kriya.foundation.redaction import redact_value
+
+logger = logging.getLogger(__name__)
 
 REVIEW_KIND = "runtime_command"
 MAX_REVIEW_ROUNDS = 2        # the commands drifted while the person decided: ask again once, then decline (never run a changed command)
@@ -168,6 +181,22 @@ def reviewable(subject: RuntimeCommandSubject) -> bool:
             and bool(subject.working_directory))
 
 
+def commands_carry_secret(commands: Any) -> bool:
+    """S2d (OI-153 (c)): True when any command, read WHOLE as an argv (a ``--token`` pair, a command's own positional grammar),
+    carries a value the one redaction owner hides - no human review of those exact bytes can be faithful."""
+    return any(redact_value(list(c)) != list(c) for c in commands)
+
+
+# What the person is told instead of a review (the launch record's ``approval_required`` reason, the terminal line, the log
+# line of a legacy channel). At most 400 characters: the launch record keeps that much of a reason.
+RUNTIME_COMMAND_SECRET_REFUSAL = (
+    "Not offered for review: the command carries a password or token on its command line. Shown as written it would expose "
+    "the secret, shown hidden you would approve bytes you cannot read, so nothing ran. Pass the secret on stdin, in a file "
+    "or the environment (docker login --password-stdin, sshpass -f), or authorize it yourself: kriya generate --yes in "
+    "a terminal, or an autonomy mode without review."
+)
+
+
 @dataclass(frozen=True)
 class RuntimeCommandDecision:
     """``approved_fingerprint`` is the fingerprint the human's approval is durably bound to; None when not approved."""
@@ -199,6 +228,11 @@ async def ask(callback: Callable[..., Any], subject: RuntimeCommandSubject) -> R
         if asyncio.iscoroutine(answer):
             answer = await answer
         return answer if isinstance(answer, RuntimeCommandDecision) else RuntimeCommandDecision(None)
+    if commands_carry_secret(subject.commands):
+        # S2d: a plain callback shows ``subject.reason`` (which quotes the commands) through the redactor and cannot say
+        # whether it would prompt or auto-approve; it is not asked. Fail closed: nothing runs.
+        logger.warning(RUNTIME_COMMAND_SECRET_REFUSAL)
+        return RuntimeCommandDecision(None)
     answer = callback([], subject.reason)
     if asyncio.iscoroutine(answer):
         answer = await answer

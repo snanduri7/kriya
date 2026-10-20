@@ -2822,10 +2822,23 @@ def _approval_decision(files: List[Dict[str, str]], reason: str, yes: bool) -> A
 def _runtime_command_decision(subject: Any, yes: bool) -> Any:
     """The `kriya generate` answer to a RUNTIME-COMMAND review (a subject distinct from a source change). Inside a desktop launch it is held as a typed pending review and the awaitable
     that resolves to the human's decision is returned; a launch that cannot hold the review declines (recorded as approval required). Outside a launch it is the terminal behaviour,
-    unchanged (the same prompt text, `--yes`)."""
-    from kriya.control.launch import note_approval_required, request_runtime_command_approval
-    from kriya.policy.approval import RuntimeCommandDecision
+    unchanged (the same prompt text, `--yes`).
 
+    S2d (OI-153, owner decision (c)): commands whose exact bytes carry a secret the redaction owner recognises are never offered for review - shown raw they disclose
+    it, shown redacted they are not what runs. Inside a launch the refusal is recorded with the REDACTED commands and the fingerprint of the exact bytes (never the raw
+    command, nor the reason text that quotes it); in a terminal the person is told why and is not asked. `--yes` outside a launch (the operator's own authority) is
+    unchanged in what it may run; its line is redacted display text."""
+    from kriya.control.launch import note_approval_required, request_runtime_command_approval
+    from kriya.policy.approval import RUNTIME_COMMAND_SECRET_REFUSAL, RuntimeCommandDecision, commands_carry_secret
+
+    if commands_carry_secret(subject.commands):
+        shown = [" ".join(redact_value(list(c))) for c in subject.commands][:10]
+        if note_approval_required("runtime_command", RUNTIME_COMMAND_SECRET_REFUSAL, {"commands": shown, "command_fingerprint": subject.fingerprint}):
+            return RuntimeCommandDecision(None)
+        if not yes:
+            click.secho(f"\n[Runtime command not offered for review] {RUNTIME_COMMAND_SECRET_REFUSAL}", bold=True, fg="yellow")
+            click.echo("\n".join(f"  {line}" for line in shown))
+            return RuntimeCommandDecision(None)
     awaiting = request_runtime_command_approval(subject)
     if awaiting is not None:
         return awaiting

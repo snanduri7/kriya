@@ -9,7 +9,8 @@ persisted raw by the refusal; the operator-authorized paths (`--yes`, an autonom
 wrote in the goal) are not changed in what they may run, only their outputs redact.
 
 Governed controls (green before and after) and EXPECTED-TO-FLIP pins written as the corrected behaviour, strict-xfail
-(AssertionError only) at the characterization commit; the correction commits remove the marks. Every channel is driven
+(AssertionError only) at the characterization commit 7b8000b (--runxfail on the unfixed bytes: 100 failed, 264 passed);
+the correction commits removed the marks. Every channel is driven
 through its production entry (``run_kup_operation``, the CLI, the log handler, the CLI callback, ``policy.approval.ask``,
 the workflow's ``_approve_runtime_commands``), never a private helper - except the owner's own closed table (tripwire).
 """
@@ -19,7 +20,6 @@ import json
 import logging
 import subprocess
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
 import yaml
@@ -30,8 +30,7 @@ from kriya.foundation.redaction import REDACTED, redact_text, redact_value
 S = "Zq9SECRETv"
 R = REDACTED
 LID = "20261020T101010-abcdef01"
-FLIP = pytest.mark.xfail(strict=True, raises=AssertionError, reason="S2d characterization: flips with the correction")
-MISSING = "<S2d: not defined yet>"
+FLIP = pytest.mark.xfail(strict=True, raises=AssertionError, reason="S2d: flips with the grammar correction")
 
 
 @pytest.fixture(autouse=True)
@@ -185,8 +184,7 @@ def test_the_supported_command_table_is_closed():
     """Tripwire: adding, widening or dropping a command or one of its option tables is a reviewed change of this table."""
     from kriya.foundation import redaction
 
-    grammars = getattr(redaction, "_COMMAND_GRAMMARS", None) or {}
-    assert {name: fn.__name__ for name, fn in grammars.items()} == {
+    assert {name: fn.__name__ for name, fn in getattr(redaction, "_COMMAND_GRAMMARS", {}).items()} == {
         "mysql": "_mysql", "mariadb": "_mysql", "sshpass": "_sshpass", "docker": "_docker_login", "podman": "_podman_login", "npm": "_npm"}
     assert getattr(redaction, "_SSHPASS_OPTIONS", None) == {"f": 1, "d": 1, "p": 1, "P": 1, "e": 2, "h": 0, "V": 0, "v": 0}
     assert getattr(redaction, "_DOCKER_LOGIN_VALUES", None) == ("-u", "--username")
@@ -280,6 +278,7 @@ POSITIONAL = [("mysql", ["mysql", "-u", "root", f"-p{S}", "db"]), ("sshpass", ["
               ("podman-attached", ["podman", "login", f"-p{S}", "r"]), ("mariadb", ["mariadb", f"-p{S}"])]
 FLAG = ("token-flag", ["run.sh", "--token", S])   # the S2b-covered shape: its terminal prompt was shown redacted (S2c) and ran raw
 REFUSING = POSITIONAL + [FLAG]
+REFUSING_NOW = [pytest.param(a, id=i, marks=FLIP) for i, a in POSITIONAL] + [pytest.param(FLAG[1], id=FLAG[0])]
 
 
 def _subject(argv):
@@ -290,9 +289,9 @@ def _subject(argv):
 
 
 def _refusal_text():
-    from kriya.policy import approval
+    from kriya.policy.approval import RUNTIME_COMMAND_SECRET_REFUSAL
 
-    return getattr(approval, "RUNTIME_COMMAND_SECRET_REFUSAL", MISSING)
+    return RUNTIME_COMMAND_SECRET_REFUSAL
 
 
 @FLIP
@@ -315,8 +314,7 @@ def _session(tmp_path):
     return canonical, session
 
 
-@FLIP
-@pytest.mark.parametrize("argv", [a for _, a in REFUSING], ids=[i for i, _ in REFUSING])
+@pytest.mark.parametrize("argv", REFUSING_NOW)
 @pytest.mark.parametrize("yes", [False, True], ids=["prompt", "yes"])
 def test_inside_a_launch_the_refusal_is_recorded_redacted_with_the_digest_of_the_exact_bytes(tmp_path, argv, yes):
     """Not offered (no pending review exists, so runtime_command.review has nothing to serve); the launch record's
@@ -345,8 +343,7 @@ def test_inside_a_launch_the_refusal_is_recorded_redacted_with_the_digest_of_the
     assert S not in record_text and S not in wire and status["error"] is None
 
 
-@FLIP
-@pytest.mark.parametrize("argv", [a for _, a in REFUSING], ids=[i for i, _ in REFUSING])
+@pytest.mark.parametrize("argv", REFUSING_NOW)
 def test_the_terminal_prompt_refuses_instead_of_showing_an_altered_command(argv, monkeypatch, capsys):
     """`kriya generate` outside a launch: the person is NOT asked (asking would show either the secret or bytes that are not
     what runs); the refusal says why and points at the operator's own paths; nothing is approved."""
@@ -390,8 +387,7 @@ def test_the_operator_yes_output_already_hid_a_flag_secret(capsys):
     assert S not in out and f"run.sh --token {R}" in out
 
 
-@FLIP
-@pytest.mark.parametrize("argv", [POSITIONAL[0][1], FLAG[1]], ids=["mysql", "token-flag"])
+@pytest.mark.parametrize("argv", [pytest.param(POSITIONAL[0][1], id="mysql", marks=FLIP), pytest.param(FLAG[1], id="token-flag")])
 def test_the_legacy_prompt_is_not_asked_and_nothing_is_approved(argv, tmp_path, monkeypatch):
     """`kriya proposal execute` (a plain callback: policy.approval.ask's legacy branch) printed the redacted reason and the
     person approved bytes they could not read. The authority does not ask a plain callback for such a subject."""
@@ -420,8 +416,7 @@ def _judgment(argv):
     return {"should_run": True, "run_commands": [argv], "success_criteria": "prints ok", "input_channel": "none", "command_source": "inferred"}
 
 
-@FLIP
-@pytest.mark.parametrize("argv", [a for _, a in REFUSING], ids=[i for i, _ in REFUSING])
+@pytest.mark.parametrize("argv", REFUSING_NOW)
 def test_the_workflow_declines_through_the_typed_channel_and_executes_nothing(argv, monkeypatch):
     """The executor's own choke point (both runtime call sites route through it): the desktop/terminal typed channel answers
     with no approval, so the run records a declined check (REQUIRED_RUNTIME_VERIFICATION_DECLINED when required)."""
@@ -433,8 +428,7 @@ def test_the_workflow_declines_through_the_typed_channel_and_executes_nothing(ar
     monkeypatch.setattr(click, "confirm", lambda *a, **k: True)
     typed = TypedApprovalCallback(lambda f, r: pytest.fail("the change channel"), lambda s: _runtime_command_decision(s, False))
     state = SimpleNamespace(run_verification_approved_fingerprint=None)
-    with patch.object(attempt, "_resolve_run_command", side_effect=lambda cmd, _wt: list(cmd)):
-        assert asyncio.run(attempt._approve_runtime_commands(_ctx(typed), state, _judgment(argv), "intro")) is False
+    assert asyncio.run(attempt._approve_runtime_commands(_ctx(typed), state, _judgment(argv), "intro")) is False
     assert state.run_verification_approved_fingerprint is None
 
 
@@ -445,11 +439,11 @@ def test_the_other_operator_paths_are_not_asked_and_not_changed(argv):
     from kriya.workflow import attempt
 
     state = SimpleNamespace(run_verification_approved_fingerprint=None)
-    with patch.object(attempt, "_resolve_run_command", side_effect=lambda cmd, _wt: list(cmd)):
-        assert attempt._runtime_commands_need_approval(_ctx(lambda f, r: True), state, _judgment(argv), "guardrails") is False
-        authored = _ctx(lambda f, r: True, goal="please run " + " ".join(argv) + " now")
-        assert attempt._runtime_commands_need_approval(authored, state, _judgment(argv), "human-in-the-loop") is False
-        assert attempt._derive_runtime_command_subject(_ctx(None), _judgment(argv), "").commands == (tuple(argv),)
+    # (no patch of the run-command resolver: it rewrites only `python` and `mvn` commands, none of these)
+    assert attempt._runtime_commands_need_approval(_ctx(lambda f, r: True), state, _judgment(argv), "guardrails") is False
+    authored = _ctx(lambda f, r: True, goal="please run " + " ".join(argv) + " now")
+    assert attempt._runtime_commands_need_approval(authored, state, _judgment(argv), "human-in-the-loop") is False
+    assert attempt._derive_runtime_command_subject(_ctx(None), _judgment(argv), "").commands == (tuple(argv),)
 
 
 def _install_raw_review(session, argv):
@@ -465,13 +459,13 @@ def _install_raw_review(session, argv):
     return entry
 
 
-@FLIP
-def test_a_review_recorded_raw_before_s2d_is_refused_not_served(tmp_path):
+@pytest.mark.parametrize("argv", [pytest.param(POSITIONAL[0][1], id="mysql", marks=FLIP), pytest.param(FLAG[1], id="token-flag")])
+def test_a_review_recorded_raw_before_s2d_is_refused_not_served(tmp_path, argv):
     from kriya.kup import policy
 
     canonical, session = _session(tmp_path)
     try:
-        entry = _install_raw_review(session, POSITIONAL[0][1])
+        entry = _install_raw_review(session, argv)
         envelope, wire = _kup("runtime_command.review", workspace=canonical, launch_id=LID, review_id=entry["review_id"])
     finally:
         session.finish(0, None, None)
@@ -491,3 +485,30 @@ def test_a_plain_runtime_command_is_still_offered_and_served(tmp_path):
     from kriya.control.launch_approval import build_pending_runtime
 
     assert build_pending_runtime("l", "w", 1, _subject(["mysql", "-P", "3306", "-u", "root", "-p", "shop"])) is not None
+
+
+def test_the_refusal_names_the_operator_paths_and_fits_the_launch_record():
+    """The launch record keeps 400 characters of a reason: the whole refusal fits, and it says what to do instead."""
+    message = _refusal_text()
+    assert len(message) <= 400
+    for words in ("Not offered for review", "nothing ran", "--password-stdin", "kriya generate --yes", "autonomy mode without review"):
+        assert words in message
+
+
+@FLIP
+def test_a_note_still_recorded_raw_is_projected_redacted_by_launch_status(tmp_path):
+    """Governed (S2c OI-131 projection, its killer moved here): a note S2d does not write (an unreviewable command set - none
+    to show - whose reason quotes a positional secret) is still stored raw (S20 I-9) and `launch.status` hides it."""
+    from kriya.cli import _runtime_command_decision
+    from kriya.control.persistence import launch_record_path
+    from kriya.policy.approval import RuntimeCommandSubject
+
+    canonical, session = _session(tmp_path)
+    try:
+        _runtime_command_decision(RuntimeCommandSubject("u9", "c", canonical, (), "none", None, f"run mysql -u root -p{S} db"), False)
+        assert S in open(launch_record_path(canonical, LID), encoding="utf-8").read()      # stored raw: S20 I-9 owns that
+        status, wire = _kup("launch.status", workspace=canonical, launch_id=LID)
+    finally:
+        session.finish(0, None, None)
+    assert status["error"] is None and status["data"]["launch"]["approval_required"]["reason"] == f"run mysql -u root -p{R} db"
+    assert S not in wire

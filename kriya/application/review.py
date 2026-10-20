@@ -47,6 +47,7 @@ from kriya.policy.approval import (
     WORKING_DIRECTORY_KIND,
     _sha,
     candidate_digest,
+    commands_carry_secret,
     fingerprint_of,
     split_reason,
 )
@@ -213,6 +214,11 @@ class ReviewService:
         digest = entry.get("candidate_digest")
         if digest != entry.get("command_fingerprint") or digest != fingerprint_of(cwd, [tuple(c) for c in commands], channel, stdin_sha):
             raise unverified("fingerprint_mismatch")
+        if commands_carry_secret(commands):
+            # S2d (OI-153 (c)): a review recorded raw by a Kriya before S2d (S2d never records one) - its commands are not
+            # shown: raw they disclose the secret, redacted they are not what the fingerprint binds.
+            raise ApplicationRefusal(REVIEW_COMMAND_UNVERIFIED, "the recorded commands carry a secret on their command line; they are not shown and cannot be "
+                                     "approved here", reason="commands_carry_secret")
         data = {
             "launch_id": launch_id, "review_id": review_id, "run_id": launch_id, "status": str(entry.get("status")), "verified": True,
             "command_fingerprint": digest, "unit_id": entry.get("unit_id") if isinstance(entry.get("unit_id"), str) else None,

@@ -466,7 +466,10 @@ def test_there_is_one_endpoint_display_rule():
 def test_the_launch_status_the_gui_receives_hides_a_recorded_secret(tmp_path):
     """MEASURED (S2c channels): a runtime command carrying `--token x` is NOT offered for review (S2b), and the CLI callback
     then records it as `approval_required` details - raw - in the launch record; launch.status served that record as is.
-    The APPLICATION projection now redacts (the OI-131 rule); the persisted copy is S20's (raw retention, OI-134)."""
+    The APPLICATION projection now redacts (the OI-131 rule). S2d (OI-153 (c)): that refusal path no longer persists the raw
+    command or the reason quoting it - it records the operator refusal, the REDACTED commands and the fingerprint (the two
+    assertions below that encoded the raw record changed; the projection's killer for a note still stored raw is
+    tests/test_s2d_positional_secrets.py::test_a_note_still_recorded_raw_is_projected_redacted_by_launch_status)."""
     from kriya.cli import _runtime_command_decision
     from kriya.config import AppConfig
     from kriya.context.workspace_identity import canonical_workspace, workspace_identity
@@ -474,7 +477,7 @@ def test_the_launch_status_the_gui_receives_hides_a_recorded_secret(tmp_path):
     from kriya.control.persistence import launch_record_path
     from kriya.kup.cli_ops import run_kup_operation
     from kriya.kup.inspect import encode_response
-    from kriya.policy.approval import RuntimeCommandSubject
+    from kriya.policy.approval import RUNTIME_COMMAND_SECRET_REFUSAL, RuntimeCommandSubject
 
     ws = tmp_path / "proj"
     ws.mkdir()
@@ -485,13 +488,13 @@ def test_the_launch_status_the_gui_receives_hides_a_recorded_secret(tmp_path):
         decision = _runtime_command_decision(RuntimeCommandSubject("u2", "c", canonical, (("run.sh", "--token", S),), "none", None,
                                                                    f"needs DB_PASSWORD={S}"), yes=False)
         assert decision.approved_fingerprint is None
-        assert S in open(launch_record_path(canonical, LID), encoding="utf-8").read()       # stored raw (S20 owns that)
+        assert S not in open(launch_record_path(canonical, LID), encoding="utf-8").read()   # S2d: the refusal stores no raw command
         envelope = run_kup_operation(AppConfig(), {"operation": "launch.status", "workspace": canonical, "launch_id": LID})
     finally:
         session.finish(0, None, None)
     assert envelope["error"] is None, envelope["error"]
     required = envelope["data"]["launch"]["approval_required"]
-    assert required["details"]["commands"] == [f"run.sh --token {R}"] and required["reason"] == f"needs DB_PASSWORD={R}"
+    assert required["details"]["commands"] == [f"run.sh --token {R}"] and required["reason"] == RUNTIME_COMMAND_SECRET_REFUSAL
     assert S not in encode_response(envelope)
 
 
