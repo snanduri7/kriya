@@ -117,6 +117,7 @@ READABLE = [
     "docker compose -p proj up -d", "docker-compose -p proj up", "podman run -p 8080:80 nginx", "docker -H tcp://h:2375 ps",
     "ssh -p 22 host", "scp -P 2222 a host:b", "psql -p 5432 -h db -U app", "curl -p -x http://proxy:3128 https://h", "ls -p /tmp",
     "npm config set registry https://registry.example", "npm config get //registry.npmjs.org/:_authToken",
+    "npm config get //registry.npmjs.org/:_authToken registry",
     "npm set init-author-name alice", "npm run build -- -p 3000", "npm config set //r.example/:certfile /etc/c.pem",
     "sshpass -f /run/secrets/pw ssh -p 22 host", "sshpass -e ssh -p 22 host", "sshpass -P assword: -f pw ssh host",
     "sshpass -d 3 ssh -p 22 host", "cat /etc/mysql/my.cnf", "ls -p /usr/bin/mysql", "./scripts/mysql-backup.sh -p 5",
