@@ -65,6 +65,9 @@ GRAMMAR = [
     ("npm-set-auth", f"npm set _auth {S}", f"npm set _auth {R}"),
     ("npm-c-password", f"npm c set //r.example/:_password {S}", f"npm c set //r.example/:_password {R}"),
     ("npm-conf-with-option", f"npm conf set -L user //r.example/:_authToken {S}", f"npm conf set -L user //r.example/:_authToken {R}"),
+    ("npm-scoped-auth", f"npm config set //r.example/:_auth {S}", f"npm config set //r.example/:_auth {R}"),
+    # a value spelled like a table command is still the value (the next command's word closes the segment, inclusive)
+    ("sshpass-password-named-like-a-command", "sshpass -p docker ssh host", f"sshpass -p {R} ssh host"),
 ]
 
 
@@ -118,6 +121,7 @@ READABLE = [
     "sshpass -f /run/secrets/pw ssh -p 22 host", "sshpass -e ssh -p 22 host", "sshpass -P assword: -f pw ssh host",
     "sshpass -d 3 ssh -p 22 host", "cat /etc/mysql/my.cnf", "ls -p /usr/bin/mysql", "./scripts/mysql-backup.sh -p 5",
     "vim docker-compose.yml", "mysqldump -P 3306 shop", "apt-get install -y mysql-client sshpass",
+    "mysql -P3306 -u root shop", "docker login -u -pete registry.example", "mysql -u root shop | less -ppattern",
 ]
 
 
@@ -126,6 +130,13 @@ def test_a_readable_look_alike_stays_byte_identical_as_text_and_argv(text):
     assert redact_text(text) == text
     argv = text.split(" ")
     assert redact_value(argv) == argv
+
+
+@pytest.mark.parametrize("text", ["mysql -u root shop; less -ppattern log", "mysql -u root shop\nless -ppattern log",
+                                  "mysql -u root shop && less -ppattern log"])
+def test_a_command_ends_at_a_shell_separator_or_a_line_break(text):
+    """The grammar of `mysql` reads its own words only: `less -p<pattern>` after `;`, a line break or `&&` is readable."""
+    assert redact_text(text) == text
 
 
 @pytest.mark.parametrize("text, expected", [
