@@ -52,7 +52,7 @@ L1 was `tests/test_s20_evidence_redaction.py`, `test_s2d_positional_secrets.py` 
 |---|---|---|---|
 | the envelope is stored redacted | writer `"payload": redact_value(dict(payload))` | M01 drop | `test_the_evidence_envelope_stores_no_secret` |
 | ... on a copy (the caller's object is never mutated) | same | M02 in-place update | `..._keeps_its_readable_fields_and_the_caller_payload` |
-| the chain binds the STORED line | `self._prev = model.digest(line)` | M03 hash the raw payload | `..._content_blob_and_its_digest...` (verify), `test_a_freshly_written_chain_verifies...` |
+| the chain binds the STORED line | `self._prev = model.digest(line)` | M03 hash the raw payload | `..._content_blob_and_its_digest...` (campaign); `test_a_freshly_written_chain_verifies...` also fails on M03 (MEASURED directly on a git-archive sandbox) |
 | the stamp names the applied policy | `REDACTION_POLICY_VERSION = "2"` | M04 "1" | `test_the_evidence_manifest_names_the_applied_policy` (+ the two goldens) |
 | content blobs keep the exact bytes | `data = model.as_bytes(value)` | M05 redact content | `..._content_blob_and_its_digest_stay_the_exact_recorded_bytes` |
 | the gap error is redacted BEFORE the cut | `redact_text(str(error))[:500]` | M06 cut first | `test_the_gap_record_and_the_seal_store_no_secret` |
