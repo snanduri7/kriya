@@ -9,6 +9,11 @@ D. GUI Open Folder (`workspace.describe`, kriya/tools/git_metadata.describe_chec
    (status, diff-files, ls-files -m, diff-index against the work tree) can run a clean or process driver, so the facts
    cannot be read filter-free: the probe asks the same authority first - with the probe's OWN git and environment -
    and a refused folder is reported typed (dirty/changed_entries null, ``reason`` = the refusal) without any schema change.
+C. An operator (global/system) definition is trusted only when its ULTIMATE file is outside the repository: direct,
+   transitive, relative, conditional (includeIf gitdir/onbranch/hasconfig) and symlinked includes all report the
+   ultimate file (MEASURED, scratch p1b/probes/probe_c_includes.*.out) and refuse; the repository's roots are ALL its work
+   trees (MEASURED gap closed: a linked worktree's main work tree, and the main work tree's linked worktrees - Kriya's
+   managed worktree holds model-written bytes - were not roots).
 
 Every pin plants the filter AFTER the fixture repository is built, binds it through .git/info/attributes, makes a
 same-size (racily clean) edit, drives the REAL entry point and asserts the typed outcome AND the marker. The helpers and
@@ -237,3 +242,167 @@ def test_the_open_folder_probe_keeps_no_filter_policy_of_its_own(owner, monkeypa
     status = [argv for argv in argvs if "status" in argv]
     assert len(status) == 1 and not [a for a in status[0] if a.startswith("filter.")]
     assert not hasattr(git_metadata, "_filter_overrides") and not hasattr(git_metadata, "_FILTER_COMMAND_KEYS")
+
+
+# --------------------------------------------------------------------------------- C: the ultimate definition origin
+
+def _include_shape(shape: str, root: Path, repo: Path, global_config: Path, monkeypatch) -> None:
+    """Plant the filter in ``repo/x.gitcfg`` (repository content) and reach it from the operator configuration."""
+    body = (repo.parent / "body.cfg").read_text()
+    target = repo / "x.gitcfg"
+    target.write_text(body)
+    outside = root / "outside"
+    outside.mkdir(exist_ok=True)
+
+    def add(text: str) -> None:
+        with open(global_config, "a", encoding="utf-8") as handle:
+            handle.write(text)
+    if shape == "direct":
+        add(f"[include]\n\tpath = {target}\n")
+    elif shape == "transitive":
+        (outside / "a.cfg").write_text(f"[include]\n\tpath = {target}\n")
+        add(f"[include]\n\tpath = {outside / 'a.cfg'}\n")
+    elif shape == "transitive relative to the including file":
+        (outside / "a.cfg").write_text(f"[include]\n\tpath = ../{repo.name}/x.gitcfg\n")
+        add(f"[include]\n\tpath = {outside / 'a.cfg'}\n")
+    elif shape == "relative to the global file":
+        add(f"[include]\n\tpath = {os.path.relpath(target, global_config.parent)}\n")
+    elif shape == "includeIf gitdir":
+        add(f'[includeIf "gitdir:{repo}/"]\n\tpath = {target}\n')
+    elif shape == "includeIf onbranch":
+        add(f'[includeIf "onbranch:main"]\n\tpath = {target}\n')
+    elif shape == "includeIf hasconfig":
+        _setup(repo, "remote", "add", "origin", "https://example.invalid/r.git")
+        add(f'[includeIf "hasconfig:remote.*.url:https://example.invalid/**"]\n\tpath = {target}\n')
+    elif shape == "includeIf gitdir, relative, from an outside file":
+        (outside / "a.cfg").write_text(f'[includeIf "gitdir:{repo}/"]\n\tpath = ../{repo.name}/x.gitcfg\n')
+        add(f"[include]\n\tpath = {outside / 'a.cfg'}\n")
+    elif shape == "symlinked file":
+        (outside / "link.cfg").symlink_to(target)
+        add(f"[include]\n\tpath = {outside / 'link.cfg'}\n")
+    elif shape == "symlinked directory":
+        (repo / "cfg").mkdir()
+        (repo / "cfg" / "x.gitcfg").write_text(body)
+        (root / "linkdir").symlink_to(repo / "cfg")
+        add(f"[include]\n\tpath = {root / 'linkdir' / 'x.gitcfg'}\n")
+    elif shape == "system file delegating to the repository":
+        system = root / "etc-gitconfig"
+        system.write_text(f"[include]\n\tpath = {target}\n")
+        monkeypatch.delenv("GIT_CONFIG_NOSYSTEM")
+        monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(system))
+    elif shape == "the global file itself is in the repository":
+        target.write_text("[user]\n\tname = s19p1b\n\temail = s19p1b@local\n" + body)
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(target))
+    else:
+        raise AssertionError(shape)
+
+
+_SHAPES = ["direct", "transitive", "transitive relative to the including file", "relative to the global file",
+           "includeIf gitdir", "includeIf onbranch", "includeIf hasconfig",
+           "includeIf gitdir, relative, from an outside file", "symlinked file", "symlinked directory",
+           "system file delegating to the repository", "the global file itself is in the repository"]
+
+
+@pytest.fixture
+def global_config() -> Path:
+    return Path(os.environ["GIT_CONFIG_GLOBAL"])
+
+
+def _filter_body(repo: Path) -> Path:
+    marker = repo.parent / "FILTER_RAN"
+    command = _marker_script(repo.parent / "filter.sh", marker)
+    (repo.parent / "body.cfg").write_text(f'[filter "kx"]\n\tclean = {command}\n\tsmudge = {command}\n'
+                                          f"\tprocess = {command}\n")
+    return marker
+
+
+def _status_refused(folder: Path, marker: Path, code: str = IN_REPOSITORY) -> None:
+    from kriya.repository.git import RepositoryContentFilterRefused
+    from kriya.workflow import worktree
+
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        worktree.git_status_entries(str(folder))
+    assert not marker.exists(), "the filter ran"
+    assert raised.value.reason_code == code and raised.value.key.startswith("filter.kx.")
+
+
+@pytest.mark.parametrize("shape", _SHAPES)
+def test_an_operator_definition_whose_ultimate_file_is_in_the_repository_is_refused(owner, tmp_path, global_config,
+                                                                                     monkeypatch, shape):
+    marker = _filter_body(owner)
+    _include_shape(shape, tmp_path, owner, global_config, monkeypatch)
+    _bind(owner)
+    _dirty(owner)
+    _status_refused(owner, marker)
+
+
+def _linked(repo: Path, where: Path) -> Path:
+    _setup(repo, "worktree", "add", "-q", "--detach", str(where))
+    return where
+
+
+def test_inspected_from_a_linked_worktree_a_main_work_tree_file_is_repository_content(owner, tmp_path, global_config):
+    """MEASURED gap at the base (041ad84): ALLOWED and the filter ran through worktree.git_status_entries."""
+    marker = _filter_body(owner)
+    linked = _linked(owner, tmp_path / "linked")
+    (owner / "x.gitcfg").write_text((owner.parent / "body.cfg").read_text())
+    with open(global_config, "a", encoding="utf-8") as handle:
+        handle.write(f"[include]\n\tpath = {owner / 'x.gitcfg'}\n")
+    _bind(owner)
+    (linked / "a.py").write_text("x = 2\n")
+    _status_refused(linked, marker)
+
+
+def test_inspected_from_the_main_work_tree_a_linked_worktree_file_is_repository_content(owner, tmp_path, global_config):
+    """MEASURED gap at the base (041ad84): a file in Kriya's managed linked worktree (model-written bytes) included by
+    the operator's global configuration was admitted for the MAIN work tree, and its filter ran."""
+    from kriya.workflow import worktree
+
+    marker = _filter_body(owner)
+    managed = Path(worktree.create_git_worktree(str(owner)))
+    (managed / "x.gitcfg").write_text((owner.parent / "body.cfg").read_text())
+    with open(global_config, "a", encoding="utf-8") as handle:
+        handle.write(f"[include]\n\tpath = {managed / 'x.gitcfg'}\n")
+    _bind(owner)
+    _dirty(owner)
+    _status_refused(owner, marker)
+
+
+@pytest.mark.parametrize("shape", ["include of an outside file", "includeIf gitdir of an outside file"])
+def test_an_operator_definition_outside_every_work_tree_still_runs(owner, tmp_path, global_config, shape):
+    """Positive control: an operator-managed global definition (Git LFS style), also behind includeIf, keeps working -
+    with a linked worktree present (the new roots add no false refusal)."""
+    from kriya.workflow import worktree
+
+    marker = _filter_body(owner)
+    _linked(owner, tmp_path / "linked")
+    outside = tmp_path / "operator" / "filters.cfg"
+    outside.parent.mkdir()
+    outside.write_text((owner.parent / "body.cfg").read_text())
+    with open(global_config, "a", encoding="utf-8") as handle:
+        handle.write(f"[include]\n\tpath = {outside}\n" if shape.startswith("include of")
+                     else f'[includeIf "gitdir:{owner}/"]\n\tpath = {outside}\n')
+    _bind(owner)
+    _dirty(owner)
+    worktree.git_status_entries(str(owner))
+    assert marker.exists(), "the operator's filter did not run"
+
+
+@pytest.mark.parametrize("answer", [(128, b""), (0, b""), (0, b"HEAD 0123\0\0")])
+def test_an_unlistable_worktree_set_refuses(owner, global_config, monkeypatch, answer):
+    """The work trees are listed only to judge an operator FILE definition (none = no listing, no cost); then an
+    unlistable or unparseable set refuses (fail closed) instead of judging against fewer roots."""
+    from kriya.repository import git
+
+    with open(global_config, "a", encoding="utf-8") as handle:
+        handle.write('[filter "lfs"]\n\tclean = git-lfs clean -- %f\n')
+    real = git._run
+
+    def run(cwd, *args):
+        if args[:2] == ("worktree", "list"):
+            return subprocess.CompletedProcess(list(args), answer[0], answer[1], b"fatal: broken")
+        return real(cwd, *args)
+    monkeypatch.setattr(git, "_run", run)
+    with pytest.raises(git.RepositoryContentFilterRefused) as raised:
+        git.refuse_repository_content_filters(str(owner))
+    assert raised.value.reason_code == git.GIT_CONFIG_UNINSPECTABLE

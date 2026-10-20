@@ -12,8 +12,10 @@ repository Git would use at ``path``, or of any submodule / embedded repository 
 
 * scope ``local`` (``.git/config``) or ``worktree`` (``config.worktree``) - including every file those scopes include
   through ``include.path`` / ``includeIf``, which Git reports with the INCLUDING file's scope (MEASURED, git 2.54.0);
-* scope ``system`` / ``global`` whose origin FILE lies inside the repository (its work tree, git dir or common dir): an
-  operator file that includes a repository file (fail-closed choice; owner question in the S19 Q1 report);
+* scope ``system`` / ``global`` whose origin FILE lies inside the repository (any of its work trees - the main one and
+  every linked one, S19 P1b -, its git dir or common dir): an operator file that includes a repository file, directly,
+  transitively, conditionally (``includeIf``), relatively or through a symlink - the ULTIMATE file decides (owner
+  decision C; MEASURED shapes in tests/test_s19p1b_residuals.py);
 * any other scope (fail closed: only the operator scopes and command scope are trusted), and a trusted scope whose
   origin is not the expected shape (``GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED``).
 
@@ -168,6 +170,23 @@ def _layout(run: _Runner, path: str) -> Optional[Tuple[str, str, str]]:
     return top, git_dir, common
 
 
+def _worktrees(run: _Runner, path: str) -> Tuple[str, ...]:
+    """Every work tree of the repository (the main one and each linked one) as real paths: all of them hold repository
+    content (S19 P1b, owner decision C - MEASURED: inspected from a linked worktree, a global include of a MAIN work-tree
+    file was admitted and its filter ran; inspected from the main work tree, a global include of a file in Kriya's
+    managed linked worktree likewise). ``worktree list`` reads metadata only (MEASURED: runs no filter)."""
+    done = run(path, "worktree", "list", "--porcelain", "-z")
+    if done.returncode != 0:
+        raise _uninspectable(path, "git worktree list failed", done)
+    roots = []
+    for record in done.stdout.split(b"\0"):
+        if record.startswith(b"worktree "):
+            roots.append(os.path.realpath(os.fsdecode(record[len(b"worktree "):])))
+    if not roots:
+        raise _uninspectable(path, "unparseable git worktree list")
+    return tuple(roots)
+
+
 def _inside(path: str, roots: Tuple[str, ...]) -> bool:
     return any(path == root or path.startswith(root.rstrip(os.sep) + os.sep) for root in roots)
 
@@ -196,6 +215,7 @@ def _gitlinks(run: _Runner, top: str) -> Set[str]:
 
 def _refuse(run: _Runner, path: str, seen: Set[str], depth: int) -> None:
     layout = _layout(run, path)
+    roots: Optional[Tuple[str, ...]] = None            # repository content: listed only when an operator file needs it
     for scope, origin, key, value in _filter_definitions(run, path):
         if value == "":
             continue                                    # an empty command: Git runs nothing (MEASURED)
@@ -206,9 +226,12 @@ def _refuse(run: _Runner, path: str, seen: Set[str], depth: int) -> None:
             continue                                    # Kriya's own argv / process environment
         if scope in OPERATOR_FILE_SCOPES and origin.startswith(_FILE_ORIGIN):
             source = os.path.realpath(os.path.join(layout[0] if layout else path, origin[len(_FILE_ORIGIN):]))
-            if layout is not None and _inside(source, layout):
-                raise RepositoryContentFilterRefused(GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY, path, key=key,
-                                                     scope=scope, origin=origin)
+            if layout is not None:
+                if roots is None:
+                    roots = (*layout, *_worktrees(run, path))
+                if _inside(source, roots):
+                    raise RepositoryContentFilterRefused(GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY, path, key=key,
+                                                         scope=scope, origin=origin)
             continue
         raise RepositoryContentFilterRefused(GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED, path, key=key, scope=scope,
                                              origin=origin)
