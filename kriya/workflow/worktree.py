@@ -12,6 +12,7 @@ from kriya.platform import git_argv
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.filesystem import SCOPED_SNAPSHOT_SENTINEL
 from kriya.policy.model import ActionRequest, ActionType
 from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
 from kriya.workflow.file_integrity import WORKTREE_CONTENT_MISMATCH, WORKTREE_SYNC_FAILED, file_raw_digest
@@ -364,7 +365,7 @@ def _resolve_repo_head(repo_path: str) -> Optional[str]:
     return None
 
 
-_SCOPED_SNAPSHOT_SENTINEL = ".kriya-scoped-snapshot"
+_SCOPED_SNAPSHOT_SENTINEL = SCOPED_SNAPSHOT_SENTINEL  # S18d: owned by the PLAT-039 control-path rule
 _SCOPED_SNAPSHOT_IGNORED = {".git", ".kriya"}
 
 

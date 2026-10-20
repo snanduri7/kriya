@@ -391,7 +391,6 @@ def test_credential_shaped_files_keep_their_existing_denial(dotted, name):
 CONTROL_ENTRIES = {"owner": {".git", ".kriya"}, "worktree": {".git"}, "snapshot": {".git", SENTINEL}}
 
 
-@pytest.mark.xfail(strict=True, reason="S18d after-pin (OI-150 c): MEASURED failing on the unfixed bytes")
 @pytest.mark.parametrize("name", ["owner", "worktree", "snapshot"])
 def test_a_listing_leaves_out_the_control_entries(dotted, name):
     s = dotted
@@ -415,7 +414,6 @@ CONTROL_READS = [
 ]
 
 
-@pytest.mark.xfail(strict=True, reason="S18d after-pin (OI-150 c): MEASURED failing on the unfixed bytes")
 @pytest.mark.parametrize("name, tool, arguments", CONTROL_READS,
                          ids=[f"{n}-{t}-{a.get('path') or a.get('file_path')}" for n, t, a in CONTROL_READS])
 def test_naming_a_control_path_is_refused_typed(dotted, name, tool, arguments):
@@ -428,7 +426,6 @@ def test_naming_a_control_path_is_refused_typed(dotted, name, tool, arguments):
 CONTROL_HITS = [("worktree", "gitdir"), ("snapshot", "workspace-scoped"), ("snapshot", "not an enclosing")]
 
 
-@pytest.mark.xfail(strict=True, reason="S18d after-pin (OI-150 c): MEASURED failing on the unfixed bytes")
 @pytest.mark.parametrize("name, pattern", CONTROL_HITS)
 def test_a_search_never_hits_a_control_file(dotted, name, pattern):
     """MEASURED on the unfixed bytes: the worktree's .git gitfile (gitdir: <owner path>) and the snapshot sentinel were
@@ -445,7 +442,6 @@ def test_the_sentinel_name_is_one_definition():
     assert worktree._SCOPED_SNAPSHOT_SENTINEL == SENTINEL
 
 
-@pytest.mark.xfail(strict=True, reason="S18d after-pin (OI-150 c): MEASURED failing on the unfixed bytes")
 def test_the_sentinel_is_a_trusted_control_path_for_the_writer_too(tmp_path):
     """The canonical set (kriya.policy.filesystem, PLAT-039) now names the sentinel: a candidate write to it is refused
     with the existing code, like .git/.kriya; look-alike names stay ordinary."""

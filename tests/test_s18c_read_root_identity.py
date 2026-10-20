@@ -479,14 +479,18 @@ def test_a_relative_symlink_in_the_candidate_resolves_inside_the_candidate(three
 
 
 def test_the_scoped_snapshot_is_read_after_a_model_step_with_its_kriya_markers(three_state):
-    """A nested plain workspace's candidate is the scoped snapshot: a read after the MODEL step describes it - and,
-    characterized, its listing carries the two Kriya-made entries the owner folder lacks (.git, the sentinel)."""
+    """A nested plain workspace's candidate is the scoped snapshot: a read after the MODEL step describes it. Its two
+    Kriya-made entries the owner folder lacks (.git, the sentinel) are on disk but, since S18d (OI-150 c, owner decision
+    2026-10-20), a planned listing leaves them out (tests/test_s18d_read_view_and_enforce_prompt.py) - so the listing
+    shows what the owner folder shows (less the owner's own .kriya)."""
     s = three_state
     read = planned("filesystem", {"operation": "read", "path": "app.py"}, (s.plain, s.snapshot), depends_on=["m1"])
     assert read.status == SubtaskStatus.COMPLETED and "ORIGIN_SNAPSHOT" in read.tool_output
     listing = planned("filesystem", {"operation": "list", "path": "."}, (s.plain, s.snapshot), depends_on=["m1"])
-    assert {".git", ".kriya-scoped-snapshot"} <= set(listing.tool_output)
+    assert {".git", ".kriya-scoped-snapshot"} <= set(os.listdir(s.snapshot))
+    assert not {".git", ".kriya-scoped-snapshot"} & set(listing.tool_output)
     assert not {".git", ".kriya-scoped-snapshot"} & set(os.listdir(s.plain))
+    assert set(listing.tool_output) == set(os.listdir(s.plain)) - {".kriya"}  # the owner's own Kriya state is left out too
 
 
 def test_an_enforce_run_reads_the_candidate_after_its_model_step_and_the_baseline_for_example_b(tmp_path, monkeypatch):

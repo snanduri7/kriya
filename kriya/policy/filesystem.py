@@ -115,9 +115,15 @@ _ENFORCEMENT_SENSITIVE_PATH_PATTERNS: Tuple[str, ...] = (
 # (model-directed) write authority never reaches them, under any spelling;
 # Kriya's own stores write `.kriya/` through kriya/control/control_store.py.
 TRUSTED_CONTROL_DIRECTORIES: Tuple[str, ...] = (".git", ".kriya")
+# S18d (OI-150 c): the file that marks a Kriya scoped-snapshot candidate (kriya/workflow/worktree.py writes it and
+# imports the name from here - one definition). Kriya control state like .kriya: never a candidate write target, never
+# a planned read's source.
+SCOPED_SNAPSHOT_SENTINEL = ".kriya-scoped-snapshot"
+# Every name the PLAT-039 rule protects, at any depth and under any spelling.
+TRUSTED_CONTROL_NAMES: Tuple[str, ...] = TRUSTED_CONTROL_DIRECTORIES + (SCOPED_SNAPSHOT_SENTINEL,)
 
 
-_FOLDED_CONTROL_DIRECTORIES = frozenset(fold_name(name) for name in TRUSTED_CONTROL_DIRECTORIES)
+_FOLDED_CONTROL_NAMES = frozenset(fold_name(name) for name in TRUSTED_CONTROL_NAMES)
 
 
 def is_trusted_control_path(root: str, target: str) -> bool:
@@ -129,7 +135,7 @@ def is_trusted_control_path(root: str, target: str) -> bool:
     repository is checked out on an insensitive one; at any depth. A
     location that cannot be established counts as trusted (fail closed)."""
     if any(path_relation(os.path.join(root, name), target) is not PathRelation.OUTSIDE
-           for name in TRUSTED_CONTROL_DIRECTORIES):
+           for name in TRUSTED_CONTROL_NAMES):
         return True
     try:
         relative = os.path.relpath(os.path.realpath(target), os.path.realpath(root))
@@ -138,7 +144,7 @@ def is_trusted_control_path(root: str, target: str) -> bool:
     parts = relative.split(os.sep)
     # Any component, as git's own verify_path does: a nested .git (a
     # submodule's) is as live as the top-level one.
-    return parts[0] != os.pardir and any(fold_name(part) in _FOLDED_CONTROL_DIRECTORIES for part in parts)
+    return parts[0] != os.pardir and any(fold_name(part) in _FOLDED_CONTROL_NAMES for part in parts)
 
 
 def trusted_control_path_denial(target_path: str) -> PolicyResult:
@@ -153,6 +159,21 @@ def trusted_control_path_denial(target_path: str) -> PolicyResult:
             f"({', '.join(TRUSTED_CONTROL_DIRECTORIES)}); candidate writes never reach it."
         ),
         matched_rule="filesystem.authorized_writer.trusted_control_path",
+    )
+
+
+def trusted_control_path_read_denial(target_path: str) -> PolicyResult:
+    """S18d (OI-150 c): the one DENY a model-authored read of a trusted control path gets - repository metadata and
+    Kriya control state are never reported as source (the same reason code as the write refusal; one cause, one
+    code)."""
+    return PolicyResult(
+        decision=PolicyDecision.DENY,
+        reason_code="TRUSTED_CONTROL_PATH_DENIED",
+        explanation=(
+            f"'{target_path}' is repository metadata or Kriya control state "
+            f"({', '.join(TRUSTED_CONTROL_NAMES)}); a planned read never reports it as source."
+        ),
+        matched_rule="filesystem.planned_read.trusted_control_path",
     )
 
 

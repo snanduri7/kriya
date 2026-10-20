@@ -18,7 +18,9 @@ from kriya.policy.filesystem import (
     AuthorizedFileReader,
     AuthorizedFileWriter,
     WriteScopeMode,
+    is_trusted_control_path,
     trusted_control_path_denial,
+    trusted_control_path_read_denial,
 )
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision
 from kriya.repository.git import refuse_repository_content_filters
@@ -88,7 +90,24 @@ def _authorized_read(invocation: ModelToolInvocation, path: str, *, in_owner: bo
     containment, symlinks resolved, credential stores) - the same reader whichever root the path landed in."""
     target = invocation.resolve(path, in_owner=in_owner)
     AuthorizedFileReader(invocation.roots[0], invocation.roots[1:]).raise_if_denied(target)
+    if _is_control_path(invocation, target):
+        raise PolicyDeniedError(request=ActionRequest(action_type=ActionType.READ_FILE, target=target),
+                                result=trusted_control_path_read_denial(target))
     return target
+
+
+def _is_control_path(invocation: ModelToolInvocation, target: str) -> bool:
+    """S18d (OI-150 c): whether a model-authored read would report repository metadata or Kriya control state as source
+    - the canonical PLAT-039 rule (kriya.policy.filesystem.is_trusted_control_path: .git, .kriya and the scoped-snapshot
+    sentinel, at any depth, any spelling) under the innermost root holding the target: a run's candidate worktree lives
+    under the owner's own .kriya, so judged from the owner every candidate file would look like control state. A target
+    no root holds is judged under every root (fail closed). The plugin knows no snapshot layout."""
+    real_target = os.path.realpath(target)
+    holding = [root for root in invocation.roots
+               if os.path.commonpath([os.path.realpath(root), real_target]) == os.path.realpath(root)]
+    if not holding:
+        return any(is_trusted_control_path(root, target) for root in invocation.roots)
+    return is_trusted_control_path(max(holding, key=lambda root: len(os.path.realpath(root))), target)
 
 
 # =====================================================================
@@ -129,6 +148,15 @@ class FilesystemTool(BaseTool):
         writer = AuthorizedFileWriter(invocation.roots[0], invocation.roots[1:], write_scope_mode=WriteScopeMode.DENY_ALL)
         raise PolicyDeniedError(request=ActionRequest(action_type=ActionType.WRITE_FILE, target=target),
                                 result=writer.authorize(target))
+
+    async def _run_model_authored(self, args: FilesystemArgs, invocation: ModelToolInvocation) -> Any:
+        """S18d (OI-150 c): a planned listing leaves out the control entries (_is_control_path); a read reaches here
+        only for a path _authorized_read admitted."""
+        output = await self._run(args)
+        if args.operation.lower() != "list":
+            return output
+        base = os.path.abspath(args.path)
+        return [entry for entry in output if not _is_control_path(invocation, os.path.join(base, entry))]
 
     async def _run(self, args: FilesystemArgs) -> Any:
         path = os.path.abspath(args.path)
@@ -657,7 +685,9 @@ class SearchTool(BaseTool):
 
     async def _run_model_authored(self, args: SearchArgs, invocation: ModelToolInvocation) -> Any:
         reader = AuthorizedFileReader(invocation.roots[0], invocation.roots[1:])
-        return self._search(args, admit=lambda file_path: reader.authorize(file_path).decision in _ALLOWED)
+        # S18d (OI-150 c): a control file (a worktree's .git gitfile, the snapshot sentinel) is never a search hit.
+        return self._search(args, admit=lambda file_path: reader.authorize(file_path).decision in _ALLOWED
+                            and not _is_control_path(invocation, file_path))
 
     async def _run(self, args: SearchArgs) -> Any:
         return self._search(args)
