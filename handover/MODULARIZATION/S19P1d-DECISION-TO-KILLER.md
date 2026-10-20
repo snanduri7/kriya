@@ -2,7 +2,7 @@
 
 Base 746fc93 (refs/kriya/verified = 7eddc5d; P1, P2, P1b, P1c, P2b are unverified ancestry). Commits: 96759cf (the
 activation step, its call sites and pins), then this docs/ledger commit (also the one test-double change in
-tests/test_workflow.py). Pins: tests/test_s19p1d_activation.py (63 tests).
+tests/test_workflow.py). Pins: tests/test_s19p1d_activation.py (64 tests).
 
 Evidence (scratch p1d, git 2.54.0, job-local HOME reproducing the host's stale `filter.media` / `filter.lfs` lines;
 the real ~/.gitconfig was never read): probe_semantics.out.json, probe_checkout_source.out.json, probe_co2.out.json
@@ -10,7 +10,7 @@ the real ~/.gitconfig was never read): probe_semantics.out.json, probe_checkout_
 fixed vs unfixed bytes), unfixed_run1.txt, mut_run1.txt.
 
 Unfixed bytes (the final test files on a `git archive` of 746fc93, hermetic HOME): tests/test_s19p1d_activation.py
-62 failed, 1 passed (`test_the_vector_is_real_when_unguarded`: the negative-control validity check, passes by design).
+63 failed, 1 passed (`test_the_vector_is_real_when_unguarded`: the negative-control validity check, passes by design).
 The changed Q1/P1b files pass at the base too (their changes are test-double signatures and a strengthened bind).
 
 Mutation campaign 20261020_221122_8156c871 (mutrun v2, `--workers 1`, rev 96759cf, hermetic HOME, VALID, 1211 s,
@@ -69,8 +69,8 @@ min of 5, ms; "stale" = the dormant host lines, every result "allowed"):
 
 Scaling: linear in path count for every spawn except `--source=<tree>`, which grows faster (C: 23 -> 78 -> 992 ms;
 A's deep tree 249 ms). Bounded: a fixed number of spawns per repository context (no per-path spawn, no batching
-needed: one stdin stream). Filter-free: same spawns as P1c; +9 ms (A) / +62 ms (200k) MEASURED from building the
-listing records in Python. No caching (owner decision stands; not measured necessary).
+needed: one stdin stream). Filter-free: same spawns as P1c; +9 ms (A) / +62 ms (200k) MEASURED; cause INFERRED (not profiled):
+building the listing records in Python. No caching (owner decision stands; not measured necessary).
 
 ## Decisions
 
@@ -80,7 +80,7 @@ listing records in Python. No caching (owner decision stands; not measured neces
 | 2 | git's attribute authority, literal value match | `_filter_values` | `test_a_driver_literally_named_set_is_active_for_a_bare_filter_attribute` | `test_a_negated_empty_or_unrelated_filter_attribute_activates_nothing[6]` |
 | 3 | path superset + materialized trees (`revisions=`) per operation (table above) | git.py `_Listing`; the 7 call sites | `test_a_filter_active_only_in_a_new_worktree_s_context_is_refused_before_its_reset`, `test_the_operator_scan_base_worktree_reads_its_head_tree`, `test_export_base_reads_the_attributes_of_the_tree_it_archives`, `test_a_path_only_the_archived_tree_has_activates_the_driver`, `test_the_worktree_checkout_reads_its_target_s_tree[reuse, remove]`, `test_the_content_hash_reads_head_s_attributes_for_its_scratch_index`, `test_an_untracked_file_the_hash_would_add_activates_the_driver`, `test_a_submodule_commit_a_materialized_tree_records_is_judged_in_the_submodule` | `test_an_unborn_repository_s_content_hash_is_unavailable_not_refused` |
 | 4 | actual context: work-tree top, caller env, child context | `_Listing(run, top)`, recursion via `caller.elsewhere` | `test_activation_is_decided_for_the_whole_work_tree_even_from_a_subdirectory`, `test_an_untracked_embedded_repository_activating_media_is_refused_in_its_own_context`, `test_a_submodule_activating_media_is_refused_through_the_parent`, `test_mutation_scope_evidence_is_guarded_by_activation` | same tests' dormant legs |
-| 5 | fail closed: check-attr exit/inconsistency, unresolvable revision; no work tree = judge all; "not a git repository" = nothing activates | `_filter_values`, `_Listing.tree`, `_layout` | `test_a_check_attr_answer_git_did_not_give_cleanly_refuses[exit, short, echo, unterminated]`, `test_a_materialized_revision_git_cannot_resolve_refuses`, `test_without_a_work_tree_to_ask_every_trusted_definition_is_judged` | `test_a_run_begins_in_a_plain_folder_under_the_stale_lines` |
+| 5 | fail closed: check-attr exit/inconsistency, unresolvable revision; no work tree = judge all; "not a git repository" = nothing activates | `_filter_values`, `_Listing.tree`, `_layout` | `test_a_check_attr_answer_git_did_not_give_cleanly_refuses[exit, short, echo, unterminated]`, `test_git_s_own_attribute_resolution_failure_refuses` (unfaked: GIT_ATTR_SOURCE naming no tree, check-attr exit 128), `test_a_materialized_revision_git_cannot_resolve_refuses`, `test_without_a_work_tree_to_ask_every_trusted_definition_is_judged` | `test_a_run_begins_in_a_plain_folder_under_the_stale_lines` |
 | 6 | repository-origin definitions still refuse, active or not (owner safe default) | `_refuse` (unchanged order) | `test_a_dormant_repository_defined_filter_is_still_refused` (fails at the base only on the new `driver` attribute; the refusal itself held there) | - |
 | 7 | the refusal names the ACTIVE driver + operator remedy; never the command (one redactor) | `_unproven`, template | every negative control above (`driver`, "ACTIVE", "Operator remedy", no command text) | - |
 | 8 | cost shape: nothing without a definition; one check-attr per source | `_refuse` | `test_activation_is_one_check_attr_spawn_per_source[2]` | `test_a_filter_free_configuration_asks_no_activation_question` |

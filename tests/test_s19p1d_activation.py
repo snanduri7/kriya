@@ -568,6 +568,17 @@ def test_a_check_attr_answer_git_did_not_give_cleanly_refuses(owner, monkeypatch
     assert raised.value.reason_code == UNINSPECTABLE
 
 
+def test_git_s_own_attribute_resolution_failure_refuses(owner):
+    """Unfaked: an attribute source git cannot read (GIT_ATTR_SOURCE naming no tree - MEASURED git 2.54.0: check-attr
+    exits 128 "bad --attr-source or GIT_ATTR_SOURCE") with the dormant stale lines refuses, never 'inactive'."""
+    from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
+
+    _dirty(owner)
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        refuse_repository_content_filters(str(owner), env={**os.environ, "GIT_ATTR_SOURCE": "no-such-revision"})
+    assert raised.value.reason_code == UNINSPECTABLE and "git check-attr failed" in str(raised.value)
+
+
 def test_a_materialized_revision_git_cannot_resolve_refuses(owner):
     from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
 
