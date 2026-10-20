@@ -52,7 +52,13 @@ def kriya_revision(source_root: str = _SOURCE_ROOT) -> Dict[str, Any]:
     """The git revision of the Kriya source. Outside a checkout (an installed
     wheel) the exact commit KRIYA-VERSION-001 embedded at build time stands in,
     with its dirty flag (RELEASE-IDENTITY-WHEEL-001); UNAVAILABLE only when
-    neither exists. A checkout's identity is unchanged (git is still read)."""
+    neither exists. A checkout's identity is unchanged (git is still read).
+
+    INSTALLATION STATE (S19 P1b, owner decision B; tests/test_s19p1b_residuals.py INSTALLATION_STATE): this reads Kriya's
+    OWN source checkout as operator-managed application infrastructure, so its `status` (which can run a content filter)
+    is not inspected - whoever can write that checkout's configuration can already write Kriya's code. The trust is the
+    ROLE of this call, never the path: the same folder opened as a target workspace gets the untrusted-repository
+    policy (kriya.repository.git) at every target entry."""
     if not os.path.exists(os.path.join(source_root, ".git")):
         from kriya.foundation.build_info import UNKNOWN as UNKNOWN_BUILD
         from kriya.foundation.build_info import embedded_build_info

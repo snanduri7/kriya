@@ -124,11 +124,11 @@ def _runner(executable: Optional[str], env: Optional[Mapping[str, str]]) -> _Run
     every Kriya git call except the GUI's sanitized Open Folder probe spawns."""
     if executable is None and env is None:
         return lambda cwd, *args: _run(cwd, *args)
-    argv0 = executable or "git"
+    git = executable or "git"                           # a git literal the S19 seam rule sees
     child_env = None if env is None else dict(env)
 
     def run(cwd: str, *args: str) -> "subprocess.CompletedProcess[bytes]":
-        return subprocess.run(git_argv([argv0, *args]), cwd=cwd, env=child_env, capture_output=True,
+        return subprocess.run(git_argv([git, *args]), cwd=cwd, env=child_env, capture_output=True,
                               stdin=subprocess.DEVNULL, timeout=_TIMEOUT_SECONDS, check=False)
     return run
 

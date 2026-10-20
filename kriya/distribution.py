@@ -27,7 +27,9 @@ UNTRACKED_PREFIX = "untracked: "
 
 
 def tracked_release_files(source_root: Path, trees: tuple[str, ...] = RELEASE_TREES) -> list[str]:
-    """Git-tracked files under ``trees``; raises when git cannot answer."""
+    """Git-tracked files under ``trees``; raises when git cannot answer. INSTALLATION STATE (S19 P1b, owner decision B):
+    the release tool's own source checkout (``--source-root``), never a target workspace; `ls-files` runs no content
+    filter (MEASURED)."""
     result = subprocess.run(
         git_argv(["git", "ls-files", "-z", "--", *trees]),
         cwd=source_root, capture_output=True, timeout=60,
