@@ -492,7 +492,6 @@ def test_the_refusal_table_is_closed():
     assert set(git.CONTENT_FILTER_REFUSALS) == {
         "GIT_CONTENT_FILTER_REPOSITORY_DEFINED", "GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY",
         "GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED", "GIT_CONFIG_UNINSPECTABLE"}
-    assert git.REPOSITORY_SCOPES == {"local", "worktree"}
     assert git.OPERATOR_FILE_SCOPES == {"system", "global"}
     assert git.COMMAND_SCOPE == "command"
     assert not issubclass(git.RepositoryContentFilterRefused, (RuntimeError, OSError, ValueError))
@@ -581,7 +580,7 @@ def _fake_run(listing: bytes, monkeypatch):
 
 
 @pytest.mark.parametrize("record, code", [
-    (b"blob\x00blob:HEAD:.gitconfig\x00filter.kx.clean\nx\x00", "GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED"),
+    (b"blob\x00blob:HEAD:.gitconfig\x00filter.kx.clean\nx\x00", "GIT_CONTENT_FILTER_REPOSITORY_DEFINED"),  # not trusted
     (b"global\x00standard input:\x00filter.kx.clean\nx\x00", "GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED"),
     (b"command\x00file:/etc/x\x00filter.kx.clean\nx\x00", "GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED"),
     (b"global\x00file:/etc/x\x00filter.kx.clean\nx", "GIT_CONFIG_UNINSPECTABLE"),           # not NUL-terminated

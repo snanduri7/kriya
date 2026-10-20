@@ -14,7 +14,8 @@ repository Git would use at ``path``, or of any submodule / embedded repository 
   through ``include.path`` / ``includeIf``, which Git reports with the INCLUDING file's scope (MEASURED, git 2.54.0);
 * scope ``system`` / ``global`` whose origin FILE lies inside the repository (its work tree, git dir or common dir): an
   operator file that includes a repository file (fail-closed choice; owner question in the S19 Q1 report);
-* any scope or origin outside the closed trusted table (fail closed).
+* any other scope (fail closed: only the operator scopes and command scope are trusted), and a trusted scope whose
+  origin is not the expected shape (``GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED``).
 
 Trusted (never refused): ``system`` and ``global`` definitions from files outside the repository (a user's Git LFS
 ``filter.lfs.*`` keeps working, and a repository may merely REFERENCE such a filter through ``.gitattributes``), and
@@ -73,9 +74,10 @@ CONTENT_FILTER_REFUSALS: Dict[str, str] = {
         "the git configuration of {repository} could not be inspected for content-filter drivers ({detail}). Kriya "
         "does not run git there (S19 Q1)."),
 }
-# The closed origin tables: repository-controlled scopes refuse; operator files are trusted unless they lie inside the
-# repository; command scope is Kriya's own argv / environment. Anything else refuses (unrecognised).
-REPOSITORY_SCOPES = frozenset({"local", "worktree"})
+# The closed origin tables: the operator scopes are trusted for files outside the repository, command scope for
+# Kriya's own argv / environment; EVERY other scope is the repository's own (MEASURED: .git/config, config.worktree and
+# everything they include report scope local or the per-worktree scope) and refuses. A trusted scope with an origin
+# outside these shapes refuses as unrecognised.
 OPERATOR_FILE_SCOPES = frozenset({"system", "global"})
 COMMAND_SCOPE = "command"
 _FILE_ORIGIN = "file:"
@@ -177,7 +179,7 @@ def _refuse(path: str, seen: Set[str], depth: int) -> None:
     for scope, origin, key, value in _filter_definitions(path):
         if value == "":
             continue                                    # an empty command: Git runs nothing (MEASURED)
-        if scope in REPOSITORY_SCOPES:
+        if scope not in OPERATOR_FILE_SCOPES and scope != COMMAND_SCOPE:
             raise RepositoryContentFilterRefused(GIT_CONTENT_FILTER_REPOSITORY_DEFINED, path, key=key, scope=scope,
                                                  origin=origin)
         if scope == COMMAND_SCOPE and origin == _COMMAND_ORIGIN:
