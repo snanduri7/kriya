@@ -358,6 +358,25 @@ def test_the_worktree_sync_refuses_to_copy_an_alias_of_a_control_object(tmp_path
     assert not os.path.exists(os.path.join(candidate, "alias_config.txt")), "refused before anything was copied"
 
 
+def test_the_worktree_sync_refuses_a_tracked_file_replaced_by_an_alias(tmp_path):
+    """A TRACKED file replaced by a hard link to a control object is a modified entry in git status: refused alike."""
+    owner = tmp_path / "owner"
+    _repository(owner)
+    os.unlink(owner / "app.py")
+    os.link(owner / ".git" / "config", owner / "app.py")
+    with pytest.raises(WorktreeSyncError) as refused:
+        create_git_worktree(str(owner))
+    assert refused.value.reason_code == TRUSTED_CONTROL_PATH_DENIED
+
+
+def test_a_planned_blame_of_an_alias_is_refused(dotted):  # noqa: F811
+    """git blame's file goes through the same planned-read authorization (owner view)."""
+    s = dotted
+    os.link(os.path.join(s.owner, ".git", "config"), os.path.join(s.owner, "blamed.txt"))
+    result = _in_view(s, "owner", "git", {"subcommand": "blame", "file_path": "blamed.txt"})
+    assert _refused(result), result
+
+
 def test_the_worktree_sync_copies_a_symlink_as_a_link_whatever_it_names(tmp_path):
     """A symlink is not a second name for an object's bytes: the sync recreates it as a link and the read-side rule judges
     it where it resolves. Even when it points at a multi-link control object (here .git/config with a second name inside
