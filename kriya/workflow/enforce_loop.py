@@ -2833,16 +2833,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         "generation": generation,
                     })
                     approved_stage_states[owner_id] = "completed" if plan_recovery_accepted else "needs_review"
-                    control_state = control_state.with_updates(
+                    control_state = record_committed_effects(control_state.with_updates(
                         subtask_states={
                             **control_state.subtask_states,
                             owner_id: "completed" if plan_recovery_accepted else "needs_review",
                         },
-                        subtask_written_files={
-                            **control_state.subtask_written_files,
-                            owner_id: sorted(owner_result.get("files") or []),
-                        },
-                    )
+                    ), owner_id, owner_result)
                     deps.save_approved_plan(
                         workspace_path, plan.plan_id,
                         deps.build_approved_plan_document(
@@ -2999,11 +2995,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             plan, obligation_ledger, owner.id, established_file_context, owner_position,
                             provenance=established_provenance,
                         )
-                        control_state = control_state.with_updates(subtask_written_files={
-                            **control_state.subtask_written_files,
-                            owner.id: sorted(set(control_state.subtask_written_files.get(owner.id, ()))
-                                             | set(owner_result.get("files") or [])),
-                        })
+                        control_state = record_committed_effects(control_state, owner.id, owner_result)
                         # Persisted before the rerun: a crash between the fold and the verification leaves the
                         # owner's real written set behind (independent review F8). The reopen bound itself is
                         # per process: a resumed run that re-verifies and fails may reopen once more.
@@ -3088,17 +3080,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # the end of the whole plan - a mid-plan crash must leave
             # accurate resumable state behind, matching run_milestones()'s
             # own completed_milestone_ids sidecar convention.
-            control_state = control_state.with_updates(
+            # The real, applied file list (not the plan's mere upfront
+            # planned_files declaration) - see ControlState.subtask_
+            # written_files's own docstring for why a later re-plan
+            # needs this to detect abandoned residue. S18d P2b: only what
+            # this invocation committed, added to the unit's record.
+            control_state = record_committed_effects(control_state.with_updates(
                 subtask_states={**control_state.subtask_states, subtask.id: result.status.value},
-                # The real, applied file list (not the plan's mere upfront
-                # planned_files declaration) - see ControlState.subtask_
-                # written_files's own docstring for why a later re-plan
-                # needs this to detect abandoned residue.
-                subtask_written_files={
-                    **control_state.subtask_written_files,
-                    subtask.id: sorted(call_result.get("files", [])),
-                },
-            )
+            ), subtask.id, call_result)
             approved_stage_states[subtask.id] = result.status.value
             plan_lifecycle_state = (
                 "in_progress" if passed else
@@ -3472,6 +3461,39 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 
         report = deps.build_verification_report(plan.acceptance_criteria)
         return aggregated, plan, tuple(subtask_results), ledger.all(), report, control_state
+
+
+# ----------------------------------------------------------------------------- S18d P2b (OI-150 a): the per-unit record
+# of what each MODEL unit committed to this run's candidate (ControlState.subtask_written_files - the evidence the
+# planned-read view (subtask_executor.reads_candidate_view), owner resolution (owner_recovery) and the abandoned-plan
+# quarantine (resume_support) read).
+
+def committed_files(result: Mapping[str, Any]) -> List[str]:
+    """The files one unit invocation COMMITTED to the run's candidate, by the candidate transaction's own result
+    authority - never a label, role or recovery action: its terminal commit ran (``quality_gates_passed`` is True only
+    after the sub-run's commit committed - stage_apply sets it after commit_terminal_candidate, and any commit that did
+    not commit stops the sub-run), or its candidate was applied before its final review was refused
+    (``final_review_refusal.candidate_applied``). A failed, refused or rolled-back invocation committed nothing,
+    whatever its ``files`` report."""
+    refusal = result.get("final_review_refusal") or {}
+    if result.get("quality_gates_passed") is True or refusal.get("candidate_applied") is True:
+        return list(result.get("files") or [])
+    return []
+
+
+def record_committed_effects(control_state: Any, unit_id: str, result: Mapping[str, Any]) -> Any:
+    """The ONE update of ControlState.subtask_written_files inside a run. Invariant: a unit's entry is the union of the
+    files that every invocation of that unit in this run (its first run, an owner recovery, a verification reopen, a
+    consumer retry, a scope recovery) committed to the candidate - a later invocation never replaces it (a VERIFY-only
+    recovery carried forward with files [] used to erase the owner's first-run change: TEST-B, P2), an uncommitted one
+    never grows it, and the entry exists once the unit ran (empty = it changed nothing; no entry = no evidence). Only
+    a candidate boundary starts the record over: a new run's ControlState, or the reset when the candidate is
+    discarded."""
+    prior = control_state.subtask_written_files.get(unit_id, ())
+    return control_state.with_updates(subtask_written_files={
+        **control_state.subtask_written_files,
+        unit_id: sorted(set(prior) | set(committed_files(result))),
+    })
 
 
 # ----------------------------------------------------------------------------- E14 (OI-62): moved verbatim from
