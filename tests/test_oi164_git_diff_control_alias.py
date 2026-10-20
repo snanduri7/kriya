@@ -135,6 +135,24 @@ def test_a_single_link_change_diffs_byte_identically(dotted, where):  # noqa: F8
     assert "CHANGED_IN_PLACE" in result.tool_output and result.tool_output == _git_diff(root)
 
 
+@pytest.mark.parametrize("where", ["worktree", "in-place"])
+def test_content_written_through_the_alias_path_diffs_byte_identically(dotted, where):  # noqa: F811
+    """Preservation (passes at 03954d8 too): a write through the alias path the way Kriya's writers write (an atomic
+    replace) gives the path a new single-link object, leaves the control bytes unchanged, and the planned diff is git's
+    own output, byte for byte."""
+    s = dotted
+    root = s.owner if where == "in-place" else s.candidate
+    protected = os.path.join(s.owner, ".git", "config")
+    before = Path(protected).read_bytes()
+    alias = _replace_with_alias(root, protected)
+    Path(alias + ".tmp").write_text("PKG = 3  # WRITTEN_THROUGH_THE_ALIAS_PATH\n")
+    os.replace(alias + ".tmp", alias)
+    assert Path(protected).read_bytes() == before and os.stat(alias).st_nlink == 1
+    result = _diff(s, where)
+    assert result.status == SubtaskStatus.COMPLETED, result
+    assert "WRITTEN_THROUGH_THE_ALIAS_PATH" in result.tool_output and result.tool_output == _git_diff(root)
+
+
 def test_a_multi_link_tracked_path_whose_identity_cannot_be_read_fails_closed(dotted, monkeypatch):  # noqa: F811
     """The stat of a listed path fails (not 'absent'): the call is refused, naming that path, before git diff runs."""
     s = dotted
