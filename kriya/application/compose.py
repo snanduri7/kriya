@@ -14,6 +14,11 @@ from __future__ import annotations
 from functools import cached_property
 from typing import TYPE_CHECKING, Optional
 
+# PRD-001 (OI-47): the composition's own parameter type resolves at runtime (typing.get_type_hints). Not a service module:
+# the production path that composes (kriya.kup.cli_ops) has loaded kriya.config already (MEASURED: +1 module there and
+# under kriya.cli). The service getters' annotations stay guarded (lazy services; cached_property is outside the PRD-001 scan).
+from kriya.config.service import ConfigService
+
 if TYPE_CHECKING:  # annotations only: each service module is imported when the service is first used
     from kriya.application.approval import ApprovalService
     from kriya.application.catalog import SkillCatalogService, ToolCatalogService
@@ -25,7 +30,6 @@ if TYPE_CHECKING:  # annotations only: each service module is imported when the 
     from kriya.application.project import ProjectService
     from kriya.application.review import ReviewService
     from kriya.application.run import RunService
-    from kriya.config.service import ConfigService
 
 SERVICE_NAMES = ("projects", "runs", "approvals", "reviews", "configuration", "models", "skills", "tools", "evidence", "history", "health")
 

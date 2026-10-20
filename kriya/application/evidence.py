@@ -14,7 +14,7 @@ from __future__ import annotations
 import base64
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.application.services import (
     EVIDENCE_BLOB_TOO_LARGE,
@@ -29,14 +29,12 @@ from kriya.application.services import (
     TraceHistory,
 )
 from kriya.context.model import RequestContext
+from kriya.control.history import Snapshot  # PRD-001 (OI-47): resolvable at runtime; MEASURED +3 modules, ~1 ms
 from kriya.core.attempt_evidence import model as evidence_model
 from kriya.core.attempt_evidence import reader
 from kriya.core.state_paths import resolve_state_directory
 from kriya.foundation.ids import RUN_ID_RULE, is_valid_run_id
 from kriya.foundation.redaction import redact_value
-
-if TYPE_CHECKING:  # annotation only: the snapshot reader is imported when a manifest names a snapshot
-    from kriya.control.history import Snapshot
 
 ABSENCE_DERIVED_FROM = "history.detail run_events[evidence.attempt_store]"
 RECORD_KINDS = evidence_model.KINDS  # the record kinds a records filter may name (the evidence schema's own table)
