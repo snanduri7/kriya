@@ -261,6 +261,22 @@ def test_a_refusal_on_the_last_permitted_attempt_is_not_reported_as_exhaustion(t
     _assert_refusal_ended_the_run(raised, cfg, workspace, before, GIT_CONTENT_FILTER_REPOSITORY_DEFINED)
 
 
+def test_the_controller_route_ends_with_the_refusal_as_itself(tmp_path, monkeypatch):
+    """WorkflowController.execute (legacy route, the CLI's composition root) above the same loop: no handler there
+    turns the propagated refusal into a result; one Developer call."""
+    from kriya.workflow.workflow_controller import WorkflowController
+
+    workspace = _workspace(tmp_path)
+    before = _tree(workspace)
+    _refusing_closer(monkeypatch, workspace)
+    eng, cfg, developer = _scripted_engine(lambda n: GOOD)
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        asyncio.run(WorkflowController(eng).execute(goal=GOAL, workspace_path=workspace, migration_mode="legacy",
+                                                    approval_callback=MagicMock(return_value=True)))
+    assert developer == [PRIMARY]
+    _assert_refusal_ended_the_run(raised, cfg, workspace, before, GIT_CONTENT_FILTER_REPOSITORY_DEFINED)
+
+
 def _best_of(n):
     """Best-of-N over ``n`` candidates, in guardrails mode: the executing gates (compile, tests) then run INSIDE
     run_attempt, where Best-of-N catches a candidate's failure (in human-in-the-loop mode they are held until after
