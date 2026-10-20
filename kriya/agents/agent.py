@@ -10,6 +10,7 @@ from kriya.agents.contracts import (
     ENVIRONMENT_DEPENDENCY_RULE,
     GLOBAL_INVARIANT_PROJECTION_RULE,
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
+    PLANNED_TOOL_CATALOGUE_RULE,
     REPOSITORY_PRECEDENT_REUSE_GUIDANCE,
     MilestoneV2,
     parse_file_list,
@@ -510,8 +511,8 @@ class PlannerAgent(BaseAgent):
             '"load_settings"}, "depends_on": [], "planned_files": [], "provides": ["callers.load_settings"], '
             '"requires": [], "relevant_global_invariant_ids": ["gi1"], "acceptance_criteria_ids": [], '
             '"verification": []} - note the subtask\'s own top-level tool_name ("search") is set here, to an '
-            "exact name from the tools list given to you elsewhere in this prompt (only the tools listed "
-            "there can run as a planned step), never a "
+            f"exact name from the tools list given to you elsewhere in this prompt ({PLANNED_TOOL_CATALOGUE_RULE}), "
+            "never a "
             "verifier keyword like \"test\"/\"compile\"/\"pytest\" (those are not valid Subtask.tool_name "
             "values) and never a name you are not certain is actually listed this run.\n"
             "\n"

@@ -97,11 +97,9 @@ def test_the_tool_name_checker_sees_a_planted_unplannable_tool(planted):
 def test_the_no_router_checker_sees_the_stale_claim():
     assert claims_no_tool_router(STALE_SENTENCE)
     assert claims_no_tool_router("TOOL steps are unsupported: there is no policy-mediated TOOL router yet.")
-    assert not claims_no_tool_router("execution_method=tool runs one Kriya tool directly through Kriya's governed TOOL "
-                                     "router.")
+    assert not claims_no_tool_router("TOOL subtasks run through Kriya's governed TOOL router.")
 
 
-@pytest.mark.xfail(strict=True, reason="S18d after-pin (OI-149): MEASURED failing on the unfixed bytes")
 def test_the_enforce_request_drops_the_stale_no_router_claim():
     request = _enforce_request()
     assert STALE_SENTENCE not in request
@@ -109,7 +107,6 @@ def test_the_enforce_request_drops_the_stale_no_router_claim():
     assert not claims_no_tool_router(request)
 
 
-@pytest.mark.xfail(strict=True, reason="S18d after-pin (OI-149): MEASURED failing on the unfixed bytes")
 def test_the_enforce_request_and_the_planner_prompt_state_one_planned_tool_contract():
     """ONE contract, one wording: the same rule constant in the Planner's system prompt (S18b) and the enforce request;
     the enforce request gives no list, so it keeps the Planner on MODEL subtasks (behaviour unchanged)."""
@@ -120,8 +117,8 @@ def test_the_enforce_request_and_the_planner_prompt_state_one_planned_tool_contr
     assert prompt.count(PLANNED_TOOL_CATALOGUE_RULE) == 1
     assert request.count(PLANNED_TOOL_CATALOGUE_RULE) == 1
     line = next(line for line in request.splitlines() if PLANNED_TOOL_CATALOGUE_RULE in line)
-    assert "governed TOOL router" in line
-    assert "This request gives no such list, so every subtask uses execution_method=model." in line
+    assert line == f"- A TOOL subtask may name only a tool from a list given to you ({PLANNED_TOOL_CATALOGUE_RULE}); none is " \
+                   "given here, so use execution_method=model."
 
 
 # =====================================================================================================================

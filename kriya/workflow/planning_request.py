@@ -44,6 +44,7 @@ from kriya.agents.contracts import (
     ENVIRONMENT_DEPENDENCY_RULE,
     GLOBAL_INVARIANT_PROJECTION_RULE,
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
+    PLANNED_TOOL_CATALOGUE_RULE,
 )
 from kriya.analyzer.graph import DependencyGraph
 from kriya.workflow.edit_safety import read_file_revision, strip_java_comments_and_strings
@@ -739,8 +740,11 @@ def build_authoritative_planner_request(
         "Return only one complete JSON object containing the execution-relevant structured plan. "
         "Emit no prose, Markdown, code fences, rationale, or architecture essay.\n"
         "Authoritative structured-plan protocol (planning metadata, not product requirements):\n"
-        "- Do not emit execution_method=tool subtasks; this execution path has no policy-mediated "
-        "TOOL router.\n"
+        # S18d (OI-149): the planned-tool contract, stated as the Planner's own system prompt states it (ONE rule,
+        # kriya.agents.contracts). TOOL subtasks do run here (TOOL-001); this request shows no plannable list, so the
+        # Planner keeps planning MODEL subtasks - the same outcome the obsolete "no TOOL router" sentence produced.
+        "- A TOOL subtask may name only a tool from a list given to you "
+        f"({PLANNED_TOOL_CATALOGUE_RULE}); none is given here, so use execution_method=model.\n"
         "- Every MODEL subtask sets execution_role: implementation or verification. An "
         "implementation subtask must own at least one exact planned_files path. A verification "
         "subtask (a non-editing build/test/run/output check, e.g. regression confirmation) sets "

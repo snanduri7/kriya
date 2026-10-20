@@ -77,6 +77,11 @@ GLOBAL_INVARIANT_PROJECTION_RULE = (
     "never invent a constraint the request does not state."
 )
 
+# The ONE statement of which tools a planned TOOL step may name (S18 governance: only the plannable catalogue, never a
+# merely registered tool; S18b OI-138). Defined once; the Planner agent's own system prompt and the enforce planning
+# request (S18d, OI-149) both include it; it names no tool, so it can never teach one a planned step cannot run.
+PLANNED_TOOL_CATALOGUE_RULE = "only the tools listed there can run as a planned step"
+
 AUTHORITATIVE_GOAL_SECTION_HEADER = "=== Authoritative Goal ==="
 PLANNED_IMPLEMENTATION_SECTION_HEADER = "=== Planned Implementation Strategy ==="
 

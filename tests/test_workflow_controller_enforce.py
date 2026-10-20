@@ -1174,7 +1174,11 @@ def test_revise_plan_for_runtime_plan_gap_rejects_already_planned_path():
 def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_changing_goal():
     request = build_authoritative_planner_request("Build one runnable application.")
     assert "Original product request:\nBuild one runnable application." in request
-    assert "Do not emit execution_method=tool subtasks" in request
+    # S18d (OI-149): the obsolete "Do not emit execution_method=tool subtasks; this execution path has no
+    # policy-mediated TOOL router" became the one planned-tool contract; the enforce request still gives no plannable
+    # list, so it still keeps the Planner on MODEL subtasks (tests/test_s18d_read_view_and_enforce_prompt.py).
+    assert "none is given here, so use execution_method=model." in request
+    assert "Do not emit execution_method=tool subtasks" not in request
     # PRV-05 (2026-08-28): a non-editing check now gets its own
     # execution_role=verification subtask (see ExecutionRole's own
     # docstring, kriya/workflow/plan_schema.py) rather than being folded
