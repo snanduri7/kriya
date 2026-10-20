@@ -7,6 +7,8 @@ import tarfile
 from pathlib import Path, PurePosixPath
 from zipfile import BadZipFile, ZipFile
 
+from kriya.platform import git_argv
+
 REQUIRED_RUNTIME_FILES = (
     "kriya/__init__.py",
     "kriya/cli.py",
@@ -27,7 +29,7 @@ UNTRACKED_PREFIX = "untracked: "
 def tracked_release_files(source_root: Path, trees: tuple[str, ...] = RELEASE_TREES) -> list[str]:
     """Git-tracked files under ``trees``; raises when git cannot answer."""
     result = subprocess.run(
-        ["git", "ls-files", "-z", "--", *trees],
+        git_argv(["git", "ls-files", "-z", "--", *trees]),
         cwd=source_root, capture_output=True, timeout=60,
     )
     if result.returncode != 0:

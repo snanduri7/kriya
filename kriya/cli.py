@@ -56,6 +56,7 @@ from kriya.core.kernel import Kernel
 from kriya.core.logging_setup import LogDirectoryError, configure_logging
 from kriya.core.state_paths import trace_db_path
 from kriya.foundation.redaction import redact_text, redact_value
+from kriya.platform import git_argv
 from kriya.platform.services import ENTRY_REFUSED_EXIT_CODE
 from kriya.platform.services import entry_refusal as platform_entry_refusal
 from kriya.plugins.plugin import PluginManager
@@ -3746,7 +3747,7 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
             # characters (e.g. `M "path with spaces/file.py"`), which a naive
             # whitespace-split silently mangles.
             import subprocess
-            res = subprocess.run(["git", "status", "--porcelain", "-z"], cwd=file_path, capture_output=True, text=True)
+            res = subprocess.run(git_argv(["git", "status", "--porcelain", "-z"]), cwd=file_path, capture_output=True, text=True)
             if res.returncode == 0 and res.stdout.strip("\x00"):
                 entries = res.stdout.split("\x00")
                 i = 0

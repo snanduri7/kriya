@@ -20,6 +20,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 from kriya.config.config import PRODUCTION_FIXED_RUNTIME_GUARANTEES, AppConfig
 from kriya.foundation.redaction import redact_text, redact_value
+from kriya.platform import git_argv
 
 MIN_FREE_BYTES = 1 * 1024 * 1024 * 1024
 
@@ -695,8 +696,8 @@ def _check_git_worktree(ctx: _Context) -> DoctorCheck:
     git = shutil.which("git")
     if not git:
         return _check("git.worktree", CheckStatus.FAIL, evidence={"error": "git executable not found"}, remediation=remediation)
-    inside = subprocess.run([git, "rev-parse", "--is-inside-work-tree"], cwd=ctx.workspace, capture_output=True, text=True, timeout=5)
-    worktrees = subprocess.run([git, "worktree", "list", "--porcelain"], cwd=ctx.workspace, capture_output=True, text=True, timeout=5)
+    inside = subprocess.run(git_argv([git, "rev-parse", "--is-inside-work-tree"]), cwd=ctx.workspace, capture_output=True, text=True, timeout=5)
+    worktrees = subprocess.run(git_argv([git, "worktree", "list", "--porcelain"]), cwd=ctx.workspace, capture_output=True, text=True, timeout=5)
     if inside.returncode != 0 or inside.stdout.strip() != "true" or worktrees.returncode != 0:
         error = inside.stderr.strip() or worktrees.stderr.strip() or "Git worktree support unavailable"
         return _check("git.worktree", CheckStatus.FAIL, evidence={"error": error}, remediation=remediation)
