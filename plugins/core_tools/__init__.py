@@ -9,6 +9,7 @@ from typing import Any, Callable, Optional, Tuple, Type
 from pydantic import BaseModel, Field
 
 from kriya.config.config import AutonomyConfig, ExecutionPolicyConfig
+from kriya.platform import git_argv
 from kriya.plugins.plugin import BasePlugin
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
@@ -524,7 +525,7 @@ class GitTool(BaseTool):
         profile = ContainmentProfile(trust_class=TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE, workspace_path=root)
         try:
             probe = ProcessController().run(
-                command, cwd=root, timeout=self._GIT_COMMAND_TIMEOUT_SECONDS, containment_profile=profile,
+                git_argv(command), cwd=root, timeout=self._GIT_COMMAND_TIMEOUT_SECONDS, containment_profile=profile,
                 containment_backend=resolve_containment_backend("none"),
             )
             lines = probe.stdout.splitlines() if probe.returncode == 0 and not probe.timeout else []
@@ -557,7 +558,9 @@ class GitTool(BaseTool):
         if sub == "status":
             cmd.append("status")
         elif sub == "diff":
-            cmd.append("diff")
+            # S19 (OI-141, owner question Q3; the fail-closed choice): no external diff command and no textconv
+            # driver - a repository's diff.<driver>.command / textconv would otherwise run on the host (MEASURED).
+            cmd.extend(["diff", "--no-ext-diff", "--no-textconv"])
         elif sub == "log":
             cmd.extend(["log", "-n", "5", "--oneline"])
         elif sub == "branch":
@@ -574,7 +577,7 @@ class GitTool(BaseTool):
         elif sub == "blame":
             if not args.file_path:
                 raise ToolExecutionError("file_path is required for git blame.")
-            cmd.extend(["blame", args.file_path])
+            cmd.extend(["blame", "--no-textconv", args.file_path])  # S19 (Q3): no repository textconv driver
         else:
             raise ToolExecutionError(f"Unsupported git subcommand: {args.subcommand}")
 
@@ -602,7 +605,7 @@ class GitTool(BaseTool):
         )
         try:
             result = await ProcessController().run_async(
-                cmd, cwd=cwd, timeout=self._GIT_COMMAND_TIMEOUT_SECONDS,
+                git_argv(cmd), cwd=cwd, timeout=self._GIT_COMMAND_TIMEOUT_SECONDS,
                 containment_profile=profile, containment_backend=resolve_containment_backend("none"),
             )
             if result.timeout:
