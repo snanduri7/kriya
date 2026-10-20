@@ -3471,7 +3471,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 def committed_files(result: Mapping[str, Any]) -> List[str]:
     """The files one unit invocation COMMITTED to the run's candidate, by the candidate transaction's own result
     authority - never a label, role or recovery action: its terminal commit ran (``quality_gates_passed`` is True only
-    after the sub-run's commit committed - stage_apply sets it after commit_terminal_candidate, and any commit that did
+    after the sub-run's commit committed - stage_apply sets it after the commit service's terminal commit, and any commit that did
     not commit stops the sub-run), or its candidate was applied before its final review was refused
     (``final_review_refusal.candidate_applied``). A failed, refused or rolled-back invocation committed nothing,
     whatever its ``files`` report."""
