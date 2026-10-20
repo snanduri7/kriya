@@ -23726,10 +23726,13 @@ def test_create_git_worktree_bootstraps_true_greenfield_before_isolation(tmp_pat
 def test_greenfield_bootstrap_failure_fails_closed_before_candidate_writes(tmp_path):
     from kriya.workflow.workflow import create_git_worktree
 
-    with patch("kriya.workflow.worktree.subprocess.run", side_effect=[
-        MagicMock(returncode=128, stdout="", stderr="not a repository"),
-        MagicMock(returncode=1, stdout="", stderr="git init denied"),
-    ]):
+    # S19 P1d: this double answers EVERY subprocess.run (one module object), so the content-filter inspection's own
+    # spawns would consume it first (text stderr, never what they read); the inspection is held out (setup only).
+    with patch("kriya.workflow.worktree.refuse_repository_content_filters", lambda *_a, **_k: None), \
+            patch("kriya.workflow.worktree.subprocess.run", side_effect=[
+                MagicMock(returncode=128, stdout="", stderr="not a repository"),
+                MagicMock(returncode=1, stdout="", stderr="git init denied"),
+            ]):
         with pytest.raises(RuntimeError, match="Git repository detection/bootstrap failed"):
             create_git_worktree(str(tmp_path))
 

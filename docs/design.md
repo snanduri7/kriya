@@ -3476,3 +3476,21 @@ folder run without the caller's repository-selecting variables (`GIT_DIR`, `GIT_
 Open Folder passes its own 15 s probe timeout. Cost (OI-60, MEASURED, loaded host): filter-free unchanged (34 ms);
 an operator program by absolute path +11 ms (41.6 -> 53.0); a bare name at the end of a 24-entry PATH +33 ms (40.7 ->
 73.8).
+
+S19 P1d (2026-10-21, OI-161; handover/MODULARIZATION/S19P1d-DECISION-TO-KILLER.md): ACTIVATION. The chain per
+repository context is now configuration -> ultimate origin -> activation -> provenance. A repository-origin definition
+still refuses whether or not anything uses it; an operator/command-scope definition is judged by the P1c provenance rule
+only when git ACTIVATES its driver for a path the actual operation can touch, so a stale global `filter.media` / an
+uninstalled `filter.lfs` no longer refuses repositories that do not use them. Git decides activation itself (`git
+check-attr --stdin -z filter`, at the work-tree top of the inspected context with the caller's environment; no
+.gitattributes parser) over a bounded path superset - the index, the untracked not-ignored files and every tree the
+operation materializes - from git's default reading (work tree, then index, honouring `attr.tree`) plus
+`--source=<tree>` for each materialized tree, passed by the caller as `revisions=` (worktree add's reset and the
+operator scan's reset: HEAD; worktree reuse/remove checkout: the target; export_base: the archived revision; the two
+scratch-index hashes: HEAD). A submodule is also judged at the commits those trees record for it (`submodule.recurse`,
+MEASURED). Values are matched literally (`unset`/`unspecified`/`set` can only match a driver of that name). A failing
+or inconsistent check-attr answer, or an unresolvable materialized revision, refuses (`GIT_CONFIG_UNINSPECTABLE`); a
+folder git calls "not a git repository" activates nothing; a place without a work tree judges every definition. The
+active refusal names the driver and the operator remedy. No definition = no extra spawn. Cost (OI-60, MEASURED, scratch
+p1d/meas_post.txt, idle host): with dormant stale lines, this repository (6.8k paths) 205 ms per inspection (+542 ms
+with `--source=HEAD`), 200k synthetic paths 1.1 s (1.65 s); filter-free unchanged in spawns.
