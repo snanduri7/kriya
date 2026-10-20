@@ -126,3 +126,20 @@ occurrences) in the captured prompts reproduces the committed lines exactly. The
 plan_global_invariant_projection_001.json (a recorded live prompt) is evidence, not regenerated. Changed assertion: the
 extraction marker _TARGETED_CORRECTION_END_MARKER in tests/test_workflow_controller_enforce.py (a verbatim copy of the
 line).
+
+## Re-run of the P2 DEV's own S18d mutants (verbatim text from the S18d campaign file)
+
+Campaign 20261020_202650_835206fc (mutrun v2, rev 58bbcdf, --workers 1, hermetic HOME, VALID, 59 s, tree_diff []):
+A1, A2, A3, A6 KILLED at L1; **C8 KILLED at L1** by test_a_path_whose_stat_fails_is_judged_protected_and_left_out
+(the exact P2 C8 text, measured on its own line, not inferred from B26). Final accounting: C8 KILLED, never
+EQUIVALENT.
+
+## Own bugs (reported)
+
+- e8b7379 is RED on tests/architecture/test_patch_points.py (MEASURED in the focused run): its pins added kernel patch
+  sites (parse/build/validate on the controller, build_recovery_execution_plan) beyond the closed PATCH_POINTS counts.
+  Not committed separately: the fix rode inside e2bbe8a (the pins were re-routed through already-counted harnesses -
+  tests/_t6_harness.enforce_run and the e12 in-place harness - and the production recovery builder); no table row
+  changed.
+- Caught before commit: a module-level script dict shared a scripted queue list across tests (the second test saw the
+  default all-files first run); replaced by a per-run factory.
