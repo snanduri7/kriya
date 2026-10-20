@@ -255,3 +255,18 @@ S19.
 - OI-142: Maven/Gradle/javac/Ruby variants NOT_RUN; OCI variant of R63 NOT_RUN (the container route to the candidate
   mount is S18 R41, MEASURED).
 - Lint at this commit: see the report.
+
+## 7. Phase 2 result (appended after the correction; sections 0-6 are the pre-fix evidence, unchanged)
+
+- Commits: 4668ddb characterization; 3fee52b seam; c8f499e REPOSITORY; a24233b KERNEL; 1529824 EXECUTION; 873d290
+  SKILLS; 5cb6e0a RETRIEVAL; c0b3800 STATE; a27a65e QUALIFICATION; b2579b7 ADAPTER-CLI; d3a66db PLUGIN; 67c1f60
+  enforcement. Each owner commit ran the S19 file, tests/architecture and every test file naming that owner's functions.
+- Original reproducer re-run on the fixed tree (`probe_git_post.py`, same fixtures, plain mode, MEASURED): 88 markers,
+  all of them either the held filter classes (filter, filter_process, attributes_info: 57; include_fsmonitor's
+  included filter: 15 of 18) or the harness's OWN argv replicas S36-S38 (raw `subprocess.run` in the probe, not Kriya
+  code: the analyzer `index_repository` and cli `review` sites themselves are wrapped, TRACED + the AST rule + the
+  dynamic twin). Every real Kriya call site: 0 fsmonitor / hook / gpg / diff-driver markers. Outputs vs pre-fix: 7
+  differences, all intended (gpg S10/S18 now succeed; GitTool diff/blame show git's own output where a driver was set;
+  one error message quotes the longer argv).
+- Architecture: `test_direct_access_owners` subprocess / git_argv counts, the cycle baseline, the import-direction
+  allowlist and module_map are unchanged (no new edge outside `_BASE`).
