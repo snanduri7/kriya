@@ -96,21 +96,29 @@ def _kriya_git(cwd: Path, *args: str) -> None:
 # --------------------------------------------------------------------------------- the new contract over every site
 
 @pytest.mark.parametrize("site", SITES)
-def test_a_dormant_repository_filter_lets_every_guarded_site_run(owner, site):
+def test_a_dormant_repository_filter_lets_every_guarded_site_run(owner, site, caplog):
     """POSITIVE (the owner invariant): .git/config defines clean, smudge and process commands but no path any operation
     can touch resolves filter=kx - every guarded Kriya entry runs, and the planted command never does."""
+    import logging
+
     from kriya.workflow import worktree
 
     if site in _NEEDS_WORKTREE:
         worktree.create_git_worktree(str(owner))
+        (Path(worktree.managed_worktree_path(str(owner))) / "a.py").write_text("x = 9\n")   # something to reset
     marker = owner.parent / "FILTER_RAN"
     _plant_local(owner, marker, "clean", "smudge", "process")
     _dirty(owner)
     assert "filter" in (owner / ".git" / "config").read_text()        # the plant is really there
-    try:
-        _sites()[site](owner)
-    except Exception as error:                        # noqa: BLE001 - e.g. GitTool commit with nothing staged
-        assert _reason(error) is None, f"{site}: {error!r}"
+    with caplog.at_level(logging.WARNING):
+        try:
+            _sites()[site](owner)
+        except Exception as error:                    # noqa: BLE001 - e.g. GitTool commit with nothing staged
+            assert _reason(error) is None, f"{site}: {error!r}"
+    assert "GIT_CONTENT_FILTER" not in caplog.text    # a cleanup site reports a refusal instead of raising it
+    if site in _NEEDS_WORKTREE:                       # the reuse / reset checkout really ran (reuse then syncs the
+        expected = "x = 2\n" if site == "worktree.create_git_worktree(reuse)" else "x = 1\n"   # owner's dirty a.py)
+        assert (Path(worktree.managed_worktree_path(str(owner))) / "a.py").read_text() == expected
     assert not marker.exists(), f"{site} ran the dormant repository filter"
 
 
