@@ -330,7 +330,9 @@ its scope and the file it comes from - never the command itself:
 - `GIT_CONTENT_FILTER_REPOSITORY_DEFINED` - the command is defined in `.git/config` (scope `local`), in a
   `config.worktree` (scope `worktree`), or in any file those include through `include.path` / `includeIf`; also a
   submodule's (or an embedded repository's) own configuration, because git runs the submodule's filters while it
-  inspects the parent;
+  inspects the parent. Since S19 P1e only a filter the git operation would really USE is refused (a path it touches
+  resolves `filter=<name>`); the message names that ACTIVE driver. A definition nothing binds is ignored. Where Kriya
+  cannot tell (no work tree) it still refuses;
 - `GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY` - your global or system configuration includes a file that lies inside the
   repository (that file is repository content): directly, through another file, relatively, through `includeIf`
   (`gitdir`, `onbranch`, `hasconfig`) or through a symlink - the file the definition finally comes from decides. Every

@@ -3411,7 +3411,8 @@ repository (top level, git dir or common dir) -> `GIT_CONTENT_FILTER_ORIGIN_IN_R
 -> trusted; anything else -> `GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED`; an unreadable or unparseable listing, a timeout
 or a failed spawn -> `GIT_CONFIG_UNINSPECTABLE`. An explicitly empty command runs nothing (MEASURED) and is not
 refused; any other value, including whitespace and a valueless key, is. A definition is refused whether or not a path
-is bound to it: the binding lives in `.gitattributes`, repository content that can change between two git calls.
+is bound to it: the binding lives in `.gitattributes`, repository content that can change between two git calls
+(superseded by S19 P1e below: a `local`/`worktree` definition now refuses when the operation can activate it).
 Submodules: a parent `status`/`diff`/`add` runs the child git of every populated gitlink with the CHILD's own
 configuration (MEASURED, also without `.gitmodules`, and the scratch-index hashes recurse into a gitlink only HEAD
 still has), so the gitlinks of the index (`ls-files -s`) and of HEAD (`ls-tree -r`) are inspected recursively (bounded
@@ -3479,7 +3480,7 @@ an operator program by absolute path +11 ms (41.6 -> 53.0); a bare name at the e
 
 S19 P1d (2026-10-21, OI-161; handover/MODULARIZATION/S19P1d-DECISION-TO-KILLER.md): ACTIVATION. The chain per
 repository context is now configuration -> ultimate origin -> activation -> provenance. A repository-origin definition
-still refuses whether or not anything uses it; an operator/command-scope definition is judged by the P1c provenance rule
+still refuses whether or not anything uses it (until S19 P1e, below); an operator/command-scope definition is judged by the P1c provenance rule
 only when git ACTIVATES its driver for a path the actual operation can touch, so a stale global `filter.media` / an
 uninstalled `filter.lfs` no longer refuses repositories that do not use them. Git decides activation itself (`git
 check-attr --stdin -z filter`, at the work-tree top of the inspected context with the caller's environment; no
@@ -3488,12 +3489,32 @@ operation materializes - from git's default reading (work tree, then index, hono
 `--source=<tree>` for each materialized tree, passed by the caller as `revisions=` (worktree add's reset and the
 operator scan's reset: HEAD; worktree reuse/remove checkout: the target; export_base: the archived revision; the two
 scratch-index hashes: HEAD). A submodule is also judged at the commits those trees record for it (`submodule.recurse`,
-MEASURED). Values are matched literally (`unset`/`unspecified`/`set` can only match a driver of that name). A failing
+MEASURED; since S19 P1e no Kriya checkout recurses, so this is kept as a superset). Values are matched literally (`unset`/`unspecified`/`set` can only match a driver of that name). A failing
 or inconsistent check-attr answer, or an unresolvable materialized revision, refuses (`GIT_CONFIG_UNINSPECTABLE`); a
 folder git calls "not a git repository" activates nothing; a place without a work tree judges every definition. The
 active refusal names the driver and the operator remedy. No definition = no extra spawn. Cost (OI-60, MEASURED, scratch
 p1d/meas_post.txt, idle host): with dormant stale lines, this repository (6.8k paths) 205 ms per inspection (+542 ms
 with `--source=HEAD`), 200k synthetic paths 1.1 s (1.65 s); filter-free unchanged in spawns.
+
+S19 P1e (2026-10-21, OI-161; handover/MODULARIZATION/S19P1e-DECISION-TO-KILLER.md). Three measured items from the
+independent characterization of P1d. (1) The activation decision now also applies to REPOSITORY-origin definitions
+(scope `local`/`worktree` and what they include): dormant - no path the actual operation can touch resolves the driver
+- is allowed (MEASURED for every guarded operation class: with the guard off a dormant definition ran nothing, a bound
+one ran); active refuses `GIT_CONTENT_FILTER_REPOSITORY_DEFINED` naming the active driver and its path count, never
+admitted by the provenance rule. Unchanged and fail closed: no work tree (activation unknown) judges every definition,
+a check-attr failure or inconsistent answer and an unresolvable materialized revision refuse, any other scope refuses
+outright, `ORIGIN_IN_REPOSITORY` / `ORIGIN_UNRECOGNISED` and the operator provenance rule are as before. A definition
+that appears only DURING an operation (an include of a file that operation creates, an `includeIf onbranch` the
+checkout switches to, a `core.attributesFile` the checkout writes) ran nothing in that operation (MEASURED; that git
+reads its configuration first is the INFERRED mechanism) and is the next operation's inspection's to refuse. (2) The managed
+worktree's reuse and remove `checkout -f` pass `--no-recurse-submodules`, as worktree add's reset and the operator scan
+already did: a repository's `submodule.recurse` made them reattach a kept `<gitdir>/modules/<name>` for a gitlink only
+the target records, or load a child include the checkout itself created, and run that child's filter where no
+inspection could see it (MEASURED). The managed worktree's submodules are no longer updated by a reuse (nothing in
+Kriya used them; a recursing reuse whose worktree had no submodule git dir failed with exit 128). (3) The git seam also
+carries `-c log.showSignature=false`: a repository's `log.showSignature=true` made GitTool's `log` run the repository's
+`gpg.program`, `gpg.openpgp.program`, `gpg.ssh.program` or `gpg.x509.program` on a forged signature (MEASURED, every
+format; Kriya's other commit readers ran none; no Kriya site runs merge or pull).
 
 Honest refusal reporting (S19e, OI-162/OI-163). The refusal is never an attempt failure: the two retry wrappers
 (`attempt_lifecycle.run_iteration`, `best_of_n.run_attempt_with_best_of_n`, including its sandbox reset) let
