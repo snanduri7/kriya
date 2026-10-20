@@ -21,6 +21,7 @@ from kriya.policy.filesystem import (
     trusted_control_path_denial,
 )
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision
+from kriya.repository.git import refuse_repository_content_filters
 from kriya.tools.containment import (
     ContainmentProfile,
     ContainmentSetupError,
@@ -402,6 +403,8 @@ class GitTool(BaseTool):
     # currently-supported mutating subcommand this tool exposes - no
     # push/reset/ref-delete capability exists here to gate.
     _MUTATING_SUBCOMMANDS = frozenset({"commit"})
+    # S19 Q1: the subcommands whose git can run a content filter (they convert working-tree content).
+    _FILTER_SUBCOMMANDS = frozenset({"status", "diff", "blame", "commit"})
     # S18b (OI-140, owner decision 3): which repository truth a PLANNED read describes. status and diff describe the
     # working tree the run is changing, so they read the run's candidate (the invocation's second root; B); log,
     # branch and blame describe the owner repository's history, refs and committed-line attribution, so they read the
@@ -583,6 +586,10 @@ class GitTool(BaseTool):
 
         if sub in self._MUTATING_SUBCOMMANDS:
             self._authorize_git_write(cmd)
+        if sub in self._FILTER_SUBCOMMANDS:
+            # S19 Q1 (OI-141): status/diff/blame/commit can run a content filter; a repository that defines one in its
+            # own configuration is refused, typed, before git runs (log and branch convert no file content).
+            refuse_repository_content_filters(cwd)
 
         # SEC-001-P6 (2026-09-11): migrated off a raw asyncio.create_subprocess_exec
         # call with no timeout and no process-group isolation onto the common

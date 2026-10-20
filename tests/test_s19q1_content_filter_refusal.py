@@ -25,9 +25,6 @@ import pytest
 from tests._plugin_test_support import load_core_tools_module
 
 REFUSED = "GIT_CONTENT_FILTER_REPOSITORY_DEFINED"
-# Characterization (expected-to-flip, MEASURED failing on 7eddc5d: every site ran the planted filter): each owner's
-# correction commit removes its sites from _PENDING and the marks from the tests it flips.
-_FLIPS = pytest.mark.xfail(strict=True, reason="S19 Q1: a repository-defined content filter still runs through Kriya git")
 IN_REPOSITORY = "GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY"
 
 
@@ -169,18 +166,6 @@ SITES = ["run_coordinator.begin_mutating_run", "worktree.git_status_entries", "w
          "checkpoint.compute_workspace_content_hash", "milestone_completion.workspace_evidence_hash",
          "named_test_oracle.export_base", "analyzer._repository_revision", "analyzer.index_repository(changed)",
          "operator_scan.changed_paths", "GitTool status", "GitTool diff", "GitTool blame", "GitTool commit"]
-_PENDING = set(SITES) - {"worktree.git_status_entries", "worktree.create_git_worktree",
-                         "worktree.create_git_worktree(reuse)", "worktree.remove_git_worktree",
-                         "checkpoint.compute_workspace_fingerprint", "checkpoint.compute_workspace_content_hash",
-                         "milestone_completion.workspace_evidence_hash", "named_test_oracle.export_base",
-                         "run_coordinator.begin_mutating_run", "analyzer._repository_revision",
-                         "analyzer.index_repository(changed)", "operator_scan.changed_paths"}
-
-
-def _site_params():
-    return [pytest.param(site, marks=_FLIPS) if site in _PENDING else site for site in SITES]
-
-
 # Sites that need the managed worktree to exist before the plant (the reuse / reset paths).
 _NEEDS_WORKTREE = {"worktree.remove_git_worktree", "worktree.create_git_worktree(reuse)"}
 # Cleanup that runs after a durable commit and from finally blocks: it reports the typed refusal and skips its git
@@ -210,7 +195,7 @@ def _assert_refused(site: str, repo: Path, marker: Path, code: str = REFUSED, ca
 
 # --------------------------------------------------------------------------------- the site matrix
 
-@pytest.mark.parametrize("site", _site_params())
+@pytest.mark.parametrize("site", SITES)
 def test_a_repository_filter_is_refused_before_any_kriya_git_runs_it(owner, site, caplog):
     from kriya.workflow import worktree
 
@@ -470,7 +455,7 @@ def _subcommand(argv: List[str]) -> List[str]:
     return rest
 
 
-@pytest.mark.parametrize("site", _site_params())
+@pytest.mark.parametrize("site", SITES)
 def test_the_inspection_precedes_every_filter_capable_git_operation(owner, site, monkeypatch):
     """Record every git process the real site starts (subprocess and GitTool's ProcessController): the inspection of
     a folder comes before any git operation there that can run a filter."""
