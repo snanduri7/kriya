@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 from typing import Any, List
 
+from kriya.platform import git_argv
 from kriya.repository.commit import StagedFileWrite
 from kriya.repository.snapshot import display_text, file_raw_digest, raw_digest
 from kriya.static_analysis.service import StaticAnalysisGateResult, StaticAnalysisRequest, StaticAnalysisService
@@ -24,7 +25,7 @@ class OperatorScanError(RuntimeError):
 
 def _git(workspace: str, *args: str) -> str:
     completed = subprocess.run(
-        ["git", *args], cwd=workspace, capture_output=True, text=True, check=False, timeout=120,
+        git_argv(["git", *args]), cwd=workspace, capture_output=True, text=True, check=False, timeout=120,
     )
     if completed.returncode != 0:
         raise OperatorScanError(f"git {' '.join(args)} failed: {completed.stderr.strip()}")

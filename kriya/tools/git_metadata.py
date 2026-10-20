@@ -47,6 +47,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from kriya.config.environment import toolchain
+from kriya.platform import git_argv
 from kriya.tools.containment import ContainmentSetupError, GitMetadataMount
 
 GIT_METADATA_FORMAT = "kriya.git_metadata/1"
@@ -100,7 +101,7 @@ class GitMetadataExport:
 
 
 def _git(cwd: str, *args: str, input_bytes: Optional[bytes] = None) -> bytes:
-    completed = subprocess.run(["git", *args], cwd=cwd, input=input_bytes, capture_output=True, check=True,
+    completed = subprocess.run(git_argv(["git", *args]), cwd=cwd, input=input_bytes, capture_output=True, check=True,
                                timeout=_GIT_TIMEOUT_SECONDS)
     return completed.stdout
 
@@ -175,7 +176,7 @@ def _filter_overrides(git: str, cwd: str) -> List[str]:
     `clean`/`process` driver to compare racily-clean files; those commands come from the folder being opened, so they are emptied for this read.
     Reading configuration (`git config --get-regexp`) executes nothing."""
     try:
-        listed = subprocess.run([git, "config", "--name-only", "--get-regexp", r"^filter\."], cwd=cwd, env=_probe_env(), capture_output=True, check=False,
+        listed = subprocess.run(git_argv([git, "config", "--name-only", "--get-regexp", r"^filter\."]), cwd=cwd, env=_probe_env(), capture_output=True, check=False,
                                 timeout=_PROBE_TIMEOUT_SECONDS)
     except (subprocess.TimeoutExpired, OSError):
         return []
@@ -185,7 +186,7 @@ def _filter_overrides(git: str, cwd: str) -> List[str]:
 
 def _probe(git: str, cwd: str, *args: str) -> "subprocess.CompletedProcess[bytes]":
     overrides = _filter_overrides(git, cwd) if args and args[0] == "status" else []
-    return subprocess.run([git, *_PROBE_OPTIONS, *overrides, *args], cwd=cwd, env=_probe_env(), capture_output=True, check=False, timeout=_PROBE_TIMEOUT_SECONDS)
+    return subprocess.run(git_argv([git, *_PROBE_OPTIONS, *overrides, *args]), cwd=cwd, env=_probe_env(), capture_output=True, check=False, timeout=_PROBE_TIMEOUT_SECONDS)
 
 
 def _first_working_git(path: str) -> Tuple[Optional[str], Optional["subprocess.CompletedProcess[bytes]"], str]:
