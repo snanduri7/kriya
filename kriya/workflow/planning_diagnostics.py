@@ -1,6 +1,7 @@
 """Bounded, local-only evidence for authoritative structured planning.
 
-These records may contain goals, paths, and planner output. They are written
+These records may contain goals, paths, and planner output - stored through
+the ONE redactor (S20r, OBS-003: no credential reaches the file). They are written
 only below the workspace's ``.kriya/control`` directory and are never inputs
 to outward lookup. Diagnostics observe planning; they do not authorize a plan,
 alter validation, or change bounded repair behavior.
@@ -14,6 +15,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from kriya.context.workspace_identity import workspace_identity
 from kriya.control.control_store import write_control_file
+from kriya.foundation.redaction import redact_text, redact_value
 from kriya.workflow.edit_safety import read_file_revision
 from kriya.workflow.plan_schema import EngineeringPlan
 
@@ -25,6 +27,11 @@ def _bounded_text(value: Optional[str]) -> Optional[str]:
     if value is None or len(value) <= _MAX_TEXT_CHARS:
         return value
     return value[:_MAX_TEXT_CHARS] + "...[truncated]"
+
+
+def _stored_text(value: Optional[str]) -> Optional[str]:
+    """S20r (OBS-003, I-12): a diagnostic text as stored - through the ONE redactor, redacted BEFORE it is bounded."""
+    return None if value is None else _bounded_text(redact_text(value))
 
 
 def bounded_repository_evidence(workspace_path: str, paths: Iterable[str]) -> List[Dict[str, Any]]:
@@ -153,20 +160,22 @@ def persist_planning_attempt_diagnostic(
         "workspace_id": workspace_identity(workspace_path),
         "run_id": run_id,
         "attempt": attempt,
-        "planner_request": _bounded_text(planner_request),
-        "planner_system_prompt": _bounded_text(planner_system_prompt),
-        "raw_plan_response": _bounded_text(raw_plan_response),
-        "parsed_plan": plan.model_dump(mode="json") if plan is not None else None,
-        "approved_plan": approved_plan_diagnostic(
+        "planner_request": _stored_text(planner_request),
+        "planner_system_prompt": _stored_text(planner_system_prompt),
+        "raw_plan_response": _stored_text(raw_plan_response),
+        # S20r (I-12): every other stored field goes through the same owner (model and goal text reach the plan, the
+        # validation errors and the ownership records); the identity fields above are digests, ids and counters.
+        "parsed_plan": redact_value(plan.model_dump(mode="json")) if plan is not None else None,
+        "approved_plan": redact_value(approved_plan_diagnostic(
             plan, validation_errors=validation_errors,
-        ),
-        "validation_errors": validation_errors,
-        "reason_codes": list(reason_codes),
-        "ownership_validation": normalized_ownership_validation_records(
+        )),
+        "validation_errors": redact_value(validation_errors),
+        "reason_codes": redact_value(list(reason_codes)),
+        "ownership_validation": redact_value(normalized_ownership_validation_records(
             plan, workspace_path=workspace_path,
-        ),
-        "repository_evidence": list(repository_evidence)[:_MAX_REPOSITORY_PATHS],
-        "repair_prompt": _bounded_text(repair_prompt),
+        )),
+        "repository_evidence": redact_value(list(repository_evidence)[:_MAX_REPOSITORY_PATHS]),
+        "repair_prompt": _stored_text(repair_prompt),
     }
     existing = ""
     if os.path.isfile(path):

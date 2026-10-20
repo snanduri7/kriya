@@ -538,7 +538,6 @@ def test_the_decision_ledger_file_stores_no_secret(tmp_path):
     assert decision.fields["note"] == f"token={S}40"          # the in-memory decision is the caller's, unchanged
 
 
-@FLIP
 def test_the_planning_diagnostic_stores_no_secret(tmp_path):
     from kriya.workflow.planning_diagnostics import persist_planning_attempt_diagnostic
 
@@ -555,7 +554,6 @@ def test_the_planning_diagnostic_stores_no_secret(tmp_path):
     assert line["reason_codes"] == ["RC"] and line["validation_errors"] == ["E1"]
 
 
-@FLIP
 def test_the_planning_diagnostic_is_redacted_before_it_is_bounded(tmp_path):
     from kriya.workflow.planning_diagnostics import _MAX_TEXT_CHARS, persist_planning_attempt_diagnostic
 
@@ -566,7 +564,7 @@ def test_the_planning_diagnostic_is_redacted_before_it_is_bounded(tmp_path):
         raw_plan_response="{}", plan=None, validation_errors=[], reason_codes=[], repository_evidence=[], repair_prompt=None)
     line = json.loads(open(path, encoding="utf-8").read().splitlines()[0])
     assert f"{S}53" not in line["planner_request"]
-    assert line["planner_request"].endswith("...[truncated]") and f"https://{R}@" in line["planner_request"]
+    assert line["planner_request"].endswith(f" https://{R}@h/x")         # hidden whole; the redacted text fits the bound
 
 
 def test_a_planning_diagnostic_without_a_secret_is_stored_as_given(tmp_path):
