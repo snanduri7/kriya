@@ -75,7 +75,7 @@ def run_operator_scan(cfg: Any, workspace: str, base: str) -> StaticAnalysisGate
         # <common>/worktrees/<id>) is inspected first, then populated exactly as `worktree add` would.
         _git(workspace, "worktree", "add", "--detach", "--no-checkout", base_root, base)
         try:
-            refuse_repository_content_filters(base_root)
+            refuse_repository_content_filters(base_root, revisions=("HEAD",))    # S19 P1d: reset reads HEAD's tree
             _git(base_root, "reset", "--hard", "--no-recurse-submodules", "-q")
             return StaticAnalysisService(cfg).evaluate(StaticAnalysisRequest(
                 writes=operator_writes(workspace, base_root, paths), workspace_path=base_root,

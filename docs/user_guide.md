@@ -347,9 +347,13 @@ its scope and the file it comes from - never the command itself:
   Refused as well: any shell syntax (quotes, `$`, backticks, `;`, `|`, `&`, `<`, `>`, `*`, `?`, `[`, `~`, `#`, `!`,
   an assignment), a shell, interpreter or evaluator as the program (`sh`, `bash`, `python`, `node`, `make`, `env`,
   `git` itself - `git <x>` falls back to a repository-defined alias - ...), an argument that is a relative or
-  in-repository path, and a program that is not installed (the message names the cause, never the command). A Git LFS
-  that is not installed, or a leftover `filter.media.*` line (`git media ...`), therefore refuses every repository until
-  you install the program or remove the stale lines from your global configuration.
+  in-repository path, and a program that is not installed (the message names the cause, never the command). Since S19
+  P1d this applies only to a filter the git operation would really USE: one that git resolves (`filter=<name>`, through
+  `.gitattributes`, `.git/info/attributes`, your global attributes file or `attr.tree`) for a path the operation can
+  touch. A Git LFS that is not installed, or a leftover `filter.media.*` line (`git media ...`), is ignored by every
+  repository that does not use it; a repository that does use it is refused, and the message names the ACTIVE filter
+  driver and the remedy (remove or correct the stale lines in your global configuration, or install the program).
+  Kriya never edits your git configuration.
 
 Not refused: a filter defined in your GLOBAL or SYSTEM git configuration whose program is installed outside the
 repository and called directly (Git LFS installed with `git lfs install` - `git-lfs clean -- %f` - keeps working, and a

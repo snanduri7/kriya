@@ -635,10 +635,10 @@ def _fake_run(listing: bytes, monkeypatch):
 
     real = git._run
 
-    def run(cwd, *args):
+    def run(cwd, *args, **kwargs):                       # S19 P1d: check-attr passes its paths as data=
         if args[0] == "config":
             return subprocess.CompletedProcess(list(args), 0, listing, b"")
-        return real(cwd, *args)
+        return real(cwd, *args, **kwargs)
     monkeypatch.setattr(git, "_run", run)
 
 
@@ -670,6 +670,7 @@ def test_operator_scopes_outside_the_repository_are_trusted(owner, monkeypatch, 
     operator_bin.mkdir()
     _marker_script(operator_bin / "git-lfs", owner.parent / "UNUSED")
     monkeypatch.setenv("PATH", f"{operator_bin}:/usr/bin:/bin")
+    _bind(owner, "lfs")                                  # S19 P1d: ACTIVE, so the provenance rule is what admits it
     _fake_run(record, monkeypatch)
     refuse_repository_content_filters(str(owner))
 
@@ -749,8 +750,9 @@ def _entry_checks_pass(monkeypatch) -> None:
     from kriya.control import run_coordinator
     from kriya.workflow import checkpoint
 
-    monkeypatch.setattr(checkpoint, "refuse_repository_content_filters", lambda _path: None)
-    monkeypatch.setattr(run_coordinator, "refuse_repository_content_filters", lambda _path: None)
+    # S19 P1d: the content hash's inspection names the tree its scratch index starts from (revisions=).
+    monkeypatch.setattr(checkpoint, "refuse_repository_content_filters", lambda _path, **_kwargs: None)
+    monkeypatch.setattr(run_coordinator, "refuse_repository_content_filters", lambda _path, **_kwargs: None)
 
 
 def test_the_direct_development_loop_lets_the_sandbox_refusal_through(tmp_path, monkeypatch):

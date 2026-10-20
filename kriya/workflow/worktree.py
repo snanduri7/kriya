@@ -503,7 +503,7 @@ def _add_worktree(repo_path: str, worktree_path: str) -> None:
     leaves the registered, unpopulated worktree: the reuse path inspects it again before its checkout."""
     subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "worktree", "add", "--detach", "--no-checkout", worktree_path]),
                    cwd=repo_path, check=True, capture_output=True)
-    refuse_repository_content_filters(worktree_path)
+    refuse_repository_content_filters(worktree_path, revisions=("HEAD",))    # S19 P1d: no index yet; reset reads HEAD
     subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "reset", "--hard", "--no-recurse-submodules", "-q"]),
                    cwd=worktree_path, check=True, capture_output=True)
 
@@ -613,7 +613,8 @@ def create_git_worktree(repo_path: str) -> str:
             # resolved against repo_path, not checked out literally inside the
             # worktree - see _resolve_repo_head for why.
             target = _resolve_repo_head(repo_path)
-            refuse_repository_content_filters(worktree_path)    # S19 Q1: the reused worktree's own config.worktree
+            # S19 Q1: the reused worktree's own config.worktree; S19 P1d: the checkout materializes ``target``'s tree.
+            refuse_repository_content_filters(worktree_path, revisions=(target or "HEAD",))
             subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "checkout", "-f", target or "HEAD"]), cwd=worktree_path, check=True, capture_output=True)
             subprocess.run(git_argv(["git", "clean", "-fd"]), cwd=worktree_path, check=True, capture_output=True)
 
@@ -774,13 +775,13 @@ def remove_git_worktree(repo_path: str, worktree_path: str) -> None:
         # S19 Q1: checkout runs smudge filters. This is cleanup (called after a durable commit and from finally blocks),
         # so a refusal is reported, typed, and the reset is skipped: raising here would turn a committed run into a
         # failure or mask the error being handled; the next create_git_worktree refuses before any git runs.
+        target = _resolve_repo_head(repo_path)          # never raises; S19 P1d: the checkout materializes its tree
         try:
-            refuse_repository_content_filters(worktree_path)
+            refuse_repository_content_filters(worktree_path, revisions=(target or "HEAD",))
         except RepositoryContentFilterRefused as refusal:
             logger.error("Worktree reset skipped at %r: %s", worktree_path, refusal)
             return
         try:
-            target = _resolve_repo_head(repo_path)
             subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "checkout", "-f", target or "HEAD"]), cwd=worktree_path, capture_output=True)
             subprocess.run(git_argv(["git", "clean", "-fd"]), cwd=worktree_path, capture_output=True)
         except Exception as e:

@@ -38,9 +38,18 @@ only HEAD still has, which the scratch-index hashes read), so the gitlinks of th
 recursively. Nothing is memoized: a repository's configuration (or a file it includes from the work tree) can change
 between two calls, so every caller inspects immediately before its own Git operation.
 
+ACTIVATION (S19 P1d, OI-161, owner decision 2026-10-21): an operator (system/global file outside the repository) or
+command-scope definition matters only when the actual Git operation can ACTIVATE it - when a path that operation can
+touch resolves its ``filter`` attribute to that driver. A dormant operator definition (a stale ``filter.media`` line
+in ~/.gitconfig, a ``filter.lfs`` line without git-lfs installed) no longer refuses an unrelated repository; an ACTIVE
+one is judged by the P1c executable-provenance rule, unchanged. Git itself decides activation (``git check-attr``,
+never a second .gitattributes parser) in the inspected repository's own context and environment, over a bounded
+superset of the paths the operation can touch (``_active_drivers``). A REPOSITORY-origin definition still refuses
+whether or not it is active (it is repository-controlled configuration; another path set can activate it later).
+
 The refusal message names the key, its scope and its origin file, never the command (it could carry a secret), and
 goes through the one redactor (kriya.foundation.redaction). Callers: the run entry (``begin_mutating_run``) and every
-Kriya function whose Git operation can run a filter (S19Q1-DECISION-TO-KILLER.md).
+Kriya function whose Git operation can run a filter (S19Q1-DECISION-TO-KILLER.md, S19P1d-DECISION-TO-KILLER.md).
 """
 from __future__ import annotations
 
@@ -48,7 +57,7 @@ import os
 import re
 import shutil
 import subprocess
-from typing import Callable, Dict, List, Mapping, Optional, Set, Tuple
+from typing import Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from kriya.config.environment import child_environment
 from kriya.foundation.redaction import redact_text
@@ -82,9 +91,16 @@ CONTENT_FILTER_REFUSALS: Dict[str, str] = {
     GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN: (
         "the content-filter command {key} for the git repository at {repository} ({scope} scope, {origin}) is not "
         "provably operator-controlled code: {detail}. Kriya does not run git there: git would run it on this host "
-        "with the repository as its working directory (S19 P1c). Point the filter at an operator-installed program "
-        "outside the repository, invoked directly (for Git LFS: `git lfs install`)."),
+        "with the repository as its working directory (S19 P1c). Operator remedy: remove or correct that filter "
+        "definition in your own git configuration, or install the program it is meant to run outside the repository "
+        "and invoke it directly (for Git LFS: install git-lfs, then `git lfs install`). Kriya never changes git "
+        "configuration."),
 }
+# The activation part of an EXECUTABLE_UNPROVEN refusal's detail (S19 P1d): the driver git really activates.
+_ACTIVE_DETAIL = ("; the filter driver '{driver}' is ACTIVE here: git resolves filter={driver} for {count} path(s) this "
+                  "git operation can touch")
+_ACTIVATION_UNKNOWN_DETAIL = ("; whether the filter driver '{driver}' is active cannot be determined here (no work "
+                              "tree to ask git about)")
 # The closed provenance causes (S19 P1c): the refusal names one of these, never the command text.
 PROVENANCE_CAUSES: Dict[str, str] = {
     "structure": "it uses a shell construct or a character outside the conservative direct-command form (quotes, "
@@ -119,20 +135,26 @@ class RepositoryContentFilterRefused(Exception):
     subclass, so no handler written for an ordinary git failure absorbs it."""
 
     def __init__(self, reason_code: str, repository: str, *, key: str = "", scope: str = "", origin: str = "",
-                 detail: str = "") -> None:
+                 detail: str = "", driver: str = "") -> None:
         self.reason_code = reason_code
         self.repository = repository
         self.key = key
         self.scope = scope
         self.origin = origin
+        self.driver = driver                            # S19 P1d: the ACTIVE driver an EXECUTABLE_UNPROVEN refusal names
         message = CONTENT_FILTER_REFUSALS[reason_code].format(repository=repository, key=key, scope=scope,
                                                               origin=origin, detail=detail)
         super().__init__(redact_text(f"{reason_code}: {message}"))
 
 
-def _run(cwd: str, *args: str) -> "subprocess.CompletedProcess[bytes]":
-    return subprocess.run(git_argv(["git", *args]), cwd=cwd, capture_output=True, stdin=subprocess.DEVNULL,
-                          timeout=_TIMEOUT_SECONDS, check=False)
+def _stdin(data: Optional[bytes]) -> Dict[str, object]:
+    """Never an inherited stdin: ``data`` (``check-attr --stdin``, S19 P1d) or nothing at all."""
+    return {"stdin": subprocess.DEVNULL} if data is None else {"input": data}
+
+
+def _run(cwd: str, *args: str, data: Optional[bytes] = None) -> "subprocess.CompletedProcess[bytes]":
+    return subprocess.run(git_argv(["git", *args]), cwd=cwd, capture_output=True, timeout=_TIMEOUT_SECONDS,
+                          check=False, **_stdin(data))
 
 
 _Runner = Callable[..., "subprocess.CompletedProcess[bytes]"]
@@ -146,13 +168,13 @@ def _runner(executable: Optional[str], env: Optional[Mapping[str, str]], timeout
     every Kriya git call except the GUI's sanitized Open Folder probe spawns. ``timeout``: the CALLER's own per-spawn
     timeout (S19 P1c, owner decision 6: the Open Folder probe's 15 s, never widened to this module's 60 s)."""
     if executable is None and env is None and timeout == _TIMEOUT_SECONDS:
-        return lambda cwd, *args: _run(cwd, *args)
+        return lambda cwd, *args, **kwargs: _run(cwd, *args, **kwargs)
     git = executable or "git"                           # a git literal the S19 seam rule sees
     child_env = None if env is None else dict(env)
 
-    def run(cwd: str, *args: str) -> "subprocess.CompletedProcess[bytes]":
-        return subprocess.run(git_argv([git, *args]), cwd=cwd, env=child_env, capture_output=True,
-                              stdin=subprocess.DEVNULL, timeout=timeout, check=False)
+    def run(cwd: str, *args: str, data: Optional[bytes] = None) -> "subprocess.CompletedProcess[bytes]":
+        return subprocess.run(git_argv([git, *args]), cwd=cwd, env=child_env, capture_output=True, timeout=timeout,
+                              check=False, **_stdin(data))
     return run
 
 
@@ -209,16 +231,18 @@ def _filter_definitions(run: _Runner, path: str) -> List[Tuple[str, str, str, Op
     return definitions
 
 
-def _layout(run: _Runner, path: str) -> Optional[Tuple[str, str, str]]:
-    """(work tree top level, git dir, common dir) as absolute real paths; None when ``path`` is not in a work tree."""
+def _layout(run: _Runner, path: str) -> Tuple[Optional[Tuple[str, str, str]], bool]:
+    """((work tree top level, git dir, common dir) as absolute real paths, False); (None, True) when git answers that
+    ``path`` is not in a git repository at all; (None, False) for any other place without a work tree (a git dir, a
+    bare repository, a repository git refuses to use)."""
     done = run(path, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir")
     if done.returncode != 0:
-        return None
+        return None, b"not a git repository" in done.stderr.lower()
     lines = os.fsdecode(done.stdout).split("\n")
     if len(lines) != 4 or lines[3] != "" or not all(lines[:3]):
         raise _uninspectable(path, "unparseable git rev-parse answer")
     top, git_dir, common = (os.path.realpath(line) for line in lines[:3])
-    return top, git_dir, common
+    return (top, git_dir, common), False
 
 
 def _same_repository(run: _Runner, source: str, common: str) -> bool:
@@ -246,26 +270,156 @@ def _inside(path: str, roots: Tuple[str, ...]) -> bool:
     return any(path_relation(root, path) is not PathRelation.OUTSIDE for root in roots)
 
 
-def _gitlinks(run: _Runner, top: str) -> Set[str]:
-    """Paths (relative to ``top``) of every gitlink in the index and in HEAD (a repository without a commit has none
-    in HEAD)."""
-    index = run(top, "ls-files", "-s", "-z", "--full-name")
-    if index.returncode != 0:
-        raise _uninspectable(top, "git ls-files failed", index)
-    records = [record for record in index.stdout.split(b"\0") if record]
-    head = run(top, "ls-tree", "-r", "-z", "--full-tree", "HEAD")
-    if head.returncode == 0:
-        records += [record for record in head.stdout.split(b"\0") if record]
-    elif run(top, "rev-parse", "--verify", "-q", "HEAD^{commit}").returncode == 0:
-        raise _uninspectable(top, "git ls-tree HEAD failed", head)
-    links = set()
-    for record in records:
+_Record = Tuple[bytes, bytes, bytes]                    # (mode, object id, path relative to the work tree top)
+
+
+def _records(top: str, done: "subprocess.CompletedProcess[bytes]", oid_field: int) -> List[_Record]:
+    """``ls-files -s -z`` (``mode oid stage TAB path``: ``oid_field`` 1) or ``ls-tree -r -z`` (``mode type oid TAB
+    path``: ``oid_field`` 2) records."""
+    records = []
+    for record in done.stdout.split(b"\0"):
+        if not record:
+            continue
         meta, tab, name = record.partition(b"\t")
-        if not tab:
+        parts = meta.split(b" ")
+        if not tab or len(parts) != 3:
             raise _uninspectable(top, "unparseable git listing")
-        if meta.split(b" ", 1)[0] == _GITLINK_MODE:
-            links.add(os.fsdecode(name))
-    return links
+        records.append((parts[0], parts[oid_field], name))
+    return records
+
+
+class _Listing:
+    """What git lists for ONE repository context during ONE inspection (each listing read at most once, never kept
+    across calls): the index, HEAD, the trees the caller's operation materializes, the untracked files."""
+
+    def __init__(self, run: _Runner, top: str) -> None:
+        self.run, self.top = run, top
+        self._index: Optional[List[_Record]] = None
+        self._head: Optional[List[_Record]] = None
+        self._unborn = False
+        self._trees: Dict[str, Tuple[Optional[str], List[_Record]]] = {}
+
+    def index(self) -> List[_Record]:
+        if self._index is None:
+            done = self.run(self.top, "ls-files", "-s", "-z", "--full-name")
+            if done.returncode != 0:
+                raise _uninspectable(self.top, "git ls-files failed", done)
+            self._index = _records(self.top, done, 1)
+        return self._index
+
+    def head(self) -> List[_Record]:
+        """HEAD's records; none for a repository without a commit."""
+        if self._head is None:
+            done = self.run(self.top, "ls-tree", "-r", "-z", "--full-tree", "HEAD")
+            if done.returncode == 0:
+                self._head = _records(self.top, done, 2)
+            elif self.run(self.top, "rev-parse", "--verify", "-q", "HEAD^{commit}").returncode == 0:
+                raise _uninspectable(self.top, "git ls-tree HEAD failed", done)
+            else:
+                self._head, self._unborn = [], True
+        return self._head
+
+    def tree(self, revision: str) -> Tuple[Optional[str], List[_Record]]:
+        """(tree object id, records) of a revision the caller's operation materializes (checkout, reset, archive);
+        (None, []) for ``HEAD`` of a repository without a commit (nothing to materialize). Any other revision git
+        cannot resolve or list refuses (fail closed)."""
+        if revision not in self._trees:
+            if revision == "HEAD" and not self.head() and self._unborn:
+                self._trees[revision] = (None, [])
+                return self._trees[revision]
+            done = self.run(self.top, "rev-parse", "--verify", "-q", "--end-of-options", f"{revision}^{{tree}}")
+            tree = os.fsdecode(done.stdout).strip()
+            if done.returncode != 0 or not tree:
+                raise _uninspectable(self.top, "git cannot resolve the revision the operation materializes", done)
+            listed = self.run(self.top, "ls-tree", "-r", "-z", "--full-tree", tree)
+            if listed.returncode != 0:
+                raise _uninspectable(self.top, "git ls-tree of the revision the operation materializes failed", listed)
+            self._trees[revision] = (tree, _records(self.top, listed, 2))
+        return self._trees[revision]
+
+    def untracked(self) -> List[bytes]:
+        """Untracked, not ignored files (what ``add -A`` would add): ``--exclude-standard``, no ``--directory``."""
+        done = self.run(self.top, "ls-files", "-o", "-z", "--exclude-standard", "--full-name")
+        if done.returncode != 0:
+            raise _uninspectable(self.top, "git ls-files --others failed", done)
+        return [name for name in done.stdout.split(b"\0") if name]
+
+    def gitlinks(self) -> Set[str]:
+        """Paths (relative to the top) of every gitlink in the index and in HEAD (the repositories git recurses into)."""
+        return {os.fsdecode(name) for mode, _, name in (*self.index(), *self.head()) if mode == _GITLINK_MODE}
+
+    def gitlink_commits(self, link: str, revisions: Sequence[str]) -> List[str]:
+        """The commits the trees of ``revisions`` record at the gitlink ``link``: what a checkout of one of them that
+        recurses into submodules (``submodule.recurse``) materializes in that submodule."""
+        name = os.fsencode(link)
+        return sorted({os.fsdecode(oid) for revision in revisions for mode, oid, path in self.tree(revision)[1]
+                       if mode == _GITLINK_MODE and path == name})
+
+
+def _filter_values(listing: _Listing, paths: List[bytes], source: Tuple[str, ...]) -> List[str]:
+    """The value git resolves for the ``filter`` attribute of each path (``check-attr --stdin -z``, ONE spawn, paths
+    relative to the work tree top where it runs), from ``source`` (``()`` = git's default work-tree-then-index reading,
+    honouring ``attr.tree`` / ``GIT_ATTR_SOURCE``; ``--source=<tree>``). A failing or inconsistent answer refuses
+    (fail closed): never read as "inactive"."""
+    done = listing.run(listing.top, "check-attr", *source, "--stdin", "-z", "filter",
+                       data=b"".join(path + b"\0" for path in paths))
+    if done.returncode != 0:
+        raise _uninspectable(listing.top, "git check-attr failed", done)
+    fields = done.stdout.split(b"\0")
+    if fields[-1] != b"" or len(fields) - 1 != 3 * len(paths):
+        raise _uninspectable(listing.top, "unparseable git check-attr answer")
+    values = []
+    for index, path in enumerate(paths):
+        echoed, attribute, value = fields[3 * index:3 * index + 3]
+        if echoed != path or attribute != b"filter":
+            raise _uninspectable(listing.top, "unparseable git check-attr answer")
+        values.append(os.fsdecode(value))
+    return values
+
+
+def _active_drivers(listing: _Listing, revisions: Sequence[str]) -> Dict[str, int]:
+    """Driver name -> number of paths for which git activates it, over a bounded SUPERSET of what the caller's
+    operation can touch (S19 P1d, MEASURED git 2.54.0 in scratch p1d/probe_semantics.out.json):
+
+    * paths: the index (status, diff, add -u, commit, blame), the untracked not-ignored files (``add -A``, ``add
+      <path>``; a file deleted from the index but present is one of them) and every tree the operation materializes
+      (``revisions``: checkout/reset/archive target, ``read-tree HEAD``; ``worktree add --no-checkout`` leaves NO index,
+      so its ``reset`` reads HEAD's tree only). A path only HEAD has is converted by no guarded operation unless HEAD
+      is materialized (then it is a revision). Ignored untracked files are not touched by any guarded operation
+      (MEASURED: blame of one dies before reading it; status / add -A skip it).
+    * sources, unioned, each the one git itself uses for the operation (MEASURED, scratch p1d probe_semantics and
+      probe_checkout_source / probe_co2): git's default reading - the work-tree file, else the index; honouring
+      ``attr.tree`` / ``GIT_ATTR_SOURCE`` - is what status, diff, add, commit and blame read; checkout, reset and
+      archive read the MATERIALIZED tree's attribute files (never the current index: a bound index with an unbound
+      target ran nothing), so each such tree adds ``--source=<tree>``. ``--cached`` alone matches no guarded operation
+      and is not asked. Git applies its macros, ``.git/info/attributes``, ``core.attributesFile`` and the system file
+      in every mode.
+
+    The value is matched LITERALLY: git looks a driver up by the attribute's string value, so ``filter=media`` names
+    ``media``; ``-filter`` prints ``unset``, ``!filter`` ``unspecified`` and bare ``filter`` ``set`` (MEASURED), which can
+    only ever match a driver literally named so - an over-approximation, never a miss. Bounded: a fixed number of
+    spawns (the index and HEAD listings the gitlink recursion reads anyway, one untracked listing, one ``rev-parse`` +
+    ``ls-tree`` per materialized tree, one ``check-attr --stdin -z`` per source), each linear in the path count."""
+    paths = {name for _, _, name in listing.index()}
+    paths.update(listing.untracked())
+    sources: List[Tuple[str, ...]] = [()]
+    for revision in revisions:
+        tree, records = listing.tree(revision)
+        if tree is not None:
+            paths.update(name for _, _, name in records)
+            sources.append((f"--source={tree}",))
+    ordered = sorted(paths)
+    activated: Dict[str, Set[int]] = {}
+    if ordered:
+        for source in sources:
+            for position, value in enumerate(_filter_values(listing, ordered, source)):
+                activated.setdefault(value, set()).add(position)
+    return {value: len(positions) for value, positions in activated.items()}
+
+
+def _driver(key: str) -> str:
+    """``filter.<driver>.<clean|smudge|process>`` -> ``<driver>`` (case kept, dots allowed: git's subsection)."""
+    return key[len("filter."):key.rindex(".")]
 
 
 # ----------------------------------------------------------------------------- executable-code provenance (S19 P1c)
@@ -312,9 +466,15 @@ _EVALUATORS = frozenset({
 })
 
 
-def _unproven(path: str, key: str, scope: str, origin: str, cause: str, name: str = "") -> RepositoryContentFilterRefused:
+def _unproven(path: str, key: str, scope: str, origin: str, cause: str, name: str = "",
+              active: Optional[int] = None) -> RepositoryContentFilterRefused:
+    """``active``: how many paths activate the driver (S19 P1d); None = activation could not be determined."""
+    driver = _driver(key)
+    detail = PROVENANCE_CAUSES[cause].format(name=name) + (
+        _ACTIVATION_UNKNOWN_DETAIL.format(driver=driver) if active is None
+        else _ACTIVE_DETAIL.format(driver=driver, count=active))
     return RepositoryContentFilterRefused(GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN, path, key=key, scope=scope,
-                                          origin=origin, detail=PROVENANCE_CAUSES[cause].format(name=name))
+                                          origin=origin, detail=detail, driver=driver)
 
 
 def _evaluator(program: str) -> Optional[str]:
@@ -399,10 +559,16 @@ def _provenance_cause(caller: _Caller, path: str, command: str, roots: Tuple[str
     return "", ""
 
 
-def _refuse(caller: _Caller, run: _Runner, path: str, seen: Set[str], depth: int) -> None:
-    layout = _layout(run, path)
+def _refuse(caller: _Caller, run: _Runner, path: str, seen: Set[str], depth: int,
+            revisions: Callable[[], Sequence[str]]) -> None:
+    """The chain for ONE repository context: effective configuration -> ultimate origin (repository-controlled
+    refuses, active or not) -> ACTIVATION (S19 P1d: only a driver git activates for a path the operation can touch
+    is judged) -> executable provenance (S19 P1c) -> the repositories git recurses into. ``revisions``: the trees the
+    caller's operation materializes in THIS repository (asked only when activation must be decided)."""
+    layout, not_a_repository = _layout(run, path)
     roots = layout if layout is not None else (os.path.realpath(path),)
     common = layout[2] if layout is not None else None
+    trusted = []
     for scope, origin, key, value in _filter_definitions(run, path):
         if value == "":
             continue                                    # an empty command: Git runs nothing (MEASURED)
@@ -417,33 +583,49 @@ def _refuse(caller: _Caller, run: _Runner, path: str, seen: Set[str], depth: int
         elif not (scope == COMMAND_SCOPE and origin == _COMMAND_ORIGIN):    # command scope: Kriya's own argv / env
             raise RepositoryContentFilterRefused(GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED, path, key=key, scope=scope,
                                                  origin=origin)
-        # A trusted ORIGIN: its executable code must be the operator's too (S19 P1c, owner decisions 1-3).
-        cause, name = _provenance_cause(caller, path, value or "", roots, common)
-        if cause:
-            raise _unproven(path, key, scope, origin, cause, name)
-    if layout is None or layout[0] in seen:
+        trusted.append((scope, origin, key, value))
+    listing = _Listing(run, layout[0]) if layout is not None else None
+    if trusted:
+        if listing is None and not_a_repository:
+            return                                      # no repository: no path can activate a filter here
+        # None: no work tree to ask (a git dir, a bare or an unusable repository) - every definition is judged.
+        active = None if listing is None else _active_drivers(listing, revisions())
+        for scope, origin, key, value in trusted:
+            if active is not None and _driver(key) not in active:
+                continue                                # DORMANT: no path this operation can touch activates it
+            # An ACTIVE trusted ORIGIN: its executable code must be the operator's too (S19 P1c, owner decisions 1-3).
+            cause, name = _provenance_cause(caller, path, value or "", roots, common)
+            if cause:
+                raise _unproven(path, key, scope, origin, cause, name,
+                                None if active is None else active[_driver(key)])
+    if listing is None or listing.top in seen:
         return
-    seen.add(layout[0])
-    for link in sorted(_gitlinks(run, layout[0])):
-        child = os.path.join(layout[0], link)
+    seen.add(listing.top)
+    for link in sorted(listing.gitlinks()):
+        child = os.path.join(listing.top, link)
         if not os.path.lexists(os.path.join(child, ".git")):
             continue                                    # not populated: Git does not recurse into it
         if depth >= _MAX_NESTING:
             raise _uninspectable(child, f"submodules nested deeper than {_MAX_NESTING}")
         # A submodule's git runs without the caller's repository-selecting variables (git clears them), so its
-        # configuration is read that way too (S19 P1c: a scratch GIT_INDEX_FILE names the PARENT's index only).
-        _refuse(caller, caller.elsewhere, child, seen, depth + 1)
+        # configuration is read that way too (S19 P1c: a scratch GIT_INDEX_FILE names the PARENT's index only). What a
+        # recursing checkout of the caller's revisions materializes there: the commits those trees record for it.
+        _refuse(caller, caller.elsewhere, child, seen, depth + 1,
+                lambda link=link: listing.gitlink_commits(link, revisions()))
 
 
 def refuse_repository_content_filters(path: str, *, git: Optional[str] = None,
                                       env: Optional[Mapping[str, str]] = None,
-                                      timeout: float = _TIMEOUT_SECONDS) -> None:
+                                      timeout: float = _TIMEOUT_SECONDS, revisions: Sequence[str] = ()) -> None:
     """Raise RepositoryContentFilterRefused when Git at ``path`` (or in a submodule it recurses into) could run a
-    content-filter command from repository-controlled configuration, or an operator/command-scope command that is
-    not provably operator code (S19 P1c); return when it cannot. Call it immediately before a Git operation that can
-    run a filter (status, diff, add, commit, checkout, reset, archive), on the folder that operation runs in and with
-    the environment it runs with - including a scratch ``GIT_INDEX_FILE``, whose gitlinks are the submodules that
-    operation recurses into. ``git`` / ``env``: the executable and the environment THAT operation runs with, when
+    content-filter command from repository-controlled configuration, or an ACTIVE operator/command-scope command
+    (S19 P1d) that is not provably operator code (S19 P1c); return when it cannot. Call it immediately before a Git
+    operation that can run a filter (status, diff, add, commit, checkout, reset, archive), on the folder that operation
+    runs in and with the environment it runs with - including a scratch ``GIT_INDEX_FILE``, whose gitlinks are the
+    submodules that operation recurses into and whose entries are the paths it touches. ``revisions``: every tree the
+    operation materializes besides the index and the work tree (``checkout <target>``, ``archive <revision>``, and
+    ``HEAD`` for a ``reset`` / ``read-tree HEAD`` after which the index is HEAD's): its paths and its own attribute
+    files decide activation too. ``git`` / ``env``: the executable and the environment THAT operation runs with, when
     they are not this process's PATH ``git`` and environment (the GUI's Open Folder probe, S19 P1b). ``timeout``: the
     caller's own per-spawn git timeout (the Open Folder probe's, S19 P1c). Returns without inspecting only when no Git
     can run there at all (``path`` is not a directory, or no such git): then no filter can run either."""
@@ -456,8 +638,9 @@ def refuse_repository_content_filters(path: str, *, git: Optional[str] = None,
     elif not (os.path.isfile(git) and os.access(git, os.X_OK)):
         return
     caller = _Caller(git, env, timeout)
+    materialized = tuple(revisions)
     try:
-        _refuse(caller, caller.run, folder, set(), 0)
+        _refuse(caller, caller.run, folder, set(), 0, lambda: materialized)
     except subprocess.TimeoutExpired as error:
         raise _uninspectable(folder, f"git did not answer within {timeout} s") from error
     except OSError as error:

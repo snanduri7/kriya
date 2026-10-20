@@ -174,7 +174,7 @@ def export_base(base: BaseTree, destination: str) -> None:
     Kriya-owned directory outside the workspace. ``git archive`` runs smudge
     filters: refused (S19 Q1) where the repository's own configuration
     defines one."""
-    refuse_repository_content_filters(base.repo)
+    refuse_repository_content_filters(base.repo, revisions=(base.revision,))    # S19 P1d: archive reads that tree
     archive = subprocess.Popen(git_argv(["git", "archive", "--format=tar", base.revision]), cwd=base.repo,
                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     try:

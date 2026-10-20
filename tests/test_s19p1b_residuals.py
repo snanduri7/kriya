@@ -421,11 +421,11 @@ def test_the_same_repository_question_fails_closed(owner, global_config, monkeyp
     real = git._run
     asked = []
 
-    def run(cwd, *args):
+    def run(cwd, *args, **kwargs):                       # S19 P1d: check-attr passes its paths as data=
         if args == ("rev-parse", "--path-format=absolute", "--git-common-dir"):
             asked.append(cwd)
             return subprocess.CompletedProcess(list(args), answer[0], answer[1], answer[2])
-        return real(cwd, *args)
+        return real(cwd, *args, **kwargs)
     monkeypatch.setattr(git, "_run", run)
     if refused:
         with pytest.raises(git.RepositoryContentFilterRefused) as raised:

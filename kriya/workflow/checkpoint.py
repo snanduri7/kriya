@@ -164,7 +164,8 @@ def compute_workspace_content_hash(workspace_path: str) -> Optional[str]:
     HEAD does not resolve (e.g. a repo with zero commits), or any step
     fails for any reason - the scratch index file is always removed in a
     `finally` block regardless of outcome."""
-    refuse_repository_content_filters(workspace_path)    # S19 Q1: add -A runs clean filters; typed, never None
+    # S19 Q1: add -A runs clean filters; typed, never None. S19 P1d: the scratch index starts as HEAD's (read-tree).
+    refuse_repository_content_filters(workspace_path, revisions=("HEAD",))
     tmp_index_path = os.path.join(
         tempfile.gettempdir(), f".kriya-scratch-index-{uuid.uuid4().hex}",
     )
