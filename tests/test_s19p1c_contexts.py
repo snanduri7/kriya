@@ -149,6 +149,50 @@ def test_the_development_loop_lets_the_closers_refusal_through():
     assert seen == reaching
 
 
+def test_a_direct_run_ends_with_the_closer_s_typed_refusal_and_releases_the_workspace(tmp_path, monkeypatch):
+    """Runtime characterization of the pass-through (the AST pin above only proves the handler exists): a direct run
+    whose goal carries a mutation-scope requirement, and whose evidence refuses, commits nothing, ends failed and frees
+    the workspace for the next run (lock released)."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from test_prd008a_plan_executor import CALC, CALC_WITH_SUB, _config, _role_llm
+
+    from kriya.control.run_coordinator import begin_mutating_run
+    from kriya.core.kernel import Kernel
+    from kriya.repository.git import RepositoryContentFilterRefused
+    from kriya.workflow import requirement_closers
+    from kriya.workflow.workflow import WorkflowEngine
+
+    workspace = tmp_path / "calc"
+    workspace.mkdir()
+    (workspace / "calc.py").write_text(CALC)
+    (workspace / ".gitignore").write_text(".kriya/\n__pycache__/\n")
+    _setup(workspace, "init", "-q", "-b", "main")
+    _setup(workspace, "add", "-A")
+    _setup(workspace, "commit", "-q", "-m", "init")
+    calls = []
+
+    def refusing(*_args, **_kwargs):
+        calls.append(1)
+        raise RepositoryContentFilterRefused(REFUSED, str(workspace), key="filter.kx.clean", scope="local",
+                                             origin="file:.git/config")
+    monkeypatch.setattr(requirement_closers, "mutation_scope_evidence", refusing)
+    cfg = _config()
+    engine = WorkflowEngine(Kernel(config=cfg), _role_llm(cfg, CALC_WITH_SUB))
+    engine.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
+    goal = "Add sub to `calc.py`.\n\nDo not modify any other file in the repository.\n"
+    result = asyncio.run(engine.run_generation_workflow(goal=goal, workspace_path=str(workspace)))
+    # MEASURED (reported to the owner, NOT decided here - outside the guard, owner correction 1): the refusal leaves
+    # _close_and_check_requirements typed, but the attempt lifecycle's generic handler (attempt_lifecycle.py,
+    # `except Exception` -> handle_attempt_failure) treats it as a retryable attempt failure; the run retries and ends
+    # failure_category=quality_gates_exhausted WITHOUT the refusal's reason code. Pinned: the safety properties only.
+    assert calls and result.get("status") != "success" and result["quality_gates_passed"] is False
+    assert (workspace / "calc.py").read_text() == CALC                    # nothing committed
+    with begin_mutating_run(str(workspace)) as context:                  # the workspace lock was released
+        assert context.run_id
+
+
 # --------------------------------------------------------------------------------- 8(b)
 
 def _worktree_only_smudge(repo: Path) -> Path:

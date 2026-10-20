@@ -83,6 +83,20 @@ tree_diff []): 28 mutants, 28 killed (27 at L1, 1 at L2), 0 survived, 0 equivale
 
 ## Not covered / owner questions
 
+- NEW FINDING, outside the guard (owner correction 1: characterized, not forced into P1c; owner = workflow attempt
+  lifecycle / recovery coordinator): a refusal raised INSIDE an attempt (here the closer's, after the pass-through) is
+  caught by kriya/workflow/attempt_lifecycle.py `except Exception` -> handle_attempt_failure and retried as an
+  ordinary attempt failure; MEASURED (`test_a_direct_run_ends_with_the_closer_s_typed_refusal_and_releases_the_workspace`):
+  the run ends failure_category=quality_gates_exhausted and the refusal's reason code is absent from the result. No
+  filter runs (every retry meets the same guard), nothing is committed, the lock is released. Misclassified terminal
+  cause + wasted Developer calls; INFERRED to apply to every in-attempt refusal since P1.
+- Decision 7 at a real entry (MEASURED, GIT_TEST_ASSUME_DIFFERENT_OWNER=1, identical at 135acfe and HEAD):
+  create_git_worktree on a dubiously owned repository fails `rev-parse --is-inside-work-tree`, takes the greenfield
+  bootstrap path and raises "Git repository detection/bootstrap failed ... greenfield Git bootstrap commit failed:
+  fatal: detected dubious ownership ..." (HEAD unchanged, no filter, nothing written). The cause is present but framed
+  as a bootstrap failure: a misclassification owned by kriya/workflow/worktree.py, outside the filter guard; reported,
+  not fixed here. git_status_entries surfaces git's own dubious-ownership message.
+
 - HOST CONFIG: this host's ~/.gitconfig has `filter.media.* = git media ... %f` (git = evaluator; MEASURED alias route)
   and `filter.lfs.*` without git-lfs installed (unresolved; MEASURED git then runs nothing, exit 127). Every repository
   is refused on this host (run entry, worktree, Open Folder) until the owner cleans the stale lines, installs git-lfs,
@@ -91,4 +105,4 @@ tree_diff []): 28 mutants, 28 killed (27 at L1, 1 at L2), 0 survived, 0 equivale
   given only bare-word arguments is admitted; only the target repository's work trees count as repository code.
 - Dubious ownership (decision 7): the target repository's own dubious ownership makes git refuse every operation
   (MEASURED rc 128, no filter runs); the inspection admits (its rev-parse fails and the layout is treated as absent).
-  INFERRED non-blocker, no unit opened.
+  No ownership weakening anywhere; see the create_git_worktree misclassification above.
