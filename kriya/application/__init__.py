@@ -28,6 +28,7 @@ _EXPORTS = {
     "SkillCatalogService": "kriya.application.catalog",
     "ToolCatalogService": "kriya.application.catalog",
     "ProjectService": "kriya.application.project",
+    "admit_repository_read": "kriya.application.project",
     "ModelService": "kriya.application.model",
     "HealthService": "kriya.application.health",
     "Capabilities": "kriya.application.health",

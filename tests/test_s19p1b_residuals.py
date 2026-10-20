@@ -1,7 +1,7 @@
 """S19 P1b (OI-141, fix-forward of S19 Q1): the residual paths the content-filter refusal left open.
 
 A. `kriya review <folder>` runs `git status` (it can run a repository-defined clean/process filter); it reaches the ONE
-   authority (kriya.repository.git) through the APPLICATION use case ProjectService.admit_repository_read - never by
+   authority (kriya.repository.git) through the APPLICATION use case kriya.application.admit_repository_read - never by
    importing REPOSITORY from the CLI (no new import-direction row, owner decision A).
 D. GUI Open Folder (`workspace.describe`, kriya/tools/git_metadata.describe_checkout): its `git status` probe used to
    blank EVERY scope's filter commands (a second, GUI-only policy that also broke operator filters such as Git LFS).
@@ -156,20 +156,36 @@ def test_the_cli_reaches_the_authority_only_through_the_application_use_case(own
 
 
 def test_admit_repository_read_is_a_typed_application_refusal_carrying_the_repository_reason(owner):
-    from kriya.application import ApplicationRefusal, ProjectService
+    from kriya.application import ApplicationRefusal, admit_repository_read
     from kriya.application.services import WORKSPACE_UNAVAILABLE
     from kriya.context import RequestContext
     from kriya.repository.git import RepositoryContentFilterRefused
 
     ctx = RequestContext.local(None, request_id="s19p1b")
-    ProjectService().admit_repository_read(ctx, str(owner))               # nothing defined: admitted
+    admit_repository_read(ctx, str(owner))                                # nothing defined: admitted
     marker = _planted(owner)
     with pytest.raises(ApplicationRefusal) as raised:
-        ProjectService().admit_repository_read(ctx, str(owner))
+        admit_repository_read(ctx, str(owner))
     refusal = raised.value
     assert refusal.reason_code == WORKSPACE_UNAVAILABLE and refusal.extra == {"reason": REFUSED}
     assert isinstance(refusal.__cause__, RepositoryContentFilterRefused) and refusal.message == str(refusal.__cause__)
     assert not marker.exists()
+
+
+def test_the_admission_is_an_application_function_and_not_part_of_the_projects_client_contract():
+    """CONTRACT-FIX (2026-10-21): the admission is a CLI-internal APPLICATION step, not a client operation. ProjectService's
+    public methods are exactly ProjectsPort's (both directions), and the admission is reached as kriya.application's
+    module-level function - the S19 P1b method form failed tests/contracts (projects port)."""
+    import kriya.application as application
+    from kriya.application import project
+    from kriya.client.contract import PORTS
+
+    def public(cls) -> set:
+        return {name for name, member in vars(cls).items() if callable(member) and not name.startswith("_")}
+
+    assert public(project.ProjectService) == public(PORTS["projects"])
+    assert not hasattr(project.ProjectService, "admit_repository_read")
+    assert application.admit_repository_read is project.admit_repository_read and "admit_repository_read" in application.__all__
 
 
 # --------------------------------------------------------------------------------- D: GUI Open Folder

@@ -69,6 +69,23 @@ def _unavailable(message: str, reason: str) -> ApplicationRefusal:
     return ApplicationRefusal(WORKSPACE_UNAVAILABLE, message, reason=reason)
 
 
+def admit_repository_read(ctx: RequestContext, folder: str) -> None:
+    """Admit a read-only Kriya git command (``git status``) in ``folder``, or refuse it typed. S19 P1b (owner decision A,
+    2026-10-20): an adapter that runs its own filter-capable git reaches the ONE repository content-filter authority
+    (kriya.repository.git) through this use case, never by importing REPOSITORY; call it immediately before that git
+    (nothing is memoized: the configuration can change between two calls). Refuses with
+    ``ApplicationRefusal(WORKSPACE_UNAVAILABLE)`` whose ``reason`` is the repository refusal's own reason code and
+    whose message is that refusal's (redacted) text.
+
+    A module-level APPLICATION function, not a ``ProjectService`` method (CONTRACT-FIX, 2026-10-21): it is a CLI-internal
+    admission step, not a client operation, and ``ProjectService``'s public methods are exactly ``ProjectsPort``'s
+    (tests/contracts/test_kriya_client_contract.py)."""
+    try:
+        refuse_repository_content_filters(folder)
+    except RepositoryContentFilterRefused as refusal:
+        raise ApplicationRefusal(WORKSPACE_UNAVAILABLE, str(refusal), reason=refusal.reason_code) from refusal
+
+
 class ProjectService:
     def status(self, ctx: RequestContext, workspace: str) -> Dict[str, Any]:
         """The recovery assessment of an (absolute) workspace path, with ``kriya runs status``'s own exit code."""
@@ -82,18 +99,6 @@ class ProjectService:
         """The run the recovery assessment reports active in ``workspace``, or None. Read-only: never creates, locks or writes."""
         assessment = assess_recovery(workspace)
         return assessment.run_active if getattr(assessment, "run_active", None) else None
-
-    def admit_repository_read(self, ctx: RequestContext, folder: str) -> None:
-        """Admit a read-only Kriya git command (``git status``) in ``folder``, or refuse it typed. S19 P1b (owner decision A,
-        2026-10-20): an adapter that runs its own filter-capable git reaches the ONE repository content-filter authority
-        (kriya.repository.git) through this use case, never by importing REPOSITORY; call it immediately before that git
-        (nothing is memoized: the configuration can change between two calls). Refuses with
-        ``ApplicationRefusal(WORKSPACE_UNAVAILABLE)`` whose ``reason`` is the repository refusal's own reason code and
-        whose message is that refusal's (redacted) text."""
-        try:
-            refuse_repository_content_filters(folder)
-        except RepositoryContentFilterRefused as refusal:
-            raise ApplicationRefusal(WORKSPACE_UNAVAILABLE, str(refusal), reason=refusal.reason_code) from refusal
 
     def describe(self, ctx: RequestContext, cfg, requested: str, workspace: str) -> Dict[str, Any]:
         """The facts Kriya reports about an admitted folder (``workspace`` = its canonical spelling, ``requested`` = the path asked for)."""

@@ -3438,7 +3438,8 @@ tracked files, 61 ms on 20,000, 15 ms outside a repository; a scripted direct ge
 
 S19 P1b (2026-10-20, fix-forward; owner decisions A-F; handover/MODULARIZATION/S19P1b-DECISION-TO-KILLER.md) closes the
 two routes S19 Q1 left open and the gaps it MEASURED on the way, with one authority and no new import-direction row:
-(A) `kriya review <folder>` calls `ProjectService.admit_repository_read` (APPLICATION, reached through the public
+(A) `kriya review <folder>` calls `admit_repository_read` (an APPLICATION function in `kriya/application/project.py`,
+not a `ProjectService` method - it is no client operation, so `ProjectsPort` does not grow; reached through the public
 `kriya.application`; APPLICATION -> `kriya.repository.git` is a legal public edge) immediately before its own
 `git status` (the spawn stays in the CLI, so no access-site count moves) and refuses with
 `ApplicationRefusal(WORKSPACE_UNAVAILABLE, reason=<the repository code>)`. (B) Kriya-source trust is a ROLE: exactly
