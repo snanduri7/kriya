@@ -3494,3 +3494,14 @@ folder git calls "not a git repository" activates nothing; a place without a wor
 active refusal names the driver and the operator remedy. No definition = no extra spawn. Cost (OI-60, MEASURED, scratch
 p1d/meas_post.txt, idle host): with dormant stale lines, this repository (6.8k paths) 205 ms per inspection (+542 ms
 with `--source=HEAD`), 200k synthetic paths 1.1 s (1.65 s); filter-free unchanged in spawns.
+
+Honest refusal reporting (S19e, OI-162/OI-163). The refusal is never an attempt failure: the two retry wrappers
+(`attempt_lifecycle.run_iteration`, `best_of_n.run_attempt_with_best_of_n`, including its sandbox reset) let
+`RepositoryContentFilterRefused` through ahead of their generic handlers, so a refusal met inside an attempt (a closer's
+inspection; a candidate `.gitattributes` activating an operator driver) ends the run as itself, exactly like the
+run-entry and sandbox-creation refusals (the run's `.exception` trace row names the class and the reason code). Before,
+it was recorded and retried and the run ended `quality_gates_exhausted` without the code (MEASURED). `create_git_worktree`
+asks `git rev-parse --is-inside-work-tree` in the C locale (git translates its messages); git's own "detected dubious
+ownership" refusal raises `GIT_REPOSITORY_OWNERSHIP_REFUSED` (same closed table) before the greenfield bootstrap writes
+anything - also when only the bootstrap commit meets it (git init does not check ownership); any other failure keeps its
+own report. Git's ownership check is never weakened (no safe.directory, no retry without it).

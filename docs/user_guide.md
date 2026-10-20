@@ -354,6 +354,14 @@ its scope and the file it comes from - never the command itself:
   repository that does not use it; a repository that does use it is refused, and the message names the ACTIVE filter
   driver and the remedy (remove or correct the stale lines in your global configuration, or install the program).
   Kriya never edits your git configuration.
+- `GIT_REPOSITORY_OWNERSHIP_REFUSED` (S19e) - git itself refuses the repository because it is owned by another user
+  ("detected dubious ownership"). Kriya reports that refusal (it is not a "greenfield bootstrap" failure) and writes
+  nothing there; it never weakens git's ownership check (no `safe.directory` change, no retry without the check). Run
+  Kriya as the repository's owner, or, only if you trust the repository, mark it safe in your own git configuration as
+  git's message describes.
+
+A refusal met in the middle of a run (for example when the candidate's own `.gitattributes` activates such a filter)
+ends the run with that refusal and its reason code: it is never retried as a failed attempt (S19e).
 
 Not refused: a filter defined in your GLOBAL or SYSTEM git configuration whose program is installed outside the
 repository and called directly (Git LFS installed with `git lfs install` - `git-lfs clean -- %f` - keeps working, and a
