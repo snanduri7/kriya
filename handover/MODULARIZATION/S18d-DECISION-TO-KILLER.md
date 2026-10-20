@@ -9,7 +9,9 @@ Commits: 8faf487 characterization (31 strict-xfail after-pins, MEASURED failing 
 ae0b9f9 Part 2 a/b; 57cb343 Part 2 c; docs/notes/this table after.
 
 L1 = tests/test_s18d_read_view_and_enforce_prompt.py. Campaign 20261020_161613_3c208135 (mutrun v2, rev 57cb343, -n 1,
-VALID, 552 s, tree_diff [], no stragglers): 23/24 KILLED at L1, 1 EQUIVALENT (C8).
+VALID, 552 s, tree_diff [], no stragglers): 23/24 KILLED at L1, 1 EQUIVALENT (C8). S18d P2b correction: C8 was NOT
+equivalent (the equivalence premise is refuted, see the C8 row) - the corrected count is 23 KILLED + 1 SURVIVED at
+57cb343, and C8 is KILLED by the P2b pin; DEV equivalent-mutant judgement errors in this packet: 1.
 
 ## Part 1 - golden / digest scope (MEASURED)
 
@@ -41,6 +43,15 @@ wrote", from the candidate transaction's state.all_files_written, which excludes
 authority for owner recovery and abandoned-plan quarantine, and in scope at the enforce TOOL call site. No second
 detector. Planned deletes never apply inside the candidate before the terminal commit (commit_service), so the record
 misses no in-run mutation.
+
+**S18d P2b CORRECTION (2026-10-20): the last sentence above was FALSE.** MEASURED by the blind TEST-B agent and
+re-derived by P2b on the unfixed bytes (tests/test_s18d_p2b_written_files_record.py, strict-xfail at e8b7379): the
+owner-recovery finalization REPLACED the owner's entry with the latest recovery call's files, so a VERIFY-only
+recovery (carried forward with files []) or a MUST_CHANGE recovery of a subset ERASED the owner's first-run change
+(record {s0: []} or {s0: [dep1.py]} while dep0.py was in the candidate), and a planned read depending on the owner read
+the owner baseline and failed 'dep0.py does not exist'. The record missed in-run mutations whenever a unit ran more
+than once. Corrected in S18d P2b: the record is cumulative over COMMITTED effects at one canonical update
+(enforce_loop.record_committed_effects); see S18dP2b-DECISION-TO-KILLER.md.
 
 ## Part 2c - control artifacts (owner of the rule: kriya/policy/filesystem.py, PLAT-039)
 
@@ -79,7 +90,7 @@ terminal-commit backstop now also cover the sentinel (same code). No golden and 
 | C: innermost, not outermost | same | min root | same | C5 KILLED |
 | C: sentinel in the set | TRUSTED_CONTROL_NAMES | sentinel exposed | listing [snapshot] | C6 KILLED |
 | C: folded names include it | _FOLDED_CONTROL_NAMES | depth/case spelling | writer test | C7 KILLED |
-| C: no-holding fallback | _is_control_path | fail open | - | C8 EQUIVALENT: reachable only for a listing entry that is a symlink resolving outside every root (the reader refuses every other outside target first); for such a target is_trusted_control_path is False under every root (its relative path starts with '..', and no root's control directory is its ancestor) except when a stat fails (UNKNOWN), which no deterministic test can produce; kept as defence in depth (as S18cA10) |
+| C: no-holding fallback | _is_control_path | fail open | (S18d P2b) test_a_path_whose_stat_fails_is_judged_protected_and_left_out | C8 KILLED (P2b correction - OLD CLAIM: 'a stat failure cannot be deterministically produced' / NEW EVIDENCE (TEST-B, re-measured in P2b): a mode-000 directory outside the roots deterministically reaches the path (path_relation UNKNOWN) / CORRECTION: deterministic killer added, C8 classified KILLED, never EQUIVALENT). Original P2 text, kept as the record of the error: C8 EQUIVALENT: reachable only for a listing entry that is a symlink resolving outside every root (the reader refuses every other outside target first); for such a target is_trusted_control_path is False under every root (its relative path starts with '..', and no root's control directory is its ancestor) except when a stat fails (UNKNOWN), which no deterministic test can produce; kept as defence in depth (as S18cA10) |
 | C: the read denial's code | trusted_control_path_read_denial | another code | named-control-path test | C9 KILLED |
 
 Negative controls on the unfixed bytes (MEASURED at 8faf487 with --runxfail): 31 after-pins failed - Part 1: 2
