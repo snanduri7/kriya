@@ -5,7 +5,8 @@ media ... %f` and `filter.lfs.*` without git-lfs installed; under the P1c proven
 used or not. Now an operator (global/system) or command-scope definition is judged only when the actual git operation
 can ACTIVATE it: a path it can touch resolves `filter=<driver>` through git's own attribute machinery (`git check-attr`
 in the inspected context). Dormant -> usable; active + unproven -> GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN naming the
-ACTIVE driver and the operator remedy; repository-origin definitions are still refused, active or not.
+ACTIVE driver and the operator remedy; repository-origin definitions are still refused, active or not (S19 P1e: now
+refused only when active - tests/test_s19p1e_dormant_repository.py).
 
 Every fixture reproduces the host's stale lines in a job-local HOME / GIT_CONFIG_GLOBAL (never the real ~/.gitconfig).
 The planted executable vector is the measured one: the global `git media clean %f` + a repository-local
@@ -521,19 +522,30 @@ def test_mutation_scope_evidence_is_guarded_by_activation(owner):
                                                                                candidate_paths=["a.py"]), marker)
 
 
-# --------------------------------------------------------------------------------- repository origin: still refused
+# --------------------------------------------------------------------------------- repository origin (S19 P1e)
 
-def test_a_dormant_repository_defined_filter_is_still_refused(owner):
-    """Owner decision 2 (safe default kept): a REPOSITORY-origin definition refuses whether or not any path activates it
-    - it is repository-controlled configuration, and a later operation (or a .gitattributes the model writes) can
-    activate it. Reproducer: nothing binds `kx` anywhere."""
+def test_a_dormant_repository_defined_filter_is_allowed_and_refused_once_bound(owner):
+    """CHANGED DELIBERATELY by S19 P1e (owner decision 2026-10-21; was test_a_dormant_repository_defined_filter_is_still_
+    refused, the P1d safe default). Reason: the independent P1d characterization MEASURED, for every guarded operation
+    class, that a dormant repository definition runs nothing with the guard off and runs once a path binds it, and
+    that the activation rule tells the two apart (no divergence counterexample); the owner invariant is that a filter
+    command matters when the actual operation can activate it. Now: nothing binds `kx` -> allowed (and nothing runs);
+    the same repository with a bound path -> GIT_CONTENT_FILTER_REPOSITORY_DEFINED naming the ACTIVE driver."""
     from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
 
-    _setup(owner, "config", "filter.kx.clean", _marker_script(owner.parent / "kx.sh", owner.parent / "KX_RAN"))
+    marker = owner.parent / "KX_RAN"
+    _setup(owner, "config", "filter.kx.clean", _marker_script(owner.parent / "kx.sh", marker))
     _setup(owner, "check-attr", "filter", "a.py", "skill.md")      # (sanity) unspecified for every path
+    _dirty(owner)
+    refuse_repository_content_filters(str(owner), revisions=("HEAD",))
+    _status(owner)
+    assert not marker.exists()
+    _bind(owner)
     with pytest.raises(RepositoryContentFilterRefused) as raised:
         refuse_repository_content_filters(str(owner))
-    assert raised.value.reason_code == "GIT_CONTENT_FILTER_REPOSITORY_DEFINED" and raised.value.driver == ""
+    assert raised.value.reason_code == "GIT_CONTENT_FILTER_REPOSITORY_DEFINED" and raised.value.driver == "kx"
+    assert "the filter driver 'kx' is ACTIVE here: git resolves filter=kx for 2 path(s)" in str(raised.value)
+    assert not marker.exists()
 
 
 # --------------------------------------------------------------------------------- fail closed

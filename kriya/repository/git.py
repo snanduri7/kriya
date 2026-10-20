@@ -26,9 +26,10 @@ operator-controlled; Kriya itself never passes a filter command). Benign filter 
 other key) and an explicitly EMPTY command (Git runs nothing for it, MEASURED) are not executable and never refuse. The
 ORIGIN decides, never the effective value: a repository that overrides a trusted global filter is refused.
 
-Why every repository-scoped definition, bound or not: whether a path is bound to the filter is decided by
-``.gitattributes``, which is repository CONTENT (model-writable) and can change between two Git calls; refusing the
-definition itself is the one decision that does not depend on content (fail closed).
+Since S19 P1e a ``local`` / ``worktree`` definition refuses only when the actual Git operation can ACTIVATE it (below):
+whether a path is bound to the filter is decided by attributes - repository CONTENT that can change between two Git
+calls - so EVERY Kriya call inspects immediately before its own Git operation, over that operation's own paths and
+materialized trees (S19 P1d), and a binding the next operation brings is that operation's inspection's to see.
 
 The inspection runs nothing a repository defines: ``git config --show-scope --show-origin -z --get-regexp`` reads
 configuration only (MEASURED: no planted driver fires), and every spawn goes through ``kriya.platform.git_argv``
@@ -44,8 +45,18 @@ touch resolves its ``filter`` attribute to that driver. A dormant operator defin
 in ~/.gitconfig, a ``filter.lfs`` line without git-lfs installed) no longer refuses an unrelated repository; an ACTIVE
 one is judged by the P1c executable-provenance rule, unchanged. Git itself decides activation (``git check-attr``,
 never a second .gitattributes parser) in the inspected repository's own context and environment, over a bounded
-superset of the paths the operation can touch (``_active_drivers``). A REPOSITORY-origin definition still refuses
-whether or not it is active (it is repository-controlled configuration; another path set can activate it later).
+superset of the paths the operation can touch (``_active_drivers``).
+
+S19 P1e (OI-161, owner decision 2026-10-21): the SAME activation decision applies to a REPOSITORY-origin definition
+(scope ``local`` / ``worktree``): dormant - no path the operation can touch resolves its driver - it runs nothing
+(MEASURED for every guarded operation class by the independent P1d characterization: guard off, dormant definition, no
+marker; bound, the marker fires) and is allowed; ACTIVE, it refuses ``GIT_CONTENT_FILTER_REPOSITORY_DEFINED`` naming
+the active driver - never judged by provenance (a repository command is refused whatever it runs). Where activation
+cannot be decided (no work tree: a git dir, a bare or unusable repository) every definition refuses, repository ones
+included; every other scope git might report stays refused outright; ``ORIGIN_IN_REPOSITORY`` /
+``ORIGIN_UNRECOGNISED`` are unchanged. A repository definition that appears only DURING an operation (an include of a
+file that operation itself creates: MEASURED, git reads its configuration once, so that operation does not load it) is
+the next operation's inspection's to refuse.
 
 The refusal message names the key, its scope and its origin file, never the command (it could carry a secret), and
 goes through the one redactor (kriya.foundation.redaction). Callers: the run entry (``begin_mutating_run``) and every
@@ -79,7 +90,7 @@ _REMEDY = ("Define the filter in your global or system git configuration (for Gi
 CONTENT_FILTER_REFUSALS: Dict[str, str] = {
     GIT_CONTENT_FILTER_REPOSITORY_DEFINED: (
         "the git repository at {repository} defines the content-filter command {key} in its own configuration "
-        "({scope} scope, {origin}). Kriya does not run git there: a repository-controlled clean/smudge/process driver "
+        "({scope} scope, {origin}){detail}. Kriya does not run git there: a repository-controlled clean/smudge/process driver "
         "would execute on this host (a current security limitation, S19 Q1). " + _REMEDY),
     GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY: (
         "the content-filter command {key} for the git repository at {repository} is defined in {origin}, a file inside "
@@ -128,6 +139,8 @@ PROVENANCE_CAUSES: Dict[str, str] = {
 # outside these shapes refuses as unrecognised.
 OPERATOR_FILE_SCOPES = frozenset({"system", "global"})
 COMMAND_SCOPE = "command"
+# S19 P1e: the repository's own scopes (.git/config, config.worktree and what they include) - refused when ACTIVE.
+REPOSITORY_SCOPES = frozenset({"local", "worktree"})
 _FILE_ORIGIN = "file:"
 _COMMAND_ORIGIN = "command line:"
 _FILTER_COMMAND_PATTERN = r"^filter\..*\.(clean|smudge|process)$"
@@ -150,7 +163,7 @@ class RepositoryContentFilterRefused(Exception):
         self.key = key
         self.scope = scope
         self.origin = origin
-        self.driver = driver                            # S19 P1d: the ACTIVE driver an EXECUTABLE_UNPROVEN refusal names
+        self.driver = driver                            # S19 P1d/P1e: the ACTIVE driver an UNPROVEN/REPOSITORY refusal names
         message = CONTENT_FILTER_REFUSALS[reason_code].format(repository=repository, key=key, scope=scope,
                                                               origin=origin, detail=detail)
         super().__init__(redact_text(f"{reason_code}: {message}"))
@@ -359,7 +372,8 @@ class _Listing:
 
     def gitlink_commits(self, link: str, revisions: Sequence[str]) -> List[str]:
         """The commits the trees of ``revisions`` record at the gitlink ``link``: what a checkout of one of them that
-        recurses into submodules (``submodule.recurse``) materializes in that submodule."""
+        recurses into submodules (``submodule.recurse``) materializes in that submodule. Since S19 P1e no Kriya
+        checkout / reset recurses (``--no-recurse-submodules``); judging these commits too is kept as a superset."""
         name = os.fsencode(link)
         return sorted({os.fsdecode(oid) for revision in revisions for mode, oid, path in self.tree(revision)[1]
                        if mode == _GITLINK_MODE and path == name})
@@ -479,11 +493,22 @@ def _unproven(path: str, key: str, scope: str, origin: str, cause: str, name: st
               active: Optional[int] = None) -> RepositoryContentFilterRefused:
     """``active``: how many paths activate the driver (S19 P1d); None = activation could not be determined."""
     driver = _driver(key)
-    detail = PROVENANCE_CAUSES[cause].format(name=name) + (
-        _ACTIVATION_UNKNOWN_DETAIL.format(driver=driver) if active is None
-        else _ACTIVE_DETAIL.format(driver=driver, count=active))
+    detail = PROVENANCE_CAUSES[cause].format(name=name) + _activation_detail(driver, active)
     return RepositoryContentFilterRefused(GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN, path, key=key, scope=scope,
                                           origin=origin, detail=detail, driver=driver)
+
+
+def _activation_detail(driver: str, active: Optional[int]) -> str:
+    return (_ACTIVATION_UNKNOWN_DETAIL.format(driver=driver) if active is None
+            else _ACTIVE_DETAIL.format(driver=driver, count=active))
+
+
+def _repository_defined(path: str, scope: str, origin: str, key: str,
+                        active: Optional[int]) -> RepositoryContentFilterRefused:
+    """S19 P1e: an ACTIVE (or not decidable) repository-origin definition; ``active`` as in :func:`_unproven`."""
+    driver = _driver(key)
+    return RepositoryContentFilterRefused(GIT_CONTENT_FILTER_REPOSITORY_DEFINED, path, key=key, scope=scope,
+                                          origin=origin, detail=_activation_detail(driver, active), driver=driver)
 
 
 def _evaluator(program: str) -> Optional[str]:
@@ -570,18 +595,23 @@ def _provenance_cause(caller: _Caller, path: str, command: str, roots: Tuple[str
 
 def _refuse(caller: _Caller, run: _Runner, path: str, seen: Set[str], depth: int,
             revisions: Callable[[], Sequence[str]]) -> None:
-    """The chain for ONE repository context: effective configuration -> ultimate origin (repository-controlled
-    refuses, active or not) -> ACTIVATION (S19 P1d: only a driver git activates for a path the operation can touch
-    is judged) -> executable provenance (S19 P1c) -> the repositories git recurses into. ``revisions``: the trees the
-    caller's operation materializes in THIS repository (asked only when activation must be decided)."""
+    """The chain for ONE repository context: effective configuration -> ultimate origin -> ACTIVATION (S19 P1d: only
+    a driver git activates for a path the operation can touch is judged; S19 P1e: repository-origin definitions too)
+    -> an active repository-origin definition refuses; an active trusted one is judged by executable provenance (S19
+    P1c) -> the repositories git recurses into. ``revisions``: the trees the caller's operation materializes in THIS
+    repository (asked only when activation must be decided)."""
     layout, not_a_repository = _layout(run, path)
     roots = layout if layout is not None else (os.path.realpath(path),)
     common = layout[2] if layout is not None else None
+    repository: List[Tuple[str, str, str]] = []
     trusted = []
     for scope, origin, key, value in _filter_definitions(run, path):
         if value == "":
             continue                                    # an empty command: Git runs nothing (MEASURED)
-        if scope not in OPERATOR_FILE_SCOPES and scope != COMMAND_SCOPE:
+        if scope in REPOSITORY_SCOPES:
+            repository.append((scope, origin, key))     # S19 P1e: refused below when ACTIVE (or undecidable)
+            continue
+        if scope not in OPERATOR_FILE_SCOPES and scope != COMMAND_SCOPE:    # any other scope: refused outright
             raise RepositoryContentFilterRefused(GIT_CONTENT_FILTER_REPOSITORY_DEFINED, path, key=key, scope=scope,
                                                  origin=origin)
         if scope in OPERATOR_FILE_SCOPES and origin.startswith(_FILE_ORIGIN):
@@ -594,11 +624,15 @@ def _refuse(caller: _Caller, run: _Runner, path: str, seen: Set[str], depth: int
                                                  origin=origin)
         trusted.append((scope, origin, key, value))
     listing = _Listing(run, layout[0]) if layout is not None else None
-    if trusted:
-        if listing is None and not_a_repository:
+    if repository or trusted:
+        if listing is None and not_a_repository and not repository:
             return                                      # no repository: no path can activate a filter here
         # None: no work tree to ask (a git dir, a bare or an unusable repository) - every definition is judged.
         active = None if listing is None else _active_drivers(listing, revisions())
+        for scope, origin, key in repository:
+            if active is not None and _driver(key) not in active:
+                continue                                # DORMANT (S19 P1e): no path this operation can touch activates it
+            raise _repository_defined(path, scope, origin, key, None if active is None else active[_driver(key)])
         for scope, origin, key, value in trusted:
             if active is not None and _driver(key) not in active:
                 continue                                # DORMANT: no path this operation can touch activates it

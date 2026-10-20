@@ -255,16 +255,19 @@ def test_the_operator_scan_base_worktree_is_inspected_in_its_own_context(owner):
 # --------------------------------------------------------------------------------- 8(d) / relayed F3
 
 def _untracked_embedded(owner: Path, where: str = "vendored") -> Path:
+    """S19 P1e: the embedded file is ``lib.py`` (was ``lib.txt``), so ``_bind``'s ``*.py filter=evil`` really binds it -
+    the definition is ACTIVE and the vector real (MEASURED: with ``lib.txt`` nothing was bound and the guard-off hash ran
+    nothing, so the pin only held the old refuse-even-if-dormant contract)."""
     marker = owner.parent / "EMBEDDED_FILTER_RAN"
     nested = owner / where
     nested.mkdir(parents=True)
     _setup(nested, "init", "-q", "-b", "main")
-    (nested / "lib.txt").write_text("v1\n")
+    (nested / "lib.py").write_text("v1\n")
     _setup(nested, "add", "-A")
     _setup(nested, "commit", "-q", "-m", "e")
     _setup(nested, "config", "filter.evil.clean", _marker_script(owner.parent / "evil.sh", marker))
     _bind(nested, "evil")
-    (nested / "lib.txt").write_text("v2\n")
+    (nested / "lib.py").write_text("v2\n")
     return marker
 
 
@@ -311,12 +314,12 @@ def test_the_checkpoint_content_hash_never_runs_an_embedded_repository_s_filter(
     nested = second_root / "other"
     nested.mkdir()
     _setup(nested, "init", "-q", "-b", "main")
-    (nested / "x.txt").write_text("1\n")
+    (nested / "x.py").write_text("1\n")                 # S19 P1e: .py, so _bind really binds it (was x.txt)
     _setup(nested, "add", "-A")
     _setup(nested, "commit", "-q", "-m", "x")
     _setup(nested, "config", "filter.evil.clean", str(owner.parent / "evil.sh"))
     _bind(nested, "evil")
-    (nested / "x.txt").write_text("2\n")
+    (nested / "x.py").write_text("2\n")
     assert checkpoint.compute_workspace_content_hash(str(owner)) is not None
     assert not first.exists()
 
@@ -335,6 +338,7 @@ def test_a_submodule_s_git_is_inspected_without_the_parent_s_repository_variable
     _setup(owner, "add", "vendored")
     _setup(owner, "commit", "-q", "-m", "gitlink")
     _setup(nested, "config", "filter.evil.clean", str(owner.parent / "evil.sh"))
+    (nested / ".git" / "info" / "attributes").write_text("*.txt filter=evil\n")    # S19 P1e: ACTIVE in the child
     env = {**os.environ, "GIT_DIR": str(owner / ".git"), "GIT_WORK_TREE": str(owner)}
     with pytest.raises(RepositoryContentFilterRefused) as raised:
         refuse_repository_content_filters(str(owner), env=env)

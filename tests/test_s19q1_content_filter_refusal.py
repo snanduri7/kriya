@@ -552,11 +552,13 @@ def test_the_refusal_names_key_scope_and_origin_never_the_command(owner):
     from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
 
     _setup(owner, "config", "filter.kx.clean", "deploy --token=sk-supersecretvalue1234567890 https://u:pw@h/x")
+    _bind(owner)                                        # S19 P1e: refused when ACTIVE (a dormant one is allowed)
     with pytest.raises(RepositoryContentFilterRefused) as raised:
         refuse_repository_content_filters(str(owner))
     message = str(raised.value)
     assert message.startswith("GIT_CONTENT_FILTER_REPOSITORY_DEFINED: ")
     assert "filter.kx.clean" in message and "local scope" in message and "file:.git/config" in message
+    assert raised.value.driver == "kx" and "the filter driver 'kx' is ACTIVE here: git resolves filter=kx for 2 " in message
     assert "deploy" not in message and "supersecret" not in message and "pw@" not in message
     assert (raised.value.key, raised.value.scope, raised.value.origin) == ("filter.kx.clean", "local",
                                                                            "file:.git/config")
@@ -571,6 +573,7 @@ def test_the_refusal_message_goes_through_the_one_redactor(tmp_path):
     secret_dir.mkdir()
     (secret_dir / "inc.cfg").write_text('[filter "kx"]\n\tclean = x\n')
     _setup(owner, "config", "include.path", str(secret_dir / "inc.cfg"))
+    _bind(owner)                                        # S19 P1e: refused when ACTIVE
     with pytest.raises(RepositoryContentFilterRefused) as raised:
         refuse_repository_content_filters(str(owner))
     assert "hunter2" in raised.value.origin and "hunter2" not in str(raised.value)
@@ -600,6 +603,7 @@ def test_only_an_explicitly_empty_command_is_not_executable(owner, value, refuse
             handle.write('[filter "kx"]\n\tclean\n')
     else:
         _setup(owner, "config", "filter.kx.clean", value)
+    _bind(owner)                                        # S19 P1e: ACTIVE, so only the value decides
     if refused:
         with pytest.raises(RepositoryContentFilterRefused):
             refuse_repository_content_filters(str(owner))
@@ -612,9 +616,10 @@ def test_dotted_and_mixed_case_driver_names_are_refused(owner):
 
     with open(owner / ".git" / "config", "a", encoding="utf-8") as handle:
         handle.write('[FILTER "A.b"]\n\tSMUDGE = x\n')
+    _bind(owner, "A.b")                                 # S19 P1e: ACTIVE (git keeps the subsection's case and dots)
     with pytest.raises(RepositoryContentFilterRefused) as raised:
         refuse_repository_content_filters(str(owner))
-    assert raised.value.key == "filter.A.b.smudge"
+    assert raised.value.key == "filter.A.b.smudge" and raised.value.driver == "A.b"
 
 
 def test_an_unreadable_configuration_refuses(owner):
