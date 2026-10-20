@@ -3429,9 +3429,30 @@ index listing, `operator_scan.changed_paths` (before the scan's diff and its bas
 used to fold a sandbox failure into another outcome (development loop, enforce plan worktree, worktree sync) let the
 refusal through as itself; Best-of-N keeps its reset contract (a failed reset ends sampling; the next inspection in the
 run's own worktree refuses, typed). Proof: `tests/test_s19q1_content_filter_refusal.py` records every git process
-each entry starts and asserts the inspection of that folder precedes every filter-capable operation. Not covered:
-`kriya review <folder>` (ADAPTER-CLI may not import REPOSITORY without a new import-direction row: owner question) and
-Kriya's own source root (`release_identity.kriya_revision`, operator installation). Cost (OI-60, MEASURED on a loaded host): one inspection is 4
+each entry starts and asserts the inspection of that folder precedes every filter-capable operation. Not covered by
+S19 Q1 (both closed by S19 P1b below): `kriya review <folder>` and Kriya's own source root. Cost (OI-60, MEASURED on a loaded host): one inspection is 4
 git spawns (rev-parse, config, ls-files -s, ls-tree -r HEAD) plus 4 per populated submodule - median 36 ms on 2,000
 tracked files, 61 ms on 20,000, 15 ms outside a repository; a scripted direct generation run inspected 10 times
 (0.36 s of 3.6 s).
+
+S19 P1b (2026-10-20, fix-forward; owner decisions A-F; handover/MODULARIZATION/S19P1b-DECISION-TO-KILLER.md) closes the
+two routes S19 Q1 left open and the gaps it MEASURED on the way, with one authority and no new import-direction row:
+(A) `kriya review <folder>` calls `ProjectService.admit_repository_read` (APPLICATION, reached through the public
+`kriya.application`; APPLICATION -> `kriya.repository.git` is a legal public edge) immediately before its own
+`git status` (the spawn stays in the CLI, so no access-site count moves) and refuses with
+`ApplicationRefusal(WORKSPACE_UNAVAILABLE, reason=<the repository code>)`. (B) Kriya-source trust is a ROLE: exactly
+`release_identity.kriya_revision` (its `status` can run a filter) and `distribution.tracked_release_files` (`ls-files`,
+filter-free) read Kriya's own checkout as installation state, pinned with every other uninspected git function in
+`tests/test_s19p1b_residuals.py` (`INSTALLATION_STATE`, `UNINSPECTED_GIT`); the same checkout opened as the target is
+refused at the run entry, worktree creation, `kriya review` and Open Folder (MEASURED on a clone of the real checkout).
+(C) an operator file definition is judged by its ULTIMATE file (direct, transitive, relative, `includeIf`, symlinked:
+MEASURED to report the final file) against ALL the repository's work trees: a file outside the inspected work tree, git dir
+and common dir is asked `git rev-parse --git-common-dir` in its own folder (only when an operator file definition needs
+judging; only "not a git repository" means elsewhere, anything else refuses): MEASURED gap closed - from a linked worktree (Kriya's managed worktree is one)
+a main-work-tree file, and from the main work tree a file of a linked worktree outside it, were admitted. (D) GUI Open
+Folder no longer blanks every scope's filters (`_filter_overrides` removed: a second policy that also disabled Git
+LFS); MEASURED that no git command reporting work-tree changes is filter-free, so `describe_checkout` asks the
+authority with the probe's own git and sanitized environment (`refuse_repository_content_filters(path, git=, env=)`)
+and a refused folder reports `dirty`/`changed_entries` null with `reason` = the typed refusal (no schema change). Cost
+(MEASURED, loaded host, 2,000 files): Open Folder 60 -> 90 ms (the inspection replaces one config listing); +10 ms
+for the work-tree listing when an operator filter exists.

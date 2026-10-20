@@ -332,7 +332,9 @@ its scope and the file it comes from - never the command itself:
   submodule's (or an embedded repository's) own configuration, because git runs the submodule's filters while it
   inspects the parent;
 - `GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY` - your global or system configuration includes a file that lies inside the
-  repository (that file is repository content);
+  repository (that file is repository content): directly, through another file, relatively, through `includeIf`
+  (`gitdir`, `onbranch`, `hasconfig`) or through a symlink - the file the definition finally comes from decides. Every
+  work tree of the repository counts as inside it (the main one and each linked `git worktree`);
 - `GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED` / `GIT_CONFIG_UNINSPECTABLE` - Kriya could not establish where the command
   comes from, or could not read the configuration at all (fail closed).
 
@@ -345,9 +347,18 @@ git's.
 What to do when refused: define the filter globally and remove it from the repository's configuration - for Git LFS,
 `git lfs install` (global) instead of `git lfs install --local`, then `git config --local --remove-section
 filter.lfs` (or edit the included file the message names). This is a CURRENT SECURITY LIMITATION, not a trust
-assumption: Kriya has no supported way to run a repository-defined filter. Kriya's own source checkout (its release
-identity) is part of your installation and is not inspected. `kriya review <folder>` still runs `git status` without
-this check (the one remaining route, pending an owner decision on the import rule; see OI-141).
+assumption: Kriya has no supported way to run a repository-defined filter.
+
+`kriya review <folder>` applies the same check before it asks git which files changed (refused: `Review failed:` and the
+reason code, exit 1). Opening a folder in the desktop app (Open Folder) applies it too: a refused folder still shows its
+commit and branch, but its working-tree changes show as "Not recorded" with the reason code - Kriya does not run
+`git status` there. A filter from your global or system configuration (Git LFS) runs for Open Folder exactly as it does
+for your own git.
+
+Kriya's own installation is trusted by ROLE, never by path: only Kriya reading its own source checkout as application
+infrastructure (its release identity, and the release tool's `--source-root` file list) is not inspected - whoever can change that
+checkout's git configuration can already change Kriya's code. The same folder opened as the workspace you work on
+gets exactly the check above.
 
 ### 2.0b Where run history goes (`paths.state`)
 `traces.db` is the run history behind `kriya traces`. It is persistent state, not log output, so it has its own
