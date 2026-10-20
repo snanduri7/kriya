@@ -184,6 +184,26 @@ def test_without_a_work_tree_every_repository_definition_is_refused(owner):
     assert "whether the filter driver 'kx' is active cannot be determined here" in str(refusal)
 
 
+def test_a_repository_definition_reported_where_git_finds_no_repository_refuses(tmp_path, monkeypatch):
+    """Fail closed on an inconsistent answer: the listing reports a local definition (faked) while git says the folder
+    is not a git repository - no activation can be decided, so the definition refuses (it never takes the 'no
+    repository, nothing can activate' shortcut, which is for trusted definitions only)."""
+    from kriya.repository import git
+
+    real = git._run
+
+    def run(cwd, *args, **kwargs):
+        if args and args[0] == "config":
+            return subprocess.CompletedProcess(list(args), 0, b"local\x00file:.git/config\x00filter.kx.clean\nx\x00", b"")
+        return real(cwd, *args, **kwargs)
+    monkeypatch.setattr(git, "_run", run)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    refusal = _guard(plain)
+    assert refusal is not None and refusal.reason_code == REFUSED and refusal.driver == "kx"
+    assert "cannot be determined here" in str(refusal)
+
+
 def _answering(monkeypatch, verb: str, answer):
     from kriya.repository import git
 
