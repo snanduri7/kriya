@@ -51,6 +51,7 @@ from typing import Callable, Dict, List, Mapping, Optional, Set, Tuple
 
 from kriya.foundation.redaction import redact_text
 from kriya.platform import git_argv
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 GIT_CONTENT_FILTER_REPOSITORY_DEFINED = "GIT_CONTENT_FILTER_REPOSITORY_DEFINED"
 GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY = "GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY"
@@ -190,7 +191,9 @@ def _same_repository(run: _Runner, source: str, common: str) -> bool:
 
 
 def _inside(path: str, roots: Tuple[str, ...]) -> bool:
-    return any(path == root or path.startswith(root.rstrip(os.sep) + os.sep) for root in roots)
+    """``path`` is one of ``roots`` or beneath it, by filesystem identity (kriya.platform's path_relation: case,
+    normalization and symlink aliases); an undecidable relation counts as inside (fail closed)."""
+    return any(path_relation(root, path) is not PathRelation.OUTSIDE for root in roots)
 
 
 def _gitlinks(run: _Runner, top: str) -> Set[str]:
