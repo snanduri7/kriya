@@ -7,7 +7,8 @@ a_div, a_mech, b_sub, b_extra, c_controls; git 2.54.0 Apple Git-157 and Homebrew
 HOME / GIT_CONFIG_GLOBAL reproducing the host's stale filter.media / filter.lfs lines (never the real ~/.gitconfig).
 
 Commits: 67530b5 (item 2), 57f702a (item 3), 30c8f3c (item 1), 70b2825 / 0fabdbb / f5d940b (pins: own-bug fix of a
-vacuous leg, a fail-closed pin, the legacy-removal pin), then this docs/ledger commit.
+vacuous leg, a fail-closed pin, the legacy-removal pin), 6475bf9 (docs/ledger), 070d621 (own bug: the worktree-location
+tripwire classifies git's `worktree` scope name), then this docs fix-forward.
 
 ## Item 1 - a dormant repository-defined filter is no longer refused
 
@@ -63,6 +64,17 @@ plain + 4 merge). The ssh variant without an allowed-signers file ran nothing (M
   `*.py` never bound: MEASURED guard-off hash ran nothing); the .kriya-embedded file `x.py` likewise; the
   GIT_DIR-submodule pin binds `*.txt` in the child. MEASURED after: guard off fires, guarded refuses.
 - tests/test_s19_git_invocation.py: the seam tuple gains `-c log.showSignature=false`.
+- tests/test_worktree_canonical_root.py `test_worktree_locations_are_decided_only_by_worktree_py`: the stable-identity
+  offender list gains `("kriya/repository/git.py", "<module>:REPOSITORY_SCOPES", "worktree", "{'local', 'worktree'}")`
+  - git's config.worktree SCOPE name, never a worktree location (an offender-list entry, not an import-direction
+  allowlist row; tests/architecture is untouched). Own bug: 30c8f3c was committed without running this file; MEASURED
+  failing at 6475bf9, fixed forward in 070d621.
+
+## Pre-existing failure seen (not P1e)
+
+`tests/test_prd030_terminal_services.py::test_one_terminal_gate_and_one_commit_implementation` fails identically at
+the base 519a243 (git archive, hermetic HOME): a source-text tripwire finds `commit_terminal_candidate` in a docstring
+(final_review_refusal text); no file it reads is touched by P1e. Not OI-47. Reported for the ledger, not fixed here.
 
 ## Mutants
 
