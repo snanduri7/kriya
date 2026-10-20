@@ -173,7 +173,8 @@ _PENDING = set(SITES) - {"worktree.git_status_entries", "worktree.create_git_wor
                          "worktree.create_git_worktree(reuse)", "worktree.remove_git_worktree",
                          "checkpoint.compute_workspace_fingerprint", "checkpoint.compute_workspace_content_hash",
                          "milestone_completion.workspace_evidence_hash", "named_test_oracle.export_base",
-                         "run_coordinator.begin_mutating_run"}
+                         "run_coordinator.begin_mutating_run", "analyzer._repository_revision",
+                         "analyzer.index_repository(changed)"}
 
 
 def _site_params():

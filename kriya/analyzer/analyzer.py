@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from kriya.platform import git_argv
 from kriya.platform.filesystem_semantics import identity_key
+from kriya.repository.git import refuse_repository_content_filters
 
 logger = logging.getLogger(__name__)
 
@@ -424,9 +425,11 @@ def is_knowledge_artifact_dir(dirpath: str, owned_roots: Set[str]) -> bool:
 
 def _repository_revision(root_path: str) -> str:
     """``<HEAD sha>`` (``+dirty`` when the tracked tree differs), or "" outside
-    git: what an index pass actually saw, recorded in the manifest."""
+    git: what an index pass actually saw, recorded in the manifest. Refuses (S19 Q1, typed) a repository whose own
+    configuration defines a content-filter command: status could run it."""
     import subprocess
 
+    refuse_repository_content_filters(root_path)
     try:
         head = subprocess.run(git_argv(["git", "rev-parse", "HEAD"]), cwd=root_path, capture_output=True, text=True)
         if head.returncode != 0:
@@ -981,6 +984,9 @@ class RepositoryAnalyzer:
 
         if changed:
             import subprocess
+
+            # S19 Q1: `git diff` runs clean filters - refused, typed, outside the fallback below (never "index all").
+            refuse_repository_content_filters(self.root_path)
             try:
                 res = subprocess.run(git_argv(["git", "diff", "--name-only"]), cwd=self.root_path, capture_output=True, text=True)
                 # `git diff --name-only` alone only ever shows UNSTAGED
