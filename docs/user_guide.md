@@ -250,9 +250,14 @@ the desktop app's error messages and the audit records never show a secret. One 
 - **Run history in the desktop app and `kriya traces`** (S2b): a run's detail (the recorded commands and their output,
   every section), its stored plan prompt and its goal are shown through the same rule. Since S20 (OI-134) the run
   history row itself (`traces.db`) is STORED redacted: a credential in a goal, a command, its output or an event never
-  reaches the database (no digest binds that row). Still stored with their exact bytes (open owner question, S20): the
-  attempt-evidence store's record envelopes and content (`<state>/attempt-evidence/`, owner-only files), checkpoints,
-  run records, verification contracts, a launch record's notes and the decision ledger under `.kriya/`; they are
+  reaches the database (no digest binds that row). Since S20r the same holds for the attempt-evidence store's record
+  envelopes, gap records and seal (its `manifest.json` says `redaction_policy_version: "2"`; a store written earlier
+  says `"1"`, keeps its raw envelope, still verifies and is still shown redacted), a desktop launch's notes (the reason
+  a decision was needed or declined, the run's error, a change review's reason - the review itself stays bound to the
+  exact reason), the decision ledger `.kriya/control/decisions.jsonl` and the planning diagnostics. A text is redacted
+  before it is shortened, so a cut never exposes part of a secret. Still stored with their exact bytes (open owner
+  question OI-154): the attempt-evidence CONTENT (`<state>/attempt-evidence/<run>/blobs/`, owner-only files),
+  checkpoints, run records, verification contracts and the exact diff a change review asks you to approve; they are
   redacted wherever they are SHOWN. A launch review is not offered for a command a redaction
   would change (you would not be reading what runs). The same rule applies (S2c) to a launch's status in the desktop app,
   the recorded evidence records (`evidence.records`), the reason text of a change review and the reason line of the

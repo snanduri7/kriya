@@ -3301,6 +3301,30 @@ launch-record, decision-ledger and planning-diagnostics ingresses.
 
 OI-152: `safe_endpoint` keeps an IPv6 host's brackets, shows an explicit port 0, and shows an unset endpoint as "".
 
+### S20r - stored-evidence redaction, the remaining unbound ingresses (2026-10-20, OI-134, OI-153 part B; TYPE D)
+
+Owner decision (2026-10-20): the stamp change and its two golden lines are approved. Each ingress is redacted at its ONE
+writer through the one redactor, and a text is redacted BEFORE it is cut (a cut first can break a shape - a URL whose
+`@` falls after the cut - and leak the prefix of a secret):
+- I-3 `AttemptEvidenceWriter`: every record's envelope `payload` (a copy; the caller's object is never mutated), the
+  gap record's error and the seal's `degraded` reasons. The redaction runs before the line's canonical bytes, so `prev`
+  and the seal's `head_digest` bind the stored line and a fresh chain verifies. `redaction_policy_version` names what
+  the writer applied: "1" = every earlier store (stamped, nothing applied: its envelope is raw), "2" = the above. A
+  stamp is never reused for another policy; old stores are never rewritten, still verify, and are still served through
+  the redacting projections. Content blobs and `content_digests` keep the exact bytes (OI-154, S20c).
+- I-9 the launch record: `approval_required` and `declined_decisions` reason and details, `ended.error`, a change
+  review's stored `reason`. `review_id`, `reason_sha256` and `reason_truncated` stay computed from the exact reason
+  (OI-146); the review-diff sidecar and a pending runtime review's commands (secret-free by construction, S2d) are
+  untouched. With S2d's refusal (redacted command + `command_fingerprint`), a launch that meets a recognized positional
+  secret leaves no raw copy under `.kriya/` or the state directory (OI-153 part B).
+- I-11 `DecisionLedger.append_to_file`: the stored line; the in-memory `Decision` and its evidence mirror stay as
+  recorded (limit: `record()` truncates first, so a token-shaped secret cut at the 4,000-character boundary may leave
+  an unrecognisable prefix).
+- I-12 `persist_planning_attempt_diagnostic`: the texts (before the 20,000-character bound) and the parsed/approved
+  plan, validation errors, ownership and repository-evidence records; reason codes are a closed vocabulary.
+
+No other golden, KUP schema field (`redaction_policy_version` is typed `string`), stored digest or record shape moved.
+
 ### S3 - enabling fields need the human authority path (2026-10-19, OI-99, OWNER-RECOVERY-SELF-CORRECTION-REVIEW-001)
 
 Rule: a repository-controlled kriya.yaml cannot enable authority-sensitive behaviour without SEC-009's human authority
