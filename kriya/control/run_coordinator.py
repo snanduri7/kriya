@@ -29,6 +29,7 @@ from kriya.control.run_record import IllegalRunTransitionError, RunLifecycle, Ru
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.logging_setup import run_log
 from kriya.platform import git_argv
+from kriya.repository.git import refuse_repository_content_filters
 
 logger = logging.getLogger(__name__)
 
@@ -394,6 +395,9 @@ def begin_mutating_run(
         yield require_mutating_run(canonical, existing)
         return
 
+    # S19 Q1 (OI-141): a workspace whose own git configuration defines a content-filter command is refused, typed,
+    # before the run takes the lock, writes anything or runs any git (every mutating entry: CLI and KUP).
+    refuse_repository_content_filters(canonical)
     if run_id is None:
         # GUI M6: the first top-level run of a desktop launch takes the launch's own id (kriya/control/launch.py); every other run is unchanged.
         from kriya.control.launch import claim_run_id

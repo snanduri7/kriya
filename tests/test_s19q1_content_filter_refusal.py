@@ -172,7 +172,8 @@ SITES = ["run_coordinator.begin_mutating_run", "worktree.git_status_entries", "w
 _PENDING = set(SITES) - {"worktree.git_status_entries", "worktree.create_git_worktree",
                          "worktree.create_git_worktree(reuse)", "worktree.remove_git_worktree",
                          "checkpoint.compute_workspace_fingerprint", "checkpoint.compute_workspace_content_hash",
-                         "milestone_completion.workspace_evidence_hash", "named_test_oracle.export_base"}
+                         "milestone_completion.workspace_evidence_hash", "named_test_oracle.export_base",
+                         "run_coordinator.begin_mutating_run"}
 
 
 def _site_params():
@@ -717,7 +718,7 @@ def _entry_checks_pass(monkeypatch) -> None:
     from kriya.workflow import checkpoint
 
     monkeypatch.setattr(checkpoint, "refuse_repository_content_filters", lambda _path: None)
-    monkeypatch.setattr(run_coordinator, "refuse_repository_content_filters", lambda _path: None, raising=False)
+    monkeypatch.setattr(run_coordinator, "refuse_repository_content_filters", lambda _path: None)
 
 
 def test_the_direct_development_loop_lets_the_sandbox_refusal_through(tmp_path, monkeypatch):
