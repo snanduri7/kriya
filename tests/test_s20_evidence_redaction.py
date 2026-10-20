@@ -228,8 +228,7 @@ def _launch(tmp_path):
         assert decision.approved_fingerprint is None
         pending = launch_module.request_runtime_command_approval(
             RuntimeCommandSubject("u3", "c", canonical, (("sshpass", "-p", f"{S}34", "ssh", "h"),), "none", None, "r"))
-        assert pending is not None                       # OI-153: a positional secret is offered for review (unchanged)
-        pending.close()
+        assert pending is None                           # S2d (OI-153 (c)): a positional secret is not offered for review
         launch_module.decline_decision("web_lookup_query", f"lookup with secret={S}35", {"terms": [f"api_key={S}36"]})
     finally:
         session.finish(1, {"status": "failed", "error": f"boom Authorization: Bearer {S}37"}, None)
@@ -259,7 +258,7 @@ def test_the_launch_record_holds_the_redacted_free_text(tmp_path):
     assert record["declined_decisions"][0]["reason"] == f"lookup with secret={R}"
     assert record["declined_decisions"][0]["details"] == {"terms": [f"api_key={R}"]}
     assert record["ended"]["error"] == f"boom Authorization: {R} {R}"
-    change = [e for e in record["approval_history"] if e.get("kind") == "change_approval"][0]
+    change = [e for e in [record["pending_approval"]] + record["approval_history"] if e and e.get("kind") == "change_approval"][0]
     assert change["reason"] == f"size trigger; reviewer said password={R}"
 
 
@@ -271,7 +270,8 @@ def test_the_review_identity_and_the_sidecar_stay_bound_to_the_raw_bytes(tmp_pat
 
     ws = _launch(tmp_path)
     record = json.loads(_launch_text(ws))
-    change = [e for e in record["approval_history"] if e.get("kind") == "change_approval"][0]
+    # S2d: the change review is no longer displaced into the history by an offered positional-secret runtime review
+    change = [e for e in [record["pending_approval"]] + record["approval_history"] if e and e.get("kind") == "change_approval"][0]
     reason = f"size trigger; reviewer said password={S}31"
     assert change["reason_sha256"] == "sha256:" + hashlib.sha256(reason.encode()).hexdigest()
     from kriya.context.workspace_identity import workspace_identity
@@ -280,13 +280,14 @@ def test_the_review_identity_and_the_sidecar_stay_bound_to_the_raw_bytes(tmp_pat
     assert sidecar["files"] == [{"filepath": "app.env", "diff": f"+API_KEY={S}30\n"}]
 
 
-def test_a_positional_secret_stays_as_offered_for_review(tmp_path):
-    """OI-153 (open owner question): the redactor does not recognise a positional secret, so the offered runtime review
-    records it as the person will see it; S20 builds no command-grammar redaction."""
+def test_a_positional_secret_is_not_offered_for_review_nor_recorded(tmp_path):
+    """S2d (OI-153, owner decisions (b)+(c)) changed this pin, which encoded the defect (it asserted the positional secret
+    OFFERED for review and recorded raw): the owner now reads `sshpass -p <pw>` through the command's grammar, so the
+    review is not offered and no runtime review in the record carries the command."""
     ws = _launch(tmp_path)
     record = json.loads(_launch_text(ws))
     runtime = [e for e in [record["pending_approval"]] + record["approval_history"] if e and e.get("kind") == "runtime_command"]
-    assert [["sshpass", "-p", f"{S}34", "ssh", "h"]] in [e["commands"] for e in runtime]
+    assert [e["commands"] for e in runtime] == [] and f"{S}34" not in _launch_text(ws)
 
 
 # =========================================================================== I-11 / I-12: decision ledger, planning diagnostics

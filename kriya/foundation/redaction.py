@@ -44,7 +44,17 @@ Two entry points, one rule set:
       ``sk_/rk_live|test_``, Google ``AIza``, Hugging Face ``hf_``) - a closed table;
     - S2c (OI-144): a compound ALL-CAPS name without separators ending in a long secret word (``PGPASSWORD=``,
       ``GITHUBTOKEN:``); a percent-encoded name (``%70assword=``, ``api%5Fkey=``) and the userinfo of a percent-encoded
-      URL (``next=https%3A%2F%2Fu%3Apw%40h``), decoded for DETECTION only - the output never holds a decoded byte.
+      URL (``next=https%3A%2F%2Fu%3Apw%40h``), decoded for DETECTION only - the output never holds a decoded byte;
+    - S2d (OI-153): a POSITIONAL secret of a command in the CLOSED table ``_COMMAND_GRAMMARS``, read through that command's
+      own documented grammar (never a general shell parser): MySQL/MariaDB ``mysql -p<pw>`` (attached only; a bare ``-p``
+      prompts, ``-P`` is the port), ``sshpass -p <pw>`` / ``-p<pw>`` (getopt; ``-f``/``-d``/``-P``/``-e`` carry none; its
+      options end at the wrapped command, so ``ssh -p 22`` stays readable), ``docker``/``podman login -p <pw>`` /
+      ``-p<pw>`` / ``-p=<pw>`` (only after ``login``: ``docker run -p 8080:80`` is a port; ``--password-stdin`` carries
+      none), ``npm config set <credential key> <value>`` (also ``npm set``, ``npm c|con|conf|confi set``). A table command is
+      recognised WHEREVER its word appears - argv element or text word, through a path (``/usr/bin/mysql``), a ``name=``
+      prefix (``cmd=mysql``) and surrounding quotes/brackets (a Python or JSON list, ``bash -c '...'``, an escaped JSON
+      string) - so ``sudo``, ``env X=1``, ``docker exec db``, ``timeout 30`` need no wrapper rule; its grammar reads up to a
+      shell operator (``; && || | &``), a line break, or the next table command.
 
 What stays readable (deliberate, pinned): SHA-256 digests and commit SHAs (no credential-shaped name or prefix), a URL
 without userinfo (an ``@`` in its path or query is not userinfo), an e-mail address and an scp-style ``git@host:path``
@@ -52,11 +62,17 @@ remote (no ``scheme://``), a scheme-relative ``//user@host`` without a password,
 merely contain a secret word (``max_tokens``, ``token_budget``, ``--token-file``, ``secretary``): names are matched by
 WORD (snake/kebab/camel segments), never by substring. Known limits (documented, not a leak of a recognised shape): an
 UNQUOTED secret value that itself contains whitespace, a quote, a backslash or ``& ; ,`` is hidden only up to that
-character; a header kept as a two-element list (``["Authorization", "Token x"]``) carries no flag or key to recognise; a
-POSITIONAL secret with no name or flag grammar of its own (``mysql -p<pw>``, ``sshpass -p <pw>``, ``docker login -p <pw>``,
-``npm config set //registry/:_authToken <pw>``) is shown - whether to add command-grammar-aware argv redaction is the open
-owner question OI-144 (4). Recorded over-redaction (fail-closed): ``pwd=`` / ``PWD=`` (``pwd`` is a secret last word) and
-a compound ALL-CAPS name that merely ends in a long secret word (``NOTOKEN=``, ``TOPSECRET=``).
+character; a header kept as a two-element list (``["Authorization", "Token x"]``) carries no flag or key to recognise.
+NOT covered by the positional table (S2d; it covers only the recognised grammars above, it is not universal shell-secret
+detection): any other command (``mysqldump``/``mysqladmin``/``psql`` positional forms, ``curl -u`` is the flag rule's),
+MySQL short options bundled before ``p`` (``-vp<pw>``), an ``npm`` abbreviation other than the listed ones, a command
+split across fields (``{"command": "sshpass", "args": ["-p", pw]}``: the ``args`` list alone names no command), a command
+built at run time (``$(...)``, a variable), and the punctuation ``[ ( {``
+/ ``, ; ) ] }`` and quotes that lead or trail an unquoted value (kept as structure). Recorded over-redaction
+(fail-closed): ``pwd=`` / ``PWD=`` (``pwd`` is a secret last word), a compound ALL-CAPS name that merely ends in a long
+secret word (``NOTOKEN=``, ``TOPSECRET=``), ``mysql --password <db>`` (the flag rule; there it is the database), prose
+that names ``sshpass -p <word>``, and an attached ``-p<x>`` after a word that merely names a table command (``docker run
+--name mysql -p3306:3306``).
 
 Not a redaction (kept elsewhere on purpose): the SEC-009 approval digest input
 (``authority_approval._redact_env_values``, salted digests so a rotated secret still invalidates an approval) and the
@@ -67,7 +83,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, List, Match, Optional
+from typing import Any, Dict, List, Match, Optional, Tuple
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 REDACTED = "***REDACTED***"
@@ -161,6 +177,229 @@ _SHAPED_SECRETS = (
     re.compile(r"\bhf_[A-Za-z0-9]{34}\b"),                  # Hugging Face access token
 )
 _JSON_SEPARATORS = (None, (",", ":"))                         # json.dumps default, and the compact form
+
+
+# ----------------------------------------------------------------------------- S2d (OI-153): positional secrets
+# A secret some commands take by POSITION (no secret-looking name or flag of its own). Owner decision 2026-10-20 (b): read
+# it through the command's OWN documented grammar, for a CLOSED table of commands; never a general shell parser. Each
+# grammar takes the command's words (``words[0]`` is the command) and returns ``(index, offset)`` pairs: ``words[index]
+# [offset:]`` is the secret. The caller hides only a non-empty one.
+
+def _subcommand(words: List[str], start: int, names: Any) -> Optional[int]:
+    """The index of the first operand at or after ``start`` when it is one of ``names``, else None. An option before it is
+    skipped, and so is the word right after an option written without ``=`` (it may be that option's value - fail-closed
+    for a global option this table does not list: ``docker --config /c login``)."""
+    pending = False
+    for index in range(start, len(words)):
+        word = words[index]
+        if word in names:
+            return index
+        if word == "--":
+            return None
+        if word[:1] == "-" and len(word) > 1:
+            pending = "=" not in word
+            continue
+        if not pending:
+            return None
+        pending = False
+    return None
+
+
+def _getopt(words: List[str], short: Dict[str, int]) -> List[Tuple[str, int, int]]:
+    """POSIX ``getopt`` in ``+`` mode over ``words[1:]`` (options end at the first operand or ``--``; an unknown option makes
+    the tool refuse to run, so the scan stops). ``short``: 0 = no value, 1 = a value attached or in the next word, 2 = a value
+    only when attached. Returns ``(option, index, offset)`` for every option that has a value."""
+    found: List[Tuple[str, int, int]] = []
+    index = 1
+    while index < len(words):
+        word = words[index]
+        if word == "--" or len(word) < 2 or word[0] != "-" or word[1] == "-":
+            break
+        for position in range(1, len(word)):
+            kind = short.get(word[position])
+            if kind is None:
+                return found
+            if kind == 0:
+                continue
+            if position + 1 < len(word):
+                found.append((word[position], index, position + 1))
+            elif kind == 1:
+                found.append((word[position], index + 1, 0))
+                index += 1
+            break
+        index += 1
+    return found
+
+
+def _mysql(words: List[str]) -> List[Tuple[int, int]]:
+    """MySQL / MariaDB client, ``--password[=password], -p[password]`` (mysql(1)): the short form's value is ATTACHED - a
+    bare ``-p`` prompts and carries no secret, in ``-p x`` the ``x`` is the database, ``-P`` is the port. ``--password=x``
+    is the name rule's and ``--password x`` the flag rule's (there ``x`` is the database: recorded over-redaction)."""
+    return [(index, 2) for index in range(1, len(words)) if words[index].startswith("-p")]
+
+
+# sshpass(1), getopt "+f:d:p:P:heVv": -p password (attached or the next word); -f file, -d fd, -P prompt take a value that
+# is not a secret; -e reads SSHPASS (an attached variable name at most); options end at the wrapped command.
+_SSHPASS_OPTIONS = {"f": 1, "d": 1, "p": 1, "P": 1, "e": 2, "h": 0, "V": 0, "v": 0}
+
+
+def _sshpass(words: List[str]) -> List[Tuple[int, int]]:
+    return [(index, offset) for option, index, offset in _getopt(words, _SSHPASS_OPTIONS) if option == "p"]
+
+
+# `login` options that take a value which is NOT a secret (`docker login --help`, MEASURED: -p/--password, --password-stdin,
+# -u/--username; podman-login(1): also --authfile, --cert-dir, --compat-auth-file, --secret <name>).
+_DOCKER_LOGIN_VALUES = ("-u", "--username")
+_PODMAN_LOGIN_VALUES = ("-u", "--username", "--authfile", "--cert-dir", "--compat-auth-file", "--secret")
+
+
+def _registry_login(words: List[str], values: Any) -> List[Tuple[int, int]]:
+    """``<tool> [global options] login [options] [server]`` (pflag): ``-p <pw>``, ``--password <pw>``, ``-p<pw>``,
+    ``-p=<pw>``, ``--password=<pw>``; ``--password-stdin`` carries none. Only ``login``: ``docker run -p 8080:80`` is a port."""
+    start = _subcommand(words, 1, ("login",))
+    if start is None:
+        return []
+    found: List[Tuple[int, int]] = []
+    index = start + 1
+    while index < len(words):
+        word = words[index]
+        if word == "--":
+            break
+        if word in ("-p", "--password"):
+            found.append((index + 1, 0))
+            index += 2
+            continue
+        if word in values:
+            index += 2
+            continue
+        if word.startswith("--password="):
+            found.append((index, len("--password=")))
+        elif word.startswith("-p="):
+            found.append((index, 3))
+        elif word.startswith("-p"):
+            found.append((index, 2))
+        index += 1
+    return found
+
+
+def _docker_login(words: List[str]) -> List[Tuple[int, int]]:
+    return _registry_login(words, _DOCKER_LOGIN_VALUES)
+
+
+def _podman_login(words: List[str]) -> List[Tuple[int, int]]:
+    return _registry_login(words, _PODMAN_LOGIN_VALUES)
+
+
+# npm's own names for `config` (lib/utils/cmd-list.js, MEASURED with npm's deref: the alias `c` and the unique abbreviations).
+_NPM_CONFIG = ("c", "con", "conf", "confi", "config")
+
+
+def _npm(words: List[str]) -> List[Tuple[int, int]]:
+    """``npm config set <key> <value> ...`` / ``npm set ...`` (lib/commands/config.js ``keyValues``): a key without ``=`` takes
+    the next word as its value; the value of a credential key (its last ``:`` segment secret-bearing by the owner's word
+    rule: ``_authToken``, ``_auth``, ``_password``) is hidden. ``<key>=<value>`` is the name rule's."""
+    index = _subcommand(words, 1, _NPM_CONFIG + ("set",))
+    if index is not None and words[index] != "set":
+        index = _subcommand(words, index + 1, ("set",))
+    if index is None:
+        return []
+    return [(key + 1, 0) for key in range(index + 1, len(words) - 1)
+            if words[key][:1] != "-" and "=" not in words[key] and _is_secret_name(words[key].rsplit(":", 1)[-1])]
+
+
+# THE closed table (tripwire-tested): a command's base name -> its grammar.
+_COMMAND_GRAMMARS = {"mysql": _mysql, "mariadb": _mysql, "sshpass": _sshpass, "docker": _docker_login, "podman": _podman_login, "npm": _npm}
+_OPERATORS = frozenset({";", "&&", "||", "|", "|&", "&"})
+# A word of free text: whitespace-separated (a quoted value with spaces is joined back by _quoted_value_end).
+_WORD = re.compile(r"\S+")
+_WORD_LEAD, _WORD_TRAIL = "[({\\\"'`", ",;)]}\\\"'`"
+_ASSIGNMENT = re.compile(r"[^\s=:'\"]*[=:]")
+
+
+def _command_name(word: str) -> Optional[str]:
+    """The table command a word names, through a leading ``name=``/``name:`` (``cmd=mysql``, ``cmd=["mysql"``) and a path
+    (``/usr/bin/mysql``); None for an option or anything else."""
+    if not word or word[0] == "-" or not any(name in word for name in _COMMAND_GRAMMARS):
+        return None
+    name = _ASSIGNMENT.sub("", word, count=1).lstrip(_WORD_LEAD).rsplit("/", 1)[-1]
+    return name if name in _COMMAND_GRAMMARS else None
+
+
+def _secret_positions(words: List[str], stops: Any = ()) -> Dict[int, int]:
+    """{index: offset} of every positional secret in a word sequence. A table command is recognised WHEREVER its word appears
+    (``sudo -u dba mysql``, ``env X=1 mysql``, ``docker exec db mysql``, ``/usr/bin/mysql``); its grammar reads the words up
+    to a shell operator, a ``stops`` index, or the next table command - that one word still included, as a value may be
+    spelled like a command (each word is read by at most two grammars: linear)."""
+    names = [_command_name(word) for word in words]
+    hidden: Dict[int, int] = {}
+    for start, name in enumerate(names):
+        if name is None:
+            continue
+        end = start + 1
+        while end < len(words) and end not in stops and words[end] not in _OPERATORS and names[end] is None:
+            end += 1
+        if end < len(words) and names[end] is not None and end not in stops:
+            end += 1
+        for index, offset in _COMMAND_GRAMMARS[name](words[start:end]):
+            position = start + index
+            if position < end and offset < len(words[position]):
+                hidden[position] = min(offset, hidden.get(position, offset))
+    return hidden
+
+
+def _split_word(token: str) -> Tuple[str, str, str]:
+    """(lead, word, trail): the quotes, brackets and separators around a word of free text (``['-p<pw>',`` -> ``['``,
+    ``-p<pw>``, ``',``)."""
+    lead = len(token) - len(token.lstrip(_WORD_LEAD))
+    rest = token[lead:]
+    trail = len(rest) - len(rest.rstrip(_WORD_TRAIL))
+    return token[:lead], rest[:len(rest) - trail], rest[len(rest) - trail:]
+
+
+def _quoted_value_end(text: str, matches: List[Match], parts: List[Tuple[str, str, str]], index: int, offset: int) -> Tuple[str, int]:
+    """(opening quote kept in the output, index of the word that ends the value). A value that opens a quote it does not
+    close in its own word (``-p 'a b'``, ``-p'a b'``, an escaped ``\\"a b\\"``) runs to the first later word on the same line
+    whose trailing separators close it; otherwise it is this word alone."""
+    lead, word, trail = parts[index]
+    if offset == 0 and lead[-1:] in ("'", '"'):
+        quote, opened, rest = lead[-1], "", trail
+    elif offset < len(word) and word[offset] in ("'", '"'):
+        quote, opened, rest = word[offset], word[offset], word[offset + 1:] + trail
+    else:
+        return "", index
+    if quote in rest:
+        return "", index
+    for later in range(index + 1, len(matches)):
+        if "\n" in text[matches[later - 1].end():matches[later].start()]:
+            break
+        if quote in parts[later][2]:
+            return opened, later
+    return "", index
+
+
+def _redact_commands(text: str) -> str:
+    """Every positional secret of a table command quoted in free text (a joined argv, a log line, a Python or JSON list, a
+    shell string such as ``bash -c 'mysql -p<pw>'``, an escaped JSON string), hidden; the words around it, its quotes and
+    separators kept. Words are whitespace-separated, read without their surrounding quotes, brackets and separators."""
+    if not any(name in text for name in _COMMAND_GRAMMARS):  # OI-60: a substring test before tokenizing
+        return text
+    matches = list(_WORD.finditer(text))
+    parts = [_split_word(match.group(0)) for match in matches]
+    stops = {index for index in range(1, len(matches))
+             if ";" in parts[index - 1][2] or "\n" in text[matches[index - 1].end():matches[index].start()]}
+    hidden = _secret_positions([word for _, word, _ in parts], stops)
+    out: List[str] = []
+    position = 0
+    for index in sorted(hidden):
+        if matches[index].start() < position:   # inside a quoted value already hidden
+            continue
+        lead, word, _ = parts[index]
+        opened, last = _quoted_value_end(text, matches, parts, index, hidden[index])
+        out.append(text[position:matches[index].start()])
+        out.append(f"{lead}{word[:hidden[index]]}{opened}{REDACTED}{parts[last][2]}")
+        position = matches[last].end()
+    out.append(text[position:])
+    return "".join(out)
 
 
 def _words(key: str) -> List[str]:
@@ -289,6 +528,7 @@ def redact_text(text: str) -> str:
     redacted = _AUTHORIZATION_HEADER.sub(_authorization, redacted)
     redacted = _COOKIE_HEADER.sub(lambda m: f"{m.group(1)}{REDACTED}", redacted)
     redacted = _FLAG_VALUE.sub(_flag_value, redacted)
+    redacted = _redact_commands(redacted)
     redacted = _redact_pairs(redacted)
     for pattern in _SHAPED_SECRETS:
         redacted = pattern.sub(REDACTED, redacted)
@@ -337,8 +577,12 @@ def _flag_name(item: Any) -> Optional[str]:
 def _redact_list(items: Any) -> List[Any]:
     out: List[Any] = []
     flag: Optional[str] = None
-    for item in items:
-        if flag is not None and isinstance(item, str) and item and not item.startswith("-"):
+    # S2d: an argv's positional secrets, read through the command's own grammar (the list read WHOLE, like a flag pair).
+    hidden = _secret_positions([item if isinstance(item, str) else "" for item in items])
+    for position, item in enumerate(items):
+        if position in hidden:
+            out.append(item[:hidden[position]] + REDACTED)
+        elif flag is not None and isinstance(item, str) and item and not item.startswith("-"):
             if flag.lower() in _USER_FLAGS:
                 out.append(redact_text(_user_value(item)))
             elif _is_secret_name(flag):

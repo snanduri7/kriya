@@ -30,7 +30,6 @@ from kriya.foundation.redaction import REDACTED, redact_text, redact_value
 S = "Zq9SECRETv"
 R = REDACTED
 LID = "20261020T101010-abcdef01"
-FLIP = pytest.mark.xfail(strict=True, raises=AssertionError, reason="S2d: flips with the grammar correction")
 
 
 @pytest.fixture(autouse=True)
@@ -68,13 +67,11 @@ GRAMMAR = [
 ]
 
 
-@FLIP
 @pytest.mark.parametrize("text, expected", [(t, e) for _, t, e in GRAMMAR], ids=[i for i, _, _ in GRAMMAR])
 def test_a_positional_secret_is_hidden_in_the_text_and_the_rest_kept(text, expected):
     assert redact_text(text) == expected
 
 
-@FLIP
 @pytest.mark.parametrize("text, expected", [(t, e) for _, t, e in GRAMMAR], ids=[i for i, _, _ in GRAMMAR])
 def test_a_positional_secret_is_hidden_in_the_argv_and_the_rest_kept(text, expected):
     assert redact_value(text.split(" ")) == expected.split(" ")
@@ -92,13 +89,11 @@ TEXT_ONLY = [
 ]
 
 
-@FLIP
 @pytest.mark.parametrize("text, expected", [(t, e) for _, t, e in TEXT_ONLY], ids=[i for i, _, _ in TEXT_ONLY])
 def test_a_positional_secret_is_hidden_wherever_the_text_quotes_the_command(text, expected):
     assert redact_text(text) == expected
 
 
-@FLIP
 @pytest.mark.parametrize("value, expected", [
     (["bash", "-c", f"mysql -p{S} db"], ["bash", "-c", f"mysql -p{R} db"]),
     ({"command": ["docker", "login", "-p", S], "exit_code": 0}, {"command": ["docker", "login", "-p", R], "exit_code": 0}),
@@ -168,7 +163,6 @@ def test_redaction_is_idempotent_over_the_generated_corpus(text):
     assert redact_value(redact_value(value)) == redact_value(value)
 
 
-@FLIP
 @pytest.mark.parametrize("text, expected", [
     ("sshpass -p is the unsafe form", f"sshpass -p {R} the unsafe form"),
     ("docker run --name mysql -p3306:3306 mysql:8", f"docker run --name mysql -p{R} mysql:8"),
@@ -179,17 +173,26 @@ def test_the_measured_cost_of_the_grammar_is_fail_closed(text, expected):
     assert redact_text(text) == expected
 
 
-@FLIP
+@pytest.mark.parametrize("value", [
+    f"mysqldump -u root -p{S} shop", f"mysql -vp{S}", ["mysqladmin", f"-p{S}", "status"],
+    {"command": "sshpass", "args": ["-p", S, "ssh", "h"]},
+], ids=["mysqldump", "bundled-short-options", "mysqladmin", "command-split-across-fields"])
+def test_a_documented_limit_is_shown_as_written(value):
+    """NOT covered (the owner docstring and docs/user_guide.md say so): the table is closed, not universal shell-secret
+    detection. Covering one of these is a reviewed change of the table, not a silent widening."""
+    assert redact_value(value) == value
+
+
 def test_the_supported_command_table_is_closed():
     """Tripwire: adding, widening or dropping a command or one of its option tables is a reviewed change of this table."""
     from kriya.foundation import redaction
 
-    assert {name: fn.__name__ for name, fn in getattr(redaction, "_COMMAND_GRAMMARS", {}).items()} == {
+    assert {name: fn.__name__ for name, fn in redaction._COMMAND_GRAMMARS.items()} == {
         "mysql": "_mysql", "mariadb": "_mysql", "sshpass": "_sshpass", "docker": "_docker_login", "podman": "_podman_login", "npm": "_npm"}
-    assert getattr(redaction, "_SSHPASS_OPTIONS", None) == {"f": 1, "d": 1, "p": 1, "P": 1, "e": 2, "h": 0, "V": 0, "v": 0}
-    assert getattr(redaction, "_DOCKER_LOGIN_VALUES", None) == ("-u", "--username")
-    assert getattr(redaction, "_PODMAN_LOGIN_VALUES", None) == ("-u", "--username", "--authfile", "--cert-dir", "--compat-auth-file", "--secret")
-    assert getattr(redaction, "_NPM_CONFIG", None) == ("c", "con", "conf", "confi", "config")
+    assert redaction._SSHPASS_OPTIONS == {"f": 1, "d": 1, "p": 1, "P": 1, "e": 2, "h": 0, "V": 0, "v": 0}
+    assert redaction._DOCKER_LOGIN_VALUES == ("-u", "--username")
+    assert redaction._PODMAN_LOGIN_VALUES == ("-u", "--username", "--authfile", "--cert-dir", "--compat-auth-file", "--secret")
+    assert redaction._NPM_CONFIG == ("c", "con", "conf", "confi", "config")
 
 
 # =========================================================================== the output channels (S2c channel table)
@@ -197,7 +200,6 @@ def test_the_supported_command_table_is_closed():
 SHAPES = [t for _, t, _ in GRAMMAR[:1] + GRAMMAR[6:7] + GRAMMAR[10:11] + GRAMMAR[15:16]]
 
 
-@FLIP
 def test_the_log_file_hides_every_positional_shape(tmp_path):
     from kriya.core import logging_setup
 
@@ -209,7 +211,6 @@ def test_the_log_file_hides_every_positional_shape(tmp_path):
     assert "runtime command failed: mysql -u root -p" in text and S not in text, text
 
 
-@FLIP
 def test_a_kup_error_envelope_and_the_cli_error_text_hide_every_positional_shape():
     from kriya.cli_commands.common import _user_error_text
     from kriya.kup.inspect import error_envelope
@@ -219,7 +220,6 @@ def test_a_kup_error_envelope_and_the_cli_error_text_hide_every_positional_shape
     assert S not in _user_error_text(RuntimeError(message))
 
 
-@FLIP
 def test_authority_inspect_hides_a_positional_secret_in_a_configured_command(tmp_path, monkeypatch):
     from kriya.cli import main
 
@@ -242,7 +242,6 @@ def _kup(operation, **request):
     return envelope, encode_response(envelope)
 
 
-@FLIP
 def test_the_run_history_the_gui_receives_hides_every_positional_shape(tmp_path, monkeypatch):
     """history.detail (each recorded step's argv and output), history.list, history.prompt and `kriya traces`. The row is
     redacted at write by its one writer (S20) - with the grammar, the stored row holds no positional secret either."""
@@ -278,7 +277,6 @@ POSITIONAL = [("mysql", ["mysql", "-u", "root", f"-p{S}", "db"]), ("sshpass", ["
               ("podman-attached", ["podman", "login", f"-p{S}", "r"]), ("mariadb", ["mariadb", f"-p{S}"])]
 FLAG = ("token-flag", ["run.sh", "--token", S])   # the S2b-covered shape: its terminal prompt was shown redacted (S2c) and ran raw
 REFUSING = POSITIONAL + [FLAG]
-REFUSING_NOW = [pytest.param(a, id=i, marks=FLIP) for i, a in POSITIONAL] + [pytest.param(FLAG[1], id=FLAG[0])]
 
 
 def _subject(argv):
@@ -294,7 +292,6 @@ def _refusal_text():
     return RUNTIME_COMMAND_SECRET_REFUSAL
 
 
-@FLIP
 @pytest.mark.parametrize("argv", [a for _, a in POSITIONAL], ids=[i for i, _ in POSITIONAL])
 def test_a_runtime_command_with_a_positional_secret_is_not_offered_for_review(argv):
     from kriya.control.launch_approval import build_pending_runtime
@@ -314,7 +311,7 @@ def _session(tmp_path):
     return canonical, session
 
 
-@pytest.mark.parametrize("argv", REFUSING_NOW)
+@pytest.mark.parametrize("argv", [a for _, a in REFUSING], ids=[i for i, _ in REFUSING])
 @pytest.mark.parametrize("yes", [False, True], ids=["prompt", "yes"])
 def test_inside_a_launch_the_refusal_is_recorded_redacted_with_the_digest_of_the_exact_bytes(tmp_path, argv, yes):
     """Not offered (no pending review exists, so runtime_command.review has nothing to serve); the launch record's
@@ -343,7 +340,7 @@ def test_inside_a_launch_the_refusal_is_recorded_redacted_with_the_digest_of_the
     assert S not in record_text and S not in wire and status["error"] is None
 
 
-@pytest.mark.parametrize("argv", REFUSING_NOW)
+@pytest.mark.parametrize("argv", [a for _, a in REFUSING], ids=[i for i, _ in REFUSING])
 def test_the_terminal_prompt_refuses_instead_of_showing_an_altered_command(argv, monkeypatch, capsys):
     """`kriya generate` outside a launch: the person is NOT asked (asking would show either the secret or bytes that are not
     what runs); the refusal says why and points at the operator's own paths; nothing is approved."""
@@ -369,7 +366,6 @@ def test_the_operator_yes_still_runs_what_it_could_run(argv, capsys):
     assert "[Auto-Approving]" in capsys.readouterr().out
 
 
-@FLIP
 @pytest.mark.parametrize("argv", [a for _, a in POSITIONAL], ids=[i for i, _ in POSITIONAL])
 def test_the_operator_yes_output_hides_the_secret(argv, capsys):
     from kriya.cli import _runtime_command_decision
@@ -387,7 +383,7 @@ def test_the_operator_yes_output_already_hid_a_flag_secret(capsys):
     assert S not in out and f"run.sh --token {R}" in out
 
 
-@pytest.mark.parametrize("argv", [pytest.param(POSITIONAL[0][1], id="mysql", marks=FLIP), pytest.param(FLAG[1], id="token-flag")])
+@pytest.mark.parametrize("argv", [POSITIONAL[0][1], FLAG[1]], ids=["mysql", "token-flag"])
 def test_the_legacy_prompt_is_not_asked_and_nothing_is_approved(argv, tmp_path, monkeypatch):
     """`kriya proposal execute` (a plain callback: policy.approval.ask's legacy branch) printed the redacted reason and the
     person approved bytes they could not read. The authority does not ask a plain callback for such a subject."""
@@ -416,7 +412,7 @@ def _judgment(argv):
     return {"should_run": True, "run_commands": [argv], "success_criteria": "prints ok", "input_channel": "none", "command_source": "inferred"}
 
 
-@pytest.mark.parametrize("argv", REFUSING_NOW)
+@pytest.mark.parametrize("argv", [a for _, a in REFUSING], ids=[i for i, _ in REFUSING])
 def test_the_workflow_declines_through_the_typed_channel_and_executes_nothing(argv, monkeypatch):
     """The executor's own choke point (both runtime call sites route through it): the desktop/terminal typed channel answers
     with no approval, so the run records a declined check (REQUIRED_RUNTIME_VERIFICATION_DECLINED when required)."""
@@ -459,7 +455,7 @@ def _install_raw_review(session, argv):
     return entry
 
 
-@pytest.mark.parametrize("argv", [pytest.param(POSITIONAL[0][1], id="mysql", marks=FLIP), pytest.param(FLAG[1], id="token-flag")])
+@pytest.mark.parametrize("argv", [POSITIONAL[0][1], FLAG[1]], ids=["mysql", "token-flag"])
 def test_a_review_recorded_raw_before_s2d_is_refused_not_served(tmp_path, argv):
     from kriya.kup import policy
 
@@ -495,7 +491,6 @@ def test_the_refusal_names_the_operator_paths_and_fits_the_launch_record():
         assert words in message
 
 
-@FLIP
 def test_a_note_still_recorded_raw_is_projected_redacted_by_launch_status(tmp_path):
     """Governed (S2c OI-131 projection, its killer moved here): a note S2d does not write (an unreviewable command set - none
     to show - whose reason quotes a positional secret) is still stored raw (S20 I-9) and `launch.status` hides it."""

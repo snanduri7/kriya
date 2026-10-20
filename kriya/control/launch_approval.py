@@ -107,7 +107,9 @@ def build_pending_runtime(launch_id: str, workspace_identity_value: str, sequenc
     what would run. Secret stdin/environment values never enter the record: only ``stdin_present`` / the stdin digest and environment NAMES do. ``review`` is the subject's
     fingerprint/reviewability owner (AUTHORITY's ``kriya.policy.approval``; slice C3: a parameter, not a lazy import of the kernel-side module)."""
     commands = [list(c) for c in subject.commands]
-    # S2b: each command is read WHOLE (``--token`` then its value is a secret pair; neither element alone is one).
+    # S2b: each command is read WHOLE (``--token`` then its value is a secret pair; neither element alone is one). S2d: the
+    # same comparison covers a positional secret of a supported command's grammar (``mysql -p<pw>``); it is the rule of
+    # ``kriya.policy.approval.commands_carry_secret`` (not imported here: this module re-exports only its moved names).
     if not review.reviewable(subject) or any(redact_value(c) != c for c in commands):
         return None
     digest = review.fingerprint_of(subject.working_directory, subject.commands, subject.input_channel, subject.stdin_sha256)

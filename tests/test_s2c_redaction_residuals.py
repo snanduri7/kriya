@@ -2,8 +2,8 @@
 
 Owner decisions (2026-10-20): (1)-(3) of OI-144 are fixed at the ONE owner (kriya/foundation/redaction.py), no per-surface
 rule; (4) - positional secrets with no name or flag grammar (`mysql -p<pw>`, `sshpass -p`, `docker login -p`, `npm config set
-... _authToken <pw>`) - is an OPEN POLICY QUESTION: characterized and pinned here strict-xfail, production behaviour
-unchanged. OI-145: one endpoint display rule at the owner. OI-146 (INTENTIONAL_CONTRACT, strict scope): the
+... _authToken <pw>`) - was an open policy question pinned here strict-xfail; S2d (OI-153) decided and flipped the 8 pins
+(tests/test_s2d_positional_secrets.py carries the full grammar and channel matrix). OI-145: one endpoint display rule at the owner. OI-146 (INTENTIONAL_CONTRACT, strict scope): the
 change_approval.review DIFF and the opt-in evidence.call_content / change_content (`content_visibility: on`) are the ONLY
 raw-content surfaces; they never reach evidence, logs, history or telemetry, and default/off WITHHOLDS (it does not redact).
 
@@ -27,9 +27,6 @@ S = "Zq9SECRETv"
 R = REDACTED
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FLIP = pytest.mark.xfail(strict=True, raises=AssertionError, reason="S2c characterization: flips with the correction")
-OPEN_4 = pytest.mark.xfail(
-    strict=True, raises=AssertionError,
-    reason="OI-144(4) OPEN owner question: command-grammar-aware argv redaction vs documented limit; S2c characterizes only")
 
 
 @pytest.fixture(autouse=True)
@@ -316,7 +313,7 @@ def test_an_opt_in_content_read_writes_nothing_and_logs_nothing(caplog):
     assert tree() == before and all(S not in r.getMessage() for r in caplog.records)
 
 
-# --------------------------------------------------------------------------- OI-144 (4): OPEN policy question, pinned
+# --------------------------------------------------------------------------- OI-144 (4) = OI-153: decided, flipped by S2d
 
 POSITIONAL = [
     ("mysql-p", f"mysql -u root -p{S} db", ["mysql", "-u", "root", f"-p{S}", "db"]),
@@ -326,19 +323,17 @@ POSITIONAL = [
 ]
 
 
-@OPEN_4
 @pytest.mark.parametrize("text, argv", [(t, a) for _, t, a in POSITIONAL], ids=[i for i, _, _ in POSITIONAL])
 def test_a_positional_secret_would_be_hidden_in_text_and_argv(text, argv):
-    """Strict-xfail: today every form is shown (MEASURED, S2c channel table). Turning green means someone changed the
-    owner's argv grammar without the owner's decision on OI-144(4)."""
-    assert S not in redact_text(text) or S not in json.dumps(redact_value(argv))
+    """S2d (OI-153, owner decision (b)) flipped this strict-xfail pin: the owner reads each form through the command's own
+    grammar. Strengthened from `or` to the exact bytes of BOTH forms (the pin passed with either path alone)."""
+    assert redact_text(text) == text.replace(S, R) and redact_value(argv) == [R if a == S else a.replace(S, R) for a in argv]
 
 
-@OPEN_4
 @pytest.mark.parametrize("argv", [a for _, _, a in POSITIONAL], ids=[i for i, _, _ in POSITIONAL])
 def test_a_runtime_command_with_a_positional_secret_would_not_be_offered_for_review(argv):
-    """Strict-xfail: the launch review is offered today (redaction does not alter the argv), so the command is recorded
-    in the launch record and shown by runtime_command.review and launch.status as written."""
+    """S2d (OI-153, owner decision (c)) flipped this strict-xfail pin: the review is not offered (the S2b rule, now through
+    the authority's `commands_carry_secret`), so nothing is recorded raw and runtime_command.review has nothing to show."""
     from kriya.control.launch_approval import build_pending_runtime
     from kriya.policy.approval import RuntimeCommandSubject
 
