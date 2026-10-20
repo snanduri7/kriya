@@ -11,6 +11,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from kriya.analyzer.analyzer import RepositoryModel
+from kriya.platform import git_argv
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 logger = logging.getLogger(__name__)
@@ -86,19 +87,19 @@ def git_commit_if_tracked(path: str, message: str) -> None:
     try:
         directory = path if os.path.isdir(path) else os.path.dirname(path)
         check = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
+            git_argv(["git", "rev-parse", "--is-inside-work-tree"]),
             cwd=directory, capture_output=True, text=True
         )
         if check.returncode != 0 or check.stdout.strip() != "true":
             return
-        subprocess.run(["git", "add", path], cwd=directory, capture_output=True)
+        subprocess.run(git_argv(["git", "add", path]), cwd=directory, capture_output=True)
         # SEC-001-P1 (2026-09-11): suppresses any repository-defined
         # pre-commit/commit-msg/post-commit hook in whatever git work tree
         # the skill directory happens to live in - this commit is
         # Kriya-internal bookkeeping, never meant to trigger arbitrary
         # repository-controlled code as a side effect.
         res = subprocess.run(
-            ["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", message],
+            git_argv(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", message]),
             cwd=directory, capture_output=True, text=True,
         )
         if res.returncode == 0:
