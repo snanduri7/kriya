@@ -32,6 +32,7 @@ import uuid
 from typing import Any, Dict, List, Mapping, Optional
 
 from kriya.core.attempt_evidence import model
+from kriya.foundation.redaction import redact_text, redact_value
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +221,9 @@ class AttemptEvidenceWriter:
                 "schema": model.SCHEMA, "seq": self._seq + 1, "prev": self._prev, "kind": kind,
                 **{key: ids.get(key) for key in _IDENTITY_KEYS},
                 "t_wall": _now_wall(), "t_mono_ms": int(time.monotonic() * 1000),
-                "provenance": provenance, "payload": dict(payload),
+                # S20r (OBS-003, stamp "2"): the envelope is stored REDACTED - a copy (the caller's payload is never
+                # mutated), made before the canonical bytes below, so the chain binds the stored line.
+                "provenance": provenance, "payload": redact_value(dict(payload)),
                 "content_digests": content_digests, "blobs": blobs,
             }
             if record["run_id"] is None:
@@ -254,7 +257,7 @@ class AttemptEvidenceWriter:
             if not self._dead and kind != "recorder.gap":
                 try:
                     self.append("recorder.gap", {"lost_kind": kind, "error_type": type(error).__name__,
-                                                 "error": str(error)[:500]})
+                                                 "error": redact_text(str(error))[:500]})  # redacted BEFORE the cut
                 except Exception:  # the gap record itself failed: the seal still counts it
                     pass
             return None
@@ -287,7 +290,8 @@ class AttemptEvidenceWriter:
                     "schema": model.SCHEMA, "final_seq": self._seq, "head_digest": self._prev,
                     "record_count": self._seq, "blob_count": self._blob_count,
                     "complete": not self.degraded and self.gaps == 0 and not self._dead,
-                    "gaps": self.gaps, "degraded": list(self.degraded), "closed_reason": closed_reason,
+                    "gaps": self.gaps, "degraded": [redact_text(reason) for reason in self.degraded],  # S20r: stamp "2"
+                    "closed_reason": closed_reason,
                 }
                 tmp = os.path.join(self.directory, f".{_SEAL}.tmp")
                 _create_private_file(tmp, json.dumps(seal, sort_keys=True, indent=1).encode("utf-8") + b"\n")

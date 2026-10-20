@@ -160,7 +160,6 @@ def _store(tmp_path):
     return str(tmp_path / "state"), payload
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="S20 GOLDEN STOP: held with the stamp (I-3); ready patch in the S20 report")
 def test_the_evidence_envelope_stores_no_secret(tmp_path):
     state, _ = _store(tmp_path)
     records = open(os.path.join(state, "attempt-evidence", "s20-rec", "records.jsonl"), "rb").read()
@@ -168,8 +167,6 @@ def test_the_evidence_envelope_stores_no_secret(tmp_path):
     assert f"Authorization: {R} {R}".encode() in records
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="S20 GOLDEN STOP: the stamp \"2\" moves tests/golden/kup/application/"
-                   "evidence_manifest(.json|_from_trace.json); held for the owner with the envelope redaction (I-3)")
 def test_the_evidence_manifest_names_the_applied_policy(tmp_path):
     from kriya.core.attempt_evidence import reader
 
@@ -219,13 +216,12 @@ def _gap_store(tmp_path):
     writer = AttemptEvidenceWriter(str(tmp_path / "state"), "s20-rec", capture=model.CAPTURE_FULL, manifest={})
     writer.append("run.opened", {})
     # ValueError("record for run '<offered>' offered to the store of 's20-rec'"): the offered id starts at character 16
-    offered = "x" * 470 + f" https://u:{S}60zzzzzzzzzzzz@h/x password={S}61"
+    offered = "x" * 450 + f" https://u:{S}60zzzzzzzzzzzz@h/x password={S}61"    # raw: the cut at 500 falls before the "@"
     assert writer.record("diagnosis", {"x": 1}, identity={"run_id": offered}) is None
     assert writer.seal("run_closed") is True
     return str(tmp_path / "state")
 
 
-@FLIP
 def test_the_gap_record_and_the_seal_store_no_secret(tmp_path):
     state = _gap_store(tmp_path)
     stored = _records_bytes(state) + open(os.path.join(state, "attempt-evidence", "s20-rec", "seal.json"), "rb").read()

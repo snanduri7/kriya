@@ -15,7 +15,15 @@ from typing import Any, Dict, Mapping
 SCHEMA = "kriya.attempt_evidence/1"
 SUPPORTED_SCHEMAS = (SCHEMA,)
 WRITER_VERSION = "1"
-REDACTION_POLICY_VERSION = "1"
+# What the writer applies before bytes reach disk (S20/S20r, OI-134, OBS-003). Never reused for another policy, and
+# never rewritten in a store that exists: a reader takes each store's stamp as written.
+#   "1" - every store written before S20r: the stamp was written, but NOTHING was redacted (the envelope is raw).
+#   "2" - every record's envelope ``payload`` (the gap record's error included) and the seal's ``degraded`` reasons pass
+#         through the ONE redactor (kriya/foundation/redaction.py) inside the writer, BEFORE the line's canonical bytes
+#         are computed, so the hash chain (``prev`` / the seal's ``head_digest``) binds the stored, redacted line; a text
+#         is redacted before it is cut. Content blobs and ``content_digests`` keep the EXACT content bytes
+#         (content-addressed; candidate export and the leak check need them: owner question OI-154, unit S20c).
+REDACTION_POLICY_VERSION = "2"
 
 # Provenance of a record's values (design §3.2). LEGACY_RECONSTRUCTED is used
 # only by the out-of-tree legacy importer (M1.11).
