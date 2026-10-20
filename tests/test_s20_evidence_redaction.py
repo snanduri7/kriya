@@ -567,6 +567,41 @@ def test_the_planning_diagnostic_is_redacted_before_it_is_bounded(tmp_path):
     assert line["planner_request"].endswith(f" https://{R}@h/x")         # hidden whole; the redacted text fits the bound
 
 
+def test_every_structured_field_of_the_planning_diagnostic_is_stored_redacted(tmp_path):
+    """Model and goal text reach the parsed plan (descriptions, a planned file's reason and path), the validation errors,
+    the repository evidence and - for a valid plan - the approved plan and the ownership records: each is stored redacted
+    (one marker per field, so each redaction site is checked on its own)."""
+    from kriya.workflow.plan_schema import (
+        ChangeKind,
+        EngineeringPlan,
+        ExecutionMethod,
+        FileAction,
+        PlannedFile,
+        Subtask,
+    )
+    from kriya.workflow.planning_diagnostics import persist_planning_attempt_diagnostic
+
+    def plan(path):
+        return EngineeringPlan(plan_id="p1", kind=ChangeKind.TASK, subtasks=[Subtask(
+            id="s1", description=f"deploy with password={S}54", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path=path, action=FileAction.MODIFY, reason=f"token: {S}55")])])
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    common = dict(planner_request="r", planner_system_prompt="s", raw_plan_response="{}", reason_codes=["RC"], repair_prompt=None)
+    path = persist_planning_attempt_diagnostic(str(ws), "r1", attempt=1, plan=plan("src/a.py"), validation_errors=[f"E1 secret={S}56"],
+                                               repository_evidence=[{"path": f"cfg/api_key={S}57", "exists": False}], **common)
+    persist_planning_attempt_diagnostic(str(ws), "r1", attempt=2, plan=plan(f"cfg/api_key={S}58"), validation_errors=[],
+                                        repository_evidence=[], **common)
+    first, second = [json.loads(line) for line in open(path, encoding="utf-8").read().splitlines()]
+    for field, marker in (("parsed_plan", 54), ("parsed_plan", 55), ("validation_errors", 56), ("repository_evidence", 57)):
+        assert f"{S}{marker}" not in json.dumps(first[field]), (field, marker)
+    for field in ("parsed_plan", "approved_plan", "ownership_validation"):
+        assert second[field] and f"{S}58" not in json.dumps(second[field]), field
+    assert first["parsed_plan"]["subtasks"][0]["description"] == f"deploy with password={R}"
+    assert first["validation_errors"] == [f"E1 secret={R}"] and first["reason_codes"] == ["RC"]
+
+
 def test_a_planning_diagnostic_without_a_secret_is_stored_as_given(tmp_path):
     """Before AND after: text without a secret shape is stored byte-identical (``max_tokens``, digests, paths)."""
     from kriya.workflow.planning_diagnostics import persist_planning_attempt_diagnostic
