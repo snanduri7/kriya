@@ -15,6 +15,7 @@ from typing import Any, List
 
 from kriya.platform import git_argv
 from kriya.repository.commit import StagedFileWrite
+from kriya.repository.git import refuse_repository_content_filters
 from kriya.repository.snapshot import display_text, file_raw_digest, raw_digest
 from kriya.static_analysis.service import StaticAnalysisGateResult, StaticAnalysisRequest, StaticAnalysisService
 
@@ -33,7 +34,9 @@ def _git(workspace: str, *args: str) -> str:
 
 
 def changed_paths(workspace: str, base: str) -> List[str]:
-    """Tracked changes against ``base`` plus untracked files (not ignored)."""
+    """Tracked changes against ``base`` plus untracked files (not ignored). Refuses (S19 Q1) a repository whose own
+    configuration defines a content-filter command: diff and the base worktree's checkout could run it."""
+    refuse_repository_content_filters(workspace)
     tracked = _git(workspace, "diff", "--name-only", "--no-renames", base, "--").splitlines()
     untracked = _git(workspace, "ls-files", "--others", "--exclude-standard").splitlines()
     return sorted({p for p in (*tracked, *untracked) if p and not p.startswith(".kriya/")})
