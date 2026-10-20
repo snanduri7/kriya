@@ -757,3 +757,26 @@ def test_the_enforce_plan_worktree_lets_the_refusal_through(tmp_path, monkeypatc
         run_enforce(tmp_path, plan=plan, units={"s1": ("shop.py", "PAGE = 2\n")}, base_files={"shop.py": "PAGE = 1\n"},
                     on_workspace=plant)
     assert not marker.exists()
+
+
+# MEASURED at base 7eddc5d on the global-only fixture below (the operator's passthrough filter runs on both sides).
+GLOBAL_ONLY_GOLDEN = {"compute_workspace_content_hash": "9291663231613dcc2d08e75a0127699e7ffacfad8abbbc3cdf2ce7965a127d26",
+                      "workspace_evidence_hash": "9291663231613dcc2d08e75a0127699e7ffacfad8abbbc3cdf2ce7965a127d26"}
+
+
+def test_a_global_only_filter_repository_keeps_its_identity_digests(tmp_path, global_config):
+    """Golden predictor for the trusted case: a repository that merely references the operator's global filter hashes
+    exactly as before the refusal existed (the filter still runs; nothing is blanked)."""
+    from kriya.workflow import checkpoint, milestone_completion
+
+    marker = tmp_path / "GLOBAL_FILTER_RAN"
+    _global_filter(global_config, marker)
+    repo = _repository(tmp_path)
+    (repo / ".gitattributes").write_text("*.py filter=kx\n")
+    _setup(repo, "add", ".gitattributes")
+    _setup(repo, "commit", "-q", "-m", "reference the global filter")
+    _dirty(repo)
+    measured = {"compute_workspace_content_hash": checkpoint.compute_workspace_content_hash(str(repo)),
+                "workspace_evidence_hash": milestone_completion.workspace_evidence_hash(str(repo))}
+    assert marker.exists()
+    assert measured == GLOBAL_ONLY_GOLDEN
