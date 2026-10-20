@@ -55,6 +55,9 @@ def _isolated_git(tmp_path_factory, monkeypatch):
     config.write_text("[user]\n\tname = s19p1b\n\temail = s19p1b@local\n")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    # S19 P1c: the Open Folder probe reads HOME/.gitconfig, not GIT_CONFIG_GLOBAL - without this the developer's own
+    # global filters reached the D pins (MEASURED on the owner's host: its `filter.media.clean` refused first).
+    monkeypatch.setenv("HOME", str(home))
     for name in ("GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE"):
         monkeypatch.setenv(name, "2026-10-20T00:00:00+00:00")
     for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"):
@@ -409,7 +412,10 @@ def test_the_same_repository_question_fails_closed(owner, global_config, monkeyp
 
     outside = owner.parent / "operator" / "filters.cfg"
     outside.parent.mkdir()
-    outside.write_text('[filter "lfs"]\n\tclean = git-lfs clean -- %f\n')
+    # S19 P1c: an absolute operator program in the same folder (a bare git-lfs is unresolved on a host without it, and
+    # the program's folder is asked the same question - so the folder below is the only one asked).
+    program = _marker_script(outside.parent / "lfs-filter", owner.parent / "UNUSED")
+    outside.write_text(f'[filter "lfs"]\n\tclean = {program} clean -- %f\n')
     with open(global_config, "a", encoding="utf-8") as handle:
         handle.write(f"[include]\n\tpath = {outside}\n")
     real = git._run
@@ -427,7 +433,7 @@ def test_the_same_repository_question_fails_closed(owner, global_config, monkeyp
         assert raised.value.reason_code == git.GIT_CONFIG_UNINSPECTABLE
     else:
         git.refuse_repository_content_filters(str(owner))
-    assert asked == [os.path.realpath(outside.parent)]
+    assert asked and set(asked) == {os.path.realpath(outside.parent)}
 
 
 def test_the_same_repository_question_is_not_asked_without_an_operator_file_definition(owner, monkeypatch):

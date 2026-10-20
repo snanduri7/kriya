@@ -214,7 +214,8 @@ def describe_checkout(path: str) -> CheckoutFacts:
         return CheckoutFacts("checkout_root", root=root, reason=f"git did not finish: {type(error).__name__}")
     head, branch = (head if _SHA.match(head) else None), (branch or None)
     try:
-        refuse_repository_content_filters(path, git=git, env=_probe_env())
+        # The probe's own git, environment AND per-spawn timeout (S19 P1c, owner decision 6: never the authority's 60 s).
+        refuse_repository_content_filters(path, git=git, env=_probe_env(), timeout=_PROBE_TIMEOUT_SECONDS)
     except RepositoryContentFilterRefused as refusal:
         # Fail closed, typed, no schema change: the work-tree facts are not reported ("Not recorded" in the GUI) and
         # ``reason`` is the refusal's own "<REASON_CODE>: <message>" text (redacted by its owner).

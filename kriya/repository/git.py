@@ -45,10 +45,12 @@ Kriya function whose Git operation can run a filter (S19Q1-DECISION-TO-KILLER.md
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from typing import Callable, Dict, List, Mapping, Optional, Set, Tuple
 
+from kriya.config.environment import child_environment
 from kriya.foundation.redaction import redact_text
 from kriya.platform import git_argv
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
@@ -57,6 +59,7 @@ GIT_CONTENT_FILTER_REPOSITORY_DEFINED = "GIT_CONTENT_FILTER_REPOSITORY_DEFINED"
 GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY = "GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY"
 GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED = "GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED"
 GIT_CONFIG_UNINSPECTABLE = "GIT_CONFIG_UNINSPECTABLE"
+GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN = "GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN"
 
 _REMEDY = ("Define the filter in your global or system git configuration (for Git LFS: `git lfs install`, not "
            "`git lfs install --local`) and remove it from the repository's configuration.")
@@ -76,6 +79,24 @@ CONTENT_FILTER_REFUSALS: Dict[str, str] = {
     GIT_CONFIG_UNINSPECTABLE: (
         "the git configuration of {repository} could not be inspected for content-filter drivers ({detail}). Kriya "
         "does not run git there (S19 Q1)."),
+    GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN: (
+        "the content-filter command {key} for the git repository at {repository} ({scope} scope, {origin}) is not "
+        "provably operator-controlled code: {detail}. Kriya does not run git there: git would run it on this host "
+        "with the repository as its working directory (S19 P1c). Point the filter at an operator-installed program "
+        "outside the repository, invoked directly (for Git LFS: `git lfs install`)."),
+}
+# The closed provenance causes (S19 P1c): the refusal names one of these, never the command text.
+PROVENANCE_CAUSES: Dict[str, str] = {
+    "structure": "it uses a shell construct or a character outside the conservative direct-command form (quotes, "
+                 "expansions, substitutions, redirections, pipelines, separators, globbing, an assignment or a "
+                 "second line)",
+    "relative_program": "its program is a path relative to the repository",
+    "program_in_repository": "its program resolves inside the repository",
+    "evaluator": "its program is a shell, interpreter or evaluator ({name}) that would run program text Kriya "
+                 "cannot prove operator-controlled",
+    "argument_path": "an argument names a path relative to or inside the repository",
+    "search_path": "the program search path has a relative, empty or in-repository entry before the program",
+    "unresolved": "its program does not resolve to an executable on git's program search path",
 }
 # The closed origin tables: the operator scopes are trusted for files outside the repository, command scope for
 # Kriya's own argv / environment; EVERY other scope is the repository's own (MEASURED: .git/config, config.worktree and
@@ -117,21 +138,50 @@ def _run(cwd: str, *args: str) -> "subprocess.CompletedProcess[bytes]":
 _Runner = Callable[..., "subprocess.CompletedProcess[bytes]"]
 
 
-def _runner(executable: Optional[str], env: Optional[Mapping[str, str]]) -> _Runner:
+def _runner(executable: Optional[str], env: Optional[Mapping[str, str]], timeout: float = _TIMEOUT_SECONDS) -> _Runner:
     """The git the inspection runs: the CALLER's own (S19 P1b, owner decision D). The inspection must read the very
     configuration the caller's git operation will read - another executable or environment can see another global or
     system file (``GIT_CONFIG_GLOBAL``, ``HOME``, ``GIT_CONFIG_NOSYSTEM``) or even another repository (``GIT_DIR``).
     Neither given = ``git`` from PATH in this process's environment (``_run``, looked up at call time), which is how
-    every Kriya git call except the GUI's sanitized Open Folder probe spawns."""
-    if executable is None and env is None:
+    every Kriya git call except the GUI's sanitized Open Folder probe spawns. ``timeout``: the CALLER's own per-spawn
+    timeout (S19 P1c, owner decision 6: the Open Folder probe's 15 s, never widened to this module's 60 s)."""
+    if executable is None and env is None and timeout == _TIMEOUT_SECONDS:
         return lambda cwd, *args: _run(cwd, *args)
     git = executable or "git"                           # a git literal the S19 seam rule sees
     child_env = None if env is None else dict(env)
 
     def run(cwd: str, *args: str) -> "subprocess.CompletedProcess[bytes]":
         return subprocess.run(git_argv([git, *args]), cwd=cwd, env=child_env, capture_output=True,
-                              stdin=subprocess.DEVNULL, timeout=_TIMEOUT_SECONDS, check=False)
+                              stdin=subprocess.DEVNULL, timeout=timeout, check=False)
     return run
+
+
+# Git's repository-SELECTING environment (S19 P1c, finding 8(c)): it names the repository and index of the CALLER's
+# operation. Git itself clears it before it runs the git of a submodule, and a question about ANOTHER folder (does
+# this operator file / program lie in a work tree of this repository?) must not inherit it either: MEASURED, with
+# GIT_DIR=<repository>/.git in the caller's environment, `rev-parse --git-common-dir` in an operator folder answered
+# the repository's own common dir and a legitimate operator include was refused as in-repository. The ceiling is
+# dropped too, which can only widen discovery (more folders count as the repository: fail closed). Nothing about
+# ownership changes (safe.directory and the caller's config parameters are kept).
+_REPOSITORY_SELECTING_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                             "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX",
+                             "GIT_CEILING_DIRECTORIES")
+
+
+class _Caller:
+    """How the CALLER's git will run: ``run`` = its git and environment as given; ``elsewhere`` = the same git and
+    environment without the repository-selecting variables (another folder's repository, a submodule's git);
+    ``environ`` = the environment its git resolves a filter program with."""
+
+    def __init__(self, executable: Optional[str], env: Optional[Mapping[str, str]], timeout: float) -> None:
+        self.environ: Mapping[str, str] = child_environment() if env is None else env
+        self.run = _runner(executable, env, timeout)
+        if any(name in self.environ for name in _REPOSITORY_SELECTING_ENV):
+            stripped = {k: v for k, v in self.environ.items() if k not in _REPOSITORY_SELECTING_ENV}
+            self.elsewhere = _runner(executable, stripped, timeout)
+        else:
+            self.elsewhere = self.run
+        self.exec_path: Optional[str] = None
 
 
 def _uninspectable(repository: str, what: str, completed: "Optional[subprocess.CompletedProcess[bytes]]" = None) -> RepositoryContentFilterRefused:
@@ -218,24 +268,159 @@ def _gitlinks(run: _Runner, top: str) -> Set[str]:
     return links
 
 
-def _refuse(run: _Runner, path: str, seen: Set[str], depth: int) -> None:
+# ----------------------------------------------------------------------------- executable-code provenance (S19 P1c)
+#
+# An operator (global/system) or command-scope definition is trusted by ORIGIN only when the code it runs is the
+# operator's too (owner decision 2026-10-20: MEASURED, `clean = ./tools/clean.sh`, `sh tools/clean.sh`, `python3
+# ./tools/filter.py`, an absolute or symlinked path into the work tree all ran repository code through a global
+# definition). Git runs a filter command with the work tree's top as its working directory, through `/bin/sh -c` as
+# soon as it holds a space or a shell character, else directly (MEASURED, git 2.54.0). This is NOT a shell parser: a
+# command is admitted only in one conservative form, and anything outside it refuses (fail closed):
+#
+# * words separated by spaces/tabs, every word made only of _SHELL_WORD characters (no quote, $, `, \, ;, &, |, <,
+#   >, (, ), *, ?, [, ], {, }, ~, #, !, newline): nothing is expanded, substituted, redirected, piped or globbed;
+#   the first word holds no `=` (an assignment). Git's own `%f` (the quoted path it substitutes) is such a word.
+# * the program (first word): a path with a `/` must be absolute and resolve - every ancestor and the file itself,
+#   symlinks followed - outside every work tree, git dir and common dir of the repository; a bare name is resolved
+#   exactly as git resolves it: `git --exec-path` first, then the caller's PATH entries in order (MEASURED both
+#   orders, git 2.54.0); every entry up to the hit must be absolute and outside the repository (an empty or relative
+#   entry is the work tree top: MEASURED, the program ran from there), and no hit = unresolved.
+# * the program is not a shell, interpreter or evaluator (_EVALUATORS, matched on the written and the resolved name,
+#   version suffix dropped): their program text is an argument or the repository itself, which Kriya does not
+#   analyse. `git` is one (MEASURED: `git <alias>` ran a repository-local `alias.<x> = !./tools/clean.sh`).
+# * no argument names a path relative to the work tree (`.`, `..`, or any word with a `/` not starting with `/`), and
+#   an absolute argument resolves outside the repository like the program.
+#
+# No program name is ever trusted for its name (git-lfs is admitted because /path/to/git-lfs is outside the
+# repository and called directly; a repository file called git-lfs is refused like any other repository path).
+
+_SHELL_WORD = re.compile(r"[A-Za-z0-9_@%+=:,./-]+")
+_WORD_SEPARATORS = re.compile(r"[ \t]+")
+_VERSION_SUFFIX = re.compile(r"[0-9.]+$")
+_EVALUATORS = frozenset({
+    # shells and shell builtins / wrappers that run another command or program text
+    "sh", "bash", "dash", "zsh", "ksh", "mksh", "ash", "csh", "tcsh", "fish", "busybox", "rbash", "pwsh", "powershell",
+    ".", "source", "eval", "exec", "command", "builtin", "trap", "env", "xargs", "nohup", "nice", "timeout", "time",
+    "stdbuf", "setsid", "sudo", "doas", "su", "chroot", "script", "watch", "parallel", "flock", "caffeinate",
+    # interpreters and build/task runners that read program text from an argument or the working directory
+    "python", "pythonw", "pypy", "perl", "ruby", "irb", "node", "nodejs", "deno", "bun", "php", "lua", "luajit",
+    "tclsh", "wish", "expect", "osascript", "java", "jshell", "groovy", "scala", "kotlin", "rscript", "r", "julia",
+    "erl", "escript", "elixir", "guile", "racket", "sbcl", "ocaml", "swift", "dotnet", "ts-node", "tsx", "awk",
+    "gawk", "mawk", "nawk", "sed", "gsed", "ed", "ex", "vi", "vim", "nvim", "emacs", "make", "gmake", "cmake",
+    "ninja", "rake", "npm", "npx", "yarn", "pnpm", "uv", "uvx", "pip", "pipx", "poetry", "cargo", "go", "gradle",
+    "gradlew", "mvn", "mvnw", "ant", "bundle", "git",
+})
+
+
+def _unproven(path: str, key: str, scope: str, origin: str, cause: str, name: str = "") -> RepositoryContentFilterRefused:
+    return RepositoryContentFilterRefused(GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN, path, key=key, scope=scope,
+                                          origin=origin, detail=PROVENANCE_CAUSES[cause].format(name=name))
+
+
+def _evaluator(program: str) -> Optional[str]:
+    """The closed-set evaluator name ``program`` is, else None (the basename, lower case, version suffix dropped)."""
+    base = os.path.basename(program).lower()
+    for name in (base, _VERSION_SUFFIX.sub("", base)):
+        if name in _EVALUATORS:
+            return name
+    return None
+
+
+def _ancestry_in(candidate: str, roots: Tuple[str, ...]) -> bool:
+    """True when ``candidate`` (absolute) or any of its ancestors, each resolved with symlinks followed, is one of
+    ``roots`` or beneath one: a symlinked directory the repository controls counts, wherever it points."""
+    current = os.path.normpath(candidate)
+    while True:
+        if _inside(os.path.realpath(current), roots):
+            return True
+        parent = os.path.dirname(current)
+        if parent == current:
+            return False
+        current = parent
+
+
+def _repository_code(caller: _Caller, candidate: str, roots: Tuple[str, ...], common: Optional[str]) -> bool:
+    """``candidate`` (absolute) is repository content: inside a root by any spelling, or its real file lies in ANY
+    work tree of the repository (git's own answer, as for an operator configuration file - S19 P1b C)."""
+    if _ancestry_in(candidate, roots):
+        return True
+    real = os.path.realpath(candidate)
+    return common is not None and os.path.isdir(os.path.dirname(real)) and _same_repository(caller.elsewhere, real, common)
+
+
+def _resolve_program(caller: _Caller, path: str, name: str, roots: Tuple[str, ...]) -> Tuple[Optional[str], str]:
+    """(the file git would run for the bare ``name``, "") or (None, a PROVENANCE_CAUSES key)."""
+    if caller.exec_path is None:
+        done = caller.run(path, "--exec-path")
+        if done.returncode != 0:
+            raise _uninspectable(path, "git --exec-path failed", done)
+        caller.exec_path = os.fsdecode(done.stdout).strip()
+    search_path = caller.environ.get("PATH")
+    if search_path is None:
+        return None, "unresolved"
+    for entry in [caller.exec_path, *search_path.split(os.pathsep)]:
+        if not entry or not os.path.isabs(entry) or _ancestry_in(entry, roots):
+            return None, "search_path"
+        candidate = os.path.join(entry, name)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate, ""
+    return None, "unresolved"
+
+
+def _provenance_cause(caller: _Caller, path: str, command: str, roots: Tuple[str, ...],
+                      common: Optional[str]) -> Tuple[str, str]:
+    """("", "") when ``command`` provably runs operator code; else (PROVENANCE_CAUSES key, evaluator name)."""
+    words = [word for word in _WORD_SEPARATORS.split(command) if word]
+    if not words or not all(_SHELL_WORD.fullmatch(word) for word in words) or "=" in words[0]:
+        return "structure", ""
+    program, arguments = words[0], words[1:]
+    for argument in arguments:
+        if argument in (".", "..") or ("/" in argument and (not os.path.isabs(argument)
+                                                            or _repository_code(caller, argument, roots, common))):
+            return "argument_path", ""
+    name = _evaluator(program)
+    if name:
+        return "evaluator", name
+    if "/" in program:
+        if not os.path.isabs(program):
+            return "relative_program", ""
+        resolved: Optional[str] = program
+    else:
+        resolved, cause = _resolve_program(caller, path, program, roots)
+        if resolved is None:
+            return cause, ""
+    name = _evaluator(os.path.realpath(resolved))
+    if name:
+        return "evaluator", name
+    if _repository_code(caller, resolved, roots, common):
+        return "program_in_repository", ""
+    if not (os.path.isfile(resolved) and os.access(resolved, os.X_OK)):
+        return "unresolved", ""
+    return "", ""
+
+
+def _refuse(caller: _Caller, run: _Runner, path: str, seen: Set[str], depth: int) -> None:
     layout = _layout(run, path)
+    roots = layout if layout is not None else (os.path.realpath(path),)
+    common = layout[2] if layout is not None else None
     for scope, origin, key, value in _filter_definitions(run, path):
         if value == "":
             continue                                    # an empty command: Git runs nothing (MEASURED)
         if scope not in OPERATOR_FILE_SCOPES and scope != COMMAND_SCOPE:
             raise RepositoryContentFilterRefused(GIT_CONTENT_FILTER_REPOSITORY_DEFINED, path, key=key, scope=scope,
                                                  origin=origin)
-        if scope == COMMAND_SCOPE and origin == _COMMAND_ORIGIN:
-            continue                                    # Kriya's own argv / process environment
         if scope in OPERATOR_FILE_SCOPES and origin.startswith(_FILE_ORIGIN):
             source = os.path.realpath(os.path.join(layout[0] if layout else path, origin[len(_FILE_ORIGIN):]))
-            if layout is not None and (_inside(source, layout) or _same_repository(run, source, layout[2])):
+            if layout is not None and (_inside(source, layout) or _same_repository(caller.elsewhere, source, layout[2])):
                 raise RepositoryContentFilterRefused(GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY, path, key=key,
                                                      scope=scope, origin=origin)
-            continue
-        raise RepositoryContentFilterRefused(GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED, path, key=key, scope=scope,
-                                             origin=origin)
+        elif not (scope == COMMAND_SCOPE and origin == _COMMAND_ORIGIN):    # command scope: Kriya's own argv / env
+            raise RepositoryContentFilterRefused(GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED, path, key=key, scope=scope,
+                                                 origin=origin)
+        # A trusted ORIGIN: its executable code must be the operator's too (S19 P1c, owner decisions 1-3).
+        cause, name = _provenance_cause(caller, path, value or "", roots, common)
+        if cause:
+            raise _unproven(path, key, scope, origin, cause, name)
     if layout is None or layout[0] in seen:
         return
     seen.add(layout[0])
@@ -245,18 +430,23 @@ def _refuse(run: _Runner, path: str, seen: Set[str], depth: int) -> None:
             continue                                    # not populated: Git does not recurse into it
         if depth >= _MAX_NESTING:
             raise _uninspectable(child, f"submodules nested deeper than {_MAX_NESTING}")
-        _refuse(run, child, seen, depth + 1)
+        # A submodule's git runs without the caller's repository-selecting variables (git clears them), so its
+        # configuration is read that way too (S19 P1c: a scratch GIT_INDEX_FILE names the PARENT's index only).
+        _refuse(caller, caller.elsewhere, child, seen, depth + 1)
 
 
 def refuse_repository_content_filters(path: str, *, git: Optional[str] = None,
-                                      env: Optional[Mapping[str, str]] = None) -> None:
+                                      env: Optional[Mapping[str, str]] = None,
+                                      timeout: float = _TIMEOUT_SECONDS) -> None:
     """Raise RepositoryContentFilterRefused when Git at ``path`` (or in a submodule it recurses into) could run a
-    content-filter command from repository-controlled configuration; return when it cannot. Call it immediately
-    before a Git operation that can run a filter (status, diff, add, commit, checkout, worktree add, archive), on the
-    folder that operation runs in. ``git`` / ``env``: the executable and the environment THAT operation runs with,
-    when they are not this process's PATH ``git`` and environment (the GUI's Open Folder probe, S19 P1b). Returns
-    without inspecting only when no Git can run there at all (``path`` is not a directory, or no such git): then no
-    filter can run either."""
+    content-filter command from repository-controlled configuration, or an operator/command-scope command that is
+    not provably operator code (S19 P1c); return when it cannot. Call it immediately before a Git operation that can
+    run a filter (status, diff, add, commit, checkout, reset, archive), on the folder that operation runs in and with
+    the environment it runs with - including a scratch ``GIT_INDEX_FILE``, whose gitlinks are the submodules that
+    operation recurses into. ``git`` / ``env``: the executable and the environment THAT operation runs with, when
+    they are not this process's PATH ``git`` and environment (the GUI's Open Folder probe, S19 P1b). ``timeout``: the
+    caller's own per-spawn git timeout (the Open Folder probe's, S19 P1c). Returns without inspecting only when no Git
+    can run there at all (``path`` is not a directory, or no such git): then no filter can run either."""
     folder = os.fspath(path)
     if not os.path.isdir(folder):
         return
@@ -265,9 +455,10 @@ def refuse_repository_content_filters(path: str, *, git: Optional[str] = None,
             return
     elif not (os.path.isfile(git) and os.access(git, os.X_OK)):
         return
+    caller = _Caller(git, env, timeout)
     try:
-        _refuse(_runner(git, env), folder, set(), 0)
+        _refuse(caller, caller.run, folder, set(), 0)
     except subprocess.TimeoutExpired as error:
-        raise _uninspectable(folder, f"git did not answer within {_TIMEOUT_SECONDS} s") from error
+        raise _uninspectable(folder, f"git did not answer within {timeout} s") from error
     except OSError as error:
         raise _uninspectable(folder, f"git could not be run ({type(error).__name__})") from error

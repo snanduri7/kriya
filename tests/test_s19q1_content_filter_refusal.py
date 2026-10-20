@@ -35,6 +35,7 @@ def _isolated_git(tmp_path_factory, monkeypatch):
     config.write_text("[user]\n\tname = s19q1\n\temail = s19q1@local\n")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("HOME", str(home))     # S19 P1c: a git reading HOME/.gitconfig sees no developer filter either
     for name in ("GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE"):
         monkeypatch.setenv(name, "2026-10-20T00:00:00+00:00")
     for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"):
@@ -501,7 +502,10 @@ def test_the_refusal_table_is_closed():
 
     assert set(git.CONTENT_FILTER_REFUSALS) == {
         "GIT_CONTENT_FILTER_REPOSITORY_DEFINED", "GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY",
-        "GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED", "GIT_CONFIG_UNINSPECTABLE"}
+        "GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED", "GIT_CONFIG_UNINSPECTABLE",
+        "GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN"}                          # S19 P1c: executable-code provenance
+    assert set(git.PROVENANCE_CAUSES) == {"structure", "relative_program", "program_in_repository", "evaluator",
+                                          "argument_path", "search_path", "unresolved"}
     assert git.OPERATOR_FILE_SCOPES == {"system", "global"}
     assert git.COMMAND_SCOPE == "command"
     assert not issubclass(git.RepositoryContentFilterRefused, (RuntimeError, OSError, ValueError))
@@ -623,8 +627,14 @@ def test_an_unrecognised_scope_origin_or_listing_refuses(owner, monkeypatch, rec
                                     b"system\x00file:/etc/gitconfig\x00filter.lfs.smudge\ngit-lfs smudge\x00",
                                     b"command\x00command line:\x00filter.lfs.process\ngit-lfs filter-process\x00"])
 def test_operator_scopes_outside_the_repository_are_trusted(owner, monkeypatch, record):
+    """S19 P1c: a trusted ORIGIN admits the command only when its program provably is the operator's - here an
+    operator-installed git-lfs on PATH outside the repository (this host has none: unresolved would refuse)."""
     from kriya.repository.git import refuse_repository_content_filters
 
+    operator_bin = owner.parent / "operator-bin"
+    operator_bin.mkdir()
+    _marker_script(operator_bin / "git-lfs", owner.parent / "UNUSED")
+    monkeypatch.setenv("PATH", f"{operator_bin}:/usr/bin:/bin")
     _fake_run(record, monkeypatch)
     refuse_repository_content_filters(str(owner))
 
