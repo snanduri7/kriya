@@ -48,6 +48,7 @@ from typing import Dict, List, Optional, Tuple
 
 from kriya.config.environment import toolchain
 from kriya.platform import git_argv
+from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
 from kriya.tools.containment import ContainmentSetupError, GitMetadataMount
 
 GIT_METADATA_FORMAT = "kriya.git_metadata/1"
@@ -132,9 +133,12 @@ def workspace_head(path: str) -> Optional[str]:
 
 _PROBE_TIMEOUT_SECONDS = 15
 _PROBE_ENTRY_CAP = 1000
-# Opening a folder must never execute anything the folder configures: fsmonitor is a repository-supplied command, content-filter drivers
-# (filter.<x>.clean/process) are emptied for `status` (_filter_overrides), hooks are never consulted by these read-only queries, and optional
-# locks are off so `status` does not refresh (write) the index.
+# Opening a folder must never execute anything the folder configures: fsmonitor is a repository-supplied command, hooks are never
+# consulted by these read-only queries, and optional locks are off so `status` does not refresh (write) the index. Content filters:
+# `status` (the only probe that compares work-tree content) can run a clean/process driver - MEASURED, git 2.54.0: so can every
+# command that reports work-tree changes (diff-files, ls-files -m, diff-index against the work tree) - so the ONE authority,
+# kriya.repository.git, inspects the folder with this probe's own git and environment first and a refused folder is not
+# status-probed (S19 P1b, owner decision D). Operator (global/system) filters such as Git LFS run as they do for the user's git.
 _PROBE_OPTIONS = ("--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false")
 
 
@@ -164,29 +168,12 @@ def _git_candidates() -> List[str]:
     return found
 
 
-_FILTER_COMMAND_KEYS = re.compile(r"^filter\..+\.(clean|smudge|process)$", re.IGNORECASE)
-
-
 def _probe_env() -> Dict[str, str]:
     return {"PATH": toolchain("PATH", "/usr/bin:/bin"), "HOME": toolchain("HOME", ""), "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"}
 
 
-def _filter_overrides(git: str, cwd: str) -> List[str]:
-    """`-c filter.<driver>.<clean|smudge|process>=` for every content-filter command the repository's own configuration defines. `git status` may run a
-    `clean`/`process` driver to compare racily-clean files; those commands come from the folder being opened, so they are emptied for this read.
-    Reading configuration (`git config --get-regexp`) executes nothing."""
-    try:
-        listed = subprocess.run(git_argv([git, "config", "--name-only", "--get-regexp", r"^filter\."]), cwd=cwd, env=_probe_env(), capture_output=True, check=False,
-                                timeout=_PROBE_TIMEOUT_SECONDS)
-    except (subprocess.TimeoutExpired, OSError):
-        return []
-    names = [n for n in listed.stdout.decode("utf-8", errors="replace").splitlines() if _FILTER_COMMAND_KEYS.match(n)]
-    return [part for name in dict.fromkeys(names) for part in ("-c", f"{name}=")]
-
-
 def _probe(git: str, cwd: str, *args: str) -> "subprocess.CompletedProcess[bytes]":
-    overrides = _filter_overrides(git, cwd) if args and args[0] == "status" else []
-    return subprocess.run(git_argv([git, *_PROBE_OPTIONS, *overrides, *args]), cwd=cwd, env=_probe_env(), capture_output=True, check=False, timeout=_PROBE_TIMEOUT_SECONDS)
+    return subprocess.run(git_argv([git, *_PROBE_OPTIONS, *args]), cwd=cwd, env=_probe_env(), capture_output=True, check=False, timeout=_PROBE_TIMEOUT_SECONDS)
 
 
 def _first_working_git(path: str) -> Tuple[Optional[str], Optional["subprocess.CompletedProcess[bytes]"], str]:
@@ -223,14 +210,24 @@ def describe_checkout(path: str) -> CheckoutFacts:
         head = head_run.stdout.decode("utf-8", errors="replace").strip() if head_run.returncode == 0 else ""
         branch_run = _probe(git, path, "symbolic-ref", "--short", "-q", "HEAD")
         branch = branch_run.stdout.decode("utf-8", errors="replace").strip() if branch_run.returncode == 0 else ""
+    except (subprocess.TimeoutExpired, OSError) as error:
+        return CheckoutFacts("checkout_root", root=root, reason=f"git did not finish: {type(error).__name__}")
+    head, branch = (head if _SHA.match(head) else None), (branch or None)
+    try:
+        refuse_repository_content_filters(path, git=git, env=_probe_env())
+    except RepositoryContentFilterRefused as refusal:
+        # Fail closed, typed, no schema change: the work-tree facts are not reported ("Not recorded" in the GUI) and
+        # ``reason`` is the refusal's own "<REASON_CODE>: <message>" text (redacted by its owner).
+        return CheckoutFacts("checkout_root", root=root, head=head, branch=branch, detached=branch is None, reason=str(refusal))
+    try:
         status = _probe(git, path, "status", "--porcelain=v1", "-z", "--untracked-files=normal")
     except (subprocess.TimeoutExpired, OSError) as error:
         return CheckoutFacts("checkout_root", root=root, reason=f"git did not finish: {type(error).__name__}")
     entries = [e for e in status.stdout.split(b"\0") if e] if status.returncode == 0 else None
     # A rename entry is followed by its source path as a separate field; counting fields over-counts renames by their sources, so the
     # figure is an upper bound on changed paths and is reported as entries, which is what it is.
-    return CheckoutFacts("checkout_root", root=root, head=head if _SHA.match(head) else None, branch=branch or None,
-                         detached=not branch, dirty=None if entries is None else bool(entries),
+    return CheckoutFacts("checkout_root", root=root, head=head, branch=branch,
+                         detached=branch is None, dirty=None if entries is None else bool(entries),
                          changed_entries=None if entries is None else min(len(entries), _PROBE_ENTRY_CAP),
                          changed_truncated=entries is not None and len(entries) > _PROBE_ENTRY_CAP,
                          reason=None if entries is not None else status.stderr.decode("utf-8", errors="replace").strip()[:300])

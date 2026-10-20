@@ -45,7 +45,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Mapping, Optional, Set, Tuple
 
 from kriya.foundation.redaction import redact_text
 from kriya.platform import git_argv
@@ -111,16 +111,36 @@ def _run(cwd: str, *args: str) -> "subprocess.CompletedProcess[bytes]":
                           timeout=_TIMEOUT_SECONDS, check=False)
 
 
+_Runner = Callable[..., "subprocess.CompletedProcess[bytes]"]
+
+
+def _runner(executable: Optional[str], env: Optional[Mapping[str, str]]) -> _Runner:
+    """The git the inspection runs: the CALLER's own (S19 P1b, owner decision D). The inspection must read the very
+    configuration the caller's git operation will read - another executable or environment can see another global or
+    system file (``GIT_CONFIG_GLOBAL``, ``HOME``, ``GIT_CONFIG_NOSYSTEM``) or even another repository (``GIT_DIR``).
+    Neither given = ``git`` from PATH in this process's environment (``_run``, looked up at call time), which is how
+    every Kriya git call except the GUI's sanitized Open Folder probe spawns."""
+    if executable is None and env is None:
+        return lambda cwd, *args: _run(cwd, *args)
+    argv0 = executable or "git"
+    child_env = None if env is None else dict(env)
+
+    def run(cwd: str, *args: str) -> "subprocess.CompletedProcess[bytes]":
+        return subprocess.run(git_argv([argv0, *args]), cwd=cwd, env=child_env, capture_output=True,
+                              stdin=subprocess.DEVNULL, timeout=_TIMEOUT_SECONDS, check=False)
+    return run
+
+
 def _uninspectable(repository: str, what: str, completed: "Optional[subprocess.CompletedProcess[bytes]]" = None) -> RepositoryContentFilterRefused:
     stderr = os.fsdecode(completed.stderr).strip()[:300] if completed is not None else ""
     detail = f"{what}" + (f": exit {completed.returncode}" if completed is not None else "") + (f", {stderr}" if stderr else "")
     return RepositoryContentFilterRefused(GIT_CONFIG_UNINSPECTABLE, repository, detail=detail)
 
 
-def _filter_definitions(path: str) -> List[Tuple[str, str, str, Optional[str]]]:
+def _filter_definitions(run: _Runner, path: str) -> List[Tuple[str, str, str, Optional[str]]]:
     """(scope, origin, key, value) of every content-filter command Git sees at ``path``; value None = valueless key.
     ``-z``: ``scope NUL origin NUL key [LF value] NUL`` (MEASURED; the scope field is NUL-terminated, never TAB)."""
-    done = _run(path, "config", "--show-scope", "--show-origin", "-z", "--get-regexp", _FILTER_COMMAND_PATTERN)
+    done = run(path, "config", "--show-scope", "--show-origin", "-z", "--get-regexp", _FILTER_COMMAND_PATTERN)
     if done.returncode == 1 and not done.stdout:       # no such key anywhere
         return []
     if done.returncode != 0:
@@ -136,9 +156,9 @@ def _filter_definitions(path: str) -> List[Tuple[str, str, str, Optional[str]]]:
     return definitions
 
 
-def _layout(path: str) -> Optional[Tuple[str, str, str]]:
+def _layout(run: _Runner, path: str) -> Optional[Tuple[str, str, str]]:
     """(work tree top level, git dir, common dir) as absolute real paths; None when ``path`` is not in a work tree."""
-    done = _run(path, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir")
+    done = run(path, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir")
     if done.returncode != 0:
         return None
     lines = os.fsdecode(done.stdout).split("\n")
@@ -152,17 +172,17 @@ def _inside(path: str, roots: Tuple[str, ...]) -> bool:
     return any(path == root or path.startswith(root.rstrip(os.sep) + os.sep) for root in roots)
 
 
-def _gitlinks(top: str) -> Set[str]:
+def _gitlinks(run: _Runner, top: str) -> Set[str]:
     """Paths (relative to ``top``) of every gitlink in the index and in HEAD (a repository without a commit has none
     in HEAD)."""
-    index = _run(top, "ls-files", "-s", "-z", "--full-name")
+    index = run(top, "ls-files", "-s", "-z", "--full-name")
     if index.returncode != 0:
         raise _uninspectable(top, "git ls-files failed", index)
     records = [record for record in index.stdout.split(b"\0") if record]
-    head = _run(top, "ls-tree", "-r", "-z", "--full-tree", "HEAD")
+    head = run(top, "ls-tree", "-r", "-z", "--full-tree", "HEAD")
     if head.returncode == 0:
         records += [record for record in head.stdout.split(b"\0") if record]
-    elif _run(top, "rev-parse", "--verify", "-q", "HEAD^{commit}").returncode == 0:
+    elif run(top, "rev-parse", "--verify", "-q", "HEAD^{commit}").returncode == 0:
         raise _uninspectable(top, "git ls-tree HEAD failed", head)
     links = set()
     for record in records:
@@ -174,9 +194,9 @@ def _gitlinks(top: str) -> Set[str]:
     return links
 
 
-def _refuse(path: str, seen: Set[str], depth: int) -> None:
-    layout = _layout(path)
-    for scope, origin, key, value in _filter_definitions(path):
+def _refuse(run: _Runner, path: str, seen: Set[str], depth: int) -> None:
+    layout = _layout(run, path)
+    for scope, origin, key, value in _filter_definitions(run, path):
         if value == "":
             continue                                    # an empty command: Git runs nothing (MEASURED)
         if scope not in OPERATOR_FILE_SCOPES and scope != COMMAND_SCOPE:
@@ -195,26 +215,34 @@ def _refuse(path: str, seen: Set[str], depth: int) -> None:
     if layout is None or layout[0] in seen:
         return
     seen.add(layout[0])
-    for link in sorted(_gitlinks(layout[0])):
+    for link in sorted(_gitlinks(run, layout[0])):
         child = os.path.join(layout[0], link)
         if not os.path.lexists(os.path.join(child, ".git")):
             continue                                    # not populated: Git does not recurse into it
         if depth >= _MAX_NESTING:
             raise _uninspectable(child, f"submodules nested deeper than {_MAX_NESTING}")
-        _refuse(child, seen, depth + 1)
+        _refuse(run, child, seen, depth + 1)
 
 
-def refuse_repository_content_filters(path: str) -> None:
+def refuse_repository_content_filters(path: str, *, git: Optional[str] = None,
+                                      env: Optional[Mapping[str, str]] = None) -> None:
     """Raise RepositoryContentFilterRefused when Git at ``path`` (or in a submodule it recurses into) could run a
     content-filter command from repository-controlled configuration; return when it cannot. Call it immediately
     before a Git operation that can run a filter (status, diff, add, commit, checkout, worktree add, archive), on the
-    folder that operation runs in. Returns without inspecting only when no Git can run there at all (``path`` is not
-    a directory, or no ``git`` on PATH): then no filter can run either."""
+    folder that operation runs in. ``git`` / ``env``: the executable and the environment THAT operation runs with,
+    when they are not this process's PATH ``git`` and environment (the GUI's Open Folder probe, S19 P1b). Returns
+    without inspecting only when no Git can run there at all (``path`` is not a directory, or no such git): then no
+    filter can run either."""
     folder = os.fspath(path)
-    if not os.path.isdir(folder) or shutil.which("git") is None:
+    if not os.path.isdir(folder):
+        return
+    if git is None:
+        if shutil.which("git", path=None if env is None else env.get("PATH", "")) is None:
+            return
+    elif not (os.path.isfile(git) and os.access(git, os.X_OK)):
         return
     try:
-        _refuse(folder, set(), 0)
+        _refuse(_runner(git, env), folder, set(), 0)
     except subprocess.TimeoutExpired as error:
         raise _uninspectable(folder, f"git did not answer within {_TIMEOUT_SECONDS} s") from error
     except OSError as error:
