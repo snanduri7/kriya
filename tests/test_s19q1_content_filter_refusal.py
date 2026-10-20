@@ -225,7 +225,6 @@ def test_a_repository_filter_is_refused_before_any_kriya_git_runs_it(owner, site
         _assert_refused(site, owner, marker, caplog=caplog)
 
 
-@_FLIPS
 def test_the_skill_commit_refuses_without_running_the_filter_or_committing(owner, caplog):
     """skill.git_commit_if_tracked is best-effort bookkeeping that never raises: the refusal is logged (typed) and
     nothing is committed - the filter never runs."""

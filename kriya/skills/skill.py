@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from kriya.analyzer.analyzer import RepositoryModel
 from kriya.platform import git_argv
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
+from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,11 @@ def git_commit_if_tracked(path: str, message: str) -> None:
             cwd=directory, capture_output=True, text=True
         )
         if check.returncode != 0 or check.stdout.strip() != "true":
+            return
+        try:
+            refuse_repository_content_filters(directory)    # S19 Q1: add / commit run clean filters
+        except RepositoryContentFilterRefused as refusal:
+            logger.warning(f"Skill change at '{path}' not committed: {refusal}")
             return
         subprocess.run(git_argv(["git", "add", path]), cwd=directory, capture_output=True)
         # SEC-001-P1 (2026-09-11): suppresses any repository-defined
