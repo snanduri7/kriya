@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -481,3 +482,170 @@ def test_the_inspection_precedes_every_filter_capable_git_operation(owner, site,
             assert cwd in inspected, (site, command, cwd)
     assert inspected, f"{site} never inspected the repository configuration"
     assert capable or site == "run_coordinator.begin_mutating_run"
+
+
+# --------------------------------------------------------------------------------- the owner (kriya.repository.git)
+
+def test_the_refusal_table_is_closed():
+    from kriya.repository import git
+
+    assert set(git.CONTENT_FILTER_REFUSALS) == {
+        "GIT_CONTENT_FILTER_REPOSITORY_DEFINED", "GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY",
+        "GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED", "GIT_CONFIG_UNINSPECTABLE"}
+    assert git.REPOSITORY_SCOPES == {"local", "worktree"}
+    assert git.OPERATOR_FILE_SCOPES == {"system", "global"}
+    assert git.COMMAND_SCOPE == "command"
+    assert not issubclass(git.RepositoryContentFilterRefused, (RuntimeError, OSError, ValueError))
+
+
+def test_the_refusal_names_key_scope_and_origin_never_the_command(owner):
+    """The command can carry a secret: the message names where it is defined, never what it runs (one redactor)."""
+    from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
+
+    _setup(owner, "config", "filter.kx.clean", "deploy --token=sk-supersecretvalue1234567890 https://u:pw@h/x")
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        refuse_repository_content_filters(str(owner))
+    message = str(raised.value)
+    assert message.startswith("GIT_CONTENT_FILTER_REPOSITORY_DEFINED: ")
+    assert "filter.kx.clean" in message and "local scope" in message and "file:.git/config" in message
+    assert "deploy" not in message and "supersecret" not in message and "pw@" not in message
+    assert (raised.value.key, raised.value.scope, raised.value.origin) == ("filter.kx.clean", "local",
+                                                                           "file:.git/config")
+
+
+def test_the_inspection_itself_runs_no_filter(owner):
+    """Inspecting (and refusing) never executes the planted command, with the file bound and racily dirty."""
+    from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
+
+    marker = owner.parent / "FILTER_RAN"
+    _plant_local(owner, marker, "clean", "smudge", "process")
+    _bind(owner)
+    _dirty(owner)
+    with pytest.raises(RepositoryContentFilterRefused):
+        refuse_repository_content_filters(str(owner))
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("value, refused", [("", False), ("   ", True), (None, True)])
+def test_only_an_explicitly_empty_command_is_not_executable(owner, value, refused):
+    """MEASURED: an empty command runs nothing; whitespace is a (shell) command; a valueless key is not a value Git
+    accepts (fatal at use), so it refuses (fail closed)."""
+    from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
+
+    if value is None:
+        with open(owner / ".git" / "config", "a", encoding="utf-8") as handle:
+            handle.write('[filter "kx"]\n\tclean\n')
+    else:
+        _setup(owner, "config", "filter.kx.clean", value)
+    if refused:
+        with pytest.raises(RepositoryContentFilterRefused):
+            refuse_repository_content_filters(str(owner))
+    else:
+        refuse_repository_content_filters(str(owner))
+
+
+def test_dotted_and_mixed_case_driver_names_are_refused(owner):
+    from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
+
+    with open(owner / ".git" / "config", "a", encoding="utf-8") as handle:
+        handle.write('[FILTER "A.b"]\n\tSMUDGE = x\n')
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        refuse_repository_content_filters(str(owner))
+    assert raised.value.key == "filter.A.b.smudge"
+
+
+def test_an_unreadable_configuration_refuses(owner):
+    from kriya.repository.git import (
+        GIT_CONFIG_UNINSPECTABLE,
+        RepositoryContentFilterRefused,
+        refuse_repository_content_filters,
+    )
+
+    with open(owner / ".git" / "config", "a", encoding="utf-8") as handle:
+        handle.write('[filter "kx"\n\tclean = x\n')
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        refuse_repository_content_filters(str(owner))
+    assert raised.value.reason_code == GIT_CONFIG_UNINSPECTABLE
+
+
+def _fake_run(listing: bytes, monkeypatch):
+    from kriya.repository import git
+
+    real = git._run
+
+    def run(cwd, *args):
+        if args[0] == "config":
+            return subprocess.CompletedProcess(list(args), 0, listing, b"")
+        return real(cwd, *args)
+    monkeypatch.setattr(git, "_run", run)
+
+
+@pytest.mark.parametrize("record, code", [
+    (b"blob\x00blob:HEAD:.gitconfig\x00filter.kx.clean\nx\x00", "GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED"),
+    (b"global\x00standard input:\x00filter.kx.clean\nx\x00", "GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED"),
+    (b"command\x00file:/etc/x\x00filter.kx.clean\nx\x00", "GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED"),
+    (b"global\x00file:/etc/x\x00filter.kx.clean\nx", "GIT_CONFIG_UNINSPECTABLE"),           # not NUL-terminated
+    (b"global\x00file:/etc/x\x00", "GIT_CONFIG_UNINSPECTABLE"),                            # a record cut short
+])
+def test_an_unrecognised_scope_origin_or_listing_refuses(owner, monkeypatch, record, code):
+    from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
+
+    _fake_run(record, monkeypatch)
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        refuse_repository_content_filters(str(owner))
+    assert raised.value.reason_code == code
+
+
+@pytest.mark.parametrize("record", [b"global\x00file:/etc/gitconfig\x00filter.lfs.clean\ngit-lfs clean -- %f\x00",
+                                    b"system\x00file:/etc/gitconfig\x00filter.lfs.smudge\ngit-lfs smudge\x00",
+                                    b"command\x00command line:\x00filter.lfs.process\ngit-lfs filter-process\x00"])
+def test_operator_scopes_outside_the_repository_are_trusted(owner, monkeypatch, record):
+    from kriya.repository.git import refuse_repository_content_filters
+
+    _fake_run(record, monkeypatch)
+    refuse_repository_content_filters(str(owner))
+
+
+def test_a_timeout_or_a_failing_spawn_refuses(owner, monkeypatch):
+    from kriya.repository import git
+
+    def timeout(cwd, *args):
+        raise subprocess.TimeoutExpired(args, 60)
+    monkeypatch.setattr(git, "_run", timeout)
+    with pytest.raises(git.RepositoryContentFilterRefused) as raised:
+        git.refuse_repository_content_filters(str(owner))
+    assert raised.value.reason_code == git.GIT_CONFIG_UNINSPECTABLE
+
+    def broken(cwd, *args):
+        raise PermissionError(13, "denied")
+    monkeypatch.setattr(git, "_run", broken)
+    with pytest.raises(git.RepositoryContentFilterRefused):
+        git.refuse_repository_content_filters(str(owner))
+
+
+def test_no_git_or_no_folder_means_nothing_can_run(tmp_path, monkeypatch):
+    """Without a git executable (or a folder), no Kriya git call - and so no filter - can run: nothing to refuse."""
+    from kriya.repository import git
+
+    git.refuse_repository_content_filters(str(tmp_path / "missing"))
+    monkeypatch.setenv("PATH", str(tmp_path))
+    git.refuse_repository_content_filters(str(tmp_path))
+
+
+def test_an_unpopulated_gitlink_is_not_inspected_and_nesting_is_bounded(tmp_path, monkeypatch):
+    from kriya.repository import git
+
+    owner = _repository(tmp_path)
+    nested = _embedded(owner, "smod")
+    _setup(owner, "add", "smod")
+    _setup(owner, "commit", "-q", "-m", "nested")
+    git.refuse_repository_content_filters(str(owner))                  # populated, clean config: inspected, passes
+    monkeypatch.setattr(git, "_MAX_NESTING", 0)
+    with pytest.raises(git.RepositoryContentFilterRefused) as raised:
+        git.refuse_repository_content_filters(str(owner))
+    assert raised.value.reason_code == git.GIT_CONFIG_UNINSPECTABLE
+    monkeypatch.setattr(git, "_MAX_NESTING", 16)
+    shutil.rmtree(nested)
+    nested.mkdir()                                                     # unpopulated: git does not recurse there
+    _setup(owner, "config", "-f", str(owner / ".gitmodules"), "submodule.smod.path", "smod")
+    git.refuse_repository_content_filters(str(owner))
