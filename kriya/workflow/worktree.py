@@ -650,7 +650,11 @@ def create_git_worktree(repo_path: str) -> str:
             target = _resolve_repo_head(repo_path)
             # S19 Q1: the reused worktree's own config.worktree; S19 P1d: the checkout materializes ``target``'s tree.
             refuse_repository_content_filters(worktree_path, revisions=(target or "HEAD",))
-            subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "checkout", "-f", target or "HEAD"]), cwd=worktree_path, check=True, capture_output=True)
+            # S19 P1e: never recurse into submodules (as _add_worktree): a repository's submodule.recurse made this
+            # checkout reattach a kept <gitdir>/modules/<name> or load a child include the checkout itself created,
+            # and run that child's filter where no inspection can see it (MEASURED).
+            subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "checkout", "-f", "--no-recurse-submodules", target or "HEAD"]),
+                           cwd=worktree_path, check=True, capture_output=True)
             subprocess.run(git_argv(["git", "clean", "-fd"]), cwd=worktree_path, check=True, capture_output=True)
 
     # A worktree only ever reflects git HEAD - it knows nothing about uncommitted
@@ -817,7 +821,9 @@ def remove_git_worktree(repo_path: str, worktree_path: str) -> None:
             logger.error("Worktree reset skipped at %r: %s", worktree_path, refusal)
             return
         try:
-            subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "checkout", "-f", target or "HEAD"]), cwd=worktree_path, capture_output=True)
+            # S19 P1e: never recurse into submodules (see create_git_worktree's reuse checkout).
+            subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "checkout", "-f", "--no-recurse-submodules", target or "HEAD"]),
+                           cwd=worktree_path, capture_output=True)
             subprocess.run(git_argv(["git", "clean", "-fd"]), cwd=worktree_path, capture_output=True)
         except Exception as e:
             logger.debug(f"Failed to clean up worktree at '{worktree_path}' (non-fatal): {e}")
