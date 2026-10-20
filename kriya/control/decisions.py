@@ -15,7 +15,12 @@ facts only, never secrets or full payloads" rule kriya/policy/model.py's
 ActionRequest.metadata and kriya/policy/telemetry.py's redaction already
 establish) - record() defensively truncates any individual field value
 longer than a few thousand characters rather than trusting every future
-caller to remember not to pass one.
+caller to remember not to pass one. "Never secrets" is ENFORCED at the
+file (S20r, OBS-003, I-11): append_to_file() writes each line through the
+ONE redactor (kriya/foundation/redaction.py); the in-memory Decision (and
+its attempt-evidence mirror) stays as the caller recorded it. Limit: the
+in-memory truncation runs first, so a token-shaped secret cut at exactly
+the 4,000-character boundary may leave a prefix too short to recognise.
 """
 
 import json
@@ -29,6 +34,7 @@ from kriya.context.workspace_identity import WorkspaceOwnershipError, workspace_
 from kriya.control.control_store import write_control_file
 from kriya.control.persistence import decision_ledger_path
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
+from kriya.foundation.redaction import redact_value
 from kriya.repository.commit import read_file_revision
 
 logger = logging.getLogger(__name__)
@@ -124,7 +130,7 @@ class DecisionLedger:
                     raise WorkspaceOwnershipError(
                         f"decision ledger at {path!r} belongs to workspace {actual_owner!r}"
                     )
-        serialized = decision.to_dict()
+        serialized = redact_value(decision.to_dict())  # S20r (I-11): the stored line is redacted; the Decision is not touched
         serialized["_workspace_id"] = workspace_identity(workspace_path)
         from kriya.control.run_coordinator import current_run_context
         context = current_run_context()

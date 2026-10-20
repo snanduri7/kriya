@@ -524,7 +524,6 @@ def test_launch_notes_without_a_secret_are_stored_as_given(tmp_path):
 
 # =========================================================================== I-11 / I-12: decision ledger, planning diagnostics
 
-@FLIP
 def test_the_decision_ledger_file_stores_no_secret(tmp_path):
     from kriya.control.decisions import DecisionLedger
     from kriya.control.persistence import decision_ledger_path
