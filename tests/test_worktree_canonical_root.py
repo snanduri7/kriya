@@ -402,17 +402,42 @@ async def test_an_enforce_run_over_a_legacy_nested_layout_commits_and_leaves_no_
 def test_worktree_locations_are_decided_only_by_worktree_py():
     """Only kriya/workflow/worktree.py names a managed worktree location or runs
     `git worktree add` for one (the static-analysis operator scan adds a
-    throwaway worktree in a temporary directory, never a managed one)."""
+    throwaway worktree in a temporary directory, never a managed one).
+
+    Offenders are pinned by a STABLE identity (S19 P1b, owner decision E): the file, the enclosing function (or the
+    module-level name the constant is assigned to), the constant and the source of the expression that holds it -
+    never a line number, which moved whenever an unrelated line was added above (S19, S19 Q1). Exact list equality,
+    duplicates included: a new, removed or changed offender still fails."""
     offenders = []
     for path in KRIYA.rglob("*.py"):
         relative = path.relative_to(KRIYA.parent).as_posix()
         if relative == "kriya/workflow/worktree.py":
             continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+        for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and node.value in ("worktree", "worktrees", "scoped-worktree"):
-                offenders.append(f"{relative}:{node.lineno}:{node.value}")
+                scope = node
+                while scope in parents and not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    scope = parents[scope]
+                if scope is tree:
+                    statement = node
+                    while not isinstance(statement, ast.stmt):
+                        statement = parents[statement]
+                    targets = statement.targets if isinstance(statement, ast.Assign) else []
+                    owner = "<module>:" + ",".join(t.id for t in targets if isinstance(t, ast.Name))
+                else:
+                    owner = scope.name
+                offenders.append((relative, owner, node.value, ast.unparse(parents[node])))
     # kriya/tools/git_metadata.py names "worktrees" as a git-directory ENTRY the sanitized export must not carry
     # (OD-1, BACKEND-FINAL-CLOSURE-005) - an export boundary, never a managed worktree location.
-    assert offenders == ["kriya/production_doctor.py:700:worktree", "kriya/tools/git_metadata.py:75:worktrees",
-                         "kriya/static_analysis/operator_scan.py:74:worktree",
-                         "kriya/static_analysis/operator_scan.py:81:worktree"], offenders
+    assert sorted(offenders) == [
+        ("kriya/production_doctor.py", "_check_git_worktree", "worktree", "[git, 'worktree', 'list', '--porcelain']"),
+        ("kriya/static_analysis/operator_scan.py", "run_operator_scan", "worktree",
+         "_git(workspace, 'worktree', 'add', '--detach', base_root, base)"),
+        ("kriya/static_analysis/operator_scan.py", "run_operator_scan", "worktree",
+         "_git(workspace, 'worktree', 'remove', '--force', base_root)"),
+        ("kriya/tools/git_metadata.py", "<module>:_FORBIDDEN_ENTRIES", "worktrees",
+         "('hooks', 'logs', 'index', 'description', 'info', 'worktrees', 'modules', 'packed-refs.lock', 'COMMIT_EDITMSG', "
+         "'FETCH_HEAD', 'ORIG_HEAD', 'shallow')"),
+    ], offenders
