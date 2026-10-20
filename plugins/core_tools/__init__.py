@@ -4,7 +4,8 @@ import logging
 import os
 import re
 import shlex
-from typing import Any, Callable, Optional, Tuple, Type
+import stat
+from typing import Any, Callable, List, Optional, Tuple, Type
 
 from pydantic import BaseModel, Field
 
@@ -446,6 +447,10 @@ class GitTool(BaseTool):
     # owner workspace (the first root; A) - the candidate is a detached Kriya worktree that gains no commits during a
     # run. The operator's own `kriya tools execute` is unchanged (the process folder).
     _CANDIDATE_VIEW_SUBCOMMANDS = frozenset({"status", "diff"})
+    # OI-164 (TIP-CLOSE C): the subcommands that print the working-tree CONTENT of any tracked path - each such path
+    # is judged by the PLAT-039 identity rule before git runs (_refuse_control_aliases). blame prints one file, which
+    # _authorized_read judges; status/log/branch print no file content; show, grep and `log -p` are not exposed.
+    _TRACKED_CONTENT_SUBCOMMANDS = frozenset({"diff"})
     # SEC-001-P6: this tool had no wall-clock timeout at all before its
     # ProcessController migration - every subcommand here is a fast,
     # finite, local git operation, so a generous-but-bounded ceiling
@@ -537,7 +542,50 @@ class GitTool(BaseTool):
         # S18b: a SEPARATE candidate must also have a base revision, or its status/diff is not the run's change.
         separate = bool(invocation.roots) and os.path.realpath(root) != os.path.realpath(invocation.roots[0])
         self._require_own_repository_view(root, sub, base_revision=separate)
+        if sub in self._TRACKED_CONTENT_SUBCOMMANDS:
+            self._refuse_control_aliases(root, invocation)
         return args
+
+    def _refuse_control_aliases(self, root: str, invocation: ModelToolInvocation) -> None:
+        """OI-164 (TIP-CLOSE C): a planned diff prints the working-tree bytes of every modified tracked path, so a
+        tracked file replaced by a hard link to a control object (the owner's .git/config, .kriya state) would print
+        the control bytes (MEASURED). Every tracked path (``_tracked_paths``: no content converted) that is a regular
+        file with more than one link is judged by the one PLAT-039 owner (``_is_control_path``) with ONE identity
+        index for this call; another name for a control object, or a path whose identity cannot be read, refuses
+        before git runs, naming that path only. A path that no longer exists prints the index's bytes, not its own;
+        a symlink prints its link text."""
+        roots = invocation.roots or (root,)
+        identities = ControlObjectIdentities(roots)
+        for relative in self._tracked_paths(root):
+            target = os.path.join(root, relative)
+            try:
+                entry: Optional[os.stat_result] = os.lstat(target)
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+            except (OSError, ValueError):
+                entry = None  # unknown identity: fail closed
+            if entry is not None and not (stat.S_ISREG(entry.st_mode) and entry.st_nlink > 1):
+                continue
+            if entry is None or (_is_control_path(invocation, target, identities=identities) if invocation.roots
+                                 else is_trusted_control_path(root, target, identities=identities)):
+                raise PolicyDeniedError(request=ActionRequest(action_type=ActionType.READ_FILE, target=target),
+                                        result=trusted_control_path_read_denial(target))
+
+    def _tracked_paths(self, root: str) -> List[str]:
+        """The tracked paths of the repository at ``root`` (its top level): ``git ls-files -z`` reads the index only -
+        it converts no working-tree content, so no content filter runs - spawned exactly as the diff will be (same
+        controller, profile and folder, so it lists the repository the diff describes). A listing git cannot give
+        whole refuses (fail closed)."""
+        profile = ContainmentProfile(trust_class=TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE, workspace_path=root)
+        listed = ProcessController().run(
+            git_argv(["git", "ls-files", "-z"]), cwd=root, timeout=self._GIT_COMMAND_TIMEOUT_SECONDS,
+            containment_profile=profile, containment_backend=resolve_containment_backend("none"),
+        )
+        if listed.returncode != 0 or listed.timeout or listed.stdout_truncated:
+            raise ToolExecutionError(
+                f"the tracked paths of {root!r} could not be listed, so whether one is another name for repository "
+                "metadata or Kriya control state cannot be established. Nothing was run.")
+        return list(dict.fromkeys(name for name in listed.stdout.split("\0") if name))
 
     @classmethod
     def _planned_read_root(cls, sub: str, invocation: ModelToolInvocation) -> str:
