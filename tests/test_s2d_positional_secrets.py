@@ -530,15 +530,23 @@ def test_the_refusal_names_the_operator_paths_and_fits_the_launch_record():
 
 def test_a_note_still_recorded_raw_is_projected_redacted_by_launch_status(tmp_path):
     """Governed (S2c OI-131 projection, its killer moved here): a note S2d does not write (an unreviewable command set - none
-    to show - whose reason quotes a positional secret) is still stored raw (S20 I-9) and `launch.status` hides it."""
+    to show - whose reason quotes a positional secret) is projected redacted by `launch.status`. S20r (I-9) changed how the
+    raw note gets on disk: the writer now stores it redacted (the line that asserted it stored raw encoded the defect), so a
+    record written BEFORE S20r - still raw on disk, never rewritten - is planted through the one control writer, and the
+    projection must still hide it."""
     from kriya.cli import _runtime_command_decision
-    from kriya.control.persistence import launch_record_path
+    from kriya.control.persistence import launch_record_path, load_launch_record, save_launch_record
     from kriya.policy.approval import RuntimeCommandSubject
 
     canonical, session = _session(tmp_path)
     try:
         _runtime_command_decision(RuntimeCommandSubject("u9", "c", canonical, (), "none", None, f"run mysql -u root -p{S} db"), False)
-        assert S in open(launch_record_path(canonical, LID), encoding="utf-8").read()      # stored raw: S20 I-9 owns that
+        assert S not in open(launch_record_path(canonical, LID), encoding="utf-8").read()  # S20r: stored redacted
+        old = load_launch_record(canonical, LID)                                             # the pre-S20r form: the note raw
+        old["approval_required"]["reason"] = f"run mysql -u root -p{S} db"
+        old.pop("_workspace", None)
+        save_launch_record(canonical, LID, old)
+        assert S in open(launch_record_path(canonical, LID), encoding="utf-8").read()
         status, wire = _kup("launch.status", workspace=canonical, launch_id=LID)
     finally:
         session.finish(0, None, None)

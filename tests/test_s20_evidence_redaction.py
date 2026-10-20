@@ -332,7 +332,6 @@ def _launch_text(ws):
     return open(launch_record_path(ws, LID), encoding="utf-8").read()
 
 
-@FLIP
 def test_the_launch_record_stores_no_redactable_secret(tmp_path):
     ws = _launch(tmp_path)
     text = _launch_text(ws)
@@ -340,7 +339,6 @@ def test_the_launch_record_stores_no_redactable_secret(tmp_path):
         assert f"{S}{n}" not in text, n
 
 
-@FLIP
 def test_the_launch_record_holds_the_redacted_free_text(tmp_path):
     """S20r changed this pin's ``approval_required`` lines (they encoded the shape before S2d): the `--token` refusal is
     S2d's (OI-153 (c)) - the fixed refusal text, the REDACTED command and the fingerprint of the exact bytes. The other
@@ -408,7 +406,6 @@ def _workspace(tmp_path):
     return canonical_workspace(str(ws))
 
 
-@FLIP
 def test_a_note_s2d_does_not_write_is_stored_redacted(tmp_path):
     """The NON-secret refusal path: an unreviewable (empty) command set whose reason quotes a positional secret, and an
     ``other_approval`` note whose details carry a flag secret - S2d records neither; both are stored redacted."""
@@ -447,7 +444,6 @@ def _straddling(limit, marker):
     return head + marker + "z" * 40 + "@h/x"
 
 
-@FLIP
 def test_each_launch_note_is_redacted_before_it_is_cut(tmp_path, monkeypatch):
     from kriya.control import launch as launch_module
     from kriya.control import launch_approval
@@ -468,12 +464,11 @@ def test_each_launch_note_is_redacted_before_it_is_cut(tmp_path, monkeypatch):
         assert f"{S}{n}" not in text, n
     record = json.loads(text)
     change = record["pending_approval"]
-    assert len(record["approval_required"]["reason"]) == 400 and len(record["declined_decisions"][0]["reason"]) == 300
-    assert len(record["ended"]["error"]) == 400 and len(change["reason"]) == 500 and change["reason_truncated"] is True
-    assert f"https://{R}@" in record["approval_required"]["reason"]
+    stored = [record["approval_required"]["reason"], record["declined_decisions"][0]["reason"], change["reason"], record["ended"]["error"]]
+    assert all(text.endswith(f" https://{R}@h/x") for text in stored), stored        # hidden whole, the cut fell after it
+    assert change["reason_truncated"] is True                                          # it describes the EXACT reason
 
 
-@FLIP
 def test_a_positional_secret_launch_leaves_no_raw_secret_under_the_launch_dir_or_the_state_dir(tmp_path):
     """OI-153 part B (S2d display/review + S20r I-9): a desktop launch reaches a runtime command carrying a RECOGNIZED
     positional secret (S2d grammar: ``sshpass -p <pw>``); its reason quotes the command, and the run ends with an error that

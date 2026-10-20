@@ -89,7 +89,9 @@ def _diff_counts(content: str) -> Dict[str, int]:
 def build_pending(launch_id: str, workspace_identity_value: str, sequence: int, files: List[Dict[str, str]], reason: str) -> Dict[str, Any]:
     digest = candidate_digest(files)
     requested = _now()
-    reason_text = reason[:REASON_MAX_CHARS]
+    # S20r (OBS-003, I-9): the STORED reason is display text, redacted BEFORE it is cut; the review identity (``review_id``) and
+    # ``reason_sha256`` stay bound to the EXACT reason bytes (OI-146), and ``reason_truncated`` describes the exact reason.
+    reason_text = redact_text(reason)[:REASON_MAX_CHARS]
     return {
         "review_id": review_identity(launch_id, workspace_identity_value, sequence, digest, reason), "sequence": sequence, "kind": "change_approval",
         "status": STATUS_PENDING, "requested_at": _stamp(requested), "expires_at": _stamp(requested + timedelta(seconds=APPROVAL_WAIT_SECONDS)),

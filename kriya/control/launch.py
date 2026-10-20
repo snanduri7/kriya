@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Dict, List, Optional
 
 from kriya.control.persistence import load_launch_record, save_launch_record
+from kriya.foundation.redaction import redact_text, redact_value
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +125,9 @@ class LaunchSession:
         The first one is kept (it is the one that stopped the run)."""
         if self._record.get("approval_required") is not None:
             return
-        self._record["approval_required"] = {"kind": kind, "reason": reason[:400], "details": details, "noted_at": _now()}
+        # S20r (OBS-003, I-9): the note is stored through the ONE redactor, redacted BEFORE it is cut (display text: no identity is
+        # computed from it; S2d's refusal already passes the redacted commands and the fingerprint of the exact bytes).
+        self._record["approval_required"] = {"kind": kind, "reason": redact_text(reason)[:400], "details": redact_value(details), "noted_at": _now()}
         try:
             save_launch_record(self.workspace, self.launch_id, self._record)
         except Exception as error:
@@ -137,7 +140,7 @@ class LaunchSession:
         declined = self._record.setdefault("declined_decisions", [])
         if len(declined) >= 20:
             return
-        declined.append({"kind": kind, "reason": reason[:300], "details": details, "noted_at": _now()})
+        declined.append({"kind": kind, "reason": redact_text(reason)[:300], "details": redact_value(details), "noted_at": _now()})  # S20r: redact, then cut
         try:
             save_launch_record(self.workspace, self.launch_id, self._record)
         except Exception as error:
@@ -264,7 +267,7 @@ class LaunchSession:
             "at": _now(), "exit_code": exit_code, "workflow_status": _text(result.get("status")),
             "quality_gates_passed": result.get("quality_gates_passed") if isinstance(result.get("quality_gates_passed"), bool) else None,
             "failure_category": _text(result.get("failure_category")), "trace_run_id": trace_id,
-            "error": message[:400] if message else None,
+            "error": redact_text(message)[:400] if message else None,  # S20r: redacted, then cut
             "note": "copied from the workflow's own result; the RunRecord, evidence store and trace row are the outcome authority",
         })
         deactivate(self)
