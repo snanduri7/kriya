@@ -28,6 +28,7 @@ from kriya.control.run_ownership import acquire_run_lock
 from kriya.control.run_record import IllegalRunTransitionError, RunLifecycle, RunRecord
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.logging_setup import run_log
+from kriya.platform import git_argv
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ def _canonical_workspace(workspace_path: str) -> str:
 def _git_revision(workspace_path: str, revision: str) -> Optional[str]:
     try:
         result = subprocess.run(
-            ["git", "rev-parse", revision],
+            git_argv(["git", "rev-parse", revision]),
             cwd=workspace_path,
             capture_output=True,
             text=True,
