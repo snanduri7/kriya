@@ -170,7 +170,7 @@ def persist_planning_attempt_diagnostic(
             plan, validation_errors=validation_errors,
         )),
         "validation_errors": redact_value(validation_errors),
-        "reason_codes": redact_value(list(reason_codes)),
+        "reason_codes": list(reason_codes),  # a closed code vocabulary (enforce_loop), not text: kept as given
         "ownership_validation": redact_value(normalized_ownership_validation_records(
             plan, workspace_path=workspace_path,
         )),
