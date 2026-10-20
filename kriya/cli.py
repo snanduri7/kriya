@@ -3760,6 +3760,12 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
             # characters (e.g. `M "path with spaces/file.py"`), which a naive
             # whitespace-split silently mangles.
             import subprocess
+
+            from kriya.application import ProjectService
+            from kriya.context import RequestContext
+            # S19 P1b (owner decision A): `git status` can run a repository-defined content filter; the one authority
+            # decides through the APPLICATION use case (a typed refusal ends the review before any git runs here).
+            ProjectService().admit_repository_read(RequestContext.local(None, request_id="review"), file_path)
             res = subprocess.run(git_argv(["git", "status", "--porcelain", "-z"]), cwd=file_path, capture_output=True, text=True)
             if res.returncode == 0 and res.stdout.strip("\x00"):
                 entries = res.stdout.split("\x00")

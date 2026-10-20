@@ -35,6 +35,7 @@ from kriya.context.workspace_identity import canonical_workspace, workspace_iden
 from kriya.control.control_store import CONTROL_DIRECTORY
 from kriya.control.recovery import STATUS_CLEAN, STATUS_RUN_ACTIVE, assess_recovery
 from kriya.core.state_paths import resolve_state_directory, trace_db_path
+from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
 from kriya.tools.git_metadata import describe_checkout
 
 CONFIG_FILE_NAMES = ("kriya.yaml", "kriya.yml")
@@ -81,6 +82,18 @@ class ProjectService:
         """The run the recovery assessment reports active in ``workspace``, or None. Read-only: never creates, locks or writes."""
         assessment = assess_recovery(workspace)
         return assessment.run_active if getattr(assessment, "run_active", None) else None
+
+    def admit_repository_read(self, ctx: RequestContext, folder: str) -> None:
+        """Admit a read-only Kriya git command (``git status``) in ``folder``, or refuse it typed. S19 P1b (owner decision A,
+        2026-10-20): an adapter that runs its own filter-capable git reaches the ONE repository content-filter authority
+        (kriya.repository.git) through this use case, never by importing REPOSITORY; call it immediately before that git
+        (nothing is memoized: the configuration can change between two calls). Refuses with
+        ``ApplicationRefusal(WORKSPACE_UNAVAILABLE)`` whose ``reason`` is the repository refusal's own reason code and
+        whose message is that refusal's (redacted) text."""
+        try:
+            refuse_repository_content_filters(folder)
+        except RepositoryContentFilterRefused as refusal:
+            raise ApplicationRefusal(WORKSPACE_UNAVAILABLE, str(refusal), reason=refusal.reason_code) from refusal
 
     def describe(self, ctx: RequestContext, cfg, requested: str, workspace: str) -> Dict[str, Any]:
         """The facts Kriya reports about an admitted folder (``workspace`` = its canonical spelling, ``requested`` = the path asked for)."""
