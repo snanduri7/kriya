@@ -6,14 +6,20 @@ import os
 import re
 import shutil
 import subprocess
-from typing import List, Optional, Tuple
+from typing import Iterable, Iterator, List, Optional, Tuple
 
 from kriya.config.environment import child_environment
 from kriya.platform import git_argv
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
-from kriya.policy.filesystem import SCOPED_SNAPSHOT_SENTINEL
+from kriya.policy.filesystem import (
+    SCOPED_SNAPSHOT_SENTINEL,
+    TRUSTED_CONTROL_PATH_DENIED,
+    ControlObjectIdentities,
+    is_trusted_control_name,
+    names_trusted_control_path,
+)
 from kriya.policy.model import ActionRequest, ActionType
 from kriya.repository.git import (
     GIT_REPOSITORY_OWNERSHIP_REFUSED,
@@ -199,6 +205,11 @@ def _interpreter_cache_path(rel: str) -> bool:
     return any(part in _INTERPRETER_CACHE_DIRS for part in rel.replace("\\", "/").split("/"))
 
 
+def _not_synced(rel: str) -> bool:
+    """Kriya's own state and interpreter caches never travel into the sandbox."""
+    return rel == ".kriya" or rel.startswith(".kriya/") or _interpreter_cache_path(rel)
+
+
 def _sync_uncommitted_changes_into_worktree(repo_path: str, worktree_path: str) -> None:
     """After create_git_worktree resets the sandbox to a clean git HEAD checkout, copy
     over any uncommitted changes (modified tracked files, new untracked files) from the
@@ -232,10 +243,16 @@ def _sync_uncommitted_changes_into_worktree(repo_path: str, worktree_path: str) 
         raise                                       # S19 Q1: a typed refusal, never a generic sync failure
     except Exception as error:
         raise WorktreeSyncError(WORKTREE_SYNC_FAILED, f"git status failed: {error}") from error
+    # OI-164: before anything is copied, a file that is another name (a hard link) for repository metadata or Kriya
+    # control state is refused - copied, it would become a new single-link candidate file holding the control bytes,
+    # which no identity rule can recognise afterwards.
+    identities = ControlObjectIdentities((repo_path,))
+    _refuse_control_object_aliases(identities, (os.path.join(repo_path, rel) for _code, rel, _original in entries
+                                                if not (_not_synced(rel) or names_trusted_control_path(rel))))
     synced: List[str] = []
     try:
         for _code, rel, original in entries:
-            if rel == ".kriya" or rel.startswith(".kriya/") or _interpreter_cache_path(rel):
+            if _not_synced(rel):
                 continue
             if original and not os.path.lexists(os.path.join(repo_path, original)):
                 _remove_path(os.path.join(worktree_path, original))
@@ -265,6 +282,37 @@ def _sync_uncommitted_changes_into_worktree(repo_path: str, worktree_path: str) 
             WORKTREE_CONTENT_MISMATCH,
             f"the sandbox does not hold the workspace's bytes after sync: {', '.join(mismatched[:10])}",
         )
+
+
+def _refuse_control_object_aliases(identities: ControlObjectIdentities, sources: Iterable[str]) -> None:
+    """OI-164: the sandbox never copies another name for a control object of the source workspace (``identities``, the
+    PLAT-039 owner's index, bounded to this one sandbox creation). A symlink is copied as a link and judged by the
+    read-side rule where it resolves; a directory holds nothing itself. Typed WorktreeSyncError (both run paths report
+    its reason code); the explanation names only the alias, never the object it aliases."""
+    for source in sources:
+        if os.path.islink(source) or os.path.isdir(source):
+            continue
+        if identities.aliases_control_object(source):
+            raise WorktreeSyncError(
+                TRUSTED_CONTROL_PATH_DENIED,
+                f"'{source}' is another name (a hard link) for repository metadata or Kriya control state, or its "
+                "identity cannot be established; the sandbox never copies it",
+            )
+
+
+def _snapshot_sources(workspace_path: str) -> Iterator[str]:
+    """Every file the scoped snapshot copies that does not itself lie at a trusted control path (a nested repository's
+    .git is copied as that repository's control state and stays protected by name in the snapshot)."""
+    for entry in os.listdir(workspace_path):
+        if entry in _SCOPED_SNAPSHOT_IGNORED or is_trusted_control_name(entry):
+            continue
+        source = os.path.join(workspace_path, entry)
+        if not os.path.isdir(source) or os.path.islink(source):
+            yield source
+            continue
+        for directory, dirnames, filenames in os.walk(source):
+            dirnames[:] = [name for name in dirnames if not is_trusted_control_name(name)]
+            yield from (os.path.join(directory, name) for name in filenames if not is_trusted_control_name(name))
 
 
 def repository_content_paths(workspace_path: str) -> List[str]:
@@ -471,6 +519,7 @@ def _create_scoped_snapshot_sandbox(workspace_path: str, sandbox_path: str) -> s
     caller's explicit workspace boundary while retaining the same apply-back
     contract used by the normal sandbox.
     """
+    _refuse_control_object_aliases(ControlObjectIdentities((workspace_path,)), _snapshot_sources(workspace_path))
     if os.path.exists(sandbox_path):
         shutil.rmtree(sandbox_path)
     os.makedirs(sandbox_path, exist_ok=True)

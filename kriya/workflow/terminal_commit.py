@@ -41,7 +41,7 @@ from kriya.control.run_record import (
     COMMIT_ROLLED_BACK,
     COMMIT_UNCERTAIN,
 )
-from kriya.policy.filesystem import is_trusted_control_path
+from kriya.policy.filesystem import ControlObjectIdentities, is_trusted_control_path
 from kriya.repository.commit import (  # M1: owned by kriya/repository/commit.py, re-exported (PARTIAL_FACADES); Removed in P1
     CandidateMaterializationError as CandidateMaterializationError,
 )
@@ -134,10 +134,11 @@ def materialize_candidate(
     Reads only the candidate; the real workspace is touched later, by the
     revision-grounded commit, which checks each recorded base revision."""
     writes: List[StagedFileWrite] = []
+    identities = ControlObjectIdentities((workspace_root,))  # OI-164: one control-object index for this commit
     for item in files:
         candidate_path = os.path.join(candidate_root, item.relpath)
         target_path = os.path.join(workspace_root, item.relpath)
-        if is_trusted_control_path(workspace_root, target_path):
+        if is_trusted_control_path(workspace_root, target_path, identities=identities):
             # PLAT-039: the commit boundary's own backstop to the candidate
             # writer's refusal - a candidate never commits into .git/.kriya.
             raise CandidateMaterializationError(

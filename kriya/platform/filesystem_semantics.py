@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import enum
 import os
+import stat
 import unicodedata
 from typing import Optional, Tuple
 
@@ -122,6 +123,38 @@ def identity_key(path: str) -> Optional[Tuple[int, int]]:
     if result is None:
         return None
     return (result.st_dev, result.st_ino)
+
+
+class LinkSharing(enum.Enum):
+    """OI-164: whether another directory entry can name the same filesystem object as a path (a hard link)."""
+    SINGLE = "single"    # absent, a directory, or a non-directory with one link: no other name refers to it
+    SHARED = "shared"    # a non-directory with more than one link: another name may be a protected object's
+    UNKNOWN = "unknown"  # the stat failed, or the host gives no usable identity (st_ino 0): the caller fails closed
+
+
+def object_key(result: os.stat_result) -> Optional[Tuple[int, int]]:
+    """The (device, inode) identity of a stat result - what ``samestat`` compares; the device is part of the key
+    because inode numbers repeat across filesystems (a hard link never crosses one). None when the host gives no
+    usable identity (st_ino 0: some network and FUSE filesystems, or a DirEntry stat on Windows)."""
+    if not result.st_ino:
+        return None
+    return (result.st_dev, result.st_ino)
+
+
+def link_sharing(path: str) -> Tuple[LinkSharing, Optional[Tuple[int, int]]]:
+    """Whether ``path`` (symlinks followed, as reading it would) names a non-directory object that has more than one
+    directory entry, and if so its ``object_key``. A directory is never SHARED: its st_nlink counts its
+    subdirectories, and a directory alias is a symlink (resolved by ``path_relation``), not a hard link."""
+    try:
+        result = os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return LinkSharing.SINGLE, None
+    except (OSError, ValueError):
+        return LinkSharing.UNKNOWN, None
+    if stat.S_ISDIR(result.st_mode) or result.st_nlink <= 1:
+        return LinkSharing.SINGLE, None
+    key = object_key(result)
+    return (LinkSharing.SHARED, key) if key is not None else (LinkSharing.UNKNOWN, None)
 
 
 def path_identity(first: str, second: str) -> PathIdentity:

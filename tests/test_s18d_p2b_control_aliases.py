@@ -9,9 +9,12 @@ code already behaved correctly (MEASURED by TEST-B and again here), these are th
 EQUIVALENT by the P2 DEV ("a stat failure cannot be produced by any deterministic test"): REFUTED - a directory with
 mode 000 outside the roots produces it deterministically for a non-root user (the B26 pin below).
 
-MEASURED and NOT fixed here (owner question, see the strict-xfail pin at the end): a HARD LINK to a file BENEATH .git or
-.kriya (not to the sentinel) is readable and searchable, because the identity rule compares the target with the control
-names themselves and walks its ancestors - a hard link has no control ancestor.
+MEASURED in P2b and pinned strict-xfail there (owner question Q1): a HARD LINK to a file BENEATH .git or .kriya (not to
+the sentinel) was readable and searchable, because the identity rule compared the target with the control names
+themselves and walked its ancestors - a hard link has no control ancestor. OI-164 (owner decision 2026-10-21, option A)
+closed it at the same owner: is_trusted_control_path also compares a multi-link target's (st_dev, st_ino) with the
+control objects of the operation's roots (kriya.policy.filesystem.ControlObjectIdentities); the pin below is now a
+real control and tests/test_oi164_control_object_identity.py holds the full matrix.
 """
 import os
 
@@ -120,25 +123,34 @@ def test_a_subfolder_symlink_into_git_is_protected(dotted, name, link, target): 
     assert hits.tool_output == "No matches found.", hits.tool_output
 
 
-# -- MEASURED gap, owner question (not fixed in P2b) --------------------------------------------------------------------
+# -- the P2b gap (owner question Q1), closed by OI-164 ------------------------------------------------------------------
 
 @pytest.mark.parametrize("control_file", [(".git", "config"), (".kriya", "control", "state.json")])
-@pytest.mark.xfail(strict=True, reason="OPEN owner question (S18d P2b Q1): a hard link to a file BENEATH .git or .kriya "
-                                       "is not recognised by the identity rule; MEASURED readable")
 def test_a_hard_link_to_a_file_beneath_a_control_directory_is_protected(dotted, control_file):  # noqa: F811
+    """Was strict-xfail (P2b Q1, MEASURED readable at 36c0ffe); converted deliberately by OI-164 when the owner chose
+    option A: the alias is refused with the one control-path code, hidden from the listing and never a search hit."""
     s = dotted
     original = os.path.join(s.owner, *control_file)
     os.makedirs(os.path.dirname(original), exist_ok=True)
     if not os.path.exists(original):
         with open(original, "w", encoding="utf-8") as handle:
             handle.write('{"KRIYA_STATE": 1}\n')
+    with open(original, "a", encoding="utf-8") as handle:
+        handle.write("\n# OI164_ALIAS_MARKER\n")
     os.link(original, os.path.join(s.owner, "alias.txt"))
     assert _refused(_in_view(s, "owner", "filesystem", {"operation": "read", "path": "alias.txt"}))
+    listing = _in_view(s, "owner", "filesystem", {"operation": "list", "path": "."})
+    assert listing.status == SubtaskStatus.COMPLETED and "alias.txt" not in listing.tool_output
+    assert "app.py" in listing.tool_output
+    hits = _in_view(s, "owner", "search", {"pattern": "OI164_ALIAS_MARKER", "path": "."})
+    assert hits.tool_output == "No matches found.", hits.tool_output
 
 
 def test_a_candidate_write_through_a_hard_link_never_reaches_the_control_file(dotted):  # noqa: F811
-    """The write side of the same alias, MEASURED: the writer admits the ordinary name, and Kriya's write is atomic
-    (temporary file + os.replace), so it replaces the directory entry and leaves the control file's bytes untouched."""
+    """The write side of the same alias. MEASURED in P2b: the writer admitted the ordinary name; Kriya's write is atomic
+    (temporary file + os.replace), so it replaces the directory entry and leaves the control file's bytes untouched.
+    OI-164 (changed assertion, deliberate): the writer now judges the alias by the same identity rule and refuses it
+    (TRUSTED_CONTROL_PATH_DENIED) - one rule for every consumer; the atomic primitive still never reaches the bytes."""
     from kriya.repository.atomic_write import atomic_write_file
 
     s = dotted
@@ -148,7 +160,7 @@ def test_a_candidate_write_through_a_hard_link_never_reaches_the_control_file(do
         handle.write('{"KRIYA_STATE": 1}\n')
     alias = os.path.join(s.owner, "alias.json")
     os.link(original, alias)
-    assert AuthorizedFileWriter(s.owner).authorize(alias).reason_code != "TRUSTED_CONTROL_PATH_DENIED"
+    assert AuthorizedFileWriter(s.owner).authorize(alias).reason_code == "TRUSTED_CONTROL_PATH_DENIED"
     atomic_write_file(alias, "MODEL TEXT\n", workspace_path=s.owner)
     with open(original, encoding="utf-8") as handle:
         assert handle.read() == '{"KRIYA_STATE": 1}\n'

@@ -53,12 +53,22 @@ silently narrowing or silently reusing the broad set.
 """
 
 import os
+import stat
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Iterable, Optional, Sequence, Tuple
+from typing import Dict, FrozenSet, Iterable, List, Optional, Sequence, Set, Tuple
 
 from kriya.config.environment import expand_user
-from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, fold_name, path_identity, path_relation
+from kriya.platform.filesystem_semantics import (
+    LinkSharing,
+    PathIdentity,
+    PathRelation,
+    fold_name,
+    link_sharing,
+    object_key,
+    path_identity,
+    path_relation,
+)
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
@@ -124,27 +134,147 @@ TRUSTED_CONTROL_NAMES: Tuple[str, ...] = TRUSTED_CONTROL_DIRECTORIES + (SCOPED_S
 
 
 _FOLDED_CONTROL_NAMES = frozenset(fold_name(name) for name in TRUSTED_CONTROL_NAMES)
+# The one reason code for every refusal of a trusted control path (a candidate write, a planned read, and - OI-164 - a
+# sandbox copy of another name for a control object): one cause, one code.
+TRUSTED_CONTROL_PATH_DENIED = "TRUSTED_CONTROL_PATH_DENIED"
 
 
-def is_trusted_control_path(root: str, target: str) -> bool:
+def is_trusted_control_name(name: str) -> bool:
+    """Whether one path component is a name the PLAT-039 rule protects (any spelling)."""
+    return fold_name(name) in _FOLDED_CONTROL_NAMES
+
+
+def names_trusted_control_path(relative_path: str) -> bool:
+    """Whether a path RELATIVE to a root names a trusted control path by its components alone (any component, as git's
+    own verify_path does: a nested .git is as live as the top-level one) - the name half of
+    ``is_trusted_control_path``. A path leaving the root (a leading ``..``) names none of that root's."""
+    parts = os.path.normpath(relative_path).split(os.sep)
+    return parts[0] != os.pardir and any(is_trusted_control_name(part) for part in parts)
+
+
+class ControlObjectIdentities:
+    """OI-164: the filesystem identities (``object_key``: device + inode) of every object at a trusted control path of
+    ``roots`` - everything beneath a `.git`/`.kriya` directory and every `.git` gitfile and scoped-snapshot sentinel, at
+    any depth and under any spelling (the names ``is_trusted_control_path`` protects) - so that ANOTHER name for one of
+    them (a hard link) is recognised as that object. Only a non-directory with more than one link can have another
+    name (``link_sharing``), so a target with one link never builds the index.
+
+    Bounded to ONE operation (one planned read, listing or search; one writer decision): built lazily on the first
+    shared target and dropped with this object - never cached across operations, views, candidates or workspaces, so
+    a link or control object created after one operation is judged afresh by the next.
+
+    Several roots (a planned read's owner workspace and candidate): each root's objects are collected, and a directory
+    that is another of the roots is left to that root's own walk - a run's candidate lives under the owner's `.kriya`,
+    yet its source is not control state (the innermost-root rule of plugins/core_tools._is_control_path). Symlinks are
+    not followed, except a control-NAMED symlink directly in a root, which ``path_relation`` resolves (everything it
+    reaches is control state); deeper, the name rule judges a symlink by where it resolves, so it is not followed. The
+    walk is in name order (deterministic). Any directory or entry that cannot be read or has no usable identity makes
+    the index incomplete, and every shared target then counts as a control object (fail closed)."""
+
+    def __init__(self, roots: Sequence[str]) -> None:
+        self._roots: Tuple[str, ...] = tuple(roots)
+        self._keys: Optional[FrozenSet[Tuple[int, int]]] = None
+        self._complete = True
+
+    def aliases_control_object(self, target: str) -> bool:
+        """Whether ``target`` (symlinks followed) is another name for a control object of the roots. A target whose
+        identity cannot be established counts as one (fail closed)."""
+        sharing, key = link_sharing(target)
+        if sharing is LinkSharing.SINGLE:
+            return False
+        if sharing is LinkSharing.UNKNOWN:
+            return True
+        if self._keys is None:
+            self._keys = self._collect()
+        return not self._complete or key in self._keys
+
+    def _collect(self) -> FrozenSet[Tuple[int, int]]:
+        root_keys: Dict[Tuple[int, int], str] = {}
+        for root in self._roots:
+            try:
+                key = object_key(os.stat(root))
+            except FileNotFoundError:  # nothing exists beneath a missing root
+                continue
+            except (OSError, ValueError):
+                key = None
+            if key is None:
+                self._complete = False
+                return frozenset()
+            root_keys[key] = root
+        keys: Set[Tuple[int, int]] = set()
+        visited: Dict[Tuple[int, int], bool] = {}
+        for root_key, root in root_keys.items():
+            if not self._walk(root, root_key, frozenset(root_keys) - {root_key}, keys, visited):
+                self._complete = False
+                return frozenset()
+        return frozenset(keys)
+
+    @staticmethod
+    def _walk(root: str, root_key: Tuple[int, int], other_roots: FrozenSet[Tuple[int, int]],
+              keys: Set[Tuple[int, int]], visited: Dict[Tuple[int, int], bool]) -> bool:
+        """Collect into ``keys``; False when the tree cannot be read completely."""
+        stack: List[Tuple[str, Tuple[int, int], bool]] = [(root, root_key, False)]
+        while stack:
+            directory, directory_key, inside_control = stack.pop()
+            # A directory is walked once, or twice when it is first reached as ordinary and then through a
+            # control-named symlink (its objects are then control objects too, as path_relation judges them).
+            if directory_key in visited and (visited[directory_key] or not inside_control):
+                continue
+            visited[directory_key] = inside_control
+            try:
+                with os.scandir(directory) as iterator:
+                    entries = sorted(iterator, key=lambda entry: entry.name)
+            except FileNotFoundError:
+                continue  # removed while walking: nothing beneath it to alias
+            except (OSError, ValueError):
+                return False
+            for entry in entries:
+                control = inside_control or is_trusted_control_name(entry.name)
+                try:
+                    # Outside a control tree only directories matter (they may hold a nested control directory); the
+                    # entry type comes from the directory listing itself where the host provides it.
+                    if not control and not entry.is_dir(follow_symlinks=False):
+                        continue
+                    # A control-NAMED entry directly in the root is resolved, as path_relation resolves it; nothing
+                    # else is followed.
+                    follow = control and not inside_control and directory_key == root_key
+                    result = os.stat(entry.path) if follow else os.lstat(entry.path)
+                except FileNotFoundError:
+                    continue
+                except (OSError, ValueError):
+                    return False  # an unreadable entry may be, or hide, a control object
+                key = object_key(result)
+                if key is None:
+                    return False
+                if stat.S_ISDIR(result.st_mode):
+                    if key not in other_roots:
+                        stack.append((entry.path, key, control))
+                elif control:
+                    keys.add(key)
+        return True
+
+
+def is_trusted_control_path(root: str, target: str, *, identities: Optional[ControlObjectIdentities] = None) -> bool:
     """Whether ``target`` is, or lies beneath, a trusted control directory
     of ``root``. By filesystem identity, so symlink aliases and (on an
     insensitive filesystem) case/normalization variants count; and by name,
     case- and normalization-insensitively on every host, because a `.GIT/`
     written on a case-sensitive filesystem becomes the real `.git/` once the
     repository is checked out on an insensitive one; at any depth. A
-    location that cannot be established counts as trusted (fail closed)."""
+    location that cannot be established counts as trusted (fail closed).
+
+    OI-164: also when ``target`` is another name (a hard link) for an object
+    at such a path - judged by ``identities`` (the operation's index over
+    its roots), else by a fresh index over ``root`` alone."""
     if any(path_relation(os.path.join(root, name), target) is not PathRelation.OUTSIDE
            for name in TRUSTED_CONTROL_NAMES):
         return True
     try:
-        relative = os.path.relpath(os.path.realpath(target), os.path.realpath(root))
+        if names_trusted_control_path(os.path.relpath(os.path.realpath(target), os.path.realpath(root))):
+            return True
     except ValueError:  # another drive: not beneath root
-        return False
-    parts = relative.split(os.sep)
-    # Any component, as git's own verify_path does: a nested .git (a
-    # submodule's) is as live as the top-level one.
-    return parts[0] != os.pardir and any(fold_name(part) in _FOLDED_CONTROL_NAMES for part in parts)
+        pass
+    return (identities if identities is not None else ControlObjectIdentities((root,))).aliases_control_object(target)
 
 
 def trusted_control_path_denial(target_path: str) -> PolicyResult:
@@ -153,7 +283,7 @@ def trusted_control_path_denial(target_path: str) -> PolicyResult:
     the filesystem."""
     return PolicyResult(
         decision=PolicyDecision.DENY,
-        reason_code="TRUSTED_CONTROL_PATH_DENIED",
+        reason_code=TRUSTED_CONTROL_PATH_DENIED,
         explanation=(
             f"'{target_path}' is repository metadata or Kriya control state "
             f"({', '.join(TRUSTED_CONTROL_DIRECTORIES)}); candidate writes never reach it."
@@ -168,7 +298,7 @@ def trusted_control_path_read_denial(target_path: str) -> PolicyResult:
     code)."""
     return PolicyResult(
         decision=PolicyDecision.DENY,
-        reason_code="TRUSTED_CONTROL_PATH_DENIED",
+        reason_code=TRUSTED_CONTROL_PATH_DENIED,
         explanation=(
             f"'{target_path}' is repository metadata or Kriya control state "
             f"({', '.join(TRUSTED_CONTROL_NAMES)}); a planned read never reports it as source."
@@ -288,7 +418,9 @@ class AuthorizedFileWriter:
             )
         self._write_scope_mode = write_scope_mode
 
-    def authorize(self, target_path: str) -> PolicyResult:
+    def authorize(self, target_path: str, *, identities: Optional[ControlObjectIdentities] = None) -> PolicyResult:
+        """``identities`` (OI-164): the calling operation's control-object index over this writer's workspace root (one
+        per batch); a fresh one per call when omitted."""
         if not is_within_scope(self._scope, target_path):
             return PolicyResult(
                 decision=PolicyDecision.DENY,
@@ -299,7 +431,7 @@ class AuthorizedFileWriter:
                 ),
                 matched_rule="filesystem.authorized_writer.outside_scope",
             )
-        if is_trusted_control_path(self._workspace_root, target_path):
+        if is_trusted_control_path(self._workspace_root, target_path, identities=identities):
             return trusted_control_path_denial(target_path)
         if self._write_scope_mode == WriteScopeMode.DENY_ALL:
             # Unconditional - no persistent write is permitted in this mode,
@@ -363,8 +495,8 @@ class AuthorizedFileWriter:
             for relpath in self._protected_relpaths
         )
 
-    def _raise_if_denied(self, target_path: str) -> None:
-        result = self.authorize(target_path)
+    def _raise_if_denied(self, target_path: str, identities: Optional[ControlObjectIdentities] = None) -> None:
+        result = self.authorize(target_path, identities=identities)
         # POL-001: fail-closed on REQUIRE_APPROVAL too, not just DENY. No
         # stage this instance's evaluate() can reach currently produces
         # REQUIRE_APPROVAL for a WRITE_FILE request built by authorize()
@@ -401,8 +533,9 @@ class AuthorizedFileWriter:
         contract for revision conflicts."""
 
         materialized = list(writes)
+        identities = ControlObjectIdentities((self._workspace_root,))  # OI-164: one index for the whole batch
         for item in materialized:
-            self._raise_if_denied(item.target_path)
+            self._raise_if_denied(item.target_path, identities)
         return commit_revision_grounded_batch(
             materialized, workspace_path=self._scope.writable_roots[0],
         )
