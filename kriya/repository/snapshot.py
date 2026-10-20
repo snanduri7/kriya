@@ -21,6 +21,8 @@ import subprocess
 from dataclasses import dataclass, replace
 from typing import Optional, Tuple
 
+from kriya.platform import git_argv
+
 UNSUPPORTED_TEXT_ENCODING = "UNSUPPORTED_TEXT_ENCODING"
 MIXED_NEWLINE_UNSUPPORTED = "MIXED_NEWLINE_UNSUPPORTED"
 SOURCE_CHANGED_SINCE_AUTHORIZATION = "SOURCE_CHANGED_SINCE_AUTHORIZATION"
@@ -230,10 +232,10 @@ def untracked_repository_paths(root: str) -> frozenset:
     exclude semantics: .gitignore, info/exclude, core.excludesFile), Kriya's
     ``.kriya/`` state excluded. Not a Git work tree: none. A failing listing
     raises (fail closed)."""
-    inside = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=root, capture_output=True, text=True)
+    inside = subprocess.run(git_argv(["git", "rev-parse", "--is-inside-work-tree"]), cwd=root, capture_output=True, text=True)
     if inside.returncode != 0 or inside.stdout.strip() != "true":
         return frozenset()
-    result = subprocess.run(["git", "ls-files", "--others", "--exclude-standard", "-z"], cwd=root,
+    result = subprocess.run(git_argv(["git", "ls-files", "--others", "--exclude-standard", "-z"]), cwd=root,
                             capture_output=True)
     if result.returncode != 0:
         raise RuntimeError(f"git ls-files --others failed: {os.fsdecode(result.stderr).strip() or result.returncode}")
