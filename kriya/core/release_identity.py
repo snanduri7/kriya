@@ -26,6 +26,7 @@ import shutil
 import subprocess
 from typing import Any, Dict, List, Mapping, Optional
 
+from kriya.platform import git_argv
 from kriya.platform.host_properties import UNAVAILABLE, os_and_architecture
 from kriya.platform.services import platform_services
 
@@ -60,8 +61,8 @@ def kriya_revision(source_root: str = _SOURCE_ROOT) -> Dict[str, Any]:
         if embedded["commit"] != UNKNOWN_BUILD:
             return {"revision": embedded["commit"], "dirty": embedded["dirty"]}
         return {"revision": UNAVAILABLE, "dirty": None}
-    revision = _command(["git", "rev-parse", "HEAD"], cwd=source_root)
-    status = _command(["git", "status", "--porcelain", "--untracked-files=no"], cwd=source_root)
+    revision = _command(git_argv(["git", "rev-parse", "HEAD"]), cwd=source_root)
+    status = _command(git_argv(["git", "status", "--porcelain", "--untracked-files=no"]), cwd=source_root)
     return {"revision": revision or UNAVAILABLE, "dirty": None if status is None else bool(status)}
 
 
