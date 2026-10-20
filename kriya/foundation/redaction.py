@@ -356,7 +356,23 @@ def _split_word(token: str) -> Tuple[str, str, str]:
     return token[:lead], rest[:len(rest) - trail], rest[len(rest) - trail:]
 
 
-def _quoted_value_end(text: str, matches: List[Match], parts: List[Tuple[str, str, str]], index: int, offset: int) -> Tuple[str, int]:
+def _closing_words(text: str, matches: List[Match], parts: List[Tuple[str, str, str]]) -> Dict[str, List[Optional[int]]]:
+    """For each quote character and each word: the index of the first LATER word on the same line whose trailing separators
+    hold that quote, or None. One right-to-left pass (a scan per value was quadratic: S2d own bug, 200 KB took 30 s)."""
+    closing: Dict[str, List[Optional[int]]] = {"'": [None] * len(matches), '"': [None] * len(matches)}
+    nearest: Dict[str, Optional[int]] = {"'": None, '"': None}
+    for index in range(len(matches) - 1, -1, -1):
+        if index + 1 < len(matches) and "\n" in text[matches[index].end():matches[index + 1].start()]:
+            nearest = {"'": None, '"': None}
+        for quote, later in nearest.items():
+            closing[quote][index] = later
+        for quote in nearest:
+            if quote in parts[index][2]:
+                nearest[quote] = index
+    return closing
+
+
+def _quoted_value_end(parts: List[Tuple[str, str, str]], closing: Dict[str, List[Optional[int]]], index: int, offset: int) -> Tuple[str, int]:
     """(opening quote kept in the output, index of the word that ends the value). A value that opens a quote it does not
     close in its own word (``-p 'a b'``, ``-p'a b'``, an escaped ``\\"a b\\"``) runs to the first later word on the same line
     whose trailing separators close it; otherwise it is this word alone."""
@@ -367,14 +383,8 @@ def _quoted_value_end(text: str, matches: List[Match], parts: List[Tuple[str, st
         quote, opened, rest = word[offset], word[offset], word[offset + 1:] + trail
     else:
         return "", index
-    if quote in rest:
-        return "", index
-    for later in range(index + 1, len(matches)):
-        if "\n" in text[matches[later - 1].end():matches[later].start()]:
-            break
-        if quote in parts[later][2]:
-            return opened, later
-    return "", index
+    later = None if quote in rest else closing[quote][index]
+    return ("", index) if later is None else (opened, later)
 
 
 def _redact_commands(text: str) -> str:
@@ -388,13 +398,16 @@ def _redact_commands(text: str) -> str:
     stops = {index for index in range(1, len(matches))
              if ";" in parts[index - 1][2] or "\n" in text[matches[index - 1].end():matches[index].start()]}
     hidden = _secret_positions([word for _, word, _ in parts], stops)
+    if not hidden:
+        return text
+    closing = _closing_words(text, matches, parts)
     out: List[str] = []
     position = 0
     for index in sorted(hidden):
         if matches[index].start() < position:   # inside a quoted value already hidden
             continue
         lead, word, _ = parts[index]
-        opened, last = _quoted_value_end(text, matches, parts, index, hidden[index])
+        opened, last = _quoted_value_end(parts, closing, index, hidden[index])
         out.append(text[position:matches[index].start()])
         out.append(f"{lead}{word[:hidden[index]]}{opened}{REDACTED}{parts[last][2]}")
         position = matches[last].end()
