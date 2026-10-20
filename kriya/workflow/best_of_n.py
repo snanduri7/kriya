@@ -24,6 +24,7 @@ patching it - one candidate needs to succeed, not the first one.
 """
 import logging
 
+from kriya.repository.git import RepositoryContentFilterRefused
 from kriya.workflow.repair_contract import RepairContractStatus
 from kriya.workflow.state import RecoveryPhaseAdvanced
 
@@ -154,6 +155,11 @@ async def run_attempt_with_best_of_n(state, attempt_ctx, n: int) -> None:
             # A verified recovery transition, never a candidate failure: the
             # retry loop's own handler records it.
             raise
+        except RepositoryContentFilterRefused:
+            # S19e (OI-162): a typed repository refusal is never a candidate
+            # failure: it is not recorded, no independent candidate follows,
+            # and it ends the run as itself.
+            raise
         except Exception as e:
             if i == n - 1:
                 raise
@@ -170,6 +176,8 @@ async def run_attempt_with_best_of_n(state, attempt_ctx, n: int) -> None:
             # independent candidate only once that candidate can run.
             try:
                 create_git_worktree(attempt_ctx.workspace_path)
+            except RepositoryContentFilterRefused:
+                raise           # S19e (OI-162): never absorbed as "no fresh sandbox"; the recorded failure stays recorded
             except Exception as reset_error:
                 # No clean sandbox for another candidate: stop sampling. The
                 # loop continues from the recorded failure, in its own

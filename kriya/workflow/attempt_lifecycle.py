@@ -9,6 +9,13 @@ attempt-evidence iteration scope, the attempt, the candidate's acceptance, and t
 verified API-contract recovery transition, a failure Best-of-N already recorded, any other failure to
 ``retry_strategy.handle_attempt_failure``); it reports how the iteration ended (``IterationEnd``).
 
+A typed repository refusal (``kriya.repository.git.RepositoryContentFilterRefused``: Kriya runs no git there) is NOT
+an attempt failure (S19e, OI-162): it propagates as itself, exactly like the same refusal at the run entry and at the
+sandbox creation, so the run's caller receives its reason code. Routed to ``handle_attempt_failure`` it was recorded
+as a failed attempt and retried (another Developer call meets the same refusal; no retry can change the repository's
+or the operator's git configuration, and a security decision is never widened by retry), and the run ended
+``quality_gates_exhausted`` with the reason code lost (MEASURED at a0eb5f0).
+
 The attempt itself still decides its mode inside ``run_attempt`` (``retry_policy.decide_attempt_mode``, attempt.py,
 unchanged): the plan's mode equals it whenever the loop continues (``tests/test_attempt_lifecycle.py`` cross-checks
 both on real runs; ``tests/state_machine/test_sm_retry_decisions.py`` R9/R11 over the whole decision domain). A
@@ -26,6 +33,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Optional, Type
 
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
+from kriya.repository.git import RepositoryContentFilterRefused
 from kriya.workflow.retry_policy import RetryAction, RetryDecision, decide_for_state
 from kriya.workflow.run_events import EventAuthority, RunEvent
 
@@ -162,7 +170,8 @@ async def run_iteration(
 ) -> IterationOutcome:
     """One iteration: the resets, the attempt-evidence iteration scope, the planned attempt, the candidate's acceptance
     (``accept``: None = applied, a dict = the run's result), and a failed attempt's routing. Exceptions that are not
-    ``Exception`` (cancellation, interruption) propagate after the scope is closed, as before."""
+    ``Exception`` (cancellation, interruption) propagate after the scope is closed, as before; so does a typed
+    repository refusal (S19e, OI-162: never recorded or retried as a failed attempt)."""
     begin_attempt(state, attempt_ctx)
     # LR-R1-M1: the whole iteration is the attempt's evidence identity
     # (observational; reset in this try's finally).
@@ -186,6 +195,8 @@ async def run_iteration(
         if recorded.stop_loop:
             return IterationOutcome(IterationEnd.STOP)
         return IterationOutcome(IterationEnd.RETRY)
+    except RepositoryContentFilterRefused:
+        raise               # S19e (OI-162): the typed refusal ends the run as itself, never a retried attempt failure
     except Exception as e:
         if await handle_attempt_failure(state, attempt_ctx, e):
             return IterationOutcome(IterationEnd.STOP)

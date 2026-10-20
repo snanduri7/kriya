@@ -151,8 +151,8 @@ def test_the_development_loop_lets_the_closers_refusal_through():
 
 def test_a_direct_run_ends_with_the_closer_s_typed_refusal_and_releases_the_workspace(tmp_path, monkeypatch):
     """Runtime characterization of the pass-through (the AST pin above only proves the handler exists): a direct run
-    whose goal carries a mutation-scope requirement, and whose evidence refuses, commits nothing, ends failed and frees
-    the workspace for the next run (lock released)."""
+    whose goal carries a mutation-scope requirement, and whose evidence refuses, commits nothing, ends with that typed
+    refusal unretried (S19e) and frees the workspace for the next run (lock released)."""
     import asyncio
     from unittest.mock import AsyncMock
 
@@ -182,12 +182,12 @@ def test_a_direct_run_ends_with_the_closer_s_typed_refusal_and_releases_the_work
     engine = WorkflowEngine(Kernel(config=cfg), _role_llm(cfg, CALC_WITH_SUB))
     engine.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
     goal = "Add sub to `calc.py`.\n\nDo not modify any other file in the repository.\n"
-    result = asyncio.run(engine.run_generation_workflow(goal=goal, workspace_path=str(workspace)))
-    # MEASURED (reported to the owner, NOT decided here - outside the guard, owner correction 1): the refusal leaves
-    # _close_and_check_requirements typed, but the attempt lifecycle's generic handler (attempt_lifecycle.py,
-    # `except Exception` -> handle_attempt_failure) treats it as a retryable attempt failure; the run retries and ends
-    # failure_category=quality_gates_exhausted WITHOUT the refusal's reason code. Pinned: the safety properties only.
-    assert calls and result.get("status") != "success" and result["quality_gates_passed"] is False
+    # S19e (OI-162, changed assertion): the run used to retry the refusal as an attempt failure and end
+    # failure_category=quality_gates_exhausted WITHOUT its reason code (MEASURED at a0eb5f0: 7 Developer calls). The
+    # attempt lifecycle now lets the typed refusal through: the run ends with it, unretried (the closer runs once).
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        asyncio.run(engine.run_generation_workflow(goal=goal, workspace_path=str(workspace)))
+    assert raised.value.reason_code == REFUSED and calls == [1]
     assert (workspace / "calc.py").read_text() == CALC                    # nothing committed
     with begin_mutating_run(str(workspace)) as context:                  # the workspace lock was released
         assert context.run_id
