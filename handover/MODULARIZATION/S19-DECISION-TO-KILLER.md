@@ -22,6 +22,7 @@ tree_diff [], no stragglers): 18/18 KILLED at L1 (pytest `-x`: the first failing
 | D5 | applied at the spawn, after `_audit_git_write` / POL-001-P3 recognizers | every call site (56 + GitTool) | `test_every_kriya_git_spawn_goes_through_the_seam` (AST), `test_every_git_process_kriya_spawns_carries_the_options` (dynamic) | `test_the_rule_catches_every_unwrapped_shape` (13 planted controls), `test_the_seam_module_holds_no_git_literal_of_its_own` |
 | D6 | GitTool diff `--no-ext-diff --no-textconv`, blame `--no-textconv` (Q3, fail-closed) | plugins/core_tools GitTool._run_in | `test_gittool_diff_runs_no_repository_diff_driver`, `test_gittool_blame_runs_no_repository_textconv` | `test_gittool_reads_are_git_s_own_output_without_drivers`; S18b/S18c output-equality pins |
 | H1 | HELD (Q1, digest STOP): content-filter drivers are NOT neutralised | - | `test_held_q1_a_repository_content_filter_never_runs[2]` stays strict xfail | - |
+| H1 (S19 Q1, 2026-10-20) | owner decision REFUSAL: the held pins now expect the typed refusal | kriya/repository/git.py | see S19Q1-DECISION-TO-KILLER.md | - |
 
 ## Mutants (all KILLED at L1)
 

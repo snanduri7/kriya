@@ -270,3 +270,31 @@ S19.
   one error message quotes the longer argv).
 - Architecture: `test_direct_access_owners` subprocess / git_argv counts, the cycle baseline, the import-direction
   allowlist and module_map are unchanged (no new edge outside `_BASE`).
+
+## 8. Q1 result (appended 2026-10-20; owner decision: REFUSAL, not blanking; sections 0-7 are unchanged evidence)
+
+Origin MEASURED (git 2.54.0, `git config --show-scope --show-origin -z --get-regexp '^filter\..*\.(clean|smudge|process)$'`;
+the record is `scope NUL origin NUL key LF value NUL`; the inspection fired no planted driver in any case):
+
+| composition | reported scope / origin | decision |
+|---|---|---|
+| `.git/config` clean / smudge / process | local / `file:.git/config` | refuse (REPOSITORY_DEFINED) |
+| `include.path` (absolute), nested include, `includeIf "gitdir:/"` | local / the included file | refuse |
+| `include.path = ../x.gitcfg` (a work-tree file) | local / `file:.git/../x.gitcfg` | refuse |
+| `config.worktree` (`extensions.worktreeConfig`), also a reused linked worktree's own | worktree / `file:.git/config.worktree` | refuse |
+| repository override of a trusted global filter | global + local records | refuse (origin decides) |
+| global only (git-lfs-like) | global / `~/.gitconfig` | trusted: works, a repository may reference it |
+| global `include` / `includeIf` of a file INSIDE the repository | global / the repository file | refuse (ORIGIN_IN_REPOSITORY; fail-closed choice, owner question) |
+| global `include.path` relative | global / relative to the global file's folder (never the repository) | trusted |
+| `GIT_CONFIG_COUNT`, `GIT_CONFIG_PARAMETERS`, `-c` | command / `command line:` | trusted (Kriya's own process) |
+| `filter.x.required`, other metadata keys | not listed (rc 1) | not refused |
+| empty command | local, value "" | not refused (runs nothing, MEASURED) |
+| valueless key / whitespace command | local, value None / "   " | refuse (fail closed) |
+| broken config | rc 128 | refuse (GIT_CONFIG_UNINSPECTABLE) |
+| submodule / embedded repo (no `.gitmodules`) / gitlink only HEAD has | parent lists nothing (rc 1); the child's local scope | MEASURED firing through parent status/diff/add and the scratch-index `add -A`: inspected recursively, refuse |
+| untracked nested repository | - | MEASURED never fires (status/add do not recurse): not inspected |
+
+Correction: kriya/repository/git.py + one inspection immediately before every filter-capable Kriya git operation (and
+at `begin_mutating_run`); no memoization; NO digest moved (golden predictor on a filter-free repository unchanged);
+details in S19Q1-DECISION-TO-KILLER.md. Not covered (STOP / owner): `kriya review <folder>` (ADAPTER-CLI ->
+REPOSITORY needs one new import-direction row), Kriya's own source root (operator installation).

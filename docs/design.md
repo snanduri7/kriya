@@ -3392,3 +3392,46 @@ validated, only pydantic's explicitly unvalidated `model_construct` (no producti
 string; `tools.tool.ModelToolInvocation` and `subtask_executor` keep treating an unreadable mode as human-in-the-loop.
 A test tripwire fails if a production comparison names a value outside the vocabulary.
 
+### S19 Q1 - repository-defined git content filters are refused (2026-10-20, OI-141; owner decision: refusal, not blanking)
+
+Problem (MEASURED, handover/MODULARIZATION/S19-PREFLIGHT.md section 2): a content-filter driver
+(`filter.<x>.clean|smudge|process`) from the repository's own configuration ran on the host through 19 Kriya git call
+sites (status/diff/add/commit run clean and process, checkout/worktree add/archive run smudge). The S19 seam
+(`kriya.platform.git_argv`) does not neutralise filters, because blanking them moves `compute_workspace_content_hash` /
+`workspace_evidence_hash` and the candidate bytes.
+
+Owner and rule: `kriya/repository/git.py` (REPOSITORY, the declared `kriya.repository.git` contract; no new module_map
+entry, no allowlist row, no cycle). `refuse_repository_content_filters(path)` lists every
+`^filter\..*\.(clean|smudge|process)$` key with `git config --show-scope --show-origin -z --get-regexp` (through
+`git_argv`; reading configuration executes nothing) and decides by ORIGIN, never by the effective value: scope `local`
+or `worktree` (which is also what git reports for everything those scopes include: `include.path`, `includeIf`, nested
+includes, a work-tree file) -> `GIT_CONTENT_FILTER_REPOSITORY_DEFINED`; scope `system`/`global` from a file inside the
+repository (top level, git dir or common dir) -> `GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY` (fail-closed choice); scope
+`command` from `command line:` (Kriya's own argv and environment) and `system`/`global` files outside the repository
+-> trusted; anything else -> `GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED`; an unreadable or unparseable listing, a timeout
+or a failed spawn -> `GIT_CONFIG_UNINSPECTABLE`. An explicitly empty command runs nothing (MEASURED) and is not
+refused; any other value, including whitespace and a valueless key, is. A definition is refused whether or not a path
+is bound to it: the binding lives in `.gitattributes`, repository content that can change between two git calls.
+Submodules: a parent `status`/`diff`/`add` runs the child git of every populated gitlink with the CHILD's own
+configuration (MEASURED, also without `.gitmodules`, and the scratch-index hashes recurse into a gitlink only HEAD
+still has), so the gitlinks of the index (`ls-files -s`) and of HEAD (`ls-tree -r`) are inspected recursively (bounded
+nesting, a populated gitlink only). The refusal (`RepositoryContentFilterRefused`, deliberately not a
+RuntimeError/OSError/ValueError) names the key, scope and origin, never the command, through the one redactor.
+
+Choke point: no memoization (a repository's configuration, or a work-tree file it includes, can change between two
+calls), so every Kriya function whose git can run a filter inspects the folder it runs git in, immediately before:
+`begin_mutating_run` (every mutating run, CLI and KUP, before the run record exists), `worktree.git_status_entries`,
+`create_git_worktree` (and the reused worktree before its checkout), `remove_git_worktree` (cleanup: reports the typed
+refusal and skips the reset), `checkpoint.compute_workspace_fingerprint` / `compute_workspace_content_hash`,
+`milestone_completion.workspace_evidence_hash`, `named_test_oracle.export_base`, `skill.git_commit_if_tracked`
+(best-effort bookkeeping: logs the refusal, commits nothing), `analyzer._repository_revision` and the incremental
+index listing, `operator_scan.changed_paths` (before the scan's diff and its base worktree), and GitTool status/diff/blame/commit. Callers that
+used to fold a sandbox failure into another outcome (development loop, enforce plan worktree, worktree sync) let the
+refusal through as itself; Best-of-N keeps its reset contract (a failed reset ends sampling; the next inspection in the
+run's own worktree refuses, typed). Proof: `tests/test_s19q1_content_filter_refusal.py` records every git process
+each entry starts and asserts the inspection of that folder precedes every filter-capable operation. Not covered:
+`kriya review <folder>` (ADAPTER-CLI may not import REPOSITORY without a new import-direction row: owner question) and
+Kriya's own source root (`release_identity.kriya_revision`, operator installation). Cost (OI-60, MEASURED on a loaded host): one inspection is 4
+git spawns (rev-parse, config, ls-files -s, ls-tree -r HEAD) plus 4 per populated submodule - median 36 ms on 2,000
+tracked files, 61 ms on 20,000, 15 ms outside a repository; a scripted direct generation run inspected 10 times
+(0.36 s of 3.6 s).

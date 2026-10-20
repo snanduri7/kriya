@@ -21,7 +21,8 @@ from typing import List, Sequence
 #   fail-closed choice).
 # Command-line options outrank every configuration file and reach child gits (submodules) through
 # GIT_CONFIG_PARAMETERS. Content-filter drivers (filter.<x>.clean|smudge|process) are NOT neutralised here: blanking
-# them moves Kriya's content/evidence hashes (owner question Q1, held).
+# them moves Kriya's content/evidence hashes. Owner decision Q1 (2026-10-20): a repository-defined filter is REFUSED,
+# typed, before the git call - kriya.repository.git.refuse_repository_content_filters (S19 Q1).
 GIT_INVOCATION_OPTIONS = ("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false")
 
 

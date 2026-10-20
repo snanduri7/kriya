@@ -315,6 +315,40 @@ the desktop app) and to `kriya authority inspect` / `approve` too: an invalid mo
 or trust file recorded for one earlier no longer makes it load. Before S16a any other string was accepted and behaved
 as `guardrails`, so a one-letter typo of `human-in-the-loop` silently switched the review off.
 
+### 2.0a-3 Git content filters a repository defines are refused (S19 Q1) - a current security limitation
+
+Git runs a content-filter driver (`filter.<name>.clean`, `.smudge`, `.process`) as a command on your machine whenever
+it converts a file that `.gitattributes` (or `.git/info/attributes`) binds to `filter=<name>`: on `status`, `diff`,
+`add` and `commit` (clean / process) and on `checkout`, `worktree add` and `archive` (smudge). Kriya's own git calls do
+all of these, so a driver defined by the repository itself would execute through Kriya.
+
+Kriya therefore REFUSES to run git in a repository whose own configuration defines such a command, before the first
+git operation that could run it (a run refuses at its start; `analyze`, the static-analysis scan, the git tool and the
+content/evidence hashes refuse when they reach the repository). The error starts with a reason code and names the key,
+its scope and the file it comes from - never the command itself:
+
+- `GIT_CONTENT_FILTER_REPOSITORY_DEFINED` - the command is defined in `.git/config` (scope `local`), in a
+  `config.worktree` (scope `worktree`), or in any file those include through `include.path` / `includeIf`; also a
+  submodule's (or an embedded repository's) own configuration, because git runs the submodule's filters while it
+  inspects the parent;
+- `GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY` - your global or system configuration includes a file that lies inside the
+  repository (that file is repository content);
+- `GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED` / `GIT_CONFIG_UNINSPECTABLE` - Kriya could not establish where the command
+  comes from, or could not read the configuration at all (fail closed).
+
+Not refused: a filter defined in your GLOBAL or SYSTEM git configuration (Git LFS installed with `git lfs install`
+keeps working, and a repository may reference it from `.gitattributes`); `-c` / `GIT_CONFIG_*` settings in Kriya's own
+environment; filter metadata without a command (`filter.<name>.required`); an explicitly empty command. Kriya never
+blanks or rewrites a filter and never switches filters off to continue, so its content and evidence hashes are exactly
+git's.
+
+What to do when refused: define the filter globally and remove it from the repository's configuration - for Git LFS,
+`git lfs install` (global) instead of `git lfs install --local`, then `git config --local --remove-section
+filter.lfs` (or edit the included file the message names). This is a CURRENT SECURITY LIMITATION, not a trust
+assumption: Kriya has no supported way to run a repository-defined filter. Kriya's own source checkout (its release
+identity) is part of your installation and is not inspected. `kriya review <folder>` still runs `git status` without
+this check (the one remaining route, pending an owner decision on the import rule; see OI-141).
+
 ### 2.0b Where run history goes (`paths.state`)
 `traces.db` is the run history behind `kriya traces`. It is persistent state, not log output, so it has its own
 location: independent of the log settings, and never derived from the directory you run from.
