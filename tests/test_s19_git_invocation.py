@@ -10,8 +10,8 @@ Isolation: GIT_CONFIG_GLOBAL points at a per-test file holding only an identity 
 developer's own global fsmonitor / hooksPath / signing can neither fire nor mask a pin.
 
 Every pin below FLIPPED from a strict expected-to-flip xfail (characterization 4668ddb, MEASURED failing) with its owner
-module's correction commit. Held (Q1, owner decision, digest STOP): content-filter drivers (filter.<x>.clean|smudge|process). The held pin stays a
-strict xfail until the owner decides; it XPASSes (and so fails) the moment anything closes the vector.
+module's correction commit. Q1 (content-filter drivers, filter.<x>.clean|smudge|process): owner decision 2026-10-20
+REFUSAL, not blanking; the two former held pins now expect the typed refusal (S19 Q1, kriya/repository/git.py).
 """
 from __future__ import annotations
 
@@ -23,9 +23,6 @@ from typing import Callable, Dict
 import pytest
 
 from tests._plugin_test_support import load_core_tools_module
-
-_HELD_Q1 = pytest.mark.xfail(strict=True, reason="S19 Q1 (owner decision, digest STOP): repository content-filter "
-                                                 "drivers still run through Kriya's own git")
 
 
 @pytest.fixture(autouse=True)
@@ -292,16 +289,21 @@ def test_gittool_blame_runs_no_repository_textconv(owner):
     assert not marker.exists()
 
 
-# --------------------------------------------------------------------------------- held (owner decision Q1)
+# --------------------------------------------------------------------------------- Q1 (owner decision 2026-10-20: refusal)
 
-@_HELD_Q1
 @pytest.mark.parametrize("site", ["checkpoint.compute_workspace_content_hash", "worktree.git_status_entries"])
 def test_held_q1_a_repository_content_filter_never_runs(owner, site):
+    """S19 Q1 (flipped by the KERNEL correction): the repository-defined filter never runs and the call is refused,
+    typed (the full matrix: tests/test_s19q1_content_filter_refusal.py)."""
+    from kriya.repository.git import GIT_CONTENT_FILTER_REPOSITORY_DEFINED, RepositoryContentFilterRefused
+
     marker = owner.parent / "FILTER_RAN"
     (owner / ".git" / "info").mkdir(exist_ok=True)
     (owner / ".git" / "info" / "attributes").write_text("*.py filter=kx\n")
     _setup(owner, "config", "filter.kx.clean", _marker_script(owner.parent / "clean.sh", marker, passthrough=True))
-    _sites()[site](owner)
+    with pytest.raises(RepositoryContentFilterRefused) as refused:
+        _sites()[site](owner)
+    assert refused.value.reason_code == GIT_CONTENT_FILTER_REPOSITORY_DEFINED
     assert not marker.exists()
 
 

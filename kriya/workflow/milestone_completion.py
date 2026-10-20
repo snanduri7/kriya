@@ -364,8 +364,10 @@ def workspace_evidence_hash(workspace_path: str) -> Optional[str]:
     import uuid
 
     from kriya.analyzer.analyzer import GENERATED_OUTPUT_DIRS
+    from kriya.repository.git import refuse_repository_content_filters
     from kriya.workflow.checkpoint import compute_base_commit
 
+    refuse_repository_content_filters(workspace_path)    # S19 Q1: add -A/-u run clean filters; typed, never None
     index = os.path.join(tempfile.gettempdir(), f".kriya-evidence-index-{uuid.uuid4().hex}")
     env = {**child_environment(), "GIT_INDEX_FILE": index}
     generated = [f":(exclude,glob)**/{name}/**" for name in sorted(GENERATED_OUTPUT_DIRS)]

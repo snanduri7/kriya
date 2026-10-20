@@ -13,6 +13,7 @@ from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType
+from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
 from kriya.workflow.file_integrity import WORKTREE_CONTENT_MISMATCH, WORKTREE_SYNC_FAILED, file_raw_digest
 
 logger = logging.getLogger(__name__)
@@ -221,6 +222,8 @@ def _sync_uncommitted_changes_into_worktree(repo_path: str, worktree_path: str) 
     purely this sync gap."""
     try:
         entries = git_status_entries(repo_path, untracked="all", pathspec=(".", ":!.kriya"))
+    except RepositoryContentFilterRefused:
+        raise                                       # S19 Q1: a typed refusal, never a generic sync failure
     except Exception as error:
         raise WorktreeSyncError(WORKTREE_SYNC_FAILED, f"git status failed: {error}") from error
     synced: List[str] = []
@@ -292,7 +295,9 @@ def git_status_entries(
     """``git status --porcelain=v1 -z`` as (XY code, path, original path of a
     rename/copy). NUL-delimited, so spaces, tabs, newlines and non-UTF-8
     bytes in names reach the caller exactly (never Git's quoted display
-    form). Raises on a failed ``git status``."""
+    form). Raises on a failed ``git status``; refuses (S19 Q1) a repository
+    whose own configuration defines a content-filter command."""
+    refuse_repository_content_filters(repo_path)
     command = ["git", "status", "--porcelain=v1", "-z", f"--untracked-files={untracked}"]
     if pathspec:
         command += ["--", *pathspec]
@@ -488,6 +493,8 @@ def git_read_lines(cwd: str, *args: str) -> List[str]:
 
 
 def create_git_worktree(repo_path: str) -> str:
+    # S19 Q1: worktree add / checkout run smudge filters - refused, typed, before any git runs here.
+    refuse_repository_content_filters(repo_path)
     # 1. Quick pre-check: Is this a git repository?
     try:
         res = subprocess.run(git_argv(["git", "rev-parse", "--is-inside-work-tree"]), cwd=repo_path, capture_output=True, text=True)
@@ -590,6 +597,7 @@ def create_git_worktree(repo_path: str) -> str:
             # resolved against repo_path, not checked out literally inside the
             # worktree - see _resolve_repo_head for why.
             target = _resolve_repo_head(repo_path)
+            refuse_repository_content_filters(worktree_path)    # S19 Q1: the reused worktree's own config.worktree
             subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "checkout", "-f", target or "HEAD"]), cwd=worktree_path, check=True, capture_output=True)
             subprocess.run(git_argv(["git", "clean", "-fd"]), cwd=worktree_path, check=True, capture_output=True)
 
@@ -747,6 +755,14 @@ def remove_git_worktree(repo_path: str, worktree_path: str) -> None:
         return
 
     if os.path.exists(worktree_path):
+        # S19 Q1: checkout runs smudge filters. This is cleanup (called after a durable commit and from finally blocks),
+        # so a refusal is reported, typed, and the reset is skipped: raising here would turn a committed run into a
+        # failure or mask the error being handled; the next create_git_worktree refuses before any git runs.
+        try:
+            refuse_repository_content_filters(worktree_path)
+        except RepositoryContentFilterRefused as refusal:
+            logger.error("Worktree reset skipped at %r: %s", worktree_path, refusal)
+            return
         try:
             target = _resolve_repo_head(repo_path)
             subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "checkout", "-f", target or "HEAD"]), cwd=worktree_path, capture_output=True)

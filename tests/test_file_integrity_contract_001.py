@@ -691,7 +691,9 @@ def test_issue12_sync_content_mismatch_fails_closed(repo):
 def test_issue12_status_parser_refuses_unparseable_records(repo):
     from kriya.workflow import worktree as worktree_module
 
-    with patch.object(worktree_module.subprocess, "run", return_value=subprocess.CompletedProcess(
+    # S19 Q1: the double answers EVERY subprocess.run, so the content-filter inspection (its own spawns) is held out of it.
+    with patch.object(worktree_module, "refuse_repository_content_filters"), \
+         patch.object(worktree_module.subprocess, "run", return_value=subprocess.CompletedProcess(
             [], 0, stdout=b"R  new\0", stderr=b"")):
         with pytest.raises(RuntimeError):
             worktree_module.git_status_entries(str(repo))

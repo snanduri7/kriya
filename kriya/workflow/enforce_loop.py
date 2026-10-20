@@ -38,6 +38,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from kriya.repository.git import RepositoryContentFilterRefused
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.plan_schema import EngineeringPlan, Subtask, VerificationMethodType
 from kriya.workflow.subtask_executor import plannable_tool_names
@@ -1526,10 +1527,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # needs_review WorkflowResult.
         try:
             plan_workspace_path = deps.create_git_worktree(workspace_path)
-        except deps.WorktreeSyncError:
+        except (deps.WorktreeSyncError, RepositoryContentFilterRefused):
             # FILE-INTEGRITY-CONTRACT-001: a sandbox that does not hold the
             # workspace's exact bytes is a typed stop (execute() reports its
-            # reason code), never a planning problem.
+            # reason code), never a planning problem; S19 Q1: so is a
+            # repository-defined content filter.
             raise
         except Exception as e:
             raise deps._StructuredPlanUnavailable(

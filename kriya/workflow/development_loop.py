@@ -40,6 +40,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from kriya.control.run_coordinator import mark_run_stage
 from kriya.control.run_record import RunLifecycle
 from kriya.policy.filesystem import WriteScopeMode
+from kriya.repository.git import RepositoryContentFilterRefused
 from kriya.tools.validate import PolymorphicValidator, execution_evidence
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
 from kriya.workflow.architectural_choice import architecture_choice_invalidated_message
@@ -376,6 +377,8 @@ async def prepare_development(ctx: StageContext, deps: StageDeps) -> Union[Dict[
             "workspace_path": workspace_path, "run_id": trace_id, "files": [],
             "quality_gates_passed": False,
         }
+    except RepositoryContentFilterRefused:
+        raise                       # S19 Q1: the typed refusal reaches the run's caller as itself
     except Exception as e:
         raise RuntimeError(
             f"Failed to create an isolated generation sandbox: {e}. "

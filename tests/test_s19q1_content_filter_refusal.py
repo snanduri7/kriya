@@ -147,6 +147,7 @@ def _sites() -> Dict[str, Callable[[Path], object]]:
         "run_coordinator.begin_mutating_run": _begin_run,
         "worktree.git_status_entries": lambda o: worktree.git_status_entries(str(o)),
         "worktree.create_git_worktree": lambda o: worktree.create_git_worktree(str(o)),
+        "worktree.create_git_worktree(reuse)": lambda o: worktree.create_git_worktree(str(o)),
         "worktree.remove_git_worktree": lambda o: worktree.remove_git_worktree(str(o), worktree.managed_worktree_path(str(o))),
         "checkpoint.compute_workspace_fingerprint": lambda o: checkpoint.compute_workspace_fingerprint(str(o)),
         "checkpoint.compute_workspace_content_hash": lambda o: checkpoint.compute_workspace_content_hash(str(o)),
@@ -163,11 +164,15 @@ def _sites() -> Dict[str, Callable[[Path], object]]:
 
 
 SITES = ["run_coordinator.begin_mutating_run", "worktree.git_status_entries", "worktree.create_git_worktree",
+         "worktree.create_git_worktree(reuse)",
          "worktree.remove_git_worktree", "checkpoint.compute_workspace_fingerprint",
          "checkpoint.compute_workspace_content_hash", "milestone_completion.workspace_evidence_hash",
          "named_test_oracle.export_base", "analyzer._repository_revision", "analyzer.index_repository(changed)",
          "operator_scan.changed_paths", "GitTool status", "GitTool diff", "GitTool blame", "GitTool commit"]
-_PENDING = set(SITES)
+_PENDING = set(SITES) - {"worktree.git_status_entries", "worktree.create_git_worktree",
+                         "worktree.create_git_worktree(reuse)", "worktree.remove_git_worktree",
+                         "checkpoint.compute_workspace_fingerprint", "checkpoint.compute_workspace_content_hash",
+                         "milestone_completion.workspace_evidence_hash", "named_test_oracle.export_base"}
 
 
 def _site_params():
@@ -175,7 +180,10 @@ def _site_params():
 
 
 # Sites that need the managed worktree to exist before the plant (the reuse / reset paths).
-_NEEDS_WORKTREE = {"worktree.remove_git_worktree"}
+_NEEDS_WORKTREE = {"worktree.remove_git_worktree", "worktree.create_git_worktree(reuse)"}
+# Cleanup that runs after a durable commit and from finally blocks: it reports the typed refusal and skips its git
+# (raising there would fail a committed run or mask the error being handled); the next worktree creation refuses.
+_REPORTS_REFUSAL = {"worktree.remove_git_worktree"}
 
 
 def _plant_local(repo: Path, marker: Path, *keys: str, scope: str = "--local") -> None:
@@ -184,13 +192,16 @@ def _plant_local(repo: Path, marker: Path, *keys: str, scope: str = "--local") -
         _setup(repo, "config", scope, f"filter.kx.{key}", command)
 
 
-def _assert_refused(site: str, repo: Path, marker: Path, code: str = REFUSED) -> None:
+def _assert_refused(site: str, repo: Path, marker: Path, code: str = REFUSED, caplog=None) -> None:
     error: Optional[BaseException] = None
     try:
         _sites()[site](repo)
     except Exception as raised:                       # noqa: BLE001 - the refusal may arrive wrapped (GitTool)
         error = raised
     assert not marker.exists(), f"{site} ran the repository's filter"          # the vector first
+    if site in _REPORTS_REFUSAL:
+        assert error is None and caplog is not None and f"{code}: " in caplog.text and "filter.kx." in caplog.text
+        return
     assert error is not None and _reason(error) == code, f"{site}: {error!r}"   # then the typed refusal
     assert "filter.kx." in str(error)
 
@@ -198,7 +209,7 @@ def _assert_refused(site: str, repo: Path, marker: Path, code: str = REFUSED) ->
 # --------------------------------------------------------------------------------- the site matrix
 
 @pytest.mark.parametrize("site", _site_params())
-def test_a_repository_filter_is_refused_before_any_kriya_git_runs_it(owner, site):
+def test_a_repository_filter_is_refused_before_any_kriya_git_runs_it(owner, site, caplog):
     from kriya.workflow import worktree
 
     if site in _NEEDS_WORKTREE:
@@ -208,7 +219,8 @@ def test_a_repository_filter_is_refused_before_any_kriya_git_runs_it(owner, site
     _bind(owner)
     _dirty(owner)
     assert "filter" in (owner / ".git" / "config").read_text()     # the plant is really there
-    _assert_refused(site, owner, marker)
+    with caplog.at_level(logging.ERROR):
+        _assert_refused(site, owner, marker, caplog=caplog)
 
 
 @_FLIPS
@@ -255,7 +267,6 @@ def _plant_include(repo: Path, marker: Path, kind: str) -> None:
         raise AssertionError(kind)
 
 
-@_FLIPS
 @pytest.mark.parametrize("kind", ["include.path", "includeIf", "nested include", "include from the work tree",
                                   "config.worktree"])
 def test_an_included_or_worktree_scoped_filter_is_refused(owner, kind):
@@ -266,7 +277,21 @@ def test_an_included_or_worktree_scoped_filter_is_refused(owner, kind):
     _assert_refused("worktree.git_status_entries", owner, marker)
 
 
-@_FLIPS
+def test_the_reused_worktree_s_own_config_worktree_is_refused_before_its_checkout(owner):
+    """The managed worktree is reused across runs: its OWN config.worktree (extensions.worktreeConfig) is not the
+    owner's configuration, so the reuse path inspects the worktree itself before `checkout -f` there."""
+    from kriya.workflow import worktree
+
+    candidate = Path(worktree.create_git_worktree(str(owner)))
+    marker = owner.parent / "FILTER_RAN"
+    _setup(owner, "config", "extensions.worktreeConfig", "true")
+    _setup(candidate, "config", "--worktree", "filter.kx.smudge", _marker_script(owner.parent / "smudge.sh", marker))
+    _bind(owner)
+    (candidate / "a.py").write_text("x = 9\n")                        # the reset checkout has something to restore
+    assert "filter.kx.smudge" not in _setup(owner, "config", "--list")   # the owner's own view: nothing defined
+    _assert_refused("worktree.create_git_worktree(reuse)", owner, marker)
+
+
 @pytest.mark.parametrize("key, site", [("clean", "worktree.git_status_entries"),
                                        ("smudge", "worktree.create_git_worktree"),
                                        ("process", "checkpoint.compute_workspace_content_hash")])
@@ -278,7 +303,6 @@ def test_each_driver_kind_alone_is_refused(owner, key, site):
     _assert_refused(site, owner, marker)
 
 
-@_FLIPS
 def test_a_repository_override_of_a_trusted_global_filter_is_refused(owner, global_config):
     """The ORIGIN decides, not the effective value: the global (trusted) definition is overridden by the repository."""
     with open(global_config, "a", encoding="utf-8") as handle:
@@ -290,7 +314,6 @@ def test_a_repository_override_of_a_trusted_global_filter_is_refused(owner, glob
     _assert_refused("checkpoint.compute_workspace_content_hash", owner, marker)
 
 
-@_FLIPS
 def test_a_global_file_including_a_repository_file_is_refused(owner, global_config):
     """Fail-closed choice (owner question in the S19 Q1 report): an operator file that includes a file INSIDE the
     repository makes repository content the origin of the command (MEASURED: git reports scope global)."""
@@ -316,7 +339,6 @@ def _embedded(parent: Path, path: str) -> Path:
     return nested
 
 
-@_FLIPS
 @pytest.mark.parametrize("shape", ["submodule", "gitlink without .gitmodules", "gitlink only HEAD still has"])
 def test_a_filter_in_a_submodule_s_own_config_is_refused(tmp_path, shape):
     """MEASURED: the parent's status / diff / add run the CHILD git of every populated gitlink with the child's own
@@ -512,6 +534,20 @@ def test_the_refusal_names_key_scope_and_origin_never_the_command(owner):
                                                                            "file:.git/config")
 
 
+def test_the_refusal_message_goes_through_the_one_redactor(tmp_path):
+    """The origin is a path the repository controls; a secret-shaped part of it is redacted like any other text."""
+    from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
+
+    owner = _repository(tmp_path)
+    secret_dir = tmp_path / "password=hunter2hunter2"
+    secret_dir.mkdir()
+    (secret_dir / "inc.cfg").write_text('[filter "kx"]\n\tclean = x\n')
+    _setup(owner, "config", "include.path", str(secret_dir / "inc.cfg"))
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        refuse_repository_content_filters(str(owner))
+    assert "hunter2" in raised.value.origin and "hunter2" not in str(raised.value)
+
+
 def test_the_inspection_itself_runs_no_filter(owner):
     """Inspecting (and refusing) never executes the planted command, with the file bound and racily dirty."""
     from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
@@ -645,6 +681,91 @@ def test_an_unpopulated_gitlink_is_not_inspected_and_nesting_is_bounded(tmp_path
     assert raised.value.reason_code == git.GIT_CONFIG_UNINSPECTABLE
     monkeypatch.setattr(git, "_MAX_NESTING", 16)
     shutil.rmtree(nested)
+    git.refuse_repository_content_filters(str(owner))                  # the gitlink's folder is gone: nothing to inspect
     nested.mkdir()                                                     # unpopulated: git does not recurse there
     _setup(owner, "config", "-f", str(owner / ".gitmodules"), "submodule.smod.path", "smod")
     git.refuse_repository_content_filters(str(owner))
+
+
+# --------------------------------------------------------------------------------- the refusal reaches the caller as itself
+# A refusal raised mid-run (configuration that appeared after the run's entry check) must stay typed: never a generic
+# sandbox error, a "plan unavailable" needs-review result or a sync failure. (Best-of-N's reset keeps its own contract:
+# a failed reset ends sampling and the loop continues in its worktree, where the next inspection refuses, typed.)
+
+def _refusal(path: str = "/ws"):
+    from kriya.repository.git import GIT_CONTENT_FILTER_REPOSITORY_DEFINED, RepositoryContentFilterRefused
+
+    return RepositoryContentFilterRefused(GIT_CONTENT_FILTER_REPOSITORY_DEFINED, path, key="filter.kx.smudge",
+                                          scope="local", origin="file:.git/config")
+
+
+def test_the_worktree_sync_lets_the_refusal_through(owner, monkeypatch):
+    from kriya.repository.git import RepositoryContentFilterRefused
+    from kriya.workflow import worktree
+
+    def refuse(*_args, **_kwargs):
+        raise _refusal(str(owner))
+    monkeypatch.setattr(worktree, "git_status_entries", refuse)
+    with pytest.raises(RepositoryContentFilterRefused):
+        worktree._sync_uncommitted_changes_into_worktree(str(owner), str(owner.parent / "sandbox"))
+
+
+def _entry_checks_pass(monkeypatch) -> None:
+    """The configuration appears AFTER the run's entry check and the content hashes (no-op there); the sandbox
+    creation (kriya.workflow.worktree) is the first inspection that sees it."""
+    from kriya.control import run_coordinator
+    from kriya.workflow import checkpoint
+
+    monkeypatch.setattr(checkpoint, "refuse_repository_content_filters", lambda _path: None)
+    monkeypatch.setattr(run_coordinator, "refuse_repository_content_filters", lambda _path: None, raising=False)
+
+
+def test_the_direct_development_loop_lets_the_sandbox_refusal_through(tmp_path, monkeypatch):
+    from _chaos_harness import (
+        CALC,
+        CALC_WITH_SUB,
+        ChaosRuntime,
+        RuntimeRegistration,
+        benign_roles,
+        chaos_config,
+        chaos_engine,
+        git_workspace,
+        run_direct,
+    )
+
+    from kriya.repository.git import RepositoryContentFilterRefused
+
+    workspace = git_workspace(tmp_path, {"calc.py": CALC})
+    marker = tmp_path / "SMUDGE_RAN"
+    _setup(workspace, "config", "filter.kx.smudge", _marker_script(tmp_path / "smudge.sh", marker))  # smudge only:
+    _bind(workspace)                                                    # nothing before the sandbox runs it
+    _entry_checks_pass(monkeypatch)
+    runtime = ChaosRuntime(lambda role, request: CALC_WITH_SUB if role == "developer" else benign_roles(role, request))
+    with RuntimeRegistration(runtime), pytest.raises(RepositoryContentFilterRefused):
+        run_direct(chaos_engine(chaos_config()), "add sub to calc.py", workspace)
+    assert not marker.exists()
+
+
+def test_the_enforce_plan_worktree_lets_the_refusal_through(tmp_path, monkeypatch):
+    from _enforce_unit_harness import run_enforce
+
+    from kriya.repository.git import RepositoryContentFilterRefused
+    from kriya.workflow.plan_schema import EngineeringPlan
+
+    marker = tmp_path / "SMUDGE_RAN"
+
+    def plant(workspace):
+        _setup(workspace, "config", "filter.kx.smudge", _marker_script(tmp_path / "smudge.sh", marker))
+        _bind(workspace)
+
+    _entry_checks_pass(monkeypatch)
+    plan = EngineeringPlan.model_validate({
+        "plan_id": "p", "kind": "task", "global_invariants": [{"id": "gi1", "statement": "x"}], "acceptance_criteria": [],
+        "subtasks": [{"id": "s1", "description": "edit shop.py", "execution_method": "model",
+                      "planned_files": [{"path": "shop.py", "action": "modify"}], "depends_on": [], "provides": ["p_s1"],
+                      "relevant_global_invariant_ids": ["gi1"],
+                      "verification": [{"type": "tool", "tool_name": "compile", "description": "compile"}]}]})
+    with pytest.raises(RepositoryContentFilterRefused):
+        run_enforce(tmp_path, plan=plan, units={"s1": ("shop.py", "PAGE = 2\n")}, base_files={"shop.py": "PAGE = 1\n"},
+                    on_workspace=plant)
+    assert not marker.exists()

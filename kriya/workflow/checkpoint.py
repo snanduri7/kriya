@@ -40,6 +40,7 @@ from kriya.control.checkpoint import new_run_id as new_run_id
 from kriya.control.checkpoint import save_checkpoint as save_checkpoint
 from kriya.control.checkpoint import without_observational_config as without_observational_config
 from kriya.platform import git_argv
+from kriya.repository.git import refuse_repository_content_filters
 from kriya.workflow.resume_fingerprints import (
     CHECKPOINT_KEY as RESUME_FINGERPRINTS_KEY,
 )
@@ -58,7 +59,9 @@ logger = logging.getLogger(__name__)
 
 
 def compute_workspace_fingerprint(workspace_path: str) -> Optional[str]:
-    """Git HEAD SHA + dirty/clean marker. None if not a git repo (resume unavailable)."""
+    """Git HEAD SHA + dirty/clean marker. None if not a git repo (resume unavailable). Refuses (S19 Q1, typed, never
+    None) a repository whose own configuration defines a content-filter command: status could run it."""
+    refuse_repository_content_filters(workspace_path)
     try:
         head = subprocess.run(
             git_argv(["git", "rev-parse", "HEAD"]), cwd=workspace_path, capture_output=True, text=True
@@ -161,6 +164,7 @@ def compute_workspace_content_hash(workspace_path: str) -> Optional[str]:
     HEAD does not resolve (e.g. a repo with zero commits), or any step
     fails for any reason - the scratch index file is always removed in a
     `finally` block regardless of outcome."""
+    refuse_repository_content_filters(workspace_path)    # S19 Q1: add -A runs clean filters; typed, never None
     tmp_index_path = os.path.join(
         tempfile.gettempdir(), f".kriya-scratch-index-{uuid.uuid4().hex}",
     )

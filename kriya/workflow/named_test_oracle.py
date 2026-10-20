@@ -73,6 +73,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 
 from kriya.core.tomlcompat import tomllib
 from kriya.platform import git_argv
+from kriya.repository.git import refuse_repository_content_filters
 from kriya.tools import test_execution
 
 NAMED_TEST_ORACLE_VERSION = 1
@@ -170,7 +171,10 @@ def _git(repo: str, *args: str) -> bytes:
 
 def export_base(base: BaseTree, destination: str) -> None:
     """The base revision's tracked tree, written by git/tar into a
-    Kriya-owned directory outside the workspace."""
+    Kriya-owned directory outside the workspace. ``git archive`` runs smudge
+    filters: refused (S19 Q1) where the repository's own configuration
+    defines one."""
+    refuse_repository_content_filters(base.repo)
     archive = subprocess.Popen(git_argv(["git", "archive", "--format=tar", base.revision]), cwd=base.repo,
                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     try:
