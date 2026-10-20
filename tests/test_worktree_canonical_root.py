@@ -434,7 +434,7 @@ def test_worktree_locations_are_decided_only_by_worktree_py():
     assert sorted(offenders) == [
         ("kriya/production_doctor.py", "_check_git_worktree", "worktree", "[git, 'worktree', 'list', '--porcelain']"),
         ("kriya/static_analysis/operator_scan.py", "run_operator_scan", "worktree",
-         "_git(workspace, 'worktree', 'add', '--detach', base_root, base)"),
+         "_git(workspace, 'worktree', 'add', '--detach', '--no-checkout', base_root, base)"),   # S19 P1c 8(b)
         ("kriya/static_analysis/operator_scan.py", "run_operator_scan", "worktree",
          "_git(workspace, 'worktree', 'remove', '--force', base_root)"),
         ("kriya/tools/git_metadata.py", "<module>:_FORBIDDEN_ENTRIES", "worktrees",

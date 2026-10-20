@@ -364,22 +364,29 @@ def workspace_evidence_hash(workspace_path: str) -> Optional[str]:
     import uuid
 
     from kriya.analyzer.analyzer import GENERATED_OUTPUT_DIRS
-    from kriya.repository.git import refuse_repository_content_filters
+    from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
     from kriya.workflow.checkpoint import compute_base_commit
 
     refuse_repository_content_filters(workspace_path)    # S19 Q1: add -A/-u run clean filters; typed, never None
     index = os.path.join(tempfile.gettempdir(), f".kriya-evidence-index-{uuid.uuid4().hex}")
     env = {**child_environment(), "GIT_INDEX_FILE": index}
     generated = [f":(exclude,glob)**/{name}/**" for name in sorted(GENERATED_OUTPUT_DIRS)]
+    update = git_argv(["git", "add", "-u", "--", ".", ":!.kriya"])
     steps = (
         git_argv(["git", "read-tree", "HEAD"]),
         git_argv(["git", "add", "-A", "--", ".", ":!.kriya", *generated]),
-        git_argv(["git", "add", "-u", "--", ".", ":!.kriya"]),
+        update,
         git_argv(["git", "write-tree"]),
     )
     try:
         output = ""
         for step in steps:
+            if step is update:
+                # S19 P1c (relayed F3, MEASURED): `add -A` records an UNTRACKED embedded repository as a new gitlink of
+                # the scratch index and `add -u` then runs that repository's own git (and its clean filter). The
+                # repositories `add -u` reaches are the scratch index's gitlinks: inspected with this very environment
+                # (GIT_INDEX_FILE) immediately before it - the context git really runs in, not a pre-scan.
+                refuse_repository_content_filters(workspace_path, env=env)
             done = subprocess.run(step, cwd=workspace_path, env=env, capture_output=True, text=True)
             if done.returncode != 0:
                 return None
@@ -388,6 +395,8 @@ def workspace_evidence_hash(workspace_path: str) -> Optional[str]:
         if base is None or not output:
             return None
         return hashlib.sha256(f"{base}\x00{output}".encode("utf-8")).hexdigest()
+    except RepositoryContentFilterRefused:
+        raise                                            # typed, never None
     except Exception:
         return None
     finally:

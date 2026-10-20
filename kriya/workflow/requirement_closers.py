@@ -676,6 +676,7 @@ def mutation_scope_evidence(
     ``unavailable`` when the candidate is not at the run's base revision or
     git/commit evidence cannot be read."""
     _run_committed_paths = deps.run_committed_paths
+    from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
     from kriya.workflow.worktree import git_read_lines as _git_lines
 
     try:
@@ -685,12 +686,17 @@ def mutation_scope_evidence(
             return [], {"unavailable": f"candidate is at {head[:12]}, not the run base {base[:12]}"}
         base = base or head
         tracked = _git_lines(candidate_root, "ls-tree", "-r", "--name-only", base)
+        # S19 P1c (8(a)): `diff <base>` compares the WORK TREE and runs a clean filter on a stat-dirty file (MEASURED);
+        # the folder it runs in is inspected immediately before it, and a refusal is typed, never "unavailable".
+        refuse_repository_content_filters(candidate_root)
         changed = {
             path for path in (
                 _git_lines(candidate_root, "diff", "--name-only", "--no-renames", "--relative", base)
                 + _git_lines(candidate_root, "ls-files", "--others", "--exclude-standard")
             ) if not (path == ".kriya" or path.startswith(".kriya/"))
         }
+    except RepositoryContentFilterRefused:
+        raise
     except Exception as exc:
         return [], {"unavailable": f"{type(exc).__name__}: {exc}"}
     actual = (set(candidate_paths) & changed) | set(committed)

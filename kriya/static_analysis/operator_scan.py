@@ -71,8 +71,12 @@ def run_operator_scan(cfg: Any, workspace: str, base: str) -> StaticAnalysisGate
     paths = changed_paths(workspace, base)
     with tempfile.TemporaryDirectory(prefix="kriya-static-analysis-base-") as parent:
         base_root = os.path.join(parent, "base")
-        _git(workspace, "worktree", "add", "--detach", base_root, base)
+        # S19 P1c (8(b)): no checkout in `worktree add` - the base worktree's own context (git dir
+        # <common>/worktrees/<id>) is inspected first, then populated exactly as `worktree add` would.
+        _git(workspace, "worktree", "add", "--detach", "--no-checkout", base_root, base)
         try:
+            refuse_repository_content_filters(base_root)
+            _git(base_root, "reset", "--hard", "--no-recurse-submodules", "-q")
             return StaticAnalysisService(cfg).evaluate(StaticAnalysisRequest(
                 writes=operator_writes(workspace, base_root, paths), workspace_path=base_root,
                 run_id="operator-scan", unit_id=base.replace("/", "_"), identity_root=workspace,

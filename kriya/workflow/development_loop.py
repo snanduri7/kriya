@@ -686,6 +686,8 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
                     worktree_path, workspace_path, candidate_paths=state.all_files_written,
                     revision=state.attempt_number,
                 )
+            except RepositoryContentFilterRefused:
+                raise               # S19 P1c (8(a)): the typed refusal of mutation_scope_evidence reaches the caller
             except Exception as exc:
                 scope_closures = []
                 logger.warning(f"Requirement mutation-scope evidence unavailable: {exc}")
@@ -762,6 +764,8 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
                     worktree_path, workspace_path, candidate_paths=state.all_files_written,
                     revision=state.attempt_number, contract=verification_contract,
                 )
+            except RepositoryContentFilterRefused:
+                raise               # S19 P1c (8(a)): via mutation_scope_evidence
             except Exception as exc:
                 immutability_closures = []
                 logger.warning(f"Requirement test-immutability evidence unavailable: {exc}")
@@ -772,6 +776,8 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
                     worktree_path, workspace_path, candidate_paths=state.all_files_written,
                     revision=state.attempt_number, contract=verification_contract,
                 )
+            except RepositoryContentFilterRefused:
+                raise               # S19 P1c (8(a)): via mutation_scope_evidence
             except Exception as exc:
                 frozen_closures = []
                 logger.warning(f"Requirement file-immutability evidence unavailable: {exc}")
@@ -791,6 +797,8 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
                     baseline_source=SUITE_BASELINE_FROM_RUN,
                     run_baseline_policy=state.validation_baseline_policy,
                 )
+            except RepositoryContentFilterRefused:
+                raise               # S19 P1c (8(a)): via mutation_scope_evidence
             except Exception as exc:
                 suite_closures = []
                 logger.warning(f"Requirement suite-preservation evidence unavailable: {exc}")

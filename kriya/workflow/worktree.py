@@ -493,6 +493,21 @@ def git_read_lines(cwd: str, *args: str) -> List[str]:
     return [line for line in completed.stdout.splitlines() if line.strip()]
 
 
+def _add_worktree(repo_path: str, worktree_path: str) -> None:
+    """``git worktree add --detach`` in two steps (S19 P1c, finding 8(b)): the checkout runs in the NEW worktree's
+    context (git dir ``<common>/worktrees/<id>``), where configuration the main work tree's context never sees can
+    apply - MEASURED: a local ``includeIf "gitdir:**/worktrees/**"`` defining a smudge filter passed the inspection of
+    the main work tree and ran in ``worktree add``. So the worktree is added WITHOUT a checkout (runs no filter), the
+    new worktree is inspected in its own context, and only then populated with exactly what ``worktree add`` itself
+    runs (``reset --hard --no-recurse-submodules``; MEASURED identical index, bytes, modes, HEAD and status). A refusal
+    leaves the registered, unpopulated worktree: the reuse path inspects it again before its checkout."""
+    subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "worktree", "add", "--detach", "--no-checkout", worktree_path]),
+                   cwd=repo_path, check=True, capture_output=True)
+    refuse_repository_content_filters(worktree_path)
+    subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "reset", "--hard", "--no-recurse-submodules", "-q"]),
+                   cwd=worktree_path, check=True, capture_output=True)
+
+
 def create_git_worktree(repo_path: str) -> str:
     # S19 Q1: worktree add / checkout run smudge filters - refused, typed, before any git runs here.
     refuse_repository_content_filters(repo_path)
@@ -578,7 +593,7 @@ def create_git_worktree(repo_path: str) -> str:
     if not worktree_registered:
         if os.path.exists(worktree_path):
             shutil.rmtree(worktree_path, ignore_errors=True)
-        subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "worktree", "add", "--detach", worktree_path]), cwd=repo_path, check=True, capture_output=True)
+        _add_worktree(repo_path, worktree_path)
     else:
         # Recreate the directory physically if it was deleted but still registered
         if not os.path.exists(worktree_path):
@@ -586,7 +601,7 @@ def create_git_worktree(repo_path: str) -> str:
                 subprocess.run(git_argv(["git", "worktree", "prune"]), cwd=repo_path, capture_output=True)
             except Exception as e:
                 logger.debug(f"git worktree prune failed (non-fatal): {e}")
-            subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "worktree", "add", "--detach", worktree_path]), cwd=repo_path, check=True, capture_output=True)
+            _add_worktree(repo_path, worktree_path)
         else:
             # Reset to the repository's HEAD. `git clean -fd` removes every
             # untracked file and directory that is not git-ignored, and keeps

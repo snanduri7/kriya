@@ -141,7 +141,18 @@ def _sites() -> Dict[str, Callable[[Path], object]]:
         (repo.parent / "export").mkdir(exist_ok=True)
         return named_test_oracle.export_base(base, str(repo.parent / "export"))
 
+    def mutation_scope(repo: Path) -> object:
+        """S19 P1c 8(a): the requirement closer's `diff <base>` in the candidate root (MEASURED filter-capable)."""
+        from kriya.workflow import requirement_closers
+
+        head = _setup(repo, "rev-parse", "HEAD").strip()
+
+        class Deps:
+            run_committed_paths = staticmethod(lambda _workspace: ("run", head, []))
+        return requirement_closers.mutation_scope_evidence(Deps(), str(repo), str(repo), candidate_paths=["a.py"])
+
     return {
+        "requirement_closers.mutation_scope_evidence": mutation_scope,
         "run_coordinator.begin_mutating_run": _begin_run,
         "worktree.git_status_entries": lambda o: worktree.git_status_entries(str(o)),
         "worktree.create_git_worktree": lambda o: worktree.create_git_worktree(str(o)),
@@ -166,7 +177,8 @@ SITES = ["run_coordinator.begin_mutating_run", "worktree.git_status_entries", "w
          "worktree.remove_git_worktree", "checkpoint.compute_workspace_fingerprint",
          "checkpoint.compute_workspace_content_hash", "milestone_completion.workspace_evidence_hash",
          "named_test_oracle.export_base", "analyzer._repository_revision", "analyzer.index_repository(changed)",
-         "operator_scan.changed_paths", "GitTool status", "GitTool diff", "GitTool blame", "GitTool commit"]
+         "operator_scan.changed_paths", "GitTool status", "GitTool diff", "GitTool blame", "GitTool commit",
+         "requirement_closers.mutation_scope_evidence"]
 # Sites that need the managed worktree to exist before the plant (the reuse / reset paths).
 _NEEDS_WORKTREE = {"worktree.remove_git_worktree", "worktree.create_git_worktree(reuse)"}
 # Cleanup that runs after a durable commit and from finally blocks: it reports the typed refusal and skips its git
@@ -475,7 +487,9 @@ def test_the_inspection_precedes_every_filter_capable_git_operation(owner, site,
     class Recording(real_popen):
         def __init__(self, args, *rest, **kwargs):
             if isinstance(args, (list, tuple)) and args and Path(str(args[0])).name == "git":
-                spawned.append((_subcommand([str(a) for a in args]), os.path.realpath(kwargs.get("cwd") or os.getcwd())))
+                index = (kwargs.get("env") or {}).get("GIT_INDEX_FILE")
+                spawned.append((_subcommand([str(a) for a in args]), os.path.realpath(kwargs.get("cwd") or os.getcwd()),
+                                index))
             super().__init__(args, *rest, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", Recording)
@@ -483,14 +497,35 @@ def test_the_inspection_precedes_every_filter_capable_git_operation(owner, site,
         _sites()[site](owner)
     except Exception:                                    # e.g. GitTool commit with nothing new: the order is the subject
         pass
+    _assert_guarded(site, spawned)
+
+
+def _assert_guarded(site: str, spawned) -> None:
+    """S19 P1c ROOT INVARIANT, structurally: every filter-capable git spawn is preceded by the inspection of ITS cwd,
+    and in the context git really runs in -
+    * a scratch index (GIT_INDEX_FILE) that an `add` has changed since its last inspection may hold NEW gitlinks
+      (relayed F3: `add -A` records an untracked embedded repository, `add -u` runs its git): the next filter-capable
+      spawn on that index needs an inspection made WITH that index (read-tree only copies HEAD's gitlinks, which the
+      plain inspection already covers; `rm -f --cached` runs no up-to-date check);
+    * `worktree add` never checks out (8(b)): the checkout runs in the NEW worktree's context, so it is a separate
+      `reset` in the new worktree's folder, which itself must be inspected first."""
     inspected = set()
+    stale_indexes = set()
     capable = 0
-    for command, cwd in spawned:
+    for command, cwd, index in spawned:
         if tuple(command[:len(_INSPECTION)]) == _INSPECTION:
             inspected.add(cwd)
-        elif command and command[0] in _FILTER_CAPABLE:
-            capable += 1
-            assert cwd in inspected, (site, command, cwd)
+            stale_indexes.discard((cwd, index))
+            continue
+        if command[:2] == ["worktree", "add"]:
+            assert "--no-checkout" in command, (site, command)
+        if not command or command[0] not in _FILTER_CAPABLE or (command[0] == "rm" and "-f" in command):
+            continue
+        capable += 1
+        assert cwd in inspected, (site, command, cwd)
+        assert (cwd, index) not in stale_indexes, (site, "uninspected scratch-index gitlinks", command)
+        if index is not None and command[0] == "add":
+            stale_indexes.add((cwd, index))
     assert inspected, f"{site} never inspected the repository configuration"
     assert capable or site == "run_coordinator.begin_mutating_run"
 

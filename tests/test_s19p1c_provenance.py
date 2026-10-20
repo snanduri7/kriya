@@ -159,6 +159,14 @@ def test_a_repository_symlinked_directory_on_the_program_path_is_repository_code
     _refused(owner, plant.marker, "resolves inside the repository")
 
 
+def test_an_operator_alias_of_a_shell_is_still_a_shell(owner, _isolated_git, monkeypatch):
+    """The evaluator set is matched on the RESOLVED program too: an innocently named operator symlink to /bin/sh."""
+    plant = Plant(owner, _isolated_git, monkeypatch)
+    (plant.operator / "innocent").symlink_to("/bin/sh")
+    plant.define("innocent -c x")
+    _refused(owner, plant.marker, "shell, interpreter or evaluator (sh)")
+
+
 @pytest.mark.parametrize("entry", ["", ".", "tools", "{ws}/bin"])
 def test_a_relative_empty_or_in_repository_search_path_entry_before_the_program_refuses(owner, _isolated_git,
                                                                                         monkeypatch, entry):

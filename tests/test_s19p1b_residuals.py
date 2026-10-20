@@ -466,10 +466,15 @@ UNINSPECTED_GIT = {
     ("kriya/workflow/worktree.py", "_registered_worktrees"): "filter-free verb only: worktree list (MEASURED)",
     ("kriya/workflow/worktree.py", "_remove_legacy_nested_worktrees"): "called by create_git_worktree after its inspection",
     ("kriya/workflow/worktree.py", "_bootstrap_greenfield_repository"): "called by create_git_worktree after its inspection",
-    ("kriya/workflow/worktree.py", "git_read_lines"): "argv from its callers: rev-parse and ls-files only (filter-free)",
+    # S19 P1c (8(a)): the old reason ("rev-parse and ls-files only") was wrong - mutation_scope_evidence passes
+    # `diff --name-only <base>`, which runs a clean filter (MEASURED); GIT_READ_LINES_VERBS pins every caller's verb.
+    ("kriya/workflow/worktree.py", "git_read_lines"): "argv from its callers: GIT_READ_LINES_VERBS (diff only after "
+                                                      "its caller's inspection)",
     ("kriya/tools/git_metadata.py", "_git"): "argv from the metadata export: object/ref plumbing, no work-tree content",
     ("kriya/tools/git_metadata.py", "_probe"): "argv from describe_checkout, which inspects before its status probe",
-    ("kriya/static_analysis/operator_scan.py", "_git"): "argv from run_operator_scan, after changed_paths' inspection",
+    ("kriya/static_analysis/operator_scan.py", "_git"): "argv from changed_paths and run_operator_scan, each after its "
+                                                         "own inspection (the base worktree's reset after the "
+                                                         "inspection of the base worktree itself, S19 P1c)",
     ("kriya/workflow/named_test_oracle.py", "_git"): "argv from BaseTree: ls-tree only (export_base inspects)",
 }
 # Exactly the call sites that read KRIYA'S OWN checkout as operator-managed application infrastructure, and why.
