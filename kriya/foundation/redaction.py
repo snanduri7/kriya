@@ -206,9 +206,10 @@ def _subcommand(words: List[str], start: int, names: Any) -> Optional[int]:
 
 
 def _getopt(words: List[str], short: Dict[str, int]) -> List[Tuple[str, int, int]]:
-    """POSIX ``getopt`` in ``+`` mode over ``words[1:]`` (options end at the first operand or ``--``; an unknown option makes
-    the tool refuse to run, so the scan stops). ``short``: 0 = no value, 1 = a value attached or in the next word, 2 = a value
-    only when attached. Returns ``(option, index, offset)`` for every option that has a value."""
+    """POSIX ``getopt`` in ``+`` mode over ``words[1:]`` (options end at the first operand or ``--``). ``short``: 0 = no value,
+    1 = a value attached or in the next word, 2 = a value only when attached. An option not in ``short`` is read as one with
+    no value (the tool would refuse it, but the text still carries what follows: fail-closed). Returns ``(option, index,
+    offset)`` for every option that has a value."""
     found: List[Tuple[str, int, int]] = []
     index = 1
     while index < len(words):
@@ -216,9 +217,7 @@ def _getopt(words: List[str], short: Dict[str, int]) -> List[Tuple[str, int, int
         if word == "--" or len(word) < 2 or word[0] != "-" or word[1] == "-":
             break
         for position in range(1, len(word)):
-            kind = short.get(word[position])
-            if kind is None:
-                return found
+            kind = short.get(word[position], 0)
             if kind == 0:
                 continue
             if position + 1 < len(word):

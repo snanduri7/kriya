@@ -53,6 +53,7 @@ GRAMMAR = [
     ("sshpass-attached", f"sshpass -p{S} ssh host", f"sshpass -p{R} ssh host"),
     ("sshpass-cluster", f"sshpass -vp {S} ssh host", f"sshpass -vp {R} ssh host"),
     ("sshpass-after-prompt-option", f"sshpass -P assword: -p {S} scp a host:b", f"sshpass -P assword: -p {R} scp a host:b"),
+    ("sshpass-unknown-option", f"sshpass -Z -p {S} ssh h", f"sshpass -Z -p {R} ssh h"),
     # docker / podman login (pflag): -p <pw>, -p<pw>, -p=<pw>; a global option may precede `login`
     ("docker-login-next", f"docker login -u alice -p {S} registry.example", f"docker login -u alice -p {R} registry.example"),
     ("docker-login-attached", f"docker login -p{S} registry.example", f"docker login -p{R} registry.example"),
@@ -221,7 +222,7 @@ def test_the_supported_command_table_is_closed():
 
 # =========================================================================== the output channels (S2c channel table)
 
-SHAPES = [t for _, t, _ in GRAMMAR[:1] + GRAMMAR[6:7] + GRAMMAR[10:11] + GRAMMAR[15:16]]
+SHAPES = [t for i, t, _ in GRAMMAR if i in ("mysql-attached", "sshpass-next", "docker-login-next", "npm-authtoken")]
 
 
 def test_the_log_file_hides_every_positional_shape(tmp_path):
