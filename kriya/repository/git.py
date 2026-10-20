@@ -172,9 +172,10 @@ def _layout(run: _Runner, path: str) -> Optional[Tuple[str, str, str]]:
 
 def _worktrees(run: _Runner, path: str) -> Tuple[str, ...]:
     """Every work tree of the repository (the main one and each linked one) as real paths: all of them hold repository
-    content (S19 P1b, owner decision C - MEASURED: inspected from a linked worktree, a global include of a MAIN work-tree
-    file was admitted and its filter ran; inspected from the main work tree, a global include of a file in Kriya's
-    managed linked worktree likewise). ``worktree list`` reads metadata only (MEASURED: runs no filter)."""
+    content (S19 P1b, owner decision C - MEASURED: inspected from a linked worktree - Kriya's managed worktree is one - a
+    global include of a MAIN work-tree file was admitted and its filter ran; inspected from the main work tree, a global
+    include of a file in a linked worktree outside it likewise). ``worktree list`` reads metadata only (MEASURED: runs
+    no filter)."""
     done = run(path, "worktree", "list", "--porcelain", "-z")
     if done.returncode != 0:
         raise _uninspectable(path, "git worktree list failed", done)

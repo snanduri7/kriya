@@ -14,8 +14,9 @@ B. Kriya-source/installation trust is ROLE-based: exactly the call sites in INST
 C. An operator (global/system) definition is trusted only when its ULTIMATE file is outside the repository: direct,
    transitive, relative, conditional (includeIf gitdir/onbranch/hasconfig) and symlinked includes all report the
    ultimate file (MEASURED, scratch p1b/probes/probe_c_includes.*.out) and refuse; the repository's roots are ALL its work
-   trees (MEASURED gap closed: a linked worktree's main work tree, and the main work tree's linked worktrees - Kriya's
-   managed worktree holds model-written bytes - were not roots).
+   trees (MEASURED gap closed: inspected from a linked worktree - Kriya's managed worktree under <ws>/.kriya is one -
+   the MAIN work tree was not a root; inspected from the main work tree, a linked worktree OUTSIDE it - a user's
+   `git worktree add ../x`, the operator scan's temporary base worktree - was not a root).
 
 Every pin plants the filter AFTER the fixture repository is built, binds it through .git/info/attributes, makes a
 same-size (racily clean) edit, drives the REAL entry point and asserts the typed outcome AND the marker. The helpers and
@@ -344,27 +345,34 @@ def _linked(repo: Path, where: Path) -> Path:
 
 
 def test_inspected_from_a_linked_worktree_a_main_work_tree_file_is_repository_content(owner, tmp_path, global_config):
-    """MEASURED gap at the base (041ad84): ALLOWED and the filter ran through worktree.git_status_entries."""
+    """MEASURED gap at the base (041ad84): ALLOWED and the filter ran through worktree.git_status_entries. Kriya runs git
+    in its managed linked worktree (GitTool, the reuse path); also the managed one, under <ws>/.kriya, is refused."""
+    from kriya.workflow import worktree
+
     marker = _filter_body(owner)
+    managed = Path(worktree.create_git_worktree(str(owner)))
     linked = _linked(owner, tmp_path / "linked")
     (owner / "x.gitcfg").write_text((owner.parent / "body.cfg").read_text())
     with open(global_config, "a", encoding="utf-8") as handle:
         handle.write(f"[include]\n\tpath = {owner / 'x.gitcfg'}\n")
     _bind(owner)
     (linked / "a.py").write_text("x = 2\n")
+    (managed / "a.py").write_text("x = 2\n")
     _status_refused(linked, marker)
+    _status_refused(managed, marker)
 
 
 def test_inspected_from_the_main_work_tree_a_linked_worktree_file_is_repository_content(owner, tmp_path, global_config):
-    """MEASURED gap at the base (041ad84): a file in Kriya's managed linked worktree (model-written bytes) included by
-    the operator's global configuration was admitted for the MAIN work tree, and its filter ran."""
-    from kriya.workflow import worktree
-
+    """MEASURED gap at the base (041ad84, scratch p1b/probes/probe_c_reverse_and_listing.out): a file in a linked
+    worktree OUTSIDE the main work tree (a sibling, like `git worktree add ../x` or the operator scan's temporary base
+    worktree) included by the operator's global configuration was admitted for the MAIN work tree, and its filter ran.
+    (Kriya's own managed worktree lives under <ws>/.kriya, inside the main work tree: already a root at the base.)"""
     marker = _filter_body(owner)
-    managed = Path(worktree.create_git_worktree(str(owner)))
-    (managed / "x.gitcfg").write_text((owner.parent / "body.cfg").read_text())
+    sibling = _linked(owner, tmp_path / "sibling")
+    assert not str(sibling).startswith(str(owner) + os.sep)
+    (sibling / "x.gitcfg").write_text((owner.parent / "body.cfg").read_text())
     with open(global_config, "a", encoding="utf-8") as handle:
-        handle.write(f"[include]\n\tpath = {managed / 'x.gitcfg'}\n")
+        handle.write(f"[include]\n\tpath = {sibling / 'x.gitcfg'}\n")
     _bind(owner)
     _dirty(owner)
     _status_refused(owner, marker)
