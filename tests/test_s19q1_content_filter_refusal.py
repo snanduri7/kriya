@@ -206,8 +206,10 @@ def test_a_repository_filter_is_refused_before_any_kriya_git_runs_it(owner, site
     _bind(owner)
     _dirty(owner)
     assert "filter" in (owner / ".git" / "config").read_text()     # the plant is really there
-    with caplog.at_level(logging.ERROR):
+    with caplog.at_level(logging.WARNING):
         _assert_refused(site, owner, marker, caplog=caplog)
+    # the refusal is never folded into a fallback (the incremental index's "indexing all files instead")
+    assert "indexing all files" not in caplog.text
 
 
 def test_the_skill_commit_refuses_without_running_the_filter_or_committing(owner, caplog):
