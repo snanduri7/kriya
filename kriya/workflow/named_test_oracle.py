@@ -72,6 +72,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 from kriya.core.tomlcompat import tomllib
+from kriya.platform import git_argv
 from kriya.tools import test_execution
 
 NAMED_TEST_ORACLE_VERSION = 1
@@ -149,7 +150,7 @@ class BaseTree:
         if not wanted:
             return found
         request = b"".join(f"{self.revision}:{path}\n".encode() for path in wanted)
-        out = subprocess.run(["git", "cat-file", "--batch"], cwd=self.repo, input=request, capture_output=True,
+        out = subprocess.run(git_argv(["git", "cat-file", "--batch"]), cwd=self.repo, input=request, capture_output=True,
                              check=True).stdout
         offset = 0
         for path in wanted:
@@ -164,13 +165,13 @@ class BaseTree:
 
 
 def _git(repo: str, *args: str) -> bytes:
-    return subprocess.run(["git", *args], cwd=repo, capture_output=True, check=True).stdout
+    return subprocess.run(git_argv(["git", *args]), cwd=repo, capture_output=True, check=True).stdout
 
 
 def export_base(base: BaseTree, destination: str) -> None:
     """The base revision's tracked tree, written by git/tar into a
     Kriya-owned directory outside the workspace."""
-    archive = subprocess.Popen(["git", "archive", "--format=tar", base.revision], cwd=base.repo,
+    archive = subprocess.Popen(git_argv(["git", "archive", "--format=tar", base.revision]), cwd=base.repo,
                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     try:
         extract = subprocess.run(["tar", "-x", "-f", "-", "-C", destination], stdin=archive.stdout,

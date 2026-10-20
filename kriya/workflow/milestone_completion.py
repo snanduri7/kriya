@@ -49,6 +49,7 @@ from kriya.control.recovery import (
 )
 from kriya.control.run_coordinator import owning_run_commits
 from kriya.control.run_record import COMMIT_COMMITTED
+from kriya.platform import git_argv
 from kriya.workflow.edit_safety import CommitState, commit_evidence_dir, load_commit_evidence
 from kriya.workflow.resume_fingerprints import FingerprintStatus
 
@@ -369,10 +370,10 @@ def workspace_evidence_hash(workspace_path: str) -> Optional[str]:
     env = {**child_environment(), "GIT_INDEX_FILE": index}
     generated = [f":(exclude,glob)**/{name}/**" for name in sorted(GENERATED_OUTPUT_DIRS)]
     steps = (
-        ["git", "read-tree", "HEAD"],
-        ["git", "add", "-A", "--", ".", ":!.kriya", *generated],
-        ["git", "add", "-u", "--", ".", ":!.kriya"],
-        ["git", "write-tree"],
+        git_argv(["git", "read-tree", "HEAD"]),
+        git_argv(["git", "add", "-A", "--", ".", ":!.kriya", *generated]),
+        git_argv(["git", "add", "-u", "--", ".", ":!.kriya"]),
+        git_argv(["git", "write-tree"]),
     )
     try:
         output = ""

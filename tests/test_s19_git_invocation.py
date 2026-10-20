@@ -24,7 +24,7 @@ import pytest
 from tests._plugin_test_support import load_core_tools_module
 
 # The owner modules whose git spawns already go through kriya.platform.git_argv: each pin flips with its owner's commit.
-_FIXED_OWNERS: frozenset = frozenset({'REPOSITORY'})
+_FIXED_OWNERS: frozenset = frozenset({'KERNEL', 'REPOSITORY'})
 
 
 def _flip(owner: str):

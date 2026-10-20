@@ -29,6 +29,7 @@ from kriya.control.run_coordinator import (
     coordinated_mutation,
 )
 from kriya.control.run_record import RunLifecycle
+from kriya.platform import GIT_INVOCATION_OPTIONS
 from kriya.workflow import worktree as wt
 from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask
 from kriya.workflow.plan_validation import PlanValidationResult
@@ -303,7 +304,8 @@ def test_a_legacy_worktree_that_cannot_be_removed_fails_closed(tmp_path):
     try:
         with begin_mutating_run(str(repo)), pytest.raises(subprocess.CalledProcessError) as failure:
             wt.create_git_worktree(str(repo))
-        assert failure.value.cmd[1:3] == ["worktree", "remove"]  # the removal itself, not a later step
+        # the removal itself, not a later step (S19: the spawned argv carries the git_argv options after the executable)
+        assert failure.value.cmd[1 + len(GIT_INVOCATION_OPTIONS):][:2] == ["worktree", "remove"]
     finally:
         locked.chmod(0o700)
     assert (repo / "app.py").read_text() == "original\n"

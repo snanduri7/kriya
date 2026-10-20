@@ -39,6 +39,7 @@ from kriya.control.checkpoint import load_checkpoint as load_checkpoint
 from kriya.control.checkpoint import new_run_id as new_run_id
 from kriya.control.checkpoint import save_checkpoint as save_checkpoint
 from kriya.control.checkpoint import without_observational_config as without_observational_config
+from kriya.platform import git_argv
 from kriya.workflow.resume_fingerprints import (
     CHECKPOINT_KEY as RESUME_FINGERPRINTS_KEY,
 )
@@ -60,7 +61,7 @@ def compute_workspace_fingerprint(workspace_path: str) -> Optional[str]:
     """Git HEAD SHA + dirty/clean marker. None if not a git repo (resume unavailable)."""
     try:
         head = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=workspace_path, capture_output=True, text=True
+            git_argv(["git", "rev-parse", "HEAD"]), cwd=workspace_path, capture_output=True, text=True
         )
         if head.returncode != 0:
             return None
@@ -69,7 +70,7 @@ def compute_workspace_fingerprint(workspace_path: str) -> Optional[str]:
         # which would otherwise make every workspace look "dirty" the moment a
         # checkpoint is saved and permanently block resuming it.
         status = subprocess.run(
-            ["git", "status", "--porcelain", "--", ".", ":!.kriya"],
+            git_argv(["git", "status", "--porcelain", "--", ".", ":!.kriya"]),
             cwd=workspace_path, capture_output=True, text=True
         )
         dirty = "dirty" if status.stdout.strip() else "clean"
@@ -166,12 +167,12 @@ def compute_workspace_content_hash(workspace_path: str) -> Optional[str]:
     try:
         env = {**child_environment(), "GIT_INDEX_FILE": tmp_index_path}
         seed = subprocess.run(
-            ["git", "read-tree", "HEAD"], cwd=workspace_path, env=env, capture_output=True, text=True,
+            git_argv(["git", "read-tree", "HEAD"]), cwd=workspace_path, env=env, capture_output=True, text=True,
         )
         if seed.returncode != 0:
             return None
         add = subprocess.run(
-            ["git", "add", "-A", "--", "."],
+            git_argv(["git", "add", "-A", "--", "."]),
             cwd=workspace_path, env=env, capture_output=True, text=True,
         )
         if add.returncode != 0:
@@ -183,13 +184,13 @@ def compute_workspace_content_hash(workspace_path: str) -> Optional[str]:
         # file and the HEAD") - measured 2026-10-09 (REG-R1/R2/PRD-024 reproducers: None after the first candidate
         # edit). --cached keeps the working tree untouched; only the scratch index entry goes.
         drop_runtime_dir = subprocess.run(
-            ["git", "rm", "-r", "-q", "-f", "--cached", "--ignore-unmatch", "--", ".kriya"],
+            git_argv(["git", "rm", "-r", "-q", "-f", "--cached", "--ignore-unmatch", "--", ".kriya"]),
             cwd=workspace_path, env=env, capture_output=True, text=True,
         )
         if drop_runtime_dir.returncode != 0:
             return None
         write = subprocess.run(
-            ["git", "write-tree"], cwd=workspace_path, env=env, capture_output=True, text=True,
+            git_argv(["git", "write-tree"]), cwd=workspace_path, env=env, capture_output=True, text=True,
         )
         if write.returncode != 0:
             return None
@@ -242,7 +243,7 @@ def compute_tree_hash(workspace_path: str) -> Optional[str]:
     closed shape compute_workspace_fingerprint above already uses."""
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "HEAD^{tree}"], cwd=workspace_path, capture_output=True, text=True,
+            git_argv(["git", "rev-parse", "HEAD^{tree}"]), cwd=workspace_path, capture_output=True, text=True,
         )
         if result.returncode != 0:
             return None
@@ -255,7 +256,7 @@ def compute_tree_hash(workspace_path: str) -> Optional[str]:
 def compute_base_commit(workspace_path: str) -> Optional[str]:
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=workspace_path, capture_output=True, text=True,
+            git_argv(["git", "rev-parse", "HEAD"]), cwd=workspace_path, capture_output=True, text=True,
         )
         if result.returncode != 0:
             return None

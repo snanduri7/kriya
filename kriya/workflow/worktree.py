@@ -8,6 +8,7 @@ import shutil
 import subprocess
 from typing import List, Optional, Tuple
 
+from kriya.platform import git_argv
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
@@ -98,7 +99,7 @@ def managed_worktree_path(repo_path: str, *, scoped: bool = False) -> str:
 
 
 def _registered_worktrees(repo_path: str) -> List[str]:
-    res = subprocess.run(["git", "worktree", "list", "--porcelain"], cwd=repo_path, capture_output=True, text=True)
+    res = subprocess.run(git_argv(["git", "worktree", "list", "--porcelain"]), cwd=repo_path, capture_output=True, text=True)
     return [os.path.realpath(line[len("worktree "):]) for line in res.stdout.splitlines() if line.startswith("worktree ")]
 
 
@@ -120,7 +121,7 @@ def _remove_legacy_nested_worktrees(repo_path: str, registered: List[str]) -> No
     nested = [path for path in registered if managed_worktree_ancestor(path) in registered_set]
     for path in sorted(nested, key=len, reverse=True):
         logger.warning("Removing a nested Kriya worktree left by an earlier layout: %s", path)
-        subprocess.run(["git", "worktree", "remove", "--force", "--force", path],
+        subprocess.run(git_argv(["git", "worktree", "remove", "--force", "--force", path]),
                        cwd=repo_path, check=True, capture_output=True)
 
 
@@ -265,11 +266,11 @@ def repository_content_paths(workspace_path: str) -> List[str]:
     repository content. A workspace that is not a Git work tree has none (a
     real run never gets here: create_git_worktree bootstraps Git first); any
     other failure to list it raises (fail closed)."""
-    inside = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=workspace_path,
+    inside = subprocess.run(git_argv(["git", "rev-parse", "--is-inside-work-tree"]), cwd=workspace_path,
                             capture_output=True, text=True)
     if inside.returncode != 0 or inside.stdout.strip() != "true":
         return []
-    result = subprocess.run(["git", "ls-files", "-z"], cwd=workspace_path, capture_output=True)
+    result = subprocess.run(git_argv(["git", "ls-files", "-z"]), cwd=workspace_path, capture_output=True)
     if result.returncode != 0:
         raise RuntimeError(f"git ls-files failed: {os.fsdecode(result.stderr).strip() or result.returncode}")
     return [path for path in (os.fsdecode(item) for item in result.stdout.split(b"\0") if item)
@@ -295,7 +296,7 @@ def git_status_entries(
     command = ["git", "status", "--porcelain=v1", "-z", f"--untracked-files={untracked}"]
     if pathspec:
         command += ["--", *pathspec]
-    result = subprocess.run(command, cwd=repo_path, capture_output=True)
+    result = subprocess.run(git_argv(command), cwd=repo_path, capture_output=True)
     if result.returncode != 0:
         raise RuntimeError(os.fsdecode(result.stderr).strip() or f"exit {result.returncode}")
     records = result.stdout.split(b"\0")
@@ -349,7 +350,7 @@ def _resolve_repo_head(repo_path: str) -> Optional[str]:
     behavior rather than crash."""
     try:
         res = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=repo_path, capture_output=True, text=True,
+            git_argv(["git", "rev-parse", "HEAD"]), cwd=repo_path, capture_output=True, text=True,
         )
         if res.returncode == 0:
             return res.stdout.strip()
@@ -373,7 +374,7 @@ def _bootstrap_greenfield_repository(workspace_path: str) -> None:
     init_command = ["git", *_HOOKS_DISABLED, "init"]
     _audit_git_write(init_command, workspace_path)
     initialized = subprocess.run(
-        init_command, cwd=workspace_path, capture_output=True, text=True,
+        git_argv(init_command), cwd=workspace_path, capture_output=True, text=True,
     )
     if initialized.returncode != 0:
         raise RuntimeError(
@@ -401,7 +402,7 @@ def _bootstrap_greenfield_repository(workspace_path: str) -> None:
     ]
     _audit_git_write(commit_command, workspace_path)
     committed = subprocess.run(
-        commit_command, cwd=workspace_path, capture_output=True, text=True,
+        git_argv(commit_command), cwd=workspace_path, capture_output=True, text=True,
     )
     if committed.returncode != 0:
         raise RuntimeError(
@@ -413,7 +414,7 @@ def _resolved_git_toplevel(workspace_path: str) -> Optional[str]:
     """Return Git's owning worktree root for ``workspace_path``, if any."""
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            git_argv(["git", "rev-parse", "--show-toplevel"]),
             cwd=workspace_path, capture_output=True, text=True,
         )
         if result.returncode == 0 and result.stdout.strip():
@@ -482,14 +483,14 @@ def git_read_lines(cwd: str, *args: str) -> List[str]:
     """A read-only git query (``rev-parse``, ``ls-tree``, ``diff --name-only``,
     ``ls-files``) in ``cwd``: its non-empty output lines. Raises on failure,
     so a caller that needs the answer can fail closed."""
-    completed = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True, timeout=60)
+    completed = subprocess.run(git_argv(["git", *args]), cwd=cwd, capture_output=True, text=True, check=True, timeout=60)
     return [line for line in completed.stdout.splitlines() if line.strip()]
 
 
 def create_git_worktree(repo_path: str) -> str:
     # 1. Quick pre-check: Is this a git repository?
     try:
-        res = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=repo_path, capture_output=True, text=True)
+        res = subprocess.run(git_argv(["git", "rev-parse", "--is-inside-work-tree"]), cwd=repo_path, capture_output=True, text=True)
         if res.returncode != 0:
             logger.info(
                 "Workspace '%s' is not a Git repository; initializing the "
@@ -537,7 +538,7 @@ def create_git_worktree(repo_path: str) -> str:
             ]
             _audit_git_write(bootstrap_commit_command, repo_path)
             subprocess.run(
-                bootstrap_commit_command,
+                git_argv(bootstrap_commit_command),
                 cwd=repo_path, check=True, capture_output=True,
             )
         except Exception as e:
@@ -551,7 +552,7 @@ def create_git_worktree(repo_path: str) -> str:
 
     # 2. Prune any stale/orphaned worktree records in git administrative data
     try:
-        subprocess.run(["git", "worktree", "prune"], cwd=repo_path, capture_output=True)
+        subprocess.run(git_argv(["git", "worktree", "prune"]), cwd=repo_path, capture_output=True)
     except Exception as e:
         logger.debug(f"git worktree prune failed (non-fatal): {e}")
 
@@ -569,15 +570,15 @@ def create_git_worktree(repo_path: str) -> str:
     if not worktree_registered:
         if os.path.exists(worktree_path):
             shutil.rmtree(worktree_path, ignore_errors=True)
-        subprocess.run(["git", *_HOOKS_DISABLED, "worktree", "add", "--detach", worktree_path], cwd=repo_path, check=True, capture_output=True)
+        subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "worktree", "add", "--detach", worktree_path]), cwd=repo_path, check=True, capture_output=True)
     else:
         # Recreate the directory physically if it was deleted but still registered
         if not os.path.exists(worktree_path):
             try:
-                subprocess.run(["git", "worktree", "prune"], cwd=repo_path, capture_output=True)
+                subprocess.run(git_argv(["git", "worktree", "prune"]), cwd=repo_path, capture_output=True)
             except Exception as e:
                 logger.debug(f"git worktree prune failed (non-fatal): {e}")
-            subprocess.run(["git", *_HOOKS_DISABLED, "worktree", "add", "--detach", worktree_path], cwd=repo_path, check=True, capture_output=True)
+            subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "worktree", "add", "--detach", worktree_path]), cwd=repo_path, check=True, capture_output=True)
         else:
             # Reset to the repository's HEAD. `git clean -fd` removes every
             # untracked file and directory that is not git-ignored, and keeps
@@ -589,8 +590,8 @@ def create_git_worktree(repo_path: str) -> str:
             # resolved against repo_path, not checked out literally inside the
             # worktree - see _resolve_repo_head for why.
             target = _resolve_repo_head(repo_path)
-            subprocess.run(["git", *_HOOKS_DISABLED, "checkout", "-f", target or "HEAD"], cwd=worktree_path, check=True, capture_output=True)
-            subprocess.run(["git", "clean", "-fd"], cwd=worktree_path, check=True, capture_output=True)
+            subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "checkout", "-f", target or "HEAD"]), cwd=worktree_path, check=True, capture_output=True)
+            subprocess.run(git_argv(["git", "clean", "-fd"]), cwd=worktree_path, check=True, capture_output=True)
 
     # A worktree only ever reflects git HEAD - it knows nothing about uncommitted
     # changes in the real workspace, which is the normal state of an in-progress
@@ -748,7 +749,7 @@ def remove_git_worktree(repo_path: str, worktree_path: str) -> None:
     if os.path.exists(worktree_path):
         try:
             target = _resolve_repo_head(repo_path)
-            subprocess.run(["git", *_HOOKS_DISABLED, "checkout", "-f", target or "HEAD"], cwd=worktree_path, capture_output=True)
-            subprocess.run(["git", "clean", "-fd"], cwd=worktree_path, capture_output=True)
+            subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "checkout", "-f", target or "HEAD"]), cwd=worktree_path, capture_output=True)
+            subprocess.run(git_argv(["git", "clean", "-fd"]), cwd=worktree_path, capture_output=True)
         except Exception as e:
             logger.debug(f"Failed to clean up worktree at '{worktree_path}' (non-fatal): {e}")
