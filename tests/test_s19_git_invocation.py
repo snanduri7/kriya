@@ -9,7 +9,8 @@ planted command would create is absent.
 Isolation: GIT_CONFIG_GLOBAL points at a per-test file holding only an identity and GIT_CONFIG_NOSYSTEM=1, so a
 developer's own global fsmonitor / hooksPath / signing can neither fire nor mask a pin.
 
-Held (Q1, owner decision, digest STOP): content-filter drivers (filter.<x>.clean|smudge|process). The held pin stays a
+Every pin below FLIPPED from a strict expected-to-flip xfail (characterization 4668ddb, MEASURED failing) with its owner
+module's correction commit. Held (Q1, owner decision, digest STOP): content-filter drivers (filter.<x>.clean|smudge|process). The held pin stays a
 strict xfail until the owner decides; it XPASSes (and so fails) the moment anything closes the vector.
 """
 from __future__ import annotations
@@ -23,14 +24,6 @@ import pytest
 
 from tests._plugin_test_support import load_core_tools_module
 
-# The owner modules whose git spawns already go through kriya.platform.git_argv: each pin flips with its owner's commit.
-_FIXED_OWNERS: frozenset = frozenset({'ADAPTER-CLI', 'EXECUTION', 'KERNEL', 'PLUGIN', 'QUALIFICATION', 'REPOSITORY', 'RETRIEVAL', 'SKILLS', 'STATE'})
-
-
-def _flip(owner: str):
-    """The strict expected-to-flip mark until ``owner``'s spawns go through the seam (then inert)."""
-    return pytest.mark.xfail(owner not in _FIXED_OWNERS, strict=True,
-                             reason=f"S19 OI-141: {owner}'s git spawns still run repository-controlled commands")
 _HELD_Q1 = pytest.mark.xfail(strict=True, reason="S19 Q1 (owner decision, digest STOP): repository content-filter "
                                                  "drivers still run through Kriya's own git")
 
@@ -129,7 +122,7 @@ SITE_OWNERS = {
     "operator_scan.changed_paths": "EXECUTION", "GitTool status": "PLUGIN", "GitTool diff": "PLUGIN",
     "GitTool blame": "PLUGIN",
 }
-SITES = [pytest.param(site, marks=_flip(owner), id=site) for site, owner in SITE_OWNERS.items()]
+SITES = list(SITE_OWNERS)
 
 
 def _plant_fsmonitor(repo: Path, marker: Path, *, scope: str = "--local") -> None:
@@ -185,7 +178,6 @@ def test_a_repository_fsmonitor_never_runs_through_kriya_git(owner, site):
     assert not marker.exists(), f"{site} ran the repository's core.fsmonitor command"
 
 
-@_flip("KERNEL")
 def test_an_included_fsmonitor_never_runs(owner):
     marker = owner.parent / "INCLUDED_FSMONITOR_RAN"
     included = owner.parent / "included.cfg"
@@ -195,7 +187,6 @@ def test_an_included_fsmonitor_never_runs(owner):
     assert not marker.exists()
 
 
-@_flip("REPOSITORY")
 def test_an_include_if_fsmonitor_never_runs(owner):
     marker = owner.parent / "INCLUDEIF_FSMONITOR_RAN"
     included = owner.parent / "includedif.cfg"
@@ -206,7 +197,6 @@ def test_an_include_if_fsmonitor_never_runs(owner):
     assert not marker.exists()
 
 
-@_flip("KERNEL")
 def test_a_worktree_config_fsmonitor_never_runs(owner):
     marker = owner.parent / "WORKTREE_CONFIG_FSMONITOR_RAN"
     _setup(owner, "config", "extensions.worktreeConfig", "true")
@@ -215,7 +205,6 @@ def test_a_worktree_config_fsmonitor_never_runs(owner):
     assert not marker.exists()
 
 
-@_flip("KERNEL")
 def test_a_submodule_fsmonitor_never_runs(tmp_path):
     source = tmp_path / "submodule-source"
     source.mkdir()
@@ -233,7 +222,6 @@ def test_a_submodule_fsmonitor_never_runs(tmp_path):
     assert not marker.exists()
 
 
-@_flip("KERNEL")
 @pytest.mark.parametrize("via_hooks_path", [False, True], ids=["dot-git-hooks", "core.hooksPath"])
 def test_a_repository_index_hook_never_runs(owner, via_hooks_path):
     marker = owner.parent / "POST_INDEX_CHANGE_RAN"
@@ -247,7 +235,6 @@ def test_a_repository_index_hook_never_runs(owner, via_hooks_path):
     assert not marker.exists()
 
 
-@_flip("EXECUTION")
 def test_the_operator_scan_base_worktree_runs_no_checkout_hook(owner):
     from kriya.static_analysis import operator_scan
 
@@ -265,7 +252,6 @@ def _plant_gpg(repo: Path, marker: Path) -> None:
     _setup(repo, "config", "gpg.program", _marker_script(repo.parent / "gpg.sh", marker, exit_code=1))
 
 
-@_flip("SKILLS")
 def test_the_skill_commit_never_runs_a_repository_gpg_program(owner):
     from kriya.skills import skill
 
@@ -276,7 +262,6 @@ def test_the_skill_commit_never_runs_a_repository_gpg_program(owner):
     assert _setup(owner, "log", "-1", "--format=%s").strip() == "s19 skill"   # and the commit is still made
 
 
-@_flip("KERNEL")
 def test_the_bootstrap_commit_never_runs_a_repository_gpg_program(tmp_path):
     from kriya.workflow import worktree
 
@@ -288,7 +273,6 @@ def test_the_bootstrap_commit_never_runs_a_repository_gpg_program(tmp_path):
     assert _setup(repo, "rev-list", "--count", "HEAD").strip() == "1"
 
 
-@_flip("PLUGIN")
 def test_gittool_diff_runs_no_repository_diff_driver(owner):
     marker = owner.parent / "DIFF_DRIVER_RAN"
     (owner / ".git" / "info").mkdir(exist_ok=True)
@@ -299,7 +283,6 @@ def test_gittool_diff_runs_no_repository_diff_driver(owner):
     assert not marker.exists()
 
 
-@_flip("PLUGIN")
 def test_gittool_blame_runs_no_repository_textconv(owner):
     marker = owner.parent / "TEXTCONV_RAN"
     (owner / ".git" / "info").mkdir(exist_ok=True)
@@ -351,3 +334,39 @@ def test_the_hardened_options_change_no_git_answer(owner):
     for command in (["status", "--porcelain=v1", "-z", "--untracked-files=all"], ["ls-files", "-z"],
                     ["rev-parse", "HEAD"], ["diff", "--name-only"], ["log", "--oneline"]):
         assert _setup(owner, *GIT_INVOCATION_OPTIONS, *command) == _setup(owner, *command), command
+
+
+def test_every_git_process_kriya_spawns_carries_the_options(owner, tmp_path, monkeypatch):
+    """Dynamic twin of tests/architecture/test_git_invocation_seam.py: every git process the real call sites start
+    (subprocess.run / Popen, and GitTool through ProcessController) carries GIT_INVOCATION_OPTIONS right after the
+    executable - including the sites the preflight measured executing nothing (export, doctor, GUI probe)."""
+    from kriya import production_doctor
+    from kriya.config.config import AppConfig
+    from kriya.platform import GIT_INVOCATION_OPTIONS
+    from kriya.tools import git_metadata
+    from kriya.workflow import checkpoint, named_test_oracle, worktree
+
+    spawned = []
+    real_popen = subprocess.Popen
+
+    class Recording(real_popen):
+        def __init__(self, args, *rest, **kwargs):
+            if isinstance(args, (list, tuple)) and args and Path(str(args[0])).name == "git":
+                spawned.append(list(args))
+            super().__init__(args, *rest, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", Recording)
+    for site in _sites().values():
+        site(owner)
+    checkpoint.compute_tree_hash(str(owner))
+    checkpoint.compute_base_commit(str(owner))
+    worktree.remove_git_worktree(str(owner), worktree.managed_worktree_path(str(owner)))
+    base = named_test_oracle.BaseTree(str(owner), "HEAD")
+    base.read_many(["a.py"])
+    (tmp_path / "export").mkdir()
+    named_test_oracle.export_base(base, str(tmp_path / "export"))
+    git_metadata.describe_checkout(str(owner))
+    git_metadata.export_git_metadata(str(owner), str(tmp_path / "state"), identity_path=str(owner))
+    production_doctor._check_git_worktree(production_doctor._Context(cfg=AppConfig(), workspace=str(owner)))
+    assert len(spawned) > 40
+    assert [argv for argv in spawned if tuple(argv[1:1 + len(GIT_INVOCATION_OPTIONS)]) != GIT_INVOCATION_OPTIONS] == []
