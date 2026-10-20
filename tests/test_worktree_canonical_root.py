@@ -433,6 +433,8 @@ def test_worktree_locations_are_decided_only_by_worktree_py():
     # (OD-1, BACKEND-FINAL-CLOSURE-005) - an export boundary, never a managed worktree location.
     assert sorted(offenders) == [
         ("kriya/production_doctor.py", "_check_git_worktree", "worktree", "[git, 'worktree', 'list', '--porcelain']"),
+        # S19 P1e: git's configuration SCOPE named "worktree" (config.worktree), never a worktree location.
+        ("kriya/repository/git.py", "<module>:REPOSITORY_SCOPES", "worktree", "{'local', 'worktree'}"),
         ("kriya/static_analysis/operator_scan.py", "run_operator_scan", "worktree",
          "_git(workspace, 'worktree', 'add', '--detach', '--no-checkout', base_root, base)"),   # S19 P1c 8(b)
         ("kriya/static_analysis/operator_scan.py", "run_operator_scan", "worktree",
