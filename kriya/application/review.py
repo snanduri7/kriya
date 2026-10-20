@@ -18,7 +18,8 @@ recorded one.
 ``build_pending_runtime``), after re-proving: (1) the review exists, for this workspace identity, and is a RUNTIME-COMMAND review (a change
 review is not served here); (2) its recorded command fingerprint is the digest the decision must carry (``candidate_digest``) AND
 re-computes from the recorded working directory, commands in order, input channel and stdin digest. No stdin or environment VALUE exists
-in the record, so none can be served.
+in the record, so none can be served. S2d (OI-153 (c)): commands that carry a secret the redaction owner recognises are not served (a review
+recorded raw by an earlier Kriya; S2d records none) - raw they disclose it, redacted they are not what the fingerprint binds.
 
 Any failure is a typed refusal and nothing is served. Read-only: it approves nothing; the decision is ``kriya launch-decision``
 (``ApprovalService.decide``), which still refuses a review id / digest that is no longer the pending one (``STALE_REVIEW``). The adapter

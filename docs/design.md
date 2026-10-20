@@ -3240,8 +3240,8 @@ escape of a NAME character joins the name and the name is unquoted for the word 
 never joins a name (so `token%3Dabc%3Dxyz` keeps its pair) and a name may start right after one, and the userinfo of a
 percent-encoded URL (`scheme%3A%2F%2F...%40`) is hidden; output bytes are never decoded. The ledger's example
 `https://h/%75ser:pw@x` is NOT userinfo (the `@` follows the authority's `/`), consistent with the decoded form.
-OI-144 (4), positional secrets with no name or flag grammar, is an open owner question (command-grammar-aware argv
-redaction vs this documented limit): pinned strict-xfail, behaviour unchanged.
+OI-144 (4), positional secrets with no name or flag grammar, was an open owner question; decided and implemented by S2d
+(OI-153, below).
 OI-145: `safe_endpoint` (scheme, host, port, path; no userinfo, query or fragment) moved to the owner; `kriya.client`'s
 name was already the application's function (MEASURED: the same object), the real copy was the skill-source display,
 which now calls the owner with its own `unparseable-url` wording; no re-export remains. `endpoint_identity` stays apart.
@@ -3255,6 +3255,31 @@ is recorded raw as `approval_required` details - the stored copy is S20's), `evi
 payload fields; redacted before the page's byte budget is counted), the change review's reason and the reason line of
 both terminal prompts (`kriya generate`'s `_approval_decision` and `kriya proposal execute`'s own inline copy; their diff
 lines stay raw).
+
+### S2d - positional secrets in argv; the runtime review fails closed (2026-10-20, OI-153)
+
+Owner decision (b): the ONE redaction owner reads a positional secret through the command's own documented grammar, for a
+CLOSED, tripwire-tested table `_COMMAND_GRAMMARS` (never a general shell parser): MySQL/MariaDB `-p<pw>` attached only
+(bare `-p` prompts, `-P` is the port), `sshpass` by its getopt string `+f:d:p:P:heVv` (options end at the wrapped command,
+an unknown option is read as a no-value flag: fail-closed), `docker`/`podman login` by pflag (`-p <pw>`, `-p<pw>`,
+`-p=<pw>`; only after `login`, a global option's value skipped), `npm config set` / `npm set` / `npm c|con|conf|confi set`
+(npm's own deref, MEASURED) with a credential key's value. A table command is recognised WHEREVER its word appears (argv
+element or text word, through a path, a `name=` prefix and surrounding quotes/brackets) - so `sudo`, `env`, `docker exec`
+and `timeout` need no wrapper rule - and its grammar reads up to a shell operator, a line break or the next table command
+(that word included: a value may be spelled like a command); each word is read by at most two grammars (linear). In text a
+quoted value with spaces runs to its closing quote on the line, or to the line's end. Not covered, documented and pinned:
+other commands, bundled MySQL short options, a command split across configuration fields, a command built at run time.
+Owner decision (c): AUTHORITY's `policy.approval.commands_carry_secret` (the redaction owner would alter an argv read
+whole - the S2b rule, now covering positional forms too) decides that no human review of those exact bytes can be
+faithful. `build_pending_runtime` does not record such a review; `ask` does not ask a plain (legacy) callback; the CLI's
+typed channel (`_runtime_command_decision`) records the refusal inside a launch as `approval_required` with the fixed
+`RUNTIME_COMMAND_SECRET_REFUSAL` text, the REDACTED commands and the fingerprint of the exact bytes (no raw command, no raw
+reason), and in a terminal says why instead of prompting; `runtime_command.review` refuses a review recorded raw by an
+earlier Kriya (`REVIEW_COMMAND_UNVERIFIED`, reason `commands_carry_secret`). The operator's own authority is unchanged in
+what it may run: `--yes` outside a launch, an autonomy mode without review, and (legacy channel) a goal-authored command.
+A dedicated reason code was NOT added: both closed tables that could hold it move a golden (`REFUSAL_CODES`,
+tests/golden/policy_approval/serialized_forms.json) or the KUP schema (`BLOCKED_REASON_CODES`) - an owner STOP
+(handover/MODULARIZATION/S2d-DECISION-TO-KILLER.md). OI-153 stays open for S20 I-9 (the launch record's other raw notes).
 
 ### S20 - stored-evidence redaction, first ingress; endpoint display (2026-10-20, OI-134, OI-152; STOPPED at the first golden move)
 

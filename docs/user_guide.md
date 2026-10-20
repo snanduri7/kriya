@@ -268,12 +268,28 @@ the desktop app's error messages and the audit records never show a secret. One 
   reason codes (`SOURCE_CHANGED_SINCE_AUTHORIZATION: ...`). The approval record (`kriya authority approve`) never stored
   values; it keeps salted digests. Limit: a secret written WITHOUT quotes that itself contains a space, a quote or one
   of `& ; ,` is hidden only up to that character; quote such values.
-- **Limit: a password passed by POSITION is shown** (S2c, open question OI-144 (4)): `mysql -p<password>`,
-  `sshpass -p <password>`, `docker login -p <password>`, `npm config set //registry/:_authToken <token>` carry no
-  secret-looking name or flag that Kriya recognises, so they are shown as written (in history, logs, errors and a launch's
-  command review). Pass such secrets through an environment variable whose name says it is a secret (`MYSQL_PWD`,
-  `NPM_TOKEN`) or on standard input (`docker login --password-stdin`) instead. Also recorded: `pwd=` / `PWD=` values are hidden (a `pwd` name can be a
-  password). An endpoint is shown as scheme, host, port and path; an IPv6 host keeps its brackets (`http://[::1]:11434/v1`).
+- **A password passed by POSITION, for a closed list of commands** (S2d, OI-153): Kriya reads these commands through their
+  own documented grammar and hides the password wherever the command is shown (history, logs, errors, the desktop app):
+  `mysql`/`mariadb -p<password>` (attached; a bare `-p` prompts and `-P 3306` is the port, both shown),
+  `sshpass -p <password>` or `-p<password>` (`-f file`, `-e`, `-P prompt` carry no secret; `ssh -p 22` after it is shown),
+  `docker`/`podman login -p <password>` / `-p<password>` / `-p=<password>` (only after `login`: `docker run -p 8080:80` is
+  a port; `--password-stdin` is shown), `npm config set <credential key> <value>` (`_authToken`, `_auth`, `_password`;
+  also `npm set`, `npm c set`). The command is recognised wherever its word appears (`sudo -u dba mysql -p...`,
+  `docker exec db mysql -p...`, `/usr/bin/mysql`, inside a quoted `bash -c '...'` or a logged list). This is NOT universal
+  shell-secret detection: any other command (`mysqldump`/`mysqladmin`/`psql` positional forms), MySQL short options
+  bundled before `p` (`-vp<password>`), a command split across configuration fields (`command: sshpass`, `args: [-p, ...]`)
+  or built at run time is shown as written - pass such secrets on standard input (`docker login --password-stdin`), in a
+  file (`sshpass -f`) or through an environment variable whose name says it is a secret (`MYSQL_PWD`, `NPM_TOKEN`). The cost
+  of recognising the word anywhere (hidden on purpose): prose that names `sshpass -p <word>`, and an attached `-p<x>` after
+  a word that only names one of these commands (`docker run --name mysql -p3306:3306`).
+- **A command that carries a recognised secret is never offered for your review** (S2d, owner decision): shown as written
+  it would expose the secret, shown hidden you would approve bytes you cannot read. In the desktop app the run records why
+  ("Not offered for review: ...") with the hidden command and the digest of the exact command, and nothing runs (a run whose
+  verification requires it stops as `REQUIRED_RUNTIME_VERIFICATION_DECLINED`); in a terminal `kriya generate` prints the same
+  reason instead of asking, and `kriya proposal execute` does not ask either. Your own authority is unchanged: `kriya
+  generate --yes` in a terminal, or an autonomy mode without review, runs it (its output is still redacted). Also recorded:
+  `pwd=` / `PWD=` values are hidden (a `pwd` name can be a password). An endpoint is shown as scheme, host, port and path;
+  an IPv6 host keeps its brackets (`http://[::1]:11434/v1`).
 
 ### 2.0a-2 Autonomy modes: a closed list (S16a)
 `autonomy.mode` has exactly two values, spelled exactly like this:
