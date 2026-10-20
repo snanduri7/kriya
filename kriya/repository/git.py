@@ -69,6 +69,9 @@ GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY = "GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITO
 GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED = "GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED"
 GIT_CONFIG_UNINSPECTABLE = "GIT_CONFIG_UNINSPECTABLE"
 GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN = "GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN"
+# S19e (OI-163): git itself refuses the repository (safe.directory ownership check). Raised by the caller that met git's
+# refusal (kriya/workflow/worktree.py create_git_worktree), never decided here: this module only names and words it.
+GIT_REPOSITORY_OWNERSHIP_REFUSED = "GIT_REPOSITORY_OWNERSHIP_REFUSED"
 
 _REMEDY = ("Define the filter in your global or system git configuration (for Git LFS: `git lfs install`, not "
            "`git lfs install --local`) and remove it from the repository's configuration.")
@@ -95,6 +98,11 @@ CONTENT_FILTER_REFUSALS: Dict[str, str] = {
         "definition in your own git configuration, or install the program it is meant to run outside the repository "
         "and invoke it directly (for Git LFS: install git-lfs, then `git lfs install`). Kriya never changes git "
         "configuration."),
+    GIT_REPOSITORY_OWNERSHIP_REFUSED: (
+        "git refuses to operate on the repository at {repository}: its ownership check failed ({detail}). Kriya does "
+        "not run git there and never weakens that check (no safe.directory change, no retry without it). Operator "
+        "remedy: run Kriya as the user who owns the repository, or, only if you trust it, mark it safe in your own git "
+        "configuration as git's message describes."),
 }
 # The activation part of an EXECUTABLE_UNPROVEN refusal's detail (S19 P1d): the driver git really activates.
 _ACTIVE_DETAIL = ("; the filter driver '{driver}' is ACTIVE here: git resolves filter={driver} for {count} path(s) this "
@@ -130,7 +138,8 @@ _TIMEOUT_SECONDS = 60
 
 
 class RepositoryContentFilterRefused(Exception):
-    """A typed refusal (S19 Q1): Kriya runs no git where a repository-controlled content filter could execute.
+    """A typed refusal (S19 Q1): Kriya runs no git where a repository-controlled content filter could execute - or
+    (S19e, ``GIT_REPOSITORY_OWNERSHIP_REFUSED``) where git itself refuses the repository's ownership.
     ``str(error)`` is ``"<REASON_CODE>: <message>"`` (redacted). Deliberately not a RuntimeError/OSError/ValueError
     subclass, so no handler written for an ordinary git failure absorbs it."""
 

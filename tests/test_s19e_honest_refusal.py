@@ -41,6 +41,7 @@ from kriya.core.state_paths import trace_db_path  # noqa: E402
 from kriya.repository.git import (  # noqa: E402
     GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN,
     GIT_CONTENT_FILTER_REPOSITORY_DEFINED,
+    GIT_REPOSITORY_OWNERSHIP_REFUSED,
     RepositoryContentFilterRefused,
 )
 
@@ -415,3 +416,116 @@ def test_every_generic_handler_of_the_retry_wrappers_lets_the_refusal_through(pa
         body = handlers[position].body
         assert isinstance(body[0], ast.Raise) and body[0].exc is None, (path, function)
     assert generic == (1 if function == "run_iteration" else 2)
+
+
+# ------------------------------------------------------------------------------------------- OI-163: ownership
+
+
+def _owned_elsewhere(monkeypatch) -> None:
+    monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")      # git's own test switch: every repository is foreign
+
+
+def _repository(root: Path, *, commit: bool = True) -> Path:
+    repo = root / "owner"
+    repo.mkdir()
+    (repo / "a.py").write_text("x = 1\n")
+    _git(repo, "init", "-q", "-b", "main")
+    if commit:
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "init")
+    return repo
+
+
+def _assert_ownership_refusal(raised, repo: Path) -> None:
+    assert type(raised.value) is RepositoryContentFilterRefused
+    assert raised.value.reason_code == GIT_REPOSITORY_OWNERSHIP_REFUSED
+    message = str(raised.value)
+    assert message.startswith(f"{GIT_REPOSITORY_OWNERSHIP_REFUSED}: git refuses to operate on the repository at {repo}")
+    assert "fatal: detected dubious ownership" in message and "bootstrap" not in message
+
+
+@pytest.mark.parametrize("commit", [True, False], ids=["committed", "no-commit"])
+def test_a_dubiously_owned_repository_is_the_ownership_refusal_and_nothing_is_written(tmp_path, monkeypatch, commit):
+    from kriya.workflow import worktree
+
+    repo = _repository(tmp_path, commit=commit)
+    before = _tree(repo)
+    _owned_elsewhere(monkeypatch)
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        worktree.create_git_worktree(str(repo))
+    _assert_ownership_refusal(raised, repo)
+    monkeypatch.delenv("GIT_TEST_ASSUME_DIFFERENT_OWNER")
+    assert _tree(repo) == before, "the refused repository was written (the greenfield bootstrap ran)"
+    assert not (repo / ".kriya").exists()
+    assert _git(repo, "worktree", "list", "--porcelain").count("worktree ") == 1
+
+
+def test_the_ownership_refusal_is_recognised_whatever_git_s_language(tmp_path, monkeypatch):
+    """git translates its refusal (MEASURED on this host: LANGUAGE=fr -> "propriétaire douteux détecté"); the
+    discovery probe reads it in the C locale."""
+    from kriya.workflow import worktree
+
+    repo = _repository(tmp_path)
+    _owned_elsewhere(monkeypatch)
+    monkeypatch.setenv("LANGUAGE", "fr")
+    monkeypatch.setenv("LC_ALL", "fr_FR.UTF-8")
+    translated = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=repo, capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL)
+    assert translated.returncode == 128 and "dubious ownership" not in translated.stderr, translated.stderr
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        worktree.create_git_worktree(str(repo))
+    _assert_ownership_refusal(raised, repo)
+
+
+def test_a_plain_folder_whose_bootstrap_commit_git_refuses_for_ownership_is_the_ownership_refusal(tmp_path, monkeypatch):
+    """`git init` does not check ownership, the commit does: the bootstrap commit's ownership failure is classified by
+    asking git again in the C locale. CHARACTERIZED, unchanged (S19e STOP, owner decision): the `.git` the greenfield
+    init created before the commit was refused stays (the pre-existing bootstrap behaviour)."""
+    from kriya.workflow import worktree
+
+    folder = tmp_path / "plain"
+    folder.mkdir()
+    (folder / "a.py").write_text("x = 1\n")
+    _owned_elsewhere(monkeypatch)
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        worktree.create_git_worktree(str(folder))
+    _assert_ownership_refusal(raised, folder)
+    assert (folder / ".git" / "HEAD").is_file()
+
+
+def test_a_genuine_bootstrap_commit_failure_is_still_the_bootstrap_failure(tmp_path, monkeypatch):
+    """A real, non-ownership git failure of the bootstrap commit (its index lock cannot be created): reported exactly
+    as before (the message is the base's, byte for byte), never as an ownership refusal."""
+    from kriya.workflow import worktree
+
+    folder = tmp_path / "plain"
+    folder.mkdir()
+    missing = tmp_path / "no-such-directory" / "index"
+    monkeypatch.setenv("GIT_INDEX_FILE", str(missing))
+    with pytest.raises(RuntimeError) as raised:
+        worktree.create_git_worktree(str(folder))
+    assert not isinstance(raised.value, RepositoryContentFilterRefused)
+    assert str(raised.value) == (
+        f"Git repository detection/bootstrap failed for {str(folder)!r}: greenfield Git bootstrap commit failed: "
+        f"fatal: Unable to create '{missing}.lock': No such file or directory")
+
+
+def test_a_dubiously_owned_workspace_ends_a_real_run_with_the_ownership_refusal(tmp_path, monkeypatch):
+    """The real entry (begin_mutating_run + the engine): the run reaches the sandbox creation and ends with the typed
+    ownership refusal as itself (before: RuntimeError 'Failed to create an isolated generation sandbox: ... greenfield
+    Git bootstrap commit failed: fatal: detected dubious ownership'); no Developer call, nothing written."""
+    from kriya.control.run_coordinator import begin_mutating_run
+
+    workspace = _workspace(tmp_path)
+    before = _tree(workspace)
+    eng, cfg, developer = _scripted_engine(lambda n: GOOD)
+    _owned_elsewhere(monkeypatch)
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        with begin_mutating_run(workspace):
+            _run(eng, workspace)
+    monkeypatch.delenv("GIT_TEST_ASSUME_DIFFERENT_OWNER")
+    _assert_ownership_refusal(raised, Path(workspace))
+    assert developer == []
+    row = _exception_row(cfg)
+    assert (row["status"], row["failure_category"]) == ("error", "RepositoryContentFilterRefused")
+    assert _tree(workspace) == before

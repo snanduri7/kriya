@@ -538,7 +538,8 @@ def test_the_refusal_table_is_closed():
     assert set(git.CONTENT_FILTER_REFUSALS) == {
         "GIT_CONTENT_FILTER_REPOSITORY_DEFINED", "GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY",
         "GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED", "GIT_CONFIG_UNINSPECTABLE",
-        "GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN"}                          # S19 P1c: executable-code provenance
+        "GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN",                          # S19 P1c: executable-code provenance
+        "GIT_REPOSITORY_OWNERSHIP_REFUSED"}                                # S19e (OI-163): git refuses the ownership
     assert set(git.PROVENANCE_CAUSES) == {"structure", "relative_program", "program_in_repository", "evaluator",
                                           "argument_path", "search_path", "unresolved"}
     assert git.OPERATOR_FILE_SCOPES == {"system", "global"}
