@@ -407,6 +407,38 @@ def test_a_case_variant_attributes_file_on_a_case_insensitive_disk_is_refused(tm
     _refused_or_runs_nothing(repo, (target,), marker, (), "refused")
 
 
+@pytest.mark.parametrize("force", [True, False], ids=["kriya-argv", "control-without-force"])
+def test_the_legacy_nested_worktree_removal_runs_no_filter_only_its_own_context_activates(owner, force):
+    """create_git_worktree inspects the MAIN context, then removes a legacy nested worktree without inspecting it
+    (S19 P1b UNINSPECTED_GIT: 'called by create_git_worktree after its inspection'). A repository definition dormant
+    in the main context but bound and dirty in the nested worktree: Kriya's `worktree remove --force --force` runs
+    nothing (MEASURED, git 2.54.0 Apple and Homebrew); the control without --force runs git's dirty check, which
+    runs the filter - so the argv, not luck, keeps it out."""
+    from kriya.workflow import worktree
+
+    managed = Path(worktree.create_git_worktree(str(owner)))
+    (owner / ".gitattributes").write_text("*.py filter=kx\n")
+    _setup(owner, "add", ".gitattributes")
+    _setup(owner, "commit", "-q", "-m", "binds kx")
+    bound = _setup(owner, "rev-parse", "HEAD").strip()
+    _setup(owner, "rm", "-q", ".gitattributes")
+    _setup(owner, "commit", "-q", "-m", "unbinds kx")
+    nested = managed / ".kriya" / "worktree"                            # the pre-canonical-root layout
+    _setup(owner, "worktree", "add", "-q", "--detach", str(nested), bound)
+    marker = owner.parent / "FILTER_RAN"
+    _plant_local(owner, marker, "clean")
+    (nested / "a.py").write_text("x = 2\n")                             # same size: racily clean, needs the filter
+    os.utime(nested / "a.py", (2_000_000_000, 2_000_000_000))
+    if force:
+        assert worktree.create_git_worktree(str(owner)) == str(managed)
+        assert str(nested) not in _setup(owner, "worktree", "list", "--porcelain")
+    else:
+        _kriya_git(owner, "worktree", "remove", str(nested))
+        assert marker.exists()
+        return
+    assert not marker.exists()
+
+
 def test_the_vector_is_real_when_bound(tmp_path):
     """Negative-control validity for the shapes above: the same definition, bound, runs on the guard-off checkout."""
     repo, target, marker = _diverging(tmp_path, {".gitattributes": "*.txt filter=kx\n"})
