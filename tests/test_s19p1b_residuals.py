@@ -13,8 +13,8 @@ B. Kriya-source/installation trust is ROLE-based: exactly the call sites in INST
    as operator-managed infrastructure; the same folder opened as a TARGET is refused at every real target entry.
 C. An operator (global/system) definition is trusted only when its ULTIMATE file is outside the repository: direct,
    transitive, relative, conditional (includeIf gitdir/onbranch/hasconfig) and symlinked includes all report the
-   ultimate file (MEASURED, scratch p1b/probes/probe_c_includes.*.out) and refuse; the repository's roots are ALL its work
-   trees (MEASURED gap closed: inspected from a linked worktree - Kriya's managed worktree under <ws>/.kriya is one -
+   ultimate file (MEASURED, scratch p1b/probes/probe_c_includes.*.out) and refuse; a file of ANY of the repository's work
+   trees is repository content - git's own `rev-parse --git-common-dir` in the file's folder decides (MEASURED gap closed: inspected from a linked worktree - Kriya's managed worktree under <ws>/.kriya is one -
    the MAIN work tree was not a root; inspected from the main work tree, a linked worktree OUTSIDE it - a user's
    `git worktree add ../x`, the operator scan's temporary base worktree - was not a root).
 
@@ -398,24 +398,50 @@ def test_an_operator_definition_outside_every_work_tree_still_runs(owner, tmp_pa
     assert marker.exists(), "the operator's filter did not run"
 
 
-@pytest.mark.parametrize("answer", [(128, b""), (0, b""), (0, b"HEAD 0123\0\0")])
-def test_an_unlistable_worktree_set_refuses(owner, global_config, monkeypatch, answer):
-    """The work trees are listed only to judge an operator FILE definition (none = no listing, no cost); then an
-    unlistable or unparseable set refuses (fail closed) instead of judging against fewer roots."""
+@pytest.mark.parametrize("answer, refused", [((128, b"", b"fatal: not a git repository (or any parent)"), False),
+                                             ((128, b"", b"fatal: detected dubious ownership"), True),
+                                             ((0, b"", b""), True), ((0, b"/a\n/b\n", b""), True)])
+def test_the_same_repository_question_fails_closed(owner, global_config, monkeypatch, answer, refused):
+    """An operator FILE definition outside every root is checked by asking git which repository its folder belongs to;
+    only git's plain "not a git repository" answer means another place - any other failure or an unparseable answer
+    refuses (fail closed). The question is asked only for an operator file definition (none = no extra spawn)."""
     from kriya.repository import git
 
+    outside = owner.parent / "operator" / "filters.cfg"
+    outside.parent.mkdir()
+    outside.write_text('[filter "lfs"]\n\tclean = git-lfs clean -- %f\n')
     with open(global_config, "a", encoding="utf-8") as handle:
-        handle.write('[filter "lfs"]\n\tclean = git-lfs clean -- %f\n')
+        handle.write(f"[include]\n\tpath = {outside}\n")
     real = git._run
+    asked = []
 
     def run(cwd, *args):
-        if args[:2] == ("worktree", "list"):
-            return subprocess.CompletedProcess(list(args), answer[0], answer[1], b"fatal: broken")
+        if args == ("rev-parse", "--path-format=absolute", "--git-common-dir"):
+            asked.append(cwd)
+            return subprocess.CompletedProcess(list(args), answer[0], answer[1], answer[2])
         return real(cwd, *args)
     monkeypatch.setattr(git, "_run", run)
-    with pytest.raises(git.RepositoryContentFilterRefused) as raised:
+    if refused:
+        with pytest.raises(git.RepositoryContentFilterRefused) as raised:
+            git.refuse_repository_content_filters(str(owner))
+        assert raised.value.reason_code == git.GIT_CONFIG_UNINSPECTABLE
+    else:
         git.refuse_repository_content_filters(str(owner))
-    assert raised.value.reason_code == git.GIT_CONFIG_UNINSPECTABLE
+    assert asked == [os.path.realpath(outside.parent)]
+
+
+def test_the_same_repository_question_is_not_asked_without_an_operator_file_definition(owner, monkeypatch):
+    from kriya.repository import git
+
+    real = git._run
+    asked = []
+
+    def run(cwd, *args):
+        asked.append(args[:1])
+        return real(cwd, *args)
+    monkeypatch.setattr(git, "_run", run)
+    git.refuse_repository_content_filters(str(owner))
+    assert ("rev-parse",) in asked and len([a for a in asked if a == ("rev-parse",)]) == 1   # the layout only
 
 
 # --------------------------------------------------------------------------------- B: installation state is a ROLE

@@ -170,22 +170,23 @@ def _layout(run: _Runner, path: str) -> Optional[Tuple[str, str, str]]:
     return top, git_dir, common
 
 
-def _worktrees(run: _Runner, path: str) -> Tuple[str, ...]:
-    """Every work tree of the repository (the main one and each linked one) as real paths: all of them hold repository
-    content (S19 P1b, owner decision C - MEASURED: inspected from a linked worktree - Kriya's managed worktree is one - a
-    global include of a MAIN work-tree file was admitted and its filter ran; inspected from the main work tree, a global
-    include of a file in a linked worktree outside it likewise). ``worktree list`` reads metadata only (MEASURED: runs
-    no filter)."""
-    done = run(path, "worktree", "list", "--porcelain", "-z")
+def _same_repository(run: _Runner, source: str, common: str) -> bool:
+    """True when the folder holding ``source`` belongs to the repository whose common dir is ``common`` - any of its
+    work trees, the main one or a linked one (S19 P1b, owner decision C - MEASURED: inspected from a linked worktree
+    (Kriya's managed worktree is one) a global include of a MAIN work-tree file was admitted and its filter ran;
+    inspected from the main work tree, a global include of a file in a linked worktree outside it likewise). Git
+    answers the question itself: ``rev-parse --git-common-dir`` in that folder (reads no content: MEASURED, runs no
+    filter). Only git's plain "not a git repository" answer means another place; any other failure refuses."""
+    folder = os.path.dirname(source)
+    done = run(folder, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if done.returncode != 0:
-        raise _uninspectable(path, "git worktree list failed", done)
-    roots = []
-    for record in done.stdout.split(b"\0"):
-        if record.startswith(b"worktree "):
-            roots.append(os.path.realpath(os.fsdecode(record[len(b"worktree "):])))
-    if not roots:
-        raise _uninspectable(path, "unparseable git worktree list")
-    return tuple(roots)
+        if b"not a git repository" in done.stderr.lower():
+            return False
+        raise _uninspectable(folder, "git rev-parse of an operator configuration's folder failed", done)
+    lines = os.fsdecode(done.stdout).split("\n")
+    if len(lines) != 2 or lines[1] != "" or not lines[0]:
+        raise _uninspectable(folder, "unparseable git rev-parse answer")
+    return os.path.realpath(lines[0]) == common
 
 
 def _inside(path: str, roots: Tuple[str, ...]) -> bool:
@@ -216,7 +217,6 @@ def _gitlinks(run: _Runner, top: str) -> Set[str]:
 
 def _refuse(run: _Runner, path: str, seen: Set[str], depth: int) -> None:
     layout = _layout(run, path)
-    roots: Optional[Tuple[str, ...]] = None            # repository content: listed only when an operator file needs it
     for scope, origin, key, value in _filter_definitions(run, path):
         if value == "":
             continue                                    # an empty command: Git runs nothing (MEASURED)
@@ -227,12 +227,9 @@ def _refuse(run: _Runner, path: str, seen: Set[str], depth: int) -> None:
             continue                                    # Kriya's own argv / process environment
         if scope in OPERATOR_FILE_SCOPES and origin.startswith(_FILE_ORIGIN):
             source = os.path.realpath(os.path.join(layout[0] if layout else path, origin[len(_FILE_ORIGIN):]))
-            if layout is not None:
-                if roots is None:
-                    roots = (*layout, *_worktrees(run, path))
-                if _inside(source, roots):
-                    raise RepositoryContentFilterRefused(GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY, path, key=key,
-                                                         scope=scope, origin=origin)
+            if layout is not None and (_inside(source, layout) or _same_repository(run, source, layout[2])):
+                raise RepositoryContentFilterRefused(GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY, path, key=key,
+                                                     scope=scope, origin=origin)
             continue
         raise RepositoryContentFilterRefused(GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED, path, key=key, scope=scope,
                                              origin=origin)
