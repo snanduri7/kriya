@@ -298,3 +298,13 @@ Correction: kriya/repository/git.py + one inspection immediately before every fi
 at `begin_mutating_run`); no memoization; NO digest moved (golden predictor on a filter-free repository unchanged);
 details in S19Q1-DECISION-TO-KILLER.md. Not covered (STOP / owner): `kriya review <folder>` (ADAPTER-CLI ->
 REPOSITORY needs one new import-direction row), Kriya's own source root (operator installation).
+
+S19 P1c correction to the table above (2026-10-20, the rows stay as measured then): "untracked nested repository -
+never fires" was incomplete. MEASURED at 135acfe (relayed F3, re-derived in scratch p1c): workspace_evidence_hash's
+scratch-index `add -A` records an untracked embedded repository as a NEW gitlink and the following `add -u` runs that
+repository's git and its own clean filter (`status` and `add -A` alone still do not; no `-c` option prevents it). Now
+the scratch index is inspected with its own GIT_INDEX_FILE immediately before `add -u` (S19P1c-DECISION-TO-KILLER.md).
+Also measured since: `diff --name-only <base>` (mutation_scope_evidence) runs a clean filter; a local
+`includeIf "gitdir:**/worktrees/**"` applies only in a linked worktree's context (worktree add's checkout); and the
+TRUSTED rows (global only, command scope) are trusted by origin only when the command's executable code is the
+operator's too (executable-code provenance, GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN).

@@ -338,8 +338,22 @@ its scope and the file it comes from - never the command itself:
 - `GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED` / `GIT_CONFIG_UNINSPECTABLE` - Kriya could not establish where the command
   comes from, or could not read the configuration at all (fail closed).
 
-Not refused: a filter defined in your GLOBAL or SYSTEM git configuration (Git LFS installed with `git lfs install`
-keeps working, and a repository may reference it from `.gitattributes`); `-c` / `GIT_CONFIG_*` settings in Kriya's own
+- `GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN` (S19 P1c) - the definition is your own (global, system or Kriya's `-c` /
+  `GIT_CONFIG_*`), but Kriya cannot prove that the program it runs is yours: git runs it with the repository as its
+  working directory, so `./tools/clean.sh`, `tools/clean.sh`, `sh tools/clean.sh`, `python3 ./filter.py`, an absolute
+  or symlinked path into the repository, or a program found through an empty, relative or in-repository `PATH` entry
+  would run repository code. Only the conservative direct form is admitted: a program by absolute path, or by bare name
+  found (as git finds it: git's exec path, then `PATH`) in a directory outside the repository, with plain arguments.
+  Refused as well: any shell syntax (quotes, `$`, backticks, `;`, `|`, `&`, `<`, `>`, `*`, `?`, `[`, `~`, `#`, `!`,
+  an assignment), a shell, interpreter or evaluator as the program (`sh`, `bash`, `python`, `node`, `make`, `env`,
+  `git` itself - `git <x>` falls back to a repository-defined alias - ...), an argument that is a relative or
+  in-repository path, and a program that is not installed (the message names the cause, never the command). A Git LFS
+  that is not installed, or a leftover `filter.media.*` line (`git media ...`), therefore refuses every repository until
+  you install the program or remove the stale lines from your global configuration.
+
+Not refused: a filter defined in your GLOBAL or SYSTEM git configuration whose program is installed outside the
+repository and called directly (Git LFS installed with `git lfs install` - `git-lfs clean -- %f` - keeps working, and a
+repository may reference it from `.gitattributes`); the same for `-c` / `GIT_CONFIG_*` settings in Kriya's own
 environment; filter metadata without a command (`filter.<name>.required`); an explicitly empty command. Kriya never
 blanks or rewrites a filter and never switches filters off to continue, so its content and evidence hashes are exactly
 git's.

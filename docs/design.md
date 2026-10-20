@@ -3456,3 +3456,23 @@ authority with the probe's own git and sanitized environment (`refuse_repository
 and a refused folder reports `dirty`/`changed_entries` null with `reason` = the typed refusal (no schema change). Cost
 (MEASURED, loaded host, 2,000 files): Open Folder 60 -> 90 ms (the inspection replaces one config listing); +10 ms
 for the work-tree listing when an operator filter exists.
+
+S19 P1c (2026-10-20, second fix-forward; handover/MODULARIZATION/S19P1c-DECISION-TO-KILLER.md). ROOT INVARIANT: every
+Kriya git spawn that can run a filter is preceded, immediately, by the inspection of the context git really runs in -
+its cwd, its effective configuration there, the repositories it recurses into - and a trusted origin admits only
+operator EXECUTABLE CODE. (1) Provenance, at the same owner (`kriya/repository/git.py`, no framework, no shell parser):
+a system/global/command-scope command is admitted only in the conservative direct form (space-separated words of
+`[A-Za-z0-9_@%+=:,./-]`, no assignment) with a program that is absolute or resolved as git resolves it (`git
+--exec-path`, then the caller's `PATH`; every entry up to the hit absolute and outside the repository), whose path,
+ancestors and real file are outside every work tree of the repository, that is not in the closed
+shell/interpreter/evaluator set (`git` included: alias fallback), and whose arguments name no relative or
+in-repository path; else `GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN` with a closed cause (`PROVENANCE_CAUSES`). (2)
+Contexts: `mutation_scope_evidence` inspects before its work-tree `diff`; `worktree add` runs `--no-checkout`, the new
+worktree is inspected in its own context (a local `includeIf "gitdir:**/worktrees/**"` applies only there), then
+`reset --hard --no-recurse-submodules` populates it (managed worktree and the operator scan's base worktree);
+`workspace_evidence_hash` inspects its scratch index (`GIT_INDEX_FILE`) before `add -u`, whose new gitlinks (untracked
+embedded repositories recorded by `add -A`) it would recurse into; a submodule's git and the question about another
+folder run without the caller's repository-selecting variables (`GIT_DIR`, `GIT_INDEX_FILE`, ...), as git does. (3)
+Open Folder passes its own 15 s probe timeout. Cost (OI-60, MEASURED, loaded host): filter-free unchanged (34 ms);
+an operator program by absolute path +11 ms (41.6 -> 53.0); a bare name at the end of a 24-entry PATH +33 ms (40.7 ->
+73.8).
