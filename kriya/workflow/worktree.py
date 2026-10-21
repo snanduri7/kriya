@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import shutil
+import stat
 import subprocess
 from typing import Iterable, Iterator, List, Optional, Tuple
 
@@ -827,17 +828,58 @@ def clean_untracked_files_since(worktree_path: str, baseline: Optional[set]) -> 
             logger.debug(f"Runtime-artifact cleanup kept '{rel}': it is or holds a trusted control path.")
             continue
         try:
-            if os.path.isdir(full):
-                shutil.rmtree(full, ignore_errors=True)
-            elif os.path.exists(full):
-                os.remove(full)
+            _remove_without_following_links(worktree_path, rel)
         except OSError as e:
             logger.debug(f"Failed to clean up runtime artifact '{rel}' after verification run (non-fatal): {e}")
 
 
+def _remove_without_following_links(root: str, rel: str) -> None:
+    """Remove the entry ``rel`` beneath ``root`` without ever resolving a symbolic link below ``root``.
+
+    The cleanup runs after a verification step whose processes may still be alive in the worktree, so a path that was a plain
+    directory when it was snapshotted can be a link to somewhere else by the time it is removed (MEASURED by the addendum #4
+    review: an ``os.remove`` through such a swapped directory deleted a file outside the worktree). Every parent is therefore
+    opened relative to the one before it with O_NOFOLLOW, and the entry is removed relative to its parent: a link at any level
+    raises instead of being followed. An entry that is itself a link (to a directory, a file, or nothing) is unlinked, never its
+    target; a real directory is emptied the same way."""
+    parts = [part for part in rel.split("/") if part and part != "."]
+    if not parts or ".." in parts:
+        return
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in parts[:-1]:
+            child = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        _remove_entry(fd, parts[-1], flags)
+    finally:
+        os.close(fd)
+
+
+def _remove_entry(parent_fd: int, name: str, flags: int) -> None:
+    try:
+        is_directory = stat.S_ISDIR(os.stat(name, dir_fd=parent_fd, follow_symlinks=False).st_mode)
+    except FileNotFoundError:
+        return
+    if not is_directory:
+        os.unlink(name, dir_fd=parent_fd)         # a file, or a link of any kind: the link itself
+        return
+    fd = os.open(name, flags, dir_fd=parent_fd)
+    try:
+        with os.scandir(fd) as entries:
+            children = [entry.name for entry in entries]
+        for child in children:
+            _remove_entry(fd, child, flags)
+    finally:
+        os.close(fd)
+    os.rmdir(name, dir_fd=parent_fd)
+
+
 def _holds_trusted_control_path(directory: str) -> bool:
-    """A real directory that has a trusted control path (the canonical ``is_trusted_control_name``) anywhere beneath it."""
-    return os.path.isdir(directory) and any(
+    """A real directory (never a link to one: a link is only itself removed) that has a trusted control path (the canonical
+    ``is_trusted_control_name``) anywhere beneath it."""
+    return (os.path.isdir(directory) and not os.path.islink(directory)) and any(
         is_trusted_control_name(name) for _root, dirs, files in os.walk(directory) for name in (*dirs, *files))
 
 

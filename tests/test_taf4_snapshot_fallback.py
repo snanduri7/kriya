@@ -13,6 +13,7 @@ MEASURED at ea56d08 (scratch taf/pre_taf4_measure.txt):
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -223,11 +224,11 @@ def test_the_git_source_cleanup_never_deletes_a_protected_control_path_and_still
 
 
 def test_the_git_source_cleanup_never_deletes_content_a_symlink_the_run_created_points_to(tmp_path):
-    """Q3 top-level symlink (consolidated addendum #3, E): DISPROVED as an escape. MEASURED at the tip with a production-shaped
-    run that creates symlinks to an external directory, to the repository's own `.kriya` control directory, to the repository
-    root, to a file, and a dangling one: nothing a symlink points at is deleted (shutil.rmtree refuses a symlink and the
-    refusal is swallowed by ignore_errors; a file symlink is unlinked, never its target). A directory symlink itself may be
-    left behind - recorded in the ledger as a hygiene residual, deliberately not asserted here."""
+    """Q3 top-level symlink (consolidated addendum #3, E): DISPROVED as an escape for links present at snapshot time. MEASURED with
+    a production-shaped run that creates symlinks to an external directory, to the repository's own `.kriya` control directory,
+    to the repository root, to a file, and a dangling one: nothing a symlink points at is deleted. Addendum #4 adds the residual
+    it found: the run's own links were LEFT BEHIND (a stale directory link then persisted into the next attempt's baseline); a link
+    is an artifact the run created, so it is removed - itself, never its target."""
     repo = _repo(tmp_path / "repo")
     external = tmp_path / "external"
     (external / "sub").mkdir(parents=True)
@@ -236,6 +237,7 @@ def test_the_git_source_cleanup_never_deletes_content_a_symlink_the_run_created_
     _create(repo, {".kriya/control.json": "{}"})
     baseline = worktree.snapshot_untracked_files(str(repo))
     assert not isinstance(baseline, worktree._FilesystemSnapshot)               # the GIT source
+    links = ["link_external", "link_control", "link_root", "link_file", "link_dangling"]
     os.symlink(external, repo / "link_external")
     os.symlink(repo / ".kriya", repo / "link_control")
     os.symlink(repo, repo / "link_root")
@@ -247,4 +249,38 @@ def test_the_git_source_cleanup_never_deletes_content_a_symlink_the_run_created_
     assert (external / "precious.txt").read_text() == "keep" and (external / "sub" / "deep.txt").read_text() == "keep"
     assert (repo / ".kriya" / "control.json").exists() and (repo / "a.py").exists()
     assert not (repo / "plain_artifact.txt").exists()                           # control: the cleanup did run
-    assert not os.path.lexists(repo / "link_file")                              # the file symlink went, its target stayed
+    assert [name for name in links if os.path.lexists(repo / name)] == []       # every link the run created is gone
+
+
+@pytest.mark.parametrize("depth", [1, 2], ids=["parent", "grandparent"])
+def test_a_directory_swapped_for_a_symlink_after_the_snapshot_never_leads_the_cleanup_outside_the_worktree(tmp_path, monkeypatch, depth):
+    """Addendum #4 (MEASURED by deterministic simulation at the tip): the cleanup runs after a verification step whose processes may
+    still be alive in the worktree. A run-created real directory replaced by a link to an outside directory between the cleanup's
+    own snapshot and its removal made `os.remove(<repo>/d/out.txt)` delete `external/out.txt`. No component of the path below the
+    worktree is followed any more."""
+    repo = _repo(tmp_path / "repo")
+    external = tmp_path / "external"
+    (external / "inner").mkdir(parents=True)
+    (external / "out.txt").write_text("outside")
+    (external / "inner" / "out.txt").write_text("outside")
+    baseline = worktree.snapshot_untracked_files(str(repo))
+    leaf = "d/out.txt" if depth == 1 else "d/e/out.txt"
+    _create(repo, {leaf: "run artifact"})
+    real = worktree.snapshot_untracked_files
+    swapped = []
+
+    def snapshot(path):
+        result = real(path)
+        if not swapped and os.path.realpath(path) == os.path.realpath(repo):
+            if depth == 1:
+                shutil.rmtree(repo / "d")
+                os.symlink(external, repo / "d")
+            else:
+                shutil.rmtree(repo / "d" / "e")
+                os.symlink(external, repo / "d" / "e")
+            swapped.append(True)
+        return result
+    monkeypatch.setattr(worktree, "snapshot_untracked_files", snapshot)
+    worktree.clean_untracked_files_since(str(repo), baseline)
+    assert swapped == [True]                                                    # the swap really happened between snapshot and removal
+    assert (external / "out.txt").read_text() == "outside" and (external / "inner" / "out.txt").read_text() == "outside"
