@@ -185,7 +185,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E5: 5 -> 3 lookups: the loop's three loads (auto baseline revision, the baseline capture's revision, the
     # targeted POST replay) moved to development_loop and bind StageDeps.compute_workspace_content_hash (+1 load in
     # _development_deps); the checkpoint opening and the run-contract baseline keep theirs.
-    (W, 'compute_workspace_content_hash'): P(2, 'kriya.workflow.checkpoint', ((W, 3),), ()),
+    (W, 'compute_workspace_content_hash'): P(3, 'kriya.workflow.checkpoint', ((W, 3),), ()),
     # E5 characterization: +1 site (tests/test_development_loop.py: the prelude's sandbox failure).
     (W, 'create_git_worktree'): P(3, 'kriya.workflow.worktree', ((W, 1),), ()),
     (W, 'delete_checkpoint'): P(2, 'kriya.control.checkpoint', ((W, 2),), ()),
@@ -428,7 +428,9 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # E14 pin2: +2 A sites (_judge_candidate_suite: the test-delta covering run's scope and attribution evidence)
     # TAF-3 e2e control (tests/test_taf3_enforce_terminal_refusal.py): +3 C sites (parse_planner_structured_output,
     # build_engineering_plan_from_planner_output, validate_plan: the real enforce route's planner parse, plan build and plan validation)
-    assert totals == {A: 114, W: 93, C: 386}
+    # suite-preservation typed-refusal control (tests/test_suite_preservation_typed_refusal.py): +1 W site
+    # (compute_workspace_content_hash: the ordinary failure injected at the real lazy-capture seam)
+    assert totals == {A: 114, W: 94, C: 386}
     assert len(PATCH_POINTS) == 132
 
 

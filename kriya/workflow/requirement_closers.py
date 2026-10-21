@@ -545,6 +545,7 @@ def close_requirements_by_suite_preservation(
             if baseline is None:
                 return None, ("the untouched workspace's PRE-mutation baseline could not be captured: "
                               f"{lazily_captured.indeterminate_reason}")
+        from kriya.repository.git import RepositoryContentFilterRefused
         try:
             return attribute_suite_result(
                 scope=SCOPE_SUITE_PRESERVATION, baseline=baseline, result=result,
@@ -553,6 +554,8 @@ def close_requirements_by_suite_preservation(
                     autonomy_cfg=autonomy_cfg, goal=goal, written_files=candidate_paths),
                 stability_cache=cache, replay=baseline_run, workspace_path=workspace_path,
             ), None
+        except RepositoryContentFilterRefused:
+            raise  # a typed S19 refusal (the stability measurement's revision inspection) reaches the caller as itself
         except Exception as exc:
             logger.warning(f"Suite-preservation baseline attribution unavailable: {type(exc).__name__}: {exc}")
             return None, f"the PRE/POST attribution could not be made ({type(exc).__name__}: {exc})"

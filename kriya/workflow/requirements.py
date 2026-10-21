@@ -1918,8 +1918,11 @@ def close_suite_preservation_requirements(
         if attribute_suite is None:
             attribution_unavailable = "no PRE-mutation baseline attribution is available to this closure"
         else:
+            from kriya.repository.git import RepositoryContentFilterRefused
             try:
                 attribution, attribution_unavailable = attribute_suite(dict(result))
+            except RepositoryContentFilterRefused:
+                raise  # a typed S19 refusal (the baseline revision's inspection) reaches the caller as itself, never prose
             except Exception as exc:  # the owner's own refusal path: never a closure, never a crash of the gate
                 attribution, attribution_unavailable = None, f"baseline attribution raised {type(exc).__name__}: {exc}"
             if attribution is None and attribution_unavailable is None:
