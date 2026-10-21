@@ -150,7 +150,8 @@ def _absorbing_handlers(source: str, closers):
     absorb on the other branch), and a dynamic/unresolvable handler type is treated as catching it. Also flagged: ``except*``,
     ``with ...suppress(...)`` and a ``finally`` that returns / breaks / continues. NOT detectable lexically (the behaviour pins in
     test_direct_closer_failure_truth are the backstop, they inject a failure at every closer and kill such a wrapper): an aliased
-    closer, a wrapper taking the call as a lambda, a ``getattr`` call and a swallowing decorator."""
+    closer, a wrapper taking the call as a lambda, a ``getattr`` call, a swallowing decorator and an aliased ``suppress``
+    (``from contextlib import suppress as s``)."""
     tree = ast.parse(source)
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     offenders, seen = [], set()

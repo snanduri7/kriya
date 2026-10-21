@@ -100,6 +100,10 @@ MALFORMED = {
     "oai_tools_function_string": ("oai", "tools", _oai(message={"role": "assistant", "content": None, "tool_calls": [
         {"id": "c1", "type": "function", "function": "oops"}]})),
     "oai_tools_content_parts_list": ("oai", "tools", _oai(message={"role": "assistant", "content": [{"type": "text", "text": "x"}]})),
+    "oai_tools_calls_number": ("oai", "tools", _oai(message={"role": "assistant", "content": None, "tool_calls": 5})),
+    "oai_tools_calls_true": ("oai", "tools", _oai(message={"role": "assistant", "content": None, "tool_calls": True})),
+    "oai_stream_chunk_not_an_object": ("oai", "stream", "data: \"hello\"\n\ndata: [DONE]\n\n"),
+    "oai_stream_chunk_number_between_valid": ("oai", "stream", "data: " + json.dumps(_oai_chunk(delta={"content": "hi"})) + "\n\ndata: 7\n\ndata: [DONE]\n\n"),
     "native_content_number": ("native", "complete", json.dumps({"model": "m", "message": {"content": 5}, "done": True})),
     "native_content_list": ("native", "complete", json.dumps({"model": "m", "message": {"content": ["a"]}, "done": True})),
     "native_thinking_number": ("native", "complete", json.dumps({"model": "m", "message": {"content": "x", "thinking": 5}, "done": True})),

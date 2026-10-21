@@ -332,6 +332,15 @@ def _choice_message(choice: Any) -> Any:
     return provider_object(getattr(choice, "message", None), "its first choice's message")
 
 
+def _tool_calls(message: Any) -> Any:
+    calls = getattr(message, "tool_calls", None)
+    if not calls:
+        return []
+    if not isinstance(calls, (list, tuple)):
+        raise malformed_provider_reply(f"its tool_calls is {_received(calls)}, not a list")
+    return calls
+
+
 def _raw_tool_call(call: Any) -> "RawToolCall":
     function = provider_object(getattr(call, "function", None), "a tool call's function")
     return RawToolCall(call.id, function.name, function.arguments)
@@ -391,6 +400,7 @@ class OpenAICompatibleTransport(InferenceRuntimePort, abc.ABC):
         chunks: List[str] = []
         reasoning_chunks: List[str] = []
         async for chunk in stream:
+            provider_object(chunk, "a streamed chunk")
             if not out.provider_metadata:
                 out.provider_metadata = _provider_metadata(chunk)
             self._read_usage(out, getattr(chunk, "usage", None))
@@ -428,7 +438,7 @@ class OpenAICompatibleTransport(InferenceRuntimePort, abc.ABC):
             content=content, reasoning_chars=len(reasoning) if reasoning else 0,
             finish_reason=_str_or_none(getattr(choice, "finish_reason", None)),
             provider_metadata=_provider_metadata(response),
-            tool_calls=[_raw_tool_call(tc) for tc in (getattr(message, "tool_calls", None) or [])],
+            tool_calls=[_raw_tool_call(tc) for tc in _tool_calls(message)],
             raw_content=content, reasoning_text=reasoning,
         )
         self._read_usage(out, getattr(response, "usage", None))

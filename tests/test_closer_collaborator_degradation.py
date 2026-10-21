@@ -4,7 +4,7 @@ consumers fail closed (the requirement stays unverified, the reason names the ex
 
 What the degradation may NOT do (consolidated addendum #3 step D, corrected by the addendum #4 review and the owner's decision) is erase
 counter-evidence already established, or swallow a Kriya coding error: those are pinned in test_counter_evidence_monotonic. The helpers'
-catches are the helper's own declared failure surface (worktree.GIT_READ_FAILURES, requirement_closers.COMMITTED_HISTORY_READ_FAILURES),
+catches are the helper's own declared failure surface (kriya.repository.git.GIT_READ_FAILURES, requirement_closers.COMMITTED_HISTORY_READ_FAILURES),
 so an AttributeError/NameError reaches the attempt classifier (Q5) from every one of them.
 
 The typed S19 refusal (RepositoryContentFilterRefused) is not degraded: it has its own pins (test_fs1c0_named_test_oracle,
