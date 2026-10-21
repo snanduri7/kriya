@@ -646,7 +646,10 @@ class GitTool(BaseTool):
         elif sub == "diff":
             # S19 (OI-141, owner question Q3; the fail-closed choice): no external diff command and no textconv
             # driver - a repository's diff.<driver>.command / textconv would otherwise run on the host (MEASURED).
-            cmd.extend(["diff", "--no-ext-diff", "--no-textconv"])
+            # TAF-2: --submodule=short - a repository's diff.submodule=diff made the diff print a populated submodule's
+            # working-tree file bytes, a hard link to the owner's .git/config (MEASURED); the explicit mode overrides it
+            # (MEASURED, git 2.54.0) and a submodule change stays visible as its commit line.
+            cmd.extend(["diff", "--no-ext-diff", "--no-textconv", "--submodule=short"])
         elif sub == "log":
             cmd.extend(["log", "-n", "5", "--oneline"])
         elif sub == "branch":

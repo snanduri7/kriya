@@ -227,3 +227,78 @@ def test_the_candidate_worktree_admin_alias_is_the_worktrees_own(dotted):  # noq
     """Guard: the worktree-admin case really aliases the candidate's admin HEAD under the owner's .git/worktrees."""
     s = dotted
     assert os.path.isfile(os.path.join(_worktree_admin(s.candidate), "HEAD"))
+
+
+# ------------------------------------------------------------- TAF-2: the repository's diff.submodule cannot widen a diff
+#
+# MEASURED at ea56d08 (TEST-A-final probe_oi164 C8): with the repository's own `diff.submodule=diff`, a planned diff
+# recursed into a populated submodule and printed the working-tree bytes of the SUBMODULE's tracked file - a hard link to
+# the owner's .git/config (the owner-side alias check lists only the owner's tracked paths; a gitlink is no file). The
+# GitTool diff is the only Kriya git invocation that renders file content (TRACED: every other diff is --name-only;
+# cat-file / archive read objects). MEASURED (git 2.54.0, scratch taf2_raw_measure.txt): an explicit --submodule=short
+# on the command line overrides the repository's diff.submodule=diff and prints no submodule content.
+
+SUBMODULE_MARK = "TAF2_SUBMODULE_CONTROL_MARKER"
+
+
+def _plain_git(cwd, *args):
+    return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", *args], cwd=cwd,
+                          check=True, capture_output=True, text=True, stdin=subprocess.DEVNULL).stdout
+
+
+@pytest.fixture
+def submodule_owner(tmp_path, monkeypatch):
+    """An owner repository with a populated submodule `sub` whose tracked c.txt is a hard link to the owner's own
+    .git/config (carrying a marker line), and the repository's own diff.submodule=diff."""
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".gitconfig").write_text("[user]\n\tname = taf2\n\temail = taf2@local\n")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(home / ".gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    child, owner = tmp_path / "child", tmp_path / "owner"
+    for repo, name, text in ((child, "c.txt", "child\n"), (owner, "a.py", "x = 1\n")):
+        repo.mkdir()
+        _plain_git(repo, "init", "-q", "-b", "main")
+        (repo / name).write_text(text)
+        _plain_git(repo, "add", "-A")
+        _plain_git(repo, "commit", "-q", "-m", "init")
+    _plain_git(owner, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(child), "sub")
+    _plain_git(owner, "commit", "-q", "-m", "sub")
+    with open(owner / ".git" / "config", "a", encoding="utf-8") as handle:
+        handle.write(f"\n# {SUBMODULE_MARK}\n")
+    os.unlink(owner / "sub" / "c.txt")
+    os.link(owner / ".git" / "config", owner / "sub" / "c.txt")
+    assert os.path.samefile(owner / ".git" / "config", owner / "sub" / "c.txt")
+    _plain_git(owner, "config", "diff.submodule", "diff")
+    return owner
+
+
+def _leaks(text) -> bool:
+    return SUBMODULE_MARK in (text or "") or "[core]" in (text or "")
+
+
+def test_the_repository_s_diff_submodule_cannot_expose_a_submodule_alias_of_the_owner_s_git_config(submodule_owner):
+    owner = submodule_owner
+    assert _leaks(_plain_git(owner, "diff", "--no-ext-diff", "--no-textconv")), "control: git itself leaks here"
+    result = view("git", {"subcommand": "diff"}, (str(owner),))
+    assert result.status == SubtaskStatus.COMPLETED, result
+    assert not _leaks(result.tool_output) and not _leaks(str(result.error)), result.tool_output
+    # Kriya's explicit mode wins over the repository's: the output is git's own short form, byte for byte.
+    assert result.tool_output == _plain_git(owner, "diff", "--no-ext-diff", "--no-textconv", "--submodule=short")
+    assert "+Subproject commit " in result.tool_output and result.tool_output.rstrip().endswith("-dirty")
+
+
+def test_an_intended_submodule_change_stays_visible_in_short_form(submodule_owner):
+    owner = submodule_owner
+    os.unlink(owner / "sub" / "c.txt")
+    _plain_git(owner / "sub", "checkout", "-q", "--", "c.txt")
+    before = _plain_git(owner / "sub", "rev-parse", "HEAD").strip()
+    (owner / "sub" / "d.txt").write_text("new\n")
+    _plain_git(owner / "sub", "add", "-A")
+    _plain_git(owner / "sub", "commit", "-q", "-m", "advance")
+    after = _plain_git(owner / "sub", "rev-parse", "HEAD").strip()
+    result = view("git", {"subcommand": "diff"}, (str(owner),))
+    assert result.status == SubtaskStatus.COMPLETED, result
+    assert f"-Subproject commit {before}" in result.tool_output and f"+Subproject commit {after}" in result.tool_output
+    assert "d.txt" not in result.tool_output, "short form: no submodule file content"
