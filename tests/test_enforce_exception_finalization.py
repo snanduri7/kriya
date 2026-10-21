@@ -54,6 +54,15 @@ def _enforce_rows(config) -> list:
         conn.close()
 
 
+def _recorded_artifacts(path: Path):
+    """What the artifact registry records, without the per-repository identities (workspace path, run id, commit)."""
+    if not path.exists():
+        return None
+    document = json.loads(path.read_text())
+    return sorted((record["ecosystem"], record["kind"], tuple(sorted(record["coordinates"].items())))
+                  for records in (document.get("artifacts") or {}).values() for record in records)
+
+
 def _persisted(repo: Path) -> dict:
     """What the run left durable: the approved plan document's lifecycle and stage states, the control state's subtask states
     and written files, and how many git worktrees the repository still lists (the candidate's cleanup)."""
@@ -67,8 +76,16 @@ def _persisted(repo: Path) -> dict:
         "subtask_states": state.get("subtask_states"),
         "written_files": state.get("subtask_written_files"),
         "completion_scope": state.get("subtask_completion_scope"),
+        "artifact_registry": _recorded_artifacts(control / "artifacts.json"),
         "git_worktrees": listed.count("worktree "),
     }
+
+
+def _candidate_bytes(repo: Path) -> list:
+    """app.py as every OTHER git worktree of the repository holds it (the run's candidate sandbox)."""
+    listed = subprocess.run(["git", "worktree", "list", "--porcelain"], cwd=repo, check=True, capture_output=True, text=True).stdout
+    paths = [Path(line.split(" ", 1)[1]) for line in listed.splitlines() if line.startswith("worktree ")]
+    return sorted((path / "app.py").read_text() for path in paths if path.resolve() != repo.resolve() and (path / "app.py").exists())
 
 
 async def _ordinary_failed_run(tmp_path) -> dict:
@@ -196,6 +213,201 @@ async def test_an_interrupt_after_the_durable_commit_leaves_exactly_what_the_suc
     assert isinstance(raised, asyncio.CancelledError)
     assert (repo / "app.py").read_text() == "verified candidate\n"                                   # the commit is durable
     assert interrupted == reference
+
+
+@pytest.mark.asyncio
+async def test_an_interrupt_after_the_commit_is_durable_but_before_the_service_returns_leaves_the_successful_runs_state(tmp_path, monkeypatch):
+    """Addendum #4 observation A (owner: durable repository truth must not contradict the plan/run state). The window: the real
+    transaction has settled COMMITTED in the RunRecord and the bytes are in the workspace, and the interrupt arrives before
+    `commit_verified_candidate` hands the result back - so the local `workspace_commit_completed` flag is still False. The handler
+    must not guess `failed` over a workspace that holds the verified work; the durable commit record is the authority."""
+    from kriya.workflow import commit_service
+
+    repo_ref, raised_ref, reference = await _scenario(tmp_path, "ref", monkeypatch=monkeypatch)
+    assert raised_ref is None and reference["plan_lifecycle"] == "completed" and reference["completion_scope"] == "workspace", reference
+    real = commit_service.commit_terminal_candidate
+
+    def commit_then_interrupt(*args, **kwargs):
+        outcome = real(*args, **kwargs)
+        assert outcome.committed is True                                       # the transaction really committed
+        raise _Interrupt()
+    monkeypatch.setattr(commit_service, "commit_terminal_candidate", commit_then_interrupt)
+    repo, raised, interrupted = await _scenario(tmp_path, "int", monkeypatch=monkeypatch)
+    assert isinstance(raised, _Interrupt)
+    assert (repo / "app.py").read_text() == "verified candidate\n"                                   # durable repository truth
+    assert interrupted == reference                                                                   # and the plan/control state agree with it
+
+
+@pytest.mark.asyncio
+async def test_an_interrupt_during_the_commit_that_the_journal_proves_rolled_back_is_a_failed_plan(tmp_path, monkeypatch):
+    """The interrupt arrives after the durable intent, while the batch is being staged; the transaction rolls itself back (journal
+    ROLLED_BACK). The workspace is proven unchanged, so `failed` and a discarded candidate are the TRUE outcome - the journal, not a
+    guess, says so."""
+    from kriya.repository import commit
+
+    ordinary = await _ordinary_failed_run(tmp_path)
+
+    def interrupted(*_args, **_kwargs):
+        raise _Interrupt()
+    monkeypatch.setattr(commit, "_stage_content", interrupted)
+    repo, raised, state = await _scenario(tmp_path, "int", monkeypatch=monkeypatch)
+    assert isinstance(raised, _Interrupt)
+    assert (repo / "app.py").read_text() == "original\n"
+    assert state == ordinary, state
+    assert "verified candidate\n" not in _candidate_bytes(repo)               # proven unchanged: the candidate is reset, not kept
+
+
+@pytest.mark.asyncio
+async def test_an_interrupt_during_the_commit_that_the_journal_cannot_prove_finished_is_the_uncertain_outcome(tmp_path, monkeypatch):
+    """The other half of observation A: the transaction started (durable IN_PROGRESS evidence) and the interrupt leaves it
+    unsettled. Whether the workspace holds the candidate is unproven - the existing UNCERTAIN outcome: the plan is needs_review and
+    the verified candidate is KEPT for explicit recovery (the only copy of bytes the commit may have partly applied), exactly what a
+    RETURNED uncertain commit leaves. `failed` plus a deleted candidate would be a guess."""
+    import time
+
+    from kriya.repository import commit
+
+    repo_ref, raised_ref, reference = await _scenario(tmp_path, "ref", monkeypatch=monkeypatch, commit_failure="UNCERTAIN")
+    assert raised_ref is None and reference["plan_lifecycle"] == "needs_review", reference
+    assert "verified candidate\n" in _candidate_bytes(repo_ref)                # the reference KEEPS the candidate's bytes
+
+    def begin_then_interrupt(writes, workspace_path=None, *, transaction_id=None):
+        commit._persist_commit_evidence(workspace_path, commit.CommitEvidence(      # pylint: disable=protected-access
+            schema_version=commit._COMMIT_EVIDENCE_SCHEMA_VERSION, transaction_id=transaction_id,   # pylint: disable=protected-access
+            state=commit.CommitState.IN_PROGRESS, started_at_unix=time.time(), updated_at_unix=time.time(), operations=(), result_revisions={}))
+        raise _Interrupt()
+    from kriya.workflow import terminal_commit
+    monkeypatch.setattr(terminal_commit, "commit_revision_grounded_batch", begin_then_interrupt)
+    repo, raised, state = await _scenario(tmp_path, "int", monkeypatch=monkeypatch)
+    assert isinstance(raised, _Interrupt)
+    assert state == reference, state                                          # needs_review, scope candidate
+    assert "verified candidate\n" in _candidate_bytes(repo)                    # the candidate is KEPT for explicit recovery
+    assert (repo / "app.py").read_text() == "original\n"                       # this stand-in wrote nothing
+
+
+@pytest.mark.asyncio
+async def test_an_interrupt_during_the_commit_whose_journal_is_unreadable_is_uncertain_never_a_guess(tmp_path, monkeypatch):
+    """If the journal entry of this run's transaction cannot be read, what happened is unknown - UNCERTAIN, not `failed`."""
+    from kriya.repository import commit
+    from kriya.workflow import terminal_commit
+
+    repo_ref, raised_ref, reference = await _scenario(tmp_path, "ref", monkeypatch=monkeypatch, commit_failure="UNCERTAIN")
+    assert raised_ref is None and reference["plan_lifecycle"] == "needs_review"
+
+    def garbage_then_interrupt(writes, workspace_path=None, *, transaction_id=None):
+        directory = Path(commit.commit_evidence_dir(workspace_path))
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / f"{transaction_id}.json").write_text("{ this is not json")
+        raise _Interrupt()
+    monkeypatch.setattr(terminal_commit, "commit_revision_grounded_batch", garbage_then_interrupt)
+    repo, raised, state = await _scenario(tmp_path, "int", monkeypatch=monkeypatch)
+    assert isinstance(raised, _Interrupt)
+    assert state == reference and "verified candidate\n" in _candidate_bytes(repo)
+
+
+@pytest.mark.asyncio
+async def test_an_earlier_committed_unit_of_the_same_run_is_not_mistaken_for_the_interrupted_terminal_commit(tmp_path, monkeypatch):
+    """A milestone sequence commits several units under one run id. The journal diff is taken against the state just before THIS
+    terminal commit, so an older COMMITTED transaction of the same run cannot make an interrupted, unproven commit look committed."""
+    import time
+
+    from kriya.repository import commit
+    from kriya.workflow import commit_service, terminal_commit
+
+    _repo_ref, raised_ref, reference = await _scenario(tmp_path, "ref", monkeypatch=monkeypatch, commit_failure="UNCERTAIN")
+    assert raised_ref is None and reference["plan_lifecycle"] == "needs_review"
+
+    def begin_then_interrupt(writes, workspace_path=None, *, transaction_id=None):
+        commit._persist_commit_evidence(workspace_path, commit.CommitEvidence(      # pylint: disable=protected-access
+            schema_version=commit._COMMIT_EVIDENCE_SCHEMA_VERSION, transaction_id=transaction_id,   # pylint: disable=protected-access
+            state=commit.CommitState.IN_PROGRESS, started_at_unix=time.time(), updated_at_unix=time.time(), operations=(),
+            result_revisions={}))
+        raise _Interrupt()
+    monkeypatch.setattr(terminal_commit, "commit_revision_grounded_batch", begin_then_interrupt)
+    repo = _repo_in(tmp_path / "int")
+    config = strict_config(autonomy={"spec_compliance_enabled": True})
+    engine = _engine(config, bind_filter=False)
+
+    async def emit(event_name, data):
+        if event_name == "commit_eligible":                 # just before the terminal commit's journal snapshot
+            commit._persist_commit_evidence(str(repo), commit.CommitEvidence(      # pylint: disable=protected-access
+                schema_version=commit._COMMIT_EVIDENCE_SCHEMA_VERSION,             # pylint: disable=protected-access
+                transaction_id=f"{commit_service._transaction_prefix(data['run_id'])}-earlierunit",   # pylint: disable=protected-access
+                state=commit.CommitState.COMMITTED, started_at_unix=time.time(), updated_at_unix=time.time(), operations=(),
+                result_revisions={}))
+    engine.kernel.events.emit = emit
+    with pytest.raises(_Interrupt):
+        await _enforce(repo, engine)
+    state = _persisted(repo)
+    assert state["plan_lifecycle"] == "needs_review" and state["completion_scope"] != "workspace", state
+    assert "verified candidate\n" in _candidate_bytes(repo)
+
+
+def _derive_one_artifact(monkeypatch) -> None:
+    """The candidate yields one derived artifact record (the harness repository has no pyproject to derive from)."""
+    from kriya.control.artifacts import ArtifactRecord, ArtifactRegistry
+
+    def derive(_workspace_path, milestone_id, resolved_at_commit=None):
+        return (ArtifactRecord(milestone_id=milestone_id, ecosystem="python", kind="package", coordinates={"name": "demo"},
+                               resolved_at_commit=resolved_at_commit),)
+    monkeypatch.setattr(ArtifactRegistry, "derive_from_workspace", staticmethod(derive))
+
+
+@pytest.mark.asyncio
+async def test_an_interrupt_after_the_durable_commit_still_records_the_artifacts_derived_from_the_verified_candidate(tmp_path, monkeypatch):
+    """Observation C (owner: mandatory evidence after a committed mutation must not silently vanish). The artifact registry holds the
+    facts derived from the candidate that is now the workspace; the ordinary path records them after the commit, and so does the
+    handler - one shared step, so the interrupted run leaves the registry the successful run leaves."""
+    _derive_one_artifact(monkeypatch)
+    _repo_ref, raised_ref, reference = await _scenario(tmp_path, "ref", monkeypatch=monkeypatch)
+    assert raised_ref is None and reference["artifact_registry"], reference                    # the reference really records one
+    _repo, raised, interrupted = await _scenario(tmp_path, "int", monkeypatch=monkeypatch, interrupt_at="workspace_commit_completed")
+    assert isinstance(raised, asyncio.CancelledError)
+    assert interrupted["artifact_registry"] == reference["artifact_registry"]
+    assert interrupted == reference
+
+
+class _SecondInterrupt(BaseException):
+    """A second operator interrupt, arriving while the first is being finalized."""
+
+
+@pytest.mark.parametrize("target", ["control_state", "approved_plan"])
+@pytest.mark.asyncio
+async def test_a_second_interrupt_while_finalizing_leaves_no_reusable_completion_and_chains_the_first(tmp_path, monkeypatch, target):
+    """Observation B. The second interrupt is the exception that reaches the caller (the first stays chained as its context) -
+    that is the operator's latest and escalating intent, and both are interrupts. What matters is the durable state it leaves: the
+    two finalization writes (control state, then the plan) are individually atomic, and an interruption between them leaves
+    completions marked `candidate` scope - which resume never reuses (the candidate is gone) - or already discarded. Never a
+    `workspace`-scoped completion that was not committed."""
+    from kriya.control import persistence
+
+    real = persistence._save_json_document            # pylint: disable=protected-access
+    unwinding = []
+    resolve = persistence.control_state_path if target == "control_state" else (lambda ws: persistence.approved_plan_path(ws, PLAN_ID))
+
+    def save(*args, **kwargs):
+        if unwinding and args[1] == resolve(args[0]):
+            raise _SecondInterrupt()
+        return real(*args, **kwargs)
+    first = _Interrupt()
+    repo = _repo_in(tmp_path / "int")
+    config = strict_config(autonomy={"spec_compliance_enabled": True})
+    engine = _engine(config, bind_filter=False)
+
+    async def emit(event_name, _data):
+        if event_name == "terminal_gates_started":
+            unwinding.append(True)
+            raise first
+    engine.kernel.events.emit = emit
+    monkeypatch.setattr(persistence, "_save_json_document", save)
+    with pytest.raises(_SecondInterrupt) as raised:
+        await _enforce(repo, engine)
+    assert raised.value.__context__ is first                                    # the first interrupt is not lost
+    state = _persisted(repo)
+    assert state["completion_scope"] != "workspace"                             # nothing claims the workspace holds the work
+    if "completed" in (state["subtask_states"] or {}).values():
+        assert state["completion_scope"] == "candidate"                         # completions still owned by a dead candidate
+    assert state["plan_lifecycle"] in ("in_progress", "failed")
 
 
 @pytest.mark.asyncio

@@ -17,11 +17,13 @@ module existed.
 
 from __future__ import annotations
 
+import os
 import re
 import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
+from kriya.repository.commit import CommitState, list_commit_evidence
 from kriya.static_analysis.service import StaticAnalysisCommitGuard
 from kriya.workflow.edit_safety import StagedFileWrite
 from kriya.workflow.obligations import ObligationLedger
@@ -107,6 +109,25 @@ def terminal_writes(request: TerminalCommitRequest) -> List[StagedFileWrite]:
     )
 
 
+def _transaction_prefix(run_id: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "", run_id).lstrip("-_")[:100] or "run"
+
+
+def run_commit_states(workspace_path: str, run_id: str) -> Optional[Dict[str, CommitState]]:
+    """The durable state of every commit transaction ``run_id`` has started in ``workspace_path``, from the commit evidence journal
+    (the transaction's own authority, written before and settled after the bytes move). ``None`` when a journal entry of this run
+    cannot be read: what happened is then unknown, and the caller must not guess."""
+    prefix = _transaction_prefix(run_id) + "-"
+    states: Dict[str, CommitState] = {}
+    for path, evidence, _error in list_commit_evidence(workspace_path):
+        if not os.path.basename(path).startswith(prefix):
+            continue
+        if evidence is None:
+            return None
+        states[evidence.transaction_id] = evidence.state
+    return states
+
+
 def commit_verified_candidate(report: TerminalGateReport, request: TerminalCommitRequest) -> TerminalCommitResult:
     """PRD-004: the one real-workspace transaction of an enforce run.
 
@@ -129,8 +150,7 @@ def commit_verified_candidate(report: TerminalGateReport, request: TerminalCommi
     # Unique per cycle: run_id is shared by nested executes (the outer run's
     # id) and reused by resume/trace overrides, and one commit-evidence file
     # must only ever describe one transaction.
-    run_prefix = re.sub(r"[^A-Za-z0-9_-]", "", request.run_id).lstrip("-_")[:100] or "run"
-    transaction_id = f"{run_prefix}-{uuid.uuid4().hex[:12]}"
+    transaction_id = f"{_transaction_prefix(request.run_id)}-{uuid.uuid4().hex[:12]}"
     outcome = commit_terminal_candidate(
         writes, workspace_path=request.workspace_path, transaction_id=transaction_id,
         evidence={

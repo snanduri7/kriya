@@ -3178,6 +3178,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         workspace_commit_evidence: Optional[Dict[str, Any]] = None
         workspace_commit_failure: Optional[Dict[str, Any]] = None
         committed_contract_registry: Optional[Dict[str, Any]] = None
+        terminal_commit_started = False
+        commit_journal_before: Any = None
 
         async def _emit_terminal_event(event_name: str, **data: Any) -> None:
             """Terminal lifecycle events are telemetry, never correctness gates."""
@@ -3239,6 +3241,35 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             nonlocal control_state
             control_state = _persist_control_state(control_state.with_updates(subtask_completion_scope="workspace"))
 
+        def _save_derived_artifacts(records: Any) -> None:
+            # Artifact facts derived from the verified candidate, persisted only after the source commit (one step shared by the
+            # ordinary path and the error handler: an interrupt after a durable commit still records them).
+            artifact_registry = deps.load_artifact_registry(workspace_path)
+            for record in records:
+                artifact_registry.record(record)
+            deps.save_artifact_registry(workspace_path, artifact_registry)
+
+        def _settled_terminal_commit(before: Any) -> Optional[str]:
+            """What the commit journal - the transaction's own durable authority - says about a terminal commit that raised before the
+            service handed a result back: ``"COMMITTED"`` (the workspace holds the candidate), ``"UNCERTAIN"`` (started and not
+            proven finished or rolled back, or the journal cannot be read: the workspace may hold part of it), or ``None`` (nothing
+            of this run's terminal commit is durable)."""
+            from kriya.repository.commit import CommitState
+            from kriya.workflow.commit_service import run_commit_states
+
+            try:
+                after = run_commit_states(workspace_path, run_id)
+            except OSError:
+                after = None
+            if after is None or before is None:
+                return "UNCERTAIN"
+            started = [state for transaction, state in after.items() if transaction not in before]
+            if CommitState.COMMITTED in started:
+                return "COMMITTED"
+            if any(state in (CommitState.IN_PROGRESS, CommitState.UNCERTAIN) for state in started):
+                return "UNCERTAIN"
+            return None
+
         try:
             if subtasks_completed:
                 # PRD-004: every blocking terminal gate runs against the one
@@ -3286,6 +3317,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 
                 if all_completed:
                     await _emit_terminal_event("commit_eligible")
+                    if plan_workspace_path != workspace_path:
+                        from kriya.workflow.commit_service import run_commit_states
+
+                        try:
+                            commit_journal_before = run_commit_states(workspace_path, run_id)
+                        except OSError:
+                            commit_journal_before = None
+                        terminal_commit_started = True
                     commit = deps.commit_verified_candidate(gate_report, deps.TerminalCommitRequest(
                         plan=plan, candidate_root=plan_workspace_path, workspace_path=workspace_path,
                         original_plan_revisions=original_plan_revisions, approved_plan_hash=current_plan_hash,
@@ -3332,6 +3371,18 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # (`failed`, or `needs_review` when a returned commit failure or a review subtask already decided so). After a
             # durable commit the workspace holds the verified work: the completions are the workspace's and the plan
             # `completed`, exactly the ordinary path's two post-commit steps. Never masks the error being handled.
+            if terminal_commit_started and not workspace_commit_completed and workspace_commit_failure is None:
+                # The commit raised (an interrupt included) before the service handed its result back. The local flags say nothing
+                # then: the journal decides whether the workspace holds the candidate, and an unproven commit is UNCERTAIN - the
+                # existing outcome - so the candidate is kept for explicit recovery and the plan is needs_review, never `failed`.
+                settled = _settled_terminal_commit(commit_journal_before)
+                if settled == "COMMITTED":
+                    workspace_commit_completed = True
+                elif settled == "UNCERTAIN":
+                    workspace_commit_failure = {
+                        "reason_code": "WORKSPACE_COMMIT_UNCERTAIN", "workspace_state": "UNCERTAIN",
+                        "error": "the terminal commit was interrupted before its outcome was proven",
+                    }
             if workspace_commit_completed:
                 if plan_workspace_path != workspace_path:
                     try:
@@ -3339,6 +3390,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     except Exception as finalize_error:
                         deps.logger.error(
                             "WorkflowController enforce run %r: sandbox completions could not be adopted after an error: %s",
+                            run_id, finalize_error,
+                        )
+                if gate_report.candidate_derived_artifacts:
+                    try:
+                        _save_derived_artifacts(gate_report.candidate_derived_artifacts)
+                    except Exception as finalize_error:
+                        deps.logger.error(
+                            "WorkflowController enforce run %r: derived artifacts could not be persisted after an error: %s",
                             run_id, finalize_error,
                         )
                 error_lifecycle = _lifecycle_of(True)
@@ -3485,10 +3544,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         candidate_derived_artifacts = gate_report.candidate_derived_artifacts
         if workspace_commit_completed and candidate_derived_artifacts:
             try:
-                artifact_registry = deps.load_artifact_registry(workspace_path)
-                for record in candidate_derived_artifacts:
-                    artifact_registry.record(record)
-                deps.save_artifact_registry(workspace_path, artifact_registry)
+                _save_derived_artifacts(candidate_derived_artifacts)
                 aggregated["derived_artifacts"] = [
                     record.to_dict() for record in candidate_derived_artifacts
                 ]
