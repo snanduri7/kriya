@@ -696,6 +696,16 @@ _SNAPSHOT_FALLBACK_IGNORED_DIRS = {
 }
 
 
+class _FilesystemSnapshot(set):
+    """TAF-4: a snapshot of EVERY file on disk (the no-git fallback), not only untracked ones - a different source from
+    a git snapshot, so clean_untracked_files_since never compares the two (MEASURED at ea56d08: a git baseline against a
+    fallback clean-time snapshot deleted every tracked file of the worktree)."""
+
+
+def _raise(error: OSError) -> None:
+    raise error
+
+
 def _snapshot_all_files_without_git(worktree_path: str) -> Optional[set]:
     """Plain filesystem-walk fallback for snapshot_untracked_files() when
     worktree_path isn't a git repository at all (git status itself fails) -
@@ -716,13 +726,18 @@ def _snapshot_all_files_without_git(worktree_path: str) -> Optional[set]:
     a run just created, never anything that already existed. Ignores the same
     directories _list_workspace_files() in kriya/workflow/milestones.py
     already treats as noise/build-cache, so compile artifacts aren't misread
-    as runtime state and wiped between attempts."""
+    as runtime state and wiped between attempts.
+
+    TAF-4: runs no process (no git, no filter, no hook); a file at a protected control name (a nested or managed
+    worktree's ``.git`` gitfile, the scoped-snapshot sentinel) is never listed, so it can never be cleaned; a directory
+    the walk cannot list makes the snapshot None ("couldn't tell"), never a partial set passed off as complete."""
     try:
-        files = set()
-        for root, dirs, filenames in os.walk(worktree_path):
+        files = _FilesystemSnapshot()
+        for root, dirs, filenames in os.walk(worktree_path, onerror=_raise):
             dirs[:] = [d for d in dirs if d not in _SNAPSHOT_FALLBACK_IGNORED_DIRS]
             for fn in filenames:
-                files.add(os.path.relpath(os.path.join(root, fn), worktree_path))
+                if not is_trusted_control_name(fn):
+                    files.add(os.path.relpath(os.path.join(root, fn), worktree_path))
         return files
     except OSError as e:
         logger.debug(f"Failed to snapshot files without git in '{worktree_path}' (non-fatal): {e}")
@@ -795,6 +810,12 @@ def clean_untracked_files_since(worktree_path: str, baseline: Optional[set]) -> 
         return
     current = snapshot_untracked_files(worktree_path)
     if current is None:
+        return
+    if isinstance(current, _FilesystemSnapshot) is not isinstance(baseline, _FilesystemSnapshot):
+        # TAF-4: one snapshot is git's untracked files, the other every file on disk - their difference is not what
+        # the run created (it would be every tracked file, or files the fallback's pruned directories hid).
+        logger.warning("Runtime-artifact cleanup skipped in '%s': the before/after snapshots come from different "
+                       "sources (git and the filesystem fallback), so what the run created cannot be told.", worktree_path)
         return
     for rel in current - baseline:
         full = os.path.join(worktree_path, rel)
