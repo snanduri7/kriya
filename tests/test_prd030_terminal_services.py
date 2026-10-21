@@ -438,3 +438,41 @@ def test_one_terminal_gate_and_one_commit_implementation():
     assert controller.count("commit_verified_candidate(") == 0 and controller.count("TerminalGateService(") == 0
     assert enforce_loop.count("deps.commit_verified_candidate(") == 1
     assert enforce_loop.count("deps.TerminalGateService(") == 1
+
+
+@pytest.mark.parametrize("closer", ["close_requirements_by_mutation_scope", "close_requirements_with_named_tests"])
+def test_a_closer_s_typed_repository_refusal_ends_the_terminal_gate_as_itself(tmp_path, monkeypatch, closer):
+    """TAF-3 (MEASURED at ea56d08, scratch taf3_terminal_measure.txt): the requirement gate's outer handler turned a
+    closer's RepositoryContentFilterRefused into a REQUIREMENTS_UNRESOLVED prose gap; it now reaches the caller as
+    itself (the enforce controller's BaseException branch records and re-raises it, like the plan-worktree refusal).
+    An ordinary closer error is still the fail-closed prose gap, byte for byte."""
+    from kriya.repository.git import GIT_CONTENT_FILTER_REPOSITORY_DEFINED, RepositoryContentFilterRefused
+    from kriya.workflow import requirement_closers  # the bodies kriya.workflow.workflow delegates to at call time
+
+    autonomy = AppConfig().autonomy
+    autonomy.spec_compliance_enabled = True
+
+    def refusing(*_args, **_kwargs):
+        raise RepositoryContentFilterRefused(GIT_CONTENT_FILTER_REPOSITORY_DEFINED, "/w", key="filter.kx.smudge",
+                                             scope="local", origin="file:.git/config")
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("closer broke")
+
+    def none(*_args, **_kwargs):
+        return []
+
+    def install(failing):
+        scope_closer = failing if closer == "close_requirements_by_mutation_scope" else none
+        monkeypatch.setattr(requirement_closers, "close_requirements_by_mutation_scope", scope_closer)
+        monkeypatch.setattr(requirement_closers, "close_requirements_with_named_tests", none if scope_closer is failing
+                            else failing)
+
+    install(refusing)
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        _run(_request(tmp_path, autonomy=autonomy), _validators())
+    assert raised.value.reason_code == GIT_CONTENT_FILTER_REPOSITORY_DEFINED
+    install(broken)
+    report, _events = _run(_request(tmp_path, autonomy=autonomy), _validators())
+    assert report.requirement_gap == ("REQUIREMENTS_UNRESOLVED: original requirement verification failed "
+                                      "(RuntimeError: closer broke); refusing success without it.")
