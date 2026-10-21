@@ -1,15 +1,11 @@
-"""What the closers' guarded git/I-O collaborators do today when they fail for ANY reason - a coding error included (consolidated
-addendum #3 step D; corrected by the addendum #4 review): the failure degrades to "unavailable", and "unavailable" is never evidence
-that a requirement is SATISFIED - its consumers fail closed (the requirement stays unverified, the reason names the exception class).
-That half is pinned here.
+"""What the closers' guarded git/I-O collaborators do when a read FAILS IN OPERATION (OSError, git exiting non-zero, an unreadable
+persisted record): the read degrades to "unavailable", and "unavailable" is never evidence that a requirement is SATISFIED - its
+consumers fail closed (the requirement stays unverified, the reason names the exception class). Pinned here.
 
-The other half is NOT an intended contract and is recorded as an OPEN OWNER DECISION: "unavailable" also discards COUNTER-evidence.
-MEASURED by the addendum #4 review on the real direct path with the default policy ``record``: a run whose committed history holds a
-deterministic violation ends quality_gates_passed False / violated; the same run with an AttributeError (or OSError) injected into the
-guarded git read ends quality_gates_passed True / unverified. ``block`` (the strict profiles) fails closed (TRACED, not measured end to
-end). Whether a Kriya coding error in a collaborator should instead reach the single attempt-exception classifier (Q5) is a per-site
-decision (a collaborator that parses candidate-controlled bytes must keep degrading): the pins below describe today's behaviour and
-must be changed together with that decision, not before it.
+What the degradation may NOT do (consolidated addendum #3 step D, corrected by the addendum #4 review and the owner's decision) is erase
+counter-evidence already established, or swallow a Kriya coding error: those are pinned in test_counter_evidence_monotonic. The helpers'
+catches are the helper's own declared failure surface (worktree.GIT_READ_FAILURES, requirement_closers.COMMITTED_HISTORY_READ_FAILURES),
+so an AttributeError/NameError reaches the attempt classifier (Q5) from every one of them.
 
 The typed S19 refusal (RepositoryContentFilterRefused) is not degraded: it has its own pins (test_fs1c0_named_test_oracle,
 test_s19e_honest_refusal)."""
@@ -42,8 +38,8 @@ def _repo(tmp_path):
     return str(tmp_path)
 
 
-@pytest.mark.parametrize("error", [AttributeError("'NoneType' object has no attribute 'x'"), OSError("disk vanished")],
-                         ids=["AttributeError", "OSError"])
+@pytest.mark.parametrize("error", [OSError("disk vanished"), ValueError("Unsupported commit evidence schema: 9."), KeyError("schema_version")],
+                         ids=["OSError", "ValueError", "KeyError"])
 def test_a_failing_run_record_read_makes_the_mutation_evidence_unavailable_and_never_available(tmp_path, error):
     def failing(_workspace):
         raise error
@@ -58,7 +54,7 @@ def test_a_failing_run_record_read_makes_the_mutation_evidence_unavailable_and_n
 
 def test_a_failing_run_record_read_leaves_the_named_test_oracle_without_a_base(tmp_path):
     def failing(_workspace):
-        raise AttributeError("'NoneType' object has no attribute 'x'")
+        raise OSError("disk vanished")
     not_a_repository = str(tmp_path)
     assert requirement_closers._oracle_base_revision(      # pylint: disable=protected-access
         _deps(failing), not_a_repository, not_a_repository) is None                 # the oracle then refuses (UNVERIFIED)

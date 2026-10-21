@@ -85,6 +85,7 @@ def immutable_test_files(deps: CloserDeps, contract: Any, workspace_path: str) -
     from kriya.workflow.file_resolution import is_runnable_test_file
     from kriya.workflow.named_test_oracle import BaseTree
     from kriya.workflow.requirements import TEST_IMMUTABILITY_CLAIM
+    from kriya.workflow.worktree import GIT_READ_FAILURES
 
     frozen = set(named_preserved_test_files(contract))
     entries = getattr(contract, "entries", None) or ()
@@ -93,7 +94,7 @@ def immutable_test_files(deps: CloserDeps, contract: Any, workspace_path: str) -
         if head:
             try:
                 frozen.update(path for path in BaseTree(workspace_path, head).paths if is_runnable_test_file(path))
-            except Exception as exc:  # unreadable base: only the named files constrain planning (the terminal gate still refuses)
+            except GIT_READ_FAILURES as exc:  # unreadable base: only the named files constrain planning (the terminal gate still refuses)
                 logger.info(f"Immutable test files unavailable for planning: {type(exc).__name__}: {exc}")
     return sorted(frozen) or None
 
@@ -107,6 +108,7 @@ def _reference_test_files(deps: CloserDeps, candidate_root: str, workspace_path:
     logger = deps.logger
     from kriya.workflow.file_resolution import is_runnable_test_file
     from kriya.workflow.named_test_oracle import BaseTree
+    from kriya.workflow.worktree import GIT_READ_FAILURES
 
     in_place = os.path.realpath(candidate_root) == os.path.realpath(workspace_path)
     files = [] if in_place else _candidate_test_files(workspace_path)
@@ -114,7 +116,7 @@ def _reference_test_files(deps: CloserDeps, candidate_root: str, workspace_path:
     if base_revision:
         try:
             files += [path for path in BaseTree(candidate_root, base_revision).paths if is_runnable_test_file(path)]
-        except Exception as exc:  # unreadable base (git error, I/O): unknown, both claims required
+        except GIT_READ_FAILURES as exc:  # unreadable base (git error, I/O): unknown, both claims required
             logger.info(f"Acceptance: base test files unavailable: {type(exc).__name__}: {exc}")
             return None
     elif in_place:
@@ -203,11 +205,11 @@ def close_requirements_with_derived_examples(
 def _tracked_workspace_paths(workspace_path: str) -> List[str]:
     """The paths git tracks in the workspace (the referent set of a mutation-scope
     statement at admission); empty when git cannot answer."""
-    from kriya.workflow.worktree import git_read_lines
+    from kriya.workflow.worktree import GIT_READ_FAILURES, git_read_lines
 
     try:
         return [path for path in git_read_lines(workspace_path, "ls-files") if path]
-    except Exception:
+    except GIT_READ_FAILURES:
         return []
 
 
@@ -226,12 +228,13 @@ def _workspace_file_reader(workspace_path: str) -> Callable[[str], Optional[byte
 
 
 def _workspace_head(workspace_path: str) -> Optional[str]:
-    from kriya.workflow.worktree import git_read_lines
+    from kriya.workflow.worktree import GIT_READ_FAILURES, git_read_lines
 
     try:
-        return git_read_lines(workspace_path, "rev-parse", "HEAD")[0]
-    except Exception:
+        heads = git_read_lines(workspace_path, "rev-parse", "HEAD")
+    except GIT_READ_FAILURES:
         return None
+    return heads[0] if heads else None
 
 
 def frozen_file_paths(contract: Any) -> Dict[str, List[str]]:
@@ -654,14 +657,21 @@ def _oracle_base_revision(deps: CloserDeps, candidate_root: str, workspace_path:
     own), else the candidate's HEAD; None when neither can be read."""
     logger = deps.logger
     _run_committed_paths = deps.run_committed_paths
-    from kriya.workflow.worktree import git_read_lines
+    from kriya.workflow.worktree import GIT_READ_FAILURES, git_read_lines
 
     try:
         base = _run_committed_paths(workspace_path)[1]
-        return base or git_read_lines(candidate_root, "rev-parse", "HEAD")[0]
-    except Exception as exc:  # no readable base: the oracle refuses (UNVERIFIED)
+        if base:
+            return base
+        heads = git_read_lines(candidate_root, "rev-parse", "HEAD")
+    except (*COMMITTED_HISTORY_READ_FAILURES, *GIT_READ_FAILURES) as exc:  # no readable base: the oracle refuses (UNVERIFIED)
         logger.info(f"Named-test oracle base revision unavailable: {exc}")
         return None
+    return heads[0] if heads else None
+
+
+# Reading the owning run's committed history is reading a persisted record: I/O, JSON/schema (ValueError) or a missing field (KeyError).
+COMMITTED_HISTORY_READ_FAILURES = (OSError, ValueError, KeyError)
 
 
 def mutation_scope_evidence(
@@ -675,18 +685,31 @@ def mutation_scope_evidence(
     git reports changed in ``candidate_root`` against the base) plus the
     run's committed path history (earlier milestones). ``foreign_paths`` =
     anything else git reports changed or untracked (``.kriya/`` and ignored
-    files excluded): present, but not attributable to the run. Evidence is
-    ``unavailable`` when the candidate is not at the run's base revision or
-    git/commit evidence cannot be read."""
+    files excluded): present, but not attributable to the run.
+
+    COUNTER-EVIDENCE IS MONOTONIC. The committed history is read first and is a fact
+    about the run on its own. When a later git read fails (or the candidate is not at the run's base) the evidence is
+    ``unavailable`` - never complete - but it keeps what was already established as ``known_changed_paths``: a consumer may
+    conclude VIOLATED from a known offending path, and may never conclude SATISFIED from an incomplete record
+    (``requirements.scope_evidence_view`` is the one reader of this shape). Only when the history itself cannot be read is
+    nothing known."""
     _run_committed_paths = deps.run_committed_paths
     from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
+    from kriya.workflow.worktree import GIT_READ_FAILURES
     from kriya.workflow.worktree import git_read_lines as _git_lines
 
     try:
         run_id, base, committed = _run_committed_paths(workspace_path)
-        head = _git_lines(candidate_root, "rev-parse", "HEAD")[0]
+    except COMMITTED_HISTORY_READ_FAILURES as exc:
+        return [], {"unavailable": f"{type(exc).__name__}: {exc}"}
+    known = {"run_id": run_id, "base_revision": base, "committed_history": sorted(committed), "known_changed_paths": sorted(committed)}
+    try:
+        heads = _git_lines(candidate_root, "rev-parse", "HEAD")
+        if not heads:
+            return [], {**known, "unavailable": "git printed no HEAD revision for the candidate"}
+        head = heads[0]
         if base and head != base:
-            return [], {"unavailable": f"candidate is at {head[:12]}, not the run base {base[:12]}"}
+            return [], {**known, "unavailable": f"candidate is at {head[:12]}, not the run base {base[:12]}"}
         base = base or head
         tracked = _git_lines(candidate_root, "ls-tree", "-r", "--name-only", base)
         # S19 P1c (8(a)): `diff <base>` compares the WORK TREE and runs a clean filter on a stat-dirty file (MEASURED);
@@ -700,8 +723,8 @@ def mutation_scope_evidence(
         }
     except RepositoryContentFilterRefused:
         raise
-    except Exception as exc:
-        return [], {"unavailable": f"{type(exc).__name__}: {exc}"}
+    except GIT_READ_FAILURES as exc:
+        return [], {**known, "unavailable": f"{type(exc).__name__}: {exc}"}
     actual = (set(candidate_paths) & changed) | set(committed)
     return tracked, {
         "run_id": run_id, "base_revision": base, "candidate_revision": head,

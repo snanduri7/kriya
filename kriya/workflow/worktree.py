@@ -543,10 +543,16 @@ def _create_scoped_snapshot_sandbox(workspace_path: str, sandbox_path: str) -> s
     return sandbox_path
 
 
+# What a read-only git query can fail with in operation: git or the filesystem refusing (OSError, a missing git), git exiting non-zero or
+# timing out (subprocess.SubprocessError), and output that is not decodable text (UnicodeDecodeError, a ValueError - a non-UTF-8 path
+# name). A caller that degrades a failed read to "unavailable" catches exactly these; anything else is a coding error and propagates.
+GIT_READ_FAILURES = (OSError, subprocess.SubprocessError, ValueError)
+
+
 def git_read_lines(cwd: str, *args: str) -> List[str]:
     """A read-only git query (``rev-parse``, ``ls-tree``, ``diff --name-only``,
-    ``ls-files``) in ``cwd``: its non-empty output lines. Raises on failure,
-    so a caller that needs the answer can fail closed."""
+    ``ls-files``) in ``cwd``: its non-empty output lines. Raises on failure
+    (``GIT_READ_FAILURES``), so a caller that needs the answer can fail closed."""
     completed = subprocess.run(git_argv(["git", *args]), cwd=cwd, capture_output=True, text=True, check=True, timeout=60)
     return [line for line in completed.stdout.splitlines() if line.strip()]
 

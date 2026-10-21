@@ -278,6 +278,7 @@ def run_java_acceptance(
     class once in a fresh Kriya-owned copy of the candidate."""
     from kriya.workflow.acceptance_oracle import AcceptanceError, AcceptanceRun, read_stored
     from kriya.workflow.named_test_oracle import BaseTree, OracleSurface, changed_surface, surface_digest
+    from kriya.workflow.worktree import GIT_READ_FAILURES
 
     run = AcceptanceRun()
     run.language = "java"
@@ -294,7 +295,7 @@ def run_java_acceptance(
             raise AcceptanceError(ACCEPTANCE_TRUST_SURFACE_UNAVAILABLE, "no authorized base revision")
         try:
             base = BaseTree(candidate_root, base_revision)
-        except Exception as error:  # an unreadable base is no trust anchor
+        except GIT_READ_FAILURES as error:  # an unreadable base is no trust anchor
             raise AcceptanceError(ACCEPTANCE_TRUST_SURFACE_UNAVAILABLE,
                                   f"base revision unreadable: {type(error).__name__}") from error
         surface = OracleSurface(base, candidate_root, ())

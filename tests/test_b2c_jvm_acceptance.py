@@ -620,3 +620,18 @@ def test_26_python_artifacts_keep_their_runner_and_contract(tmp_path):
         (tmp_path / "acceptance.txt").write_text(CALC_ACCEPTANCE)
         ao.load_acceptance(str(tmp_path / "acceptance.txt"), derive_requirements(CALC_GOAL), str(tmp_path / "st"))
     assert refused.value.reason_code == ao.ACCEPTANCE_ARTIFACT_INVALID
+
+
+def test_an_unreadable_base_revision_is_no_trust_anchor_but_a_kriya_coding_error_is_not_that(tmp_path, ws):
+    """Counter-evidence decision: reading the base tree is a pure git read, so its OPERATIONAL failure (git cannot resolve the revision)
+    is the unavailable refusal - nothing was known before it - while an AttributeError in that read propagates (Q5)."""
+    cand = candidate(ws, tmp_path / "c", "correct")
+    run = jvm.run_java_acceptance(_artifact(tmp_path), str(cand), candidate_paths=[TARGET], base_revision="0" * 40,
+                                  validator_factory=_validator(ws))
+    assert run.refusal.reason_code == jvm.ACCEPTANCE_TRUST_SURFACE_UNAVAILABLE and "base revision unreadable" in str(run.refusal)
+    error = AttributeError("'NoneType' object has no attribute 'split'")
+    with patch("kriya.workflow.named_test_oracle.BaseTree", side_effect=error):
+        with pytest.raises(AttributeError) as raised:
+            jvm.run_java_acceptance(_artifact(tmp_path), str(cand), candidate_paths=[TARGET], base_revision=base_revision(ws),
+                                    validator_factory=_validator(ws))
+    assert raised.value is error

@@ -69,7 +69,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.workflow.obligations import (
     ObligationAuthority,
@@ -1261,6 +1261,28 @@ def mutation_path_roles(requirements: RequirementSet, tracked_paths: Iterable[st
     return result
 
 
+@dataclass(frozen=True)
+class ScopeEvidenceView:
+    """The one reading of ``mutation_scope_evidence`` (requirement_closers): which paths the run is KNOWN to have changed, and whether
+    that record is COMPLETE. Counter-evidence is monotonic: a known offending path convicts whether or not the record is complete;
+    a record that is not complete can never acquit (no consumer may conclude SATISFIED from it)."""
+
+    changed: FrozenSet[str]
+    complete: bool
+    reason: Optional[str]
+
+
+def scope_evidence_view(scope_evidence: Optional[Mapping[str, Any]]) -> ScopeEvidenceView:
+    if not scope_evidence:
+        return ScopeEvidenceView(frozenset(), False, "mutation evidence unavailable: not collected")
+    unavailable = scope_evidence.get("unavailable")
+    if unavailable:
+        return ScopeEvidenceView(frozenset(scope_evidence.get("known_changed_paths") or ()), False,
+                                 "mutation evidence unavailable: " + str(unavailable))
+    return ScopeEvidenceView(frozenset(scope_evidence.get("actual_paths") or ()) | frozenset(scope_evidence.get("foreign_paths") or ()),
+                             True, None)
+
+
 def close_mutation_scope_requirements(
     ledger: ObligationLedger, requirements: RequirementSet, *,
     tracked_paths: Iterable[str], scope_evidence: Optional[Mapping[str, Any]], source: str, revision: Any,
@@ -1296,18 +1318,20 @@ def close_mutation_scope_requirements(
             entry["reason"] = "the goal names no file to change, so 'other' has no authoritative referent"
         elif not evidence_id:
             entry["reason"] = "no verifier verdict on this candidate to bind the evidence to"
-        elif not scope_evidence or scope_evidence.get("unavailable"):
-            entry["reason"] = "mutation evidence unavailable: " + str(
-                (scope_evidence or {}).get("unavailable") or "not collected")
         else:
-            actual = sorted(set(scope_evidence.get("actual_paths") or ()))
-            foreign = sorted(set(scope_evidence.get("foreign_paths") or ()))
+            view = scope_evidence_view(scope_evidence)
+            if view.complete:
+                actual = sorted(set(scope_evidence.get("actual_paths") or ()))
+                foreign = sorted(set(scope_evidence.get("foreign_paths") or ()))
+            else:
+                actual, foreign = sorted(view.changed), []        # a lower bound: enough to convict, never to acquit
             outside = [path for path in actual if path not in set(authorized)]
             detail = {
                 "kind": MUTATION_SCOPE, "requirement": requirement.id, "authorized_paths": authorized,
                 "reference_paths": roles["references"],
                 "actual_paths": actual, "out_of_scope_paths": outside, "foreign_paths": foreign,
-                **{key: scope_evidence.get(key) for key in ("run_id", "base_revision", "candidate_revision", "committed_history")},
+                "evidence_complete": view.complete, **({} if view.complete else {"evidence_unavailable": view.reason}),
+                **{key: (scope_evidence or {}).get(key) for key in ("run_id", "base_revision", "candidate_revision", "committed_history")},
             }
             entry.update(detail)
             if outside:
@@ -1316,6 +1340,8 @@ def close_mutation_scope_requirements(
                                            revision=revision, violated=True)
                 entry["reason"] = f"changed outside the authorized paths: {', '.join(outside)}"
                 entry["violated"] = True
+            elif not view.complete:
+                entry["reason"] = view.reason
             elif foreign:
                 entry["reason"] = f"changes present that the run did not make: {', '.join(foreign)}"
             elif not closable:
@@ -1502,18 +1528,19 @@ def test_immutability_evidence(
     it: ``available`` (the reference set and the record exist), the existing
     test files the candidate changed and those no longer present."""
     if reference_test_files is None:
-        return {"available": False, "reason": "the tests that existed before the run cannot be established"}
-    if not scope_evidence or scope_evidence.get("unavailable"):
-        return {"available": False, "reason": "mutation evidence unavailable: " + str(
-            (scope_evidence or {}).get("unavailable") or "not collected")}
+        return {"available": False, "reason": "the tests that existed before the run cannot be established",
+                "changed_test_files": [], "missing_test_files": []}
+    view = scope_evidence_view(scope_evidence)
     reference = sorted(set(reference_test_files))
     present = set(present_test_files)
-    changed = set(scope_evidence.get("actual_paths") or ()) | set(scope_evidence.get("foreign_paths") or ())
-    return {"available": True, "reference_test_files": reference,
-            "changed_test_files": sorted(path for path in reference if path in changed),
+    # `available` means COMPLETE: only a complete record can acquit. An incomplete one still reports what it already proves
+    # (a known changed file; a reference file absent from the candidate needs no git read at all).
+    return {"available": view.complete, **({} if view.complete else {"reason": view.reason}),
+            "reference_test_files": reference,
+            "changed_test_files": sorted(path for path in reference if path in view.changed),
             "missing_test_files": sorted(path for path in reference if path not in present),
-            "changed_trust_surface": changed_test_trust_surface(changed),
-            **{key: scope_evidence.get(key) for key in ("run_id", "base_revision", "candidate_revision")}}
+            "changed_trust_surface": changed_test_trust_surface(view.changed),
+            **{key: (scope_evidence or {}).get(key) for key in ("run_id", "base_revision", "candidate_revision")}}
 
 
 def is_test_immutability_requirement(text: str) -> bool:
@@ -1690,7 +1717,7 @@ def close_test_immutability_requirements(
                                  "whole_statement": whole}
         if not evidence_id:
             entry["reason"] = "no verifier verdict on this candidate to bind the evidence to"
-        elif not immutability["available"]:
+        elif not immutability["available"] and not (immutability["changed_test_files"] or immutability["missing_test_files"]):
             entry["reason"] = immutability["reason"]
         else:
             touched, missing = immutability["changed_test_files"], immutability["missing_test_files"]
@@ -1791,16 +1818,13 @@ def file_immutability_evidence(
     (the record exists and the candidate is at the run's base), the frozen
     files the candidate changed and those no longer present at their path
     (deleted or renamed)."""
-    if not scope_evidence or scope_evidence.get("unavailable"):
-        return {"available": False, "reason": "mutation evidence unavailable: " + str(
-            (scope_evidence or {}).get("unavailable") or "not collected")}
+    view = scope_evidence_view(scope_evidence)
     frozen = sorted(set(frozen_paths))
     present = set(present_paths)
-    changed = set(scope_evidence.get("actual_paths") or ()) | set(scope_evidence.get("foreign_paths") or ())
-    return {"available": True, "frozen_paths": frozen,
-            "changed_frozen_paths": [path for path in frozen if path in changed],
+    return {"available": view.complete, **({} if view.complete else {"reason": view.reason}), "frozen_paths": frozen,
+            "changed_frozen_paths": [path for path in frozen if path in view.changed],
             "missing_frozen_paths": [path for path in frozen if path not in present],
-            **{key: scope_evidence.get(key) for key in ("run_id", "base_revision", "candidate_revision")}}
+            **{key: (scope_evidence or {}).get(key) for key in ("run_id", "base_revision", "candidate_revision")}}
 
 
 def close_file_immutability_requirements(
@@ -1828,7 +1852,7 @@ def close_file_immutability_requirements(
         entry: Dict[str, Any] = {"requirement": requirement.id, "kind": FILE_IMMUTABILITY, "closed": False}
         if not evidence_id:
             entry["reason"] = "no verifier verdict on this candidate to bind the evidence to"
-        elif not immutability["available"]:
+        elif not immutability["available"] and not (immutability["changed_frozen_paths"] or immutability["missing_frozen_paths"]):
             entry["reason"] = immutability["reason"]
         else:
             touched, missing = immutability["changed_frozen_paths"], immutability["missing_frozen_paths"]
@@ -1970,7 +1994,13 @@ def close_suite_preservation_requirements(
                 "available": False, "reason": "no mutation record was supplied"}
             detail["test_immutability"] = dict(immutability)
             entry["test_immutability"] = dict(immutability)
-            if not immutability.get("available"):
+            claims = tuple(contract_claims.get(requirement.id) or ())
+            whole = not claims or set(claims) <= {REGRESSION_PRESERVATION, TEST_IMMUTABILITY_CLAIM}
+            touched = list(immutability.get("changed_test_files") or ()) + list(immutability.get("missing_test_files") or ())
+            # Counter-evidence is monotonic: an INCOMPLETE mutation record that already proves a changed or vanished test file
+            # still convicts a statement that demands them unchanged; it can never close anything.
+            known_violation = bool(touched) and whole and suite_statement_requires_immutability(requirement.text)
+            if not immutability.get("available") and not known_violation:
                 entry["reason"] = "a full-suite closure needs the run's mutation record: " + str(immutability.get("reason"))
                 attempts.append(entry)
                 continue
@@ -1980,11 +2010,8 @@ def close_suite_preservation_requirements(
                                    "independent oracle: " + ", ".join(surface))
                 attempts.append(entry)
                 continue
-            claims = tuple(contract_claims.get(requirement.id) or ())
-            whole = not claims or set(claims) <= {REGRESSION_PRESERVATION, TEST_IMMUTABILITY_CLAIM}
             detail["required_claims"] = list(claims)
             if whole and suite_statement_requires_immutability(requirement.text):
-                touched = list(immutability.get("changed_test_files") or ()) + list(immutability.get("missing_test_files") or ())
                 if touched:
                     record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
                                                method=FULL_REGRESSION_METHOD, detail=detail, source=source,

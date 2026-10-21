@@ -245,8 +245,11 @@ def _pyproject(root: bool) -> Callable[[bytes], Any]:
         view: Dict[str, Any] = {"tool.pytest": tool.get("pytest") if isinstance(tool, dict) else tool}
         if root:
             project_table = document.get("project") or {}
-            view["project.dependencies"] = project_table.get("dependencies")
-            view["project.optional-dependencies"] = project_table.get("optional-dependencies")
+            if isinstance(project_table, dict):
+                view["project.dependencies"] = project_table.get("dependencies")
+                view["project.optional-dependencies"] = project_table.get("optional-dependencies")
+            else:
+                view["project"] = project_table       # a malformed shape stays visible: an edit to it is a change, never a crash
         return view
     return project
 
@@ -327,6 +330,12 @@ def _read_candidate(root: str, path: str) -> Optional[bytes]:
         return handle.read()
 
 
+# What parsing CANDIDATE-CONTROLLED configuration bytes can raise: undecodable text, a syntax error in TOML or an INI file
+# (ValueError / configparser.Error), and pathological nesting (RecursionError). A projection is total over every parsed shape; anything
+# else escaping it is a coding error and propagates (it must never be read as "the candidate's file is malformed").
+_UNPARSEABLE_CONFIGURATION = (ValueError, configparser.Error, RecursionError)
+
+
 def _side_digest(data: Optional[bytes], projection: Projection, link: bool = False) -> str:
     if data is None:
         return ABSENT
@@ -336,7 +345,7 @@ def _side_digest(data: Optional[bytes], projection: Projection, link: bool = Fal
         return "file:" + hashlib.sha256(data).hexdigest()
     try:
         view = projection(data)
-    except Exception:  # unparseable configuration: compared by its bytes, never ignored
+    except _UNPARSEABLE_CONFIGURATION:  # unparseable configuration: compared by its bytes, never ignored
         return "unparseable:" + hashlib.sha256(data).hexdigest()
     return "view:" + hashlib.sha256(json.dumps(view, sort_keys=True, default=str).encode()).hexdigest()
 
@@ -545,7 +554,7 @@ def judge_named_tests(
             base_result = base_check.run_tests(target_test=list(named)) if base_runner == runner else None
         except RepositoryContentFilterRefused:
             raise                   # TAF-3: a typed S19 refusal reaches the closure's caller as itself, never a verdict
-        except Exception as error:  # no base inventory is no evidence
+        except Exception as error:  # no base inventory is no evidence (nothing negative was known before this run: the surface judgments above return conclusive codes first; the failure surface of executing test tooling is open-ended, so the catch stays broad - owner decision, counter-evidence packet)
             return OracleJudgment(ORACLE_BASELINE_INDETERMINATE, f"base run failed: {type(error).__name__}: {error}",
                                   evidence)
     expected = baseline_inventory(base_result, runner)
@@ -559,7 +568,7 @@ def judge_named_tests(
         result = validator.run_tests(target_test=list(named)) or {}
     except RepositoryContentFilterRefused:
         raise                       # TAF-3: as for the base run
-    except Exception as error:  # a runner failure is no evidence either way
+    except Exception as error:  # a runner failure is no evidence either way (same reasoning as the base run: no prior counter-evidence existed to lose)
         return OracleJudgment(ORACLE_EVIDENCE_INDETERMINATE, f"runner raised: {type(error).__name__}: {error}",
                               evidence)
     report = result.get("test_execution") if isinstance(result, dict) else None
