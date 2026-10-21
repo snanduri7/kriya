@@ -399,6 +399,38 @@ async def test_an_enforce_run_over_a_legacy_nested_layout_commits_and_leaves_no_
 
 # --- structural -------------------------------------------------------------------------------
 
+# git's own `git config --show-scope` vocabulary (git-config(1)). Defined here, never imported from kriya: the tripwire
+# must not trust the code it checks.
+_GIT_CONFIG_SCOPES = frozenset({"system", "global", "local", "worktree", "command"})
+
+
+def _is_git_config_scope_set(node) -> bool:
+    """TAF-5: a SET literal of at least two string constants, every one a git configuration scope name - the structured
+    scope ``worktree`` (config.worktree). A set is never ordered path parts; any other element (``".kriya"``, a name, a
+    call) or any other container (a tuple / list / call argument that could be joined into a path) stays an offender."""
+    return (isinstance(node, ast.Set) and len(node.elts) >= 2
+            and all(isinstance(e, ast.Constant) and e.value in _GIT_CONFIG_SCOPES for e in node.elts))
+
+
+@pytest.mark.parametrize("source, legitimate", [
+    ("REPOSITORY_SCOPES = frozenset({'local', 'worktree'})", True),
+    ("SCOPES = {'system', 'global', 'local', 'worktree', 'command'}", True),
+    ("X = {'worktree'}", False),                                      # one member: no scope vocabulary context
+    ("X = {'local', 'worktree', '.kriya'}", False),                  # a non-scope element
+    ("X = ('local', 'worktree')", False),                            # ordered: could be joined into a path
+    ("X = ['local', 'worktree']", False),
+    ("X = os.path.join(root, '.kriya', 'worktree')", False),          # the forbidden location dependency
+    ("X = {os.path.join(root, '.kriya', 'worktree'), 'local'}", False),
+])
+def test_the_scope_classifier_admits_only_a_set_of_git_config_scope_names(source, legitimate):
+    """TAF-5 controls for the precision rule above (no allowlist entry)."""
+    tree = ast.parse(source)
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    constants = [n for n in ast.walk(tree) if isinstance(n, ast.Constant) and n.value == "worktree"]
+    assert len(constants) == 1
+    assert _is_git_config_scope_set(parents[constants[0]]) is legitimate
+
+
 def test_worktree_locations_are_decided_only_by_worktree_py():
     """Only kriya/workflow/worktree.py names a managed worktree location or runs
     `git worktree add` for one (the static-analysis operator scan adds a
@@ -417,6 +449,8 @@ def test_worktree_locations_are_decided_only_by_worktree_py():
         parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and node.value in ("worktree", "worktrees", "scoped-worktree"):
+                if _is_git_config_scope_set(parents[node]):
+                    continue                    # TAF-5: git's configuration SCOPE vocabulary, never a location
                 scope = node
                 while scope in parents and not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                     scope = parents[scope]
@@ -433,8 +467,6 @@ def test_worktree_locations_are_decided_only_by_worktree_py():
     # (OD-1, BACKEND-FINAL-CLOSURE-005) - an export boundary, never a managed worktree location.
     assert sorted(offenders) == [
         ("kriya/production_doctor.py", "_check_git_worktree", "worktree", "[git, 'worktree', 'list', '--porcelain']"),
-        # S19 P1e: git's configuration SCOPE named "worktree" (config.worktree), never a worktree location.
-        ("kriya/repository/git.py", "<module>:REPOSITORY_SCOPES", "worktree", "{'local', 'worktree'}"),
         ("kriya/static_analysis/operator_scan.py", "run_operator_scan", "worktree",
          "_git(workspace, 'worktree', 'add', '--detach', '--no-checkout', base_root, base)"),   # S19 P1c 8(b)
         ("kriya/static_analysis/operator_scan.py", "run_operator_scan", "worktree",
