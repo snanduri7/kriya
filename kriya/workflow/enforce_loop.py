@@ -3205,6 +3205,22 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 payload["reason"] = reason
             await _emit_terminal_event("terminal_gate_outcome", **payload)
 
+        def _discard_sandbox_completions() -> None:
+            # Sandbox-only completion state cannot be resumed after the candidate is discarded.
+            nonlocal approved_stage_states, control_state
+            approved_stage_states = {
+                subtask_id: ("pending" if status == "completed" else status)
+                for subtask_id, status in approved_stage_states.items()
+            }
+            control_state = control_state.with_updates(
+                subtask_states={
+                    subtask_id: ("pending" if status == "completed" else status)
+                    for subtask_id, status in control_state.subtask_states.items()
+                },
+                subtask_written_files={},
+            )
+            control_state = _persist_control_state(control_state)
+
         try:
             if subtasks_completed:
                 # PRD-004: every blocking terminal gate runs against the one
@@ -3292,20 +3308,35 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             })
 
             if not all_completed and plan_workspace_path != workspace_path:
-                # Sandbox-only completion state cannot be resumed after the
-                # candidate is discarded.
-                approved_stage_states = {
-                    subtask_id: ("pending" if status == "completed" else status)
-                    for subtask_id, status in approved_stage_states.items()
-                }
-                control_state = control_state.with_updates(
-                    subtask_states={
-                        subtask_id: ("pending" if status == "completed" else status)
-                        for subtask_id, status in control_state.subtask_states.items()
-                    },
-                    subtask_written_files={},
-                )
-                control_state = _persist_control_state(control_state)
+                _discard_sandbox_completions()
+        except BaseException:
+            # D-F1: an unexpected error (the terminal gates or the commit raised) ends the run as an error, and the durable
+            # state must say so: the same two steps the ordinary failed path takes after the gates - the sandbox
+            # completions are discarded and the approved plan is saved `failed` (no new status). Never after a durable
+            # commit (the workspace then holds the work), never masks the error being handled.
+            if not workspace_commit_completed:
+                if plan_workspace_path != workspace_path:
+                    try:
+                        _discard_sandbox_completions()
+                    except Exception as finalize_error:
+                        deps.logger.error(
+                            "WorkflowController enforce run %r: sandbox state could not be finalized after an error: %s",
+                            run_id, finalize_error,
+                        )
+                try:
+                    deps.save_approved_plan(
+                        workspace_path, plan.plan_id,
+                        deps.build_approved_plan_document(
+                            plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                            stage_states=approved_stage_states, lifecycle_state="failed",
+                        ),
+                    )
+                except Exception as finalize_error:
+                    deps.logger.error(
+                        "WorkflowController enforce run %r: final plan state could not be saved after an error: %s",
+                        run_id, finalize_error,
+                    )
+            raise
         finally:
             candidate_retained = (
                 workspace_commit_failure is not None
