@@ -220,3 +220,31 @@ def test_the_git_source_cleanup_never_deletes_a_protected_control_path_and_still
     assert (embedded / ".git").exists() and (embedded / "f.txt").exists()      # the embedded repository is kept whole
     assert not any((repo / rel).exists() for rel in ordinary), [rel for rel in ordinary if (repo / rel).exists()]
     assert (repo / "a.py").exists()                                              # tracked content untouched
+
+
+def test_the_git_source_cleanup_never_deletes_content_a_symlink_the_run_created_points_to(tmp_path):
+    """Q3 top-level symlink (consolidated addendum #3, E): DISPROVED as an escape. MEASURED at the tip with a production-shaped
+    run that creates symlinks to an external directory, to the repository's own `.kriya` control directory, to the repository
+    root, to a file, and a dangling one: nothing a symlink points at is deleted (shutil.rmtree refuses a symlink and the
+    refusal is swallowed by ignore_errors; a file symlink is unlinked, never its target). A directory symlink itself may be
+    left behind - recorded in the ledger as a hygiene residual, deliberately not asserted here."""
+    repo = _repo(tmp_path / "repo")
+    external = tmp_path / "external"
+    (external / "sub").mkdir(parents=True)
+    (external / "precious.txt").write_text("keep")
+    (external / "sub" / "deep.txt").write_text("keep")
+    _create(repo, {".kriya/control.json": "{}"})
+    baseline = worktree.snapshot_untracked_files(str(repo))
+    assert not isinstance(baseline, worktree._FilesystemSnapshot)               # the GIT source
+    os.symlink(external, repo / "link_external")
+    os.symlink(repo / ".kriya", repo / "link_control")
+    os.symlink(repo, repo / "link_root")
+    os.symlink(external / "precious.txt", repo / "link_file")
+    os.symlink(tmp_path / "nowhere", repo / "link_dangling")
+    _create(repo, {"plain_artifact.txt": "run state"})
+    worktree.clean_untracked_files_since(str(repo), baseline)
+    assert sorted(p.name for p in external.rglob("*")) == ["deep.txt", "precious.txt", "sub"]      # nothing behind a link deleted
+    assert (external / "precious.txt").read_text() == "keep" and (external / "sub" / "deep.txt").read_text() == "keep"
+    assert (repo / ".kriya" / "control.json").exists() and (repo / "a.py").exists()
+    assert not (repo / "plain_artifact.txt").exists()                           # control: the cleanup did run
+    assert not os.path.lexists(repo / "link_file")                              # the file symlink went, its target stayed
