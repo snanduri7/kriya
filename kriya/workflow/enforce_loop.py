@@ -3205,21 +3205,39 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 payload["reason"] = reason
             await _emit_terminal_event("terminal_gate_outcome", **payload)
 
+        def _needs_review() -> bool:
+            return (
+                any(r.status == deps.SubtaskStatus.NEEDS_REVIEW for r in subtask_results)
+                or gate_report.artifact_error is not None
+                or workspace_commit_failure is not None
+            )
+
+        def _lifecycle_of(completed: bool) -> str:
+            """The one rule for the approved plan's final lifecycle, shared by the ordinary path and the error handler."""
+            return "completed" if completed else "needs_review" if _needs_review() else "failed"
+
         def _discard_sandbox_completions() -> None:
-            # Sandbox-only completion state cannot be resumed after the candidate is discarded.
+            # Sandbox-only completion state cannot be resumed after the candidate is discarded. All-or-nothing: the plan's
+            # stage states and the control state change together, so a failing save leaves them in agreement.
             nonlocal approved_stage_states, control_state
-            approved_stage_states = {
+            discarded_stage_states = {
                 subtask_id: ("pending" if status == "completed" else status)
                 for subtask_id, status in approved_stage_states.items()
             }
-            control_state = control_state.with_updates(
+            discarded_control_state = _persist_control_state(control_state.with_updates(
                 subtask_states={
                     subtask_id: ("pending" if status == "completed" else status)
                     for subtask_id, status in control_state.subtask_states.items()
                 },
                 subtask_written_files={},
-            )
-            control_state = _persist_control_state(control_state)
+            ))
+            approved_stage_states = discarded_stage_states
+            control_state = discarded_control_state
+
+        def _adopt_sandbox_completions() -> None:
+            # The sandbox's completions are now the workspace's.
+            nonlocal control_state
+            control_state = _persist_control_state(control_state.with_updates(subtask_completion_scope="workspace"))
 
         try:
             if subtasks_completed:
@@ -3298,9 +3316,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         # A failure here leaves "candidate" (nothing reused
                         # later): safe, and never undoes the commit.
                         try:
-                            control_state = _persist_control_state(
-                                control_state.with_updates(subtask_completion_scope="workspace"),
-                            )
+                            _adopt_sandbox_completions()
                         except Exception as error:
                             post_commit_persistence_errors.append({
                                 "operation": "save_control_state",
@@ -3311,10 +3327,22 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 _discard_sandbox_completions()
         except BaseException:
             # D-F1: an unexpected error (the terminal gates or the commit raised) ends the run as an error, and the durable
-            # state must say so: the same two steps the ordinary failed path takes after the gates - the sandbox
-            # completions are discarded and the approved plan is saved `failed` (no new status). Never after a durable
-            # commit (the workspace then holds the work), never masks the error being handled.
-            if not workspace_commit_completed:
+            # state must say what the ordinary path would have persisted for the decision already made. Before a durable
+            # commit: the sandbox completions are discarded and the plan saved with the lifecycle the ordinary path derives
+            # (`failed`, or `needs_review` when a returned commit failure or a review subtask already decided so). After a
+            # durable commit the workspace holds the verified work: the completions are the workspace's and the plan
+            # `completed`, exactly the ordinary path's two post-commit steps. Never masks the error being handled.
+            if workspace_commit_completed:
+                if plan_workspace_path != workspace_path:
+                    try:
+                        _adopt_sandbox_completions()
+                    except Exception as finalize_error:
+                        deps.logger.error(
+                            "WorkflowController enforce run %r: sandbox completions could not be adopted after an error: %s",
+                            run_id, finalize_error,
+                        )
+                error_lifecycle = _lifecycle_of(True)
+            else:
                 if plan_workspace_path != workspace_path:
                     try:
                         _discard_sandbox_completions()
@@ -3323,19 +3351,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             "WorkflowController enforce run %r: sandbox state could not be finalized after an error: %s",
                             run_id, finalize_error,
                         )
-                try:
-                    deps.save_approved_plan(
-                        workspace_path, plan.plan_id,
-                        deps.build_approved_plan_document(
-                            plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
-                            stage_states=approved_stage_states, lifecycle_state="failed",
-                        ),
-                    )
-                except Exception as finalize_error:
-                    deps.logger.error(
-                        "WorkflowController enforce run %r: final plan state could not be saved after an error: %s",
-                        run_id, finalize_error,
-                    )
+                error_lifecycle = _lifecycle_of(False)
+            try:
+                deps.save_approved_plan(
+                    workspace_path, plan.plan_id,
+                    deps.build_approved_plan_document(
+                        plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                        stage_states=approved_stage_states, lifecycle_state=error_lifecycle,
+                    ),
+                )
+            except Exception as finalize_error:
+                deps.logger.error(
+                    "WorkflowController enforce run %r: final plan state could not be saved after an error: %s",
+                    run_id, finalize_error,
+                )
             raise
         finally:
             candidate_retained = (
@@ -3350,12 +3379,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # explicit recovery instead of deleting it.
                 workspace_commit_failure["retained_candidate_path"] = plan_workspace_path
 
-        needs_review = (
-            any(r.status == deps.SubtaskStatus.NEEDS_REVIEW for r in subtask_results)
-            or gate_report.artifact_error is not None
-            or workspace_commit_failure is not None
-        )
-        final_plan_lifecycle = "completed" if all_completed else "needs_review" if needs_review else "failed"
+        needs_review = _needs_review()
+        final_plan_lifecycle = _lifecycle_of(all_completed)
         try:
             deps.save_approved_plan(
                 workspace_path, plan.plan_id,

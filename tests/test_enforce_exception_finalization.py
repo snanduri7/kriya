@@ -66,6 +66,7 @@ def _persisted(repo: Path) -> dict:
         "plan_stages": plan.get("stage_states"),
         "subtask_states": state.get("subtask_states"),
         "written_files": state.get("subtask_written_files"),
+        "completion_scope": state.get("subtask_completion_scope"),
         "git_worktrees": listed.count("worktree "),
     }
 
@@ -122,22 +123,123 @@ async def test_the_run_after_an_unexpected_terminal_error_is_not_blocked_by_its_
     assert (repo / "app.py").read_text() == "verified candidate\n"
 
 
-@pytest.mark.asyncio
-async def test_an_interrupt_after_the_durable_commit_never_marks_the_plan_failed(tmp_path):
-    """The guard of the new handler: once the workspace commit is durable the work is in the workspace, so an interrupt that
-    arrives afterwards (a BaseException - the terminal event emitter swallows only Exception) must not record `failed`."""
-    repo = _repo_in(tmp_path / "committed")
+class _Interrupt(BaseException):
+    """A BaseException that is neither Exception nor asyncio's CancelledError (a stand-in for KeyboardInterrupt/SystemExit)."""
+
+
+def _interrupting(engine, at_event: str, error_class=asyncio.CancelledError) -> None:
+    async def emit(event_name, _data):
+        if event_name == at_event:
+            raise error_class()
+    engine.kernel.events.emit = emit
+
+
+def _commit_returns_failure(monkeypatch, workspace_state: str) -> None:
+    """The commit service RETURNS a failure (the ordinary path then persists needs_review): UNCHANGED through a real refusal
+    (the candidate cannot be materialized), UNCERTAIN through a non-committed outcome of the one transaction function."""
+    from types import SimpleNamespace
+
+    from kriya.workflow import commit_service
+
+    if workspace_state == "UNCHANGED":
+        def refuse(_request):
+            raise commit_service.CandidateMaterializationError("probe: the candidate cannot be materialized")
+        monkeypatch.setattr(commit_service, "terminal_writes", refuse)
+    else:
+        def uncertain(*_args, **_kwargs):
+            return SimpleNamespace(committed=False, failure_payload=lambda: {
+                "reason_code": "WORKSPACE_COMMIT_FAILED", "workspace_state": "UNCERTAIN", "error": "probe",
+                "commit_transaction_id": "probe"})
+        monkeypatch.setattr(commit_service, "commit_terminal_candidate", uncertain)
+
+
+async def _scenario(tmp_path, name, *, monkeypatch=None, commit_failure=None, interrupt_at=None, error_class=asyncio.CancelledError):
+    """One enforce run in its own repository; returns (repo, raised BaseException or None, persisted state)."""
+    repo = _repo_in(tmp_path / name)
     config = strict_config(autonomy={"spec_compliance_enabled": True})
     engine = _engine(config, bind_filter=False)
+    if interrupt_at:
+        _interrupting(engine, interrupt_at, error_class)
+    raised = None
+    with monkeypatch.context() as patched:
+        if commit_failure:
+            _commit_returns_failure(patched, commit_failure)
+        try:
+            await _enforce(repo, engine)
+        except BaseException as error:               # noqa: BLE001 - the scenario's outcome
+            raised = error
+    return repo, raised, _persisted(repo)
 
-    async def emit(event_name, _data):
-        if event_name == "workspace_commit_completed":      # emitted only after commit.completed: raising proves the commit
-            raise asyncio.CancelledError()                   # is durable, and BaseException escapes the emitter's `except Exception`
-    engine.kernel.events.emit = emit
-    with pytest.raises(asyncio.CancelledError):
-        await _enforce(repo, engine)
-    assert (repo / "app.py").read_text() == "verified candidate\n"                # the commit is durable
-    assert _persisted(repo)["plan_lifecycle"] != "failed"
+
+@pytest.mark.parametrize("workspace_state", ["UNCHANGED", "UNCERTAIN"])
+@pytest.mark.asyncio
+async def test_an_exception_after_a_returned_commit_failure_keeps_the_commit_decisions_lifecycle(tmp_path, monkeypatch, workspace_state):
+    """Exceptional unwinding must not overwrite a more authoritative lifecycle decision already made: once the commit service has
+    RETURNED a failure the ordinary path persists needs_review; an interrupt at the very next event (workspace_commit_failed) must leave
+    exactly that - not `failed`."""
+    _repo_ref, raised_ref, reference = await _scenario(tmp_path, "ref", monkeypatch=monkeypatch, commit_failure=workspace_state)
+    assert raised_ref is None and reference["plan_lifecycle"] == "needs_review", reference           # the reference is meaningful
+    _repo, raised, interrupted = await _scenario(tmp_path, "int", monkeypatch=monkeypatch, commit_failure=workspace_state,
+                                            interrupt_at="workspace_commit_failed")
+    assert isinstance(raised, asyncio.CancelledError)                                                # the interrupt still propagates
+    assert interrupted == reference
+
+
+@pytest.mark.asyncio
+async def test_an_interrupt_after_the_durable_commit_leaves_exactly_what_the_successful_path_leaves(tmp_path, monkeypatch):
+    """The workspace holds the verified work, so the durable plan and the completion scope say so: the same two bookkeeping steps
+    the ordinary path takes after the commit (completions adopted by the workspace, the plan saved completed) - never failed, never
+    left in_progress with the completions still owned by a candidate that no longer exists."""
+    repo_ref, raised_ref, reference = await _scenario(tmp_path, "ref", monkeypatch=monkeypatch)
+    assert raised_ref is None and reference["plan_lifecycle"] == "completed" and reference["completion_scope"] == "workspace", reference
+    repo, raised, interrupted = await _scenario(tmp_path, "int", monkeypatch=monkeypatch, interrupt_at="workspace_commit_completed")
+    assert isinstance(raised, asyncio.CancelledError)
+    assert (repo / "app.py").read_text() == "verified candidate\n"                                   # the commit is durable
+    assert interrupted == reference
+
+
+@pytest.mark.asyncio
+async def test_a_base_exception_that_is_not_an_exception_before_the_commit_is_finalized_like_the_failed_path(tmp_path, monkeypatch):
+    """The width of the handler: narrowing `except BaseException` to `except Exception` would leave the plan in_progress here
+    (an interrupt is not an Exception). Uses a BaseException subclass that is not asyncio's CancelledError."""
+    ordinary = await _ordinary_failed_run(tmp_path)
+    repo, raised, interrupted = await _scenario(tmp_path, "int", monkeypatch=monkeypatch, interrupt_at="terminal_gates_started",
+                                           error_class=_Interrupt)
+    assert isinstance(raised, _Interrupt)
+    assert (repo / "app.py").read_text() == "original\n"                                             # fail closed: nothing committed
+    assert interrupted == ordinary
+
+
+@pytest.mark.asyncio
+async def test_a_failing_control_state_save_during_finalization_keeps_plan_and_control_in_agreement_and_the_original_error(
+        tmp_path, monkeypatch):
+    """The discard of the sandbox completions is all-or-nothing: if the control state cannot be saved, the plan must not claim the
+    completions were discarded. Either way the original error is re-raised, never replaced."""
+    from kriya.control import persistence
+
+    real = persistence._save_json_document            # pylint: disable=protected-access
+    error = RuntimeError("closer broke")
+    unwinding = []
+
+    def failing_save_while_unwinding(*args, **kwargs):
+        if unwinding and args[1] == persistence.control_state_path(args[0]):     # only the control state, only while unwinding
+            raise OSError("control state write failed")
+        return real(*args, **kwargs)
+
+    def broken(*_args, **_kwargs):
+        unwinding.append(True)
+        raise error
+    repo = _repo_in(tmp_path / "boom")
+    config = strict_config(autonomy={"spec_compliance_enabled": True})
+    with monkeypatch.context() as patched:
+        patched.setattr(requirement_closers, "close_requirements_by_mutation_scope", broken)
+        patched.setattr(persistence, "_save_json_document", failing_save_while_unwinding)
+        with pytest.raises(RuntimeError) as raised:
+            await _enforce(repo, _engine(config, bind_filter=False))
+    assert raised.value is error                                                       # the original error, not the OSError
+    after = _persisted(repo)
+    assert after["plan_lifecycle"] == "failed"
+    assert set(after["plan_stages"].values()) == set(after["subtask_states"].values()), after      # plan and control agree
 
 
 # ------------------------------------------------------------------------------------------------ D-F2 (intentional contract)
