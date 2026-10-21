@@ -1,6 +1,6 @@
 """PRD-003: one JSON result on every callback terminal path."""
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from _strict_doubles import strict_kernel
@@ -199,3 +199,58 @@ def test_a_returned_result_without_a_run_id_prints_no_resume_command(invoke):
     assert result.exit_code == 1 and isinstance(result.exception, SystemExit)         # the result path completed normally
     assert "Quality Gates: FAILED" in result.output and "Workflow error" not in result.output
     assert "--resume" not in result.output
+
+
+# ------------------------------------------------------------------------------ the other presentations of the same failure
+
+def _invoke_milestones(tmp_path, monkeypatch, error, *flags):
+    """`generate --from-milestones` whose sequence raises `error`: the milestone path's own handler (not the single-run one)."""
+    monkeypatch.chdir(tmp_path)
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({"group_id": "g", "original_goal": "goal", "milestones": [
+        {"id": "M1", "goal": "build M1", "success_criterion": "done", "depends_on": []}]}))
+    cfg = AppConfig()
+    cfg.paths.memory = str(tmp_path / "memory")
+    cfg.logging.file_enabled = False
+    cfg.logging.run_file_enabled = False
+    kernel = strict_kernel(cfg)
+    kernel.start = AsyncMock()
+    kernel.stop = AsyncMock()
+    with patch("kriya.cli.load_config", return_value=cfg), \
+         patch("kriya.cli.Kernel", return_value=kernel), \
+         patch("kriya.cli.LLMClient", autospec=True), \
+         patch("kriya.cli.WorkflowEngine"), \
+         patch("kriya.cli._dispatch_milestones", new=AsyncMock(side_effect=error)):
+        return CliRunner().invoke(main, ["generate", "--from-milestones", str(plan), "-y", *flags])
+
+
+def test_the_milestone_failure_line_and_json_name_the_same_class(tmp_path, monkeypatch):
+    """Presentation parity with the single-run path: the human line carries the class the structured result already carried."""
+    error = AttributeError("'NoneType' object has no attribute 'x'")
+    human = _invoke_milestones(tmp_path, monkeypatch, error)
+    assert human.exit_code == 1
+    assert "Milestone sequence error: AttributeError: 'NoneType' object has no attribute 'x'" in human.output
+    structured = _invoke_milestones(tmp_path, monkeypatch, error, "--json")
+    assert json.loads(structured.stdout)["failure_type"] == "AttributeError"
+
+
+def test_the_fix_failure_line_names_the_class_and_suggests_no_resume(tmp_path, monkeypatch):
+    """`kriya fix` has no structured result: its human line is the whole presentation, from the one place the class is read."""
+    monkeypatch.chdir(tmp_path)
+    cfg = AppConfig()
+    cfg.paths.memory = str(tmp_path / "memory")
+    cfg.logging.file_enabled = False
+    cfg.logging.run_file_enabled = False
+    kernel = strict_kernel(cfg)
+    kernel.start = AsyncMock()
+    kernel.stop = AsyncMock()
+    engine = MagicMock()
+    engine.run_generation_workflow = AsyncMock(side_effect=KeyError("missing"))
+    with patch("kriya.cli.load_config", return_value=cfg), \
+         patch("kriya.cli.Kernel", return_value=kernel), \
+         patch("kriya.cli.LLMClient", autospec=True), \
+         patch("kriya.cli.WorkflowEngine", return_value=engine):
+        result = CliRunner().invoke(main, ["fix", "--error", "compile failed", "-y"])
+    assert result.exit_code == 1
+    assert "Error executing fix workflow: KeyError: 'missing'" in result.output
+    assert "--resume" not in result.output and "pick up where it left off" not in result.output

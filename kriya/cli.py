@@ -3155,8 +3155,8 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
             output.fail_with(e)
             sys.exit(1)
         except Exception as e:
-            click.secho(f"Milestone sequence error: {e}", fg="red")
             output.fail_with(e)
+            click.secho(f"Milestone sequence error: {output.failure_line()}", fg="red")
             sys.exit(1)
 
         output.result = milestone_result
@@ -4641,12 +4641,11 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
         click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
         sys.exit(1)
     except Exception as e:
-        click.secho(f"Error executing fix workflow: {e}", fg="red")
-        click.secho(
-            "If a Plan/Design/Developer stage had already completed before this error, "
-            "re-run the same command with --resume to pick up where it left off instead of starting over.",
-            fg="yellow"
-        )
+        # The class is read in the one place `generate` reads it (GenerateOutput.fail_with). No resume suggestion: whether a
+        # run can resume is decided later by validate_resume_against_reality, with state this handler does not have.
+        failure = GenerateOutput(False)
+        failure.fail_with(e)
+        click.secho(f"Error executing fix workflow: {failure.failure_line()}", fg="red")
         sys.exit(1)
 
 @main.command(name="traces")
