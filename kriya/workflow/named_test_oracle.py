@@ -73,7 +73,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 
 from kriya.core.tomlcompat import tomllib
 from kriya.platform import git_argv
-from kriya.repository.git import refuse_repository_content_filters
+from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
 from kriya.tools import test_execution
 
 NAMED_TEST_ORACLE_VERSION = 1
@@ -543,6 +543,8 @@ def judge_named_tests(
             base_check = base_validator(export)
             base_runner = base_check._test_runner()
             base_result = base_check.run_tests(target_test=list(named)) if base_runner == runner else None
+        except RepositoryContentFilterRefused:
+            raise                   # TAF-3: a typed S19 refusal reaches the closure's caller as itself, never a verdict
         except Exception as error:  # no base inventory is no evidence
             return OracleJudgment(ORACLE_BASELINE_INDETERMINATE, f"base run failed: {type(error).__name__}: {error}",
                                   evidence)
@@ -555,6 +557,8 @@ def judge_named_tests(
 
     try:
         result = validator.run_tests(target_test=list(named)) or {}
+    except RepositoryContentFilterRefused:
+        raise                       # TAF-3: as for the base run
     except Exception as error:  # a runner failure is no evidence either way
         return OracleJudgment(ORACLE_EVIDENCE_INDETERMINATE, f"runner raised: {type(error).__name__}: {error}",
                               evidence)

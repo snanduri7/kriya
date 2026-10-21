@@ -751,6 +751,8 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
                     ),
                     java_home_override=state.java_home_override, contract=verification_contract,
                 )
+            except RepositoryContentFilterRefused:
+                raise               # TAF-3: via the named-test oracle's base export (its sibling closers' contract)
             except Exception as exc:
                 closures = []
                 logger.warning(f"Requirement closure by named tests unavailable: {exc}")

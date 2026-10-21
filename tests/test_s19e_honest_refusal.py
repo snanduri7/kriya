@@ -665,3 +665,24 @@ def test_a_dubiously_owned_workspace_with_stale_host_filters_ends_a_real_run_wit
     _assert_ownership_refusal(raised, Path(workspace))
     assert developer == []
     assert _tree(workspace) == before
+
+
+def test_a_named_test_closure_refusal_ends_the_run_as_itself(tmp_path, monkeypatch):
+    """TAF-3: the development loop lets the named-test closure's typed refusal through like its sibling closers'
+    (before: its generic handler logged 'closure by named tests unavailable' and the run went on)."""
+    from kriya.workflow import requirement_closers
+
+    workspace = _workspace(tmp_path)
+    before = _tree(workspace)
+    calls = []
+
+    def refusing(*_args, **_kwargs):
+        calls.append(1)
+        raise RepositoryContentFilterRefused(GIT_CONTENT_FILTER_REPOSITORY_DEFINED, workspace,
+                                             key="filter.kx.smudge", scope="local", origin="file:.git/config")
+    monkeypatch.setattr(requirement_closers, "close_requirements_with_named_tests", refusing)
+    eng, cfg, developer = _scripted_engine(lambda n: GOOD)
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        _run(eng, workspace)
+    assert calls == [1] and developer == [PRIMARY], (calls, developer)
+    _assert_refusal_ended_the_run(raised, cfg, workspace, before, GIT_CONTENT_FILTER_REPOSITORY_DEFINED)

@@ -350,3 +350,78 @@ def test_the_baseline_inventory_is_exact_cases_of_a_complete_report_only():
     assert baseline_inventory(_result([]), "pytest") is None
     assert baseline_inventory(_result(ALL_PASSED, runner="maven"), "pytest") is None
     assert baseline_inventory({"success": True}, "pytest") is None
+
+
+# ------------------------------------------------------- TAF-3: a typed repository refusal is never an oracle verdict
+#
+# MEASURED at ea56d08 (TEST-A-final probe_s19e E5): a repository-defined ACTIVE smudge filter made export_base's S19
+# inspection raise RepositoryContentFilterRefused, and judge_named_tests' generic handler turned it into
+# ORACLE_BASELINE_INDETERMINATE with the security reason code in prose only. The existing mechanism (TRACED: every
+# other closer's guarded git read, mutation_scope_evidence, and their development-loop call sites) is to let the typed
+# refusal reach the run's caller as itself; ordinary oracle failures keep their verdicts.
+
+def _refusing_repository(tmp_path):
+    repo = make_base(tmp_path / "repo")
+    marker = tmp_path / "FILTER_RAN"
+    script = tmp_path / "smudge.sh"
+    script.write_text(f'#!/bin/sh\necho ran >> "{marker}"\ncat\n')
+    script.chmod(0o755)
+    git(repo, "config", "filter.kx.smudge", str(script))
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "attributes").write_text("*.py filter=kx\n")
+    return repo, marker
+
+
+def test_a_repository_refusal_of_the_base_export_reaches_the_closure_s_caller_typed(tmp_path):
+    from kriya.repository.git import GIT_CONTENT_FILTER_REPOSITORY_DEFINED, RepositoryContentFilterRefused
+
+    repo, marker = _refusing_repository(tmp_path)
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        close(repo, modified=[])                         # the production closure, real validator, real git
+    assert raised.value.reason_code == GIT_CONTENT_FILTER_REPOSITORY_DEFINED and raised.value.driver == "kx"
+    assert not marker.exists(), "the repository's filter ran"
+
+
+class _Validator:
+    def __init__(self, run_tests):
+        self.run_tests = run_tests
+
+    @staticmethod
+    def _test_runner():
+        return "pytest"
+
+
+def _judge(repo, *, base_run, candidate_run):
+    from kriya.workflow.named_test_oracle import judge_named_tests
+
+    return judge_named_tests([NAMED], candidate_root=str(repo), base_revision=git(repo, "rev-parse", "HEAD").strip(),
+                             modified=[], candidate_validator=lambda: _Validator(candidate_run),
+                             base_validator=lambda _root: _Validator(base_run))
+
+
+def _real_run(repo):
+    from kriya.tools.validate import PolymorphicValidator
+    return PolymorphicValidator(str(repo)).run_tests
+
+
+def test_a_refusal_raised_by_either_run_propagates_and_ordinary_failures_keep_their_verdicts(tmp_path):
+    from kriya.repository.git import GIT_CONFIG_UNINSPECTABLE, RepositoryContentFilterRefused
+
+    repo = make_base(tmp_path / "repo")
+
+    def refusing(**_kwargs):
+        raise RepositoryContentFilterRefused(GIT_CONFIG_UNINSPECTABLE, str(repo), detail="planted")
+
+    def broken(**_kwargs):
+        raise RuntimeError("runner broke")
+
+    for base_run, candidate_run in ((refusing, None), (None, refusing)):
+        with pytest.raises(RepositoryContentFilterRefused):
+            _judge(repo, base_run=base_run or _real_run(repo), candidate_run=candidate_run or _real_run(repo))
+    baseline = _judge(repo, base_run=broken, candidate_run=_real_run(repo))
+    assert baseline.reason_code == ORACLE_BASELINE_INDETERMINATE
+    assert baseline.reason == "base run failed: RuntimeError: runner broke"
+    evidence = _judge(repo, base_run=_real_run(repo), candidate_run=broken)
+    assert evidence.reason_code == ORACLE_EVIDENCE_INDETERMINATE
+    assert evidence.reason == "runner raised: RuntimeError: runner broke"
+    assert _judge(repo, base_run=_real_run(repo), candidate_run=_real_run(repo)).reason_code == ORACLE_PASSED
