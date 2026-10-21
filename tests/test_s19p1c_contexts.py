@@ -129,26 +129,29 @@ def test_every_git_read_lines_verb_is_classified_and_filter_capable_ones_are_ins
     assert found == _GIT_READ_LINES_CALLERS
 
 
-def test_the_development_loop_lets_the_closers_refusal_through():
-    """mutation_scope_evidence's typed refusal is not absorbed as 'evidence unavailable' by the pre-apply closers
-    that reach it (mutation scope, test immutability, file immutability, suite preservation).
+_CLOSERS_REACHING_THE_REFUSAL = {"close_requirements_by_mutation_scope", "close_requirements_by_test_immutability",
+                                 "close_requirements_by_file_immutability", "close_requirements_by_suite_preservation"}
+_CATCHES_THE_REFUSAL = {None, "Exception", "BaseException", "RepositoryContentFilterRefused"}
 
-    Q5 (2026-10-21): the closers' handlers that absorbed an unexpected exception are gone altogether (an absorbed exception
-    meant a passed quality gate that had verified nothing), so the invariant is stated for ANY enclosing handler: a handler
-    around a closer call that could catch the typed refusal - a bare except, Exception, BaseException or the refusal itself -
-    must re-raise it. Re-adding an absorbing `except Exception` (the pre-fix shape) fails here."""
-    tree = ast.parse((REPO / "kriya/workflow/development_loop.py").read_text(encoding="utf-8"))
-    reaching = {"close_requirements_by_mutation_scope", "close_requirements_by_test_immutability",
-                "close_requirements_by_file_immutability", "close_requirements_by_suite_preservation"}
+
+def _handler_type_names(handler):
+    """The names a handler catches: {None} for a bare except, else every Name / Attribute / tuple member it lists."""
+    if handler.type is None:
+        return {None}
+    members = handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
+    return {member.id if isinstance(member, ast.Name) else member.attr if isinstance(member, ast.Attribute) else "<dynamic>"
+            for member in members}
+
+
+def _absorbing_handlers(source: str, closers):
+    """(closer, caught names) for every handler enclosing a closer call that could catch the typed refusal and is not a PURE
+    pass-through - a body that is exactly one bare ``raise``. A conditional, delayed or wrapped re-raise does not qualify (it can
+    absorb on the other branch), and a dynamic/unresolvable handler type is treated as catching it."""
+    tree = ast.parse(source)
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
-    catches_the_refusal = {None, "Exception", "BaseException", "RepositoryContentFilterRefused"}
-
-    def reraises(handler):
-        return any(isinstance(sub, ast.Raise) and sub.exc is None for stmt in handler.body for sub in ast.walk(stmt))
-
-    seen = set()
+    offenders, seen = [], set()
     for node in ast.walk(tree):
-        if not (isinstance(node, ast.Attribute) and node.attr in reaching):
+        if not (isinstance(node, ast.Attribute) and node.attr in closers):
             continue
         seen.add(node.attr)
         child = node
@@ -156,10 +159,45 @@ def test_the_development_loop_lets_the_closers_refusal_through():
             parent = parents[child]
             if isinstance(parent, ast.Try) and any(child is stmt for stmt in parent.body):
                 for handler in parent.handlers:
-                    caught = getattr(handler.type, "id", None)
-                    assert caught not in catches_the_refusal or reraises(handler), (node.attr, caught)
+                    names = _handler_type_names(handler)
+                    pure_pass_through = len(handler.body) == 1 and isinstance(handler.body[0], ast.Raise) and handler.body[0].exc is None
+                    if (names & _CATCHES_THE_REFUSAL or "<dynamic>" in names) and not pure_pass_through:
+                        offenders.append((node.attr, sorted(str(name) for name in names)))
             child = parent
-    assert seen == reaching
+    return offenders, seen
+
+
+def test_the_development_loop_lets_the_closers_refusal_through():
+    """mutation_scope_evidence's typed refusal is not absorbed as 'evidence unavailable' by the pre-apply closers
+    that reach it (mutation scope, test immutability, file immutability, suite preservation).
+
+    Q5 (2026-10-21): the closers' handlers that absorbed an unexpected exception are gone altogether (an absorbed exception
+    meant a passed quality gate that had verified nothing), so the invariant is stated for ANY enclosing handler: a handler
+    around a closer call that could catch the typed refusal - a bare except, Exception, BaseException, the refusal itself, any
+    of them inside a tuple or behind a module attribute - must be a PURE pass-through (exactly one bare ``raise``). Re-adding an
+    absorbing ``except Exception`` (the pre-fix shape), or one that re-raises only on some branch, fails here."""
+    offenders, seen = _absorbing_handlers((REPO / "kriya/workflow/development_loop.py").read_text(encoding="utf-8"),
+                                          _CLOSERS_REACHING_THE_REFUSAL)
+    assert offenders == [] and seen == _CLOSERS_REACHING_THE_REFUSAL
+
+
+@pytest.mark.parametrize("handler, absorbs", [
+    ("except Exception:\n        logger.warning('x')\n        closures = []", True),                     # the pre-fix shape
+    ("except Exception as exc:\n        if is_typed(exc):\n            raise\n        closures = []", True),   # conditional re-raise
+    ("except Exception:\n        closures = []\n        raise", True),                                      # delayed re-raise
+    ("except Exception as exc:\n        raise RuntimeError('wrapped') from exc", True),                    # wrapped: not the refusal itself
+    ("except (ValueError, Exception):\n        closures = []", True),                                      # inside a tuple
+    ("except builtins.Exception:\n        closures = []", True),                                           # behind an attribute
+    ("except:\n        closures = []", True),                                                              # bare
+    ("except get_error_type():\n        closures = []", True),                                             # dynamic type
+    ("except Exception:\n        raise", False),                                                           # pure pass-through
+    ("except KeyError:\n        closures = []", False),                                                    # cannot catch the refusal
+])
+def test_the_tripwire_catches_the_evasive_handler_shapes_and_only_those(handler, absorbs):
+    source = f"def f():\n    try:\n        x = obj.close_requirements_by_mutation_scope()\n    {handler}\n"
+    offenders, seen = _absorbing_handlers(source, {"close_requirements_by_mutation_scope"})
+    assert seen == {"close_requirements_by_mutation_scope"}                                              # the call was found
+    assert bool(offenders) is absorbs
 
 
 def test_a_direct_run_ends_with_the_closer_s_typed_refusal_and_releases_the_workspace(tmp_path, monkeypatch):

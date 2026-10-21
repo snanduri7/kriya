@@ -115,3 +115,19 @@ def test_a_typed_repository_refusal_at_any_closer_stays_the_typed_refusal(tmp_pa
         _run(eng, _workspace(tmp_path))
     assert raised.value is refusal and calls == [point]
     assert len(developer_calls) == 1                                            # ended as itself, no retry
+
+
+@pytest.mark.parametrize("error", [RuntimeError("closer collaborator failed"), OSError("disk vanished")], ids=["RuntimeError", "OSError"])
+@pytest.mark.parametrize("point", POINTS)
+def test_an_ambiguous_exception_at_any_closer_is_neither_internal_nor_a_pass(tmp_path, monkeypatch, point, error):
+    """The intended policy for the ambiguous families (the owner's Q5 decision: cause-dependent, no type-only refinement): the
+    generic classifier keeps them - a retryable general error, never the internal-error stop and never a passed quality gate."""
+    calls = _inject(monkeypatch, point, error)
+    eng, _cfg, developer_calls = _scripted_engine(lambda n: GOOD)
+    result = _run(eng, _workspace(tmp_path))
+    assert calls and set(calls) == {point}, calls                               # the injected closer ran
+    assert result["quality_gates_passed"] is not True                            # verification did not complete: never a pass
+    assert ("internal_framework_error", "internal") not in _failure_report(result)
+    assert (result.get("last_failure") or {}).get("type") != "internal_framework_error"
+    assert not str(result.get("environment_failure") or "").startswith("INTERNAL KRIYA ERROR")
+    assert len(developer_calls) > 1, f"the generic (retryable) policy did not retry: {len(developer_calls)} Developer call(s)"
