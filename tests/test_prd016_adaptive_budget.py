@@ -316,6 +316,8 @@ def _capacity_client(*, recall_head=True, fill=0.97, usage=True, served=65536, s
         response = MagicMock()
         response.choices = [MagicMock()]
         response.choices[0].finish_reason = "stop"
+        # A real server's message content is text or null, never an object: the decoder (E.1) refuses anything else.
+        response.choices[0].message.content = ""
         if max_tokens == 1:
             tokens = 20 + units * per_unit
         else:
