@@ -1,9 +1,9 @@
 """PRD-003: one JSON result on every callback terminal path."""
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from _strict_doubles import strict_kernel
+from _strict_doubles import strict_engine, strict_kernel
 from click.testing import CliRunner
 
 from kriya.cli import main
@@ -244,7 +244,7 @@ def test_the_fix_failure_line_names_the_class_and_suggests_no_resume(tmp_path, m
     kernel = strict_kernel(cfg)
     kernel.start = AsyncMock()
     kernel.stop = AsyncMock()
-    engine = MagicMock()
+    engine = strict_engine(cfg)
     engine.run_generation_workflow = AsyncMock(side_effect=KeyError("missing"))
     with patch("kriya.cli.load_config", return_value=cfg), \
          patch("kriya.cli.Kernel", return_value=kernel), \
