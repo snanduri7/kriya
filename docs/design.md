@@ -3526,4 +3526,7 @@ it was recorded and retried and the run ended `quality_gates_exhausted` without 
 asks `git rev-parse --is-inside-work-tree` in the C locale (git translates its messages); git's own "detected dubious
 ownership" refusal raises `GIT_REPOSITORY_OWNERSHIP_REFUSED` (same closed table) before the greenfield bootstrap writes
 anything - also when only the bootstrap commit meets it (git init does not check ownership); any other failure keeps its
-own report. Git's ownership check is never weakened (no safe.directory, no retry without it).
+own report. Git's ownership check is never weakened (no safe.directory, no retry without it). TAF-1: the content-filter inspection itself (every caller, the run entry `begin_mutating_run` first) reports
+that refusal when git refuses the repository and a definition would otherwise be judged without activation (a stale
+dormant `filter.media` in ~/.gitconfig was reported `GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN`, MEASURED at ea56d08):
+ownership is decided first, by the one detector `kriya.repository.git.refuse_dubious_ownership`.

@@ -545,3 +545,123 @@ def test_a_dubiously_owned_workspace_ends_a_real_run_with_the_ownership_refusal(
     row = _exception_row(cfg)
     assert (row["status"], row["failure_category"]) == ("error", "RepositoryContentFilterRefused")
     assert _tree(workspace) == before
+
+
+# ------------------------------------------------------------------- TAF-1: ownership is decided before filter inspection
+#
+# MEASURED at ea56d08 (TEST-A-final probe_s19e E4b/E4d, owner host shape): a repository git refuses for its ownership,
+# with the operator's stale dormant `filter.media`/`filter.lfs` lines in ~/.gitconfig, was reported
+# GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN, not GIT_REPOSITORY_OWNERSHIP_REFUSED. TRACED: git refuses the repository, so
+# the inspection's layout probe has no work tree ((None, False)); activation cannot be decided and every operator
+# definition is judged (`git media ...`: an evaluator) - before any caller asked git about ownership (the run entry
+# begin_mutating_run and create_git_worktree both inspect first). Ownership is a prerequisite security decision: the
+# inspection itself now asks git (C locale) before it reports a filter cause for a repository git refuses.
+
+STALE_LFS = ('[filter "lfs"]\n\tclean = git-lfs clean -- %f\n\tsmudge = git-lfs smudge -- %f\n'
+             '\tprocess = git-lfs filter-process\n\trequired = true\n')
+
+
+def _host_filters(config: Path) -> None:
+    with open(config, "a", encoding="utf-8") as handle:
+        handle.write(STALE_MEDIA + STALE_LFS)
+
+
+@pytest.mark.parametrize("stale, local", [(False, False), (True, False), (False, True), (True, True)],
+                         ids=["clean-home", "stale-host-filters", "local-filter", "stale-and-local"])
+def test_a_dubiously_owned_repository_is_the_ownership_refusal_whatever_the_filter_configuration(
+        tmp_path, monkeypatch, _isolated_git, stale, local):
+    """clean HOME and the owner's real HOME shape give the same reason for the same cause; nothing is written."""
+    from kriya.workflow import worktree
+
+    repo = _repository(tmp_path)
+    if local:
+        _git(repo, "config", "filter.kx.clean", "cat")
+        (repo / ".git" / "info").mkdir(exist_ok=True)
+        (repo / ".git" / "info" / "attributes").write_text("*.py filter=kx\n")
+    if stale:
+        _host_filters(_isolated_git)
+    before = _tree(repo)
+    _owned_elsewhere(monkeypatch)
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        worktree.create_git_worktree(str(repo))
+    _assert_ownership_refusal(raised, repo)
+    monkeypatch.delenv("GIT_TEST_ASSUME_DIFFERENT_OWNER")
+    assert _tree(repo) == before and not (repo / ".kriya").exists()
+
+
+def test_the_inspection_itself_reports_ownership_for_every_caller(tmp_path, monkeypatch, _isolated_git):
+    """Every guarded caller (run entry, GitTool, checkpoint, analyzer, ...) inspects through
+    refuse_repository_content_filters: on a repository git refuses, the definitions it would otherwise judge without
+    activation are never the reported cause - also in another language, and with the caller's own git and env."""
+    from kriya.repository.git import refuse_repository_content_filters
+
+    repo = _repository(tmp_path)
+    _host_filters(_isolated_git)
+    _owned_elsewhere(monkeypatch)
+    monkeypatch.setenv("LANGUAGE", "fr")
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        refuse_repository_content_filters(str(repo))
+    _assert_ownership_refusal(raised, repo)
+    monkeypatch.delenv("GIT_TEST_ASSUME_DIFFERENT_OWNER")
+    monkeypatch.delenv("LANGUAGE")
+    env = {**os.environ, "GIT_TEST_ASSUME_DIFFERENT_OWNER": "1", "LANGUAGE": "fr"}
+    git = subprocess.run(["which", "git"], capture_output=True, text=True, check=True).stdout.strip()
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        refuse_repository_content_filters(str(repo), git=git, env=env, timeout=15)
+    _assert_ownership_refusal(raised, repo)
+
+
+def test_a_dubiously_owned_repository_without_filter_definitions_is_not_newly_refused_by_the_inspection(
+        tmp_path, monkeypatch):
+    """Negative control: with nothing to judge, the inspection returns exactly as before (the caller's own git meets
+    git's refusal - create_git_worktree's discovery reports it); no extra refusal and no extra spawn on any path."""
+    from kriya.repository import git as repository_git
+
+    repo = _repository(tmp_path)
+    _owned_elsewhere(monkeypatch)
+    spawned = []
+    real = repository_git.subprocess.run
+
+    def counting(argv, *args, **kwargs):
+        spawned.append(list(argv))
+        return real(argv, *args, **kwargs)
+    monkeypatch.setattr(repository_git.subprocess, "run", counting)
+    assert repository_git.refuse_repository_content_filters(str(repo)) is None
+    assert [argv[argv.index("git") + 1:][:1] if "git" in argv else argv for argv in spawned] and \
+        not any("--is-inside-work-tree" in argv for argv in spawned), spawned
+
+
+def test_valid_ownership_keeps_the_activation_aware_filter_contract(tmp_path, _isolated_git):
+    """Positive controls (P1 activation-aware contract, unchanged): valid ownership + dormant host filters is allowed;
+    valid ownership + an ACTIVE unprovable host filter is GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN."""
+    from kriya.workflow import worktree
+
+    _host_filters(_isolated_git)
+    repo = _repository(tmp_path)
+    assert os.path.isdir(worktree.create_git_worktree(str(repo)))
+    (tmp_path / "active").mkdir()
+    active = _repository(tmp_path / "active")
+    (active / ".gitattributes").write_text("*.py filter=media\n")
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        worktree.create_git_worktree(str(active))
+    assert raised.value.reason_code == GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN and raised.value.driver == "media"
+
+
+def test_a_dubiously_owned_workspace_with_stale_host_filters_ends_a_real_run_with_the_ownership_refusal(
+        tmp_path, monkeypatch, _isolated_git):
+    """The real entry on the owner's host shape: begin_mutating_run inspects first and reports ownership, as with a
+    clean HOME (test_a_dubiously_owned_workspace_ends_a_real_run_with_the_ownership_refusal)."""
+    from kriya.control.run_coordinator import begin_mutating_run
+
+    _host_filters(_isolated_git)
+    workspace = _workspace(tmp_path)
+    before = _tree(workspace)
+    eng, _cfg, developer = _scripted_engine(lambda n: GOOD)
+    _owned_elsewhere(monkeypatch)
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        with begin_mutating_run(workspace):
+            _run(eng, workspace)
+    monkeypatch.delenv("GIT_TEST_ASSUME_DIFFERENT_OWNER")
+    _assert_ownership_refusal(raised, Path(workspace))
+    assert developer == []
+    assert _tree(workspace) == before

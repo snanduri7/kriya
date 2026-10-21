@@ -80,8 +80,9 @@ GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY = "GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITO
 GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED = "GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED"
 GIT_CONFIG_UNINSPECTABLE = "GIT_CONFIG_UNINSPECTABLE"
 GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN = "GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN"
-# S19e (OI-163): git itself refuses the repository (safe.directory ownership check). Raised by the caller that met git's
-# refusal (kriya/workflow/worktree.py create_git_worktree), never decided here: this module only names and words it.
+# S19e (OI-163): git itself refuses the repository (safe.directory ownership check). Git decides ownership, never Kriya:
+# this module only recognises git's own refusal (refuse_dubious_ownership, the one detector) - raised by the inspection
+# below before it reports any filter cause for a repository git refuses (TAF-1), and by create_git_worktree's discovery.
 GIT_REPOSITORY_OWNERSHIP_REFUSED = "GIT_REPOSITORY_OWNERSHIP_REFUSED"
 
 _REMEDY = ("Define the filter in your global or system git configuration (for Git LFS: `git lfs install`, not "
@@ -226,6 +227,40 @@ class _Caller:
         else:
             self.elsewhere = self.run
         self.exec_path: Optional[str] = None
+        self._executable, self._timeout = executable, timeout
+        self._stripped = {k: v for k, v in self.environ.items() if k not in _REPOSITORY_SELECTING_ENV}
+
+    def refuse_dubious_ownership(self, path: str, *, elsewhere: bool) -> None:
+        """TAF-1: git's own ownership answer for ``path``, asked with the git and environment ``run`` (or, for
+        ``elsewhere``, a submodule's git) uses there - the C-locale discovery, the one detector."""
+        env = self._stripped if elsewhere else self.environ
+        refuse_dubious_ownership(path, git_discovery(path, git=self._executable, env=env, timeout=self._timeout))
+
+
+# S19e (OI-163): git's own refusal of a repository whose ownership check fails (setup.c ``die(_("detected dubious
+# ownership in repository at '%s'..."))``). git translates it (MEASURED: LANGUAGE=fr answers "propriétaire douteux
+# détecté"), so the discovery probe that reads it runs in the C locale, which overrides LANGUAGE (MEASURED).
+_DUBIOUS_OWNERSHIP = "detected dubious ownership"
+
+
+def git_discovery(path: str, *, git: Optional[str] = None, env: Optional[Mapping[str, str]] = None,
+                  timeout: Optional[float] = None) -> "subprocess.CompletedProcess[str]":
+    """``git rev-parse --is-inside-work-tree`` in ``path``, its messages in the C locale (read-only: no hook, no
+    filter), with the caller's git and environment (default: PATH ``git``, this process's environment). Raises OSError
+    when git cannot run there at all (e.g. ``path`` is not a directory)."""
+    executable = git or "git"                           # a git literal the S19 seam rule sees
+    return subprocess.run(git_argv([executable, "rev-parse", "--is-inside-work-tree"]), cwd=path, capture_output=True,
+                          text=True, env={**(child_environment() if env is None else env), "LC_ALL": "C"},
+                          timeout=timeout)
+
+
+def refuse_dubious_ownership(path: str, discovery: "subprocess.CompletedProcess[str]") -> None:
+    """S19e (OI-163): raise the typed ownership refusal when the failed ``discovery`` (:func:`git_discovery`) is git
+    refusing the repository's ownership. Git's ownership check is never weakened: no safe.directory, no retry without
+    the check. Any other answer returns (the caller's own handling)."""
+    if discovery.returncode != 0 and _DUBIOUS_OWNERSHIP in discovery.stderr:
+        refusal = (discovery.stderr.strip().splitlines() or [""])[0]
+        raise RepositoryContentFilterRefused(GIT_REPOSITORY_OWNERSHIP_REFUSED, path, detail=refusal)
 
 
 def _uninspectable(repository: str, what: str, completed: "Optional[subprocess.CompletedProcess[bytes]]" = None) -> RepositoryContentFilterRefused:
@@ -603,9 +638,15 @@ def _refuse(caller: _Caller, run: _Runner, path: str, seen: Set[str], depth: int
     layout, not_a_repository = _layout(run, path)
     roots = layout if layout is not None else (os.path.realpath(path),)
     common = layout[2] if layout is not None else None
+    definitions = _filter_definitions(run, path)
+    if layout is None and not not_a_repository and any(value != "" for *_, value in definitions):
+        # TAF-1: no work tree because git may REFUSE this repository (ownership). Ownership is a prerequisite security
+        # decision: git's own refusal is the cause, never a definition judged without activation (MEASURED at ea56d08:
+        # a stale dormant ~/.gitconfig `filter.media` was reported EXECUTABLE_UNPROVEN instead). Asked only here.
+        caller.refuse_dubious_ownership(path, elsewhere=depth > 0)
     repository: List[Tuple[str, str, str]] = []
     trusted = []
-    for scope, origin, key, value in _filter_definitions(run, path):
+    for scope, origin, key, value in definitions:
         if value == "":
             continue                                    # an empty command: Git runs nothing (MEASURED)
         if scope in REPOSITORY_SCOPES:

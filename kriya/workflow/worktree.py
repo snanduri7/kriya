@@ -8,7 +8,6 @@ import shutil
 import subprocess
 from typing import Iterable, Iterator, List, Optional, Tuple
 
-from kriya.config.environment import child_environment
 from kriya.platform import git_argv
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
@@ -22,8 +21,9 @@ from kriya.policy.filesystem import (
 )
 from kriya.policy.model import ActionRequest, ActionType
 from kriya.repository.git import (
-    GIT_REPOSITORY_OWNERSHIP_REFUSED,
     RepositoryContentFilterRefused,
+    git_discovery,
+    refuse_dubious_ownership,
     refuse_repository_content_filters,
 )
 from kriya.workflow.file_integrity import WORKTREE_CONTENT_MISMATCH, WORKTREE_SYNC_FAILED, file_raw_digest
@@ -422,29 +422,6 @@ _SCOPED_SNAPSHOT_SENTINEL = SCOPED_SNAPSHOT_SENTINEL  # S18d: owned by the PLAT-
 _SCOPED_SNAPSHOT_IGNORED = {".git", ".kriya"}
 
 
-# S19e (OI-163): git's own refusal of a repository whose ownership check fails (setup.c ``die(_("detected dubious
-# ownership in repository at '%s'..."))``). git translates it (MEASURED: LANGUAGE=fr answers "propriétaire douteux
-# détecté"), so the discovery probe that reads it runs in the C locale, which overrides LANGUAGE (MEASURED).
-_DUBIOUS_OWNERSHIP = "detected dubious ownership"
-
-
-def _git_discovery(path: str) -> "subprocess.CompletedProcess[str]":
-    """``git rev-parse --is-inside-work-tree`` in ``path``, its messages in the C locale (read-only: no hook, no filter).
-    Raises OSError when git cannot run there at all (e.g. ``path`` is not a directory)."""
-    return subprocess.run(git_argv(["git", "rev-parse", "--is-inside-work-tree"]), cwd=path, capture_output=True,
-                          text=True, env={**child_environment(), "LC_ALL": "C"})
-
-
-def _refuse_dubious_ownership(path: str, discovery: "subprocess.CompletedProcess[str]") -> None:
-    """S19e (OI-163): raise the typed ownership refusal when the failed discovery is git refusing the repository's
-    ownership - never a greenfield bootstrap (git would refuse every operation there, and the bootstrap wrote
-    ``.git/info/exclude`` into the refused repository first: MEASURED at a0eb5f0). Git's ownership check is never
-    weakened: no safe.directory, no retry without the check. Any other failure returns (the caller's own handling)."""
-    if discovery.returncode != 0 and _DUBIOUS_OWNERSHIP in discovery.stderr:
-        refusal = (discovery.stderr.strip().splitlines() or [""])[0]
-        raise RepositoryContentFilterRefused(GIT_REPOSITORY_OWNERSHIP_REFUSED, path, detail=refusal)
-
-
 def _bootstrap_greenfield_repository(workspace_path: str) -> None:
     """Initialize a truly non-Git workspace before any model-originated write.
 
@@ -489,7 +466,7 @@ def _bootstrap_greenfield_repository(workspace_path: str) -> None:
     if committed.returncode != 0:
         # S19e (OI-163): `git init` does not check ownership but the commit does - a folder owned by another user is
         # git's ownership refusal, asked again in the C locale; any other commit failure is the bootstrap's own.
-        _refuse_dubious_ownership(workspace_path, _git_discovery(workspace_path))
+        refuse_dubious_ownership(workspace_path, git_discovery(workspace_path))
         raise RuntimeError(
             f"greenfield Git bootstrap commit failed: {committed.stderr.strip() or committed.stdout.strip()}"
         )
@@ -594,9 +571,9 @@ def create_git_worktree(repo_path: str) -> str:
     # 1. Quick pre-check: Is this a git repository? (S19e: a repository git refuses for its ownership is not a
     # greenfield folder - the typed refusal, raised before the bootstrap writes anything, passes the wrapping below.)
     try:
-        res = _git_discovery(repo_path)
+        res = git_discovery(repo_path)
         if res.returncode != 0:
-            _refuse_dubious_ownership(repo_path, res)
+            refuse_dubious_ownership(repo_path, res)
             logger.info(
                 "Workspace '%s' is not a Git repository; initializing the "
                 "greenfield repository before creating its isolated worktree.", repo_path,

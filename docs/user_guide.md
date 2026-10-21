@@ -357,7 +357,8 @@ its scope and the file it comes from - never the command itself:
   driver and the remedy (remove or correct the stale lines in your global configuration, or install the program).
   Kriya never edits your git configuration.
 - `GIT_REPOSITORY_OWNERSHIP_REFUSED` (S19e) - git itself refuses the repository because it is owned by another user
-  ("detected dubious ownership"). Kriya reports that refusal (it is not a "greenfield bootstrap" failure) and writes
+  ("detected dubious ownership"). Kriya reports that refusal (it is not a "greenfield bootstrap" failure, nor a
+  filter refusal caused by stale filter lines in your global configuration) and writes
   nothing there; it never weakens git's ownership check (no `safe.directory` change, no retry without the check). Run
   Kriya as the repository's owner, or, only if you trust the repository, mark it safe in your own git configuration as
   git's message describes.
