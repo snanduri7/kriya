@@ -168,7 +168,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E4: 2 -> 1 lookup: both loads (_oracle_base_revision, mutation_scope_evidence) moved to requirement_closers and
     # bind CloserDeps.run_committed_paths, built by _closer_deps from this name at call time (the two patch sites are
     # the dynamic proof: they patch it on this module and drive the moved closers).
-    (W, '_run_committed_paths'): P(2, W, ((W, 1),), ()),
+    (W, '_run_committed_paths'): P(3, W, ((W, 1),), ()),
     (W, '_run_contract_acceptance'): P(1, W, ((W, 1),), ()),
     (W, '_run_static_analysis_gate'): P(2, W, ((W, 1),), ()),
     # E5: 3 -> 1 lookup: the three loads moved with the Developer loop to development_loop, which binds
@@ -430,7 +430,9 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # build_engineering_plan_from_planner_output, validate_plan: the real enforce route's planner parse, plan build and plan validation)
     # suite-preservation typed-refusal control (tests/test_suite_preservation_typed_refusal.py): +1 W site
     # (compute_workspace_content_hash: the ordinary failure injected at the real lazy-capture seam)
-    assert totals == {A: 114, W: 94, C: 386}
+    # counter-evidence control (tests/test_counter_evidence_monotonic.py): +1 W site (_run_committed_paths: the deterministic violation
+    # planted in the run's committed history of the measured end-to-end scenario)
+    assert totals == {A: 114, W: 95, C: 386}
     assert len(PATCH_POINTS) == 132
 
 
