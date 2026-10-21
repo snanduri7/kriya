@@ -239,7 +239,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # PlanningDeps.assess_planned_edit (one load in workflow_controller._planning_deps); the sites above are the dynamic proof.
     (C, 'assess_planned_edit'): P(3, 'kriya.workflow.edit_feasibility', ((C, 1),), ()),
     (C, 'blocking_requirements'): P(1, 'kriya.workflow.requirements', ((C, 1),), ()),
-    (C, 'build_engineering_plan_from_planner_output'): P(69, 'kriya.workflow.plan_schema', ((C, 2),), ()),
+    (C, 'build_engineering_plan_from_planner_output'): P(70, 'kriya.workflow.plan_schema', ((C, 2),), ()),
     (C, 'build_planning_structural_evidence'): P(3, C, (('kriya.workflow.ownership_findings', 1), (C, 1)), ()),
     (C, 'canonicalize_planned_file_actions'): P(1, 'kriya.workflow.plan_validation', ((C, 2),), ()),
     # E11 characterization: +1 site (tests/test_e11_owner_modules.py: one unit grounding per unit, through this name).
@@ -253,7 +253,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (C, 'localization_candidates'): P(2, 'kriya.workflow.graph_retrieval', ((C, 1),), ()),
     # E11 characterization: +2 sites (tests/test_e11_owner_modules.py).
     (C, 'model_capacities'): P(13, 'kriya.workflow.edit_feasibility', ((C, 1),), ()),
-    (C, 'parse_planner_structured_output'): P(74, 'kriya.agents.contracts', ((C, 2),), ()),
+    (C, 'parse_planner_structured_output'): P(75, 'kriya.agents.contracts', ((C, 2),), ()),
     (C, 'record_plan_created'): P(1, 'kriya.workflow.subtask_telemetry', ((C, 2),), ()),
     (C, 'remove_git_worktree'): P(10, 'kriya.workflow.worktree', ((C, 1),), ()),
     (C, 'resolve_migration_resolution'): P(4, 'kriya.workflow.migration', ((C, 1),), ()),
@@ -269,7 +269,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E12: 5 -> 2 lookups: the enforce loop's loads moved to enforce_loop and read EnforceDeps (one load in
     # workflow_controller._enforce_deps); the shadow run's load is _shadow_deps' (E12 1/2); the patch sites above
     # are the dynamic proof.
-    (C, 'validate_plan'): P(54, 'kriya.workflow.plan_validation', ((C, 2),), ()),
+    (C, 'validate_plan'): P(55, 'kriya.workflow.plan_validation', ((C, 2),), ()),
     (C, 'validate_stack_contract_artifacts'): P(1, 'kriya.workflow.static_checks', ((C, 1),), ()),
     # E12 characterization: 37 new rows (tests/test_e12_enforce_characterization.py pins the enforce loop's and the shadow
     # run's decisions through these controller names; E12 moves the bodies and reads each through EnforceDeps/ShadowDeps).
@@ -426,7 +426,9 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # _attribute_candidate_suite 2, _fallback_routing 1, _has_authoritative_full_source 1, _sync_active_repair_contract 5)
     # and +1 C site (_evaluate_subtask_verification)
     # E14 pin2: +2 A sites (_judge_candidate_suite: the test-delta covering run's scope and attribution evidence)
-    assert totals == {A: 114, W: 93, C: 383}
+    # TAF-3 e2e control (tests/test_taf3_enforce_terminal_refusal.py): +3 C sites (parse_planner_structured_output,
+    # build_engineering_plan_from_planner_output, validate_plan: the real enforce route's planner parse, plan build and plan validation)
+    assert totals == {A: 114, W: 93, C: 386}
     assert len(PATCH_POINTS) == 132
 
 
