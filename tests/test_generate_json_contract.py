@@ -23,13 +23,14 @@ def invoke(tmp_path, monkeypatch):
     cfg.logging.run_file_enabled = False
     kernel = strict_kernel(cfg)
 
-    def run(payload=None, args=(), input_text=None, setup_error=None, workflow_error=None):
+    def run(payload=None, args=(), input_text=None, setup_error=None, workflow_error=None, human=False):
+        flags = () if human else ("--json",)
         with patch("kriya.cli.load_config", return_value=cfg), \
              patch("kriya.cli.Kernel", return_value=kernel), \
              patch("kriya.cli.LLMClient", autospec=True, side_effect=setup_error), \
              patch("kriya.cli.WorkflowEngine"), \
              patch("kriya.cli._dispatch_generation", new=AsyncMock(return_value=payload, side_effect=workflow_error)):
-            return CliRunner().invoke(main, ["generate", "test goal", "--json", *args], input=input_text)
+            return CliRunner().invoke(main, ["generate", "test goal", *flags, *args], input=input_text)
     return run
 
 
@@ -131,3 +132,70 @@ def test_workspace_lock_refusal_is_json(invoke):
     assert result.exit_code == 1
     assert json.loads(result.stdout)['quality_gates_passed'] is False
     assert 'Workspace Locked' in result.stderr
+
+
+# ------------------------------------------------------------------------------------------ Q6: public failure truth
+#
+# After an unexpected exception the durable state is terminalised and the controller's .enforce row carries the exception class as
+# ``failure_type``; the CLI used to drop it (human line and JSON) and to print an unconditional "--resume" suggestion. The class is now
+# transported from the propagated exception into the result family's existing ``failure_type`` field, and the generic hint is gone:
+# whether a resume is accepted is decided later by validate_resume_against_reality with state this handler does not have.
+
+def test_a_workflow_exception_carries_its_class_as_failure_type_in_the_json_failure(invoke):
+    result = invoke(workflow_error=RuntimeError("controlled failure"))
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "status": "failed", "quality_gates_passed": False, "error": "controlled failure", "failure_type": "RuntimeError"}
+
+
+@pytest.mark.parametrize("error", [AttributeError("'NoneType' object has no attribute 'x'"), KeyError("k"), OSError("disk vanished")],
+                         ids=["AttributeError", "KeyError", "OSError"])
+def test_the_failure_type_is_the_propagated_exceptions_own_class(invoke, error):
+    result = invoke(workflow_error=error)
+    assert json.loads(result.stdout)["failure_type"] == type(error).__name__
+
+
+def test_a_setup_exception_and_an_interrupt_carry_their_class_too(invoke):
+    assert json.loads(invoke(setup_error=RuntimeError("provider unavailable")).stdout)["failure_type"] == "RuntimeError"
+    assert json.loads(invoke(setup_error=EOFError("input ended")).stdout)["failure_type"] == "EOFError"
+    assert json.loads(invoke(setup_error=KeyboardInterrupt()).stdout)["failure_type"] == "KeyboardInterrupt"
+
+
+def test_a_failure_that_is_not_an_exception_has_no_failure_type():
+    from kriya.cli_output import GenerateOutput
+
+    output = GenerateOutput(True)
+    output.fail("--acceptance-approval without --acceptance")
+    assert output.result == {"status": "failed", "quality_gates_passed": False,
+                             "error": "--acceptance-approval without --acceptance"}
+    output.fail_with(KeyError())                    # str(KeyError()) is empty: the class names the failure
+    assert output.result["error"] == "KeyError" and output.result["failure_type"] == "KeyError"
+
+
+def test_a_returned_workflow_result_is_untouched_by_the_failure_contract(invoke):
+    payload = {"quality_gates_passed": False, "status": "failed", "files": [], "failure_type": "PLANNING_ERROR"}
+    assert json.loads(invoke(payload).stdout) == payload             # success and returned results keep their own payload
+    assert "failure_type" not in json.loads(invoke({"quality_gates_passed": True, "files": []}).stdout)
+
+
+def test_the_human_failure_line_names_the_authoritative_class_and_suggests_no_resume(invoke):
+    result = invoke(workflow_error=RuntimeError("controlled failure"), human=True)
+    assert result.exit_code == 1
+    assert "Workflow error: RuntimeError: controlled failure" in result.output
+    assert "--resume" not in result.output and "pick up where it left off" not in result.output
+
+
+def test_a_returned_run_id_still_prints_the_exact_resume_command(invoke):
+    """Control for the resumable state the CLI can know: a returned result with a saved checkpoint's run id."""
+    result = invoke({"quality_gates_passed": False, "files": ["calc.py"], "run_id": "run-42", "failure_category": "no_progress"},
+                    human=True)
+    assert result.exit_code == 1 and isinstance(result.exception, SystemExit)         # the result path completed normally
+    assert "--resume-id run-42" in result.output and "Checkpoint saved" in result.output
+    assert "Workflow error" not in result.output
+
+
+def test_a_returned_result_without_a_run_id_prints_no_resume_command(invoke):
+    result = invoke({"quality_gates_passed": False, "files": ["calc.py"], "failure_category": "no_progress"}, human=True)
+    assert result.exit_code == 1 and isinstance(result.exception, SystemExit)         # the result path completed normally
+    assert "Quality Gates: FAILED" in result.output and "Workflow error" not in result.output
+    assert "--resume" not in result.output

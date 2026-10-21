@@ -20,8 +20,23 @@ class GenerateOutput:
         self.result = None
         self.stdout = None
 
-    def fail(self, error: str) -> None:
+    def fail(self, error: str, failure_type: Optional[str] = None) -> None:
         self.result = {"status": "failed", "quality_gates_passed": False, "error": error}
+        if failure_type:
+            # The result family's canonical ``failure_type`` (an enforce planning failure and the .enforce trace row carry it):
+            # present only when the failure is an exception whose class is the authority.
+            self.result["failure_type"] = failure_type
+
+    def fail_with(self, error: BaseException) -> None:
+        """Fail from the propagated exception itself: its message is the error and its class the ``failure_type`` - the one
+        place the class is read, so the JSON result and the human line can never disagree."""
+        self.fail(str(error) or type(error).__name__, failure_type=type(error).__name__)
+
+    def failure_line(self) -> str:
+        """The human wording of the failure just recorded: ``<failure_type>: <error>`` (or the error alone)."""
+        result = self.result or {}
+        failure_type = result.get("failure_type")
+        return f"{failure_type}: {result['error']}" if failure_type else str(result.get("error"))
 
     def __enter__(self):
         if self.enabled:
@@ -35,8 +50,8 @@ class GenerateOutput:
         exit_code = None
         try:
             if exc is not None and not isinstance(exc, (SystemExit, click.exceptions.Exit)):
-                self.fail(str(exc) or type(exc).__name__)
-                click.echo(f"Workflow error: {self.result['error']}", err=True)
+                self.fail_with(exc)
+                click.echo(f"Workflow error: {self.failure_line()}", err=True)
                 exit_code = 130 if isinstance(exc, KeyboardInterrupt) else 1
             if self.result is None:
                 self.fail("Generation exited before a workflow result was available")

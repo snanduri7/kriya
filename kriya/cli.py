@@ -2859,7 +2859,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                 goal = fh.read()
         except Exception as e:
             click.secho(f"Failed to read goal file: {e}", fg="red")
-            output.fail(str(e))
+            output.fail_with(e)
             sys.exit(1)
     elif not goal:
         if not sys.stdin.isatty():
@@ -2881,7 +2881,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                 requirement_goal = json.load(fh)["original_goal"]
         except (OSError, ValueError, KeyError) as e:
             click.secho(f"[Milestone plan refused] {e}", bold=True, fg="red")
-            output.fail(str(e))
+            output.fail_with(e)
             sys.exit(1)
     if requirements_file:
         # GR-R1A: the operator's closed requirement set, bound before any model
@@ -2891,7 +2891,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
             contract_artifact = _bind_requirement_contract(cfg, requirements_file, requirement_goal or "")
         except RequirementContractError as e:
             click.secho(f"[Requirement contract refused] {e}", bold=True, fg="red")
-            output.fail(str(e))
+            output.fail_with(e)
             sys.exit(1)
         click.secho(f"Requirement contract bound: {contract_artifact.source_name} sha256 "
                     f"{contract_artifact.digest[:12]} ({len(contract_artifact.requirement_set.requirements)} "
@@ -2911,7 +2911,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                                                    contract_artifact)
         except (AcceptanceError, OSError, ValueError, KeyError) as e:
             click.secho(f"[Acceptance file refused] {e}", bold=True, fg="red")
-            output.fail(str(e))
+            output.fail_with(e)
             sys.exit(1)
         click.secho(f"Acceptance file bound: {acceptance_artifact.source_name} sha256 "
                     f"{acceptance_artifact.digest[:12]} ({len(acceptance_artifact.cases)} case(s) for "
@@ -2925,7 +2925,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                                                             os.getcwd(), contract_artifact)
         except AuthorityBundleError as e:
             click.secho(f"[Verification authority refused] {e}", bold=True, fg="red")
-            output.fail(str(e))
+            output.fail_with(e)
             sys.exit(1)
         click.secho(f"Verification authority bound: {authority_bundle.authority_id} sha256 {authority_bundle.digest[:12]} "
                     f"(covers {', '.join(f'{rid}:{c.claim}' for rid in sorted(authority_bundle.covers) for c in authority_bundle.covers[rid])}; "
@@ -2940,7 +2940,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                                                          os.getcwd(), contract_artifact)
         except RequirementDispositionError as e:
             click.secho(f"[Requirement disposition refused] {e}", bold=True, fg="red")
-            output.fail(str(e))
+            output.fail_with(e)
             sys.exit(1)
         listed = ", ".join(f"{rid}" + ("" if e.claim is None else f":{e.claim}") + f"={e.disposition}"
                            for rid in sorted(dispositions.entries) for e in dispositions.entries[rid])
@@ -3148,15 +3148,15 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                 milestone_result = asyncio.run(_closing(llm, run_milestone_sequence()))
         except UncertainWorkspaceStateError as e:
             click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red")
-            output.fail(str(e))
+            output.fail_with(e)
             sys.exit(1)
         except WorkspaceLockHeldError as e:
             click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
-            output.fail(str(e))
+            output.fail_with(e)
             sys.exit(1)
         except Exception as e:
             click.secho(f"Milestone sequence error: {e}", fg="red")
-            output.fail(str(e))
+            output.fail_with(e)
             sys.exit(1)
 
         output.result = milestone_result
@@ -3622,20 +3622,18 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
             final_res = asyncio.run(_closing(llm, run_workflow()))
     except UncertainWorkspaceStateError as e:
         click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red")
-        output.fail(str(e))
+        output.fail_with(e)
         sys.exit(1)
     except WorkspaceLockHeldError as e:
         click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
-        output.fail(str(e))
+        output.fail_with(e)
         sys.exit(1)
     except Exception as e:
-        click.secho(f"Workflow error: {e}", fg="red")
-        click.secho(
-            "If a Plan/Design/Developer stage had already completed before this error, "
-            "re-run the same command with --resume to pick up where it left off instead of starting over.",
-            fg="yellow"
-        )
-        output.fail(str(e))
+        output.fail_with(e)
+        click.secho(f"Workflow error: {output.failure_line()}", fg="red")
+        # No generic "--resume" hint here: whether a resume is accepted is decided later by validate_resume_against_reality, with
+        # state this handler does not have (a checkpoint can exist and still be rejected). The result path above prints the
+        # hint only for a returned run id.
         sys.exit(1)
 
     output.result = final_res
