@@ -3351,7 +3351,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # The commit raised (an interrupt included) before the service handed its result back. The local flags say nothing
                 # then: the journal decides whether the workspace holds the candidate, and an unproven commit is UNCERTAIN - the
                 # existing outcome - so the candidate is kept for explicit recovery and the plan is needs_review, never `failed`.
-                settled = deps.interrupted_commit_outcome(workspace_path, run_id, commit_journal_before)
+                try:
+                    settled = deps.interrupted_commit_outcome(workspace_path, run_id, commit_journal_before)
+                except Exception as finalize_error:        # never replaces the error being handled: unproven means UNCERTAIN
+                    deps.logger.error(
+                        "WorkflowController enforce run %r: the terminal commit's outcome could not be read after an error: %s",
+                        run_id, finalize_error,
+                    )
+                    settled = "UNCERTAIN"
                 if settled == "COMMITTED":
                     workspace_commit_completed = True
                 elif settled == "UNCERTAIN":

@@ -343,6 +343,65 @@ async def test_an_earlier_committed_unit_of_the_same_run_is_not_mistaken_for_the
     assert "verified candidate\n" in _candidate_bytes(repo)
 
 
+@pytest.mark.parametrize("failure", [OSError("digest re-read failed"), _Interrupt()], ids=["OSError", "interrupt"])
+@pytest.mark.asyncio
+async def test_a_failure_after_the_bytes_moved_but_before_the_commit_is_settled_is_uncertain_like_a_returned_digest_mismatch(
+        tmp_path, monkeypatch, failure):
+    """Addendum #5 (MEASURED): the batch journal says COMMITTED as soon as the bytes move, but the terminal commit counts as committed
+    only after its digest re-read (and the registry promotion) and settles the RunRecord cycle last. An exception in that window used
+    to make the handler trust the journal alone: plan `completed`, scope `workspace`, the candidate discarded - while the RunRecord
+    cycle ended UNCERTAIN. The commit's own settled record is the authority: the outcome is the ordinary one for a returned digest
+    mismatch (needs_review, the candidate kept for explicit recovery)."""
+    from kriya.workflow import terminal_commit
+
+    with monkeypatch.context() as patched:
+        patched.setattr(terminal_commit, "committed_digest_mismatch", lambda _writes: "probe: bytes differ from the verified candidate")
+        repo_ref, raised_ref, reference = await _scenario(tmp_path, "ref", monkeypatch=patched)
+    assert raised_ref is None and reference["plan_lifecycle"] == "needs_review" and reference["completion_scope"] != "workspace", reference
+    assert "verified candidate\n" in _candidate_bytes(repo_ref)
+
+    def failing(_writes):
+        raise failure
+    monkeypatch.setattr(terminal_commit, "committed_digest_mismatch", failing)
+    repo, raised, state = await _scenario(tmp_path, "int", monkeypatch=monkeypatch)
+    assert raised is failure                                                 # the original error, as itself
+    assert (repo / "app.py").read_text() == "verified candidate\n"             # the bytes did move
+    assert state["plan_lifecycle"] == "needs_review" and state["completion_scope"] != "workspace", state
+    assert "verified candidate\n" in _candidate_bytes(repo)                   # the recovery copy is kept
+    assert state == reference, state
+
+
+@pytest.mark.asyncio
+async def test_a_failure_to_read_the_commit_outcome_while_finalizing_never_replaces_the_original_error(tmp_path, monkeypatch):
+    """The outcome lookup is a finalization step like the others: if it raises, the outcome is UNCERTAIN (the candidate is kept) and
+    the interrupt being handled is still the exception that reaches the caller."""
+    import time
+
+    from kriya.repository import commit
+    from kriya.workflow import commit_service, terminal_commit
+
+    def begin_then_interrupt(writes, workspace_path=None, *, transaction_id=None):
+        commit._persist_commit_evidence(workspace_path, commit.CommitEvidence(      # pylint: disable=protected-access
+            schema_version=commit._COMMIT_EVIDENCE_SCHEMA_VERSION, transaction_id=transaction_id,   # pylint: disable=protected-access
+            state=commit.CommitState.IN_PROGRESS, started_at_unix=time.time(), updated_at_unix=time.time(), operations=(),
+            result_revisions={}))
+        raise _Interrupt()
+    monkeypatch.setattr(terminal_commit, "commit_revision_grounded_batch", begin_then_interrupt)
+    real = commit_service.list_commit_evidence
+    calls = []
+
+    def flaky(workspace_path):
+        calls.append(True)
+        if len(calls) > 1:                                  # the snapshot before the commit works; the lookup while handling does not
+            raise RuntimeError("journal lookup broke")
+        return real(workspace_path)
+    monkeypatch.setattr(commit_service, "list_commit_evidence", flaky)
+    repo, raised, state = await _scenario(tmp_path, "int", monkeypatch=monkeypatch)
+    assert len(calls) >= 2
+    assert isinstance(raised, _Interrupt)                                    # not the RuntimeError
+    assert state["plan_lifecycle"] == "needs_review" and "verified candidate\n" in _candidate_bytes(repo), state
+
+
 def _derive_one_artifact(monkeypatch) -> None:
     """The candidate yields one derived artifact record (the harness repository has no pyproject to derive from)."""
     from kriya.control.artifacts import ArtifactRecord, ArtifactRegistry

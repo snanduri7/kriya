@@ -135,17 +135,29 @@ def run_commit_states(workspace_path: str, run_id: str) -> Optional[Dict[str, Co
 def interrupted_commit_outcome(
     workspace_path: str, run_id: str, before: Optional[Dict[str, CommitState]],
 ) -> Optional[str]:
-    """What the journal says about a terminal commit that RAISED (an interrupt included) before the service handed a result back,
-    against ``before`` (``run_commit_states`` taken just before the commit): ``"COMMITTED"`` (the workspace holds the candidate),
-    ``"UNCERTAIN"`` (started and not proven finished or rolled back, or the journal cannot be read: the workspace may hold part of
-    it), or ``None`` (nothing of this commit is durable, or it was proven rolled back)."""
+    """What the durable records say about a terminal commit that RAISED (an interrupt included) before the service handed a result
+    back, against ``before`` (``run_commit_states`` taken just before the commit): ``"COMMITTED"`` (the workspace holds the
+    candidate and the commit is SETTLED as such), ``"UNCERTAIN"`` (started and not proven finished or rolled back, the journal
+    cannot be read, or the bytes moved but the transaction was not settled COMMITTED: the workspace may hold part of it, or the
+    verification that follows the move did not finish), or ``None`` (nothing of this commit is durable, or it was proven rolled back).
+
+    The batch journal says COMMITTED as soon as the bytes move, but the terminal commit only counts as committed after its digest
+    re-read and the contract-registry promotion, and it settles the RunRecord cycle last. So a journal COMMITTED is trusted only
+    where the commit's own settled record (the owning run's cycle) agrees; without an owning run the journal is all there is."""
+    from kriya.control.run_coordinator import owning_run_commits
+    from kriya.control.run_record import COMMIT_COMMITTED
+
     after = run_commit_states(workspace_path, run_id)
     if after is None or before is None:
         return "UNCERTAIN"
-    started = [state for transaction, state in after.items() if transaction not in before]
-    if CommitState.COMMITTED in started:
+    started = {transaction: state for transaction, state in after.items() if transaction not in before}
+    cycles = owning_run_commits(workspace_path)
+    settled = None if cycles is None else {
+        cycle.get("transaction_id"): cycle.get("result") for cycle in cycles[1]}
+    committed = [transaction for transaction, state in started.items() if state is CommitState.COMMITTED]
+    if committed and (settled is None or any(settled.get(transaction) == COMMIT_COMMITTED for transaction in committed)):
         return "COMMITTED"
-    if any(state in (CommitState.IN_PROGRESS, CommitState.UNCERTAIN) for state in started):
+    if committed or any(state in (CommitState.IN_PROGRESS, CommitState.UNCERTAIN) for state in started.values()):
         return "UNCERTAIN"
     return None
 
