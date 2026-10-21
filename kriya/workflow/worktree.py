@@ -820,6 +820,12 @@ def clean_untracked_files_since(worktree_path: str, baseline: Optional[set]) -> 
         return
     for rel in current - baseline:
         full = os.path.join(worktree_path, rel)
+        if names_trusted_control_path(rel) or _holds_trusted_control_path(full):
+            # Q3: cleanup removes ordinary run artifacts, never a trusted control path - `.kriya/...`, the scoped-snapshot
+            # sentinel, a `.git` - in any spelling (the one canonical rule), nor a directory entry (git lists an untracked
+            # embedded repository as one) that holds one beneath it.
+            logger.debug(f"Runtime-artifact cleanup kept '{rel}': it is or holds a trusted control path.")
+            continue
         try:
             if os.path.isdir(full):
                 shutil.rmtree(full, ignore_errors=True)
@@ -827,6 +833,12 @@ def clean_untracked_files_since(worktree_path: str, baseline: Optional[set]) -> 
                 os.remove(full)
         except OSError as e:
             logger.debug(f"Failed to clean up runtime artifact '{rel}' after verification run (non-fatal): {e}")
+
+
+def _holds_trusted_control_path(directory: str) -> bool:
+    """A real directory that has a trusted control path (the canonical ``is_trusted_control_name``) anywhere beneath it."""
+    return os.path.isdir(directory) and any(
+        is_trusted_control_name(name) for _root, dirs, files in os.walk(directory) for name in (*dirs, *files))
 
 
 def _is_scoped_snapshot(worktree_path: str) -> bool:

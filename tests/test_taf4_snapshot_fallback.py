@@ -187,3 +187,36 @@ def test_files_a_run_creates_under_a_protected_directory_spelling_are_never_clea
     assert all(path.exists() for path in created_in_control)
     assert not (folder / "new.txt").exists()
     assert (folder / "app.py").exists()
+
+
+# ------------------------------------------------------------------------------------------------ Q3: the git-source cleanup
+
+def _create(repo: Path, files: dict) -> None:
+    for rel, text in files.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+
+def test_the_git_source_cleanup_never_deletes_a_protected_control_path_and_still_removes_ordinary_files(tmp_path):
+    """Q3 of the consolidated addendum (MEASURED at 72d9182, pre-existing): with git as the snapshot source, the cleanup
+    deleted untracked `.kriya/...` control files, the scoped-snapshot sentinel, a case variant of `.kriya`, and an untracked
+    embedded repository INCLUDING its `.git` (git lists it as one directory entry). The protection is the one canonical
+    rule (kriya.policy.filesystem: ANY path component, any spelling) - and a directory entry that holds a control path beneath
+    it is kept whole. Ordinary run artifacts, including look-alike names, are still removed."""
+    repo = _repo(tmp_path / "repo")
+    baseline = worktree.snapshot_untracked_files(str(repo))
+    assert not isinstance(baseline, worktree._FilesystemSnapshot)               # the GIT source (this is not the fallback)
+    protected = {".kriya/state.json": "control", ".kriya-scoped-snapshot": "sentinel", "p/.KrIyA/y.txt": "case variant"}
+    ordinary = {"ordinary_new.txt": "runtime state", "pkg/.github/ci.yml": "look-alike", "docs/.kriya-notes/n.md": "look-alike",
+                "gitlab/ci.yml": "look-alike", "kriya/z.py": "look-alike"}
+    _create(repo, {**protected, **ordinary})
+    embedded = repo / "embedded"
+    embedded.mkdir()
+    _git(embedded, "init", "-q")
+    (embedded / "f.txt").write_text("x")
+    worktree.clean_untracked_files_since(str(repo), baseline)
+    assert all((repo / rel).exists() for rel in protected), [rel for rel in protected if not (repo / rel).exists()]
+    assert (embedded / ".git").exists() and (embedded / "f.txt").exists()      # the embedded repository is kept whole
+    assert not any((repo / rel).exists() for rel in ordinary), [rel for rel in ordinary if (repo / rel).exists()]
+    assert (repo / "a.py").exists()                                              # tracked content untouched
