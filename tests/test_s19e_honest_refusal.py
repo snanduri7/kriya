@@ -686,3 +686,136 @@ def test_a_named_test_closure_refusal_ends_the_run_as_itself(tmp_path, monkeypat
         _run(eng, workspace)
     assert calls == [1] and developer == [PRIMARY], (calls, developer)
     _assert_refusal_ended_the_run(raised, cfg, workspace, before, GIT_CONTENT_FILTER_REPOSITORY_DEFINED)
+
+
+# ------------------------------------------------------------------------- TAF-1: a dubiously owned submodule
+#
+# MEASURED (git 2.54.0): an ordinary operation in a valid parent (status, add -A, diff, commit -a) makes git run the
+# populated submodule's own repository-local filter, and it does so with an explicit GIT_DIR for the submodule's git, which
+# skips git's ownership check (made during discovery only). So a submodule's ownership is a prerequisite security decision
+# of the parent's operation, not of git: Kriya must decide it itself, deterministically, whatever dormant host filters exist.
+
+def _submodule_scenario(root: Path, config: Path, *, local_filter: bool, sub_safe: bool = False, stale: bool = False):
+    """A valid parent (listed in safe.directory) with a populated submodule; optionally an ACTIVE repository-local filter
+    in the submodule's own config. Returns (parent, submodule, marker) - the marker exists only if a filter ran."""
+    child = root / "child"
+    parent = root / "parent"
+    for repo, name in ((child, "f.txt"), (parent, "p.txt")):
+        repo.mkdir()
+        (repo / name).write_text("x\n")
+        _git(repo, "init", "-q", "-b", "main")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "init")
+    _git(parent, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(child), "sub")
+    _git(parent, "commit", "-q", "-m", "sub")
+    sub = parent / "sub"
+    marker = root / "FILTER_RAN"
+    if local_filter:
+        script = root / "clean.sh"
+        script.write_text(f'#!/bin/sh\necho ran >> "{marker}"\ncat\n')
+        script.chmod(0o755)
+        _git(sub, "config", "filter.kx.clean", str(script))
+        (sub / ".gitattributes").write_text("*.txt filter=kx\n")
+    with open(config, "a", encoding="utf-8") as handle:
+        if stale:
+            handle.write(STALE_MEDIA + STALE_LFS)
+        handle.write(f"[safe]\n\tdirectory = {os.path.realpath(parent)}\n")
+        if sub_safe:
+            handle.write(f"[safe]\n\tdirectory = {os.path.realpath(sub)}\n")
+    return parent, sub, marker
+
+
+def _assert_submodule_ownership_refusal(raised, sub: Path) -> None:
+    assert type(raised.value) is RepositoryContentFilterRefused
+    assert raised.value.reason_code == GIT_REPOSITORY_OWNERSHIP_REFUSED
+    assert os.path.realpath(raised.value.repository) == os.path.realpath(sub)
+
+
+@pytest.mark.parametrize("stale, local_filter", [(False, False), (True, False), (False, True), (True, True)],
+                         ids=["clean-home", "stale-host-filters", "local-active-filter", "stale-and-local-active"])
+def test_a_dubiously_owned_submodule_is_the_ownership_refusal_whatever_the_host_configuration(
+        tmp_path, monkeypatch, _isolated_git, stale, local_filter):
+    """The same cause gives the same reason in a clean HOME and in the owner's: the dormant host filters decide nothing.
+    The refusal comes from the run entry's own inspection, before any git operation could run the submodule's filter."""
+    from kriya.workflow import worktree
+
+    parent, sub, marker = _submodule_scenario(tmp_path, _isolated_git, local_filter=local_filter, stale=stale)
+    before = _tree(parent)
+    _owned_elsewhere(monkeypatch)
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        worktree.create_git_worktree(str(parent))
+    _assert_submodule_ownership_refusal(raised, sub)
+    monkeypatch.delenv("GIT_TEST_ASSUME_DIFFERENT_OWNER")
+    assert not marker.exists(), "the submodule's repository-defined filter ran"
+    assert _tree(parent) == before and not (parent / ".kriya").exists()
+
+
+@pytest.mark.parametrize("stale", [False, True], ids=["clean-home", "stale-host-filters"])
+def test_an_ambient_repository_selecting_environment_cannot_make_a_dubious_submodule_look_valid(
+        tmp_path, monkeypatch, _isolated_git, stale):
+    """The inspection asks about a submodule the way git does for its own child: the repository-selecting variables
+    (GIT_DIR, GIT_WORK_TREE) are cleared - an ambient GIT_DIR (Kriya launched from a git hook, or an operator's
+    export; child_environment() is a whole-environment copy and nothing else strips it) names the PARENT's git dir and
+    would otherwise answer 'valid' for the submodule's folder."""
+    from kriya.repository.git import refuse_repository_content_filters
+
+    parent, sub, _marker = _submodule_scenario(tmp_path, _isolated_git, local_filter=False, stale=stale)
+    _owned_elsewhere(monkeypatch)
+    monkeypatch.setenv("GIT_DIR", str(parent / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(parent))
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        refuse_repository_content_filters(str(parent))
+    _assert_submodule_ownership_refusal(raised, sub)
+
+
+def test_a_validly_owned_submodule_is_still_judged_by_its_filters_and_asks_no_ownership_question(
+        tmp_path, monkeypatch, _isolated_git):
+    """Controls: (1) valid ownership + dormant host filters + no local filter is allowed, with no ownership probe for the
+    submodule (git gave it a work tree: nothing to ask); (2) valid ownership + an ACTIVE repository-local filter in the
+    submodule is the repository-defined refusal at the submodule."""
+    from kriya.repository import git as repository_git
+
+    root = tmp_path / "dormant"
+    root.mkdir()
+    parent, sub, _marker = _submodule_scenario(root, _isolated_git, local_filter=False, sub_safe=True, stale=True)
+    asked = []
+    original = repository_git._Caller.refuse_dubious_ownership
+
+    def recording(self, path, *, elsewhere):
+        asked.append(path)
+        return original(self, path, elsewhere=elsewhere)
+    monkeypatch.setattr(repository_git._Caller, "refuse_dubious_ownership", recording)
+    _owned_elsewhere(monkeypatch)
+    assert repository_git.refuse_repository_content_filters(str(parent)) is None
+    assert asked == [], asked
+    monkeypatch.delenv("GIT_TEST_ASSUME_DIFFERENT_OWNER")
+
+    active_root = tmp_path / "active"
+    active_root.mkdir()
+    parent, sub, _marker = _submodule_scenario(active_root, _isolated_git, local_filter=True, sub_safe=True)
+    _owned_elsewhere(monkeypatch)
+    with pytest.raises(RepositoryContentFilterRefused) as raised:
+        repository_git.refuse_repository_content_filters(str(parent))
+    assert raised.value.reason_code == GIT_CONTENT_FILTER_REPOSITORY_DEFINED
+    assert os.path.realpath(raised.value.repository) == os.path.realpath(sub)
+
+
+def test_a_plain_folder_with_host_filters_is_not_asked_an_ownership_question(tmp_path, monkeypatch, _isolated_git):
+    """Control for the ownership probe's cost: git's own 'not a git repository' answer is final - no repository, so no
+    ownership to judge and no filter that can run - so a non-git workspace under a HOME that carries filter definitions is
+    allowed without the extra discovery spawn, exactly as before."""
+    from kriya.repository import git as repository_git
+
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "a.py").write_text("x = 1\n")
+    _host_filters(_isolated_git)
+    asked = []
+    original = repository_git._Caller.refuse_dubious_ownership
+
+    def recording(self, path, *, elsewhere):
+        asked.append(path)
+        return original(self, path, elsewhere=elsewhere)
+    monkeypatch.setattr(repository_git._Caller, "refuse_dubious_ownership", recording)
+    assert repository_git.refuse_repository_content_filters(str(plain)) is None
+    assert asked == [], asked

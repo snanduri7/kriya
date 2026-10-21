@@ -639,10 +639,15 @@ def _refuse(caller: _Caller, run: _Runner, path: str, seen: Set[str], depth: int
     roots = layout if layout is not None else (os.path.realpath(path),)
     common = layout[2] if layout is not None else None
     definitions = _filter_definitions(run, path)
-    if layout is None and not not_a_repository and any(value != "" for *_, value in definitions):
+    if layout is None and not not_a_repository and (depth > 0 or any(value != "" for *_, value in definitions)):
         # TAF-1: no work tree because git may REFUSE this repository (ownership). Ownership is a prerequisite security
         # decision: git's own refusal is the cause, never a definition judged without activation (MEASURED at ea56d08:
         # a stale dormant ~/.gitconfig `filter.media` was reported EXECUTABLE_UNPROVEN instead). Asked only here.
+        # A SUBMODULE (depth > 0) is asked whether or not any definition is visible (MEASURED, git 2.54.0): the parent's
+        # status / add / diff / commit run the populated submodule's own repository-local filter through a child git with an
+        # explicit GIT_DIR, which skips git's ownership check - so a submodule git would refuse is NOT harmless to leave
+        # unjudged, and a clean HOME must refuse exactly as a HOME with dormant host filters does. At depth 0 git itself
+        # refuses every operation in the folder, so with nothing to judge nothing is asked (no extra spawn).
         caller.refuse_dubious_ownership(path, elsewhere=depth > 0)
     repository: List[Tuple[str, str, str]] = []
     trusted = []
