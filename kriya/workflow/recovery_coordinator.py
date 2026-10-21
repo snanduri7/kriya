@@ -48,7 +48,12 @@ logger = logging.getLogger(__name__)
 # (never a deliberate "the model/input was bad" signal). ValueError is
 # deliberately excluded: DeveloperAgent uses it for a malformed response,
 # an ordinary retryable model failure. See docs/design.md §11.3.
-INTERNAL_FRAMEWORK_ERROR_TYPES = (UnboundLocalError, TypeError, KeyError, AssertionError)
+#
+# AttributeError and NameError (Q5, 2026-10-21) are the same accidental coding error: a malformed model, provider or application input is
+# translated into a typed failure at its own trust boundary (a skill-gap entry that is not an object is discarded, never left to raise
+# AttributeError and "abort the entire generation run"), so one reaching this classifier raw is Kriya's own defect, and a Developer retry
+# cannot repair it. UnboundLocalError (a NameError subclass) stays listed explicitly.
+INTERNAL_FRAMEWORK_ERROR_TYPES = (UnboundLocalError, TypeError, KeyError, AssertionError, AttributeError, NameError)
 
 # (exception, attempt context) -> the plan_scope_conflict Failure a validated
 # scope denial grounds into, or a falsy value when it cannot be grounded.
@@ -176,15 +181,17 @@ def classify_attempt_exception(
             ),
             message=(
                 f"CONTAINMENT_SETUP_FAILED: {raw_error_context}" if containment_setup_failure
-                else f"INTERNAL KRIYA ERROR (not a generated-application defect): {raw_error_context}"
+                else f"INTERNAL KRIYA ERROR (not a generated-application defect): {type(exc).__name__}: {raw_error_context}"
                 if internal_framework_bug else raw_error_context
             ),
             raw_output=raw_error_context, source="orchestrator",
             # PRD-011: a typed containment refusal (e.g.
-            # TOOLCHAIN_REQUIREMENT_CONFLICT) keeps its reason code.
+            # TOOLCHAIN_REQUIREMENT_CONFLICT) keeps its reason code. An internal error keeps the class of the exception
+            # (its message alone - "'NoneType' object has no attribute 'x'" - does not name it).
             diagnostics=(
                 {"reason_code": exc.reason_code}
-                if containment_setup_failure and getattr(exc, "reason_code", None) else None
+                if containment_setup_failure and getattr(exc, "reason_code", None)
+                else {"exception_type": type(exc).__name__} if internal_framework_bug else None
             ),
         )
     )

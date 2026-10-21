@@ -676,42 +676,37 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
         # outcomes count (never plan/design/review prose); what a
         # non-satisfied outcome does is the requirement policy's call.
         if requirement_set is not None:
+            # Q5: no closer's exception is absorbed here. A closer that raises has not verified anything, so continuing with
+            # "no closure" and reporting quality_gates_passed=True would claim a verification that never completed (MEASURED at
+            # ec50268). The exception reaches the one attempt-exception classifier (recovery_coordinator): Kriya's own accidental
+            # control-plane errors are an internal_framework_error stop, a typed RepositoryContentFilterRefused stays the typed
+            # refusal (nothing on this path catches it), and the generic classifier governs the rest.
             autonomy_policy = deps.config.autonomy
             # "Do not modify any other file": decided from what the run
             # actually changed (this candidate plus the run's committed
             # history) against the files the goal itself names.
-            try:
-                scope_closures = await asyncio.to_thread(
-                    deps.close_requirements_by_mutation_scope, resolved_obligation_ledger, requirement_set,
-                    worktree_path, workspace_path, candidate_paths=state.all_files_written,
-                    revision=state.attempt_number,
-                )
-            except RepositoryContentFilterRefused:
-                raise               # S19 P1c (8(a)): the typed refusal of mutation_scope_evidence reaches the caller
-            except Exception as exc:
-                scope_closures = []
-                logger.warning(f"Requirement mutation-scope evidence unavailable: {exc}")
+            scope_closures = await asyncio.to_thread(
+                deps.close_requirements_by_mutation_scope, resolved_obligation_ledger, requirement_set,
+                worktree_path, workspace_path, candidate_paths=state.all_files_written,
+                revision=state.attempt_number,
+            )
             # FS-1C2 B2-a: the operator's acceptance file judges the
             # behaviour claims it covers on this candidate.
-            try:
-                acceptance_closures = await asyncio.to_thread(
-                    deps.close_requirements_with_acceptance_tests, deps.config.autonomy,
-                    resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
-                    acceptance=deps.bound_acceptance(deps.engine), approval=deps.bound_approval(deps.engine),
-                    modified=state.all_files_written, revision=state.attempt_number,
-                    toolchain_declaration_mutable=toolchain_declaration_mutable(
-                        write_scope_mode, allowed_write_relpaths, structured_plan,
-                    ),
-                    contract=verification_contract,
-                )
-            except Exception as exc:
-                acceptance_closures = []
-                logger.warning(f"Requirement acceptance evidence unavailable: {exc}")
+            acceptance_closures = await asyncio.to_thread(
+                deps.close_requirements_with_acceptance_tests, deps.config.autonomy,
+                resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
+                acceptance=deps.bound_acceptance(deps.engine), approval=deps.bound_approval(deps.engine),
+                modified=state.all_files_written, revision=state.attempt_number,
+                toolchain_declaration_mutable=toolchain_declaration_mutable(
+                    write_scope_mode, allowed_write_relpaths, structured_plan,
+                ),
+                contract=verification_contract,
+            )
             # VERIFICATION-CONTRACT-003: the goal's compiled examples, the
             # API predicate, the test-addition record and the documentation
             # referent - each closer bound by the sealed contract.
             contract_closures: List[Dict[str, Any]] = []
-            for closer_name, closer_call in (
+            for _closer, closer_call in (
                 ("external authority", lambda: deps.close_requirements_with_authority_bundle_evidence(
                     deps.config.autonomy, resolved_obligation_ledger, requirement_set,
                     verification_contract, worktree_path, workspace_path, engine=deps.engine,
@@ -734,76 +729,49 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
                     resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
                     revision=state.attempt_number)),
             ):
-                try:
-                    contract_closures += await asyncio.to_thread(closer_call)
-                except Exception as exc:
-                    logger.warning(f"Requirement {closer_name} evidence unavailable: {exc}")
+                contract_closures += await asyncio.to_thread(closer_call)
             # An UNVERIFIED (cannot confirm from code) requirement whose
             # own text names existing tests is closed only by running
             # exactly those tests on this candidate.
-            try:
-                closures = await asyncio.to_thread(
-                    deps.close_requirements_with_named_tests, deps.config.autonomy,
-                    resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
-                    modified=state.all_files_written, revision=state.attempt_number,
-                    toolchain_declaration_mutable=toolchain_declaration_mutable(
-                        write_scope_mode, allowed_write_relpaths, structured_plan,
-                    ),
-                    java_home_override=state.java_home_override, contract=verification_contract,
-                )
-            except RepositoryContentFilterRefused:
-                raise               # TAF-3: via the named-test oracle's base export (its sibling closers' contract)
-            except Exception as exc:
-                closures = []
-                logger.warning(f"Requirement closure by named tests unavailable: {exc}")
+            closures = await asyncio.to_thread(
+                deps.close_requirements_with_named_tests, deps.config.autonomy,
+                resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
+                modified=state.all_files_written, revision=state.attempt_number,
+                toolchain_declaration_mutable=toolchain_declaration_mutable(
+                    write_scope_mode, allowed_write_relpaths, structured_plan,
+                ),
+                java_home_override=state.java_home_override, contract=verification_contract,
+            )
             # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: the run's mutation
             # record decides "do not change any existing test"; the
             # candidate's own complete, green full suite closes
             # "every existing test must keep passing".
-            try:
-                immutability_closures = await asyncio.to_thread(
-                    deps.close_requirements_by_test_immutability, resolved_obligation_ledger, requirement_set,
-                    worktree_path, workspace_path, candidate_paths=state.all_files_written,
-                    revision=state.attempt_number, contract=verification_contract,
-                )
-            except RepositoryContentFilterRefused:
-                raise               # S19 P1c (8(a)): via mutation_scope_evidence
-            except Exception as exc:
-                immutability_closures = []
-                logger.warning(f"Requirement test-immutability evidence unavailable: {exc}")
+            immutability_closures = await asyncio.to_thread(
+                deps.close_requirements_by_test_immutability, resolved_obligation_ledger, requirement_set,
+                worktree_path, workspace_path, candidate_paths=state.all_files_written,
+                revision=state.attempt_number, contract=verification_contract,
+            )
             # OD-3: the files the goal froze by name, judged from the same mutation record.
-            try:
-                frozen_closures = await asyncio.to_thread(
-                    deps.close_requirements_by_file_immutability, resolved_obligation_ledger, requirement_set,
-                    worktree_path, workspace_path, candidate_paths=state.all_files_written,
-                    revision=state.attempt_number, contract=verification_contract,
-                )
-            except RepositoryContentFilterRefused:
-                raise               # S19 P1c (8(a)): via mutation_scope_evidence
-            except Exception as exc:
-                frozen_closures = []
-                logger.warning(f"Requirement file-immutability evidence unavailable: {exc}")
-            try:
-                suite_closures = await asyncio.to_thread(
-                    deps.close_requirements_by_suite_preservation, deps.config.autonomy,
-                    resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
-                    revision=state.attempt_number, candidate_paths=state.all_files_written,
-                    toolchain_declaration_mutable=toolchain_declaration_mutable(
-                        write_scope_mode, allowed_write_relpaths, structured_plan,
-                    ),
-                    java_home_override=state.java_home_override, contract=verification_contract,
-                    # SUITE-PRESERVATION-CLOSURE-BASELINE-ATTRIBUTION-001: the run's own captured
-                    # baseline, stability cache and replay - no second baseline run on this path.
-                    goal=goal, suite_baseline=state.validation_baseline_full_regression,
-                    stability_cache=state.pytest_stability_cache, baseline_suite_run=baseline_suite_run,
-                    baseline_source=SUITE_BASELINE_FROM_RUN,
-                    run_baseline_policy=state.validation_baseline_policy,
-                )
-            except RepositoryContentFilterRefused:
-                raise               # S19 P1c (8(a)): via mutation_scope_evidence
-            except Exception as exc:
-                suite_closures = []
-                logger.warning(f"Requirement suite-preservation evidence unavailable: {exc}")
+            frozen_closures = await asyncio.to_thread(
+                deps.close_requirements_by_file_immutability, resolved_obligation_ledger, requirement_set,
+                worktree_path, workspace_path, candidate_paths=state.all_files_written,
+                revision=state.attempt_number, contract=verification_contract,
+            )
+            suite_closures = await asyncio.to_thread(
+                deps.close_requirements_by_suite_preservation, deps.config.autonomy,
+                resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
+                revision=state.attempt_number, candidate_paths=state.all_files_written,
+                toolchain_declaration_mutable=toolchain_declaration_mutable(
+                    write_scope_mode, allowed_write_relpaths, structured_plan,
+                ),
+                java_home_override=state.java_home_override, contract=verification_contract,
+                # SUITE-PRESERVATION-CLOSURE-BASELINE-ATTRIBUTION-001: the run's own captured
+                # baseline, stability cache and replay - no second baseline run on this path.
+                goal=goal, suite_baseline=state.validation_baseline_full_regression,
+                stability_cache=state.pytest_stability_cache, baseline_suite_run=baseline_suite_run,
+                baseline_source=SUITE_BASELINE_FROM_RUN,
+                run_baseline_policy=state.validation_baseline_policy,
+            )
             closures = (scope_closures + acceptance_closures + contract_closures + closures
                         + immutability_closures + frozen_closures + suite_closures)
             if closures:

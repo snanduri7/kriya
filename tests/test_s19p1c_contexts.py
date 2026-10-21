@@ -131,21 +131,34 @@ def test_every_git_read_lines_verb_is_classified_and_filter_capable_ones_are_ins
 
 def test_the_development_loop_lets_the_closers_refusal_through():
     """mutation_scope_evidence's typed refusal is not absorbed as 'evidence unavailable' by the pre-apply closers
-    that reach it (mutation scope, test immutability, file immutability, suite preservation)."""
+    that reach it (mutation scope, test immutability, file immutability, suite preservation).
+
+    Q5 (2026-10-21): the closers' handlers that absorbed an unexpected exception are gone altogether (an absorbed exception
+    meant a passed quality gate that had verified nothing), so the invariant is stated for ANY enclosing handler: a handler
+    around a closer call that could catch the typed refusal - a bare except, Exception, BaseException or the refusal itself -
+    must re-raise it. Re-adding an absorbing `except Exception` (the pre-fix shape) fails here."""
     tree = ast.parse((REPO / "kriya/workflow/development_loop.py").read_text(encoding="utf-8"))
     reaching = {"close_requirements_by_mutation_scope", "close_requirements_by_test_immutability",
                 "close_requirements_by_file_immutability", "close_requirements_by_suite_preservation"}
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    catches_the_refusal = {None, "Exception", "BaseException", "RepositoryContentFilterRefused"}
+
+    def reraises(handler):
+        return any(isinstance(sub, ast.Raise) and sub.exc is None for stmt in handler.body for sub in ast.walk(stmt))
+
     seen = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Try):
+        if not (isinstance(node, ast.Attribute) and node.attr in reaching):
             continue
-        called = {sub.attr for stmt in node.body for sub in ast.walk(stmt) if isinstance(sub, ast.Attribute)} & reaching
-        if not called:
-            continue
-        seen |= called
-        first = node.handlers[0]
-        assert getattr(first.type, "id", None) == "RepositoryContentFilterRefused", called
-        assert isinstance(first.body[0], ast.Raise) and first.body[0].exc is None, called
+        seen.add(node.attr)
+        child = node
+        while child in parents:
+            parent = parents[child]
+            if isinstance(parent, ast.Try) and any(child is stmt for stmt in parent.body):
+                for handler in parent.handlers:
+                    caught = getattr(handler.type, "id", None)
+                    assert caught not in catches_the_refusal or reraises(handler), (node.attr, caught)
+            child = parent
     assert seen == reaching
 
 

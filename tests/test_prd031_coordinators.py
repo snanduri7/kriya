@@ -88,11 +88,43 @@ def test_a_grounded_scope_denial_becomes_its_plan_scope_conflict():
     assert classified.failure is grounded and not classified.unrecoverable_scope_denial
 
 
-@pytest.mark.parametrize("exc", [UnboundLocalError("x"), TypeError("x"), KeyError("x"), AssertionError("x")])
+@pytest.mark.parametrize("exc", [UnboundLocalError("x"), TypeError("x"), KeyError("x"), AssertionError("x"),
+                                 AttributeError("x"), NameError("x")],
+                         ids=["UnboundLocalError", "TypeError", "KeyError", "AssertionError", "AttributeError", "NameError"])
 def test_a_control_plane_exception_is_an_internal_framework_error(exc):
     classified = _classify(exc)
     assert classified.internal_framework_bug and classified.failure.type == "internal_framework_error"
     assert classified.failure.message.startswith("INTERNAL KRIYA ERROR (not a generated-application defect): ")
+
+
+@pytest.mark.parametrize("exc", [AttributeError("'NoneType' object has no attribute 'x'"), NameError("name 'y' is not defined"),
+                                 TypeError("unsupported operand")], ids=["AttributeError", "NameError", "TypeError"])
+def test_an_internal_framework_error_keeps_the_original_exception_class(exc):
+    """The message of AttributeError / NameError / TypeError alone does not name the class; the evidence must."""
+    failure = _classify(exc).failure
+    assert f": {type(exc).__name__}: {exc}" in failure.message
+    assert failure.diagnostics == {"exception_type": type(exc).__name__}
+
+
+def test_a_typed_failure_is_never_made_internal_because_its_class_derives_from_a_raw_internal_type():
+    """The architectural boundary: a failure that arrives typed (an attached Failure) keeps its classification, whatever its
+    Python base class - widening the raw-exception authority to AttributeError / NameError reclassifies only UNtyped exceptions."""
+    typed = Failure(type="test", message="a real test failure", raw_output="a real test failure")
+
+    class TypedFromAttributeError(AttributeError):
+        failure = typed
+
+    classified = _classify(TypedFromAttributeError("typed"))
+    assert classified.failure is typed
+    assert not classified.internal_framework_bug and classified.failure.type == "test"
+
+
+def test_a_runtime_error_stays_governed_by_the_generic_classifier():
+    """RuntimeError / OSError are cause-dependent (a Kriya invariant or an external failure): no type-only refinement is made."""
+    for exc in (RuntimeError("git ls-files failed"), OSError("disk vanished")):
+        classified = _classify(exc)
+        assert not classified.internal_framework_bug and classified.failure.type == "general_error"
+        assert classified.failure.message == str(exc) and classified.failure.diagnostics is None
 
 
 def test_a_value_error_stays_an_ordinary_retryable_failure():
