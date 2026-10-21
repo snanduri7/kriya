@@ -1,8 +1,15 @@
-"""INTENTIONAL CONTRACT (consolidated addendum #3, step D): a closer's guarded git/I-O collaborator that fails for ANY reason - a
-coding error included - degrades to "unavailable", and "unavailable" is never evidence for a requirement: its consumers fail closed
-(the requirement stays unverified, the reason names the exception class). The terminal result then follows the operator's
-``requirement_unknown_policy`` (``record`` by default, ``block`` in the strict profiles). The defect class this pins out is the
-opposite one: an error that makes the requirement look SATISFIED.
+"""What the closers' guarded git/I-O collaborators do today when they fail for ANY reason - a coding error included (consolidated
+addendum #3 step D; corrected by the addendum #4 review): the failure degrades to "unavailable", and "unavailable" is never evidence
+that a requirement is SATISFIED - its consumers fail closed (the requirement stays unverified, the reason names the exception class).
+That half is pinned here.
+
+The other half is NOT an intended contract and is recorded as an OPEN OWNER DECISION: "unavailable" also discards COUNTER-evidence.
+MEASURED by the addendum #4 review on the real direct path with the default policy ``record``: a run whose committed history holds a
+deterministic violation ends quality_gates_passed False / violated; the same run with an AttributeError (or OSError) injected into the
+guarded git read ends quality_gates_passed True / unverified. ``block`` (the strict profiles) fails closed (TRACED, not measured end to
+end). Whether a Kriya coding error in a collaborator should instead reach the single attempt-exception classifier (Q5) is a per-site
+decision (a collaborator that parses candidate-controlled bytes must keep degrading): the pins below describe today's behaviour and
+must be changed together with that decision, not before it.
 
 The typed S19 refusal (RepositoryContentFilterRefused) is not degraded: it has its own pins (test_fs1c0_named_test_oracle,
 test_s19e_honest_refusal)."""

@@ -132,6 +132,7 @@ def test_every_git_read_lines_verb_is_classified_and_filter_capable_ones_are_ins
 _CLOSERS_REACHING_THE_REFUSAL = {"close_requirements_by_mutation_scope", "close_requirements_by_test_immutability",
                                  "close_requirements_by_file_immutability", "close_requirements_by_suite_preservation"}
 _CATCHES_THE_REFUSAL = {None, "Exception", "BaseException", "RepositoryContentFilterRefused"}
+_TRY_NODES = (ast.Try, getattr(ast, "TryStar", ast.Try))          # `except*` is ast.TryStar (3.11+)
 
 
 def _handler_type_names(handler):
@@ -146,7 +147,10 @@ def _handler_type_names(handler):
 def _absorbing_handlers(source: str, closers):
     """(closer, caught names) for every handler enclosing a closer call that could catch the typed refusal and is not a PURE
     pass-through - a body that is exactly one bare ``raise``. A conditional, delayed or wrapped re-raise does not qualify (it can
-    absorb on the other branch), and a dynamic/unresolvable handler type is treated as catching it."""
+    absorb on the other branch), and a dynamic/unresolvable handler type is treated as catching it. Also flagged: ``except*``,
+    ``with ...suppress(...)`` and a ``finally`` that returns / breaks / continues. NOT detectable lexically (the behaviour pins in
+    test_direct_closer_failure_truth are the backstop, they inject a failure at every closer and kill such a wrapper): an aliased
+    closer, a wrapper taking the call as a lambda, a ``getattr`` call and a swallowing decorator."""
     tree = ast.parse(source)
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     offenders, seen = [], set()
@@ -157,12 +161,17 @@ def _absorbing_handlers(source: str, closers):
         child = node
         while child in parents:
             parent = parents[child]
-            if isinstance(parent, ast.Try) and any(child is stmt for stmt in parent.body):
+            if isinstance(parent, _TRY_NODES) and any(child is stmt for stmt in parent.body):
                 for handler in parent.handlers:
                     names = _handler_type_names(handler)
                     pure_pass_through = len(handler.body) == 1 and isinstance(handler.body[0], ast.Raise) and handler.body[0].exc is None
                     if (names & _CATCHES_THE_REFUSAL or "<dynamic>" in names) and not pure_pass_through:
                         offenders.append((node.attr, sorted(str(name) for name in names)))
+                if any(isinstance(sub, (ast.Return, ast.Break, ast.Continue)) for stmt in parent.finalbody for sub in ast.walk(stmt)):
+                    offenders.append((node.attr, ["finally: leaves the block"]))      # a jump out of `finally` discards the exception
+            if isinstance(parent, (ast.With, ast.AsyncWith)) and any(child is stmt for stmt in parent.body) and any(
+                    "suppress" in ast.dump(item.context_expr) for item in parent.items):
+                offenders.append((node.attr, ["with suppress(...)"]))
             child = parent
     return offenders, seen
 
@@ -192,12 +201,22 @@ def test_the_development_loop_lets_the_closers_refusal_through():
     ("except get_error_type():\n        closures = []", True),                                             # dynamic type
     ("except Exception:\n        raise", False),                                                           # pure pass-through
     ("except KeyError:\n        closures = []", False),                                                    # cannot catch the refusal
+    ("except* Exception:\n        closures = []", True),                                                   # except* (ast.TryStar)
+    ("except KeyError:\n        raise\n    finally:\n        return None", True),                              # finally discards the exception
 ])
 def test_the_tripwire_catches_the_evasive_handler_shapes_and_only_those(handler, absorbs):
     source = f"def f():\n    try:\n        x = obj.close_requirements_by_mutation_scope()\n    {handler}\n"
     offenders, seen = _absorbing_handlers(source, {"close_requirements_by_mutation_scope"})
     assert seen == {"close_requirements_by_mutation_scope"}                                              # the call was found
     assert bool(offenders) is absorbs
+
+
+def test_the_tripwire_flags_a_suppress_context_and_not_an_ordinary_one():
+    closers = {"close_requirements_by_mutation_scope"}
+    flagged, _ = _absorbing_handlers(
+        "def f():\n    with contextlib.suppress(Exception):\n        obj.close_requirements_by_mutation_scope()\n", closers)
+    ordinary, _ = _absorbing_handlers("def f():\n    with lock:\n        obj.close_requirements_by_mutation_scope()\n", closers)
+    assert flagged and not ordinary
 
 
 def test_a_direct_run_ends_with_the_closer_s_typed_refusal_and_releases_the_workspace(tmp_path, monkeypatch):
