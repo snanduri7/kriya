@@ -95,7 +95,7 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         "kriya.workflow.checkpoint": (8, "M2", _M2),
         "kriya.workflow.milestone_completion": (1, "M3", _M3),
         "kriya.workflow.named_test_oracle": (6, "L2", _L2),
-        "kriya.workflow.worktree": (20, "M2", _M2),
+        "kriya.workflow.worktree": (19, "M2", _M2 + " (TAF-1: the ownership discovery moved to kriya.repository.git)"),
     },
     "git_argv": {
         "kriya.analyzer.analyzer": (5, "M3", _M3),
@@ -110,7 +110,7 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         "kriya.workflow.checkpoint": (8, "M2", _M2 + " (compute_tree_hash/compute_base_commit/git_read_lines)"),
         "kriya.workflow.milestone_completion": (4, "M3", _M3),
         "kriya.workflow.named_test_oracle": (3, "M3", _M3),
-        "kriya.workflow.worktree": (20, "M2", _M2),
+        "kriya.workflow.worktree": (19, "M2", _M2 + " (TAF-1: the ownership discovery moved to kriya.repository.git)"),
     },
     "os_environ": {
         # D3: every other env read goes through kriya.config.environment. PLATFORM is L0 and cannot import CONFIG, and this read is the
