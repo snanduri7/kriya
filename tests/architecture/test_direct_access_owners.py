@@ -215,7 +215,7 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         # ignored-directory set), resume_support 2 (the abandoned-plan quarantine root and the milestone sidecar path)
         "kriya.workflow.planning_request": (1, "P2", _P2),
         "kriya.workflow.resume_support": (2, "P2", _P2),
-        "kriya.workflow.worktree": (11, "M2", "moves to kriya/repository (owner of the worktree path)"),
+        "kriya.workflow.worktree": (10, "M2", "moves to kriya/repository (owner of the worktree path); TAF-4(i): the fallback's exact-case .kriya name is gone, the fold-aware control-name check decides"),
     },
 }
 

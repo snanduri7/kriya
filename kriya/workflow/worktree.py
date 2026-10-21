@@ -692,7 +692,7 @@ def create_git_worktree(repo_path: str) -> str:
 
 
 _SNAPSHOT_FALLBACK_IGNORED_DIRS = {
-    ".git", ".kriya", "__pycache__", "node_modules", "target", ".venv", "venv",
+    "__pycache__", "node_modules", "target", ".venv", "venv",
 }
 
 
@@ -728,13 +728,14 @@ def _snapshot_all_files_without_git(worktree_path: str) -> Optional[set]:
     already treats as noise/build-cache, so compile artifacts aren't misread
     as runtime state and wiped between attempts.
 
-    TAF-4: runs no process (no git, no filter, no hook); a file at a protected control name (a nested or managed
-    worktree's ``.git`` gitfile, the scoped-snapshot sentinel) is never listed, so it can never be cleaned; a directory
+    TAF-4: runs no process (no git, no filter, no hook); a file or directory at a protected control name, under any
+    spelling and by the one fold-aware definition (``.git`` / ``.kriya`` directories, a nested or managed worktree's
+    ``.git`` gitfile, the scoped-snapshot sentinel), is never listed or descended into, so it can never be cleaned; a directory
     the walk cannot list makes the snapshot None ("couldn't tell"), never a partial set passed off as complete."""
     try:
         files = _FilesystemSnapshot()
         for root, dirs, filenames in os.walk(worktree_path, onerror=_raise):
-            dirs[:] = [d for d in dirs if d not in _SNAPSHOT_FALLBACK_IGNORED_DIRS]
+            dirs[:] = [d for d in dirs if d not in _SNAPSHOT_FALLBACK_IGNORED_DIRS and not is_trusted_control_name(d)]
             for fn in filenames:
                 if not is_trusted_control_name(fn):
                     files.add(os.path.relpath(os.path.join(root, fn), worktree_path))

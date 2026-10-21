@@ -144,3 +144,46 @@ def test_an_unlistable_directory_makes_the_fallback_say_it_cannot_tell(tmp_path)
     finally:
         os.chmod(folder / "locked", 0o755)
     assert worktree._snapshot_all_files_without_git(str(folder)) == {"app.py", "locked/keep.txt"}
+
+
+def _layout_with_protected_directories(folder: Path) -> None:
+    """Every protected control directory under its own parent (so no two spellings collide on a case-insensitive
+    filesystem), next to ordinary directories whose names merely resemble them."""
+    for parent, control in (("a", ".git"), ("b", ".Git"), ("c", ".GIT"), ("d", ".kriya"), ("e", ".KRIYA"), ("f", ".KrIyA")):
+        (folder / parent / control).mkdir(parents=True)
+        (folder / parent / control / "state").write_text("control\n")
+    for ordinary in ("g/.github", "h/.kriya-notes", "i/gitlab", "j/kriya", "k/Git", "l/.gitx"):
+        (folder / ordinary).mkdir(parents=True)
+        (folder / ordinary / "keep.txt").write_text("ordinary\n")
+    (folder / "app.py").write_text("x\n")
+    (folder / ".gitignore").write_text("target/\n")
+
+
+ORDINARY = {"app.py", ".gitignore", "g/.github/keep.txt", "h/.kriya-notes/keep.txt", "i/gitlab/keep.txt", "j/kriya/keep.txt",
+            "k/Git/keep.txt", "l/.gitx/keep.txt"}
+
+
+def test_the_fallback_never_lists_a_protected_directory_under_any_spelling(tmp_path):
+    """TAF-4 (i): the protected-name rule is the one fold-aware definition (kriya.policy.filesystem), applied to directories as
+    it is to file names - `.git`, `.Git`, `.GIT`, `.kriya`, `.KRIYA` and mixed spellings are pruned; ordinary similar
+    names stay visible."""
+    folder = tmp_path / "plain"
+    _layout_with_protected_directories(folder)
+    assert worktree._snapshot_all_files_without_git(str(folder)) == ORDINARY
+
+
+def test_files_a_run_creates_under_a_protected_directory_spelling_are_never_cleaned(tmp_path):
+    """The harm behind (i): a listed protected file is deletable by cleanup. A file created during the run beneath any
+    spelling of a control directory survives clean_untracked_files_since; an ordinary new file is still removed."""
+    folder = tmp_path / "plain"
+    _layout_with_protected_directories(folder)
+    baseline = worktree.snapshot_untracked_files(str(folder))
+    assert isinstance(baseline, worktree._FilesystemSnapshot)
+    created_in_control = [folder / "b" / ".Git" / "made.txt", folder / "e" / ".KRIYA" / "made.txt", folder / "a" / ".git" / "made.txt"]
+    for path in created_in_control:
+        path.write_text("run state\n")
+    (folder / "new.txt").write_text("runtime state\n")
+    worktree.clean_untracked_files_since(str(folder), baseline)
+    assert all(path.exists() for path in created_in_control)
+    assert not (folder / "new.txt").exists()
+    assert (folder / "app.py").exists()
