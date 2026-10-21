@@ -188,6 +188,35 @@ def test_suite_preservation_an_incomplete_record_without_a_violation_never_close
     assert outcome is RequirementOutcome.UNVERIFIED
 
 
+@pytest.mark.parametrize("situation", ["zero-tests", "incomplete-report", "attribution-raised", "no-attribution"])
+@pytest.mark.parametrize("record", [
+    {"available": True, "changed_test_files": ["tests/test_suite.py"], "missing_test_files": [], "changed_trust_surface": []},
+    {"available": True, "changed_test_files": [], "missing_test_files": ["tests/test_other.py"], "changed_trust_surface": []},
+], ids=["changed", "vanished"])
+def test_suite_preservation_a_known_changed_or_vanished_test_convicts_whatever_the_suite_did(tmp_path, situation, record):
+    """Addendum #5 (consumer level, pre-existing): the conviction used to be reached only in the final branch, after the report,
+    case-count and attribution checks - so a COMPLETE record proving a test changed or vanished was dropped when the suite ran zero
+    tests, its report was incomplete, or the attribution raised or was unavailable. The mutation record does not depend on the suite."""
+    reqs = derive_requirements(SUITE_UNCHANGED)
+    ledger = unverified_ledger(reqs)
+    attribute = None
+    if situation == "zero-tests":
+        run_suite = lambda: validator_for(write_project(tmp_path / "empty", "x = 1\n")).run_tests()          # noqa: E731
+    elif situation == "incomplete-report":
+        stub = {"success": True, "output": "2 passed", "test_execution": {"gate_id": "g", "runner": "pytest", "workspace": "w",
+                                                                           "completeness": "INDETERMINATE", "reason": "STRUCTURED_REPORT_MISSING"}}
+        run_suite = lambda: stub                                                                              # noqa: E731
+    else:
+        run_suite = lambda: validator_for(write_project(tmp_path / "failing", "def test_a():\n    assert False\n")).run_tests()  # noqa: E731
+        if situation == "attribution-raised":
+            def attribute(_result):
+                raise RuntimeError("attribution broke")
+    [entry] = close_suite_preservation_requirements(ledger, reqs, test_files=[], run_suite=run_suite, source="t", revision=1,
+                                                    test_immutability=record, attribute_suite=attribute)
+    assert entry["violated"] is True and entry["closed"] is False
+    assert requirement_outcomes(ledger, reqs)["REQ-2"] is RequirementOutcome.VIOLATED
+
+
 def test_suite_preservation_control_a_complete_clean_record_closes(tmp_path):
     clean = {"available": True, "changed_test_files": [], "missing_test_files": [], "changed_trust_surface": []}
     entry, outcome = _suite_closure(tmp_path, clean)

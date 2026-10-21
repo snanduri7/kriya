@@ -1958,8 +1958,25 @@ def close_suite_preservation_requirements(
         entry: Dict[str, Any] = {"requirement": requirement.id, "kind": SUITE_PRESERVATION, "closed": False,
                                  "success": bool(result.get("success")) if isinstance(result, dict) else None,
                                  "test_execution": summary}
+        immutability = test_immutability if test_immutability is not None else {
+            "available": False, "reason": "no mutation record was supplied"}
+        claims = tuple(contract_claims.get(requirement.id) or ())
+        whole = not claims or set(claims) <= {REGRESSION_PRESERVATION, TEST_IMMUTABILITY_CLAIM}
+        touched = list(immutability.get("changed_test_files") or ()) + list(immutability.get("missing_test_files") or ())
         if not evidence_id:
             entry["reason"] = "the verdict has no evidence id to bind to"
+        elif touched and whole and suite_statement_requires_immutability(requirement.text):
+            # Counter-evidence is monotonic and independent of the suite: an existing test file the mutation record proves changed or
+            # vanished convicts a statement that demands them unchanged - whether the record is complete or not, and whatever the
+            # suite did (zero tests, an incomplete report, a failed or unavailable attribution). Nothing here can close anything.
+            detail = {"kind": SUITE_PRESERVATION, "claim": TEST_IMMUTABILITY_CLAIM, "test_immutability": dict(immutability),
+                      "required_claims": list(claims), "suite_success": suite_success}
+            entry["test_immutability"] = dict(immutability)
+            record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
+                                       method=FULL_REGRESSION_METHOD, detail=detail, source=source,
+                                       revision=revision, violated=True)
+            entry["reason"] = "existing test file(s) changed or vanished under an 'unchanged' statement: " + ", ".join(touched)
+            entry["violated"] = True
         elif report is None or not report.complete:
             entry["reason"] = "the suite's structured evidence is not COMPLETE: " + str(
                 report.reason if report is not None else "no test execution report")
@@ -1990,17 +2007,9 @@ def close_suite_preservation_requirements(
                 entry["regression_attribution"] = attribution.gate_evidence()
                 detail["regression_attribution"] = attribution.gate_evidence()
                 detail["regression_decision"] = attribution.event_details()
-            immutability = test_immutability if test_immutability is not None else {
-                "available": False, "reason": "no mutation record was supplied"}
             detail["test_immutability"] = dict(immutability)
             entry["test_immutability"] = dict(immutability)
-            claims = tuple(contract_claims.get(requirement.id) or ())
-            whole = not claims or set(claims) <= {REGRESSION_PRESERVATION, TEST_IMMUTABILITY_CLAIM}
-            touched = list(immutability.get("changed_test_files") or ()) + list(immutability.get("missing_test_files") or ())
-            # Counter-evidence is monotonic: an INCOMPLETE mutation record that already proves a changed or vanished test file
-            # still convicts a statement that demands them unchanged; it can never close anything.
-            known_violation = bool(touched) and whole and suite_statement_requires_immutability(requirement.text)
-            if not immutability.get("available") and not known_violation:
+            if not immutability.get("available"):
                 entry["reason"] = "a full-suite closure needs the run's mutation record: " + str(immutability.get("reason"))
                 attempts.append(entry)
                 continue
@@ -2011,15 +2020,6 @@ def close_suite_preservation_requirements(
                 attempts.append(entry)
                 continue
             detail["required_claims"] = list(claims)
-            if whole and suite_statement_requires_immutability(requirement.text):
-                if touched:
-                    record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
-                                               method=FULL_REGRESSION_METHOD, detail=detail, source=source,
-                                               revision=revision, violated=True)
-                    entry["reason"] = "the suite is green but existing test file(s) changed or vanished: " + ", ".join(touched)
-                    entry["violated"] = True
-                    attempts.append(entry)
-                    continue
             if whole:
                 record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
                                            method=FULL_REGRESSION_METHOD, detail=detail, source=source, revision=revision)
