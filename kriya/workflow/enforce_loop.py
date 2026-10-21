@@ -153,7 +153,9 @@ class EnforceDeps:
     # kriya.workflow.commit_service (all-import cycle)
     TerminalCommitRequest: Any
     commit_verified_candidate: Callable[..., Any]
+    interrupted_commit_outcome: Callable[..., Any]
     plan_terminal_writes: Callable[..., Any]
+    run_commit_states: Callable[..., Any]
     # kriya.workflow.context_budget (all-import cycle)
     CandidatePrompts: Any
     candidate_model: Callable[..., Any]
@@ -3249,27 +3251,6 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 artifact_registry.record(record)
             deps.save_artifact_registry(workspace_path, artifact_registry)
 
-        def _settled_terminal_commit(before: Any) -> Optional[str]:
-            """What the commit journal - the transaction's own durable authority - says about a terminal commit that raised before the
-            service handed a result back: ``"COMMITTED"`` (the workspace holds the candidate), ``"UNCERTAIN"`` (started and not
-            proven finished or rolled back, or the journal cannot be read: the workspace may hold part of it), or ``None`` (nothing
-            of this run's terminal commit is durable)."""
-            from kriya.repository.commit import CommitState
-            from kriya.workflow.commit_service import run_commit_states
-
-            try:
-                after = run_commit_states(workspace_path, run_id)
-            except OSError:
-                after = None
-            if after is None or before is None:
-                return "UNCERTAIN"
-            started = [state for transaction, state in after.items() if transaction not in before]
-            if CommitState.COMMITTED in started:
-                return "COMMITTED"
-            if any(state in (CommitState.IN_PROGRESS, CommitState.UNCERTAIN) for state in started):
-                return "UNCERTAIN"
-            return None
-
         try:
             if subtasks_completed:
                 # PRD-004: every blocking terminal gate runs against the one
@@ -3318,12 +3299,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 if all_completed:
                     await _emit_terminal_event("commit_eligible")
                     if plan_workspace_path != workspace_path:
-                        from kriya.workflow.commit_service import run_commit_states
-
-                        try:
-                            commit_journal_before = run_commit_states(workspace_path, run_id)
-                        except OSError:
-                            commit_journal_before = None
+                        commit_journal_before = deps.run_commit_states(workspace_path, run_id)
                         terminal_commit_started = True
                     commit = deps.commit_verified_candidate(gate_report, deps.TerminalCommitRequest(
                         plan=plan, candidate_root=plan_workspace_path, workspace_path=workspace_path,
@@ -3375,7 +3351,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # The commit raised (an interrupt included) before the service handed its result back. The local flags say nothing
                 # then: the journal decides whether the workspace holds the candidate, and an unproven commit is UNCERTAIN - the
                 # existing outcome - so the candidate is kept for explicit recovery and the plan is needs_review, never `failed`.
-                settled = _settled_terminal_commit(commit_journal_before)
+                settled = deps.interrupted_commit_outcome(workspace_path, run_id, commit_journal_before)
                 if settled == "COMMITTED":
                     workspace_commit_completed = True
                 elif settled == "UNCERTAIN":

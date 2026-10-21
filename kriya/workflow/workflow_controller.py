@@ -135,7 +135,13 @@ from kriya.workflow.checkpoint import (
     save_checkpoint,
     validate_resume_against_reality,
 )
-from kriya.workflow.commit_service import TerminalCommitRequest, commit_verified_candidate, plan_terminal_writes
+from kriya.workflow.commit_service import (
+    TerminalCommitRequest,
+    commit_verified_candidate,
+    interrupted_commit_outcome,
+    plan_terminal_writes,
+    run_commit_states,
+)
 from kriya.workflow.context_budget import (
     CandidatePrompts,
     candidate_model,
@@ -552,6 +558,7 @@ def _enforce_deps(controller: WorkflowController) -> Any:
         compute_workspace_content_hash=compute_workspace_content_hash,
         validate_resume_against_reality=validate_resume_against_reality, TerminalCommitRequest=TerminalCommitRequest,
         commit_verified_candidate=commit_verified_candidate, plan_terminal_writes=plan_terminal_writes,
+        interrupted_commit_outcome=interrupted_commit_outcome, run_commit_states=run_commit_states,
         CandidatePrompts=CandidatePrompts, candidate_model=candidate_model,
         fit_reference_section=fit_reference_section, fit_structural_evidence=fit_structural_evidence,
         project_implementation_source=project_implementation_source,

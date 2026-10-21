@@ -82,10 +82,10 @@ def immutable_test_files(deps: CloserDeps, contract: Any, workspace_path: str) -
     the test files a pure regression-preservation statement names (``named_preserved_test_files``). A planning-time input
     only: the terminal gate still judges the candidate's test tree against the same base."""
     logger = deps.logger
+    from kriya.repository.git import GIT_READ_FAILURES
     from kriya.workflow.file_resolution import is_runnable_test_file
     from kriya.workflow.named_test_oracle import BaseTree
     from kriya.workflow.requirements import TEST_IMMUTABILITY_CLAIM
-    from kriya.workflow.worktree import GIT_READ_FAILURES
 
     frozen = set(named_preserved_test_files(contract))
     entries = getattr(contract, "entries", None) or ()
@@ -106,9 +106,9 @@ def _reference_test_files(deps: CloserDeps, candidate_root: str, workspace_path:
     None when that cannot be established (an in-place candidate with no
     readable base): the caller then assumes the statement claims both."""
     logger = deps.logger
+    from kriya.repository.git import GIT_READ_FAILURES
     from kriya.workflow.file_resolution import is_runnable_test_file
     from kriya.workflow.named_test_oracle import BaseTree
-    from kriya.workflow.worktree import GIT_READ_FAILURES
 
     in_place = os.path.realpath(candidate_root) == os.path.realpath(workspace_path)
     files = [] if in_place else _candidate_test_files(workspace_path)
@@ -205,7 +205,8 @@ def close_requirements_with_derived_examples(
 def _tracked_workspace_paths(workspace_path: str) -> List[str]:
     """The paths git tracks in the workspace (the referent set of a mutation-scope
     statement at admission); empty when git cannot answer."""
-    from kriya.workflow.worktree import GIT_READ_FAILURES, git_read_lines
+    from kriya.repository.git import GIT_READ_FAILURES
+    from kriya.workflow.worktree import git_read_lines
 
     try:
         return [path for path in git_read_lines(workspace_path, "ls-files") if path]
@@ -228,7 +229,8 @@ def _workspace_file_reader(workspace_path: str) -> Callable[[str], Optional[byte
 
 
 def _workspace_head(workspace_path: str) -> Optional[str]:
-    from kriya.workflow.worktree import GIT_READ_FAILURES, git_read_lines
+    from kriya.repository.git import GIT_READ_FAILURES
+    from kriya.workflow.worktree import git_read_lines
 
     try:
         heads = git_read_lines(workspace_path, "rev-parse", "HEAD")
@@ -657,7 +659,8 @@ def _oracle_base_revision(deps: CloserDeps, candidate_root: str, workspace_path:
     own), else the candidate's HEAD; None when neither can be read."""
     logger = deps.logger
     _run_committed_paths = deps.run_committed_paths
-    from kriya.workflow.worktree import GIT_READ_FAILURES, git_read_lines
+    from kriya.repository.git import GIT_READ_FAILURES
+    from kriya.workflow.worktree import git_read_lines
 
     try:
         base = _run_committed_paths(workspace_path)[1]
@@ -694,8 +697,11 @@ def mutation_scope_evidence(
     (``requirements.scope_evidence_view`` is the one reader of this shape). Only when the history itself cannot be read is
     nothing known."""
     _run_committed_paths = deps.run_committed_paths
-    from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
-    from kriya.workflow.worktree import GIT_READ_FAILURES
+    from kriya.repository.git import (
+        GIT_READ_FAILURES,
+        RepositoryContentFilterRefused,
+        refuse_repository_content_filters,
+    )
     from kriya.workflow.worktree import git_read_lines as _git_lines
 
     try:

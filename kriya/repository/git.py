@@ -75,6 +75,11 @@ from kriya.foundation.redaction import redact_text
 from kriya.platform import git_argv
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
+# What a read-only git query can fail with in operation: git or the filesystem refusing (OSError, a missing git), git exiting non-zero or
+# timing out (subprocess.SubprocessError), and output that is not decodable text (UnicodeDecodeError, a ValueError - a non-UTF-8 path
+# name). A caller that degrades a failed read to "unavailable" catches exactly these; anything else is a coding error and propagates.
+GIT_READ_FAILURES = (OSError, subprocess.SubprocessError, ValueError)
+
 GIT_CONTENT_FILTER_REPOSITORY_DEFINED = "GIT_CONTENT_FILTER_REPOSITORY_DEFINED"
 GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY = "GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY"
 GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED = "GIT_CONTENT_FILTER_ORIGIN_UNRECOGNISED"

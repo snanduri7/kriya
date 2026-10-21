@@ -115,17 +115,39 @@ def _transaction_prefix(run_id: str) -> str:
 
 def run_commit_states(workspace_path: str, run_id: str) -> Optional[Dict[str, CommitState]]:
     """The durable state of every commit transaction ``run_id`` has started in ``workspace_path``, from the commit evidence journal
-    (the transaction's own authority, written before and settled after the bytes move). ``None`` when a journal entry of this run
-    cannot be read: what happened is then unknown, and the caller must not guess."""
+    (the transaction's own authority, written before and settled after the bytes move). ``None`` when the journal cannot be read
+    (an unreadable entry of this run, or the directory itself): what happened is then unknown, and the caller must not guess."""
     prefix = _transaction_prefix(run_id) + "-"
     states: Dict[str, CommitState] = {}
-    for path, evidence, _error in list_commit_evidence(workspace_path):
+    try:
+        entries = list_commit_evidence(workspace_path)
+    except OSError:
+        return None
+    for path, evidence, _error in entries:
         if not os.path.basename(path).startswith(prefix):
             continue
         if evidence is None:
             return None
         states[evidence.transaction_id] = evidence.state
     return states
+
+
+def interrupted_commit_outcome(
+    workspace_path: str, run_id: str, before: Optional[Dict[str, CommitState]],
+) -> Optional[str]:
+    """What the journal says about a terminal commit that RAISED (an interrupt included) before the service handed a result back,
+    against ``before`` (``run_commit_states`` taken just before the commit): ``"COMMITTED"`` (the workspace holds the candidate),
+    ``"UNCERTAIN"`` (started and not proven finished or rolled back, or the journal cannot be read: the workspace may hold part of
+    it), or ``None`` (nothing of this commit is durable, or it was proven rolled back)."""
+    after = run_commit_states(workspace_path, run_id)
+    if after is None or before is None:
+        return "UNCERTAIN"
+    started = [state for transaction, state in after.items() if transaction not in before]
+    if CommitState.COMMITTED in started:
+        return "COMMITTED"
+    if any(state in (CommitState.IN_PROGRESS, CommitState.UNCERTAIN) for state in started):
+        return "UNCERTAIN"
+    return None
 
 
 def commit_verified_candidate(report: TerminalGateReport, request: TerminalCommitRequest) -> TerminalCommitResult:

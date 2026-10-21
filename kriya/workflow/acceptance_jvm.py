@@ -276,9 +276,9 @@ def run_java_acceptance(
 ) -> Any:
     """Check the trust surface on the candidate, then run the bound operator
     class once in a fresh Kriya-owned copy of the candidate."""
+    from kriya.repository.git import GIT_READ_FAILURES
     from kriya.workflow.acceptance_oracle import AcceptanceError, AcceptanceRun, read_stored
     from kriya.workflow.named_test_oracle import BaseTree, OracleSurface, changed_surface, surface_digest
-    from kriya.workflow.worktree import GIT_READ_FAILURES
 
     run = AcceptanceRun()
     run.language = "java"
