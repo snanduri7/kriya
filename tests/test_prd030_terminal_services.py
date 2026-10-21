@@ -189,7 +189,7 @@ def test_one_failing_gate_fails_only_itself_and_blocks_the_commit(tmp_path, monk
 
 
 @pytest.mark.parametrize("validator", [
-    "find_migration_incomplete", "validate_stack_contract_artifacts", "blocking_requirements",
+    "find_migration_incomplete", "validate_stack_contract_artifacts",
 ])
 def test_a_validator_that_raises_is_an_indeterminate_failure_never_a_pass(tmp_path, validator):
     migration = MigrationResolution(MigrationResolutionStatus.RESOLVED, obligation=object())
@@ -197,6 +197,15 @@ def test_a_validator_that_raises_is_an_indeterminate_failure_never_a_pass(tmp_pa
     assert not report.commit_eligible
     assert [status for _gate, status, _reason in events].count("failed") == 1
     assert any("RuntimeError: boom" in (reason or "") for _gate, _status, reason in events)
+
+
+def test_the_requirements_policy_validator_that_raises_propagates_with_its_class_never_a_pass(tmp_path):
+    """Part C: ``blocking_requirements`` is judged inside the requirement gate. Its exception was reported as a failed
+    'original_requirements' event with an INDETERMINATE-looking reason (a requirements failure); it is not a requirement
+    verdict, so it is not caught there: the run raises it - still never a pass, and still no commit."""
+    migration = MigrationResolution(MigrationResolutionStatus.RESOLVED, obligation=object())
+    with pytest.raises(RuntimeError, match="boom"):
+        _run(_request(tmp_path, migration=migration), _validators(blocking_requirements=_raise("boom")))
 
 
 def test_an_indeterminate_migration_records_a_terminal_obligation(tmp_path):
@@ -445,7 +454,9 @@ def test_a_closer_s_typed_repository_refusal_ends_the_terminal_gate_as_itself(tm
     """TAF-3 (MEASURED at ea56d08, scratch taf3_terminal_measure.txt): the requirement gate's outer handler turned a
     closer's RepositoryContentFilterRefused into a REQUIREMENTS_UNRESOLVED prose gap; it now reaches the caller as
     itself (the enforce controller's BaseException branch records and re-raises it, like the plan-worktree refusal).
-    An ordinary closer error is still the fail-closed prose gap, byte for byte."""
+    TERMINAL-GATE-BROAD-HANDLER-FALSIFIES-FAILURE-CLASS-001 (Part C): an ordinary closer error is not a requirements gap
+    either - the broad handler that made it one is gone, so it reaches the caller with its own class (it used to be
+    pinned here as the REQUIREMENTS_UNRESOLVED prose; that pin encoded the defect)."""
     from kriya.repository.git import GIT_CONTENT_FILTER_REPOSITORY_DEFINED, RepositoryContentFilterRefused
     from kriya.workflow import requirement_closers  # the bodies kriya.workflow.workflow delegates to at call time
 
@@ -473,6 +484,5 @@ def test_a_closer_s_typed_repository_refusal_ends_the_terminal_gate_as_itself(tm
         _run(_request(tmp_path, autonomy=autonomy), _validators())
     assert raised.value.reason_code == GIT_CONTENT_FILTER_REPOSITORY_DEFINED
     install(broken)
-    report, _events = _run(_request(tmp_path, autonomy=autonomy), _validators())
-    assert report.requirement_gap == ("REQUIREMENTS_UNRESOLVED: original requirement verification failed "
-                                      "(RuntimeError: closer broke); refusing success without it.")
+    with pytest.raises(RuntimeError, match="closer broke"):          # Part C: its own class, never a requirements gap
+        _run(_request(tmp_path, autonomy=autonomy), _validators())

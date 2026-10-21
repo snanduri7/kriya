@@ -51,7 +51,6 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.persistence import load_artifact_registry
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
-from kriya.repository.git import RepositoryContentFilterRefused
 from kriya.static_analysis.service import StaticAnalysisCandidate, StaticAnalysisGateResult, banner
 from kriya.workflow.edit_safety import (
     CandidateMaterializationError,
@@ -519,171 +518,168 @@ class TerminalGateService:
     ) -> Tuple[Optional[str], List[Dict[str, Any]]]:
         """PRD-020: the user's original requirements, judged against the
         whole verified candidate by the verifier (never by the plan's own
-        acceptance text), then the requirement policy decides."""
+        acceptance text), then the requirement policy decides.
+
+        Only a requirement verdict makes a requirements gap: the verifier returns its deliberate failures as findings and
+        the closers return their attempts. An unexpected exception (a coding error, an I/O failure, a typed S19 refusal)
+        is not caught here - it reaches the enforce controller's error authority with its own class, so it can never be
+        reported as an unresolved requirement."""
         closure_attempts: List[Dict[str, Any]] = []
         ledger, requirement_set, autonomy = request.obligation_ledger, request.requirement_set, request.autonomy
-        try:
-            verifier_findings: List[str] = []
-            if autonomy is not None and autonomy.spec_compliance_enabled:
-                verifier_findings = await self._validators.verify_original_requirements(
-                    request.spec_compliance, requirement_set, request.goal,
-                    request.candidate_root, _terminal_candidate_paths(request.plan), ledger,
-                    baseline_root=request.workspace_path,
-                )
-                # "Do not modify any other file": decided from what this
-                # final candidate (and the run's committed history)
-                # actually changed, against the files the goal names.
-                from kriya.policy.filesystem import WriteScopeMode
-                from kriya.workflow.toolchain import toolchain_declaration_mutable
-                from kriya.workflow.workflow import (
-                    SUITE_BASELINE_LAZY_CAPTURE,
-                    close_requirements_by_api_preservation,
-                    close_requirements_by_documentation,
-                    close_requirements_by_file_immutability,
-                    close_requirements_by_mutation_scope,
-                    close_requirements_by_suite_preservation,
-                    close_requirements_by_test_addition,
-                    close_requirements_by_test_immutability,
-                    close_requirements_with_acceptance_tests,
-                    close_requirements_with_authority_bundle_evidence,
-                    close_requirements_with_derived_examples,
-                    close_requirements_with_named_tests,
-                )
-                contract = request.verification_contract
-
-                scope_closures = await asyncio.to_thread(
-                    close_requirements_by_mutation_scope, ledger, requirement_set,
-                    request.candidate_root, request.workspace_path,
-                    candidate_paths=[planned.path for subtask in request.plan.subtasks
-                                     for planned in subtask.planned_files],
-                    revision="terminal",
-                )
-                if scope_closures:
-                    logger.info("Original requirement mutation-scope evidence: %s", scope_closures)
-                # An UNVERIFIED requirement naming existing tests: run
-                # exactly those on this candidate (never a model citation).
-                from kriya.workflow.file_integrity import VerificationTreeBinding
-                from kriya.workflow.worktree import repository_content_paths
-
-                # FILE-INTEGRITY-CONTRACT-001: the named tests run repository
-                # code on the candidate; a tracked-content change fails this gate.
-                tree_binding = VerificationTreeBinding(
-                    request.candidate_root, repository_content_paths(request.workspace_path),
-                    _terminal_candidate_paths(request.plan),
-                )
-                # FS-1C2 B2-a: the operator's acceptance file judges the
-                # behaviour claims it covers on this final candidate.
-                acceptance_closures = await asyncio.to_thread(
-                    close_requirements_with_acceptance_tests, autonomy, ledger,
-                    requirement_set, request.candidate_root, request.workspace_path,
-                    acceptance=request.acceptance, approval=request.acceptance_approval,
-                    modified=_terminal_candidate_paths(request.plan),
-                    revision="terminal",
-                    toolchain_declaration_mutable=toolchain_declaration_mutable(
-                        WriteScopeMode.DENY_ALL, (), request.plan,
-                    ),
-                    tree_binding=tree_binding, contract=contract,
-                )
-                if acceptance_closures:
-                    logger.info("Original requirement acceptance evidence: %s", acceptance_closures)
-                # VERIFICATION-CONTRACT-003: the contract's other closers on this final candidate.
-                contract_closures: List[Dict[str, Any]] = []
-                if contract is not None:
-                    contract_closures += await asyncio.to_thread(
-                        close_requirements_with_authority_bundle_evidence, autonomy, ledger, requirement_set, contract,
-                        request.candidate_root, request.workspace_path, engine=request.engine, revision="terminal",
-                        toolchain_declaration_mutable=toolchain_declaration_mutable(WriteScopeMode.DENY_ALL, (), request.plan),
-                        tree_binding=tree_binding,
-                    )
-                    contract_closures += await asyncio.to_thread(
-                        close_requirements_with_derived_examples, autonomy, ledger, requirement_set,
-                        request.candidate_root, request.workspace_path, engine=request.engine,
-                        modified=_terminal_candidate_paths(request.plan), revision="terminal",
-                        toolchain_declaration_mutable=toolchain_declaration_mutable(WriteScopeMode.DENY_ALL, (), request.plan),
-                        tree_binding=tree_binding, contract=contract,
-                    )
-                    contract_closures += await asyncio.to_thread(
-                        close_requirements_by_api_preservation, ledger, requirement_set, contract,
-                        request.candidate_root, request.workspace_path,
-                        candidate_paths=_terminal_candidate_paths(request.plan), revision="terminal",
-                    )
-                    contract_closures += await asyncio.to_thread(
-                        close_requirements_by_test_addition, ledger, requirement_set, contract,
-                        request.candidate_root, request.workspace_path, revision="terminal",
-                    )
-                    contract_closures += await asyncio.to_thread(
-                        close_requirements_by_documentation, ledger, requirement_set, contract,
-                        request.candidate_root, revision="terminal",
-                    )
-                    if contract_closures:
-                        logger.info("Original requirement contract closures: %s", contract_closures)
-                # D8: the terminal writes nothing; the toolchain authority is
-                # the approved plan's (the same derivation its units used).
-                closures = await asyncio.to_thread(
-                    close_requirements_with_named_tests, autonomy, ledger,
-                    requirement_set, request.candidate_root, request.workspace_path,
-                    modified=_terminal_candidate_paths(request.plan), revision="terminal",
-                    toolchain_declaration_mutable=toolchain_declaration_mutable(
-                        WriteScopeMode.DENY_ALL, (), request.plan,
-                    ),
-                    tree_binding=tree_binding, contract=contract,
-                )
-                if closures:
-                    logger.info("Original requirement closure by named tests: %s", closures)
-                # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: the final candidate's
-                # mutation record and its own complete, green full suite.
-                immutability_closures = await asyncio.to_thread(
-                    close_requirements_by_test_immutability, ledger, requirement_set,
-                    request.candidate_root, request.workspace_path,
-                    candidate_paths=_terminal_candidate_paths(request.plan), revision="terminal", contract=contract,
-                )
-                if immutability_closures:
-                    logger.info("Original requirement test-immutability evidence: %s", immutability_closures)
-                # OD-3: the files the goal froze by name, from the final candidate's mutation record.
-                frozen_closures = await asyncio.to_thread(
-                    close_requirements_by_file_immutability, ledger, requirement_set,
-                    request.candidate_root, request.workspace_path,
-                    candidate_paths=_terminal_candidate_paths(request.plan), revision="terminal", contract=contract,
-                )
-                if frozen_closures:
-                    logger.info("Original requirement file-immutability evidence: %s", frozen_closures)
-                suite_closures = await asyncio.to_thread(
-                    close_requirements_by_suite_preservation, autonomy, ledger,
-                    requirement_set, request.candidate_root, request.workspace_path,
-                    revision="terminal", candidate_paths=_terminal_candidate_paths(request.plan),
-                    toolchain_declaration_mutable=toolchain_declaration_mutable(
-                        WriteScopeMode.DENY_ALL, (), request.plan,
-                    ),
-                    tree_binding=tree_binding, contract=contract,
-                    baseline_source=SUITE_BASELINE_LAZY_CAPTURE,  # the enforce gate owns the lazy capture (13.2)
-                )
-                if suite_closures:
-                    logger.info("Original requirement suite-preservation evidence: %s", suite_closures)
-                closure_attempts = (scope_closures + acceptance_closures + contract_closures + closures
-                                    + immutability_closures + frozen_closures + suite_closures)
-                # The terminal migration gate just judged this same final
-                # candidate; a requirement stating the migration itself
-                # is closed by it (attempt._close_requirements_by_migration_gate).
-                if not migration_gap and requirement_set.requirements:
-                    self._close_by_migration_gate(ledger, requirement_set)
-            blocking = self._validators.blocking_requirements(
-                ledger, requirement_set,
-                unknown_policy=getattr(autonomy, "requirement_unknown_policy", "record"),
-                unverified_policy=getattr(autonomy, "requirement_unverified_policy", "record"),
+        verifier_findings: List[str] = []
+        if autonomy is not None and autonomy.spec_compliance_enabled:
+            verifier_findings = await self._validators.verify_original_requirements(
+                request.spec_compliance, requirement_set, request.goal,
+                request.candidate_root, _terminal_candidate_paths(request.plan), ledger,
+                baseline_root=request.workspace_path,
             )
-            if blocking:
-                gap = f"{REQUIREMENTS_UNRESOLVED}: " + "; ".join(
-                    f"{req.id} ({outcome.value}): {req.text}" for req, outcome in blocking)
-                if verifier_findings:
-                    gap += " [verifier: " + "; ".join(verifier_findings) + "]"
-                return gap, closure_attempts
-        except RepositoryContentFilterRefused:
-            raise   # TAF-3: a closer's typed S19 refusal reaches the run's caller as itself (never a prose gap)
-        except Exception as error:
-            return (
-                f"{REQUIREMENTS_UNRESOLVED}: original requirement verification failed "
-                f"({type(error).__name__}: {error}); refusing success without it."
-            ), closure_attempts
+            # "Do not modify any other file": decided from what this
+            # final candidate (and the run's committed history)
+            # actually changed, against the files the goal names.
+            from kriya.policy.filesystem import WriteScopeMode
+            from kriya.workflow.toolchain import toolchain_declaration_mutable
+            from kriya.workflow.workflow import (
+                SUITE_BASELINE_LAZY_CAPTURE,
+                close_requirements_by_api_preservation,
+                close_requirements_by_documentation,
+                close_requirements_by_file_immutability,
+                close_requirements_by_mutation_scope,
+                close_requirements_by_suite_preservation,
+                close_requirements_by_test_addition,
+                close_requirements_by_test_immutability,
+                close_requirements_with_acceptance_tests,
+                close_requirements_with_authority_bundle_evidence,
+                close_requirements_with_derived_examples,
+                close_requirements_with_named_tests,
+            )
+            contract = request.verification_contract
+
+            scope_closures = await asyncio.to_thread(
+                close_requirements_by_mutation_scope, ledger, requirement_set,
+                request.candidate_root, request.workspace_path,
+                candidate_paths=[planned.path for subtask in request.plan.subtasks
+                                 for planned in subtask.planned_files],
+                revision="terminal",
+            )
+            if scope_closures:
+                logger.info("Original requirement mutation-scope evidence: %s", scope_closures)
+            # An UNVERIFIED requirement naming existing tests: run
+            # exactly those on this candidate (never a model citation).
+            from kriya.workflow.file_integrity import VerificationTreeBinding
+            from kriya.workflow.worktree import repository_content_paths
+
+            # FILE-INTEGRITY-CONTRACT-001: the named tests run repository
+            # code on the candidate; a tracked-content change fails this gate.
+            tree_binding = VerificationTreeBinding(
+                request.candidate_root, repository_content_paths(request.workspace_path),
+                _terminal_candidate_paths(request.plan),
+            )
+            # FS-1C2 B2-a: the operator's acceptance file judges the
+            # behaviour claims it covers on this final candidate.
+            acceptance_closures = await asyncio.to_thread(
+                close_requirements_with_acceptance_tests, autonomy, ledger,
+                requirement_set, request.candidate_root, request.workspace_path,
+                acceptance=request.acceptance, approval=request.acceptance_approval,
+                modified=_terminal_candidate_paths(request.plan),
+                revision="terminal",
+                toolchain_declaration_mutable=toolchain_declaration_mutable(
+                    WriteScopeMode.DENY_ALL, (), request.plan,
+                ),
+                tree_binding=tree_binding, contract=contract,
+            )
+            if acceptance_closures:
+                logger.info("Original requirement acceptance evidence: %s", acceptance_closures)
+            # VERIFICATION-CONTRACT-003: the contract's other closers on this final candidate.
+            contract_closures: List[Dict[str, Any]] = []
+            if contract is not None:
+                contract_closures += await asyncio.to_thread(
+                    close_requirements_with_authority_bundle_evidence, autonomy, ledger, requirement_set, contract,
+                    request.candidate_root, request.workspace_path, engine=request.engine, revision="terminal",
+                    toolchain_declaration_mutable=toolchain_declaration_mutable(WriteScopeMode.DENY_ALL, (), request.plan),
+                    tree_binding=tree_binding,
+                )
+                contract_closures += await asyncio.to_thread(
+                    close_requirements_with_derived_examples, autonomy, ledger, requirement_set,
+                    request.candidate_root, request.workspace_path, engine=request.engine,
+                    modified=_terminal_candidate_paths(request.plan), revision="terminal",
+                    toolchain_declaration_mutable=toolchain_declaration_mutable(WriteScopeMode.DENY_ALL, (), request.plan),
+                    tree_binding=tree_binding, contract=contract,
+                )
+                contract_closures += await asyncio.to_thread(
+                    close_requirements_by_api_preservation, ledger, requirement_set, contract,
+                    request.candidate_root, request.workspace_path,
+                    candidate_paths=_terminal_candidate_paths(request.plan), revision="terminal",
+                )
+                contract_closures += await asyncio.to_thread(
+                    close_requirements_by_test_addition, ledger, requirement_set, contract,
+                    request.candidate_root, request.workspace_path, revision="terminal",
+                )
+                contract_closures += await asyncio.to_thread(
+                    close_requirements_by_documentation, ledger, requirement_set, contract,
+                    request.candidate_root, revision="terminal",
+                )
+                if contract_closures:
+                    logger.info("Original requirement contract closures: %s", contract_closures)
+            # D8: the terminal writes nothing; the toolchain authority is
+            # the approved plan's (the same derivation its units used).
+            closures = await asyncio.to_thread(
+                close_requirements_with_named_tests, autonomy, ledger,
+                requirement_set, request.candidate_root, request.workspace_path,
+                modified=_terminal_candidate_paths(request.plan), revision="terminal",
+                toolchain_declaration_mutable=toolchain_declaration_mutable(
+                    WriteScopeMode.DENY_ALL, (), request.plan,
+                ),
+                tree_binding=tree_binding, contract=contract,
+            )
+            if closures:
+                logger.info("Original requirement closure by named tests: %s", closures)
+            # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: the final candidate's
+            # mutation record and its own complete, green full suite.
+            immutability_closures = await asyncio.to_thread(
+                close_requirements_by_test_immutability, ledger, requirement_set,
+                request.candidate_root, request.workspace_path,
+                candidate_paths=_terminal_candidate_paths(request.plan), revision="terminal", contract=contract,
+            )
+            if immutability_closures:
+                logger.info("Original requirement test-immutability evidence: %s", immutability_closures)
+            # OD-3: the files the goal froze by name, from the final candidate's mutation record.
+            frozen_closures = await asyncio.to_thread(
+                close_requirements_by_file_immutability, ledger, requirement_set,
+                request.candidate_root, request.workspace_path,
+                candidate_paths=_terminal_candidate_paths(request.plan), revision="terminal", contract=contract,
+            )
+            if frozen_closures:
+                logger.info("Original requirement file-immutability evidence: %s", frozen_closures)
+            suite_closures = await asyncio.to_thread(
+                close_requirements_by_suite_preservation, autonomy, ledger,
+                requirement_set, request.candidate_root, request.workspace_path,
+                revision="terminal", candidate_paths=_terminal_candidate_paths(request.plan),
+                toolchain_declaration_mutable=toolchain_declaration_mutable(
+                    WriteScopeMode.DENY_ALL, (), request.plan,
+                ),
+                tree_binding=tree_binding, contract=contract,
+                baseline_source=SUITE_BASELINE_LAZY_CAPTURE,  # the enforce gate owns the lazy capture (13.2)
+            )
+            if suite_closures:
+                logger.info("Original requirement suite-preservation evidence: %s", suite_closures)
+            closure_attempts = (scope_closures + acceptance_closures + contract_closures + closures
+                                + immutability_closures + frozen_closures + suite_closures)
+            # The terminal migration gate just judged this same final
+            # candidate; a requirement stating the migration itself
+            # is closed by it (attempt._close_requirements_by_migration_gate).
+            if not migration_gap and requirement_set.requirements:
+                self._close_by_migration_gate(ledger, requirement_set)
+        blocking = self._validators.blocking_requirements(
+            ledger, requirement_set,
+            unknown_policy=getattr(autonomy, "requirement_unknown_policy", "record"),
+            unverified_policy=getattr(autonomy, "requirement_unverified_policy", "record"),
+        )
+        if blocking:
+            gap = f"{REQUIREMENTS_UNRESOLVED}: " + "; ".join(
+                f"{req.id} ({outcome.value}): {req.text}" for req, outcome in blocking)
+            if verifier_findings:
+                gap += " [verifier: " + "; ".join(verifier_findings) + "]"
+            return gap, closure_attempts
         return None, closure_attempts
 
     @staticmethod
