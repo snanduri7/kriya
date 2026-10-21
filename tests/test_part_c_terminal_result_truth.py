@@ -18,6 +18,7 @@ test_taf3_enforce_terminal_refusal (no new patch sites). The typed-refusal contr
 ``test_a_closers_real_refusal_ends_the_enforce_run_as_the_security_refusal``; the unit-level controls are in
 test_prd030_terminal_services.py.
 """
+import traceback
 from unittest.mock import AsyncMock
 
 import pytest
@@ -74,4 +75,27 @@ async def test_control_a_genuine_requirement_failure_is_still_a_requirements_gap
     assert gap.startswith("REQUIREMENTS_UNRESOLVED:") and "REQ-1" in gap and "verification failed" not in gap, gap
     row = _enforce_row(config)
     assert row["status"] != "error", dict(row)
+    assert (repo / "app.py").read_text() == "original\n"            # fail closed: nothing committed
+
+
+@pytest.mark.asyncio
+async def test_d_f3_the_deliberate_fail_closed_error_of_repository_content_paths_is_status_error_not_a_gap(tmp_path, monkeypatch):
+    """INTENTIONAL CONTRACT (D-F3 of the consolidated addendum): ``repository_content_paths`` raises RuntimeError on purpose when
+    the tracked files cannot be listed ("any other failure to list it raises (fail closed)"); the terminal requirement gate calls
+    it directly to bind the verification tree. Under the corrected result-truth contract that error is the run's error - the
+    .enforce row is status=error / RuntimeError, nothing is committed - not an unresolved requirement (the direct path's
+    ``_bind_verification_tree`` already behaves this way)."""
+    from kriya.workflow import worktree as workflow_worktree
+
+    repo = _repo(tmp_path, tmp_path / "FILTER_RAN")
+    config = strict_config(autonomy={"spec_compliance_enabled": True})
+
+    def cannot_list(_workspace_path):
+        raise RuntimeError("git ls-files failed: fatal: the index could not be read")
+    monkeypatch.setattr(workflow_worktree, "repository_content_paths", cannot_list)
+    with pytest.raises(RuntimeError, match="git ls-files failed") as raised:
+        await _enforce(repo, _engine(config, bind_filter=False))
+    assert "_requirement_gap" in [frame.name for frame in traceback.extract_tb(raised.value.__traceback__)]   # the gate's call
+    row = _enforce_row(config)
+    assert (row["status"], row["failure_category"]) == ("error", "RuntimeError"), dict(row)
     assert (repo / "app.py").read_text() == "original\n"            # fail closed: nothing committed
