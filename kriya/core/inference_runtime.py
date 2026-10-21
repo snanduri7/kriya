@@ -284,6 +284,43 @@ def _provider_metadata(response: Any) -> Dict[str, Any]:
     }
 
 
+def malformed_provider_reply(detail: str) -> ValueError:
+    """The provider answered, but not in the shape its API defines (HTTP 200 with a null message, a streamed chunk without a delta, a
+    body that is not an object). This is the one place untrusted provider structure becomes Kriya's ``ChatResponse``, so the shape is
+    CHECKED here and a malformed reply is the project's established malformed-response signal - a ``ValueError``, deliberately outside
+    ``INTERNAL_FRAMEWORK_ERROR_TYPES`` (recovery_coordinator): ``classify_error`` calls it REQUEST and the attempt loop retries it like any
+    other request failure. It is never a caught structural exception, so a genuine coding error in a decoder stays a raw
+    AttributeError/TypeError and stays an internal Kriya error."""
+    return ValueError(f"the provider's reply is malformed: {detail}")
+
+
+def _received(value: Any) -> str:
+    if value is None:
+        return "null"
+    return "an empty list" if isinstance(value, (list, tuple)) and not value else type(value).__name__
+
+
+def _first_choice(response: Any) -> Any:
+    choices = getattr(response, "choices", None)
+    if not choices:
+        raise malformed_provider_reply(f"it has no choices (received {_received(choices)})")
+    return choices[0]
+
+
+def _choice_message(choice: Any) -> Any:
+    message = getattr(choice, "message", None)
+    if message is None:
+        raise malformed_provider_reply("its first choice has no message (received null)")
+    return message
+
+
+def _raw_tool_call(call: Any) -> "RawToolCall":
+    function = getattr(call, "function", None)
+    if function is None:
+        raise malformed_provider_reply("a tool call has no function (received null)")
+    return RawToolCall(call.id, function.name, function.arguments)
+
+
 def _timeout_kwarg(request: ChatRequest) -> Dict[str, Any]:
     return {"timeout": request.timeout} if request.timeout is not None else {}
 
@@ -319,9 +356,9 @@ class OpenAICompatibleTransport(InferenceRuntimePort, abc.ABC):
             )
             out = ChatResponse(content="", provider_metadata=_provider_metadata(response))
             self._read_usage(out, getattr(response, "usage", None))
-            if response.choices:
-                out.finish_reason = _str_or_none(getattr(response.choices[0], "finish_reason", None))
-            message = response.choices[0].message
+            choice = _first_choice(response)
+            out.finish_reason = _str_or_none(getattr(choice, "finish_reason", None))
+            message = _choice_message(choice)
             reasoning = _str_or_none(getattr(message, "reasoning", None)) or _str_or_none(
                 getattr(message, "reasoning_content", None))
             out.reasoning_chars = len(reasoning) if reasoning else 0
@@ -348,7 +385,9 @@ class OpenAICompatibleTransport(InferenceRuntimePort, abc.ABC):
                 chunk_finish_reason = _str_or_none(getattr(chunk.choices[0], "finish_reason", None))
                 if chunk_finish_reason:
                     out.finish_reason = chunk_finish_reason
-                delta = chunk.choices[0].delta
+                delta = getattr(chunk.choices[0], "delta", None)
+                if delta is None:
+                    raise malformed_provider_reply("a streamed chunk has no delta (received null)")
                 reasoning_delta = _str_or_none(getattr(delta, "reasoning", None))
                 if reasoning_delta:
                     out.reasoning_chars += len(reasoning_delta)
@@ -365,14 +404,14 @@ class OpenAICompatibleTransport(InferenceRuntimePort, abc.ABC):
         response = await client.chat.completions.create(
             **self.wire_payload(request, stream=False), **_timeout_kwarg(request),
         )
-        message = response.choices[0].message
+        choice = _first_choice(response)
+        message = _choice_message(choice)
         reasoning = _str_or_none(getattr(message, "reasoning", None))
         out = ChatResponse(
             content=message.content or "", reasoning_chars=len(reasoning) if reasoning else 0,
-            finish_reason=_str_or_none(getattr(response.choices[0], "finish_reason", None)),
+            finish_reason=_str_or_none(getattr(choice, "finish_reason", None)),
             provider_metadata=_provider_metadata(response),
-            tool_calls=[RawToolCall(tc.id, tc.function.name, tc.function.arguments)
-                        for tc in (message.tool_calls or [])],
+            tool_calls=[_raw_tool_call(tc) for tc in (message.tool_calls or [])],
             raw_content=message.content or "", reasoning_text=reasoning,
         )
         self._read_usage(out, getattr(response, "usage", None))

@@ -46,6 +46,7 @@ from kriya.core.inference_runtime import (
     RawToolCall,
     RuntimeCapabilities,
     RuntimeErrorKind,
+    malformed_provider_reply,
     register_runtime_adapter,
 )
 from kriya.foundation.redaction import redact_text
@@ -1082,6 +1083,13 @@ def _context_exceeded_counts(message: str) -> Dict[str, int]:
     return counts
 
 
+def _native_object(value: Any, what: str) -> Dict[str, Any]:
+    """The native API's replies are JSON objects; anything else (a bare string, a list, a heartbeat line) is a malformed reply."""
+    if not isinstance(value, dict):
+        raise malformed_provider_reply(f"{what} is {type(value).__name__}, not an object")
+    return value
+
+
 class NativeRuntimeError(RuntimeError):
     """An HTTP error answer of the native API."""
 
@@ -1300,8 +1308,8 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
                                        headers=self._headers(client), timeout=timeout)
             if response.status_code >= 400:
                 self._raise_for(response.status_code, response.text)
-            data = response.json()
-            message = data.get("message") or {}
+            data = _native_object(response.json(), "the reply body")
+            message = _native_object(data.get("message") or {}, "its message")
             out.raw_content = message.get("content") or ""
             out.content = out.raw_content.strip()
             out.reasoning_text = message.get("thinking") or None
@@ -1318,10 +1326,10 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
             async for line in response.aiter_lines():
                 if not line.strip():
                     continue
-                chunk = json.loads(line)
+                chunk = _native_object(json.loads(line), "a streamed line")
                 if chunk.get("error"):
                     self._raise_for(500, str(chunk["error"]))
-                message = chunk.get("message") or {}
+                message = _native_object(chunk.get("message") or {}, "a streamed line's message")
                 out.reasoning_chars += len(message.get("thinking") or "")
                 if message.get("thinking"):
                     thinking.append(message["thinking"])
@@ -1342,12 +1350,16 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
                                    headers=self._headers(client), timeout=timeout)
         if response.status_code >= 400:
             self._raise_for(response.status_code, response.text)
-        data = response.json()
-        message = data.get("message") or {}
+        data = _native_object(response.json(), "the reply body")
+        message = _native_object(data.get("message") or {}, "its message")
         out = ChatResponse(content=message.get("content") or "", reasoning_chars=len(message.get("thinking") or ""),
                            raw_content=message.get("content") or "", reasoning_text=message.get("thinking") or None)
-        for index, call in enumerate(message.get("tool_calls") or []):
-            function = (call or {}).get("function") or {}
+        calls = message.get("tool_calls") or []
+        if not isinstance(calls, list):
+            raise malformed_provider_reply(f"its tool_calls is {type(calls).__name__}, not a list")
+        for index, call in enumerate(calls):
+            call = _native_object(call or {}, "a tool call")
+            function = _native_object(call.get("function") or {}, "a tool call's function")
             arguments = function.get("arguments")
             out.tool_calls.append(RawToolCall(
                 str(call.get("id") or f"call_{index}"), str(function.get("name") or ""),

@@ -49,10 +49,13 @@ logger = logging.getLogger(__name__)
 # deliberately excluded: DeveloperAgent uses it for a malformed response,
 # an ordinary retryable model failure. See docs/design.md §11.3.
 #
-# AttributeError and NameError (Q5, 2026-10-21) are the same accidental coding error: a malformed model, provider or application input is
-# translated into a typed failure at its own trust boundary (a skill-gap entry that is not an object is discarded, never left to raise
-# AttributeError and "abort the entire generation run"), so one reaching this classifier raw is Kriya's own defect, and a Developer retry
-# cannot repair it. UnboundLocalError (a NameError subclass) stays listed explicitly.
+# AttributeError and NameError (Q5, 2026-10-21) are the same accidental coding error, and a Developer retry cannot repair them. They are
+# internal only because an UNTRUSTED input is translated into a typed failure before it can raise one here: a provider's reply is shape-checked
+# at the decode boundary (inference_runtime.malformed_provider_reply - a ValueError, REQUEST, retryable) and a malformed skill-gap entry is
+# discarded at its own boundary. The first version of this comment claimed that for every provider reply; E.1 of the consolidated addendum
+# #3 MEASURED it false (the adapters raised a raw AttributeError for a null message, and the widened set turned a transient malformed reply
+# into a hard stop) and the adapters were corrected. Not every model-output shape is translated yet: a file entry whose filepath is not a
+# string still raises a raw TypeError (an internal stop at both SHAs, pre-existing). UnboundLocalError (a NameError subclass) stays listed.
 INTERNAL_FRAMEWORK_ERROR_TYPES = (UnboundLocalError, TypeError, KeyError, AssertionError, AttributeError, NameError)
 
 # (exception, attempt context) -> the plan_scope_conflict Failure a validated
