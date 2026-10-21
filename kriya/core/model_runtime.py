@@ -47,6 +47,7 @@ from kriya.core.inference_runtime import (
     RuntimeCapabilities,
     RuntimeErrorKind,
     malformed_provider_reply,
+    provider_text,
     register_runtime_adapter,
 )
 from kriya.foundation.redaction import redact_text
@@ -1310,10 +1311,11 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
                 self._raise_for(response.status_code, response.text)
             data = _native_object(response.json(), "the reply body")
             message = _native_object(data.get("message") or {}, "its message")
-            out.raw_content = message.get("content") or ""
+            out.raw_content = provider_text(message.get("content"), "the message content")
             out.content = out.raw_content.strip()
-            out.reasoning_text = message.get("thinking") or None
-            out.reasoning_chars = len(message.get("thinking") or "")
+            thinking = provider_text(message.get("thinking"), "the message thinking")
+            out.reasoning_text = thinking or None
+            out.reasoning_chars = len(thinking)
             self._read(out, {**data, "done": True})
             return out
         # Exactly one request, streamed as NDJSON.
@@ -1330,10 +1332,11 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
                 if chunk.get("error"):
                     self._raise_for(500, str(chunk["error"]))
                 message = _native_object(chunk.get("message") or {}, "a streamed line's message")
-                out.reasoning_chars += len(message.get("thinking") or "")
-                if message.get("thinking"):
-                    thinking.append(message["thinking"])
-                piece = message.get("content") or ""
+                thought = provider_text(message.get("thinking"), "a streamed line's thinking")
+                out.reasoning_chars += len(thought)
+                if thought:
+                    thinking.append(thought)
+                piece = provider_text(message.get("content"), "a streamed line's content")
                 if piece:
                     chunks.append(piece)
                     request.stream_callback(piece)
@@ -1352,8 +1355,10 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
             self._raise_for(response.status_code, response.text)
         data = _native_object(response.json(), "the reply body")
         message = _native_object(data.get("message") or {}, "its message")
-        out = ChatResponse(content=message.get("content") or "", reasoning_chars=len(message.get("thinking") or ""),
-                           raw_content=message.get("content") or "", reasoning_text=message.get("thinking") or None)
+        content = provider_text(message.get("content"), "the message content")
+        thinking = provider_text(message.get("thinking"), "the message thinking")
+        out = ChatResponse(content=content, reasoning_chars=len(thinking), raw_content=content,
+                           reasoning_text=thinking or None)
         calls = message.get("tool_calls") or []
         if not isinstance(calls, list):
             raise malformed_provider_reply(f"its tool_calls is {type(calls).__name__}, not a list")

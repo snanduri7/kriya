@@ -300,24 +300,40 @@ def _received(value: Any) -> str:
     return "an empty list" if isinstance(value, (list, tuple)) and not value else type(value).__name__
 
 
+# What an API object is never: a JSON scalar, array or (once decoded to attributes) a bare mapping. The SDK builds its models without
+# validating them, so a server that sends a string where an object is defined leaves that string in the attribute.
+_NOT_AN_OBJECT = (str, bytes, int, float, bool, list, tuple, dict)
+
+
+def provider_object(value: Any, what: str) -> Any:
+    """``value`` when it can carry attributes; otherwise the provider's reply is malformed."""
+    if value is None or isinstance(value, _NOT_AN_OBJECT):
+        raise malformed_provider_reply(f"{what} is {_received(value)}, not an object")
+    return value
+
+
+def provider_text(value: Any, what: str) -> str:
+    """A text field: null/absent/empty is ``""``; any other non-string (a list of content parts, a number) is malformed."""
+    if not value:
+        return ""
+    if not isinstance(value, str):
+        raise malformed_provider_reply(f"{what} is {_received(value)}, not text")
+    return value
+
+
 def _first_choice(response: Any) -> Any:
     choices = getattr(response, "choices", None)
-    if not choices:
+    if not isinstance(choices, (list, tuple)) or not choices:
         raise malformed_provider_reply(f"it has no choices (received {_received(choices)})")
     return choices[0]
 
 
 def _choice_message(choice: Any) -> Any:
-    message = getattr(choice, "message", None)
-    if message is None:
-        raise malformed_provider_reply("its first choice has no message (received null)")
-    return message
+    return provider_object(getattr(choice, "message", None), "its first choice's message")
 
 
 def _raw_tool_call(call: Any) -> "RawToolCall":
-    function = getattr(call, "function", None)
-    if function is None:
-        raise malformed_provider_reply("a tool call has no function (received null)")
+    function = provider_object(getattr(call, "function", None), "a tool call's function")
     return RawToolCall(call.id, function.name, function.arguments)
 
 
@@ -363,7 +379,7 @@ class OpenAICompatibleTransport(InferenceRuntimePort, abc.ABC):
                 getattr(message, "reasoning_content", None))
             out.reasoning_chars = len(reasoning) if reasoning else 0
             out.reasoning_text = reasoning
-            out.raw_content = message.content or ""
+            out.raw_content = provider_text(getattr(message, "content", None), "the message content")
             out.content = out.raw_content.strip()
             return out
         # PROVIDER-CONTRACT-001: exactly one request. A failure is the
@@ -378,23 +394,23 @@ class OpenAICompatibleTransport(InferenceRuntimePort, abc.ABC):
             if not out.provider_metadata:
                 out.provider_metadata = _provider_metadata(chunk)
             self._read_usage(out, getattr(chunk, "usage", None))
-            if chunk.choices:
+            if getattr(chunk, "choices", None):
                 # The finish_reason-carrying chunk is typically the LAST one
                 # with empty delta content: only a real value overwrites, so
                 # an earlier chunk's null can never clobber a later real one.
-                chunk_finish_reason = _str_or_none(getattr(chunk.choices[0], "finish_reason", None))
+                choice = _first_choice(chunk)
+                chunk_finish_reason = _str_or_none(getattr(choice, "finish_reason", None))
                 if chunk_finish_reason:
                     out.finish_reason = chunk_finish_reason
-                delta = getattr(chunk.choices[0], "delta", None)
-                if delta is None:
-                    raise malformed_provider_reply("a streamed chunk has no delta (received null)")
+                delta = provider_object(getattr(choice, "delta", None), "a streamed chunk's delta")
                 reasoning_delta = _str_or_none(getattr(delta, "reasoning", None))
                 if reasoning_delta:
                     out.reasoning_chars += len(reasoning_delta)
                     reasoning_chunks.append(reasoning_delta)
-                if delta.content:
-                    chunks.append(delta.content)
-                    request.stream_callback(delta.content)
+                piece = provider_text(getattr(delta, "content", None), "a streamed delta's content")
+                if piece:
+                    chunks.append(piece)
+                    request.stream_callback(piece)
         out.raw_content = "".join(chunks)
         out.reasoning_text = "".join(reasoning_chunks) or None
         out.content = out.raw_content.strip()
@@ -407,12 +423,13 @@ class OpenAICompatibleTransport(InferenceRuntimePort, abc.ABC):
         choice = _first_choice(response)
         message = _choice_message(choice)
         reasoning = _str_or_none(getattr(message, "reasoning", None))
+        content = provider_text(getattr(message, "content", None), "the message content")
         out = ChatResponse(
-            content=message.content or "", reasoning_chars=len(reasoning) if reasoning else 0,
+            content=content, reasoning_chars=len(reasoning) if reasoning else 0,
             finish_reason=_str_or_none(getattr(choice, "finish_reason", None)),
             provider_metadata=_provider_metadata(response),
-            tool_calls=[_raw_tool_call(tc) for tc in (message.tool_calls or [])],
-            raw_content=message.content or "", reasoning_text=reasoning,
+            tool_calls=[_raw_tool_call(tc) for tc in (getattr(message, "tool_calls", None) or [])],
+            raw_content=content, reasoning_text=reasoning,
         )
         self._read_usage(out, getattr(response, "usage", None))
         return out

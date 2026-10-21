@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 #
 # AttributeError and NameError (Q5, 2026-10-21) are the same accidental coding error, and a Developer retry cannot repair them. They are
 # internal only because an UNTRUSTED input is translated into a typed failure before it can raise one here: a provider's reply is shape-checked
-# at the decode boundary (inference_runtime.malformed_provider_reply - a ValueError, REQUEST, retryable) and a malformed skill-gap entry is
+# at the decode boundary (inference_runtime.malformed_provider_reply - a ValueError, REQUEST, retryable; every field's null/type is checked, addendum #4) and a malformed skill-gap entry is
 # discarded at its own boundary. The first version of this comment claimed that for every provider reply; E.1 of the consolidated addendum
 # #3 MEASURED it false (the adapters raised a raw AttributeError for a null message, and the widened set turned a transient malformed reply
 # into a hard stop) and the adapters were corrected. Not every model-output shape is translated yet: a file entry whose filepath is not a

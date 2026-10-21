@@ -84,6 +84,28 @@ MALFORMED = {
     "native_stream_non_object_line": ("native", "stream", _ndjson({"model": "m", "message": {"content": "hi"}, "done": False}, "keep-alive")),
     "native_stream_message_string": ("native", "stream", _ndjson({"model": "m", "message": "oops", "done": False})),
     "native_tools_message_string": ("native", "tools", json.dumps({"model": "m", "message": "model is loading", "done": True})),
+    # Addendum #4: the checks cover the TYPE of every field the decoders read, not only null / non-object. Each of these raised a raw
+    # AttributeError (INTERNAL, no retry; retried at 72d9182) or TypeError / KeyError (INTERNAL at every revision) before.
+    "oai_message_string": ("oai", "complete", _oai(message="model is loading")),
+    "oai_message_number": ("oai", "complete", _oai(message=5)),
+    "oai_content_parts_list": ("oai", "complete", _oai(message={"role": "assistant", "content": [{"type": "text", "text": "x"}]})),
+    "oai_content_number": ("oai", "complete", _oai(message={"role": "assistant", "content": 5})),
+    "oai_choices_object": ("oai", "complete", json.dumps({"id": "x", "object": "chat.completion", "model": "m",
+                                                          "choices": {"a": {"message": {"content": "x"}}}})),
+    "oai_stream_delta_string": ("oai", "stream", _sse(_oai_chunk(delta="hi"))),
+    "oai_stream_delta_content_number": ("oai", "stream", _sse(_oai_chunk(delta={"content": 5}))),
+    "oai_stream_choices_object": ("oai", "stream", _sse({"id": "x", "object": "chat.completion.chunk", "model": "m",
+                                                          "choices": {"a": {"delta": {"content": "x"}}}})),
+    "oai_tools_message_string": ("oai", "tools", _oai(message="loading")),
+    "oai_tools_function_string": ("oai", "tools", _oai(message={"role": "assistant", "content": None, "tool_calls": [
+        {"id": "c1", "type": "function", "function": "oops"}]})),
+    "oai_tools_content_parts_list": ("oai", "tools", _oai(message={"role": "assistant", "content": [{"type": "text", "text": "x"}]})),
+    "native_content_number": ("native", "complete", json.dumps({"model": "m", "message": {"content": 5}, "done": True})),
+    "native_content_list": ("native", "complete", json.dumps({"model": "m", "message": {"content": ["a"]}, "done": True})),
+    "native_thinking_number": ("native", "complete", json.dumps({"model": "m", "message": {"content": "x", "thinking": 5}, "done": True})),
+    "native_stream_content_number": ("native", "stream", _ndjson({"model": "m", "message": {"content": 5}, "done": False})),
+    "native_stream_thinking_list": ("native", "stream", _ndjson({"model": "m", "message": {"thinking": ["a"]}, "done": False})),
+    "native_tools_content_number": ("native", "tools", json.dumps({"model": "m", "message": {"content": 5}, "done": True})),
 }
 VALID = {  # -> expected content
     "oai_valid": ("oai", "complete", _oai(message={"role": "assistant", "content": "hello"}), "hello"),
@@ -101,6 +123,23 @@ VALID = {  # -> expected content
                                                          "done_reason": "stop"}), "hello"),
     "native_valid_tools": ("native", "tools", json.dumps({"model": "m", "message": {"content": "", "tool_calls": [
         {"function": {"name": "f", "arguments": {}}}]}, "done": True}), ""),
+    # Valid shapes the type checks must keep accepting (the E.1 lesson: a stricter decoder must not reject what worked).
+    "oai_valid_finish_reason_null": ("oai", "complete", _oai(finish_reason=None, message={"role": "assistant", "content": "hi"}), "hi"),
+    "oai_valid_empty_parts_list": ("oai", "complete", _oai(message={"role": "assistant", "content": []}), ""),
+    "oai_valid_reasoning_only": ("oai", "complete", _oai(message={"role": "assistant", "content": "", "reasoning": "thinking hard"}), ""),
+    "oai_valid_stream_null_content_and_empty_choices": ("oai", "stream", _sse(
+        {"id": "x", "object": "chat.completion.chunk", "model": "m", "choices": []},
+        _oai_chunk(delta={"role": "assistant", "content": None}), _oai_chunk(delta={"content": "ok"}),
+        _oai_chunk(delta={}, finish_reason=None), _oai_chunk(delta={}, finish_reason="stop")), "ok"),
+    "oai_valid_tools_reasoning_only": ("oai", "tools", _oai(message={"role": "assistant", "content": None,
+                                                                      "reasoning": "thinking hard"}), ""),
+    "native_valid_message_null": ("native", "complete", json.dumps({"model": "m", "message": None, "done": True}), ""),
+    "native_valid_message_missing": ("native", "complete", json.dumps({"model": "m", "done": True}), ""),
+    "native_valid_thinking_only": ("native", "complete", json.dumps({"model": "m", "message": {"content": "", "thinking": "hm"},
+                                                                     "done": True}), ""),
+    "native_valid_stream_final_line_without_message": ("native", "stream", _ndjson(
+        {"model": "m", "message": {"content": "hello"}, "done": False}, {"model": "m", "done": True, "done_reason": "stop"}), "hello"),
+    "native_valid_tools_message_null": ("native", "tools", json.dumps({"model": "m", "message": None, "done": True}), ""),
 }
 ALL = {**{k: v for k, v in MALFORMED.items()}, **{k: v[:3] for k, v in VALID.items()}}
 CURRENT = {"name": None}
