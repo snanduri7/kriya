@@ -162,6 +162,29 @@ def test_an_outcome_has_no_truth_value_so_no_site_can_read_it_as_approval():
             assert not not outcome
 
 
+@pytest.mark.parametrize("decision", list(ApprovalDecision), ids=[d.value for d in ApprovalDecision])
+def test_a_decision_member_has_no_truth_value_so_no_site_can_read_it_as_approval(decision):
+    """1-F (Wave-1 final fix-forward): ``ApprovalOutcome.decision`` IS the decision (its ``approved`` / ``declined`` / ``unavailable`` are `is` comparisons on it), and a str Enum member is
+    truthy by its text, so ``if outcome.decision:`` would have read DECLINED and UNAVAILABLE as approval. Same fail-loud rule as the outcome itself."""
+    with pytest.raises(TypeError):
+        bool(decision)
+    with pytest.raises(TypeError):
+        if decision:  # noqa: SIM108 - the truthiness test is the thing under test
+            pass
+    for outcome in (APPROVED, DECLINED, UNAVAILABLE):
+        with pytest.raises(TypeError):
+            bool(outcome.decision)
+
+
+def test_the_documented_ways_to_read_a_decision_still_work():
+    """Identity, equality, mapping keys, the closed lookup and ``.value`` are untouched: only truthiness was closed."""
+    assert APPROVED.decision is ApprovalDecision.APPROVED and DECLINED.decision is ApprovalDecision.DECLINED and UNAVAILABLE.decision is ApprovalDecision.UNAVAILABLE
+    assert ApprovalDecision("declined") is ApprovalDecision.DECLINED and ApprovalDecision.UNAVAILABLE.value == "unavailable"
+    assert {ApprovalDecision.APPROVED: "a", ApprovalDecision.DECLINED: "d"}[DECLINED.decision] == "d"
+    assert APPROVED.decision != DECLINED.decision and APPROVED.decision == ApprovalDecision.APPROVED
+    assert [(o.approved, o.declined, o.unavailable) for o in (APPROVED, DECLINED, UNAVAILABLE)] == [(True, False, False), (False, True, False), (False, False, True)]
+
+
 def test_decision_and_reason_code_can_only_be_paired_legally():
     assert [o.reason_code for o in (APPROVED, DECLINED, UNAVAILABLE)] == [APPROVAL_GRANTED, APPROVAL_DECLINED, APPROVAL_LAUNCH_CANNOT_ASK]
     assert [(o.approved, o.declined, o.unavailable) for o in (APPROVED, DECLINED, UNAVAILABLE)] == [(True, False, False), (False, True, False), (False, False, True)]

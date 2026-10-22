@@ -227,6 +227,10 @@ class ApprovalDecision(str, Enum):
     DECLINED = "declined"
     UNAVAILABLE = "unavailable"
 
+    def __bool__(self) -> bool:
+        # A str member is truthy by its text, so `if outcome.decision:` would read DECLINED and UNAVAILABLE as approval: same fail-loud rule as ApprovalOutcome.
+        raise TypeError("an ApprovalDecision has no truth value; compare it with `is` or read ApprovalOutcome.approved / .declined / .unavailable")
+
 
 # The closed reason-code table of an approval outcome (key policy on the code, never on prose). The pairing with the decision is enforced by ApprovalOutcome.
 APPROVAL_GRANTED = "APPROVAL_GRANTED"                          # APPROVED: an explicit approval
