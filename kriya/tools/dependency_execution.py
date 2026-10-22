@@ -140,7 +140,12 @@ _MAVEN_RESOLUTION_OR_TRANSPORT_RE = re.compile(
 # Maven's diagnostics about its OWN operator-level documents (the user / global settings and the toolchains file), recorded in tests/fixtures/maven_validate/recorded_operator_config.json:
 # `[ERROR] 1 problem was encountered while building the effective settings` / `[FATAL] Non-parseable settings <file>: Duplicated tag ... @ <file>, line 2, column 54`. They share the
 # located-problem shape (`Duplicated tag`, `@ ..., line N, column M`) of a POM-model problem, but name a document the candidate did not write and the Developer cannot repair.
-_MAVEN_OPERATOR_CONFIG_RE = re.compile(r"while building the effective (?:settings|toolchains)|Non-(?:parseable|readable) (?:settings|toolchains)\b")
+# Anchored to the start of a Maven log line: Maven also echoes candidate bytes (`position: ... seen ...<!-- ... -->`) and candidate paths into the same stream, so the same words inside a
+# POM's own comment, URL or module directory name (all measured, recorded as pom_defect_*) must not reclassify a genuine POM defect. Maven reads `.mvn/maven.config`, so a candidate that
+# points `-s` at a settings file it wrote is also seen here as an operator document: no repair is offered, and the run stops (fail closed) rather than convicting a document the POM check
+# never judged.
+_MAVEN_OPERATOR_CONFIG_RE = re.compile(
+    r"^\[(?:ERROR|FATAL)\] (?:Non-(?:parseable|readable) (?:settings|toolchains)\b|\d+ problems? (?:was|were) encountered while building the effective (?:settings|toolchains))", re.MULTILINE)
 # Maven's own POM-model diagnostics (a located model problem, a malformed / non-parseable document, an unknown packaging, ...).
 _MAVEN_POM_MODEL_PROBLEM_RE = re.compile(
     r"Non-parseable POM|Malformed POM|Expected root element|Unrecognised tag|Duplicated tag|Unknown packaging|Invalid packaging|Invalid POM|"

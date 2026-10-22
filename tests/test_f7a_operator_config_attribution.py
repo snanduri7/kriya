@@ -86,6 +86,16 @@ def test_an_operator_document_failure_outranks_a_pom_message_printed_next_to_it(
     assert classify_maven_validate_failure(1, False, text) == MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID
 
 
+@pytest.mark.parametrize("name", ["pom_defect_with_phrase_in_comment", "pom_defect_with_phrase_in_url", "pom_defect_in_module_named_like_the_phrase"])
+def test_a_genuine_pom_defect_whose_echoed_context_carries_the_operator_phrase_still_convicts(tmp_path, name):
+    """Delta-review F-1. REAL Maven output for a duplicated tag after `<!-- while building the effective settings -->`, after a `<url>` full of `Non-parseable settings`, and for a
+    malformed module POM in a directory NAMED `Non-parseable settings`: Maven echoes those candidate bytes / paths into its log, and the phrase must only count at the start of a log line."""
+    recorded = OPERATOR[name]
+    assert "Non-parseable settings" in _combined(recorded) or "effective settings" in _combined(recorded), "the control really carries the phrase"
+    result = _validate(tmp_path, recorded)
+    assert result["success"] is False and "environment_reason_code" not in result and result["output"].startswith("Maven POM validation failed:"), result
+
+
 @pytest.mark.parametrize("text", ["[FATAL] Non-parseable settings /h/.m2/settings.xml: Duplicated tag: 'a' @ /h/.m2/settings.xml, line 2, column 3",
                                   "[FATAL] Non-parseable toolchains /h/tc.xml: Duplicated tag: 'type' @ line 1, column 46",
                                   "[FATAL] Non-readable settings /h/.m2/settings.xml: no more data available",
