@@ -21,8 +21,14 @@ from test_enforce_exception_finalization import _candidate_bytes, _enforce, _eng
 from test_p2_candidate_retention import VERIFIED, _begin_then_interrupt, _Interrupt, _second_interrupt_at
 
 from kriya.control import persistence
-from kriya.control.commit_state import REASON_UNCERTAIN_COMMIT, assess_workspace_commit_state
-from kriya.repository import atomic_write
+from kriya.control.commit_state import (
+    REASON_UNCERTAIN_COMMIT,
+    REASON_UNCERTAIN_RUN_RECORD,
+    RECOVERY_COMMAND,
+    assess_workspace_commit_state,
+)
+from kriya.control.recovery import recover_workspace
+from kriya.repository import atomic_write, commit
 from kriya.workflow import terminal_commit
 
 from _strict_doubles import strict_config  # isort: skip
@@ -80,12 +86,8 @@ async def test_the_write_itself_is_atomic_an_interrupt_inside_the_replace_keeps_
     assert [name for name in os.listdir(_path.parent) if name.endswith(".json")] == ["taf3-e2e.json"]
 
 
-@pytest.mark.parametrize("entry", ["fresh", "resume"])
-@pytest.mark.asyncio
-async def test_after_an_interrupt_at_the_plan_write_a_fresh_run_and_resume_are_refused_before_any_model_work(tmp_path, monkeypatch, entry):
-    repo, _state = await _interrupted_at_the_plan_write(tmp_path, monkeypatch)
-    path, before = _plan_document(repo)
-
+async def _refused_entry(repo, entry):
+    """A fresh run or ``resume=True`` against the interrupted workspace: the refusal's payload, and whether any Developer work was started."""
     config = strict_config(autonomy={"spec_compliance_enabled": True})
     engine = _engine(config, bind_filter=False)
     real_generate, developer_runs = engine.run_generation_workflow, []
@@ -95,11 +97,65 @@ async def test_after_an_interrupt_at_the_plan_write_a_fresh_run_and_resume_are_r
         return await real_generate(*args, **kwargs)
     engine.run_generation_workflow = counting
     result = await _enforce(repo, engine, **({"resume": True} if entry == "resume" else {}))
+    return result.legacy_result, developer_runs
 
-    legacy = result.legacy_result
+
+@pytest.mark.parametrize("entry", ["fresh", "resume"])
+@pytest.mark.asyncio
+async def test_after_an_interrupt_at_the_plan_write_a_fresh_run_and_resume_are_refused_before_any_model_work(tmp_path, monkeypatch, entry):
+    repo, _state = await _interrupted_at_the_plan_write(tmp_path, monkeypatch)
+    path, before = _plan_document(repo)
+    assessed = assess_workspace_commit_state(str(repo))
+
+    legacy, developer_runs = await _refused_entry(repo, entry)
     assert legacy["status"] == "needs_review" and legacy["quality_gates_passed"] is False, legacy       # F: no false success / failure
     assert REASON_UNCERTAIN_COMMIT in legacy["reason_codes"], legacy                                      # G: the commit assessment names it
+    assert legacy["recovery_command"] == RECOVERY_COMMAND == "kriya runs recover"                         # G: and tells the person how it is settled
     assert not developer_runs                                                                             # F: no stale work reused, no new work started
     assert path.read_bytes() == before                                                                    # the stale document is not rewritten by the refusal
     assert VERIFIED in _candidate_bytes(repo) and (repo / "app.py").read_text() == "original\n"           # B: evidence and workspace untouched
     assert persistence.approved_plan_path(str(repo), "taf3-e2e") == str(path)
+    assert assess_workspace_commit_state(str(repo)) == assessed                                           # G: a refusal settles nothing - only explicit recovery does
+
+
+def _settle_the_journal_entry(repo):
+    """The commit journal says the transaction is over (the entry the interrupted commit began, rewritten COMMITTED), leaving the run record as it was."""
+    [entry] = commit.find_uncertain_commit_evidence(str(repo))
+    commit._persist_commit_evidence(str(repo), commit.CommitEvidence(       # pylint: disable=protected-access
+        schema_version=entry.schema_version, transaction_id=entry.transaction_id, state=commit.CommitState.COMMITTED, started_at_unix=entry.started_at_unix,
+        updated_at_unix=entry.updated_at_unix, operations=entry.operations, result_revisions=entry.result_revisions))
+
+
+@pytest.mark.parametrize("entry", ["fresh", "resume"])
+@pytest.mark.asyncio
+async def test_the_run_record_alone_also_refuses_the_next_run(tmp_path, monkeypatch, entry):
+    """P2-A. The interrupted run leaves TWO independent durable signals: the journal's IN_PROGRESS entry and the run record whose commit state is unknown. Each must refuse the next
+    run by itself (a refusal that rested on the journal alone would be one rewritten file away from letting a run start over a possibly partial commit). Reviewer mutant P2_4
+    (the assessment ignores the run record) survived because only the journal was ever asserted."""
+    repo, _state = await _interrupted_at_the_plan_write(tmp_path, monkeypatch)
+    both = assess_workspace_commit_state(str(repo))
+    assert REASON_UNCERTAIN_RUN_RECORD in both.reason_codes and REASON_UNCERTAIN_COMMIT in both.reason_codes, both.reason_codes
+
+    _settle_the_journal_entry(repo)
+    alone = assess_workspace_commit_state(str(repo))
+    assert alone.reason_codes == [REASON_UNCERTAIN_RUN_RECORD] and not alone.safe and alone.uncertain_run_ids == both.uncertain_run_ids
+    legacy, developer_runs = await _refused_entry(repo, entry)
+    assert legacy["status"] == "needs_review" and legacy["reason_codes"] == [REASON_UNCERTAIN_RUN_RECORD] and not developer_runs, legacy
+    assert VERIFIED in _candidate_bytes(repo)
+
+
+@pytest.mark.asyncio
+async def test_only_explicit_recovery_settles_it_and_the_stale_plan_never_becomes_a_success(tmp_path, monkeypatch):
+    """P2-C, claim G: ``kriya runs recover`` is the one way out of the refusal. Recovery settles the evidence (the next assessment is safe) but it never reports the interrupted
+    run as done: the plan document keeps the lifecycle it had (`in_progress`, byte for byte), the verified candidate is still retained, and nothing is reported as applied.
+    (The journal entry the test scaffolds has no operations, so recovery's verdict on it says nothing about the workspace; what happens to a RESUME after recovery is not part of the
+    accepted disposition and is deliberately not pinned here.)"""
+    repo, state = await _interrupted_at_the_plan_write(tmp_path, monkeypatch)
+    path, stale = _plan_document(repo)
+    assert not assess_workspace_commit_state(str(repo)).safe
+
+    report = recover_workspace(str(repo))
+    assert report.errors == [] and assess_workspace_commit_state(str(repo)).safe                          # explicit recovery settled it
+    assert path.read_bytes() == stale and json.loads(stale)["lifecycle_state"] == "in_progress"           # the stale document is neither completed nor failed by recovery
+    assert state["plan_lifecycle"] == "in_progress" and state["completion_scope"] != "workspace"          # and the interrupted run itself never claimed the workspace holds the work
+    assert VERIFIED in _candidate_bytes(repo) and (repo / "app.py").read_text() == "original\n"          # the candidate is retained, the workspace is untouched
