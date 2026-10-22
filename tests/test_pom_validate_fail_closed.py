@@ -69,3 +69,47 @@ def test_a_containment_setup_failure_still_propagates(tmp_path):
     with patch.object(PolymorphicValidator, "_run_maven_cmd", side_effect=ContainmentSetupError("daemon unreachable")):
         with pytest.raises(ContainmentSetupError):
             _validator(tmp_path).run_pom_validate()
+
+
+# ---- one level up: the candidate-gates caller (gate_orchestrator._run_pom_validation_gate) ---------------------------------------
+def _gate_inputs(tmp_path):
+    from types import SimpleNamespace
+
+    from _strict_doubles import strict_config, strict_kernel
+
+    (tmp_path / "pom.xml").write_text(POM)
+    recorded = []
+    state = SimpleNamespace(files_written=["pom.xml"], attempt_number=1, record_gate_outcome=recorded.append)
+    ctx = SimpleNamespace(worktree_path=str(tmp_path), kernel=strict_kernel(strict_config()))
+    return state, ctx, recorded
+
+
+def test_the_gate_records_a_pom_failure_and_stops_the_attempt(tmp_path):
+    from kriya.workflow.failure import QualityGateFailure
+    from kriya.workflow.gate_orchestrator import _run_pom_validation_gate  # pylint: disable=protected-access
+
+    state, ctx, recorded = _gate_inputs(tmp_path)
+    with patch.object(PolymorphicValidator, "run_pom_validate", return_value={"success": False, "output": "Malformed POM"}):
+        with pytest.raises(QualityGateFailure):
+            _run_pom_validation_gate(None, state, ctx, None)
+    assert len(recorded) == 1
+
+
+@pytest.mark.parametrize("error", [RuntimeError("policy denied the command"), ValueError("unexpected")], ids=["runtime", "value"])
+def test_an_unexpected_failure_of_the_validation_is_never_recorded_as_a_pass_by_the_gate(tmp_path, error):
+    from kriya.workflow.gate_orchestrator import _run_pom_validation_gate  # pylint: disable=protected-access
+
+    state, ctx, recorded = _gate_inputs(tmp_path)
+    with patch.object(PolymorphicValidator, "run_pom_validate", side_effect=error):
+        with pytest.raises(type(error)):
+            _run_pom_validation_gate(None, state, ctx, None)
+    assert recorded == []                              # no gate outcome, in particular no passing one
+
+
+def test_the_gate_passes_silently_for_a_confirmed_valid_pom(tmp_path):
+    from kriya.workflow.gate_orchestrator import _run_pom_validation_gate  # pylint: disable=protected-access
+
+    state, ctx, recorded = _gate_inputs(tmp_path)
+    with patch.object(PolymorphicValidator, "run_pom_validate", return_value={"success": True, "output": "ok"}):
+        assert _run_pom_validation_gate(None, state, ctx, None) is None
+    assert recorded == []
