@@ -24,7 +24,6 @@ from kriya.control import persistence
 from kriya.control.commit_state import REASON_UNCERTAIN_COMMIT, assess_workspace_commit_state
 from kriya.repository import atomic_write
 from kriya.workflow import terminal_commit
-from kriya.workflow.workflow_controller import WorkflowController
 
 from _strict_doubles import strict_config  # isort: skip
 
@@ -95,13 +94,7 @@ async def test_after_an_interrupt_at_the_plan_write_a_fresh_run_and_resume_are_r
         developer_runs.append(True)
         return await real_generate(*args, **kwargs)
     engine.run_generation_workflow = counting
-    if entry == "resume":
-        real_execute = WorkflowController.execute
-
-        async def resuming(self, *args, **kwargs):
-            return await real_execute(self, *args, resume=True, **kwargs)
-        monkeypatch.setattr(WorkflowController, "execute", resuming)
-    result = await _enforce(repo, engine)
+    result = await _enforce(repo, engine, **({"resume": True} if entry == "resume" else {}))
 
     legacy = result.legacy_result
     assert legacy["status"] == "needs_review" and legacy["quality_gates_passed"] is False, legacy       # F: no false success / failure

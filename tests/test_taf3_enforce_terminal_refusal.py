@@ -82,7 +82,7 @@ def _engine(config, *, bind_filter):
     return engine
 
 
-async def _enforce(repo, engine):
+async def _enforce(repo, engine, **execute_kwargs):
     plan = EngineeringPlan(plan_id="taf3-e2e", kind=ChangeKind.TASK, subtasks=[Subtask(
         id="s1", description="update app", execution_method=ExecutionMethod.MODEL,
         planned_files=[PlannedFile(path="app.py", action=FileAction.MODIFY)])])
@@ -90,7 +90,7 @@ async def _enforce(repo, engine):
             patch("kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output", return_value=plan), \
             patch("kriya.workflow.workflow_controller.validate_plan",
                   new=AsyncMock(return_value=PlanValidationResult(valid=True))):
-        return await WorkflowController(engine).execute(GOAL, str(repo), migration_mode="enforce")
+        return await WorkflowController(engine).execute(GOAL, str(repo), migration_mode="enforce", **execute_kwargs)
 
 
 def _enforce_row(config):
