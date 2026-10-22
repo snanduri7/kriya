@@ -16389,9 +16389,9 @@ async def test_workflow_run_verification_declined_still_passes_on_compile_alone(
     ])
 
     def approval_cb(files, reason):
-        # Run-verification's own confirmation is called with an empty diff list;
-        # the pre-apply diff-approval gate is called with the real diffs. Decline
-        # only the former to isolate what's being tested.
+        # (MEASURED, Wave-1 delta review) In this scenario the callback is asked once, with the real
+        # diffs of the pre-apply gate; the run-verification confirmation is never put to it, so a
+        # decline of that confirmation is not exercised here (see the docstring).
         return bool(files)
 
     we = WorkflowEngine(kernel, llm)

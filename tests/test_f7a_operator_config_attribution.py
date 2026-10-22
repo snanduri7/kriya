@@ -96,6 +96,16 @@ def test_a_genuine_pom_defect_whose_echoed_context_carries_the_operator_phrase_s
     assert result["success"] is False and "environment_reason_code" not in result and result["output"].startswith("Maven POM validation failed:"), result
 
 
+@pytest.mark.parametrize("text", ["[ERROR] a POM comment says [FATAL] Non-parseable settings and then the real defect",
+                                  "[ERROR] the project description is [ERROR] 1 problem was encountered while building the effective settings",
+                                  "Non-parseable settings at the start of a line with no Maven prefix",
+                                  "while building the effective settings, with neither anchor nor prefix"],
+                         ids=["phrase-mid-line-after-a-prefix", "count-phrase-mid-line", "bare-phrase-at-line-start", "bare-fragment"])
+def test_the_operator_phrase_counts_only_as_a_maven_log_line_that_starts_with_its_level(text):
+    """Delta re-review T-1: the anchor (`^`) and the required `[ERROR]` / `[FATAL]` prefix are each pinned by a case only they reject (real mvn echoes candidate bytes mid-line)."""
+    assert classify_maven_validate_failure(1, False, text) != MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID
+
+
 @pytest.mark.parametrize("text", ["[FATAL] Non-parseable settings /h/.m2/settings.xml: Duplicated tag: 'a' @ /h/.m2/settings.xml, line 2, column 3",
                                   "[FATAL] Non-parseable toolchains /h/tc.xml: Duplicated tag: 'type' @ line 1, column 46",
                                   "[FATAL] Non-readable settings /h/.m2/settings.xml: no more data available",
