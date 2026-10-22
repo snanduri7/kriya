@@ -199,9 +199,25 @@ def _payload_digest(kind: str, payload) -> str:
     return kg.digest(kg.Normalizer({}).payload(kind, payload))
 
 
-def test_the_install_path_canonicalization_is_typed_and_narrow():
+# OI-64: the checkout's own directory name must not decide this test. The normalizer's generic run-id pass rewrites any run-id shaped
+# path component (a mutant-campaign sandbox named campaign-<YYYYMMDD>T<HHMMSS>-<hex8> did exactly that), so "stays raw" elsewhere
+# means "is not given the typed token and gets only the generic text pass" - identical to the literal path for an ordinary path.
+INSTALL_PATHS = {"neutral": "/srv/kriya-checkout/kriya", "run-id-shaped": "/tmp/campaign-20261018T164711-432cf0f6/kriya", "real": None}
+
+
+@pytest.mark.parametrize("where", sorted(INSTALL_PATHS))
+def test_the_install_path_canonicalization_is_typed_and_narrow(monkeypatch, where):
     from kriya.foundation import build_info
 
+    if INSTALL_PATHS[where] is not None:
+        monkeypatch.setattr(build_info, "PACKAGE_DIR", INSTALL_PATHS[where])
+    installed = build_info.PACKAGE_DIR
+    raw_elsewhere = kg.Normalizer({}).text(installed)         # what any non-run.opened position becomes: the generic pass only
+    assert "<install_path" not in raw_elsewhere
+    if where == "neutral":
+        assert raw_elsewhere == installed                      # an ordinary path is untouched, as the pre-OI-64 assertion required
+    if where == "run-id-shaped":
+        assert raw_elsewhere == "/tmp/campaign-<run:1>/kriya"   # the collision this parameter exists to keep covered
     base = _opened()
     normalized = kg.Normalizer({}).payload("run.opened", base)
     assert normalized["kriya_build"] == {**base["kriya_build"], "install_path": "<install_path:1>"}
@@ -211,9 +227,9 @@ def test_the_install_path_canonicalization_is_typed_and_narrow():
     assert reference != _payload_digest("run.opened", _opened(install_path=ELSEWHERE))   # not the running package
     assert reference != _payload_digest("run.opened", _opened(python="0.0.0"))   # the rest of kriya_build stays pinned
     # the same key in another record kind or at another nesting stays raw
-    assert kg.Normalizer({}).payload("unit.opened", base)["kriya_build"]["install_path"] == build_info.PACKAGE_DIR
-    nested = kg.Normalizer({}).payload("run.opened", {**base, "extra": {"install_path": build_info.PACKAGE_DIR}})
-    assert nested["extra"]["install_path"] == build_info.PACKAGE_DIR
+    assert kg.Normalizer({}).payload("unit.opened", base)["kriya_build"]["install_path"] == raw_elsewhere
+    nested = kg.Normalizer({}).payload("run.opened", {**base, "extra": {"install_path": installed}})
+    assert nested["extra"]["install_path"] == raw_elsewhere
 
 
 def _late_finish(monkeypatch, seconds: float, *, timeout_delta_ms: int = 0) -> None:
