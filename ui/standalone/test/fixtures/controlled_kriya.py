@@ -43,7 +43,9 @@ import uuid
 
 import click
 
-import kriya.cli as cli
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # the sibling helper module, whatever the working directory
+import kriya.cli as cli  # noqa: E402
+from controlled_review import event_outcome, held_outcome, stop_status  # noqa: E402
 from kriya.control.run_coordinator import _complete_successful_run, begin_mutating_run, mark_run_stage
 from kriya.control.run_record import RunLifecycle
 from kriya.core.attempt_evidence import scope
@@ -117,13 +119,15 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
                 while release and not os.path.exists(release):
                     time.sleep(0.05)
             approved = None
+            review = None
             runtime_decision = None
             runtime_commands = SCRIPT.get("runtime_commands") or [["mvn", "-q", "package"], ["java", "-cp", "target/classes", "com.example.App"]]
             if OUTCOME == "greenfield_flow" and passed:
                 from kriya.control.launch import request_change_approval
                 files = ([{"filepath": d["path"], "content": d["diff"]} for d in DIFFS] if DIFFS else [{"filepath": c["path"], "content": f"--- a/{c['path']}\n+++ b/{c['path']}\n@@ -0,0 +1,3 @@\n+public class HelloKriya {{\n+  public static void main(String[] a) {{ System.out.println(\"Hello from Kriya\"); }}\n+}}\n"} for c in CHANGES])
                 awaiting = request_change_approval(files, SCRIPT.get("review_reason") or "Human-in-the-loop review policy\n\n=== Automated Code Review ===\nThe application prints the requested greeting and includes a unit test.")
-                approved = asyncio.run(awaiting).approved if awaiting is not None else False  # the awaitable resolves to a typed ApprovalOutcome (no truth value): read .approved
+                review = held_outcome(awaiting, asyncio.run)  # a typed ApprovalOutcome (no truth value): a decline and "nobody decided" are different stops (1-D)
+                approved = review.approved
             if (OUTCOME == "runtime_review" or (OUTCOME == "greenfield_flow" and approved is True)) and passed:
                 from kriya.control.launch import request_runtime_command_approval
                 from kriya.workflow.runtime_command_approval import build_subject
@@ -141,13 +145,14 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
                 files = ([{"filepath": d["path"], "content": d["diff"]} for d in DIFFS] if DIFFS
                          else [{"filepath": c["path"], "content": f"--- a/{c['path']}\n+++ b/{c['path']}\n@@ -1 +1 @@\n-old\n+new\n"} for c in scripted])
                 awaiting = request_change_approval(files, SCRIPT.get("review_reason") or "Human-in-the-loop review policy\n\n=== Automated Code Review ===\nThe change implements the goal.")
-                approved = asyncio.run(awaiting).approved if awaiting is not None else False  # the awaitable resolves to a typed ApprovalOutcome (no truth value): read .approved
+                review = held_outcome(awaiting, asyncio.run)
+                approved = review.approved
                 if approved and SCRIPT.get("post_approval_ms"):
                     time.sleep(float(SCRIPT["post_approval_ms"]) / 1000.0)
         pointer = scope.store_pointer()
         success = (OUTCOME in ("success", "hold") and passed) or (approved is True and OUTCOME != "greenfield_flow") or runtime_decision is True
         rejected = (OUTCOME == "review" or (OUTCOME == "greenfield_flow" and runtime_decision is None)) and passed and not approved
-        status = "success" if success else "human_rejected" if rejected else "failure"
+        status = "success" if success else stop_status(review) if rejected else "failure"
         events = [{"kind": "evidence.attempt_store", "attempt": 0, "source": "workflow.run_generation_workflow", "authority": "auxiliary",
                    "message": "attempt evidence store", "failure_type": None, "operation": None, "details": pointer, "created_at": started}]
         if SCRIPT.get("rich_events"):
@@ -157,7 +162,7 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
             events += [event("attempt.started", started + 0.5), event("generation.completed", started + 1.0, file_count=len(CHANGES)),
                        event("candidate_gates.passed", started + 1.5, passed=passed, terminal=False)]
             if OUTCOME == "review" and passed:
-                events.append(event("approval.decision", now - 0.2, outcome="approved" if approved else "rejected", triggers=["human_in_the_loop"]))
+                events.append(event("approval.decision", now - 0.2, outcome=event_outcome(review), triggers=["human_in_the_loop"]))
             if success:
                 events += [event("terminal_regression.passed", now - 0.1, passed=True, terminal=True), event("attempt.passed", now, passed=True, applied=True)]
         gates = SCRIPT.get("gate_outcomes")
