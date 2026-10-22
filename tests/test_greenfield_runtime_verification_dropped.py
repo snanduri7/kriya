@@ -8,6 +8,7 @@ workflow; only the model transport and the toolchain gates are stubbed.
 """
 import _enforce_unit_harness as harness
 
+from kriya.policy.approval import APPROVAL_LAUNCH_CANNOT_ASK, ApprovalOutcome
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
 from kriya.workflow.plan_schema import EngineeringPlan
 
@@ -50,11 +51,28 @@ def _run(tmp_path, goal=GOAL, judge=JUDGE, callback=None):
 
 
 def _desktop(calls):
-    """What a desktop launch does (kriya/cli.py::_approval_decision): a real change is held for the person (approved here), every empty-file approval is declined at once."""
+    """What a desktop launch does (kriya/cli.py::_approval_decision): a real change is held for the person (approved here), every empty-file approval is UNAVAILABLE at once
+    (nobody is asked and nobody declined - 1-H: this used to be modelled as a bare False, a decline; the pin below ties the model to the product's own answer)."""
     def decide(files, reason):
         calls.append((len(files), reason))
-        return bool(files)
+        return True if files else EMPTY_APPROVAL_ANSWER
     return decide
+
+
+EMPTY_APPROVAL_ANSWER = ApprovalOutcome.unavailable_because(APPROVAL_LAUNCH_CANNOT_ASK)
+
+
+def test_the_desktop_helper_answers_an_empty_approval_exactly_as_the_product_does(monkeypatch):
+    """The model above is only as good as its agreement with ``kriya.cli._approval_decision`` inside a launch that has no review to hold for an empty change set."""
+    from kriya import cli
+    from kriya.control import launch
+
+    noted = []
+    monkeypatch.setattr(launch, "request_change_approval", lambda files, reason: None)
+    monkeypatch.setattr(launch, "note_approval_required", lambda kind, reason, details: noted.append(kind) or True)
+    product = cli._approval_decision([], "run-verification confirmation", False)  # pylint: disable=protected-access
+    assert product == EMPTY_APPROVAL_ANSWER and product.unavailable and not product.declined and noted == ["other_approval"]
+    assert _desktop([])([], "run-verification confirmation") == product
 
 
 GOAL_BUILD_ONLY = ('Create a small Java 17 Maven application named hello-kriya and include a unit test.\nMake the application runnable.')

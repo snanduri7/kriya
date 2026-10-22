@@ -25,6 +25,7 @@ from kriya.core.file_stamp import RACY_WINDOW_NS
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.core.state_paths import trace_db_path
+from kriya.policy.approval import APPROVAL_LAUNCH_CANNOT_ASK, ApprovalOutcome
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
@@ -16358,11 +16359,16 @@ async def test_workflow_run_verification_substitutes_unresolvable_python(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_workflow_run_verification_declined_still_passes_on_compile_alone(tmp_path):
+@pytest.mark.parametrize("empty_answer", [False, ApprovalOutcome.decline(), ApprovalOutcome.unavailable_because(APPROVAL_LAUNCH_CANNOT_ASK)],
+                         ids=["terminal-bool-no", "terminal-declined", "desktop-launch-unavailable"])
+async def test_workflow_run_verification_declined_still_passes_on_compile_alone(tmp_path, empty_answer):
     """Declining the judgment-triggered confirmation must only skip the run-verification
     step itself, not fail the whole generation - compile passing is still a valid pass.
     The same approval_callback also gates the (separate) pre-apply diff approval, which
-    must still be asked and approved independently."""
+    must still be asked and approved independently. 1-H: the empty-diff confirmation is
+    answered the way a terminal person declines it (a bool or DECLINED) AND the way a desktop
+    launch answers a decision it cannot put to anyone (UNAVAILABLE, kriya/cli.py::_approval_decision);
+    neither is a run-verification failure."""
     cfg = AppConfig()
     cfg.autonomy.mode = "human-in-the-loop"
     kernel = Kernel(config=cfg)
@@ -16388,7 +16394,7 @@ async def test_workflow_run_verification_declined_still_passes_on_compile_alone(
         # Run-verification's own confirmation is called with an empty diff list;
         # the pre-apply diff-approval gate is called with the real diffs. Decline
         # only the former to isolate what's being tested.
-        return bool(files)
+        return True if files else empty_answer
 
     we = WorkflowEngine(kernel, llm)
 
