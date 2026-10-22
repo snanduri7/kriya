@@ -83,3 +83,66 @@ def test_the_classifier_and_the_enforced_compiler_agree_on_the_same_line(tmp_pat
         compiled = [e for e in classify_goal_examples(goal, root).examples if e.status is Status.COMPILED]
         recognized = _recognized(tmp_path, goal, root).examples
         assert bool(compiled) is ok and bool(recognized) is ok, (line, compiled, recognized)
+
+
+# ---- blind-review fix-forward (F1 ReDoS, F2 unicode-escape breakout; T1 identity pins, T2 non-hex) -----------------------------
+BS = chr(92)         # built at run time: a literal backslash-u in this file would be read as an escape by editors and tools
+
+
+def _u(hex4: str, quote: str = '"') -> str:
+    return quote + BS + "u" + hex4 + quote
+
+
+# Java translates \uXXXX BEFORE lexing: these code points end the literal (quote), break the line (CR/LF) or are the quote/backslash.
+BREAKOUT_HEX = ["0022", "0027", "005c", "005C", "000a", "000A", "000d", "000D"]
+
+
+@pytest.mark.parametrize("hex4", BREAKOUT_HEX)
+def test_a_unicode_escape_that_would_end_or_break_the_literal_is_refused(hex4):
+    assert not ej._LITERAL.match(_u(hex4))                                       # pylint: disable=protected-access
+    assert not ej._LITERAL.match(_u(hex4, "'"))                                  # pylint: disable=protected-access
+    assert not ej._LITERAL.match('"' + BS + "uuu" + hex4 + '"')                  # \uuuXXXX is the same escape (JLS 3.3)
+
+
+@pytest.mark.parametrize("hex4", ["0041", "00e9", "000b", "0021", "0023", "2003", "FFFF"])
+def test_an_ordinary_unicode_escape_is_still_a_literal(hex4):
+    assert ej._LITERAL.match(_u(hex4))                                           # pylint: disable=protected-access
+    assert ej._LITERAL.match('"' + BS + "uu" + hex4 + '"')                       # pylint: disable=protected-access
+
+
+@pytest.mark.parametrize("bad", ["ZZZZ", "00G1", "12", "", "0041x"[:3]])
+def test_a_non_hex_or_truncated_unicode_escape_is_refused(bad):
+    assert not ej._LITERAL.match('"' + BS + "u" + bad + '"')                     # pylint: disable=protected-access
+
+
+def test_the_breakout_goal_line_is_rejected_by_the_enforced_compiler_with_a_reason(tmp_path):
+    line = "Text.echo(" + '"a' + BS + 'u0022 + evil() + ' + BS + 'u0022b"' + ') -> "x"'
+    compilation = _recognized(tmp_path, "Add Text.echo.\n\n" + line + "\n")
+    assert compilation.examples == [] and len(compilation.rejected) == 1 and "Java literal" in compilation.rejected[0]["why"]
+
+
+def test_the_octal_escapes_follow_javas_longest_match_and_stay_literals():
+    for body in (BS + "1234", BS + "477", BS + "47", BS + "4", BS + "0", BS + "377", BS + "12" + "a"):
+        assert ej._LITERAL.match('"' + body + '"'), body                         # pylint: disable=protected-access
+    for body in (BS + "8", BS + "9", BS + "1" + BS):
+        assert not ej._LITERAL.match('"' + body + '"'), body                     # pylint: disable=protected-access
+
+
+@pytest.mark.parametrize("repeat", [BS + "123", BS + "12", BS + "1", BS + "47", BS + "u0041", BS + "t", "a"])
+def test_a_malformed_literal_is_decided_in_linear_time(repeat):
+    """The octal alternatives used to overlap (\123 parsed three ways): n repeats of an unterminated string cost 3^n steps
+    (16 repeats: 5.4 s; 22: about an hour) and the goal text reaches this regex unbounded. 16 repeats is where the old grammar was
+    already seconds (so the ambiguity fails this bound and the test still terminates); the linear grammar decides 2000 instantly."""
+    import time
+    started = time.perf_counter()
+    assert not ej._LITERAL.match('"' + repeat * 16)                              # pylint: disable=protected-access
+    assert time.perf_counter() - started < 2.0
+    started = time.perf_counter()
+    assert not ej._LITERAL.match('"' + repeat * 2000 + '" trailing')             # pylint: disable=protected-access
+    assert time.perf_counter() - started < 2.0
+
+
+def test_the_identity_bearing_versions_are_pinned():
+    """The accepted set of goal lines changed (single-backslash escapes compile, malformed ones and unicode breakouts are refused):
+    a stored compilation from the old rules must not be reused as the same compilation."""
+    assert ej.JAVA_EXAMPLE_COMPILER_VERSION == 2 and gf.GOAL_EXAMPLE_FORMS_VERSION == 2

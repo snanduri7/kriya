@@ -44,9 +44,17 @@ _ARROW = re.compile(r"^\s*(?P<expr>\S.*?)\s*->\s*(?P<expected>\S.*?)\s*$")
 _RAISES = re.compile(r"^raises\s+(?P<name>[A-Za-z_][\w.]*)\s*$", re.IGNORECASE)
 _CALL = re.compile(r"^(?P<type>(?:[a-z]\w*\.)*[A-Z]\w*)\.(?P<method>[a-z]\w*)\((?P<args>.*)\)$")
 # The ONE Java-literal grammar of the goal-example compilers (goal_example_forms imports it; there is no second copy). A string or
-# char body is any character but the quote and the backslash, or one of Java's own escapes: \b \t \n \f \r \s \" \' \\, an
-# octal escape (\0..\377) or \uXXXX. A backslash followed by anything else, or a dangling one, is not a Java literal.
-_JAVA_ESCAPE = r"\\(?:[btnfrs\"'\\]|[0-3][0-7]{2}|[0-7]{1,2}|u+[0-9a-fA-F]{4})"
+# char body is any character but the quote and the backslash, or one of Java's own escapes: \b \t \n \f \r \s \" \' \\, an octal
+# escape (\0..\377) or \uXXXX. A backslash followed by anything else, or a dangling one, is not a Java literal.
+# Two properties are load-bearing (blind review of Wave 1):
+# - LINEAR TIME: the octal alternatives are mutually exclusive (Java's longest match; the digit after an escape is a plain
+#   character), so a malformed literal cannot be parsed several ways. Ambiguous alternatives took 3^n steps on n repeats of \123.
+# - NO ESCAPE FROM THE LITERAL: Java translates \uXXXX BEFORE lexing, so \u0022 ends the string, \u000a/\u000d break the line and
+#   \u0027/\u005c are quote and backslash. Those five code points are refused as \u escapes; the generated source keeps the text verbatim.
+_JAVA_ESCAPE = (
+    r"\\(?:[btnfrs\"'\\]"
+    r"|[0-3][0-7]{2}|[0-3][0-7](?![0-7])|[0-3](?![0-7])|[4-7][0-7]|[4-7](?![0-7])"
+    r"|u+(?!000[aAdD]|0022|0027|005[cC])[0-9a-fA-F]{4})")
 _LITERAL = re.compile(
     r"^(?:-?\d+[lL]|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?[fFdD]?|-?\d+"
     r"|\"(?:[^\"\\]|" + _JAVA_ESCAPE + r")*\""
