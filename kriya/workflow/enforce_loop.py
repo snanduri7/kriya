@@ -3351,6 +3351,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # The commit raised (an interrupt included) before the service handed its result back. The local flags say nothing
                 # then: the journal decides whether the workspace holds the candidate, and an unproven commit is UNCERTAIN - the
                 # existing outcome - so the candidate is kept for explicit recovery and the plan is needs_review, never `failed`.
+                # P-2: the unproven marker is set BEFORE the lookup and only the journal's proof clears it. A second interrupt
+                # (a BaseException the `except Exception` below cannot take) escapes while the lookup runs, and the `finally`
+                # then still finds the candidate marked retained instead of removing the only copy of the verified bytes.
+                workspace_commit_failure = {
+                    "reason_code": "WORKSPACE_COMMIT_UNCERTAIN", "workspace_state": "UNCERTAIN",
+                    "error": "the terminal commit was interrupted before its outcome was proven",
+                }
                 try:
                     settled = deps.interrupted_commit_outcome(workspace_path, run_id, commit_journal_before)
                 except Exception as finalize_error:        # never replaces the error being handled: unproven means UNCERTAIN
@@ -3361,11 +3368,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     settled = "UNCERTAIN"
                 if settled == "COMMITTED":
                     workspace_commit_completed = True
-                elif settled == "UNCERTAIN":
-                    workspace_commit_failure = {
-                        "reason_code": "WORKSPACE_COMMIT_UNCERTAIN", "workspace_state": "UNCERTAIN",
-                        "error": "the terminal commit was interrupted before its outcome was proven",
-                    }
+                    workspace_commit_failure = None
+                elif settled is None:                       # proven: nothing durable happened, or it was rolled back
+                    workspace_commit_failure = None
             if workspace_commit_completed:
                 if plan_workspace_path != workspace_path:
                     try:
