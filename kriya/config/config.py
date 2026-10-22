@@ -385,15 +385,12 @@ def _autonomy_mode(value: Any) -> str:
     return parse_autonomy_mode(value)
 
 
-EGRESS_POLICIES = ("local_only", "unrestricted")
-
-
 def _egress_policy(value: Any) -> str:
-    """The one check of ``autonomy.egress_policy`` (validator, assignment and model_copy all call it): exactly a member of
-    EGRESS_POLICIES. Every consumer compares against the literal "local_only", so any other value is read as unrestricted."""
-    if type(value) is not str or value not in EGRESS_POLICIES:
-        raise ValueError(f"autonomy.egress_policy must be 'local_only' or 'unrestricted', got {value!r}")
-    return value
+    """F5: the config authority's one check of ``autonomy.egress_policy`` (kriya.config.authority.parse_egress_policy, which owns EGRESS_POLICIES and EgressPolicyError and is
+    also what the authority resolution calls); lazy, like ``_autonomy_mode``."""
+    from kriya.config.authority import parse_egress_policy
+
+    return parse_egress_policy(value)
 
 
 class AutonomyConfig(BaseModel):

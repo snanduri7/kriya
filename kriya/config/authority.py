@@ -460,6 +460,22 @@ def parse_autonomy_mode(value: Any) -> str:
     raise AutonomyModeError(AUTONOMY_MODE_UNKNOWN)
 
 
+EGRESS_POLICIES = ("local_only", "unrestricted")
+
+
+class EgressPolicyError(ValueError):
+    """A malformed ``autonomy.egress_policy``. A ValueError (pydantic turns it into a ValidationError inside a validator, and the assignment / model_copy paths keep raising a
+    ValueError), named so the `kriya authority` CLI can report it as the operator error it is instead of a traceback."""
+
+
+def parse_egress_policy(value: Any) -> str:
+    """The ONE check of ``autonomy.egress_policy`` (the AutonomyConfig validator, assignment and model_copy AND the authority resolution all call it): exactly a member of
+    EGRESS_POLICIES. Every consumer compares against the literal "local_only", so any other value is read as unrestricted."""
+    if type(value) is not str or value not in EGRESS_POLICIES:
+        raise EgressPolicyError(f"autonomy.egress_policy must be 'local_only' or 'unrestricted', got {value!r}")
+    return value
+
+
 def autonomy_mode_of(config: Any) -> str:
     """OI-135 (S18): the ONE fail-closed reader every autonomy-mode consumer calls. Re-checks the value at read time with
     parse_autonomy_mode, so an instance that bypassed validation (pydantic ``model_construct``, ``object.__setattr__``)

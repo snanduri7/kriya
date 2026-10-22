@@ -39,12 +39,12 @@ def _authority_user_errors() -> tuple:
     import pydantic
     import yaml
 
-    from kriya.config.authority import AutonomyModeError, ConfigAuthorityError
+    from kriya.config.authority import AutonomyModeError, ConfigAuthorityError, EgressPolicyError
     from kriya.config.authority_approval import ApprovalArtifactError, TrustPathInsideWorkspaceError
     from kriya.config.config import RemovedConfigFieldError
     from kriya.core.state_paths import StateDirectoryError
     return (
-        StateDirectoryError, LogDirectoryError, RemovedConfigFieldError, ConfigAuthorityError, AutonomyModeError,
+        StateDirectoryError, LogDirectoryError, RemovedConfigFieldError, ConfigAuthorityError, AutonomyModeError, EgressPolicyError,
         pydantic.ValidationError, TrustPathInsideWorkspaceError, ApprovalArtifactError,
         OSError, yaml.YAMLError,
     )

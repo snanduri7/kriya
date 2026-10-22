@@ -221,6 +221,7 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
         compute_violations,
         explicit_config_source,
         parse_autonomy_mode,
+        parse_egress_policy,
         path_field_classification,
         value_gated_field_classification,
     )
@@ -593,6 +594,12 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
     autonomy_section = config_dict.get("autonomy")
     if isinstance(autonomy_section, dict) and "mode" in autonomy_section:
         parse_autonomy_mode(autonomy_section["mode"])
+    # F5 (Wave-1 closure delta): autonomy.egress_policy is a closed vocabulary too, owned by the same module (parse_egress_policy; AutonomyConfig's validator, assignment and
+    # model_copy call the very same function). The effective value is checked at the same point as the mode, so a mistyped restriction ("LOCAL_ONLY") is a typed
+    # EgressPolicyError for `kriya authority inspect|approve` and the desktop's configuration operations as it already is for load_config - never listed as a field to
+    # approve: an approval cannot make it valid.
+    if isinstance(autonomy_section, dict) and "egress_policy" in autonomy_section:
+        parse_egress_policy(autonomy_section["egress_policy"])
 
     violations = compute_violations(provenance, classification_overrides)
     return ConfigResolutionState(config_dict=config_dict, workspace_root=workspace_root, violations=violations,
