@@ -128,7 +128,7 @@ def test_the_octal_escapes_follow_javas_longest_match_and_stay_literals():
         assert not ej._LITERAL.match('"' + body + '"'), body                     # pylint: disable=protected-access
 
 
-@pytest.mark.parametrize("repeat", [BS + "123", BS + "12", BS + "1", BS + "47", BS + "u0041", BS + "t", "a"])
+@pytest.mark.parametrize("repeat", [BS + "123", BS + "12", BS + "1", BS + "0", BS + "4", BS + "7", BS + "47", BS + "u0041", BS + "t", "a"])
 def test_a_malformed_literal_is_decided_in_linear_time(repeat):
     """The octal alternatives used to overlap (\123 parsed three ways): n repeats of an unterminated string cost 3^n steps
     (16 repeats: 5.4 s; 22: about an hour) and the goal text reaches this regex unbounded. 16 repeats is where the old grammar was
@@ -138,8 +138,9 @@ def test_a_malformed_literal_is_decided_in_linear_time(repeat):
     assert not ej._LITERAL.match('"' + repeat * 16)                              # pylint: disable=protected-access
     assert time.perf_counter() - started < 2.0
     started = time.perf_counter()
-    assert not ej._LITERAL.match('"' + repeat * 2000 + '" trailing')             # pylint: disable=protected-access
-    assert time.perf_counter() - started < 2.0
+    assert not ej._LITERAL.match('"' + repeat * 26 + '" trailing')              # pylint: disable=protected-access
+    assert time.perf_counter() - started < 2.0       # 26: a 2^n parse (two identical alternatives) takes seconds here and still terminates
+    assert not ej._LITERAL.match('"' + repeat * 2000)                            # pylint: disable=protected-access (linear grammar only)
 
 
 def test_the_identity_bearing_versions_are_pinned():

@@ -14,11 +14,13 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 CLAUDE_MD = ROOT / "CLAUDE.md"
 CONTEXT_DIR = "handover/claude-context"
-_REFERENCED = re.compile(r"(?<![\w/.-])(handover/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\.(?:md|csv|py|json|txt|yaml|yml))(?![\w/-])")
+_ROOTS = "handover|docs|tests|scripts|kriya|ui|plugins"
+_REFERENCED = re.compile(
+    rf"(?<![\w/.-])((?:{_ROOTS})/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\.(?:md|csv|py|json|txt|yaml|yml|sh|ts|tsx))(?![\w/-])")
 
 
 def referenced_authority(text: str) -> set:
-    """The repository-relative ``handover/...md`` paths CLAUDE.md names (a table cell, an @import or a ``cat`` hint)."""
+    """The repository-relative file paths (under handover/, docs/, tests/, scripts/, kriya/, ui/, plugins/) CLAUDE.md names (a table cell, an @import or a ``cat`` hint)."""
     return set(_REFERENCED.findall(text))
 
 
