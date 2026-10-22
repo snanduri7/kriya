@@ -95,7 +95,7 @@ class LaunchSession:
             "approval_required": None, "declined_decisions": [], "pending_approval": None, "approval_history": [],
         }
         self._review_sequence = 0
-        self.parent_pid = os.getppid()  # the host this process started under: a review whose host is gone is declined (kriya/control/launch_approval.py)
+        self.parent_pid = os.getppid()  # the host this process started under: a review whose host is gone ends UNAVAILABLE (kriya/control/launch_approval.py)
 
     @property
     def record(self) -> Dict[str, Any]:
@@ -121,8 +121,9 @@ class LaunchSession:
 
     def note_approval_required(self, kind: str, reason: str, details: Dict[str, Any]) -> None:
         """A step that needs a human decision was reached. The desktop has no approval action (owner decision: never auto-approved), so the run stops;
-        this records WHICH decision and why. The CALLER then declines (returns False) without prompting, so the workflow stops cleanly with the human-rejected
-        outcome; a prompt with no terminal raises click.Abort, which the workflow counts as a failed attempt and RETRIES (MEASURED in the second live smoke).
+        this records WHICH decision and why. The CALLER then answers ApprovalOutcome.unavailable_because(APPROVAL_LAUNCH_CANNOT_ASK) without prompting, so the workflow stops cleanly
+        with the existing approval_required outcome - nobody was asked and nobody declined, so it is NOT a human rejection; a prompt with no terminal raises click.Abort, which the
+        workflow counts as a failed attempt and RETRIES (MEASURED in the second live smoke).
         The first one is kept (it is the one that stopped the run)."""
         if self._record.get("approval_required") is not None:
             return
@@ -157,7 +158,7 @@ class LaunchSession:
 
     def request_change_approval(self, files: List[Dict[str, str]], reason: str) -> Optional[Awaitable[ApprovalOutcome]]:
         """The change gate asked for a human decision. Record the exact pending review durably (bound to this launch, workspace and candidate) and return the
-        awaitable that resolves to the human's decision (see kriya/control/launch_approval.py). None = no review could be recorded: the caller declines."""
+        awaitable that resolves to the human's ApprovalOutcome (see kriya/control/launch_approval.py). None = no review could be recorded: the caller answers UNAVAILABLE, never a decline."""
         from kriya.control.launch_approval import await_decision, build_pending
 
         if not files:
@@ -165,7 +166,7 @@ class LaunchSession:
         self._review_sequence += 1
         pending = build_pending(self.launch_id, self._record["workspace"]["identity"], self._review_sequence, files, reason)
         # The exact diff text the person will be asked to approve is stored (approval-scoped, digest-bound) BEFORE the review becomes pending. If it cannot be stored
-        # the review cannot be inspected, so it is not offered: no review means the caller declines (never an approval of an unreviewable change).
+        # the review cannot be inspected, so it is not offered: no review means the caller answers UNAVAILABLE (never an approval of an unreviewable change).
         if not self._store_review_diff(pending, files):
             self._review_sequence -= 1
             return None
@@ -314,10 +315,10 @@ def note_approval_required(kind: str, reason: str, details: Dict[str, Any]) -> b
 
 def request_change_approval(files: List[Dict[str, str]], reason: str) -> Optional[Awaitable[ApprovalOutcome]]:
     """For the change gate's callback in `kriya generate`: inside a desktop launch with a non-empty change set, the awaitable that resolves to the human
-    decision (the callback returns it; the change gate awaits it). None outside a launch, for an empty change set, or when no review could be recorded."""
+    ApprovalOutcome (the callback returns it; the change gate awaits it). None outside a launch, for an empty change set, or when no review could be recorded."""
     try:
         return _ACTIVE.request_change_approval(files, reason) if _ACTIVE is not None else None
-    except Exception as error:  # observational: a failure to record means the caller declines
+    except Exception as error:  # observational: a failure to record means the caller answers UNAVAILABLE
         logger.error("Launch: change review not requested (%s: %s)", type(error).__name__, error)
         return None
 

@@ -1,7 +1,8 @@
 """Human review of a change inside a desktop launch (GUI final).
 
 Kriya's change-approval gate is an in-process callback (``approval_callback``): returning True continues the workflow into its regression gates and
-the apply step, returning False ends it as ``human_rejected``. That callback stays the ONE continuation point. A desktop launch has no terminal, so
+the apply step; a DECLINED answer (a person said no) ends it as ``human_rejected`` and an UNAVAILABLE one (nobody decided) as ``approval_required``
+(``kriya.policy.approval.ApprovalOutcome``). That callback stays the ONE continuation point. A desktop launch has no terminal, so
 instead of prompting, the callback of ``kriya generate --launch-id`` (kriya/cli.py ``on_approval``):
 
 1. records a PENDING review in the launch record - durable, bound to the launch id, the workspace identity, the exact candidate (a digest over the
@@ -11,7 +12,8 @@ instead of prompting, the callback of ``kriya generate --launch-id`` (kriya/cli.
 3. records the decision in the launch record BEFORE returning, so the workflow can only continue after the approval is durable.
 
 Fail closed everywhere: a stale review id or digest, another workspace, an ended or dead launch, a duplicate, an expired review, a host that vanished
-- all decline. Nothing here approves anything by itself, passes ``-y`` or changes the autonomy mode; the human decision is the only input.
+- none of them approves. A durable ``reject`` by the person is DECLINED (``human_rejected``); an expired, abandoned or unrecordable review is UNAVAILABLE
+(``approval_required``): nobody said no. Nothing here approves anything by itself, passes ``-y`` or changes the autonomy mode; the human decision is the only input.
 """
 from __future__ import annotations
 
@@ -58,7 +60,7 @@ REVIEW_ID_RE = re.compile(r"^ra-[0-9a-f]{24}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 DECISIONS = ("approve", "reject")
 STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED, STATUS_EXPIRED = "PENDING", "APPROVED", "REJECTED", "EXPIRED"
-APPROVAL_WAIT_SECONDS = 3600.0   # a review nobody answers is declined, never left holding the workspace forever
+APPROVAL_WAIT_SECONDS = 3600.0   # a review nobody answers ends UNAVAILABLE (approval_required), never left holding the workspace forever
 POLL_SECONDS = 0.25
 REASON_MAX_CHARS = 60000
 HISTORY_MAX = 20
