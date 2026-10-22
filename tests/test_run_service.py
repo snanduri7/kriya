@@ -34,6 +34,7 @@ from kriya.control.run_coordinator import begin_mutating_run
 from kriya.core.state_paths import trace_db_path
 from kriya.kup import execution
 from kriya.kup.cli_ops import run_kup_operation
+from kriya.policy.approval import ApprovalOutcome
 
 LID = "20261010T101010-abcdef01"
 TOOLS = [{"tool": "git", "available": True, "path": "/usr/bin/git", "checked": "ran --version"}]
@@ -205,7 +206,7 @@ def test_the_decision_reaches_the_authoritys_stale_candidate_refusal_and_then_re
     out = _held(ws, scenario)
     codes, accepted = out["scenario"]
     assert codes == ["STALE_REVIEW", "STALE_REVIEW"], "a candidate or review the person was not shown is never approved"
-    assert accepted["accepted"] is True and accepted["decision"] == "approve" and out["approved"] is True
+    assert accepted["accepted"] is True and accepted["decision"] == "approve" and out["approved"] == ApprovalOutcome.approve()
 
 
 def test_a_decision_needs_a_workspace():

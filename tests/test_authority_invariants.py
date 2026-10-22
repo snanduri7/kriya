@@ -44,6 +44,7 @@ from kriya.config import AppConfig
 from kriya.core.llm import EgressViolationError, LLMClient
 from kriya.mcp import invocation_approval
 from kriya.mcp.mcp import MCPClient, MCPTool
+from kriya.policy.approval import ApprovalOutcome
 from kriya.policy.egress import capability_for
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
@@ -109,7 +110,7 @@ def test_stale_candidate_is_refused(tmp_path):
     (tmp_path / "decide").mkdir()
     _canonical, outcome = _run(tmp_path / "decide", scenario)
     assert outcome["scenario"][0] == ["STALE_REVIEW", "STALE_REVIEW"]
-    assert outcome["approved"] is False and outcome["record_at_resume"]["status"] == "REJECTED"   # only the bound decision counted
+    assert outcome["approved"] == ApprovalOutcome.decline() and outcome["record_at_resume"]["status"] == "REJECTED"   # only the bound decision counted
 
     real, calls = workflow_module.assert_candidate_unchanged_since_source_review, []
 
