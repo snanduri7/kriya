@@ -43,14 +43,19 @@ import uuid
 
 import click
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # the sibling helper module, whatever the working directory
-import kriya.cli as cli  # noqa: E402
-from controlled_review import event_outcome, held_outcome, stop_status  # noqa: E402
+import kriya.cli as cli
 from kriya.control.run_coordinator import _complete_successful_run, begin_mutating_run, mark_run_stage
 from kriya.control.run_record import RunLifecycle
 from kriya.core.attempt_evidence import scope
 from kriya.core.state_paths import resolve_state_directory
 from kriya.core.trace import TraceLogger
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # the sibling helper module, whatever the working directory
+from controlled_review import (  # noqa: E402 - importable only once the path is set
+    event_outcome,
+    held_outcome,
+    stop_status,
+)
 
 SCRIPT = json.loads(os.environ.get("KRIYA_CONTROLLED_SCRIPT", "{}"))
 DIFFS = SCRIPT.get("diffs") or []
