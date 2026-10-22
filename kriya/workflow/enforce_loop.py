@@ -3243,6 +3243,22 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             nonlocal control_state
             control_state = _persist_control_state(control_state.with_updates(subtask_completion_scope="workspace"))
 
+        def _save_plan_after_error(lifecycle: str) -> None:
+            # The error handler's plan save: logged, never replaces the error being handled.
+            try:
+                deps.save_approved_plan(
+                    workspace_path, plan.plan_id,
+                    deps.build_approved_plan_document(
+                        plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                        stage_states=approved_stage_states, lifecycle_state=lifecycle,
+                    ),
+                )
+            except Exception as finalize_error:
+                deps.logger.error(
+                    "WorkflowController enforce run %r: final plan state could not be saved after an error: %s",
+                    run_id, finalize_error,
+                )
+
         def _save_derived_artifacts(records: Any) -> None:
             # Artifact facts derived from the verified candidate, persisted only after the source commit (one step shared by the
             # ordinary path and the error handler: an interrupt after a durable commit still records them).
@@ -3358,6 +3374,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     "reason_code": "WORKSPACE_COMMIT_UNCERTAIN", "workspace_state": "UNCERTAIN",
                     "error": "the terminal commit was interrupted before its outcome was proven",
                 }
+                # The plan document gets the same pessimistic-until-proof treatment: needs_review is durable BEFORE the lookup
+                # (stage states and completion scope are untouched: the COMMITTED proof below still adopts them), so a second
+                # interrupt cannot leave `in_progress` over an unproven commit. The proof below overwrites it.
+                _save_plan_after_error(_lifecycle_of(False))
                 try:
                     settled = deps.interrupted_commit_outcome(workspace_path, run_id, commit_journal_before)
                 except Exception as finalize_error:        # never replaces the error being handled: unproven means UNCERTAIN
@@ -3399,19 +3419,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             run_id, finalize_error,
                         )
                 error_lifecycle = _lifecycle_of(False)
-            try:
-                deps.save_approved_plan(
-                    workspace_path, plan.plan_id,
-                    deps.build_approved_plan_document(
-                        plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
-                        stage_states=approved_stage_states, lifecycle_state=error_lifecycle,
-                    ),
-                )
-            except Exception as finalize_error:
-                deps.logger.error(
-                    "WorkflowController enforce run %r: final plan state could not be saved after an error: %s",
-                    run_id, finalize_error,
-                )
+            _save_plan_after_error(error_lifecycle)
             raise
         finally:
             candidate_retained = (

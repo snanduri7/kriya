@@ -66,18 +66,28 @@ def _second_interrupt_at(monkeypatch, target, unwinding):
     return second
 
 
-@pytest.mark.parametrize("target", ["outcome_lookup", "control_state", "approved_plan"])
+# Where the second interrupt lands -> the plan lifecycle that is durable afterwards. The pessimistic needs_review is written BEFORE the
+# outcome lookup, so an interrupt at the lookup or at the control-state save leaves it. An interrupt AT the plan write itself is that
+# write not happening (the write is atomic): there is no earlier durable plan state to keep, so it stays in_progress - the candidate
+# and the journal's UNCERTAIN entry are what keep the next run refused. A named residual, not a hidden one.
+PLAN_AFTER = {"outcome_lookup": "needs_review", "control_state": "needs_review", "approved_plan": "in_progress"}
+
+
+@pytest.mark.parametrize("target", sorted(PLAN_AFTER))
 @pytest.mark.asyncio
 async def test_a_second_interrupt_while_finalizing_an_unproven_commit_keeps_the_verified_candidate(tmp_path, monkeypatch, target):
     first, unwinding = _Interrupt(), []
     monkeypatch.setattr(terminal_commit, "commit_revision_grounded_batch",
                         _begin_then_interrupt(first, on_first=lambda: unwinding.append(True)))
     second = _second_interrupt_at(monkeypatch, target, unwinding)
-    repo, raised, _state = await _scenario(tmp_path, "int", monkeypatch=monkeypatch)
+    repo, raised, state = await _scenario(tmp_path, "int", monkeypatch=monkeypatch)
     assert raised is second                                                  # the latest interrupt reaches the caller ...
     assert raised.__context__ is first                                       # ... with the first not lost
     assert VERIFIED in _candidate_bytes(repo)                                # P-2: the only copy of the verified bytes survives
     assert (repo / "app.py").read_text() == "original\n"                     # this stand-in committed nothing
+    # the durable plan says what is true of an unproven commit (MEASURED pre-fix at the lookup: `in_progress`) and no completion
+    # claims the workspace holds the work
+    assert state["plan_lifecycle"] == PLAN_AFTER[target] and state["completion_scope"] != "workspace", state
 
 
 @pytest.mark.asyncio
