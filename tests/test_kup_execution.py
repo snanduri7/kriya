@@ -519,7 +519,7 @@ def test_every_interactive_callback_of_generate_records_the_decision_before_it_w
         else:
             body = source[source.index(f"    def {callback}("):]
             body = body[: body.index("\n    def ", 10)] if "\n    def " in body[10:] else body
-        prompts = [body.index(marker) for marker in ("click.confirm(", "click.prompt(") if marker in body]
+        prompts = [body.index(marker) for marker in ("click.confirm(", "click.prompt(", "_confirm_change(") if marker in body]  # RDCG-D-003: the terminal prompt now goes through _confirm_change
         assert call in body, f"{callback} must CALL {call}"
         assert body.index(call) < min(prompts), f"{callback} must record the decision BEFORE it can prompt"
     assert "True, KNOWLEDGE_POLICY" not in inspect.getsource(cli._launched_generate)

@@ -62,6 +62,7 @@ from kriya.platform.services import entry_refusal as platform_entry_refusal
 from kriya.plugins.plugin import PluginManager
 from kriya.policy.approval import (
     APPROVAL_LAUNCH_CANNOT_ASK,
+    APPROVAL_REVIEW_EXPIRED,
     ApprovalOutcome,
     TypedApprovalCallback,
     classify_approval_answer,
@@ -2790,6 +2791,45 @@ def _bind_requirement_disposition(cfg: AppConfig, disposition_path: str, require
     )
 
 
+def _confirm_change(prompt: str, *, default: bool = False) -> Any:
+    """The terminal's answer to a CHANGE-approval prompt (`generate`, `proposal execute`, the `fix` fallback): a real answer is the legacy plain bool (yes -> True, no -> the person's decline).
+    Input that ends with NO answer - end of file / closed stdin (click raises Abort for it; Ctrl-C reads the same way) - is not a decision: it is
+    `ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED)` ("the review ended with no decision"), reported as approval_required - never an approval and never a human decline
+    (owner decision 2026-10-22, RDCG-D-003)."""
+    try:
+        return click.confirm(prompt, default=default)
+    except click.Abort:
+        click.echo("")
+        return ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED)
+
+
+def _fix_tty_answer(raw: str) -> Any:
+    """`kriya fix`'s answer at its `[Y/n]` prompt, from the UNSTRIPPED `readline()` result: "" only ever means end of file (a bare Enter is "\\n") and is UNAVAILABLE, never the default.
+    A typed answer is the plain bool: a bare Enter takes the displayed default (yes), anything starting with "y" approves, anything else is the person's no."""
+    if raw == "":
+        return ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED)
+    answer = raw.strip().lower()
+    return not answer or answer.startswith("y")
+
+
+def _fix_approval_decision(diffs: List[Dict[str, str]], reason: str, yes: bool) -> Any:
+    """The `kriya fix` approval callback (module level so its behaviour is tested directly): the diffs, then `-y` or the controlling terminal; a missing terminal falls back to a click prompt."""
+    click.secho(f"\n[HUMAN REVIEW GATE REQUIRED]: {reason}", bold=True, fg="yellow")
+    for diff in diffs:
+        click.secho(f"File: {diff['filepath']}", bold=True)
+        click.echo(diff['content'])
+    if yes:
+        click.secho("Auto-approving patch application (-y / --yes specified).", fg="green")
+        return True
+    try:
+        with open("/dev/tty", "r") as tty:
+            sys.stdout.write("Apply these changes to your active workspace? [Y/n]: ")
+            sys.stdout.flush()
+            return _fix_tty_answer(tty.readline())
+    except Exception:
+        return _confirm_change("Apply these changes to your active workspace?", default=True)
+
+
 def _approval_decision(files: List[Dict[str, str]], reason: str, yes: bool) -> Any:
     """The `kriya generate` approval callback (module level so its behaviour is tested directly, not by reading its source).
 
@@ -2797,7 +2837,7 @@ def _approval_decision(files: List[Dict[str, str]], reason: str, yes: bool) -> A
     ApprovalOutcome) is returned - the change gate awaits it. Every other approval (an empty change set: knowledge gap, runtime command, policy action; or a change whose review
     could not be recorded) cannot be put to anyone: the launch answers `ApprovalOutcome.unavailable_because(APPROVAL_LAUNCH_CANNOT_ASK)` WITHOUT prompting, never a bare False. That
     is NOT a human decline - nobody was asked - and the callers report it as "approval required and not available", not as a human rejection. `--yes` can never take effect inside a
-    launch (the launch refuses it, and this returns before consulting it). Outside a launch it is the terminal behaviour, unchanged (a plain bool: True approves, False is the person's no)."""
+    launch (the launch refuses it, and this returns before consulting it). Outside a launch it is the terminal behaviour (a plain bool: True approves, False is the person's no); input that ends with no answer (end of file / closed stdin) is UNAVAILABLE, never either."""
     from kriya.control.launch import (
         note_approval_required,  # GUI M7: recorded when a desktop launch reaches a human decision it cannot take
         request_change_approval,  # GUI final: a desktop launch's CHANGE review, answered by `kriya launch-decision`
@@ -2822,7 +2862,7 @@ def _approval_decision(files: List[Dict[str, str]], reason: str, yes: bool) -> A
         click.echo("\n".join(lines[:15]))
         if len(lines) > 15:
             click.echo(f"... and {len(lines) - 15} more lines.")
-    return click.confirm("\nDo you approve applying these changes to the codebase?")
+    return _confirm_change("\nDo you approve applying these changes to the codebase?")
 
 
 def _runtime_command_decision(subject: Any, yes: bool) -> Any:
@@ -4147,7 +4187,7 @@ def proposal_execute(ctx: click.Context, proposal_id: str, yes: bool) -> None:
         click.echo(token, nl=False)
         sys.stdout.flush()
 
-    def on_approval(files: List[Dict[str, str]], reason: str) -> bool:
+    def on_approval(files: List[Dict[str, str]], reason: str) -> Any:
         # OI-146: the reason is display text (redacted); the diff lines are the approval surface, shown as they are.
         if yes:
             click.secho(f"\n[Auto-Approving] Reason: {redact_text(reason)}", bold=True, fg="green")
@@ -4161,7 +4201,7 @@ def proposal_execute(ctx: click.Context, proposal_id: str, yes: bool) -> None:
             click.echo("\n".join(lines[:15]))
             if len(lines) > 15:
                 click.echo(f"... and {len(lines) - 15} more lines.")
-        return click.confirm("\nDo you approve applying these changes to the codebase?")
+        return _confirm_change("\nDo you approve applying these changes to the codebase?")
 
     async def run_execution() -> Dict[str, Any]:
         await kernel.start()
@@ -4468,21 +4508,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             click.echo(content[:300] + "..." if len(content) > 300 else content)
             
         def approval_cb(diffs, reason):
-            click.secho(f"\n[HUMAN REVIEW GATE REQUIRED]: {reason}", bold=True, fg="yellow")
-            for diff in diffs:
-                click.secho(f"File: {diff['filepath']}", bold=True)
-                click.echo(diff['content'])
-            if yes:
-                click.secho("Auto-approving patch application (-y / --yes specified).", fg="green")
-                return True
-            try:
-                with open("/dev/tty", "r") as tty:
-                    sys.stdout.write("Apply these changes to your active workspace? [Y/n]: ")
-                    sys.stdout.flush()
-                    val = tty.readline().strip().lower()
-                    return not val or val.startswith("y")
-            except Exception:
-                return click.confirm("Apply these changes to your active workspace?", default=True)
+            return _fix_approval_decision(diffs, reason, yes)
 
         res = await we.run_generation_workflow(
             goal="Fix compilation/test failure",
