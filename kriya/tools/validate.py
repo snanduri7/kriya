@@ -33,6 +33,8 @@ from kriya.tools.containment import (
 )
 from kriya.tools.containment_oci import MAVEN_CACHE_MOUNT, finalize_registry_acquisition_result
 from kriya.tools.dependency_execution import (
+    MAVEN_INVOCATION_FAILED,
+    MAVEN_VALIDATE_TIMED_OUT,
     OfflineFailureKind,
     classify_maven_offline_failure_text,
     log_acquisition_outcome,
@@ -1707,13 +1709,17 @@ class PolymorphicValidator:
             res = self._run_maven_cmd(["validate"], cwd=self.workspace_path, timeout=120)
             if res["returncode"] == 0:
                 return {"success": True, "output": "Maven POM validation succeeded."}
+            if res.get("timeout"):
+                # ProcessController reports a timeout as returncode -1 + timeout=True. Maven returned no verdict about the POM, so this is
+                # an environment outcome (typed `environment_reason_code`, like the Gradle wrapper's), never a POM defect.
+                return {"success": False, "environment_reason_code": MAVEN_VALIDATE_TIMED_OUT,
+                        "output": f"mvn validate did not finish within its time bound; no verdict about the POM was obtained.\n{res.get('stdout', '')}\n{res.get('stderr', '')}"}
             return {"success": False, "output": f"Maven POM validation failed:\n{res['stdout']}\n{res['stderr']}"}
         except OSError as e:
             # 'mvn' itself isn't on PATH (FileNotFoundError), isn't executable, or the process could not be started - a
-            # toolchain problem, not a POM defect. Same reasoning as run_compile_check()'s identical guard: must be
-            # returned, not silently swallowed, or a real toolchain gap gets misread as a code-content bug. A timeout is not
-            # an exception here: ProcessController returns it as a non-zero result, handled above.
-            return {"success": False, "output": f"Failed to invoke mvn validate: {e}"}
+            # toolchain problem, not a POM defect: returned (never swallowed into a pass) with a typed `environment_reason_code`, so the
+            # gate raises the existing verification_infrastructure_failure and the Developer is never asked to repair a POM that was not judged.
+            return {"success": False, "environment_reason_code": MAVEN_INVOCATION_FAILED, "output": f"Failed to invoke mvn validate: {e}"}
         except ContainmentSetupError:
             # SEC-002 (2026-09-12): a containment/resource setup failure
             # (docker daemon unreachable, NET_ADMIN unavailable, proxy/

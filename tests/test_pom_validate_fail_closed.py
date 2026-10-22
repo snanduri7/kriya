@@ -12,7 +12,9 @@ import pytest
 
 from kriya.config.config import AutonomyConfig
 from kriya.tools.containment import ContainmentSetupError
+from kriya.tools.dependency_execution import MAVEN_INVOCATION_FAILED, MAVEN_VALIDATE_TIMED_OUT
 from kriya.tools.validate import PolymorphicValidator
+from kriya.workflow.failure import QualityGateFailure
 
 POM = '<?xml version="1.0"?>\n<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion></project>\n'
 
@@ -37,16 +39,20 @@ def test_no_pom_is_the_one_other_pass(tmp_path):
         assert _validator(tmp_path, pom=False).run_pom_validate()["success"] is True
 
 
-def test_a_real_validation_failure_fails_with_the_maven_output(tmp_path):
+def test_a_real_validation_failure_fails_with_the_maven_output_and_no_environment_code(tmp_path):
+    """F7: only a verdict from Maven itself is a POM validation failure - it carries NO `environment_reason_code`."""
     with patch.object(PolymorphicValidator, "_run_maven_cmd", return_value=_returns(returncode=1, stdout="[ERROR] Malformed POM")):
         result = _validator(tmp_path).run_pom_validate()
-    assert result["success"] is False and "Malformed POM" in result["output"]
+    assert result["success"] is False and "Malformed POM" in result["output"] and "environment_reason_code" not in result
 
 
-def test_a_timeout_fails(tmp_path):
-    """ProcessController reports a timeout as returncode -1 + timeout=True (kriya/tools/process.py), not as an exception."""
-    with patch.object(PolymorphicValidator, "_run_maven_cmd", return_value=_returns(returncode=-1, timeout=True)):
-        assert _validator(tmp_path).run_pom_validate()["success"] is False
+def test_a_timeout_fails_with_the_typed_environment_code(tmp_path):
+    """ProcessController reports a timeout as returncode -1 + timeout=True (kriya/tools/process.py), not as an exception. Maven returned no verdict about the POM: an
+    environment outcome (F7), typed, not a POM defect."""
+    with patch.object(PolymorphicValidator, "_run_maven_cmd", return_value=_returns(returncode=-1, timeout=True, stderr="killed")):
+        result = _validator(tmp_path).run_pom_validate()
+    assert result["success"] is False and result["environment_reason_code"] == MAVEN_VALIDATE_TIMED_OUT
+    assert "no verdict about the POM was obtained" in result["output"] and "killed" in result["output"]
 
 
 @pytest.mark.parametrize("error", [FileNotFoundError("mvn"), PermissionError("mvn is not executable"), OSError("cannot start process")],
@@ -55,6 +61,7 @@ def test_an_invocation_failure_fails_and_names_the_cause(tmp_path, error):
     with patch.object(PolymorphicValidator, "_run_maven_cmd", side_effect=error):
         result = _validator(tmp_path).run_pom_validate()
     assert result["success"] is False and result["output"].startswith("Failed to invoke mvn validate: ")
+    assert result["environment_reason_code"] == MAVEN_INVOCATION_FAILED, "typed, not only a human-readable string"
 
 
 @pytest.mark.parametrize("error", [RuntimeError("policy denied the command"), NameError("coding error"), ValueError("unexpected")],
@@ -113,3 +120,61 @@ def test_the_gate_passes_silently_for_a_confirmed_valid_pom(tmp_path):
     with patch.object(PolymorphicValidator, "run_pom_validate", return_value={"success": True, "output": "ok"}):
         assert _run_pom_validation_gate(None, state, ctx, None) is None
     assert recorded == []
+
+
+# ---- F7: the gate attributes the failure to the right owner ---------------------------------------------------------------------
+def _raise_from_gate(tmp_path, result):
+    from kriya.workflow.gate_orchestrator import _run_pom_validation_gate  # pylint: disable=protected-access
+
+    state, ctx, recorded = _gate_inputs(tmp_path)
+    with patch.object(PolymorphicValidator, "run_pom_validate", return_value=result):
+        with pytest.raises(QualityGateFailure) as raised:
+            _run_pom_validation_gate(None, state, ctx, None)
+    return raised.value.failure, recorded
+
+
+@pytest.mark.parametrize("code,phrase", [(MAVEN_INVOCATION_FAILED, "could not start"), (MAVEN_VALIDATE_TIMED_OUT, "did not finish")])
+def test_a_maven_that_could_not_run_is_a_verification_infrastructure_failure_not_a_pom_defect(tmp_path, code, phrase):
+    failure, recorded = _raise_from_gate(tmp_path, {"success": False, "output": "Failed to invoke mvn validate: [Errno 2]", "environment_reason_code": code})
+    assert failure.type == "verification_infrastructure_failure" and failure.diagnostics["reason_code"] == code
+    assert phrase in failure.message and "not a code failure" in failure.message and "POM VALIDATION FAILED" not in failure.message
+    assert not failure.failed_content and not failure.likely_files and not failure.file_locations   # nothing offered to the Developer to repair
+    assert [outcome["type"] for outcome in recorded] == ["verification_infrastructure_failure"]
+
+
+def test_a_real_pom_defect_stays_a_pom_semantic_validation_with_the_pom_offered_for_repair(tmp_path):
+    failure, recorded = _raise_from_gate(tmp_path, {"success": False, "output": "[ERROR] Malformed POM"})
+    assert failure.type == "pom_semantic_validation" and "POM VALIDATION FAILED for pom.xml" in failure.message
+    assert failure.failed_content == {"pom.xml": POM} and failure.likely_files == ["pom.xml"]
+    assert [outcome["type"] for outcome in recorded] == ["pom_semantic_validation"]
+
+
+def test_the_env_gate_wording_of_existing_codes_is_unchanged(tmp_path):
+    """The phrase table only adds a case for a tool that started: every earlier code still reads 'could not start' (the recorded goldens depend on it)."""
+    from kriya.workflow.gate_orchestrator import _stop_on_environment_gate_result  # pylint: disable=protected-access
+
+    state, _ctx, _recorded = _gate_inputs(tmp_path)
+    state.attempt_number = 1
+    with pytest.raises(QualityGateFailure) as raised:
+        _stop_on_environment_gate_result(state, {"environment_reason_code": "GRADLE_DISTRIBUTION_UNAVAILABLE", "output": "x"}, "compile")
+    assert "verification tool could not start (GRADLE_DISTRIBUTION_UNAVAILABLE)" in raised.value.failure.message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result,stops", [({"success": False, "output": "x", "environment_reason_code": MAVEN_INVOCATION_FAILED}, True),
+                                          ({"success": False, "output": "[ERROR] Malformed POM"}, False)], ids=["infrastructure-stops", "pom-defect-retries"])
+async def test_the_retry_strategy_stops_the_run_on_the_environment_and_retries_a_pom_defect(tmp_path, result, stops):
+    """Developer-facing attribution through the real retry strategy: an unrunnable Maven is STOP_ENVIRONMENT (no repair attempt is asked of the Developer); a real POM defect
+    is an ordinary repairable failure."""
+    from test_workflow import _minimal_attempt_ctx
+
+    from kriya.workflow.retry_strategy import handle_attempt_failure
+    from kriya.workflow.state import GenerationState
+
+    failure, _recorded = _raise_from_gate(tmp_path, result)
+    state = GenerationState()
+    state.attempt_number = 1
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    should_break = await handle_attempt_failure(state, ctx, QualityGateFailure(failure))
+    assert should_break is stops
+    assert bool(state.environment_failure) is stops

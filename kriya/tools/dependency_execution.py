@@ -116,6 +116,10 @@ GRADLE_DISTRIBUTION_UNAVAILABLE = "GRADLE_DISTRIBUTION_UNAVAILABLE"
 # .kriya/venv) could not be created, so no interpreter may produce an
 # authoritative verdict for the workspace; never a substitute interpreter.
 PYTHON_ENVIRONMENT_UNAVAILABLE = "PYTHON_ENVIRONMENT_UNAVAILABLE"
+# F7 (Wave-1 closure delta): the Maven POM-validation gate's twins. `mvn validate` could not be started (the executable is missing / not executable / the process could not be
+# spawned), or started and did not finish within its bound: either way Maven returned NO verdict about the POM, so nothing about the candidate was observed.
+MAVEN_INVOCATION_FAILED = "MAVEN_INVOCATION_FAILED"
+MAVEN_VALIDATE_TIMED_OUT = "MAVEN_VALIDATE_TIMED_OUT"
 # The offline run still misses a dependency/plugin after one bounded,
 # registry-scoped acquisition (the Maven marker's Gradle twin; a marker in
 # the output, repair-eligible like Maven's: a candidate may have declared
