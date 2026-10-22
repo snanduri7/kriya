@@ -22,13 +22,11 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Awaitable, Dict, List, Optional
+from typing import Any, Awaitable, Dict, List, Optional
 
 from kriya.control.persistence import load_launch_record, save_launch_record
 from kriya.foundation.redaction import redact_text, redact_value
-
-if TYPE_CHECKING:
-    from kriya.policy.approval import ApprovalOutcome
+from kriya.policy.approval import ApprovalOutcome
 
 logger = logging.getLogger(__name__)
 
