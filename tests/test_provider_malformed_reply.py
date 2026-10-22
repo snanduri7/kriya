@@ -226,13 +226,25 @@ VALID = {  # -> expected content
 _RECORDED_DIR = Path(__file__).resolve().parent.parent / "handover" / "evidence" / "gr1-replay" / "run"
 for _label in ("A", "B"):
     _recorded = _RECORDED_DIR / f"response_{_label}.stream.jsonl"
-    if _recorded.exists():
-        _lines = [json.loads(line) for line in _recorded.read_text(encoding="utf-8").splitlines() if line.strip()]
-        VALID[f"native_valid_recorded_real_stream_{_label}"] = (
-            "native", "stream", "".join(json.dumps(line) + "\n" for line in _lines),
-            "".join(line["message"]["content"] for line in _lines).strip())
+    # F3-B: the evidence is REQUIRED. A control that is generated only when its file exists vanishes silently when the evidence is removed, which would turn "the valid shapes still
+    # decode" into a claim nothing proves. A missing file is a loud collection failure (never fabricate a stand-in: restore the recorded stream).
+    if not _recorded.is_file():
+        raise RuntimeError(f"required recorded real-provider stream is missing: {_recorded} - restore the GR-1 replay evidence; do not replace it with a synthetic stream")
+    _lines = [json.loads(line) for line in _recorded.read_text(encoding="utf-8").splitlines() if line.strip()]
+    VALID[f"native_valid_recorded_real_stream_{_label}"] = (
+        "native", "stream", "".join(json.dumps(line) + "\n" for line in _lines),
+        "".join(line["message"]["content"] for line in _lines).strip())
 ALL = {**{k: v for k, v in MALFORMED.items()}, **{k: v[:3] for k, v in VALID.items()}}
 CURRENT = {"name": None}
+
+
+def test_both_recorded_real_streams_are_among_the_valid_controls_and_are_real_sized():
+    """The controls above exist unconditionally (F3-B) and are the recorded streams, not stubs: about a thousand lines each, each a real Ollama chunk with a message."""
+    for label in ("A", "B"):
+        body = VALID[f"native_valid_recorded_real_stream_{label}"][2]
+        lines = [json.loads(line) for line in body.splitlines()]
+        assert len(lines) > 500 and all("message" in line for line in lines), label
+        assert VALID[f"native_valid_recorded_real_stream_{label}"][3], "the expected decoded text is non-empty"
 
 
 class _Handler(BaseHTTPRequestHandler):
