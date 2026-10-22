@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from _fake_static_analysis import DISABLED_STATIC_ANALYSIS
+from _strict_doubles import strict_kernel
 
 from kriya.agents.contracts import MilestoneV2
 from kriya.config.config import AppConfig
@@ -91,6 +92,7 @@ class FakeEngine:
         self.outputs = outputs
         self.integration = integration or {}
         self.calls = []
+        self.kernel = strict_kernel(AppConfig())  # a real config: the milestone replay executes under the run's autonomy config (Wave-2 item 1(b)), as a production engine always has
         self.run_verifier = MagicMock()
         self.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
         self.engineering_triage = MagicMock()

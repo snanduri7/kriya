@@ -1055,7 +1055,7 @@ def check_dependency_regression(
 
 
 def replay_prior_milestone_verifications(
-    workspace_path: str, run_state: MilestoneRunState
+    workspace_path: str, run_state: MilestoneRunState, *, autonomy_cfg: Any
 ) -> List[Dict[str, Any]]:
     """Re-executes every completed milestone's own persisted verification
     command sequence against the CURRENT workspace state and re-checks the
@@ -1073,12 +1073,15 @@ def replay_prior_milestone_verifications(
     deterministic marker in its captured output is silently skipped (not
     counted as a failure) - a false alarm here would be worse than staying
     silent, and the integration call's own full regression suite still runs
-    regardless of what this function finds."""
+    regardless of what this function finds.
+
+    ``autonomy_cfg`` is the RUN's autonomy configuration (required, no default: Wave-2 item 1(b)). The replay executes persisted argv, so it runs under the same containment and
+    resource authority as every other validator construction in kriya/workflow; a default ``AutonomyConfig()`` here executed them on the host in a run that required containment."""
     from kriya.tools.validate import PolymorphicValidator
     from kriya.workflow.verification_authority import deterministic_sequence_kind
 
     failures: List[Dict[str, Any]] = []
-    validator = PolymorphicValidator(workspace_path, original_workspace_path=workspace_path)
+    validator = PolymorphicValidator(workspace_path, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
     for milestone_id in sorted(run_state.verification_commands):
         raw_commands = run_state.verification_commands[milestone_id]
         if not raw_commands:
@@ -1468,7 +1471,9 @@ class _MilestonePlanDriver(PlanDriver):
     async def run_phase(self, phase: TerminalPhase) -> Optional[Dict[str, Any]]:
         if phase is not TerminalPhase.REPLAY_PRIOR_VERIFICATIONS:
             raise ValueError(f"milestone plans have no '{phase.value}' phase")
-        replay_failures = replay_prior_milestone_verifications(self.workspace_path, self.run_state)
+        replay_failures = replay_prior_milestone_verifications(
+            self.workspace_path, self.run_state, autonomy_cfg=self.engine_config.autonomy,  # the run's config; a missing one is an error, never a default
+        )
         if replay_failures:
             return {
                 "status": "milestone_replay_failed",
