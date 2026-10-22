@@ -14,18 +14,20 @@ export function VerificationLines({ lines, label = 'Verification' }: { lines: re
 /** How many lines of the captured output are shown before "Show full output". The output is Kriya's record of what the command printed - the program's own lines and the tool that launched it share one
  * stream, and nothing here parses it to pick "the" program line: it is shown as captured, bounded, with the whole text one click away. */
 export const OUTPUT_PREVIEW_LINES = 15;
-export function CapturedOutput({ text }: { text: string }) {
+export function CapturedOutput({ text, label = 'Application output' }: { text: string; label?: string }) {
   const trimmed = text.replace(/\s+$/, '');
-  if (trimmed === '') return <pre className="mono ck-output" aria-label="Application output">(no output)</pre>;
+  if (trimmed === '') return <pre className="mono ck-output" aria-label={label}>(no output)</pre>;
   const lines = trimmed.split('\n');
-  if (lines.length <= OUTPUT_PREVIEW_LINES) return <pre className="mono ck-output" aria-label="Application output">{trimmed}</pre>;
+  if (lines.length <= OUTPUT_PREVIEW_LINES) return <pre className="mono ck-output" aria-label={label}>{trimmed}</pre>;
   return (
     <>
-      <pre className="mono ck-output" aria-label="Application output">{lines.slice(0, OUTPUT_PREVIEW_LINES).join('\n')}</pre>
-      <details className="ck-tech" data-testid="full-output"><summary>Show full output ({lines.length} lines)</summary><pre className="mono ck-output" aria-label="Full application output">{trimmed}</pre></details>
+      <pre className="mono ck-output" aria-label={label}>{lines.slice(0, OUTPUT_PREVIEW_LINES).join('\n')}</pre>
+      <details className="ck-tech" data-testid="full-output"><summary>Show full output ({lines.length} lines)</summary><pre className="mono ck-output" aria-label={`Full ${label.charAt(0).toLowerCase()}${label.slice(1)}`}>{trimmed}</pre></details>
     </>
   );
 }
+
+const hasText = (text: string | undefined): text is string => (text ?? '').trim() !== '';
 
 /** What Kriya recorded about EXECUTING the application: only an EXECUTED record renders, and `succeeded` alone says "ran successfully". */
 export function ApplicationResult({ app }: { app: ApplicationOutcome }) {
@@ -38,8 +40,20 @@ export function ApplicationResult({ app }: { app: ApplicationOutcome }) {
       <p data-status={ok ? 'passed' : 'failed'}>{ok ? '✓ Ran successfully' : '✕ Runtime verification failed'}</p>
       {exitLine ? <div data-testid="application-exit">{exitLine}</div> : null}
       <div className="muted small" data-testid="application-runs-in">Runs in Kriya isolated worktree</div>
-      <h4 className="ck-action-sub">{ok ? 'Output' : 'Output / error'}</h4>
-      <CapturedOutput text={app.stdout?.text || app.stderr?.text || ''} />
+      {!ok && hasText(app.stdout?.text) && hasText(app.stderr?.text) ? (
+        // A failed run's two streams are both evidence: stderr is never hidden behind a non-empty stdout, and they are never merged into one block.
+        <>
+          <h4 className="ck-action-sub">Output</h4>
+          <CapturedOutput text={app.stdout.text} />
+          <h4 className="ck-action-sub">Error output</h4>
+          <CapturedOutput text={app.stderr.text} label="Application error output" />
+        </>
+      ) : (
+        <>
+          <h4 className="ck-action-sub">{ok ? 'Output' : 'Output / error'}</h4>
+          <CapturedOutput text={hasText(app.stdout?.text) ? app.stdout.text : app.stderr?.text ?? ''} />
+        </>
+      )}
       {app.stdout?.truncated || app.stderr?.truncated ? <p className="muted small">The output is longer than can be shown here.</p> : null}
       {app.command ? <details className="ck-tech"><summary>Technical details</summary><div className="muted small">Command <span className="mono">{app.command}</span></div></details> : null}
     </section>

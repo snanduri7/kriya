@@ -24,6 +24,34 @@ describe('ApplicationResult', () => {
     expect(screen.getByText(/did not finish in time/)).toBeInTheDocument();
     expect(screen.getByText('✕ Runtime verification failed')).toBeInTheDocument();
   });
+  it('a failed run shows stderr even when stdout is non-empty: separate labelled blocks, never merged', () => {
+    render(<ApplicationResult app={exec({ succeeded: false, exit_code: 1, stdout: { text: 'starting up\n', truncated: false }, stderr: { text: 'boom: port in use\n', truncated: false } })} />);
+    expect(screen.getByLabelText('Application output')).toHaveTextContent('starting up');
+    expect(screen.getByLabelText('Application output')).not.toHaveTextContent('boom');
+    expect(screen.getByLabelText('Application error output')).toHaveTextContent('boom: port in use');
+    expect(screen.getByLabelText('Application error output')).not.toHaveTextContent('starting up');
+    expect(screen.getByRole('heading', { name: 'Output' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Error output' })).toBeInTheDocument();
+  });
+  it('a failed run with only stdout, only stderr, or a whitespace-only stdout beside stderr shows exactly the recorded stream', () => {
+    const failed = { succeeded: false, exit_code: 1 };
+    const { unmount } = render(<ApplicationResult app={exec({ ...failed, stdout: { text: 'only out', truncated: false }, stderr: { text: '', truncated: false } })} />);
+    expect(screen.getByLabelText('Application output')).toHaveTextContent('only out');
+    expect(screen.queryByLabelText('Application error output')).toBeNull();
+    unmount();
+    const second = render(<ApplicationResult app={exec({ ...failed, stdout: { text: '', truncated: false }, stderr: { text: 'only err', truncated: false } })} />);
+    expect(screen.getByLabelText('Application output')).toHaveTextContent('only err');
+    expect(screen.queryByLabelText('Application error output')).toBeNull();
+    second.unmount();
+    render(<ApplicationResult app={exec({ ...failed, stdout: { text: ' \n\t', truncated: false }, stderr: { text: 'err behind blank stdout', truncated: false } })} />);
+    expect(screen.getByLabelText('Application output')).toHaveTextContent('err behind blank stdout');
+    expect(screen.queryByLabelText('Application error output')).toBeNull();
+  });
+  it('a successful run is unchanged: the printed output, no error block', () => {
+    render(<ApplicationResult app={exec({ stderr: { text: 'a warning', truncated: false } })} />);
+    expect(screen.getByLabelText('Application output')).toHaveTextContent('Hello from Kriya');
+    expect(screen.queryByLabelText('Application error output')).toBeNull();
+  });
   it('says where it ran in words (the isolated worktree) and never shows the absolute path; the command is under Technical details', () => {
     const { container } = render(<ApplicationResult app={exec({ command: '/private/var/x/.kriya/worktrees/candidate-1/run.sh' })} />);
     expect(screen.getByTestId('application-runs-in')).toHaveTextContent('Runs in Kriya isolated worktree');
