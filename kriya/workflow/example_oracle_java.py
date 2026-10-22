@@ -33,7 +33,7 @@ from kriya.workflow.acceptance_oracle import AcceptanceArtifact, AcceptanceError
 from kriya.workflow.example_oracle import EXAMPLE_COMPILER_VERSION, _binding_requirement
 from kriya.workflow.requirements import RequirementSet
 
-JAVA_EXAMPLE_COMPILER_VERSION = 1
+JAVA_EXAMPLE_COMPILER_VERSION = 2  # 2: one Java-correct literal grammar (single-backslash escapes compile; malformed escapes are rejected)
 JAVA_EXAMPLE_PACKAGE = "kriya.examples"
 JAVA_EXAMPLE_CLASS = "KriyaGoalExamplesTest"
 JAVA_EXAMPLE_SOURCE_NAME = JAVA_EXAMPLE_CLASS + ".java"
@@ -43,8 +43,14 @@ FORM_JAVA_RAISES = "java_arrow_raises"
 _ARROW = re.compile(r"^\s*(?P<expr>\S.*?)\s*->\s*(?P<expected>\S.*?)\s*$")
 _RAISES = re.compile(r"^raises\s+(?P<name>[A-Za-z_][\w.]*)\s*$", re.IGNORECASE)
 _CALL = re.compile(r"^(?P<type>(?:[a-z]\w*\.)*[A-Z]\w*)\.(?P<method>[a-z]\w*)\((?P<args>.*)\)$")
+# The ONE Java-literal grammar of the goal-example compilers (goal_example_forms imports it; there is no second copy). A string or
+# char body is any character but the quote and the backslash, or one of Java's own escapes: \b \t \n \f \r \s \" \' \\, an
+# octal escape (\0..\377) or \uXXXX. A backslash followed by anything else, or a dangling one, is not a Java literal.
+_JAVA_ESCAPE = r"\\(?:[btnfrs\"'\\]|[0-3][0-7]{2}|[0-7]{1,2}|u+[0-9a-fA-F]{4})"
 _LITERAL = re.compile(
-    r"^(?:-?\d+[lL]|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?[fFdD]?|-?\d+|\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)'|true|false|null)$")
+    r"^(?:-?\d+[lL]|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?[fFdD]?|-?\d+"
+    r"|\"(?:[^\"\\]|" + _JAVA_ESCAPE + r")*\""
+    r"|'(?:[^'\\]|" + _JAVA_ESCAPE + r")'|true|false|null)$")
 _JAVA_LANG_EXCEPTIONS = frozenset({
     "ArithmeticException", "ArrayIndexOutOfBoundsException", "ArrayStoreException", "ClassCastException", "Exception",
     "IllegalArgumentException", "IllegalStateException", "IndexOutOfBoundsException", "NegativeArraySizeException",

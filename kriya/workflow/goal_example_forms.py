@@ -38,19 +38,15 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from kriya.workflow.example_oracle_java import (
     _ARROW,
     _CALL,
+    _LITERAL,
     _RAISES,
     _resolve_exception,
     _split_arguments,
     resolve_java_type,
 )
 
-GOAL_EXAMPLE_FORMS_VERSION = 1
+GOAL_EXAMPLE_FORMS_VERSION = 2  # 2: literals use the base module's Java-correct grammar (a malformed escape is no longer COMPILED)
 
-# A Java literal. NOTE: example_oracle_java._LITERAL is written inside a raw string with doubled backslashes, so it only
-# accepts a string escape spelled with TWO backslashes; a real goal line such as "my\tfoo" is rejected there (safe
-# direction, but it hides T3's own example). This pattern accepts the escapes Java accepts.
-_LITERAL = re.compile(
-    r"^(?:-?\d+[lL]|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?[fFdD]?|-?\d+|\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\u[0-9a-fA-F]{4}|\\.)'|true|false|null)$")
 
 
 class Status(str, Enum):
