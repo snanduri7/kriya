@@ -391,6 +391,32 @@ def test_a_rejected_stage_2a_dependency_aborts_the_run(tmp_path):
     assert guard.checked == ["Use mylib==1.2.3."]
 
 
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync-callback", "async-callback"])
+@pytest.mark.parametrize("decision", [False, True], ids=["declined", "approved"])
+def test_the_stage_2a_dependency_approval_awaits_an_async_callback_like_every_other_approval_site(tmp_path, asynchronous, decision):
+    """An async approval callback is part of the contract (workflow.py, stage_apply.py, spec_compliance.py and policy/approval.ask all
+    await a coroutine). Un-awaited, the coroutine object is truthy: a declined async answer would read as approval."""
+    answered = []
+
+    async def asking(diffs, reason):
+        answered.append((diffs, reason))
+        return decision
+
+    def sync(diffs, reason):
+        answered.append((diffs, reason))
+        return decision
+
+    guard = _Guard(lambda text: [GAP] if "mylib" in text else [])
+    ctx = _design_ctx(tmp_path, predetermined_design="Use mylib==1.2.3.", predetermined_architect_files=["calc.py"],
+                      guard=guard, approval_callback=asking if asynchronous else sync)
+    if decision:
+        assert asyncio.run(design_work_unit(ctx, _deps(_engine(tmp_path)))) is None          # approved: the stage continues
+    else:
+        with pytest.raises(ValueError, match="User rejected post-cutoff dependency risk in Stage 2A"):
+            asyncio.run(design_work_unit(ctx, _deps(_engine(tmp_path))))
+    assert len(answered) == 1 and answered[0][0] == [] and "Knowledge Guard detected" in answered[0][1]     # asked once, with the prompt
+
+
 def test_the_post_architect_recomputation_updates_the_control_context_and_the_run_state(tmp_path):
     """A LOW/LIGHT request whose design plans pom.xml escalates to HIGH/HEAVY before the Developer runs: the stage replaces
     ``ctx.control`` and records the new route AND process profile on the run state (the run metrics read both). Found by an

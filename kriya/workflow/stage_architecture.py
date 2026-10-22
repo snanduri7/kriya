@@ -392,6 +392,8 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
             )
             if approval_callback:
                 approved = approval_callback([], reason_str)
+                if asyncio.iscoroutine(approved):         # an async callback is supported everywhere else; un-awaited it is truthy = approval
+                    approved = await approved
                 if not approved:
                     raise ValueError("Workflow aborted: User rejected post-cutoff dependency risk in Stage 2A.")
             else:
