@@ -194,6 +194,11 @@ VALID = {  # -> expected content
          "total_duration": 1, "eval_count": 2}), "hello"),
     "native_valid_final_chunk_empty_content": ("native", "complete", json.dumps({"model": "m", "message": {"role": "assistant", "content": ""}, "done": True,
                                                                                  "done_reason": "stop"}), ""),
+    # The only RECORDED real tool call available is in decoded form (live qualification records, e.g. ~/kriya-m1-live/src-gr1/evidence/provider-contract-001/batch_b/live/qualify_qwen3-coder.json:
+    # {"id": "call_suvqnqvg", "name": "get_weather", "arguments": {"city": "Paris"}, "source": "native"}); this is its wire form. No raw wire capture of a tool call exists, so the other
+    # tool-call controls are hand-built from the documented API (CLOSURE_MAP: UNKNOWN whether any real provider emits `arguments: null`).
+    "native_valid_tools_recorded_real_call_shape": ("native", "tools", json.dumps({"model": "qwen3-coder:30b", "message": {"role": "assistant", "content": "", "tool_calls": [
+        {"id": "call_suvqnqvg", "function": {"index": 0, "name": "get_weather", "arguments": {"city": "Paris"}}}]}, "done": True, "done_reason": "stop"}), ""),
     "native_valid_tools_with_id_and_arguments": ("native", "tools", json.dumps({"model": "m", "message": {"role": "assistant", "content": "", "tool_calls": [
         {"id": "call_1", "function": {"index": 0, "name": "f", "arguments": {"a": 1}}}]}, "done": True}), ""),
     "native_valid_tools_arguments_as_json_string": ("native", "tools", json.dumps({"model": "m", "message": {"content": "", "tool_calls": [
