@@ -143,3 +143,49 @@ def test_the_resolution_and_cli_reuse_the_one_validator_and_define_no_vocabulary
         assert not re.search(r"[\"']local_only[\"']\s*,\s*[\"']unrestricted[\"']|[\"']unrestricted[\"']\s*,\s*[\"']local_only[\"']", code), f"{relative} defines its own egress vocabulary"
     assert "parse_egress_policy(autonomy_section[\"egress_policy\"])" in open(os.path.join(REPO, "kriya/config/resolution.py"), encoding="utf-8").read()
     assert "return parse_egress_policy(value)" in open(os.path.join(REPO, "kriya/config/config.py"), encoding="utf-8").read()
+
+
+# ------------------------------------------------------------------------------------------------------- F5-A: a str subclass is not a policy value
+
+class _Sneaky(str):
+    """A subclass carrying a valid member's text."""
+
+
+class _Liar(str):
+    """A subclass that claims to equal anything, with the hash of a plain str: ``value in EGRESS_POLICIES`` is True for it whatever its text."""
+
+    def __eq__(self, other):
+        return True
+
+    __hash__ = str.__hash__
+
+
+@pytest.mark.parametrize("value", [_Sneaky("local_only"), _Sneaky("unrestricted"), _Liar("open"), _Liar("local_only")], ids=["sneaky-local", "sneaky-unrestricted", "liar-open", "liar-local"])
+def test_the_one_validator_refuses_any_str_subclass(value):
+    """The contract is exact (a plain ``str`` that is a member): the closed vocabulary cannot be satisfied by an object that merely compares equal to a member
+    (mutant ``isinstance(value, str)`` for ``type(value) is str``, reviewer F5_4/F5_4b)."""
+    from kriya.config.authority import parse_egress_policy
+
+    with pytest.raises(EgressPolicyError):
+        parse_egress_policy(value)
+
+
+def test_assignment_refuses_a_str_subclass_and_a_liar_never_constructs():
+    from kriya.config.config import AutonomyConfig
+
+    config = AutonomyConfig()
+    for value in (_Sneaky("local_only"), _Liar("open")):
+        with pytest.raises(EgressPolicyError):
+            config.egress_policy = value
+    with pytest.raises(Exception, match="egress_policy"):                      # pydantic ValidationError carrying the owner's message
+        AutonomyConfig(egress_policy=_Liar("open"))
+    assert config.egress_policy == "local_only" and type(config.egress_policy) is str
+
+
+@pytest.mark.parametrize("member", VALID)
+def test_construction_stores_a_plain_str_never_the_subclass_instance(member):
+    """MEASURED: pydantic copies a str subclass to a plain ``str`` at construction, so nothing downstream can ever hold the subclass; the stored value is exactly the member."""
+    from kriya.config.config import AutonomyConfig
+
+    stored = AutonomyConfig(egress_policy=_Sneaky(member)).egress_policy
+    assert type(stored) is str and stored == member
