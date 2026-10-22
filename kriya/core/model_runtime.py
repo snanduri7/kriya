@@ -1359,7 +1359,9 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
         thinking = provider_text(message.get("thinking"), "the message thinking")
         out = ChatResponse(content=content, reasoning_chars=len(thinking), raw_content=content,
                            reasoning_text=thinking or None)
-        calls = message.get("tool_calls") or []
+        calls = message.get("tool_calls")
+        if calls is None:              # absent or an explicit null: no calls. A falsy NON-list (0, false, "", {}) is malformed.
+            calls = []
         if not isinstance(calls, list):
             raise malformed_provider_reply(f"its tool_calls is {type(calls).__name__}, not a list")
         for index, call in enumerate(calls):

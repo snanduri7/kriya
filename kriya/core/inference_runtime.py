@@ -334,7 +334,7 @@ def _choice_message(choice: Any) -> Any:
 
 def _tool_calls(message: Any) -> Any:
     calls = getattr(message, "tool_calls", None)
-    if not calls:
+    if calls is None:                  # absent or an explicit null: no calls. A falsy NON-list (0, false, "", {}) is malformed.
         return []
     if not isinstance(calls, (list, tuple)):
         raise malformed_provider_reply(f"its tool_calls is {_received(calls)}, not a list")

@@ -102,6 +102,13 @@ MALFORMED = {
     "oai_tools_content_parts_list": ("oai", "tools", _oai(message={"role": "assistant", "content": [{"type": "text", "text": "x"}]})),
     "oai_tools_calls_number": ("oai", "tools", _oai(message={"role": "assistant", "content": None, "tool_calls": 5})),
     "oai_tools_calls_true": ("oai", "tools", _oai(message={"role": "assistant", "content": None, "tool_calls": True})),
+    # MC3: a FALSY non-list `tool_calls` is a malformed value too, not "no calls" (the `x or []` idiom hid it). Absent, null and []
+    # remain the valid no-call shapes (VALID below).
+    **{f"oai_tools_calls_falsy_{label}": ("oai", "tools", _oai(message={"role": "assistant", "content": None, "tool_calls": value}))
+       for label, value in (("zero", 0), ("false", False), ("empty_string", ""), ("empty_object", {}))},
+    **{f"native_tools_calls_falsy_{label}": ("native", "tools", json.dumps({"model": "m", "message": {"content": "", "tool_calls": value},
+                                                                        "done": True}))
+       for label, value in (("zero", 0), ("false", False), ("empty_string", ""), ("empty_object", {}))},
     "oai_stream_chunk_not_an_object": ("oai", "stream", "data: \"hello\"\n\ndata: [DONE]\n\n"),
     "oai_stream_chunk_number_between_valid": ("oai", "stream", "data: " + json.dumps(_oai_chunk(delta={"content": "hi"})) + "\n\ndata: 7\n\ndata: [DONE]\n\n"),
     "native_content_number": ("native", "complete", json.dumps({"model": "m", "message": {"content": 5}, "done": True})),
@@ -144,6 +151,14 @@ VALID = {  # -> expected content
     "native_valid_stream_final_line_without_message": ("native", "stream", _ndjson(
         {"model": "m", "message": {"content": "hello"}, "done": False}, {"model": "m", "done": True, "done_reason": "stop"}), "hello"),
     "native_valid_tools_message_null": ("native", "tools", json.dumps({"model": "m", "message": None, "done": True}), ""),
+    # MC3 controls: the legitimate no-call shapes stay accepted on both adapters.
+    "oai_valid_tools_calls_null": ("oai", "tools", _oai(message={"role": "assistant", "content": "hi", "tool_calls": None}), "hi"),
+    "oai_valid_tools_calls_empty_list": ("oai", "tools", _oai(message={"role": "assistant", "content": "hi", "tool_calls": []}), "hi"),
+    "native_valid_tools_calls_absent": ("native", "tools", json.dumps({"model": "m", "message": {"content": "hi"}, "done": True}), "hi"),
+    "native_valid_tools_calls_null": ("native", "tools", json.dumps({"model": "m", "message": {"content": "hi", "tool_calls": None},
+                                                                     "done": True}), "hi"),
+    "native_valid_tools_calls_empty_list": ("native", "tools", json.dumps({"model": "m", "message": {"content": "hi", "tool_calls": []},
+                                                                           "done": True}), "hi"),
 }
 ALL = {**{k: v for k, v in MALFORMED.items()}, **{k: v[:3] for k, v in VALID.items()}}
 CURRENT = {"name": None}
@@ -223,6 +238,12 @@ def test_the_failure_names_what_was_received(stub_port, name, expected):
 def test_control_a_valid_reply_is_decoded_exactly_as_before(stub_port, name):
     response = asyncio.run(_call(name, stub_port))
     assert response.content == VALID[name][3]
+
+
+@pytest.mark.parametrize("name", ["oai_valid_tools_calls_null", "oai_valid_tools_calls_empty_list", "native_valid_tools_calls_absent",
+                                  "native_valid_tools_calls_null", "native_valid_tools_calls_empty_list", "oai_valid_tools_reasoning_only"])
+def test_mc3_control_absent_null_and_empty_tool_calls_are_no_calls(stub_port, name):
+    assert asyncio.run(_call(name, stub_port)).tool_calls == []
 
 
 def test_control_a_valid_tool_call_is_still_returned(stub_port):
