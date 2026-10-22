@@ -1708,11 +1708,11 @@ class PolymorphicValidator:
             if res["returncode"] == 0:
                 return {"success": True, "output": "Maven POM validation succeeded."}
             return {"success": False, "output": f"Maven POM validation failed:\n{res['stdout']}\n{res['stderr']}"}
-        except FileNotFoundError as e:
-            # 'mvn' itself isn't on PATH - a toolchain problem, not a POM
-            # defect. Same reasoning as run_compile_check()'s identical guard:
-            # must be returned, not silently swallowed, or a real toolchain
-            # gap gets misread as a code-content bug.
+        except OSError as e:
+            # 'mvn' itself isn't on PATH (FileNotFoundError), isn't executable, or the process could not be started - a
+            # toolchain problem, not a POM defect. Same reasoning as run_compile_check()'s identical guard: must be
+            # returned, not silently swallowed, or a real toolchain gap gets misread as a code-content bug. A timeout is not
+            # an exception here: ProcessController returns it as a non-zero result, handled above.
             return {"success": False, "output": f"Failed to invoke mvn validate: {e}"}
         except ContainmentSetupError:
             # SEC-002 (2026-09-12): a containment/resource setup failure
@@ -1726,9 +1726,9 @@ class PolymorphicValidator:
             # (kriya/workflow/retry_strategy.py's handle_attempt_failure),
             # never silently reported as gate PASS.
             raise
-        except Exception as e:
-            logger.warning(f"Failed to invoke mvn validate: {e}")
-            return {"success": True, "output": f"mvn validate could not be run ({e}) - skipped, not confirmed valid."}
+        # Nothing else is caught. This gate used to end in `except Exception: return {"success": True, ...skipped, not confirmed
+        # valid}`, so an unexpected failure (a policy denial from the command audit, a coding error) read as a PASS of the
+        # pom_validate gate. Now it propagates: _verification_gate records it and the attempt handler classifies it, never a pass.
 
     def resolve_maven_classpath(self) -> Optional[str]:
         """Resolves the REAL, full Maven classpath (including transitive
