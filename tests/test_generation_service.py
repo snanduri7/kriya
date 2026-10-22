@@ -607,3 +607,18 @@ def test_the_forwarders_keep_the_attempt_names_and_kinds():
     assert attempt._fallback_rejection is fallback_decision._fallback_rejection
     assert attempt.PLANNED_SOURCE_HEADER is generation_service.PLANNED_SOURCE_HEADER
     assert attempt._PLANNED_SOURCE_UNBOUNDED_TOKENS is generation_service._PLANNED_SOURCE_UNBOUNDED_TOKENS
+
+
+def test_oi45_this_listed_file_runs_from_a_fresh_working_directory_with_an_empty_memory():
+    """OI-45 sentinel: ``tests/conftest.py::_checkout_memory_isolated`` is autouse and keyed by file name, and this file is one of
+    ``CHECKOUT_MEMORY_RESOLVING_FILES``. If the fixture is dropped, un-autoused or this name leaves the set, the working directory
+    is the checkout again and the default ``./memory`` resolves into it (tests/test_checkout_memory_isolation.py pins the rest)."""
+    from pathlib import Path
+
+    from kriya.config import AppConfig
+
+    repository = Path(__file__).resolve().parent.parent
+    cwd = Path.cwd().resolve()
+    assert cwd != repository and repository not in cwd.parents
+    assert (cwd / "memory").is_dir() and not any((cwd / "memory").iterdir())
+    assert Path(AppConfig().paths.memory).resolve() == (cwd / "memory").resolve()      # the unchanged relative value, resolved here
