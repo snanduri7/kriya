@@ -302,7 +302,7 @@ def claim_run_id(workspace: str) -> Optional[str]:
 
 def note_approval_required(kind: str, reason: str, details: Dict[str, Any]) -> bool:
     """Called by the interactive callbacks of `kriya generate` before they would prompt. Inside a desktop launch: record the decision and return True (the
-    caller then DECLINES without prompting - nothing is approved). Outside a launch: return False and change nothing. Never raises."""
+    caller then answers without prompting - for a change or other approval ApprovalOutcome UNAVAILABLE, so nothing is approved and nobody declined). Outside a launch: return False and change nothing. Never raises."""
     try:
         if _ACTIVE is None:
             return False

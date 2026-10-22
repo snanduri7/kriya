@@ -2859,7 +2859,8 @@ class WorkflowEngine:
         # the learned reference, the Plan, the Architect incl. Stage 2A/2B, then the active-skill snapshot - driven by
         # kriya/workflow/work_unit_runner.py over one StageContext, with this engine's collaborators in StageDeps
         # (_work_unit_deps, resolved through this module at call time). A stage's early result (knowledge_gap, a
-        # Planner rejection, architect_file_list_rejected) is this method's result, unchanged.
+        # Planner rejection, architect_file_list_rejected, a Stage 2A dependency approval that is declined or unavailable: human_rejected / approval_required)
+        # is this method's result, unchanged.
         def _open_stage_checkpoints() -> Callable[..., None]:
             # Called by the runner between analysis and planning: exactly where the checkpoint fingerprints were
             # always computed (after any stage-1 skill bootstrap, before the Planner).

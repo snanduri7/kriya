@@ -999,7 +999,7 @@ def _stage_run(tmp_path: Path, *, goal: str = GOAL, planner: Callable[[int], str
             stack.enter_context(item)
         try:
             result: Any = asyncio.run(WorkflowController(eng).execute(**kwargs))
-        except Exception as error:   # a stage that raises (Stage 2A rejection): the exception IS the outcome
+        except Exception as error:   # a stage that raises: the exception IS the outcome (Stage 2A no longer does: a dependency approval not given is a result since 1-E)
             result = {"raised": type(error).__name__, "message": str(error)}
     rows, trace_ids = [], {}
     if os.path.isfile(trace_db_path(cfg)):
