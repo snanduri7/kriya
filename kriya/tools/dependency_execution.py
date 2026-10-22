@@ -124,8 +124,10 @@ MAVEN_VALIDATE_TIMED_OUT = "MAVEN_VALIDATE_TIMED_OUT"                      # sta
 MAVEN_VALIDATE_TERMINATED = "MAVEN_VALIDATE_TERMINATED"                    # killed by a signal without a verdict (not our timeout)
 MAVEN_VALIDATE_RESOLUTION_UNVERIFIED = "MAVEN_VALIDATE_RESOLUTION_UNVERIFIED"  # parent / plugin / dependency resolution or transfer failed: no trustworthy POM verdict
 MAVEN_VALIDATE_NO_DIAGNOSTICS = "MAVEN_VALIDATE_NO_DIAGNOSTICS"            # non-zero exit with no interpretable POM-model diagnostics
+MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID = "MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID"  # Maven refused its OWN configuration (settings / toolchains) before it read the POM
 # The codes of a Maven that DID start (the gate words them "returned no trustworthy verdict" instead of "could not start").
-MAVEN_VALIDATE_NO_VERDICT_CODES = frozenset({MAVEN_VALIDATE_TIMED_OUT, MAVEN_VALIDATE_TERMINATED, MAVEN_VALIDATE_RESOLUTION_UNVERIFIED, MAVEN_VALIDATE_NO_DIAGNOSTICS})
+MAVEN_VALIDATE_NO_VERDICT_CODES = frozenset({MAVEN_VALIDATE_TIMED_OUT, MAVEN_VALIDATE_TERMINATED, MAVEN_VALIDATE_RESOLUTION_UNVERIFIED, MAVEN_VALIDATE_NO_DIAGNOSTICS,
+                                             MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID})
 
 # Resolution / transport diagnostics, as real Maven 3.9 prints them (recorded: tests/fixtures/maven_validate and the live logs they cite). Any of them makes the POM verdict untrustworthy,
 # because a model problem reported next to an unresolved parent / BOM / plugin is usually a cascade of the failed resolution (the recorded env-T2 output shows exactly that).
@@ -135,6 +137,10 @@ _MAVEN_RESOLUTION_OR_TRANSPORT_RE = re.compile(
     r"MAVEN_ACQUISITION_INCOMPLETE|(?:Connect|Read) timed out|Connection (?:refused|reset)|Unknown ?[Hh]ost|Temporary failure in name resolution|"
     r"PKIX path|SSLHandshake|Network is unreachable|No route to host|status code: \d{3}|Transfer failed|Failure to transfer|Checksum validation failed|nodename nor servname"
 )
+# Maven's diagnostics about its OWN operator-level documents (the user / global settings and the toolchains file), recorded in tests/fixtures/maven_validate/recorded_operator_config.json:
+# `[ERROR] 1 problem was encountered while building the effective settings` / `[FATAL] Non-parseable settings <file>: Duplicated tag ... @ <file>, line 2, column 54`. They share the
+# located-problem shape (`Duplicated tag`, `@ ..., line N, column M`) of a POM-model problem, but name a document the candidate did not write and the Developer cannot repair.
+_MAVEN_OPERATOR_CONFIG_RE = re.compile(r"while building the effective (?:settings|toolchains)|Non-(?:parseable|readable) (?:settings|toolchains)\b")
 # Maven's own POM-model diagnostics (a located model problem, a malformed / non-parseable document, an unknown packaging, ...).
 _MAVEN_POM_MODEL_PROBLEM_RE = re.compile(
     r"Non-parseable POM|Malformed POM|Expected root element|Unrecognised tag|Duplicated tag|Unknown packaging|Invalid packaging|Invalid POM|"
@@ -145,12 +151,14 @@ _MAVEN_POM_MODEL_PROBLEM_RE = re.compile(
 def classify_maven_validate_failure(returncode: int, timed_out: bool, combined_output: str) -> Optional[str]:
     """Why a failed (non-zero) ``mvn validate`` may NOT convict the POM: the environment reason code, or None when Maven ran and rejected the POM with trustworthy model diagnostics.
 
-    Order: a timeout and a signal kill carry no verdict; resolution / transport evidence (checked BEFORE model problems - a cascade is not a verdict) makes any model message
+    Order: a timeout and a signal kill carry no verdict; Maven's own refusal of an operator document (settings / toolchains) is not a POM verdict; resolution / transport evidence (checked BEFORE model problems - a cascade is not a verdict) makes any model message
     untrustworthy; only then do located POM-model diagnostics convict; a non-zero exit with neither is uninterpretable. Captured output is the caller's to preserve."""
     if timed_out:
         return MAVEN_VALIDATE_TIMED_OUT
     if returncode < 0:
         return MAVEN_VALIDATE_TERMINATED
+    if _MAVEN_OPERATOR_CONFIG_RE.search(combined_output):
+        return MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID
     if classify_maven_offline_failure_text(combined_output) is OfflineFailureKind.MISSING_DEPENDENCY or _MAVEN_RESOLUTION_OR_TRANSPORT_RE.search(combined_output):
         return MAVEN_VALIDATE_RESOLUTION_UNVERIFIED
     if _MAVEN_POM_MODEL_PROBLEM_RE.search(combined_output):

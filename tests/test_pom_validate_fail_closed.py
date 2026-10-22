@@ -24,6 +24,7 @@ from kriya.tools.dependency_execution import (
     MAVEN_INVOCATION_FAILED,
     MAVEN_VALIDATE_NO_DIAGNOSTICS,
     MAVEN_VALIDATE_NO_VERDICT_CODES,
+    MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID,
     MAVEN_VALIDATE_RESOLUTION_UNVERIFIED,
     MAVEN_VALIDATE_TERMINATED,
     MAVEN_VALIDATE_TIMED_OUT,
@@ -195,7 +196,7 @@ def _raise_from_gate(tmp_path, result):
 
 @pytest.mark.parametrize("code,phrase", [(MAVEN_INVOCATION_FAILED, "could not start"), (MAVEN_VALIDATE_TIMED_OUT, "returned no trustworthy verdict"),
                                          (MAVEN_VALIDATE_RESOLUTION_UNVERIFIED, "returned no trustworthy verdict"), (MAVEN_VALIDATE_TERMINATED, "returned no trustworthy verdict"),
-                                         (MAVEN_VALIDATE_NO_DIAGNOSTICS, "returned no trustworthy verdict")])
+                                         (MAVEN_VALIDATE_NO_DIAGNOSTICS, "returned no trustworthy verdict"), (MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID, "returned no trustworthy verdict")])
 def test_a_maven_without_a_verdict_is_a_verification_infrastructure_failure_not_a_pom_defect(tmp_path, code, phrase):
     failure, recorded = _raise_from_gate(tmp_path, {"success": False, "output": "Failed to invoke mvn validate: [Errno 2]", "environment_reason_code": code})
     assert failure.type == "verification_infrastructure_failure" and failure.diagnostics["reason_code"] == code

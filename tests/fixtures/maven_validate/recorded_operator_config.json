@@ -1,0 +1,43 @@
+{
+ "_provenance": {
+  "tool": "Apache Maven 3.9.16 (real `mvn -B -o validate`, host mode; transfer_cut_short is online `mvn -B validate` against a local server that closes the body short)",
+  "recorded": "2026-10-22",
+  "scrubbed": "the temporary workspace / home / local port are replaced by <workspace> / <home> / <port>",
+  "how": "operator documents: ~/.m2/settings.xml (user.home redirected through .mvn/jvm.config), -gs / -t from .mvn/maven.config; a mirror of '*' to the cut-short server"
+ },
+ "settings_duplicated_tag": {
+  "returncode": 1,
+  "stdout": "[ERROR] Error executing Maven.\n[ERROR] 1 problem was encountered while building the effective settings\n[FATAL] Non-parseable settings <home>/.m2/settings.xml: Duplicated tag: 'localRepository' (position: START_TAG seen ...</localRepository><localRepository>... @2:54)  @ <home>/.m2/settings.xml, line 2, column 54\n\n",
+  "stderr": ""
+ },
+ "settings_not_xml": {
+  "returncode": 1,
+  "stdout": "[ERROR] Error executing Maven.\n[ERROR] 1 problem was encountered while building the effective settings\n[FATAL] Non-parseable settings <home>/.m2/settings.xml: only whitespace content allowed before start tag and not t (position: START_DOCUMENT seen t... @1:2)  @ <home>/.m2/settings.xml, line 1, column 2\n\n",
+  "stderr": ""
+ },
+ "global_settings_duplicated_tag": {
+  "returncode": 1,
+  "stdout": "[ERROR] Error executing Maven.\n[ERROR] 1 problem was encountered while building the effective settings\n[FATAL] Non-parseable settings <home>/gs.xml: Duplicated tag: 'localRepository' (position: START_TAG seen ...</localRepository><localRepository>... @2:54)  @ <home>/gs.xml, line 2, column 54\n\n",
+  "stderr": ""
+ },
+ "toolchains_duplicated_tag": {
+  "returncode": 1,
+  "stdout": "[ERROR] Error executing Maven.\n[ERROR] 1 problem was encountered while building the effective toolchains\n[FATAL] Non-parseable toolchains <home>/tc.xml: Duplicated tag: 'type' (position: START_TAG seen ...<type>jdk</type><type>... @1:46)  @ line 1, column 46\n\n",
+  "stderr": ""
+ },
+ "valid_user_settings": {
+  "returncode": 0,
+  "stdout": "[INFO] Scanning for projects...\n[INFO] \n[INFO] --------------------------------< g:a >---------------------------------\n[INFO] Building a 1\n[INFO]   from pom.xml\n[INFO] --------------------------------[ jar ]---------------------------------\n[INFO] ------------------------------------------------------------------------\n[INFO] BUILD SUCCESS\n[INFO] ------------------------------------------------------------------------\n[INFO] Total time:  0.051 s\n[INFO] Finished at: 2026-10-22T17:08:37+05:30\n[INFO] ------------------------------------------------------------------------\n",
+  "stderr": ""
+ },
+ "transfer_cut_short": {
+  "returncode": 1,
+  "stdout": "[INFO] Scanning for projects...\n[INFO] Downloading from cut: http://127.0.0.1:<port>/m/org/example/par/1/par-1.pom\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[FATAL] Non-resolvable parent POM for org.example:a:1: The following artifacts could not be resolved: org.example:par:pom:1 (absent): Could not transfer artifact org.example:par:pom:1 from/to cut (http://127.0.0.1:<port>/m): Premature end of Content-Length delimited message body (expected: 400; received: 9) and 'parent.relativePath' points at wrong local POM @ line 1, column 94\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project org.example:a:1 (<workspace>/pom.xml) has 1 error\n[ERROR]     Non-resolvable parent POM for org.example:a:1: The following artifacts could not be resolved: org.example:par:pom:1 (absent): Could not transfer artifact org.example:par:pom:1 from/to cut (http://127.0.0.1:<port>/m): Premature end of Content-Length delimited message body (expected: 400; received: 9) and 'parent.relativePath' points at wrong local POM @ line 1, column 94 -> [Help 2]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n[ERROR] [Help 2] http://cwiki.apache.org/confluence/display/MAVEN/UnresolvableModelException\n",
+  "stderr": ""
+ },
+ "pom_duplicated_tag": {
+  "returncode": 1,
+  "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[FATAL] Non-parseable POM <workspace>/pom.xml: Duplicated tag: 'version' (position: START_TAG seen ...<version>1</version><version>... @1:161)  @ line 1, column 161\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project  (<workspace>/pom.xml) has 1 error\n[ERROR]     Non-parseable POM <workspace>/pom.xml: Duplicated tag: 'version' (position: START_TAG seen ...<version>1</version><version>... @1:161)  @ line 1, column 161 -> [Help 2]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n[ERROR] [Help 2] http://cwiki.apache.org/confluence/display/MAVEN/ModelParseException\n",
+  "stderr": ""
+ }
+}
