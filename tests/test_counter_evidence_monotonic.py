@@ -217,6 +217,44 @@ def test_suite_preservation_a_known_changed_or_vanished_test_convicts_whatever_t
     assert requirement_outcomes(ledger, reqs)["REQ-2"] is RequirementOutcome.VIOLATED
 
 
+SUITE_NO_CUE = "Fix it.\nAll existing tests must keep passing."          # no "unchanged"/"intact"/...: the tests are not frozen
+TOUCHED = {"available": True, "changed_test_files": ["tests/test_suite.py"], "missing_test_files": ["tests/test_other.py"],
+           "changed_trust_surface": []}
+
+
+def _suite_outcome(tmp_path, goal, record, *, claims=None):
+    reqs = derive_requirements(goal)
+    ledger = unverified_ledger(reqs)
+    empty = validator_for(write_project(tmp_path / "empty", "x = 1\n"))            # zero executed tests: the suite itself proves nothing
+    [entry] = close_suite_preservation_requirements(
+        ledger, reqs, test_files=[], run_suite=lambda: empty.run_tests(), source="t", revision=1, test_immutability=record,
+        contract_claims=claims)
+    return entry, requirement_outcomes(ledger, reqs)["REQ-2"]
+
+
+def test_suite_preservation_a_changed_test_does_not_convict_a_statement_that_does_not_ask_for_unchanged_tests(tmp_path):
+    """The conviction is a consequence of the STATEMENT: tests are frozen only where it says so. "All existing tests must keep
+    passing" lets a candidate edit a test; the touched list alone convicts nothing (here the empty suite leaves it open)."""
+    entry, outcome = _suite_outcome(tmp_path, SUITE_NO_CUE, TOUCHED)
+    assert "violated" not in entry and entry["closed"] is False
+    assert outcome is RequirementOutcome.UNVERIFIED
+
+
+def test_suite_preservation_a_compound_statement_is_not_convicted_by_the_suite_closer_alone(tmp_path):
+    """A statement that also carries other claims (here: documentation) is judged by their producers; the suite closer convicts only a
+    statement whose claims are the regression/immutability pair, so a compound one is never over-convicted from here."""
+    from kriya.workflow.requirements import DOCUMENTATION_CLAIM, REGRESSION_PRESERVATION
+
+    entry, outcome = _suite_outcome(tmp_path, SUITE_UNCHANGED, TOUCHED, claims={"REQ-2": (REGRESSION_PRESERVATION, DOCUMENTATION_CLAIM)})
+    assert "violated" not in entry and entry["closed"] is False
+    assert outcome is RequirementOutcome.UNVERIFIED
+
+
+def test_suite_preservation_control_the_same_record_convicts_a_statement_that_does_ask_for_unchanged_tests(tmp_path):
+    entry, outcome = _suite_outcome(tmp_path, SUITE_UNCHANGED, TOUCHED)
+    assert entry["violated"] is True and outcome is RequirementOutcome.VIOLATED
+
+
 def test_suite_preservation_control_a_complete_clean_record_closes(tmp_path):
     clean = {"available": True, "changed_test_files": [], "missing_test_files": [], "changed_trust_surface": []}
     entry, outcome = _suite_closure(tmp_path, clean)

@@ -250,6 +250,39 @@ def test_a_genuine_kriya_coding_error_inside_an_adapter_is_still_a_raw_internal_
     assert _classify(raised.value).internal_framework_bug
 
 
+# Where a decoder's own code can fail, per path: (valid reply, the matching malformed reply, the module attribute whose failure is a
+# Kriya coding error on that path). The boundary: malformed EXTERNAL structure is the retryable REQUEST failure; an injected INTERNAL
+# coding error on the same path is never laundered into one (no broad catch around any path - complete, stream, tools, native).
+_DECODER_PATHS = {
+    "oai_complete": ("oai_valid", "oai_message_string", "kriya.core.inference_runtime._str_or_none"),
+    "oai_stream": ("oai_valid_stream", "oai_stream_chunk_not_an_object", "kriya.core.inference_runtime._provider_metadata"),
+    "oai_stream_finish": ("oai_valid_stream", "oai_stream_chunk_not_an_object", "kriya.core.inference_runtime._str_or_none"),
+    "oai_tools": ("oai_valid_tools", "oai_tools_calls_number", "kriya.core.inference_runtime.RawToolCall"),
+    "native_complete": ("native_valid", "native_content_number", "kriya.core.model_runtime.provider_text"),
+    "native_stream": ("native_valid_stream", "native_stream_content_number", "kriya.core.model_runtime.provider_text"),
+    "native_tools": ("native_valid_tools", "native_tools_content_number", "kriya.core.model_runtime.provider_text"),
+}
+
+
+@pytest.mark.parametrize("path", list(_DECODER_PATHS))
+def test_on_every_decoder_path_malformed_structure_is_request_and_an_internal_coding_error_is_internal(stub_port, monkeypatch, path):
+    valid, malformed, target = _DECODER_PATHS[path]
+    kind = ALL[valid][0]
+    with pytest.raises(ValueError) as external:
+        asyncio.run(_call(malformed, stub_port))
+    assert str(external.value).startswith("the provider's reply is malformed: ")
+    assert _adapter(kind).classify_error(external.value) is RuntimeErrorKind.REQUEST
+    assert not _classify(external.value).internal_framework_bug
+
+    def broken(*_args, **_kwargs):
+        raise AttributeError("'NoneType' object has no attribute 'strip'")
+    monkeypatch.setattr(target, broken)
+    with pytest.raises(AttributeError) as internal:
+        asyncio.run(_call(valid, stub_port))
+    assert internal.value.args == ("'NoneType' object has no attribute 'strip'",)         # itself, not a translated malformed reply
+    assert _classify(internal.value).internal_framework_bug
+
+
 # ---------------------------------------------------------------------------------- the original E.1 end-to-end scenario
 
 @pytest.mark.parametrize("scenario", ["oai_message_null", "oai_error_body_200", "native_message_string", "connection_error"])
