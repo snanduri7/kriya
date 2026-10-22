@@ -15,7 +15,13 @@ import json
 import sqlite3
 
 import pytest
-from test_s2b_redaction_completeness import GATES, R, S, _kup
+from test_s2b_redaction_completeness import (  # noqa: F401 - _homes is an autouse pytest fixture (isolates KRIYA_AUTHORITY_HOME / KRIYA_TRUST_FILE)
+    GATES,
+    R,
+    S,
+    _homes,
+    _kup,
+)
 
 from kriya.config import AppConfig
 from kriya.core.state_paths import trace_db_path
