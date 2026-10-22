@@ -12,10 +12,10 @@ architecture stage's Stage 2B extraction, before the Developer loop. Collaborato
 """
 from __future__ import annotations
 
-import asyncio
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
+from kriya.policy.approval import await_if_awaitable, resolve_approval_result
 from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.live_lookup import _extract_first_usable, _resolve_via_web_lookup
 from kriya.workflow.run_events import EventAuthority, RunEvent
@@ -253,9 +253,8 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
             proceed = bool(found)
             if found and web_lookup_callback:
                 try:
-                    proceed = web_lookup_callback(found)
-                    if asyncio.iscoroutine(proceed):
-                        proceed = await proceed
+                    # a review of externally fetched references: resolved by the approval owner, so an unresolved Task or an unrecognized answer never adopts them
+                    proceed = (await resolve_approval_result(web_lookup_callback(found))).approved
                 except Exception as ex:
                     logger.warning(f"web_lookup_callback failed, discarding auto-found references: {ex}")
                     proceed = False
@@ -293,9 +292,7 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
         supplied = None
         if remaining_unverified or remaining_missing:
             try:
-                supplied = skill_gap_callback(gap_reason, [s.name for s in remaining_unverified] + remaining_missing)
-                if asyncio.iscoroutine(supplied):
-                    supplied = await supplied
+                supplied = await await_if_awaitable(skill_gap_callback(gap_reason, [s.name for s in remaining_unverified] + remaining_missing))  # supplied CONTENT, not a decision
             except Exception as ex:
                 logger.warning(f"skill_gap_callback failed, proceeding without it: {ex}")
                 supplied = None
@@ -428,9 +425,7 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
                     resolution = find_conflict_resolution(skills_dir, name_a, rule_a, name_b, rule_b)
                     if resolution is None:
                         try:
-                            raw = skill_conflict_callback(name_a, rule_a, name_b, rule_b, conflict.get("explanation", ""))
-                            if asyncio.iscoroutine(raw):
-                                raw = await raw
+                            raw = await await_if_awaitable(skill_conflict_callback(name_a, rule_a, name_b, rule_b, conflict.get("explanation", "")))
                         except Exception as ex:
                             logger.warning(f"skill_conflict_callback failed, proceeding without resolving: {ex}")
                             raw = None

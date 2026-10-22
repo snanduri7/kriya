@@ -417,6 +417,47 @@ def test_the_stage_2a_dependency_approval_awaits_an_async_callback_like_every_ot
     assert len(answered) == 1 and answered[0][0] == [] and "Knowledge Guard detected" in answered[0][1]     # asked once, with the prompt
 
 
+def _shaped_callback(kind, value, answered):
+    """An approval callback answering with ``value`` as a sync value, a coroutine, an asyncio Task or a Future (built inside the running loop)."""
+    async def coroutine():
+        return value
+
+    def callback(diffs, reason):
+        answered.append((diffs, reason))
+        if kind == "sync":
+            return value
+        if kind == "coroutine":
+            return coroutine()
+        if kind == "task":
+            return asyncio.ensure_future(coroutine())
+        future = asyncio.get_running_loop().create_future()
+        future.set_result(value)
+        return future
+    return callback
+
+
+@pytest.mark.parametrize("kind", ["sync", "coroutine", "task", "future"])
+@pytest.mark.parametrize("value,outcome", [
+    (True, "approved"), (False, "User rejected post-cutoff dependency risk in Stage 2A"),
+    ("unavailable", "approval of the post-cutoff dependency risk could not be obtained in Stage 2A \\(APPROVAL_LAUNCH_CANNOT_ASK\\)"),
+    (None, "could not be obtained in Stage 2A \\(APPROVAL_RESULT_UNRECOGNIZED\\)")], ids=["approved", "declined", "unavailable", "unrecognized"])
+def test_the_stage_2a_dependency_approval_acts_on_the_resolved_decision_only(tmp_path, kind, value, outcome):
+    """F4 + N1 at Stage 2A. A Task/Future is not a coroutine and is truthy: it used to be read as approval. An UNAVAILABLE answer (a launch that cannot ask) is not a rejection:
+    the run still stops, and says that no decision could be obtained, with the closed reason code."""
+    from kriya.policy.approval import APPROVAL_LAUNCH_CANNOT_ASK, ApprovalOutcome
+    answered = []
+    answer = ApprovalOutcome.unavailable_because(APPROVAL_LAUNCH_CANNOT_ASK) if value == "unavailable" else value
+    guard = _Guard(lambda text: [GAP] if "mylib" in text else [])
+    ctx = _design_ctx(tmp_path, predetermined_design="Use mylib==1.2.3.", predetermined_architect_files=["calc.py"],
+                      guard=guard, approval_callback=_shaped_callback(kind, answer, answered))
+    if outcome == "approved":
+        assert asyncio.run(design_work_unit(ctx, _deps(_engine(tmp_path)))) is None
+    else:
+        with pytest.raises(ValueError, match=outcome):
+            asyncio.run(design_work_unit(ctx, _deps(_engine(tmp_path))))
+    assert len(answered) == 1
+
+
 def test_the_post_architect_recomputation_updates_the_control_context_and_the_run_state(tmp_path):
     """A LOW/LIGHT request whose design plans pom.xml escalates to HIGH/HEAVY before the Developer runs: the stage replaces
     ``ctx.control`` and records the new route AND process profile on the run state (the run metrics read both). Found by an

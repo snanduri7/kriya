@@ -60,7 +60,12 @@ from kriya.platform import git_argv
 from kriya.platform.services import ENTRY_REFUSED_EXIT_CODE
 from kriya.platform.services import entry_refusal as platform_entry_refusal
 from kriya.plugins.plugin import PluginManager
-from kriya.policy.approval import TypedApprovalCallback
+from kriya.policy.approval import (
+    APPROVAL_LAUNCH_CANNOT_ASK,
+    ApprovalOutcome,
+    TypedApprovalCallback,
+    classify_approval_answer,
+)
 from kriya.prompt import PromptEngine
 from kriya.skills import SkillEngine
 from kriya.workflow import WorkflowEngine
@@ -2788,10 +2793,11 @@ def _bind_requirement_disposition(cfg: AppConfig, disposition_path: str, require
 def _approval_decision(files: List[Dict[str, str]], reason: str, yes: bool) -> Any:
     """The `kriya generate` approval callback (module level so its behaviour is tested directly, not by reading its source).
 
-    Inside a desktop launch (`--launch-id`): a CHANGE (non-empty change set) is held as a durable pending review and the awaitable that resolves to the human's decision is
-    returned - the change gate awaits it. Every other approval (an empty change set: knowledge gap, runtime command, policy action) is declined WITHOUT prompting and a
-    plain False is returned, never an awaitable, because those call sites do not await and an un-awaited coroutine would read as truthy, i.e. as approval. `--yes` can
-    never take effect inside a launch (the launch refuses it, and this returns before consulting it). Outside a launch it is the terminal behaviour, unchanged."""
+    Inside a desktop launch (`--launch-id`): a CHANGE (non-empty change set) is held as a durable pending review and the awaitable that resolves to the human's decision (an
+    ApprovalOutcome) is returned - the change gate awaits it. Every other approval (an empty change set: knowledge gap, runtime command, policy action; or a change whose review
+    could not be recorded) cannot be put to anyone: the launch answers `ApprovalOutcome.unavailable_because(APPROVAL_LAUNCH_CANNOT_ASK)` WITHOUT prompting, never a bare False. That
+    is NOT a human decline - nobody was asked - and the callers report it as "approval required and not available", not as a human rejection. `--yes` can never take effect inside a
+    launch (the launch refuses it, and this returns before consulting it). Outside a launch it is the terminal behaviour, unchanged (a plain bool: True approves, False is the person's no)."""
     from kriya.control.launch import (
         note_approval_required,  # GUI M7: recorded when a desktop launch reaches a human decision it cannot take
         request_change_approval,  # GUI final: a desktop launch's CHANGE review, answered by `kriya launch-decision`
@@ -2800,7 +2806,7 @@ def _approval_decision(files: List[Dict[str, str]], reason: str, yes: bool) -> A
     if awaiting is not None:
         return awaiting
     if note_approval_required("change_approval" if files else "other_approval", reason, {"files": [str(f.get("filepath", "")) for f in files][:50]}):
-        return False  # a desktop launch never approves on its own and never prompts: declining stops the run cleanly (human_rejected)
+        return ApprovalOutcome.unavailable_because(APPROVAL_LAUNCH_CANNOT_ASK)  # a desktop launch never approves on its own and never prompts: nothing is approved and nobody declined
     # OI-146 (owner decision 2026-10-20): the diff lines are the approval surface and are shown as they are; the reason is
     # display text and goes through the one redaction owner (the same rule as `kriya proposal execute`'s prompt).
     if yes:
@@ -2844,7 +2850,7 @@ def _runtime_command_decision(subject: Any, yes: bool) -> Any:
         return awaiting
     if note_approval_required("runtime_command", subject.reason, {"commands": [" ".join(c) for c in subject.commands][:10]}):
         return RuntimeCommandDecision(None)
-    return RuntimeCommandDecision(subject.fingerprint if _approval_decision([], subject.reason, yes) else None)
+    return RuntimeCommandDecision(subject.fingerprint if classify_approval_answer(_approval_decision([], subject.reason, yes)).approved else None)
 
 
 def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,

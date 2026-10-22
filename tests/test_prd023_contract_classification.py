@@ -7,6 +7,7 @@ blocking and is never offered to anyone; only evidence-backed potentially-
 derived or indeterminate changes may go to a human, under an explicit policy,
 and only a real approval creates a revision-bound authorization.
 """
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -15,6 +16,7 @@ from _strict_doubles import developer_double
 
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
+from kriya.policy.approval import APPROVAL_LAUNCH_CANNOT_ASK, APPROVAL_REVIEW_EXPIRED, ApprovalOutcome
 from kriya.workflow.attempt import _classify_and_escalate_contract_changes, run_attempt
 from kriya.workflow.contract_authority import (
     AuthorizationAuthority,
@@ -190,6 +192,48 @@ async def test_a_declined_escalation_stays_blocked(repo):
     ctx = _ctx(repo, escalation="human", mode="human-in-the-loop", callback=lambda diffs, reason: False)
     _, remaining, _, reason = await _escalate(repo, ctx)
     assert len(remaining) == 1 and reason == CONTRACT_ESCALATION_DECLINED
+
+
+def _shaped(kind, value):
+    async def coroutine():
+        return value
+
+    def callback(diffs, reason):
+        if kind == "sync":
+            return value
+        if kind == "coroutine":
+            return coroutine()
+        if kind == "task":
+            return asyncio.ensure_future(coroutine())
+        future = asyncio.get_running_loop().create_future()
+        future.set_result(value)
+        return future
+    return callback
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["sync", "coroutine", "task", "future"])
+@pytest.mark.parametrize("value,expected", [
+    (False, CONTRACT_ESCALATION_DECLINED), (ApprovalOutcome.decline(), CONTRACT_ESCALATION_DECLINED),
+    (ApprovalOutcome.unavailable_because(APPROVAL_LAUNCH_CANNOT_ASK), CONTRACT_ESCALATION_UNAVAILABLE),
+    (ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED), CONTRACT_ESCALATION_UNAVAILABLE), (None, CONTRACT_ESCALATION_UNAVAILABLE)],
+    ids=["False", "DECLINED", "UNAVAILABLE-launch", "UNAVAILABLE-expired", "None"])
+async def test_the_escalation_reason_tells_a_human_decline_from_an_answer_nobody_gave(repo, kind, value, expected):
+    """N1 + F4: only an actual decline is CONTRACT_ESCALATION_DECLINED; a launch that cannot ask, an expired review or an unrecognized answer is UNAVAILABLE. A Task/Future is resolved,
+    never read as approval. In every case the change stays a violation and nothing is authorized."""
+    ctx = _ctx(repo, escalation="human", mode="human-in-the-loop", callback=_shaped(kind, value))
+    state, remaining, _, reason = await _escalate(repo, ctx)
+    assert len(remaining) == 1 and reason == expected
+    assert state.human_contract_authorizations == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["sync", "coroutine", "task", "future"])
+@pytest.mark.parametrize("value", [True, ApprovalOutcome.approve()], ids=["True", "APPROVED"])
+async def test_an_approval_resolves_from_every_awaitable_shape_and_authorizes_the_offered_change(repo, kind, value):
+    ctx = _ctx(repo, escalation="human", mode="human-in-the-loop", callback=_shaped(kind, value))
+    state, remaining, _, reason = await _escalate(repo, ctx)
+    assert reason is None and remaining == [] and len(state.human_contract_authorizations) == 1
 
 
 @pytest.mark.asyncio

@@ -96,13 +96,14 @@ def test_candidate_digest_and_decide_review_are_launch_approvals(tmp_path):
     (tmp_path / "proj").mkdir()
     _canonical, outcome = _run(tmp_path / "proj", scenario)
     code, accepted = outcome["scenario"]
-    assert code == "STALE_REVIEW" and accepted["accepted"] is True and accepted["code"] == "ACCEPTED" and outcome["approved"] is True
+    assert code == "STALE_REVIEW" and accepted["accepted"] is True and accepted["code"] == "ACCEPTED" and outcome["approved"] == approval.ApprovalOutcome.approve()
     with pytest.raises(launch_approval.ApprovalRefused) as invalid:
         port.decide_review(str(tmp_path), "bad", "ra-" + "0" * 24, "sha256:" + "0" * 64, "approve")
     assert invalid.value.code == "INVALID_REQUEST"
 
 
-@pytest.mark.parametrize("answer", [True, False])
+@pytest.mark.parametrize("answer", [approval.ApprovalOutcome.approve(), approval.ApprovalOutcome.decline(), approval.ApprovalOutcome.unavailable_because(approval.APPROVAL_REVIEW_EXPIRED)],
+                         ids=["approved", "declined", "unavailable"])
 def test_the_waits_forward_to_the_owner_functions_by_name(monkeypatch, answer):
     seen = []
 
@@ -117,7 +118,7 @@ def test_the_waits_forward_to_the_owner_functions_by_name(monkeypatch, answer):
     monkeypatch.setattr(launch_approval, "await_decision", await_decision)
     monkeypatch.setattr(launch_approval, "await_runtime_decision", await_runtime_decision)
     port = AuthorityPort()
-    assert asyncio.run(port.await_source_decision("S", "ra-1", "sha256:d")) is answer
+    assert asyncio.run(port.await_source_decision("S", "ra-1", "sha256:d")) is answer, "the typed outcome is forwarded unchanged"
     assert asyncio.run(port.await_runtime_decision("S", "ra-2", "sha256:f")) == ("decision", answer)
     assert seen == [("source", "S", "ra-1", "sha256:d"), ("runtime", "S", "ra-2", "sha256:f")]
 
@@ -252,10 +253,13 @@ def test_runtime_command_review_through_the_port_is_the_parameter_launch_approva
     assert launch_approval.build_pending_runtime(LID, "wsid", 1, subject, review=refusing) is None and refusing.calls == ["reviewable"]
 
 
-@pytest.mark.parametrize("approved", [True, False])
-def test_the_runtime_wait_answers_with_the_ports_typed_decision(monkeypatch, approved):
+@pytest.mark.parametrize("answer", [approval.ApprovalOutcome.approve(), approval.ApprovalOutcome.decline(), approval.ApprovalOutcome.unavailable_because(approval.APPROVAL_REVIEW_EXPIRED)],
+                         ids=["approved", "declined", "unavailable"])
+def test_the_runtime_wait_answers_with_the_ports_typed_decision(monkeypatch, answer):
+    approved = answer.approved
+
     async def await_decision(session, review_id, digest):
-        return approved
+        return answer
 
     monkeypatch.setattr(launch_approval, "await_decision", await_decision)
     expected = "sha256:" + "e" * 64 if approved else None

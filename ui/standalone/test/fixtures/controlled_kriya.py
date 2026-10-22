@@ -123,7 +123,7 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
                 from kriya.control.launch import request_change_approval
                 files = ([{"filepath": d["path"], "content": d["diff"]} for d in DIFFS] if DIFFS else [{"filepath": c["path"], "content": f"--- a/{c['path']}\n+++ b/{c['path']}\n@@ -0,0 +1,3 @@\n+public class HelloKriya {{\n+  public static void main(String[] a) {{ System.out.println(\"Hello from Kriya\"); }}\n+}}\n"} for c in CHANGES])
                 awaiting = request_change_approval(files, SCRIPT.get("review_reason") or "Human-in-the-loop review policy\n\n=== Automated Code Review ===\nThe application prints the requested greeting and includes a unit test.")
-                approved = asyncio.run(awaiting) if awaiting is not None else False
+                approved = asyncio.run(awaiting).approved if awaiting is not None else False  # the awaitable resolves to a typed ApprovalOutcome (no truth value): read .approved
             if (OUTCOME == "runtime_review" or (OUTCOME == "greenfield_flow" and approved is True)) and passed:
                 from kriya.control.launch import request_runtime_command_approval
                 from kriya.workflow.runtime_command_approval import build_subject
@@ -141,7 +141,7 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
                 files = ([{"filepath": d["path"], "content": d["diff"]} for d in DIFFS] if DIFFS
                          else [{"filepath": c["path"], "content": f"--- a/{c['path']}\n+++ b/{c['path']}\n@@ -1 +1 @@\n-old\n+new\n"} for c in scripted])
                 awaiting = request_change_approval(files, SCRIPT.get("review_reason") or "Human-in-the-loop review policy\n\n=== Automated Code Review ===\nThe change implements the goal.")
-                approved = asyncio.run(awaiting) if awaiting is not None else False
+                approved = asyncio.run(awaiting).approved if awaiting is not None else False  # the awaitable resolves to a typed ApprovalOutcome (no truth value): read .approved
                 if approved and SCRIPT.get("post_approval_ms"):
                     time.sleep(float(SCRIPT["post_approval_ms"]) / 1000.0)
         pointer = scope.store_pointer()

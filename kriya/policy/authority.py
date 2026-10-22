@@ -34,7 +34,7 @@ from kriya.config.authority_approval import (
     validate_trust_path_outside_workspace as validate_trust_path_outside_workspace,
 )
 from kriya.policy import approval as _approval
-from kriya.policy.approval import RuntimeCommandReviewPort
+from kriya.policy.approval import ApprovalOutcome, RuntimeCommandReviewPort
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, MCPCapabilityProfileIdentity, MCPToolIdentity, PolicyResult
 
@@ -83,8 +83,8 @@ class AuthorityPort:
 
         return launch_approval.candidate_digest(files)
 
-    async def await_source_decision(self, session: Any, review_id: str, digest: str) -> bool:
-        """``launch_approval.await_decision``: True ONLY for a durable approval of exactly ``digest``."""
+    async def await_source_decision(self, session: Any, review_id: str, digest: str) -> ApprovalOutcome:
+        """``launch_approval.await_decision``: APPROVED ONLY for a durable approval of exactly ``digest``; a person's rejection is DECLINED, a review nobody decided is UNAVAILABLE."""
         from kriya.control import launch_approval
 
         return await launch_approval.await_decision(session, review_id, digest)

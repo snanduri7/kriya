@@ -105,6 +105,22 @@ def test_every_approval_decision_is_recorded_with_its_triggers(tmp_path):
     assert _generation(cfg)["human_escalations"] == {"approved": 1, "rejected": 1, "unavailable": 1}
 
 
+def test_the_approval_decision_event_names_why_no_decision_could_be_obtained(tmp_path):
+    """N1: a person's no (False / DECLINED), a launch that could not ask (UNAVAILABLE) and an approval are told apart by `outcome`; an UNAVAILABLE outcome also carries its closed
+    machine-readable `reason_code`. An approval, a decline and a missing callback keep their recorded shape (no `reason_code` key: `outcome` already names them)."""
+    from kriya.policy.approval import APPROVAL_REVIEW_EXPIRED, ApprovalOutcome
+    cases = {"approved": (True, "approved", None), "declined": (False, "rejected", None), "typed-declined": (ApprovalOutcome.decline(), "rejected", None),
+             "expired": (ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED), "unavailable", "APPROVAL_REVIEW_EXPIRED"),
+             "garbage": ("yes", "unavailable", "APPROVAL_RESULT_UNRECOGNIZED")}
+    for name, (decision, outcome, code) in cases.items():
+        cfg, _result, _seen = _approval_run(tmp_path / name, decision=decision)
+        event = _events(load_trace_runs(trace_db_path(cfg)), "approval.decision")[-1]  # one trace store per test: the latest run's decision is the last
+        assert (event["outcome"], event.get("reason_code")) == (outcome, code), name
+    cfg, _result, _seen = _approval_run(tmp_path / "no-callback", decision=None)
+    event = _events(load_trace_runs(trace_db_path(cfg)), "approval.decision")[-1]
+    assert event["outcome"] == "unavailable" and event.get("reason_code") is None
+
+
 def test_an_unattached_pre_approval_review_is_recorded_and_shown_to_the_approver(tmp_path):
     calls = []
 

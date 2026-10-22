@@ -38,7 +38,6 @@ imported here directly. This module never imports ``kriya.workflow.attempt``, ``
 state module is not imported; AttemptContext lives in attempt.py, OI-46), as is the state module's
 ``APIContractRecovery`` of one signature.
 """
-import asyncio
 import hashlib
 import os
 import re
@@ -47,6 +46,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import AUTHORITATIVE_GOAL_SECTION_HEADER, PLANNED_IMPLEMENTATION_SECTION_HEADER
 from kriya.config.authority import is_human_in_the_loop
+from kriya.policy.approval import resolve_approval
 from kriya.workflow.edit_safety import StagedFileWrite, content_revision
 from kriya.workflow.file_integrity import file_raw_digest
 from kriya.workflow.file_resolution import IncompleteGenerationError
@@ -650,10 +650,11 @@ async def _classify_and_escalate_contract_changes(
         deps.logger.warning("Contract change needs human authorization but none can be asked - blocked: %s",
                        [c.id for c in escalatable])
         return violations, classifications, CONTRACT_ESCALATION_UNAVAILABLE
-    approved = ctx.approval_callback([], escalation_prompt(escalatable))
-    if asyncio.iscoroutine(approved):
-        approved = await approved
-    if not approved:
+    outcome = await resolve_approval(ctx.approval_callback, [], escalation_prompt(escalatable))
+    if outcome.unavailable:  # nobody was asked or nobody decided: the same stop as "none can be asked", never a human decline
+        deps.logger.warning("Contract change needs human authorization but no decision could be obtained (%s) - blocked: %s", outcome.reason_code, [c.id for c in escalatable])
+        return violations, classifications, CONTRACT_ESCALATION_UNAVAILABLE
+    if not outcome.approved:
         return violations, classifications, CONTRACT_ESCALATION_DECLINED
     plan_revision = (getattr(ctx.structured_plan, "plan_id", None)
                      or hashlib.sha256((ctx.grounding_goal or ctx.goal).encode("utf-8")).hexdigest())

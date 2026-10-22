@@ -17,6 +17,7 @@ from kriya.context.workspace_identity import workspace_identity
 from kriya.control import launch as launch_module
 from kriya.control.persistence import launch_review_decision_path, load_launch_record
 from kriya.control.run_coordinator import begin_mutating_run
+from kriya.policy.approval import ApprovalOutcome
 from kriya.workflow.runtime_command_approval import RuntimeCommandDecision, build_subject
 
 CWD = "/private/var/kriya/worktrees/run-1"
@@ -121,7 +122,7 @@ def test_a_decision_of_the_other_kind_is_refused_both_ways(ws):
                 approval.decide(canonical, "20261010T101010-abcdef09", pending["review_id"], pending["candidate_digest"], "approve", "runtime_command")
             assert refused.value.code == "WRONG_REVIEW_KIND"
             approval.decide(canonical, "20261010T101010-abcdef09", pending["review_id"], pending["candidate_digest"], "reject", "change_approval")
-            assert await asyncio.wait_for(task, 20) is False
+            assert await asyncio.wait_for(task, 20) == ApprovalOutcome.decline()
         with begin_mutating_run(canonical):
             asyncio.run(main_())
     finally:

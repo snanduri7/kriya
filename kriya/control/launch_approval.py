@@ -33,6 +33,9 @@ from kriya.control.persistence import (
 )
 from kriya.control.run_ownership import probe_run_lock
 from kriya.foundation.redaction import redact_text, redact_value
+from kriya.policy import (
+    approval as _owner,  # the typed ApprovalOutcome and its reason codes (used here, not re-exported)
+)
 
 # Moved to AUTHORITY's approval owner (kriya/policy/approval.py) in slice C3, re-exported here as themselves for this module's importers. Removed in P1.
 from kriya.policy.approval import KIND_CHANGE as KIND_CHANGE
@@ -133,8 +136,9 @@ def valid_decision_payload(payload: Optional[Dict[str, Any]], launch_id: str, re
             and payload.get("candidate_digest") == digest and payload.get("workspace_identity") == workspace_identity_value and payload.get("decision") in DECISIONS)
 
 
-async def await_decision(session: Any, review_id: str, digest: str) -> bool:
-    """Block (cooperatively) until the review is decided, expired or abandoned; returns True ONLY for a durable approval."""
+async def await_decision(session: Any, review_id: str, digest: str) -> _owner.ApprovalOutcome:
+    """Block (cooperatively) until the review is decided, expired or abandoned. APPROVED only for a durable approval; DECLINED only for a durable rejection by the person;
+    UNAVAILABLE (with its reason code) when nobody decided - the review expired, the host went away, the wait was interrupted - or the decision could not be made durable."""
     try:
         return await _wait(session, review_id, digest)
     except BaseException:  # the terminal's own cancellation (SIGINT -> KeyboardInterrupt) or a cancelled task: the review ends undecided, and the record says so
@@ -145,10 +149,11 @@ async def await_decision(session: Any, review_id: str, digest: str) -> bool:
 async def await_runtime_decision(session: Any, review_id: str, fingerprint: str, review: RuntimeCommandReviewPort = RUNTIME_COMMAND_REVIEW) -> Any:
     """The runtime-command review's wait: the same durable, fail-closed decision as a change review, answered with the fingerprint the approval is bound to (as
     ``review``'s typed decision: a ``RuntimeCommandDecision`` by default)."""
-    return review.decision(fingerprint if await await_decision(session, review_id, fingerprint) else None)
+    outcome = await await_decision(session, review_id, fingerprint)
+    return review.decision(fingerprint if outcome.approved else None)
 
 
-async def _wait(session: Any, review_id: str, digest: str) -> bool:
+async def _wait(session: Any, review_id: str, digest: str) -> _owner.ApprovalOutcome:
     # The expiry is the WALL-CLOCK instant Kriya recorded (the same one `decide` enforces), not a monotonic timer that stops while the machine sleeps; and the host is the
     # parent this PROCESS started under (sampled when the launch opened), so a host that died before the wait began is noticed too.
     pending = session.record.get("pending_approval") or {}
@@ -160,18 +165,18 @@ async def _wait(session: Any, review_id: str, digest: str) -> bool:
         if valid_decision_payload(payload, session.launch_id, review_id, digest, identity):
             if _now() > expires:  # consume-time expiry: a decision file that arrives after the review's end is not honoured, whoever wrote it
                 session.resolve_review(review_id, STATUS_EXPIRED, {"decision": None, "decided_at": _stamp(_now()), "source": "timeout"})
-                return False
+                return _owner.ApprovalOutcome.unavailable_because(_owner.APPROVAL_REVIEW_EXPIRED)
             approved = payload["decision"] == "approve"
             # DURABLE BEFORE RESUME: the record says APPROVED before the workflow is allowed to continue; if that cannot be written, nothing is applied
             if session.resolve_review(review_id, STATUS_APPROVED if approved else STATUS_REJECTED, {"decision": payload["decision"], "decided_at": payload.get("decided_at"), "source": "launch-decision"}):
-                return approved
-            return False
+                return _owner.ApprovalOutcome.approve() if approved else _owner.ApprovalOutcome.decline()
+            return _owner.ApprovalOutcome.unavailable_because(_owner.APPROVAL_DECISION_NOT_RECORDED)
         if os.getppid() != parent:
             session.resolve_review(review_id, STATUS_EXPIRED, {"decision": None, "decided_at": _stamp(_now()), "source": "host-gone"})
-            return False
+            return _owner.ApprovalOutcome.unavailable_because(_owner.APPROVAL_REVIEW_EXPIRED)
         if _now() > expires:
             session.resolve_review(review_id, STATUS_EXPIRED, {"decision": None, "decided_at": _stamp(_now()), "source": "timeout"})
-            return False
+            return _owner.ApprovalOutcome.unavailable_because(_owner.APPROVAL_REVIEW_EXPIRED)
         await asyncio.sleep(POLL_SECONDS)
 
 

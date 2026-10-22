@@ -22,10 +22,13 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Dict, List, Optional
 
 from kriya.control.persistence import load_launch_record, save_launch_record
 from kriya.foundation.redaction import redact_text, redact_value
+
+if TYPE_CHECKING:
+    from kriya.policy.approval import ApprovalOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +157,7 @@ class LaunchSession:
             if isinstance(details, dict) and details.get("run_id") == self.launch_id:
                 self._trace_run_id = trace_run_id
 
-    def request_change_approval(self, files: List[Dict[str, str]], reason: str) -> Optional[Awaitable[bool]]:
+    def request_change_approval(self, files: List[Dict[str, str]], reason: str) -> Optional[Awaitable[ApprovalOutcome]]:
         """The change gate asked for a human decision. Record the exact pending review durably (bound to this launch, workspace and candidate) and return the
         awaitable that resolves to the human's decision (see kriya/control/launch_approval.py). None = no review could be recorded: the caller declines."""
         from kriya.control.launch_approval import await_decision, build_pending
@@ -311,7 +314,7 @@ def note_approval_required(kind: str, reason: str, details: Dict[str, Any]) -> b
         return True
 
 
-def request_change_approval(files: List[Dict[str, str]], reason: str) -> Optional[Awaitable[bool]]:
+def request_change_approval(files: List[Dict[str, str]], reason: str) -> Optional[Awaitable[ApprovalOutcome]]:
     """For the change gate's callback in `kriya generate`: inside a desktop launch with a non-empty change set, the awaitable that resolves to the human
     decision (the callback returns it; the change gate awaits it). None outside a launch, for an empty change set, or when no review could be recorded."""
     try:

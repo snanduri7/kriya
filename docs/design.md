@@ -3289,6 +3289,8 @@ A dedicated reason code was NOT added: both closed tables that could hold it mov
 tests/golden/policy_approval/serialized_forms.json) or the KUP schema (`BLOCKED_REASON_CODES`) - an owner STOP
 (handover/MODULARIZATION/S2d-DECISION-TO-KILLER.md). OI-153 stays open for S20 I-9 (the launch record's other raw notes).
 
+**Approval outcome contract (N1/F4).** The general approval callback's answer is the closed, typed `ApprovalOutcome` (`APPROVED` / `DECLINED` / `UNAVAILABLE`, each with a reason code) resolved by one owner, `kriya/policy/approval.py::resolve_approval`. A desktop launch that cannot put a decision to a person, or whose review expired, is UNAVAILABLE - not a human decline - so the run ends `approval_required` ("approval required and not available"), not `human_rejected`; a person's reject stays `human_rejected`. An unresolved Task/Future or any unrecognized callback answer is never read as approval. The full statement is in `handover/claude-context/generation-pipeline.md` (step 6).
+
 ### S20 - stored-evidence redaction, first ingress; endpoint display (2026-10-20, OI-134, OI-152; STOPPED at the first golden move)
 
 OBS-003 / KRP-025 (REQUIRED) say secrets are redacted in logs, traces and evidence. The preflight

@@ -46,7 +46,7 @@ _EVENT_DETAIL_KEYS: Mapping[str, Tuple[str, ...]] = {
     "static_analysis.result": ("outcome", "requirement", "accepted_risk", "reason_codes", "waiver_ids", "coverage"),
     "workspace_commit.failed": ("reason_code", "workspace_state"),
     "review.pre_approval_unattached": ("reason_code",),
-    "approval.decision": ("outcome", "triggers"),
+    "approval.decision": ("outcome", "triggers", "reason_code"),
     "authority.expansion": ("outcome", "reason_code"),
     "model.transition": ("initial", "fallback"),
 }

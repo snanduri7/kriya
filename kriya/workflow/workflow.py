@@ -35,6 +35,7 @@ from kriya.core.llm import InferenceDeadlineError, LLMClient
 from kriya.core.model_routing import resume_routes_from
 from kriya.core.token_budget import ContextBudgetUnsatisfiableError
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
+from kriya.policy.approval import resolve_approval, resolve_approval_result
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.filesystem import WriteScopeMode
@@ -542,7 +543,6 @@ async def _primary_model_runtime_details(cfg: Any) -> Dict[str, Any]:
     """PRD-013/014: the primary model's runtime fingerprint and the
     Developer role's qualification assessment, for the ``model.runtime``
     run event. Evidence only; never blocks a run."""
-    import asyncio
 
     from kriya.core.inference_settings import role_inference_settings
     from kriya.core.model_qualification import assess, policy_digest_for, required_capabilities
@@ -1635,13 +1635,18 @@ def _raise_terminal_commit_stop(state: GenerationState, outcome: Any) -> None:
     raise QualityGateFailure(failure)
 
 
-def _record_approval_decision(state: GenerationState, outcome: str, triggers: List[str]) -> None:
+def _record_approval_decision(state: GenerationState, outcome: str, triggers: List[str], reason_code: Optional[str] = None) -> None:
     """PRD-033: one typed record of a human-approval decision (approved,
-    rejected, or unavailable when no approval callback exists)."""
+    rejected, or unavailable when no approval callback exists or no decision could be obtained).
+    ``reason_code`` is the approval outcome's code when no decision could be obtained (UNAVAILABLE); an approval or a decline is fully named by ``outcome``, and the key is absent
+    there (and when there was no callback to ask), so the recorded shape of those events is unchanged."""
+    details: Dict[str, Any] = {"outcome": outcome, "triggers": list(triggers)}
+    if reason_code is not None:
+        details["reason_code"] = reason_code
     state.record_event(RunEvent(
         kind="approval.decision", attempt=state.attempt_number, source="workflow.approval_gate",
         authority=EventAuthority.AUTHORITATIVE, message=f"human approval: {outcome}",
-        details={"outcome": outcome, "triggers": list(triggers)},
+        details=details,
     ))
 
 
@@ -2033,10 +2038,9 @@ class WorkflowEngine:
         invokes `approval_callback` using the EXACT shape Kriya's one real
         approval mechanism already uses everywhere else in this file
         (`Callable[[List[Dict[str, str]], str], Any]`, awaited only if it
-        returns a coroutine - see run_generation_workflow's own
-        `approved = approval_callback(...); if asyncio.iscoroutine(approved): ...`
-        a few hundred lines below) and raises PolicyDeniedError if not
-        approved or if no callback was supplied at all. ALLOW and
+        returns an awaitable - resolved by the one approval owner,
+        kriya.policy.approval.resolve_approval) and raises PolicyDeniedError if not
+        approved (declined, or no decision obtainable) or if no callback was supplied at all. ALLOW and
         ALLOW_SANDBOXED never raise - ALLOW_SANDBOXED's actual sandboxing
         is ProcessController's job (defense in depth), not this method's.
 
@@ -2074,10 +2078,7 @@ class WorkflowEngine:
         if result.decision == PolicyDecision.REQUIRE_APPROVAL:
             if not approval_callback:
                 raise PolicyDeniedError(request=request, result=result)
-            approved = approval_callback(diffs_to_show or [], result.explanation)
-            if asyncio.iscoroutine(approved):
-                approved = await approved
-            if not approved:
+            if not (await resolve_approval(approval_callback, diffs_to_show or [], result.explanation)).approved:
                 raise PolicyDeniedError(request=request, result=result)
 
         return result
@@ -2119,10 +2120,7 @@ class WorkflowEngine:
         if not web_lookup_query_callback:
             return False
         try:
-            approved = web_lookup_query_callback(terms, base_url)
-            if asyncio.iscoroutine(approved):
-                approved = await approved
-            return bool(approved)
+            return (await resolve_approval_result(web_lookup_query_callback(terms, base_url))).approved
         except Exception as ex:
             logger.warning(f"web_lookup_query_callback failed, skipping live lookup: {ex}")
             return False

@@ -16,6 +16,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from kriya.agents.contracts import partition_file_list_escapes
+from kriya.policy.approval import await_if_awaitable, resolve_approval, resolve_approval_result
 from kriya.workflow.file_resolution import (
     _resolve_file_paths_from_design,
     artifact_resolution_scope,
@@ -391,11 +392,11 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
                 f"Do you want to proceed with these dependencies?"
             )
             if approval_callback:
-                approved = approval_callback([], reason_str)
-                if asyncio.iscoroutine(approved):         # an async callback is supported everywhere else; un-awaited it is truthy = approval
-                    approved = await approved
-                if not approved:
+                outcome = await resolve_approval(approval_callback, [], reason_str)
+                if outcome.declined:
                     raise ValueError("Workflow aborted: User rejected post-cutoff dependency risk in Stage 2A.")
+                if not outcome.approved:  # nobody decided (a launch that cannot ask, an expired review): not approved, and not a rejection either
+                    raise ValueError(f"Workflow aborted: approval of the post-cutoff dependency risk could not be obtained in Stage 2A ({outcome.reason_code}).")
             else:
                 logger.warning("Stage 2A validation warning: new gaps detected but no approval callback available. Proceeding under default policy.")
 
@@ -454,9 +455,7 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
             proceed = bool(found)
             if found and web_lookup_callback:
                 try:
-                    proceed = web_lookup_callback(found)
-                    if asyncio.iscoroutine(proceed):
-                        proceed = await proceed
+                    proceed = (await resolve_approval_result(web_lookup_callback(found))).approved  # a review of externally fetched references (see stage_analysis)
                 except Exception as ex:
                     logger.warning(f"web_lookup_callback failed, discarding design-derived references: {ex}")
                     proceed = False
@@ -481,13 +480,11 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
                             f"technology '{term}' but none contained anything usable - falling back to asking for a better source."
                         )
                         try:
-                            supplied = skill_gap_callback(
+                            supplied = await await_if_awaitable(skill_gap_callback(
                                 design_gap_reason + " Provide a URL, file path, or paste reference content to "
                                 "strengthen it, or decline to proceed with best-effort generation.",
                                 [term],
-                            )
-                            if asyncio.iscoroutine(supplied):
-                                supplied = await supplied
+                            ))
                         except Exception as ex:
                             logger.warning(f"skill_gap_callback failed for design-derived term '{term}': {ex}")
                             supplied = None

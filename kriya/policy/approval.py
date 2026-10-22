@@ -47,8 +47,8 @@ Deliberately small: one subject, one optional channel on the existing callback. 
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -56,6 +56,7 @@ import re
 import shutil
 import sys
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 from kriya.foundation.redaction import redact_value
@@ -219,24 +220,111 @@ class TypedApprovalCallback:
         return self._change_callback(files, reason)
 
 
+class ApprovalDecision(str, Enum):
+    """The closed vocabulary of an approval decision. UNAVAILABLE is "no decision could be obtained" and is NOT a decline: nobody said no."""
+
+    APPROVED = "approved"
+    DECLINED = "declined"
+    UNAVAILABLE = "unavailable"
+
+
+# The closed reason-code table of an approval outcome (key policy on the code, never on prose). The pairing with the decision is enforced by ApprovalOutcome.
+APPROVAL_GRANTED = "APPROVAL_GRANTED"                          # APPROVED: an explicit approval
+APPROVAL_DECLINED = "APPROVAL_DECLINED"                        # DECLINED: a person (or the terminal prompt) said no
+APPROVAL_LAUNCH_CANNOT_ASK = "APPROVAL_LAUNCH_CANNOT_ASK"      # UNAVAILABLE: a desktop launch has no approval action for this decision (an empty change set, a policy action) or could not record the review
+APPROVAL_REVIEW_EXPIRED = "APPROVAL_REVIEW_EXPIRED"            # UNAVAILABLE: the review ended with no decision (expired, the host went away, the wait was interrupted)
+APPROVAL_DECISION_NOT_RECORDED = "APPROVAL_DECISION_NOT_RECORDED"  # UNAVAILABLE: a decision arrived but could not be made durable, so it is not honoured either way
+APPROVAL_RESULT_UNRECOGNIZED = "APPROVAL_RESULT_UNRECOGNIZED"  # UNAVAILABLE: the callback answered with something that is neither a bool nor an ApprovalOutcome (never read through truthiness)
+UNAVAILABLE_REASON_CODES = (APPROVAL_LAUNCH_CANNOT_ASK, APPROVAL_REVIEW_EXPIRED, APPROVAL_DECISION_NOT_RECORDED, APPROVAL_RESULT_UNRECOGNIZED)
+APPROVAL_REASON_CODES = (APPROVAL_GRANTED, APPROVAL_DECLINED, *UNAVAILABLE_REASON_CODES)
+
+
+@dataclass(frozen=True)
+class ApprovalOutcome:
+    """The canonical answer of the general approval callback (``callback(files, reason)``): a closed decision and the reason code that explains it.
+
+    It deliberately has NO truth value: a site that wrote ``if approved:`` on an outcome would read UNAVAILABLE or DECLINED as approval, so ``bool(outcome)`` raises. Read ``.approved``."""
+
+    decision: ApprovalDecision
+    reason_code: str
+
+    def __post_init__(self) -> None:
+        expected = {ApprovalDecision.APPROVED: (APPROVAL_GRANTED,), ApprovalDecision.DECLINED: (APPROVAL_DECLINED,), ApprovalDecision.UNAVAILABLE: UNAVAILABLE_REASON_CODES}
+        if not isinstance(self.decision, ApprovalDecision) or self.reason_code not in expected[self.decision]:
+            raise ValueError(f"approval outcome {self.decision!r} cannot carry reason code {self.reason_code!r}")
+
+    def __bool__(self) -> bool:
+        raise TypeError("an ApprovalOutcome has no truth value; read .approved / .declined / .unavailable")
+
+    @property
+    def approved(self) -> bool:
+        return self.decision is ApprovalDecision.APPROVED
+
+    @property
+    def declined(self) -> bool:
+        return self.decision is ApprovalDecision.DECLINED
+
+    @property
+    def unavailable(self) -> bool:
+        return self.decision is ApprovalDecision.UNAVAILABLE
+
+    @classmethod
+    def approve(cls) -> "ApprovalOutcome":
+        return cls(ApprovalDecision.APPROVED, APPROVAL_GRANTED)
+
+    @classmethod
+    def decline(cls) -> "ApprovalOutcome":
+        return cls(ApprovalDecision.DECLINED, APPROVAL_DECLINED)
+
+    @classmethod
+    def unavailable_because(cls, reason_code: str) -> "ApprovalOutcome":
+        return cls(ApprovalDecision.UNAVAILABLE, reason_code)
+
+
+def classify_approval_answer(answer: Any) -> ApprovalOutcome:
+    """The ONE classification of an approval callback's RESOLVED answer: an ApprovalOutcome is itself; a real ``bool`` is the legacy answer (True -> APPROVED, False -> DECLINED);
+    anything else - None, a number, a string, a mock, a still-unresolved awaitable - is UNAVAILABLE, never read through Python truthiness (an unresolved Task is truthy)."""
+    if isinstance(answer, ApprovalOutcome):
+        return answer
+    if isinstance(answer, bool):
+        return ApprovalOutcome.approve() if answer else ApprovalOutcome.decline()
+    if inspect.iscoroutine(answer):
+        answer.close()  # never awaited: do not leave a "coroutine was never awaited" warning behind a refusal
+    logger.warning("approval callback answered with %s, which is neither a bool nor an ApprovalOutcome: not approved", type(answer).__name__)
+    return ApprovalOutcome.unavailable_because(APPROVAL_RESULT_UNRECOGNIZED)
+
+
+async def await_if_awaitable(answer: Any) -> Any:
+    """Resolve ``answer`` when it is ANY awaitable (a coroutine, an asyncio Task or Future, an object with ``__await__``); anything else is returned as is. An exception raised by the
+    awaitable propagates unchanged - an approval that failed is never an approval."""
+    return await answer if inspect.isawaitable(answer) else answer
+
+
+async def resolve_approval_result(answer: Any) -> ApprovalOutcome:
+    """Resolve what an approval callback returned (sync or any awaitable) into the canonical ApprovalOutcome. Exceptions propagate (each caller keeps its own fail-closed policy for them)."""
+    return classify_approval_answer(await await_if_awaitable(answer))
+
+
+async def resolve_approval(callback: Callable[..., Any], files: List[Any], reason: str) -> ApprovalOutcome:
+    """Ask the general approval callback and resolve its answer. The ONE place a caller turns ``callback(files, reason)`` into a decision: no caller resolves a coroutine and then
+    tests the object's truthiness itself."""
+    return await resolve_approval_result(callback(files, reason))
+
+
 async def ask(callback: Callable[..., Any], subject: RuntimeCommandSubject) -> RuntimeCommandDecision:
-    """Ask for the subject. A typed callback answers with the fingerprint its approval is bound to; a legacy callback's boolean is bound to the subject it was shown."""
+    """Ask for the subject. A typed callback answers with the fingerprint its approval is bound to; a legacy callback's answer is resolved first, and only an APPROVED outcome is bound to the subject it was shown."""
     if isinstance(callback, TypedApprovalCallback):
         if not reviewable(subject):
             return RuntimeCommandDecision(None)
-        answer = callback.runtime_command_review(subject)
-        if asyncio.iscoroutine(answer):
-            answer = await answer
+        answer = await await_if_awaitable(callback.runtime_command_review(subject))
         return answer if isinstance(answer, RuntimeCommandDecision) else RuntimeCommandDecision(None)
     if commands_carry_secret(subject.commands):
         # S2d: a plain callback shows ``subject.reason`` (which quotes the commands) through the redactor and cannot say
         # whether it would prompt or auto-approve; it is not asked. Fail closed: nothing runs.
         logger.warning(RUNTIME_COMMAND_SECRET_REFUSAL)
         return RuntimeCommandDecision(None)
-    answer = callback([], subject.reason)
-    if asyncio.iscoroutine(answer):
-        answer = await answer
-    return RuntimeCommandDecision(subject.fingerprint if bool(answer) else None)
+    outcome = await resolve_approval(callback, [], subject.reason)
+    return RuntimeCommandDecision(subject.fingerprint if outcome.approved else None)
 
 
 def approval_matches(decision: RuntimeCommandDecision, about_to_run: RuntimeCommandSubject) -> bool:

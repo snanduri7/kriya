@@ -22,7 +22,6 @@ arrive in ``StageDeps`` (``kriya/workflow/stage_context.py``); this module never
 """
 from __future__ import annotations
 
-import asyncio
 import difflib
 import functools
 import os
@@ -32,6 +31,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from kriya.config.authority import is_human_in_the_loop
 from kriya.control.run_coordinator import annotate_run
+from kriya.policy.approval import ApprovalDecision, resolve_approval
 from kriya.repository.atomic_write import atomic_write_file
 from kriya.repository.commit import CandidateMaterializationError
 from kriya.workflow.acceptance import output_confirms_nonzero_test_execution
@@ -47,6 +47,8 @@ from kriya.workflow.stage_review import pre_approval_review
 from kriya.workflow.worktree import remove_git_worktree
 
 RunState = Any   # kriya.workflow.state.GenerationState (kriya/workflow/stage_context.py says why it is not imported)
+# The approval.decision event's `outcome` vocabulary (PRD-033; recorded traces keep it): a decline is spelled "rejected" there.
+_APPROVAL_EVENT_OUTCOME = {ApprovalDecision.APPROVED: "approved", ApprovalDecision.DECLINED: "rejected", ApprovalDecision.UNAVAILABLE: "unavailable"}
 
 
 def run_static_analysis_gate(
@@ -359,14 +361,21 @@ async def approval_gate(
             "Escalating changes to human approval gate: "
             f"{escalation_reason.splitlines()[0]}{review_note}"
         )
-        approved = approval_callback(diffs_to_show, escalation_reason)
-        if asyncio.iscoroutine(approved):
-            approved = await approved
-        _record_approval_decision(state, "approved" if approved else "rejected", approval_triggers)
-        if not approved:
+        outcome = await resolve_approval(approval_callback, diffs_to_show, escalation_reason)
+        _record_approval_decision(state, _APPROVAL_EVENT_OUTCOME[outcome.decision], approval_triggers, reason_code=outcome.reason_code if outcome.unavailable else None)
+        if outcome.declined:
             logger.info("Human rejected changes. Aborting workflow.")
             return _abort_without_applying(
                 "human_rejected", "Rejected by user during approval gate review."
+            ), need_human_approval
+        if outcome.unavailable:
+            # Nobody was asked or nobody decided (a desktop launch that cannot put this decision to a person, a review that expired): that is "approval required and not
+            # available", the same stop as a missing callback - never a human rejection.
+            logger.warning(f"Approval required ({escalation_reason}) but no approval decision could be obtained ({outcome.reason_code}) - nothing applied.")
+            return _abort_without_applying(
+                "approval_required",
+                f"Not applied: human approval was required ({escalation_reason}) but no approval decision could be obtained ({outcome.reason_code}); "
+                "nothing was approved and nobody declined.",
             ), need_human_approval
     elif need_human_approval and not approval_callback:
         # Independent adversarial review, 2026-08-16, Finding 2: this gate used

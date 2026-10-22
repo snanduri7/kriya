@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import logging
@@ -9075,6 +9076,68 @@ async def test_workflow_traces_human_rejected(tmp_path):
     assert trace_row is not None
     assert trace_row["status"] == "human_rejected"
     assert trace_row["failure_category"] == "human_rejected"
+
+
+def _change_gate_callback(kind, value):
+    """An approval callback whose answer arrives as a sync value, a coroutine, an asyncio Task or a Future (built inside the running loop)."""
+    async def coroutine():
+        return value
+
+    def callback(files, reason):
+        if kind == "sync":
+            return value
+        if kind == "coroutine":
+            return coroutine()
+        if kind == "task":
+            return asyncio.ensure_future(coroutine())
+        future = asyncio.get_running_loop().create_future()
+        future.set_result(value)
+        return future
+    return callback
+
+
+async def _run_change_gate(tmp_path, callback):
+    cfg = AppConfig()
+    cfg.autonomy.mode = "human-in-the-loop"
+    cfg.autonomy.run_verification_enabled = False
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=["Step 1: Write code", "Design: Write app.py", '[{"filepath": "app.py", "content": "print(1)"}]', "Review: flagged for human judgment"])
+    res = await WorkflowEngine(Kernel(config=cfg), llm).run_generation_workflow(goal="Create app", workspace_path=str(tmp_path), approval_callback=callback)
+    return res, _latest_trace_row(cfg)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["sync", "coroutine", "task", "future"])
+async def test_a_person_who_declined_is_human_rejected_however_the_answer_arrives(tmp_path, kind):
+    """F4: a declined answer delivered as a Task/Future used to be read as APPROVAL (the object is truthy) and the change was applied. N1 control: an actual decline keeps its
+    human-rejected semantics."""
+    res, trace_row = await _run_change_gate(tmp_path, _change_gate_callback(kind, False))
+    assert res["quality_gates_passed"] is False and res["review"] == "Rejected by user during approval gate review."
+    assert not os.path.exists(os.path.join(str(tmp_path), "app.py")), "a declined change must never reach the workspace"
+    assert trace_row["status"] == "human_rejected" and trace_row["failure_category"] == "human_rejected"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["sync", "coroutine", "task", "future"])
+async def test_an_approval_that_could_not_be_obtained_is_approval_required_not_a_human_rejection(tmp_path, kind):
+    """N1: a desktop launch that cannot put the decision to a person (or a review nobody decided) is ApprovalOutcome.UNAVAILABLE. Nobody declined, so the run must NOT end
+    ``human_rejected``: it is the existing "approval required and not available" stop, nothing is applied, and the machine-readable reason code is on the approval.decision event."""
+    from kriya.policy.approval import APPROVAL_LAUNCH_CANNOT_ASK, ApprovalOutcome
+    unavailable = ApprovalOutcome.unavailable_because(APPROVAL_LAUNCH_CANNOT_ASK)
+    res, trace_row = await _run_change_gate(tmp_path, _change_gate_callback(kind, unavailable))
+    assert res["quality_gates_passed"] is False and res["files"] == []
+    assert "no approval decision could be obtained (APPROVAL_LAUNCH_CANNOT_ASK)" in res["review"] and "nobody declined" in res["review"]
+    assert not os.path.exists(os.path.join(str(tmp_path), "app.py"))
+    assert trace_row["status"] == "approval_required" and trace_row["failure_category"] == "approval_required"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("answer", [None, "yes", 1])
+async def test_an_unrecognized_callback_answer_is_not_approval_and_not_a_rejection(tmp_path, answer):
+    res, trace_row = await _run_change_gate(tmp_path, lambda files, reason: answer)
+    assert not os.path.exists(os.path.join(str(tmp_path), "app.py"))
+    assert trace_row["status"] == "approval_required"
+    assert "APPROVAL_RESULT_UNRECOGNIZED" in res["review"]
 
 
 @pytest.mark.asyncio

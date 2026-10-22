@@ -22,6 +22,7 @@ import re
 import pytest
 
 from kriya.foundation.redaction import REDACTED, redact_text, redact_value
+from kriya.policy.approval import ApprovalOutcome
 
 S = "Zq9SECRETv"
 R = REDACTED
@@ -188,7 +189,7 @@ def _hold_change_review(ws, files, reason, scenario):
             approved = asyncio.run(main_())
     finally:
         session.finish(0, None, None)
-    assert approved is False
+    assert approved == ApprovalOutcome.decline()  # the person's reject: DECLINED
     return canonical
 
 
