@@ -140,7 +140,7 @@ def test_a_malformed_literal_is_decided_in_linear_time(repeat):
     started = time.perf_counter()
     assert not ej._LITERAL.match('"' + repeat * 26 + '" trailing')              # pylint: disable=protected-access
     assert time.perf_counter() - started < 2.0       # 26: a 2^n parse (two identical alternatives) takes seconds here and still terminates
-    assert not ej._LITERAL.match('"' + repeat * 2000)                            # pylint: disable=protected-access (linear grammar only)
+    assert not ej._LITERAL.match('"' + repeat * 2000)                            # pylint: disable=protected-access
 
 
 def test_the_identity_bearing_versions_are_pinned():
