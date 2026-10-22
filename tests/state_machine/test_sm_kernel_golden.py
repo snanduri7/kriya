@@ -79,7 +79,7 @@ EXPECTED = {
     "legacy_planner_unauthorized_path": ("WorkflowResult", None, None, "planner_output_unauthorized_path", ["FAILURE"], False),
     "legacy_planner_schema_invalid": ("WorkflowResult", None, None, "planner_output_schema_invalid", ["FAILURE"], False),
     "legacy_architect_file_list_rejected": ("WorkflowResult", None, None, "architect_file_list_rejected", ["FAILURE"], False),
-    "legacy_stage2a_dependency_rejected": ("dict", None, None, None, ["FAILURE"], False),
+    "legacy_stage2a_dependency_rejected": ("WorkflowResult", False, None, "human_rejected", ["FAILURE"], False),   # 1-E: a result (was: ValueError), the apply gate's status
     # E4 characterization of stages 5-7 and the pre-apply boundary (written from 3e5751c, before that code moved): the
     # approval-gate abort returns its own dict (no failure_category in it, as human_rejected; the traces.db row carries it)
     "legacy_static_analysis_blocked": ("WorkflowResult", False, "static_analysis_blocked", None, ["FAILURE"], True),

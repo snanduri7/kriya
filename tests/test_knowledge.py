@@ -3,8 +3,6 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from kriya.tools.knowledge import (
     KnowledgeGuard,
     RegistryAdapterFactory,
@@ -229,7 +227,7 @@ def test_knowledge_guard_with_cache(tmp_path):
         assert report.gaps[0]["risk_level"] == "HIGH"
         MockClient.assert_not_called()
 
-def test_workflow_stage_2a_gap(tmp_path):
+def _stage_2a_run(tmp_path, answer):
     from kriya.config.config import AppConfig
     from kriya.core.kernel import Kernel
     from kriya.core.llm import LLMClient
@@ -256,7 +254,7 @@ def test_workflow_stage_2a_gap(tmp_path):
     cache.set_release_date("java", "org.apache.ignite:ignite-core", "2.18.0", datetime(2024, 3, 15, 0, 0, tzinfo=timezone.utc))
     
     # mock approval callback to reject
-    mock_approval = MagicMock(return_value=False)
+    mock_approval = MagicMock(return_value=answer)
     
     with patch("kriya.workflow.workflow.RepositoryAnalyzer") as MockAnalyzer:
         mock_analyzer = MockAnalyzer.return_value
@@ -264,17 +262,31 @@ def test_workflow_stage_2a_gap(tmp_path):
         mock_analyzer.analyze.return_value.frameworks = []
         mock_analyzer.analyze.return_value.model_dump_json.return_value = "{}"
         
-        with pytest.raises(ValueError, match="User rejected post-cutoff dependency risk in Stage 2A"):
-            import asyncio
-            asyncio.run(we.run_generation_workflow(
-                goal="Build a standard application",
-                workspace_path=str(tmp_path),
-                approval_callback=mock_approval,
-                knowledge_risk_confirmed=True  # Confirm stage 0, trigger stage 2A check
-            ))
-            
+        import asyncio
+        result = asyncio.run(we.run_generation_workflow(
+            goal="Build a standard application",
+            workspace_path=str(tmp_path),
+            approval_callback=mock_approval,
+            knowledge_risk_confirmed=True  # Confirm stage 0, trigger stage 2A check
+        ))
         # Verify approval callback was indeed queried for the Stage 2A gap
         assert mock_approval.called
+        return result
+
+
+def test_workflow_stage_2a_gap(tmp_path):
+    result = _stage_2a_run(tmp_path, False)
+    assert result["status"] == "human_rejected" and result["quality_gates_passed"] is False and result["files"] == []     # a result, not an exception (1-E)
+    assert "User rejected the post-cutoff dependency risk in Stage 2A" in result["reason"]
+
+
+def test_workflow_stage_2a_gap_with_no_approval_decision_is_approval_required_not_a_rejection(tmp_path):
+    from kriya.policy.approval import APPROVAL_LAUNCH_CANNOT_ASK, ApprovalOutcome
+
+    result = _stage_2a_run(tmp_path, ApprovalOutcome.unavailable_because(APPROVAL_LAUNCH_CANNOT_ASK))
+    assert result["status"] == "approval_required" and result["quality_gates_passed"] is False and result["files"] == []
+    assert "APPROVAL_LAUNCH_CANNOT_ASK" in result["reason"] and "nobody declined" in result["reason"] and "rejected" not in result["reason"].lower()
+
 
 def test_workflow_auto_accrual(tmp_path):
     from unittest.mock import AsyncMock

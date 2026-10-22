@@ -382,12 +382,39 @@ def test_a_brownfield_design_resolves_owners_through_the_patched_facade_name(tmp
     assert architect.calls == 0 and ctx.design == "design" and ctx.architect_files == ["calc.py"]
 
 
+def _assert_a_stage_2a_stop(stop, status, reason):
+    """1-E: Stage 2A ends the unit with the apply gate's two outcomes as a RESULT (no exception): a person's decline is `human_rejected`, nobody deciding is `approval_required`.
+    Nothing is applied, no gate passed, and no Developer work started."""
+    assert stop is not None, "the unit must stop"
+    assert stop["status"] == status and reason in stop["reason"] and stop["review"] == stop["reason"], stop
+    assert stop["quality_gates_passed"] is False and stop["files"] == [], stop
+    assert {"plan", "design", "goal", "workspace_path", "run_id"} <= set(stop), stop
+
+
+@pytest.mark.parametrize("answer,status", [(False, "human_rejected"), ("unavailable", "approval_required")], ids=["declined", "unavailable"])
+def test_a_stage_2a_stop_is_recorded_as_the_short_trace_row_and_reported_to_the_step_callback(tmp_path, answer, status):
+    """1-E: the same terminal bookkeeping as every other pre-Developer stop (architect_file_list_rejected): one short trace row whose status AND failure category are the
+    stop's status, and the step callback told once, last."""
+    from kriya.policy.approval import APPROVAL_LAUNCH_CANNOT_ASK, ApprovalOutcome
+    steps = []
+    given = ApprovalOutcome.unavailable_because(APPROVAL_LAUNCH_CANNOT_ASK) if answer == "unavailable" else answer
+    guard = _Guard(lambda text: [GAP] if "mylib" in text else [])
+    ctx = _design_ctx(tmp_path, predetermined_design="Use mylib==1.2.3.", predetermined_architect_files=["calc.py"], guard=guard, approval_callback=lambda diffs, reason: given,
+                      step_callback=lambda name, detail: steps.append((name, detail)))
+    with _log_run() as log_run:
+        stop = asyncio.run(design_work_unit(ctx, _deps(_engine(tmp_path))))
+    assert stop["status"] == status
+    assert log_run.call_count == 1 and log_run.call_args.kwargs["status"] == status and log_run.call_args.kwargs["failure_category"] == status
+    assert log_run.call_args.kwargs["attempts"] == 0 and log_run.call_args.kwargs["files_modified"] == []
+    assert steps[-1] == (status, stop["reason"]) and [name for name, _detail in steps].count(status) == 1      # told once, and it is the last thing the stage reported
+
+
 def test_a_rejected_stage_2a_dependency_aborts_the_run(tmp_path):
     guard = _Guard(lambda text: [GAP] if "mylib" in text else [])
     ctx = _design_ctx(tmp_path, predetermined_design="Use mylib==1.2.3.", predetermined_architect_files=["calc.py"],
                       guard=guard, approval_callback=lambda diffs, reason: False)
-    with pytest.raises(ValueError, match="User rejected post-cutoff dependency risk in Stage 2A"):
-        asyncio.run(design_work_unit(ctx, _deps(_engine(tmp_path))))
+    stop = asyncio.run(design_work_unit(ctx, _deps(_engine(tmp_path))))
+    _assert_a_stage_2a_stop(stop, "human_rejected", "User rejected the post-cutoff dependency risk in Stage 2A")
     assert guard.checked == ["Use mylib==1.2.3."]
 
 
@@ -412,8 +439,7 @@ def test_the_stage_2a_dependency_approval_awaits_an_async_callback_like_every_ot
     if decision:
         assert asyncio.run(design_work_unit(ctx, _deps(_engine(tmp_path)))) is None          # approved: the stage continues
     else:
-        with pytest.raises(ValueError, match="User rejected post-cutoff dependency risk in Stage 2A"):
-            asyncio.run(design_work_unit(ctx, _deps(_engine(tmp_path))))
+        _assert_a_stage_2a_stop(asyncio.run(design_work_unit(ctx, _deps(_engine(tmp_path)))), "human_rejected", "User rejected the post-cutoff dependency risk in Stage 2A")
     assert len(answered) == 1 and answered[0][0] == [] and "Knowledge Guard detected" in answered[0][1]     # asked once, with the prompt
 
 
@@ -438,9 +464,9 @@ def _shaped_callback(kind, value, answered):
 
 @pytest.mark.parametrize("kind", ["sync", "coroutine", "task", "future"])
 @pytest.mark.parametrize("value,outcome", [
-    (True, "approved"), (False, "User rejected post-cutoff dependency risk in Stage 2A"),
-    ("unavailable", "approval of the post-cutoff dependency risk could not be obtained in Stage 2A \\(APPROVAL_LAUNCH_CANNOT_ASK\\)"),
-    (None, "could not be obtained in Stage 2A \\(APPROVAL_RESULT_UNRECOGNIZED\\)")], ids=["approved", "declined", "unavailable", "unrecognized"])
+    (True, None), (False, ("human_rejected", "User rejected the post-cutoff dependency risk in Stage 2A")),
+    ("unavailable", ("approval_required", "Approval of the post-cutoff dependency risk could not be obtained in Stage 2A (APPROVAL_LAUNCH_CANNOT_ASK)")),
+    (None, ("approval_required", "(APPROVAL_RESULT_UNRECOGNIZED)"))], ids=["approved", "declined", "unavailable", "unrecognized"])
 def test_the_stage_2a_dependency_approval_acts_on_the_resolved_decision_only(tmp_path, kind, value, outcome):
     """F4 + N1 at Stage 2A. A Task/Future is not a coroutine and is truthy: it used to be read as approval. An UNAVAILABLE answer (a launch that cannot ask) is not a rejection:
     the run still stops, and says that no decision could be obtained, with the closed reason code."""
@@ -450,11 +476,11 @@ def test_the_stage_2a_dependency_approval_acts_on_the_resolved_decision_only(tmp
     guard = _Guard(lambda text: [GAP] if "mylib" in text else [])
     ctx = _design_ctx(tmp_path, predetermined_design="Use mylib==1.2.3.", predetermined_architect_files=["calc.py"],
                       guard=guard, approval_callback=_shaped_callback(kind, answer, answered))
-    if outcome == "approved":
-        assert asyncio.run(design_work_unit(ctx, _deps(_engine(tmp_path)))) is None
+    stop = asyncio.run(design_work_unit(ctx, _deps(_engine(tmp_path))))
+    if outcome is None:
+        assert stop is None
     else:
-        with pytest.raises(ValueError, match=outcome):
-            asyncio.run(design_work_unit(ctx, _deps(_engine(tmp_path))))
+        _assert_a_stage_2a_stop(stop, *outcome)
     assert len(answered) == 1
 
 

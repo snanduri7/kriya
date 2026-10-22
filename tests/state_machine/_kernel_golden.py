@@ -429,7 +429,7 @@ TERMINAL_PATHS: Dict[str, str] = {
     "legacy_planner_unauthorized_path": "stage 2 stop: planner_output_unauthorized_path (a planned path outside the workspace)",
     "legacy_planner_schema_invalid": "stage 2 stop: planner_output_schema_invalid after the bounded structured-plan repairs",
     "legacy_architect_file_list_rejected": "stage 3 stop: architect_file_list_rejected (every file-list entry escapes)",
-    "legacy_stage2a_dependency_rejected": "stage 2A: a new design dependency rejected by the human raises ValueError",
+    "legacy_stage2a_dependency_rejected": "stage 2A stop: a new design dependency rejected by the human is the result human_rejected (before 1-E: raised ValueError)",
     # E4 characterization (stages 5-7 and the pre-apply boundary), before that code left run_generation_workflow
     "legacy_static_analysis_blocked": "pre-apply stop: static_analysis BLOCKED (a new HIGH finding), before the approval gate",
     "legacy_static_analysis_unknown": "pre-apply stop: static_analysis UNKNOWN (the scanner failed inside the gate)",
@@ -1087,7 +1087,8 @@ def legacy_architect_file_list_rejected(tmp_path: Path) -> Outcome:
 @scenario("legacy_stage2a_dependency_rejected")
 def legacy_stage2a_dependency_rejected(tmp_path: Path) -> Outcome:
     """Stage 2A: the design names a library the goal did not (a new KnowledgeGuard gap) and the human rejects it: the
-    run raises ValueError before any Developer call."""
+    unit stops with the result `human_rejected` before any Developer call (until the Wave-1 final fix-forward, 1-E, it
+    raised ValueError; this golden was regenerated for that deliberate contract change only)."""
     design = "Use mylib==1.2.3 in calc.py.\n```json\n" + json.dumps({"files": ["calc.py"]}) + "\n```"
     return _stage_run(tmp_path, architect=lambda n: design, approve=False)
 

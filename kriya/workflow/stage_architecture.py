@@ -4,7 +4,7 @@ Moved verbatim from ``WorkflowEngine.run_generation_workflow`` (``kriya/workflow
 the Architect call (or the predetermined/resumed design), the design checkpoint, the Architect file list
 (ARCHITECT-FILE-LIST-ESCAPE-FALLBACK-001: an all-escaping list stops the unit, ``architect_file_list_rejected``),
 brownfield owner resolution and PRD-021 ownership findings, the MA2.4 post-Architect triage recomputation, Stage
-2A (the post-design KnowledgeGuard scan; a rejected new dependency raises) and Stage 2B (design-derived live
+2A (the post-design KnowledgeGuard scan; a new dependency whose approval is declined or unavailable stops the unit) and Stage 2B (design-derived live
 lookup and skill bootstrap). Collaborators arrive in ``StageDeps`` (``kriya/workflow/stage_context.py``); this
 module never imports ``kriya.workflow.workflow``.
 """
@@ -35,7 +35,7 @@ from kriya.workflow.untrusted_context import outside_untrusted_reference
 
 
 async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[str, Any]]:
-    """Stage 3: the design and its file list, ownership, triage recomputation, Stage 2A and 2B; the Architect-rejection result when every file-list entry escapes the workspace, else None."""
+    """Stage 3: the design and its file list, ownership, triage recomputation, Stage 2A and 2B; the stop result (every file-list entry escapes the workspace; a Stage 2A dependency approval that is declined or unavailable), else None."""
     # The stage's run-local names (StageContext) and injected collaborators (StageDeps), bound under the names
     # the body used inside run_generation_workflow; the body below is that method's code, moved verbatim.
     goal, workspace_path, state, plan = ctx.goal, ctx.workspace_path, ctx.state, ctx.plan
@@ -393,10 +393,20 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
             )
             if approval_callback:
                 outcome = await resolve_approval(approval_callback, [], reason_str)
-                if outcome.declined:
-                    raise ValueError("Workflow aborted: User rejected post-cutoff dependency risk in Stage 2A.")
-                if not outcome.approved:  # nobody decided (a launch that cannot ask, an expired review): not approved, and not a rejection either
-                    raise ValueError(f"Workflow aborted: approval of the post-cutoff dependency risk could not be obtained in Stage 2A ({outcome.reason_code}).")
+                if not outcome.approved:
+                    # The two ways a person's decision is not "yes", kept apart as at the apply gate (stage_apply): a person's decline is `human_rejected`; nobody deciding (a launch
+                    # that cannot ask, an expired review) is `approval_required` and not a rejection. The unit stops before any Developer work, with no exception.
+                    status = "human_rejected" if outcome.declined else "approval_required"
+                    reason = ("User rejected the post-cutoff dependency risk in Stage 2A." if outcome.declined else
+                              f"Approval of the post-cutoff dependency risk could not be obtained in Stage 2A ({outcome.reason_code}); nothing was approved and nobody declined.")
+                    logger.warning(f"Stage 2A stopped ({status}): {reason}")
+                    if step_callback:
+                        step_callback(status, reason)
+                    persist_early_exit_trace(deps, state, stage_run_trace(ctx), status=status, failure_category=status)
+                    return {
+                        "status": status, "reason": reason, "plan": plan, "design": design, "goal": goal, "files": [], "quality_gates_passed": False, "review": reason,
+                        "workspace_path": workspace_path, "run_id": trace_id,
+                    }
             else:
                 logger.warning("Stage 2A validation warning: new gaps detected but no approval callback available. Proceeding under default policy.")
 

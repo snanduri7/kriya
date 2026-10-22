@@ -9,8 +9,8 @@ identity, verification contract), fills one ``StageContext`` and calls ``run_des
    fingerprints were always computed (after any skill bootstrap of stage 1, before the Planner), and whose saver the
    planning and architecture stages use;
 2. ``stage_planning.plan_work_unit`` - may stop the unit (a Planner rejection);
-3. ``stage_architecture.design_work_unit`` - may stop the unit (``architect_file_list_rejected``) or raise (a
-   rejected Stage 2A dependency);
+3. ``stage_architecture.design_work_unit`` - may stop the unit (``architect_file_list_rejected``, or a Stage 2A
+   dependency approval that is not given: ``human_rejected`` / ``approval_required``);
 and finally ``stage_analysis.record_active_skills`` (the active-skill snapshot, after Stage 2B's extraction).
 
 A stage's early result is returned unchanged, so the engine returns exactly the dict the inline code returned. The
