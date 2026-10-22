@@ -14,7 +14,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 CLAUDE_MD = ROOT / "CLAUDE.md"
 CONTEXT_DIR = "handover/claude-context"
-_REFERENCED = re.compile(r"(?<![\w/.-])((?:handover/claude-context|handover)/[A-Za-z0-9_.-]+\.md)")
+_REFERENCED = re.compile(r"(?<![\w/.-])(handover/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\.(?:md|csv|py|json|txt|yaml|yml))(?![\w/-])")
 
 
 def referenced_authority(text: str) -> set:
@@ -49,8 +49,9 @@ def test_the_helper_distinguishes_a_tracked_file_from_an_untracked_one(tmp_path)
 
 def test_the_reference_extractor_finds_table_cells_imports_and_hints():
     text = ("@handover/ENGINEERING_RULES.md\n| `live-model-tiers.md` | x |\n(`cat handover/claude-context/<file>`)\n"
-            "`handover/claude-context/kernel-mcp-and-tool-authority.md` and handover/BACKLOG_REGISTRY.csv")
-    assert referenced_authority(text) == {"handover/ENGINEERING_RULES.md", "handover/claude-context/kernel-mcp-and-tool-authority.md"}
+            "`handover/claude-context/kernel-mcp-and-tool-authority.md` and handover/BACKLOG_REGISTRY.csv, handover/sub/dir/x.py.")
+    assert referenced_authority(text) == {"handover/ENGINEERING_RULES.md", "handover/claude-context/kernel-mcp-and-tool-authority.md",
+                                         "handover/BACKLOG_REGISTRY.csv", "handover/sub/dir/x.py"}
 
 
 @pytest.mark.skipif(not _in_git_checkout(), reason="a source archive has no index; it contains only tracked files by construction")
