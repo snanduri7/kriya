@@ -50,7 +50,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode
-from kriya.tools.validate import execution_evidence
+from kriya.tools.validate import MAVEN_VALIDATE_NO_VERDICT_CODES, execution_evidence
 from kriya.workflow.acceptance import output_confirms_nonzero_test_execution, subtask_owns_test_obligation
 from kriya.workflow.banners import log_gate_banner
 from kriya.workflow.edit_safety import StagedFileWrite, read_file_revision
@@ -1738,9 +1738,10 @@ def _stop_on_environment_gate_result(state: RunState, result: Any, gate: str) ->
     if not code:
         return
     output = str(result.get("output") or "")
+    what = "returned no trustworthy verdict" if code in MAVEN_VALIDATE_NO_VERDICT_CODES else "could not start"   # a Maven that started vs one that did not
     failure = Failure(
         type="verification_infrastructure_failure",
-        message=(f"VERIFICATION_INFRASTRUCTURE_FAILURE: the {gate} gate's verification tool could not start "
+        message=(f"VERIFICATION_INFRASTRUCTURE_FAILURE: the {gate} gate's verification tool {what} "
                  f"({code}); nothing about the candidate was observed, so this is not a code failure.\n{output}"),
         raw_output=output, source="orchestrator", attempt=state.attempt_number,
         diagnostics={"reason_code": code, "gate": gate, "gradle_distribution": result.get("gradle_distribution")},

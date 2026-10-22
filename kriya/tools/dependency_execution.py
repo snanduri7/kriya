@@ -116,10 +116,46 @@ GRADLE_DISTRIBUTION_UNAVAILABLE = "GRADLE_DISTRIBUTION_UNAVAILABLE"
 # .kriya/venv) could not be created, so no interpreter may produce an
 # authoritative verdict for the workspace; never a substitute interpreter.
 PYTHON_ENVIRONMENT_UNAVAILABLE = "PYTHON_ENVIRONMENT_UNAVAILABLE"
-# F7 (Wave-1 closure delta): the Maven POM-validation gate's twin. `mvn validate` could not be started (the executable is missing / not executable / the process could not be
-# spawned): Maven returned NO verdict about the POM, so nothing about the candidate was observed. (A timeout is NOT in this table: the sibling build gates treat a timed-out
-# Maven as a candidate failure - a POM can itself make Maven hang - so it stays a POM-validation failure, marked `timed_out`.)
-MAVEN_INVOCATION_FAILED = "MAVEN_INVOCATION_FAILED"
+# F7 (Wave-1 closure delta; owner decision): the Maven POM-validation gate's twins. The invariant is `no trustworthy validator verdict -> no candidate conviction`:
+# `pom_semantic_validation` is reserved for a Maven that RAN and rejected the POM with trustworthy model diagnostics; every other failure to obtain a verdict is an
+# environment outcome (`environment_reason_code`), raised as the existing `verification_infrastructure_failure`.
+MAVEN_INVOCATION_FAILED = "MAVEN_INVOCATION_FAILED"                        # `mvn` could not be started (missing / not executable / spawn OSError)
+MAVEN_VALIDATE_TIMED_OUT = "MAVEN_VALIDATE_TIMED_OUT"                      # started, did not finish within its bound
+MAVEN_VALIDATE_TERMINATED = "MAVEN_VALIDATE_TERMINATED"                    # killed by a signal without a verdict (not our timeout)
+MAVEN_VALIDATE_RESOLUTION_UNVERIFIED = "MAVEN_VALIDATE_RESOLUTION_UNVERIFIED"  # parent / plugin / dependency resolution or transfer failed: no trustworthy POM verdict
+MAVEN_VALIDATE_NO_DIAGNOSTICS = "MAVEN_VALIDATE_NO_DIAGNOSTICS"            # non-zero exit with no interpretable POM-model diagnostics
+# The codes of a Maven that DID start (the gate words them "returned no trustworthy verdict" instead of "could not start").
+MAVEN_VALIDATE_NO_VERDICT_CODES = frozenset({MAVEN_VALIDATE_TIMED_OUT, MAVEN_VALIDATE_TERMINATED, MAVEN_VALIDATE_RESOLUTION_UNVERIFIED, MAVEN_VALIDATE_NO_DIAGNOSTICS})
+
+# Resolution / transport diagnostics, as real Maven 3.9 prints them (recorded: tests/fixtures/maven_validate and the live logs they cite). Any of them makes the POM verdict untrustworthy,
+# because a model problem reported next to an unresolved parent / BOM / plugin is usually a cascade of the failed resolution (the recorded env-T2 output shows exactly that).
+_MAVEN_RESOLUTION_OR_TRANSPORT_RE = re.compile(
+    r"Could not transfer|Could not find artifact|in offline mode|Non-resolvable (?:parent|import) POM|Unresolveable build extension|could not be resolved|"
+    r"Could not resolve (?:dependencies|plugin|artifact)|Failed to read artifact descriptor|Failed to process POM for|Unable to get dependency information|"
+    r"MAVEN_ACQUISITION_INCOMPLETE|(?:Connect|Read) timed out|Connection (?:refused|reset)|Unknown ?[Hh]ost|Temporary failure in name resolution|"
+    r"PKIX path|SSLHandshake|Network is unreachable|No route to host|status code: \d{3}|Transfer failed|Failure to transfer|Checksum validation failed|nodename nor servname"
+)
+# Maven's own POM-model diagnostics (a located model problem, a malformed / non-parseable document, an unknown packaging, ...).
+_MAVEN_POM_MODEL_PROBLEM_RE = re.compile(
+    r"Non-parseable POM|Malformed POM|Expected root element|Unrecognised tag|Duplicated tag|Unknown packaging|Invalid packaging|Invalid POM|"
+    r"@ line \d+, column \d+|Child module .{1,300} does not exist"
+)
+
+
+def classify_maven_validate_failure(returncode: int, timed_out: bool, combined_output: str) -> Optional[str]:
+    """Why a failed (non-zero) ``mvn validate`` may NOT convict the POM: the environment reason code, or None when Maven ran and rejected the POM with trustworthy model diagnostics.
+
+    Order: a timeout and a signal kill carry no verdict; resolution / transport evidence (checked BEFORE model problems - a cascade is not a verdict) makes any model message
+    untrustworthy; only then do located POM-model diagnostics convict; a non-zero exit with neither is uninterpretable. Captured output is the caller's to preserve."""
+    if timed_out:
+        return MAVEN_VALIDATE_TIMED_OUT
+    if returncode < 0:
+        return MAVEN_VALIDATE_TERMINATED
+    if classify_maven_offline_failure_text(combined_output) is OfflineFailureKind.MISSING_DEPENDENCY or _MAVEN_RESOLUTION_OR_TRANSPORT_RE.search(combined_output):
+        return MAVEN_VALIDATE_RESOLUTION_UNVERIFIED
+    if _MAVEN_POM_MODEL_PROBLEM_RE.search(combined_output):
+        return None
+    return MAVEN_VALIDATE_NO_DIAGNOSTICS
 # The offline run still misses a dependency/plugin after one bounded,
 # registry-scoped acquisition (the Maven marker's Gradle twin; a marker in
 # the output, repair-eligible like Maven's: a candidate may have declared

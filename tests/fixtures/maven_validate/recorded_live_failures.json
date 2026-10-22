@@ -1,0 +1,11 @@
+{
+ "_provenance": "Excerpts of REAL Maven output recorded in live Kriya runs (not hand-built); only the user's home directory is scrubbed to <home>.",
+ "demo01_transfer_failure": {
+  "source": "kriya-live-demo/demo-01-skills/evidence/v4/run-a/stderr.log (network unreachable: name resolution failed)",
+  "output": "\tThe following artifacts could not be resolved: org.apache.maven.plugins:maven-compiler-plugin:pom:3.11.0 (absent): Could not transfer artifact org.apache.maven.plugins:maven-compiler-plugin:pom:3.11.0 from/to central (https://repo.maven.apache.org/maven2): repo.maven.apache.org: Temporary failure in name resolution\n\tThe following artifacts could not be resolved: org.apache.maven.plugins:maven-clean-plugin:pom:3.2.0 (absent): Could not transfer artifact org.apache.maven.plugins:maven-clean-plugin:pom:3.2.0 from/to central (https://repo.maven.apache.org/maven2): repo.maven.apache.org"
+ },
+ "sec001_non_resolvable_parent_offline": {
+  "source": "kriya-live-validation/sec001-adversarial-live-02/run_output.log (contained offline run)",
+  "output": "[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.0.0-M9:test (default-test) on project WordFrequencyDiagnostics: Unable to get dependency information for org.objenesis:objenesis:jar:2.6: Failed to process POM for org.objenesis:objenesis:jar:2.6: Non-resolvable parent POM for org.objenesis:objenesis:2.6: The following artifacts could not be resolved: org.objenesis:objenesis-parent:pom:2.6 (absent): Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact org.objenesis:objenesis-parent:pom:2.6 has not been downloaded from it before."
+ }
+}

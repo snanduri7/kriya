@@ -36,8 +36,12 @@ from kriya.tools.dependency_execution import (
     MAVEN_INVOCATION_FAILED,
     OfflineFailureKind,
     classify_maven_offline_failure_text,
+    classify_maven_validate_failure,
     log_acquisition_outcome,
     maven_missing_artifact_signature,
+)
+from kriya.tools.dependency_execution import (
+    MAVEN_VALIDATE_NO_VERDICT_CODES as MAVEN_VALIDATE_NO_VERDICT_CODES,  # re-exported: the gate words these codes (kriya/workflow imports this module, not dependency_execution)
 )
 from kriya.tools.process import ProcessController
 from kriya.tools.sandbox import ResourcePlan, build_restricted_env, resource_plan
@@ -1708,13 +1712,18 @@ class PolymorphicValidator:
             res = self._run_maven_cmd(["validate"], cwd=self.workspace_path, timeout=120)
             if res["returncode"] == 0:
                 return {"success": True, "output": "Maven POM validation succeeded."}
+            captured = f"{res.get('stdout', '')}\n{res.get('stderr', '')}"
+            # F7 (owner decision): only a Maven that RAN and rejected the POM with trustworthy model diagnostics convicts it. A timeout (ProcessController: returncode -1 +
+            # timeout=True), a signal kill, resolution / transfer evidence, or a non-zero exit with no interpretable diagnostics is NO verdict: an environment outcome with the
+            # captured output preserved, never a POM defect and never offered to the Developer for repair.
+            code = classify_maven_validate_failure(res["returncode"], bool(res.get("timeout")), captured)
+            if code is None:
+                return {"success": False, "output": f"Maven POM validation failed:\n{res['stdout']}\n{res['stderr']}"}
+            result: Dict[str, Any] = {"success": False, "environment_reason_code": code, "returncode": res["returncode"],
+                                      "output": f"Maven returned no trustworthy POM-validation verdict ({code}):\n{captured}"}
             if res.get("timeout"):
-                # ProcessController reports a timeout as returncode -1 + timeout=True. Maven STARTED and did not finish: like the compile and test gates (a timed-out Maven is a
-                # candidate failure there - a POM can itself make Maven hang, e.g. an unreachable parent or plugin repository) this stays a POM-validation failure, but is marked
-                # `timed_out` (the key every other timed gate result uses) instead of only saying so in prose.
-                return {"success": False, "timed_out": True,
-                        "output": f"Maven POM validation timed out (no verdict within its time bound):\n{res.get('stdout', '')}\n{res.get('stderr', '')}"}
-            return {"success": False, "output": f"Maven POM validation failed:\n{res['stdout']}\n{res['stderr']}"}
+                result["timed_out"] = True
+            return result
         except OSError as e:
             # 'mvn' itself isn't on PATH (FileNotFoundError), isn't executable, or the process could not be started - a
             # toolchain problem, not a POM defect: returned (never swallowed into a pass) with a typed `environment_reason_code`, so the
