@@ -3291,6 +3291,8 @@ tests/golden/policy_approval/serialized_forms.json) or the KUP schema (`BLOCKED_
 
 **Approval outcome contract (N1/F4).** The general approval callback's answer is the closed, typed `ApprovalOutcome` (`APPROVED` / `DECLINED` / `UNAVAILABLE`, each with a reason code) resolved by one owner, `kriya/policy/approval.py::resolve_approval`. A desktop launch that cannot put a decision to a person, or whose review expired, is UNAVAILABLE - not a human decline - so the run ends `approval_required` ("approval required and not available"), not `human_rejected`; a person's reject stays `human_rejected`. An unresolved Task/Future or any unrecognized callback answer is never read as approval. The full statement is in `handover/claude-context/generation-pipeline.md` (step 6).
 
+**Maven POM validation (F7).** `mvn validate` that cannot be run (the executable is missing / not executable) or returns no verdict in its time bound is a typed `environment_reason_code` (`MAVEN_INVOCATION_FAILED` / `MAVEN_VALIDATE_TIMED_OUT`) on the validator result; the gate raises the existing `verification_infrastructure_failure` (STOP_ENVIRONMENT) and the Developer is never asked to repair a POM that Maven did not judge. Only a verdict from Maven itself is `pom_semantic_validation`. Unexpected non-OSError exceptions still propagate (never a pass, OI-83).
+
 ### S20 - stored-evidence redaction, first ingress; endpoint display (2026-10-20, OI-134, OI-152; STOPPED at the first golden move)
 
 OBS-003 / KRP-025 (REQUIRED) say secrets are redacted in logs, traces and evidence. The preflight
