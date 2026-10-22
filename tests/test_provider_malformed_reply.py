@@ -109,6 +109,40 @@ MALFORMED = {
     **{f"native_tools_calls_falsy_{label}": ("native", "tools", json.dumps({"model": "m", "message": {"content": "", "tool_calls": value},
                                                                         "done": True}))
        for label, value in (("zero", 0), ("false", False), ("empty_string", ""), ("empty_object", {}))},
+    # F3 (Wave-1 closure delta; the blind review's measured residuals of the MC3 idiom `x or {}`): a falsy NON-object where an object is defined is malformed, not an empty
+    # reply / a fabricated call. Absent and null stay valid (VALID below: a final line without a message, `message: null`).
+    **{f"native_message_falsy_{label}": ("native", "complete", json.dumps({"model": "m", "message": value, "done": True}))
+       for label, value in (("zero", 0), ("false", False), ("empty_string", ""), ("empty_list", []))},
+    **{f"native_tools_message_falsy_{label}": ("native", "tools", json.dumps({"model": "m", "message": value, "done": True}))
+       for label, value in (("zero", 0), ("false", False), ("empty_string", ""), ("empty_list", []))},
+    **{f"native_stream_message_falsy_{label}": ("native", "stream", _ndjson({"model": "m", "message": {"content": "hi"}, "done": False},
+                                                                           {"model": "m", "message": value, "done": True}))
+       for label, value in (("zero", 0), ("false", False), ("empty_string", ""), ("empty_list", []))},
+    # a tool call is an object with a `function` object naming a tool: nothing else is fabricated into one (no `call_0` with an empty name)
+    **{f"native_tools_call_element_{label}": ("native", "tools", json.dumps({"model": "m", "message": {"content": "", "tool_calls": [value]}, "done": True}))
+       for label, value in (("zero", 0), ("null", None), ("false", False), ("empty_string", ""), ("empty_list", []), ("empty_object", {}))},
+    **{f"native_tools_call_function_{label}": ("native", "tools", json.dumps({"model": "m", "message": {"content": "", "tool_calls": [{"function": value}]}, "done": True}))
+       for label, value in (("zero", 0), ("null", None), ("empty_string", ""), ("empty_list", []), ("empty_object", {}))},
+    "native_tools_call_without_function": ("native", "tools", json.dumps({"model": "m", "message": {"content": "", "tool_calls": [{"id": "c1"}]}, "done": True})),
+    **{f"native_tools_call_name_{label}": ("native", "tools", json.dumps({"model": "m", "message": {"content": "", "tool_calls": [{"function": {"name": value, "arguments": {}}}]},
+                                                                         "done": True}))
+       for label, value in (("null", None), ("zero", 0), ("empty_string", ""), ("list", ["f"]), ("object", {"n": "f"}))},
+    "native_tools_call_name_missing": ("native", "tools", json.dumps({"model": "m", "message": {"content": "", "tool_calls": [{"function": {"arguments": {}}}]}, "done": True})),
+    **{f"native_tools_call_arguments_{label}": ("native", "tools", json.dumps({"model": "m", "message": {"content": "", "tool_calls": [{"function": {"name": "f", "arguments": value}}]},
+                                                                              "done": True}))
+       for label, value in (("zero", 0), ("false", False), ("number", 1.5), ("empty_list", []), ("list", [1]))},
+    # OpenAI contract: `function.name` and `function.arguments` are strings (the SDK builds models without validating them)
+    **{f"oai_tools_call_name_{label}": ("oai", "tools", _oai(message={"role": "assistant", "content": None, "tool_calls": [
+        {"id": "c1", "type": "function", "function": {"name": value, "arguments": "{}"}}]}))
+       for label, value in (("null", None), ("zero", 0), ("empty_string", ""), ("list", ["f"]))},
+    "oai_tools_call_name_missing": ("oai", "tools", _oai(message={"role": "assistant", "content": None, "tool_calls": [
+        {"id": "c1", "type": "function", "function": {"arguments": "{}"}}]})),
+    **{f"oai_tools_call_arguments_{label}": ("oai", "tools", _oai(message={"role": "assistant", "content": None, "tool_calls": [
+        {"id": "c1", "type": "function", "function": {"name": "f", "arguments": value}}]}))
+       for label, value in (("null", None), ("zero", 0), ("object", {"a": 1}), ("list", []))},
+    "oai_tools_call_arguments_missing": ("oai", "tools", _oai(message={"role": "assistant", "content": None, "tool_calls": [
+        {"id": "c1", "type": "function", "function": {"name": "f"}}]})),
+    "oai_tools_call_element_null": ("oai", "tools", _oai(message={"role": "assistant", "content": None, "tool_calls": [None]})),
     "oai_stream_chunk_not_an_object": ("oai", "stream", "data: \"hello\"\n\ndata: [DONE]\n\n"),
     "oai_stream_chunk_number_between_valid": ("oai", "stream", "data: " + json.dumps(_oai_chunk(delta={"content": "hi"})) + "\n\ndata: 7\n\ndata: [DONE]\n\n"),
     "native_content_number": ("native", "complete", json.dumps({"model": "m", "message": {"content": 5}, "done": True})),
@@ -151,6 +185,27 @@ VALID = {  # -> expected content
     "native_valid_stream_final_line_without_message": ("native", "stream", _ndjson(
         {"model": "m", "message": {"content": "hello"}, "done": False}, {"model": "m", "done": True, "done_reason": "stop"}), "hello"),
     "native_valid_tools_message_null": ("native", "tools", json.dumps({"model": "m", "message": None, "done": True}), ""),
+    # F3 controls (valid shapes the stricter checks must keep accepting). The first is the shape of every line of the RECORDED real Ollama stream
+    # (handover/evidence/gr1-replay/run/response_A.stream.jsonl: `message` = {role, content} on all lines, the final one carrying done_reason).
+    "native_valid_recorded_stream_shape": ("native", "stream", _ndjson(
+        {"model": "m", "created_at": "t", "message": {"role": "assistant", "content": "hel"}, "done": False},
+        {"model": "m", "created_at": "t", "message": {"role": "assistant", "content": "lo"}, "done": False},
+        {"model": "m", "created_at": "t", "message": {"role": "assistant", "content": ""}, "done": True, "done_reason": "stop",
+         "total_duration": 1, "eval_count": 2}), "hello"),
+    "native_valid_final_chunk_empty_content": ("native", "complete", json.dumps({"model": "m", "message": {"role": "assistant", "content": ""}, "done": True,
+                                                                                 "done_reason": "stop"}), ""),
+    "native_valid_tools_with_id_and_arguments": ("native", "tools", json.dumps({"model": "m", "message": {"role": "assistant", "content": "", "tool_calls": [
+        {"id": "call_1", "function": {"index": 0, "name": "f", "arguments": {"a": 1}}}]}, "done": True}), ""),
+    "native_valid_tools_arguments_as_json_string": ("native", "tools", json.dumps({"model": "m", "message": {"content": "", "tool_calls": [
+        {"function": {"name": "f", "arguments": "{\"a\": 1}"}}]}, "done": True}), ""),
+    "native_valid_tools_arguments_null": ("native", "tools", json.dumps({"model": "m", "message": {"content": "", "tool_calls": [
+        {"function": {"name": "f", "arguments": None}}]}, "done": True}), ""),
+    "native_valid_tools_arguments_absent": ("native", "tools", json.dumps({"model": "m", "message": {"content": "", "tool_calls": [
+        {"function": {"name": "f"}}]}, "done": True}), ""),
+    "native_valid_tools_two_calls": ("native", "tools", json.dumps({"model": "m", "message": {"content": "", "tool_calls": [
+        {"function": {"name": "f", "arguments": {}}}, {"function": {"name": "g", "arguments": {"x": [1, 2]}}}]}, "done": True}), ""),
+    "oai_valid_tools_empty_arguments_object_string": ("oai", "tools", _oai(message={"role": "assistant", "content": None, "tool_calls": [
+        {"id": "c1", "type": "function", "function": {"name": "f", "arguments": "{\"a\": 1}"}}]}), ""),
     # MC3 controls: the legitimate no-call shapes stay accepted on both adapters.
     "oai_valid_tools_calls_null": ("oai", "tools", _oai(message={"role": "assistant", "content": "hi", "tool_calls": None}), "hi"),
     "oai_valid_tools_calls_empty_list": ("oai", "tools", _oai(message={"role": "assistant", "content": "hi", "tool_calls": []}), "hi"),
@@ -160,6 +215,17 @@ VALID = {  # -> expected content
     "native_valid_tools_calls_empty_list": ("native", "tools", json.dumps({"model": "m", "message": {"content": "hi", "tool_calls": []},
                                                                            "done": True}), "hi"),
 }
+
+# F3: the two REAL Ollama native streams recorded by the GR-1 replay (handover/evidence/gr1-replay/run, ~1000 lines each) are the valid-shape controls for the native
+# streaming decoder: every line must decode exactly as before, whatever the stricter message / tool-call checks say.
+_RECORDED_DIR = Path(__file__).resolve().parent.parent / "handover" / "evidence" / "gr1-replay" / "run"
+for _label in ("A", "B"):
+    _recorded = _RECORDED_DIR / f"response_{_label}.stream.jsonl"
+    if _recorded.exists():
+        _lines = [json.loads(line) for line in _recorded.read_text(encoding="utf-8").splitlines() if line.strip()]
+        VALID[f"native_valid_recorded_real_stream_{_label}"] = (
+            "native", "stream", "".join(json.dumps(line) + "\n" for line in _lines),
+            "".join(line["message"]["content"] for line in _lines).strip())
 ALL = {**{k: v for k, v in MALFORMED.items()}, **{k: v[:3] for k, v in VALID.items()}}
 CURRENT = {"name": None}
 
@@ -282,6 +348,9 @@ _DECODER_PATHS = {
     "native_complete": ("native_valid", "native_content_number", "kriya.core.model_runtime.provider_text"),
     "native_stream": ("native_valid_stream", "native_stream_content_number", "kriya.core.model_runtime.provider_text"),
     "native_tools": ("native_valid_tools", "native_tools_content_number", "kriya.core.model_runtime.provider_text"),
+    "native_tool_call": ("native_valid_tools", "native_tools_call_name_null", "kriya.core.model_runtime._native_tool_call"),
+    "native_message": ("native_valid", "native_message_falsy_zero", "kriya.core.model_runtime._native_optional_object"),
+    "oai_tool_call": ("oai_valid_tools", "oai_tools_call_name_null", "kriya.core.inference_runtime._raw_tool_call"),
 }
 
 

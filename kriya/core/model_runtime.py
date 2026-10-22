@@ -1091,6 +1091,36 @@ def _native_object(value: Any, what: str) -> Dict[str, Any]:
     return value
 
 
+def _native_optional_object(value: Any, what: str) -> Dict[str, Any]:
+    """An object a reply MAY omit (the final streamed line carries no message): absent / null is empty; any other non-object - a FALSY one (0, false, "", []) included - is
+    malformed. Never ``value or {}``, which read those as an empty reply."""
+    return {} if value is None else _native_object(value, what)
+
+
+def _native_tool_call(call: Any, index: int) -> RawToolCall:
+    """One native tool call. The API defines ``{"id"?: str, "function": {"name": non-empty str, "arguments": object | str | absent / null}}``; a call that is not that is the
+    provider's malformed reply, never a fabricated ``call_0`` with an empty name (the old ``call or {}`` / ``function.get("name") or ""`` idiom) or empty arguments."""
+    call = _native_object(call, "a tool call")
+    function = _native_object(call.get("function"), "a tool call's function")
+    name = function.get("name")
+    if not isinstance(name, str) or not name:
+        raise malformed_provider_reply(f"a tool call's name is {_native_kind(name)}, not a non-empty string")
+    arguments = function.get("arguments")
+    if arguments is None:
+        text = "{}"                    # a tool with no parameters
+    elif isinstance(arguments, str):
+        text = arguments
+    elif isinstance(arguments, dict):
+        text = json.dumps(arguments)
+    else:
+        raise malformed_provider_reply(f"a tool call's arguments are {_native_kind(arguments)}, not an object")
+    return RawToolCall(str(call.get("id") or f"call_{index}"), name, text)
+
+
+def _native_kind(value: Any) -> str:
+    return "null" if value is None else type(value).__name__
+
+
 class NativeRuntimeError(RuntimeError):
     """An HTTP error answer of the native API."""
 
@@ -1310,7 +1340,7 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
             if response.status_code >= 400:
                 self._raise_for(response.status_code, response.text)
             data = _native_object(response.json(), "the reply body")
-            message = _native_object(data.get("message") or {}, "its message")
+            message = _native_optional_object(data.get("message"), "its message")
             out.raw_content = provider_text(message.get("content"), "the message content")
             out.content = out.raw_content.strip()
             thinking = provider_text(message.get("thinking"), "the message thinking")
@@ -1331,7 +1361,7 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
                 chunk = _native_object(json.loads(line), "a streamed line")
                 if chunk.get("error"):
                     self._raise_for(500, str(chunk["error"]))
-                message = _native_object(chunk.get("message") or {}, "a streamed line's message")
+                message = _native_optional_object(chunk.get("message"), "a streamed line's message")
                 thought = provider_text(message.get("thinking"), "a streamed line's thinking")
                 out.reasoning_chars += len(thought)
                 if thought:
@@ -1354,7 +1384,7 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
         if response.status_code >= 400:
             self._raise_for(response.status_code, response.text)
         data = _native_object(response.json(), "the reply body")
-        message = _native_object(data.get("message") or {}, "its message")
+        message = _native_optional_object(data.get("message"), "its message")
         content = provider_text(message.get("content"), "the message content")
         thinking = provider_text(message.get("thinking"), "the message thinking")
         out = ChatResponse(content=content, reasoning_chars=len(thinking), raw_content=content,
@@ -1365,12 +1395,7 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
         if not isinstance(calls, list):
             raise malformed_provider_reply(f"its tool_calls is {type(calls).__name__}, not a list")
         for index, call in enumerate(calls):
-            call = _native_object(call or {}, "a tool call")
-            function = _native_object(call.get("function") or {}, "a tool call's function")
-            arguments = function.get("arguments")
-            out.tool_calls.append(RawToolCall(
-                str(call.get("id") or f"call_{index}"), str(function.get("name") or ""),
-                arguments if isinstance(arguments, str) else json.dumps(arguments or {})))
+            out.tool_calls.append(_native_tool_call(call, index))
         self._read(out, {**data, "done": True})
         if out.tool_calls and out.finish_reason == "stop":
             out.finish_reason = "tool_calls"  # the /v1 normalized meaning

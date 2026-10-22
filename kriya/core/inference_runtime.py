@@ -342,8 +342,15 @@ def _tool_calls(message: Any) -> Any:
 
 
 def _raw_tool_call(call: Any) -> "RawToolCall":
+    """One OpenAI-compatible tool call. The SDK builds its models without validating them, so the contract's required strings are checked HERE: ``function.name`` is a
+    non-empty string and ``function.arguments`` a string (an absent attribute reads as null, never as a raw AttributeError that would be taken for a Kriya coding bug)."""
     function = provider_object(getattr(call, "function", None), "a tool call's function")
-    return RawToolCall(call.id, function.name, function.arguments)
+    name, arguments = getattr(function, "name", None), getattr(function, "arguments", None)
+    if not isinstance(name, str) or not name:
+        raise malformed_provider_reply(f"a tool call's name is {_received(name)}, not a non-empty string")
+    if not isinstance(arguments, str):
+        raise malformed_provider_reply(f"a tool call's arguments are {_received(arguments)}, not a string")
+    return RawToolCall(call.id, name, arguments)
 
 
 def _timeout_kwarg(request: ChatRequest) -> Dict[str, Any]:
