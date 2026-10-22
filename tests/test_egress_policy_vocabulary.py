@@ -35,3 +35,29 @@ def test_anything_outside_the_vocabulary_is_refused_not_read_as_unrestricted(val
 def test_a_non_string_is_refused_too(value):
     with pytest.raises(ValidationError):
         AutonomyConfig(egress_policy=value)
+
+
+# The same closed vocabulary on every way a value can reach the section after construction (the `autonomy.mode` pattern): an
+# assignment (`cfg.autonomy.egress_policy = ...`), a model_copy update, and an instance built without validation handed to AppConfig
+# (revalidate_instances="always"). A raw `AutonomyConfig.model_construct(...)` used WITHOUT AppConfig is not guarded - not a production path.
+@pytest.mark.parametrize("value", ["local-only", "LOCAL_ONLY", "nonsense", "", "open"])
+def test_an_assignment_a_model_copy_and_a_model_constructed_section_are_refused_too(value):
+    section = AutonomyConfig()
+    with pytest.raises(ValueError, match="autonomy.egress_policy must be 'local_only' or 'unrestricted'"):
+        section.egress_policy = value
+    with pytest.raises(ValueError, match="autonomy.egress_policy must be 'local_only' or 'unrestricted'"):
+        section.model_copy(update={"egress_policy": value})
+    with pytest.raises(ValidationError):
+        AppConfig(autonomy=AutonomyConfig.model_construct(egress_policy=value))
+    config = AppConfig()
+    with pytest.raises(ValueError, match="autonomy.egress_policy must be"):
+        config.autonomy.egress_policy = value
+    assert section.egress_policy == "local_only" and config.autonomy.egress_policy == "local_only"       # nothing was half-applied
+
+
+@pytest.mark.parametrize("value", ["local_only", "unrestricted"])
+def test_a_valid_assignment_and_model_copy_still_work(value):
+    section = AutonomyConfig()
+    section.egress_policy = value
+    assert section.egress_policy == value
+    assert AutonomyConfig().model_copy(update={"egress_policy": value}).egress_policy == value

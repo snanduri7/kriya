@@ -449,7 +449,7 @@ async def test_self_correction_resolve_missing_dependency_looks_up_a_real_coordi
         {"content": "done", "tool_calls": []},
     ])
     validator = MagicMock()
-    validator.autonomy_cfg.egress_policy = "open"
+    validator.autonomy_cfg.egress_policy = "unrestricted"
     validator.autonomy_cfg.web_lookup_enabled = True
 
     with patch(

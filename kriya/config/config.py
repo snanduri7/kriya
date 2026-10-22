@@ -385,6 +385,17 @@ def _autonomy_mode(value: Any) -> str:
     return parse_autonomy_mode(value)
 
 
+EGRESS_POLICIES = ("local_only", "unrestricted")
+
+
+def _egress_policy(value: Any) -> str:
+    """The one check of ``autonomy.egress_policy`` (validator, assignment and model_copy all call it): exactly a member of
+    EGRESS_POLICIES. Every consumer compares against the literal "local_only", so any other value is read as unrestricted."""
+    if type(value) is not str or value not in EGRESS_POLICIES:
+        raise ValueError(f"autonomy.egress_policy must be 'local_only' or 'unrestricted', got {value!r}")
+    return value
+
+
 class AutonomyConfig(BaseModel):
     # S16a (OI-130): a closed vocabulary (kriya.config.authority.AUTONOMY_MODES), validated at construction, on
     # assignment and on a model_copy update; a malformed value is AutonomyModeError, never a mode.
@@ -403,11 +414,15 @@ class AutonomyConfig(BaseModel):
     def __setattr__(self, name: str, value: Any) -> None:
         if name == "mode":
             value = _autonomy_mode(value)
+        elif name == "egress_policy":
+            value = _egress_policy(value)
         super().__setattr__(name, value)
 
     def model_copy(self, *, update: Optional[Dict[str, Any]] = None, deep: bool = False) -> "AutonomyConfig":
         if update and "mode" in update:
             _autonomy_mode(update["mode"])
+        if update and "egress_policy" in update:
+            _egress_policy(update["egress_policy"])
         return super().model_copy(update=update, deep=deep)
 
     # A closed vocabulary like its siblings (shell_network, contract_change_escalation): exactly "local_only" (the default;
@@ -419,9 +434,7 @@ class AutonomyConfig(BaseModel):
     @field_validator("egress_policy")
     @classmethod
     def _egress_policy_must_be_known(cls, v: str) -> str:
-        if v not in ("local_only", "unrestricted"):
-            raise ValueError(f"autonomy.egress_policy must be 'local_only' or 'unrestricted', got {v!r}")
-        return v
+        return _egress_policy(v)
 
     sensitive_paths: List[str] = Field(default_factory=lambda: [
         r".*\.env$", r".*secrets.*", r"\.github/workflows/.*", r"Jenkinsfile",

@@ -163,7 +163,7 @@ async def test_egress_policy_disabled_still_never_lets_audit_call_raise_out():
     audit call itself, even if it errors, must not propagate and break an
     otherwise-successful local call."""
     cfg = AppConfig()
-    cfg.autonomy.egress_policy = "open"
+    cfg.autonomy.egress_policy = "unrestricted"
     cfg.llm.base_url = "https://api.openai.com/v1"
     llm = LLMClient(cfg)
     llm.execution_policy.evaluate = MagicMock(side_effect=RuntimeError("policy engine broke"))
