@@ -104,7 +104,8 @@ autonomy:
                                             # then only triggers on a sensitive-path match, risk_threshold_lines
                                             # or a process profile, not on every change). Anything else is a
                                             # typed error (S16a, section 2.0a-2).
-  egress_policy: "local_only"              # Enforce local boundaries; blocks remote endpoints
+  egress_policy: "local_only"              # Exactly "local_only" (the default: blocks remote endpoints) or "unrestricted";
+                                            # any other spelling ("local-only", "LOCAL_ONLY", a typo) is a config error
   sensitive_paths:                         # ADDED to, never replaces, a baseline force-appended regardless of
     - ".*\\.env$"                          # config: .env, secrets, .github/workflows/, Jenkinsfile, credentials,
     - ".*secrets.*"                        # password (kriya/config/config.py::load_config()) - you cannot

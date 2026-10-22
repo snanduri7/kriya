@@ -410,7 +410,19 @@ class AutonomyConfig(BaseModel):
             _autonomy_mode(update["mode"])
         return super().model_copy(update=update, deep=deep)
 
+    # A closed vocabulary like its siblings (shell_network, contract_change_escalation): exactly "local_only" (the default;
+    # every non-loopback/private endpoint is refused) or "unrestricted" (the production profile seals this field back to
+    # "local_only"). Every consumer compares against "local_only", so an unlisted spelling ("local-only", "LOCAL_ONLY", a
+    # typo) used to be silently read as unrestricted: a typo fails open. Exact and case-sensitive; SECURITY_AUTHORITY under SEC-009.
     egress_policy: str = Field(default="local_only")
+
+    @field_validator("egress_policy")
+    @classmethod
+    def _egress_policy_must_be_known(cls, v: str) -> str:
+        if v not in ("local_only", "unrestricted"):
+            raise ValueError(f"autonomy.egress_policy must be 'local_only' or 'unrestricted', got {v!r}")
+        return v
+
     sensitive_paths: List[str] = Field(default_factory=lambda: [
         r".*\.env$", r".*secrets.*", r"\.github/workflows/.*", r"Jenkinsfile",
         r".*credentials.*", r".*password.*"
