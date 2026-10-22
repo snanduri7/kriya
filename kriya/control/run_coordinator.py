@@ -17,12 +17,18 @@ import subprocess
 import time
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import wraps
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
 
 from kriya.context.workspace_identity import workspace_identity
-from kriya.control.commit_state import UncertainWorkspaceStateError, assess_workspace_commit_state
+from kriya.control.commit_state import (
+    REASON_RESULT_CONTRADICTS_RUN_RECORD,
+    REASON_UNCERTAIN_RUN_RECORD,
+    RECOVERY_COMMAND,
+    UncertainWorkspaceStateError,
+    assess_workspace_commit_state,
+)
 from kriya.control.persistence import load_run_record, save_run_record
 from kriya.control.run_ownership import acquire_run_lock
 from kriya.control.run_record import IllegalRunTransitionError, RunLifecycle, RunRecord
@@ -302,6 +308,34 @@ def _fail_active_run(context: RunContext, error: Optional[BaseException] = None)
     )
 
 
+def _claims_success(payload: Dict[str, Any]) -> bool:
+    return payload.get("quality_gates_passed") is True or str(payload.get("status", "")).lower() == "success"
+
+
+def _reconciled_with_record(payload: Dict[str, Any], record: RunRecord, run_id: str) -> Dict[str, Any]:
+    """RDCG-B-001 (owner decision 2026-10-23): the ONE result-truth owner for a mutating run. A result that claims success while the run's authoritative RunRecord did not end
+    SUCCESS is not terminal success: UNCERTAIN -> ``needs_review`` (with the recovery command), any other terminal state -> ``failed``. ``quality_gates_passed`` is the aggregate
+    terminal truth (``RunState.final_workflow_quality_passed``; the CLI exit code and every consumer read it as success), so it becomes False; the factual sub-results the workflow
+    produced (candidate_gates_passed, terminal_regression_passed, overall_attempt_passed, files, commit_evidence, post_commit_persistence_errors, ...) are kept as they are."""
+    uncertain = record.lifecycle_state == RunLifecycle.UNCERTAIN
+    reconciled = {
+        **payload,
+        "status": "needs_review" if uncertain else "failed",
+        "quality_gates_passed": False,
+        "reason_codes": [REASON_UNCERTAIN_RUN_RECORD if uncertain else REASON_RESULT_CONTRADICTS_RUN_RECORD],
+        "run_record_state": record.lifecycle_state.value,
+        "reported_status": payload.get("status"),
+        "run_id": payload.get("run_id") or run_id,
+        "run_record_id": run_id,
+    }
+    if uncertain:
+        reconciled["recovery_command"] = RECOVERY_COMMAND
+        reconciled.setdefault("error", f"The run's commit could not be confirmed in its run record. Run `{RECOVERY_COMMAND}` to settle it from the durable evidence.")
+    else:
+        reconciled.setdefault("error", f"The run reported success but its run record ended {record.lifecycle_state.value}.")
+    return reconciled
+
+
 def current_run_context() -> Optional[RunContext]:
     """Return the active capability in this execution context, if any."""
     context = _ACTIVE_RUN.get()
@@ -495,6 +529,17 @@ def _config_fingerprint(arguments: dict) -> Optional[str]:
     return None
 
 
+def _reconcile_result(result: Any, record: RunRecord, run_id: str) -> Any:
+    """``result`` unchanged unless it claims success while the run's record did not end SUCCESS (see ``_reconciled_with_record``). A ``WorkflowResult`` carries the payload as
+    ``legacy_result``."""
+    payload = result.legacy_result if hasattr(result, "legacy_result") else result
+    if not isinstance(payload, dict) or not _claims_success(payload) or record.lifecycle_state == RunLifecycle.SUCCESS:
+        return result
+    logger.error("Run %s: the result claimed success but its run record is %s - reporting it as not successful.", run_id, record.lifecycle_state.value)
+    reconciled = _reconciled_with_record(payload, record, run_id)
+    return replace(result, legacy_result=reconciled) if hasattr(result, "legacy_result") else reconciled
+
+
 def coordinated_mutation(function: F) -> F:
     """Ensure an async public mutation API always executes with ownership.
 
@@ -553,6 +598,8 @@ def coordinated_mutation(function: F) -> F:
                             _complete_successful_run(context)
                         elif quality is False or status in {"failed", "failure", "needs_review"}:
                             _fail_active_run(context)
+                if outermost and lease.record is not None:
+                    result = _reconcile_result(result, lease.record, context.run_id)
                 return result
             except BaseException as error:
                 if outermost:

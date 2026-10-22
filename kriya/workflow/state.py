@@ -679,6 +679,8 @@ class GenerationState:
     # PRD-032: the terminal commit's failure payload (TerminalCommitOutcome.
     # failure_payload()) when the verified candidate was not committed.
     terminal_commit_failure: Optional[Dict[str, Any]] = None
+    # RDCG-B-001: RunRecord persistence failures AFTER the workspace outcome was decided (TerminalCommitOutcome.record_errors), the same payload the enforce site reports.
+    post_commit_persistence_errors: List[Dict[str, str]] = field(default_factory=list)
     # Current attempt's three distinct verification/application boundaries.
     candidate_gates_succeeded: bool = False
     terminal_regression_succeeded: bool = False

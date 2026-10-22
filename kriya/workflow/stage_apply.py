@@ -591,6 +591,7 @@ def apply_terminal_candidate(
             _raise_contract_registry_stop(state, commit_outcome)
         _raise_terminal_commit_stop(state, commit_outcome)
     state.contract_registry_transition = commit_outcome.contract_registry
+    state.post_commit_persistence_errors.extend(commit_outcome.record_errors)
     for filepath in sorted(state.all_files_written):
         logger.info(
             "Applied terminally verified sandbox change to workspace: %s", filepath,

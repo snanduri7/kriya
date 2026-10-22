@@ -227,15 +227,17 @@ async def test_uncertain_commit_is_recorded_uncertain_and_candidate_retained(tmp
 
 
 @pytest.mark.asyncio
-async def test_run_record_failure_after_successful_commit_is_persistence_error_not_exception(
+async def test_run_record_failure_after_successful_commit_is_needs_review_with_the_persistence_error_not_success(
     tmp_path, sandboxed,
 ):
+    """RDCG-B-001 (owner decision 2026-10-23, replacing the earlier contract that pinned `status: success` plus the error list): the verified candidate did reach the workspace,
+    but the run's record could not confirm the commit and ends UNCERTAIN - so the run is NOT terminal success. The facts the workflow established stay in the result."""
     (tmp_path / "app.py").write_text("original\n")
     plan = _plan("prd004-post-commit-record", ("app.py", FileAction.MODIFY))
 
     async def fake_run(**kwargs):
         (sandboxed / "app.py").write_text("verified candidate\n")
-        return {"status": "success", "quality_gates_passed": True, "files": ["app.py"]}
+        return {"status": "success", "quality_gates_passed": True, "candidate_gates_passed": True, "overall_attempt_passed": True, "files": ["app.py"]}
 
     real_save = run_coordinator_module.save_run_record
 
@@ -253,9 +255,10 @@ async def test_run_record_failure_after_successful_commit_is_persistence_error_n
         result = await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
 
     legacy = result.legacy_result
-    # The verified candidate did reach the workspace; the record failure is
-    # reported as persistence, never as an unverified or failed candidate.
-    assert legacy["status"] == "success"
+    assert legacy["status"] == "needs_review" and legacy["quality_gates_passed"] is False
+    assert legacy["reported_status"] == "success" and legacy["run_record_state"] == "UNCERTAIN"
+    assert legacy["reason_codes"] == ["UNCERTAIN_RUN_RECORD_COMMIT_STATE"] and legacy["recovery_command"] == "kriya runs recover"
+    # Independent evidence is not falsified: the commit did happen and the verified bytes are in the workspace.
     assert legacy["commit_evidence"]["state"] == "committed"
     assert (tmp_path / "app.py").read_text() == "verified candidate\n"
     assert {

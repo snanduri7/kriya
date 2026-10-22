@@ -279,6 +279,7 @@ def completed_result(
         # PRD-032: why the verified candidate was not committed (None
         # unless its terminal commit did not commit).
         "workspace_commit_failure": state.terminal_commit_failure,
+        **({"post_commit_persistence_errors": list(state.post_commit_persistence_errors)} if state.post_commit_persistence_errors else {}),
         "failure_report": failure_report_dicts,
         "plan_scope_conflict": state.plan_scope_conflict,
         "toolchain_warning": state.toolchain_warning,

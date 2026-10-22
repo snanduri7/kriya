@@ -2791,6 +2791,20 @@ def _bind_requirement_disposition(cfg: AppConfig, disposition_path: str, require
     )
 
 
+def _echo_needs_review(res: Dict[str, Any]) -> None:
+    """A result that is neither a pass nor a plain failure (RDCG-B-001): the run's record could not confirm its commit, so the outcome is UNSETTLED. Files in the result were written to the
+    workspace (that is a fact the workflow established), so they are never described as "not applied"."""
+    click.secho("Quality Gates: NOT CONFIRMED (needs review)", bold=True, fg="red")
+    if res.get("files"):
+        click.secho(f"Files written to workspace: {', '.join(str(f) for f in res['files'])}", fg="yellow")
+    for error in res.get("post_commit_persistence_errors") or []:
+        click.secho(f"Run record problem ({error.get('operation')}): {error.get('error')}", fg="yellow")
+    if res.get("error"):
+        click.secho(str(res["error"]), fg="yellow")
+    if res.get("recovery_command"):
+        click.secho(f"Before the next run on this workspace, run: {res['recovery_command']}", bold=True, fg="yellow")
+
+
 def _terminal_answer(raw: str) -> Any:
     """The answer to a CHANGE-approval prompt, from the UNSTRIPPED line read: only an explicit `y`/`yes` approves (the plain bool True) and only an explicit `n`/`no` is the person's decline (False).
     Nothing else is a decision: end of file (`""`), a bare Enter, or text that is neither - the `[y/n]` prompt shows no default, so no default is taken - is
@@ -3394,7 +3408,9 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
             # signal about on its own.
             for warning in res["skill_staleness_warnings"]:
                 click.secho(f"[SKILL STALENESS] {warning}", fg="yellow")
-        if res.get("files") and res.get("final_review_refusal"):
+        if res.get("status") == "needs_review":
+            _echo_needs_review(res)
+        elif res.get("files") and res.get("final_review_refusal"):
             _echo_final_review_refusal(res)
         elif res.get("files"):
             status_color = "green" if res.get('quality_gates_passed') else "red"

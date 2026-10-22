@@ -27,6 +27,8 @@ RECOVERY_COMMAND = "kriya runs recover"
 REASON_UNCERTAIN_RUN_RECORD = "UNCERTAIN_RUN_RECORD_COMMIT_STATE"
 REASON_RUN_RECORD_UNREADABLE = "RUN_RECORD_UNREADABLE"
 REASON_UNCERTAIN_COMMIT = "UNCERTAIN_COMMIT_STATE"
+# RDCG-B-001: a run's own result claimed success but the RunRecord that is the authority for that run ended in a different terminal state (not UNCERTAIN: that is the code above).
+REASON_RESULT_CONTRADICTS_RUN_RECORD = "RESULT_CONTRADICTS_RUN_RECORD"
 
 
 @dataclass(frozen=True)
