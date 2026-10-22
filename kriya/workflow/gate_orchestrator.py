@@ -50,7 +50,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode
-from kriya.tools.validate import MAVEN_VALIDATE_TIMED_OUT, execution_evidence
+from kriya.tools.validate import execution_evidence
 from kriya.workflow.acceptance import output_confirms_nonzero_test_execution, subtask_owns_test_obligation
 from kriya.workflow.banners import log_gate_banner
 from kriya.workflow.edit_safety import StagedFileWrite, read_file_revision
@@ -1726,10 +1726,6 @@ async def _as_developer(deps: GateDeps, awaitable: Any) -> Any:
         return await awaitable
 
 
-# Environment outcomes of a tool that DID start but returned no verdict (every other code means it could not start).
-_ENVIRONMENT_CODES_THAT_STARTED = frozenset({MAVEN_VALIDATE_TIMED_OUT})
-
-
 def _stop_on_environment_gate_result(state: RunState, result: Any, gate: str) -> None:
     """GRADLE-WRAPPER-CONTAINMENT-001: a gate result whose verification tool
     could not start carries a typed ``environment_reason_code`` (the
@@ -1742,10 +1738,9 @@ def _stop_on_environment_gate_result(state: RunState, result: Any, gate: str) ->
     if not code:
         return
     output = str(result.get("output") or "")
-    what = "did not finish" if code in _ENVIRONMENT_CODES_THAT_STARTED else "could not start"
     failure = Failure(
         type="verification_infrastructure_failure",
-        message=(f"VERIFICATION_INFRASTRUCTURE_FAILURE: the {gate} gate's verification tool {what} "
+        message=(f"VERIFICATION_INFRASTRUCTURE_FAILURE: the {gate} gate's verification tool could not start "
                  f"({code}); nothing about the candidate was observed, so this is not a code failure.\n{output}"),
         raw_output=output, source="orchestrator", attempt=state.attempt_number,
         diagnostics={"reason_code": code, "gate": gate, "gradle_distribution": result.get("gradle_distribution")},

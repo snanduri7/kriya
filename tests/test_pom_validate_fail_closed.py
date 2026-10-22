@@ -12,7 +12,7 @@ import pytest
 
 from kriya.config.config import AutonomyConfig
 from kriya.tools.containment import ContainmentSetupError
-from kriya.tools.dependency_execution import MAVEN_INVOCATION_FAILED, MAVEN_VALIDATE_TIMED_OUT
+from kriya.tools.dependency_execution import MAVEN_INVOCATION_FAILED
 from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.failure import QualityGateFailure
 
@@ -46,13 +46,13 @@ def test_a_real_validation_failure_fails_with_the_maven_output_and_no_environmen
     assert result["success"] is False and "Malformed POM" in result["output"] and "environment_reason_code" not in result
 
 
-def test_a_timeout_fails_with_the_typed_environment_code(tmp_path):
-    """ProcessController reports a timeout as returncode -1 + timeout=True (kriya/tools/process.py), not as an exception. Maven returned no verdict about the POM: an
-    environment outcome (F7), typed, not a POM defect."""
+def test_a_timeout_stays_a_pom_validation_failure_marked_timed_out_not_an_environment_outcome(tmp_path):
+    """ProcessController reports a timeout as returncode -1 + timeout=True (kriya/tools/process.py), not as an exception. Maven STARTED and did not finish; like the compile and test gates
+    (a timed-out Maven is a candidate failure there - a POM can itself make Maven hang) it is a validation failure, machine-readable as `timed_out`, with NO environment code."""
     with patch.object(PolymorphicValidator, "_run_maven_cmd", return_value=_returns(returncode=-1, timeout=True, stderr="killed")):
         result = _validator(tmp_path).run_pom_validate()
-    assert result["success"] is False and result["environment_reason_code"] == MAVEN_VALIDATE_TIMED_OUT
-    assert "no verdict about the POM was obtained" in result["output"] and "killed" in result["output"]
+    assert result["success"] is False and result["timed_out"] is True and "environment_reason_code" not in result
+    assert "timed out" in result["output"] and "killed" in result["output"]
 
 
 @pytest.mark.parametrize("error", [FileNotFoundError("mvn"), PermissionError("mvn is not executable"), OSError("cannot start process")],
@@ -133,11 +133,10 @@ def _raise_from_gate(tmp_path, result):
     return raised.value.failure, recorded
 
 
-@pytest.mark.parametrize("code,phrase", [(MAVEN_INVOCATION_FAILED, "could not start"), (MAVEN_VALIDATE_TIMED_OUT, "did not finish")])
-def test_a_maven_that_could_not_run_is_a_verification_infrastructure_failure_not_a_pom_defect(tmp_path, code, phrase):
-    failure, recorded = _raise_from_gate(tmp_path, {"success": False, "output": "Failed to invoke mvn validate: [Errno 2]", "environment_reason_code": code})
-    assert failure.type == "verification_infrastructure_failure" and failure.diagnostics["reason_code"] == code
-    assert phrase in failure.message and "not a code failure" in failure.message and "POM VALIDATION FAILED" not in failure.message
+def test_a_maven_that_could_not_run_is_a_verification_infrastructure_failure_not_a_pom_defect(tmp_path):
+    failure, recorded = _raise_from_gate(tmp_path, {"success": False, "output": "Failed to invoke mvn validate: [Errno 2]", "environment_reason_code": MAVEN_INVOCATION_FAILED})
+    assert failure.type == "verification_infrastructure_failure" and failure.diagnostics["reason_code"] == MAVEN_INVOCATION_FAILED
+    assert "could not start" in failure.message and "not a code failure" in failure.message and "POM VALIDATION FAILED" not in failure.message
     assert not failure.failed_content and not failure.likely_files and not failure.file_locations   # nothing offered to the Developer to repair
     assert [outcome["type"] for outcome in recorded] == ["verification_infrastructure_failure"]
 
@@ -149,8 +148,14 @@ def test_a_real_pom_defect_stays_a_pom_semantic_validation_with_the_pom_offered_
     assert [outcome["type"] for outcome in recorded] == ["pom_semantic_validation"]
 
 
+def test_a_timed_out_maven_is_offered_to_the_developer_as_a_pom_validation_failure(tmp_path):
+    """A timed-out Maven is a candidate failure like the compile / test gates' (a POM can make Maven hang): the POM is offered for repair."""
+    failure, _recorded = _raise_from_gate(tmp_path, {"success": False, "timed_out": True, "output": "Maven POM validation timed out (no verdict within its time bound):\n"})
+    assert failure.type == "pom_semantic_validation" and failure.failed_content == {"pom.xml": POM} and "timed out" in failure.message
+
+
 def test_the_env_gate_wording_of_existing_codes_is_unchanged(tmp_path):
-    """The phrase table only adds a case for a tool that started: every earlier code still reads 'could not start' (the recorded goldens depend on it)."""
+    """Every earlier environment code still reads 'could not start' (the recorded goldens depend on it)."""
     from kriya.workflow.gate_orchestrator import _stop_on_environment_gate_result  # pylint: disable=protected-access
 
     state, _ctx, _recorded = _gate_inputs(tmp_path)

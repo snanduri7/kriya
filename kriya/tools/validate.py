@@ -34,7 +34,6 @@ from kriya.tools.containment import (
 from kriya.tools.containment_oci import MAVEN_CACHE_MOUNT, finalize_registry_acquisition_result
 from kriya.tools.dependency_execution import (
     MAVEN_INVOCATION_FAILED,
-    MAVEN_VALIDATE_TIMED_OUT,
     OfflineFailureKind,
     classify_maven_offline_failure_text,
     log_acquisition_outcome,
@@ -1710,10 +1709,11 @@ class PolymorphicValidator:
             if res["returncode"] == 0:
                 return {"success": True, "output": "Maven POM validation succeeded."}
             if res.get("timeout"):
-                # ProcessController reports a timeout as returncode -1 + timeout=True. Maven returned no verdict about the POM, so this is
-                # an environment outcome (typed `environment_reason_code`, like the Gradle wrapper's), never a POM defect.
-                return {"success": False, "environment_reason_code": MAVEN_VALIDATE_TIMED_OUT,
-                        "output": f"mvn validate did not finish within its time bound; no verdict about the POM was obtained.\n{res.get('stdout', '')}\n{res.get('stderr', '')}"}
+                # ProcessController reports a timeout as returncode -1 + timeout=True. Maven STARTED and did not finish: like the compile and test gates (a timed-out Maven is a
+                # candidate failure there - a POM can itself make Maven hang, e.g. an unreachable parent or plugin repository) this stays a POM-validation failure, but is marked
+                # `timed_out` (the key every other timed gate result uses) instead of only saying so in prose.
+                return {"success": False, "timed_out": True,
+                        "output": f"Maven POM validation timed out (no verdict within its time bound):\n{res.get('stdout', '')}\n{res.get('stderr', '')}"}
             return {"success": False, "output": f"Maven POM validation failed:\n{res['stdout']}\n{res['stderr']}"}
         except OSError as e:
             # 'mvn' itself isn't on PATH (FileNotFoundError), isn't executable, or the process could not be started - a
