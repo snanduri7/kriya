@@ -596,11 +596,11 @@ def test_inside_a_launch_a_change_is_held_for_review_and_everything_else_is_unav
 def test_outside_a_launch_the_callback_is_the_terminal_behaviour_unchanged(monkeypatch):
     import kriya.cli as cli
     asked = []
-    monkeypatch.setattr(cli.click, "confirm", lambda text, **kw: asked.append(text) or True)
+    monkeypatch.setattr(cli.click, "prompt", lambda text, **kw: asked.append(text) or "y")
     assert cli._approval_decision(FILES, REASON, False) is True and len(asked) == 1, "no launch: the person is asked at the terminal"
     asked.clear()
     assert cli._approval_decision(FILES, REASON, True) is True and asked == [], "--yes keeps its terminal meaning outside a launch"
-    monkeypatch.setattr(cli.click, "confirm", lambda text, **kw: False)
+    monkeypatch.setattr(cli.click, "prompt", lambda text, **kw: "n")
     assert cli._approval_decision(FILES, REASON, False) is False
 
 

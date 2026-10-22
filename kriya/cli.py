@@ -61,8 +61,8 @@ from kriya.platform.services import ENTRY_REFUSED_EXIT_CODE
 from kriya.platform.services import entry_refusal as platform_entry_refusal
 from kriya.plugins.plugin import PluginManager
 from kriya.policy.approval import (
+    APPROVAL_DECISION_NOT_RECORDED,
     APPROVAL_LAUNCH_CANNOT_ASK,
-    APPROVAL_REVIEW_EXPIRED,
     ApprovalOutcome,
     TypedApprovalCallback,
     classify_approval_answer,
@@ -2791,25 +2791,27 @@ def _bind_requirement_disposition(cfg: AppConfig, disposition_path: str, require
     )
 
 
-def _confirm_change(prompt: str, *, default: bool = False) -> Any:
-    """The terminal's answer to a CHANGE-approval prompt (`generate`, `proposal execute`, the `fix` fallback): a real answer is the legacy plain bool (yes -> True, no -> the person's decline).
-    Input that ends with NO answer - end of file / closed stdin (click raises Abort for it; Ctrl-C reads the same way) - is not a decision: it is
-    `ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED)` ("the review ended with no decision"), reported as approval_required - never an approval and never a human decline
-    (owner decision 2026-10-22, RDCG-D-003)."""
+def _terminal_answer(raw: str) -> Any:
+    """The answer to a CHANGE-approval prompt, from the UNSTRIPPED line read: only an explicit `y`/`yes` approves (the plain bool True) and only an explicit `n`/`no` is the person's decline (False).
+    Nothing else is a decision: end of file (`""`), a bare Enter, or text that is neither - the `[y/n]` prompt shows no default, so no default is taken - is
+    `ApprovalOutcome.unavailable_because(APPROVAL_DECISION_NOT_RECORDED)`, reported as approval_required, never an approval and never a human decline (owner decision 2026-10-23, RDCG-D-003)."""
+    answer = raw.strip().lower()
+    if answer in ("y", "yes"):
+        return True
+    if answer in ("n", "no"):
+        return False
+    return ApprovalOutcome.unavailable_because(APPROVAL_DECISION_NOT_RECORDED)
+
+
+def _confirm_change(prompt: str) -> Any:
+    """The terminal's answer to a CHANGE-approval prompt (`generate`, `proposal execute`, the `fix` fallback), read through `_terminal_answer`. Input that ends (click raises Abort for end of
+    file / closed stdin, and for an intercepted Ctrl-C) is not a decision either: UNAVAILABLE, never an approval."""
     try:
-        return click.confirm(prompt, default=default)
+        raw = click.prompt(f"{prompt} [y/n]", default="", show_default=False, prompt_suffix=": ")
     except click.Abort:
         click.echo("")
-        return ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED)
-
-
-def _fix_tty_answer(raw: str) -> Any:
-    """`kriya fix`'s answer at its `[Y/n]` prompt, from the UNSTRIPPED `readline()` result: "" only ever means end of file (a bare Enter is "\\n") and is UNAVAILABLE, never the default.
-    A typed answer is the plain bool: a bare Enter takes the displayed default (yes), anything starting with "y" approves, anything else is the person's no."""
-    if raw == "":
-        return ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED)
-    answer = raw.strip().lower()
-    return not answer or answer.startswith("y")
+        return ApprovalOutcome.unavailable_because(APPROVAL_DECISION_NOT_RECORDED)
+    return _terminal_answer(raw)
 
 
 def _fix_approval_decision(diffs: List[Dict[str, str]], reason: str, yes: bool) -> Any:
@@ -2823,11 +2825,14 @@ def _fix_approval_decision(diffs: List[Dict[str, str]], reason: str, yes: bool) 
         return True
     try:
         with open("/dev/tty", "r") as tty:
-            sys.stdout.write("Apply these changes to your active workspace? [Y/n]: ")
+            sys.stdout.write("Apply these changes to your active workspace? [y/n]: ")
             sys.stdout.flush()
-            return _fix_tty_answer(tty.readline())
+            return _terminal_answer(tty.readline())
+    except KeyboardInterrupt:  # an intercepted Ctrl-C is no decision (the click prompt reads it the same way)
+        click.echo("")
+        return ApprovalOutcome.unavailable_because(APPROVAL_DECISION_NOT_RECORDED)
     except Exception:
-        return _confirm_change("Apply these changes to your active workspace?", default=True)
+        return _confirm_change("Apply these changes to your active workspace?")
 
 
 def _approval_decision(files: List[Dict[str, str]], reason: str, yes: bool) -> Any:
@@ -2837,7 +2842,7 @@ def _approval_decision(files: List[Dict[str, str]], reason: str, yes: bool) -> A
     ApprovalOutcome) is returned - the change gate awaits it. Every other approval (an empty change set: knowledge gap, runtime command, policy action; or a change whose review
     could not be recorded) cannot be put to anyone: the launch answers `ApprovalOutcome.unavailable_because(APPROVAL_LAUNCH_CANNOT_ASK)` WITHOUT prompting, never a bare False. That
     is NOT a human decline - nobody was asked - and the callers report it as "approval required and not available", not as a human rejection. `--yes` can never take effect inside a
-    launch (the launch refuses it, and this returns before consulting it). Outside a launch it is the terminal behaviour (a plain bool: True approves, False is the person's no); input that ends with no answer (end of file / closed stdin) is UNAVAILABLE, never either."""
+    launch (the launch refuses it, and this returns before consulting it). Outside a launch it is the terminal behaviour (a plain bool: True approves, False is the person's no); anything but an explicit y/n (end of file / closed stdin, a bare Enter, an intercepted Ctrl-C) is UNAVAILABLE, never either."""
     from kriya.control.launch import (
         note_approval_required,  # GUI M7: recorded when a desktop launch reaches a human decision it cannot take
         request_change_approval,  # GUI final: a desktop launch's CHANGE review, answered by `kriya launch-decision`

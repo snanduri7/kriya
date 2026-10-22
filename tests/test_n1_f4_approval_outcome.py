@@ -263,7 +263,7 @@ def test_the_resolver_reads_a_launch_unavailable_answer_as_unavailable_not_a_dec
 
 def test_outside_a_launch_a_terminal_no_is_a_decline_and_yes_is_an_approval(monkeypatch):
     import kriya.cli as cli
-    monkeypatch.setattr(cli.click, "confirm", lambda text, **kw: False)
+    monkeypatch.setattr(cli.click, "prompt", lambda text, **kw: "n")  # the terminal: an explicit n
     assert classify_approval_answer(cli._approval_decision([{"filepath": "a.py", "content": "x"}], "r", False)) == DECLINED
     assert classify_approval_answer(cli._approval_decision([{"filepath": "a.py", "content": "x"}], "r", True)) == APPROVED
 

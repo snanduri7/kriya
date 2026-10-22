@@ -242,7 +242,7 @@ def test_the_terminal_approval_prompt_shows_the_diff_raw(monkeypatch, capsys):
 
     from kriya.cli import _approval_decision
 
-    monkeypatch.setattr(click, "confirm", lambda *a, **k: False)
+    monkeypatch.setattr(click, "prompt", lambda *a, **k: "n")
     assert _approval_decision(SECRET_FILES, "policy", yes=False) is False
     assert f"+DB_PASSWORD={S}1" in capsys.readouterr().out
 
@@ -536,7 +536,7 @@ def test_the_terminal_approval_prompt_redacts_its_reason_not_its_diff(monkeypatc
 
     from kriya.cli import _approval_decision
 
-    monkeypatch.setattr(click, "confirm", lambda *a, **k: False)
+    monkeypatch.setattr(click, "prompt", lambda *a, **k: "n")
     _approval_decision(SECRET_FILES, f"review: DB_PASSWORD={S}9", yes=False)
     _approval_decision([], f"auto: api_key={S}8", yes=True)
     out = capsys.readouterr().out
