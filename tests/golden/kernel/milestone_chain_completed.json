@@ -107,7 +107,7 @@
     }
    ],
    "created_at": "<clock>",
-   "effective_config_fingerprint": null,
+   "effective_config_fingerprint": "9e84e320657a42aef18beaca33a74618060ac3d14ad98259b9c19b96a04f7e76",
    "execution_plan": {
     "commit_strategy": "incremental_work_unit",
     "fingerprint": "e9f4bf17f8148e3f111379c3c07e4cf1410a7d10babc8d04e50da4da55a87f51",

@@ -160,7 +160,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # kriya.workflow.workflow
     (W, 'RepositoryAnalyzer'): P(3, 'kriya.analyzer.analyzer', ((W, 2),), ()),
     (W, 'RepositoryAnalyzer.index_repository'): P(3, 'kriya.analyzer.analyzer', None, ()),
-    (W, 'WorkflowEngine.run_generation_workflow'): P(18, W, None, ()),
+    (W, 'WorkflowEngine.run_generation_workflow'): P(19, W, None, ()),
     (W, '_direct_terminal_writes'): P(1, W, ((W, 4),), ()),
     (W, '_ensure_repository_indexed'): P(2, W, ((W, 1),), ()),
     (W, '_gate_outcome_proven'): P(1, W, ((W, 2),), ()),
@@ -432,7 +432,9 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # (compute_workspace_content_hash: the ordinary failure injected at the real lazy-capture seam)
     # counter-evidence control (tests/test_counter_evidence_monotonic.py): +1 W site (_run_committed_paths: the deterministic violation
     # planted in the run's committed history of the measured end-to-end scenario)
-    assert totals == {A: 114, W: 95, C: 386}
+    # RDCG-B-001 result-truth control (tests/test_rdcg_b001_result_truth.py): +1 W site (run_generation_workflow: the needs_review result the
+    # generate command renders)
+    assert totals == {A: 114, W: 96, C: 386}
     assert len(PATCH_POINTS) == 132
 
 
