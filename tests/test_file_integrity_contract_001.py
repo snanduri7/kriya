@@ -867,7 +867,10 @@ _WRITE_RE = re.compile(
     r"|shutil\.(copy|copy2|copyfile|copytree|move|rmtree)\(|os\.(replace|rename|unlink|remove|rmdir|symlink|truncate)\("
 )
 _AUDITED_WRITE_SITES = {
-    "kriya/cli.py": 7, "kriya/config/authority_approval.py": 4, "kriya/control/history/acquire.py": 5, "kriya/application/project_init.py": 2, "kriya/control/persistence.py": 2,
+    "kriya/cli.py": 7, "kriya/config/authority_approval.py": 4, "kriya/control/history/acquire.py": 5, "kriya/application/project_init.py": 2, "kriya/control/persistence.py": 1,
+    # D2 M1a: the human-decision store (launch records, review decisions, review diffs) writes ONLY beneath <authority home>/launches/<workspace identity>/,
+    # outside the repository: staged 0600, fsynced, then replaced (or hard-linked once for a decision); never a workspace or candidate write.
+    "kriya/control/human_decision_store.py": 3,
     "kriya/control/recovery.py": 3, "kriya/control/checkpoint.py": 3, "kriya/control/retention.py": 1, "kriya/core/model_certification.py": 4,
     "kriya/core/model_qualification.py": 3, "kriya/core/model_routing.py": 2, "kriya/core/model_runtime.py": 2,
 

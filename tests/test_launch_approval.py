@@ -194,9 +194,9 @@ def test_wrong_run_wrong_workspace_and_a_decision_after_the_run_ended_are_refuse
         elsewhere.mkdir()
         with pytest.raises(wrong_run) as folder_error:
             approval.decide(str(elsewhere), LID, pending["review_id"], pending["candidate_digest"], "approve")
-        monkeypatch.setattr(approval, "workspace_identity", lambda _path: "not-this-workspace")
-        identity_code = _refusal(canonical, pending)
-        monkeypatch.undo()
+        with monkeypatch.context() as scoped:  # NOT monkeypatch.undo(): that would also revert the autouse KRIYA_AUTHORITY_HOME isolation
+            scoped.setattr(approval, "workspace_identity", lambda _path: "not-this-workspace")
+            identity_code = _refusal(canonical, pending)
         monkeypatch.setattr(approval, "POLL_SECONDS", 0.01)
         _decide(canonical, pending, "approve")
         return run_error.value.code, folder_error.value.code, identity_code
@@ -508,7 +508,11 @@ def test_a_review_that_ended_without_a_decision_cannot_be_decided_later_while_th
         session.finish(0, None, None)
 
 
-def test_if_the_approval_cannot_be_recorded_nothing_is_approved(ws, monkeypatch):
+def test_if_the_approval_cannot_be_recorded_nothing_is_approved(ws):
+    # A private MonkeyPatch, not the fixture: undoing the fixture would also revert the autouse KRIYA_AUTHORITY_HOME isolation, and session.finish below
+    # would then write the launch record into the real ~/.kriya/authority.
+    local = pytest.MonkeyPatch()
+
     def scenario(canonical, pending):
         real_save = launch_module.save_launch_record
 
@@ -516,7 +520,7 @@ def test_if_the_approval_cannot_be_recorded_nothing_is_approved(ws, monkeypatch)
             if (record.get("pending_approval") or {}).get("status") == "APPROVED":
                 raise OSError("disk full")
             return real_save(workspace, launch_id, record)
-        monkeypatch.setattr(launch_module, "save_launch_record", failing)
+        local.setattr(launch_module, "save_launch_record", failing)
         return _decide(canonical, pending, "approve")
 
     canonical, session = _session(ws)
@@ -528,12 +532,12 @@ def test_if_the_approval_cannot_be_recorded_nothing_is_approved(ws, monkeypatch)
         await asyncio.to_thread(scenario, canonical, pending)
         outcome["approved"] = await asyncio.wait_for(task, 20)
 
-    monkeypatch.setattr(approval, "APPROVAL_WAIT_SECONDS", 5.0)  # was 0.5: under 8-way load the decision thread landed after the review expired (REVIEW_EXPIRED); this test is about a failed save, not expiry
+    local.setattr(approval, "APPROVAL_WAIT_SECONDS", 5.0)  # was 0.5: under 8-way load the decision thread landed after the review expired (REVIEW_EXPIRED); this test is about a failed save, not expiry
     try:
         with begin_mutating_run(canonical):
             asyncio.run(main_())
     finally:
-        monkeypatch.undo()
+        local.undo()
         session.finish(0, None, None)
     assert outcome["approved"] == ApprovalOutcome.unavailable_because(APPROVAL_DECISION_NOT_RECORDED), "an approval that could not be made durable must never let the workflow continue - and is not a decline either"
 

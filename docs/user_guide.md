@@ -270,7 +270,7 @@ the desktop app's error messages and the audit records never show a secret. One 
   bytes, so you see the exact bytes, secrets included. (2) Recorded candidate changes and model requests, ONLY when you
   set `evidence.attempt_recorder.content_visibility: on` (default `off`: the content is withheld - nothing is shown, not
   a redacted copy). Neither copies that content into logs, run history, telemetry or other evidence views. The stored
-  review diff (`.kriya/control/launches/<launch>.review-diff-<review>.json`) keeps the exact bytes the review is bound to.
+  review diff (`<authority home>/launches/<workspace identity>/<launch>.review-diff-<review>.json`, outside the repository) keeps the exact bytes the review is bound to.
 - Readable on purpose: the host, port and path of a URL, hashes and commit SHAs, e-mail addresses, `git@host:repo`
   remotes, certificate PEM blocks, names that only contain a secret word (`max_tokens`, `--token-file`), Kriya's own
   reason codes (`SOURCE_CHANGED_SINCE_AUTHORIZATION: ...`). The approval record (`kriya authority approve`) never stored

@@ -3257,7 +3257,7 @@ OI-146 (owner decision, INTENTIONAL_CONTRACT, strict scope): the change-review D
 terminal prompt; reviewed bytes are approved bytes) and the opt-in `evidence.call_content`/`change_content`
 (`content_visibility: on`; off/default WITHHOLDS with a typed refusal) are the only raw-content surfaces. What Kriya
 keeps about a review is identity (candidate digest, per-file digests and counts, decision); the review-diff sidecar under
-`.kriya/control/launches/` is the one raw copy, read only by the review after re-proving its digests. Survey fixes at the
+`<authority home>/launches/<workspace identity>/` (D2 M1a: with the launch record and the review decisions, in the operator's authority home - `KRIYA_AUTHORITY_HOME`, else `~/.kriya/authority` - never inside the repository; files 0600, directories 0700; the old `.kriya/control/launches/` location is never read, trusted or migrated, so a review pending there is gone and a fresh one is required) is the one raw copy, read only by the review after re-proving its digests. Survey fixes at the
 APPLICATION projection (the OI-131 rule): `launch.status` (a command refused for review because it carries a secret
 is recorded raw as `approval_required` details - the stored copy is S20's), `evidence.records` (free-text envelope
 payload fields; redacted before the page's byte budget is counted), the change review's reason and the reason line of

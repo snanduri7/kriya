@@ -205,7 +205,7 @@ def test_the_approval_diff_is_served_raw_and_byte_faithful_and_persisted_only_as
     """OI-146 (INTENTIONAL_CONTRACT): reviewed bytes must equal approved bytes, so the change review shows the diff RAW - a
     redactor applied to it fails this test (S2c/S20 never alter approval bytes). What Kriya keeps about the review in its
     launch record and decision document is identity (digests, counts, decision), never the diff text; reading the review
-    logs nothing that carries it. The review-diff sidecar (control/launches/<id>.review-diff-<rid>.json) is the one raw
+    logs nothing that carries it. The review-diff sidecar (<authority home>/launches/<identity>/<id>.review-diff-<rid>.json) is the one raw
     copy, read only by this operation after re-proving its digests (traced in S2c-DECISION-TO-KILLER.md)."""
     from kriya.control.persistence import launch_record_path, launch_review_decision_path, launch_review_diff_path
     from kriya.policy.approval import candidate_digest

@@ -25,7 +25,6 @@ write; that is the existing pattern this follows.
 import json
 import logging
 import os
-import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
@@ -39,6 +38,7 @@ from kriya.context.workspace_identity import (
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.contracts import ContractRegistry, ContractRegistryCorruptError, ContractRegistryTransitionError
 from kriya.control.control_store import write_control_file
+from kriya.control.human_decision_store import human_decision_path, write_document
 from kriya.control.run_record import RunRecord
 from kriya.control.state import ControlState
 from kriya.foundation.ids import CONTROL_ID_CHARS, is_control_id
@@ -55,7 +55,6 @@ _ARTIFACTS_FILENAME = "artifacts.json"
 _DECISIONS_FILENAME = "decisions.jsonl"
 _APPROVED_PLANS_DIRNAME = "plans"
 _RUNS_DIRNAME = "runs"
-_LAUNCHES_DIRNAME = "launches"
 
 
 class StaleRunRecordError(RuntimeError):
@@ -104,15 +103,16 @@ def run_record_path(workspace_path: str, run_id: str) -> str:
 
 
 def launch_record_path(workspace_path: str, launch_id: str) -> str:
-    """GUI M6: the durable launch record of one desktop-started run (kriya/control/launch.py), beside the run records."""
+    """GUI M6: the durable launch record of one desktop-started run (kriya/control/launch.py). D2 M1a: it lives in the operator's authority home
+    (kriya/control/human_decision_store.py), not in the workspace; the old ``<workspace>/.kriya/control/launches/`` location is never read."""
     if not _valid_run_id(launch_id):
         raise ValueError("launch_id must contain only letters, digits, '-' or '_'")
-    return os.path.join(_control_dir(workspace_path), _LAUNCHES_DIRNAME, f"{launch_id}.json")
+    return human_decision_path(workspace_path, f"{launch_id}.json")
 
 
 def save_launch_record(workspace_path: str, launch_id: str, payload: Dict[str, Any]) -> None:
-    """Atomically (re)write one launch record; ownership-stamped like every control document, revision-grounded on what is on disk."""
-    _save_json_document(workspace_path, launch_record_path(workspace_path, launch_id), payload, derived_from_active_run=False)
+    """Atomically (re)write one launch record; ownership-stamped like every control document, and never over an unstamped or foreign one."""
+    write_document(workspace_path, launch_record_path(workspace_path, launch_id), payload)
 
 
 def launch_review_decision_path(workspace_path: str, launch_id: str, review_id: str) -> str:
@@ -120,23 +120,14 @@ def launch_review_decision_path(workspace_path: str, launch_id: str, review_id: 
     that has been superseded can never be read as the answer to the current one."""
     if not _valid_run_id(launch_id) or not _valid_run_id(review_id):
         raise ValueError("launch_id and review_id must contain only letters, digits, '-' or '_'")
-    return os.path.join(_control_dir(workspace_path), _LAUNCHES_DIRNAME, f"{launch_id}.review-{review_id}.json")
+    return human_decision_path(workspace_path, f"{launch_id}.review-{review_id}.json")
 
 
 def save_launch_review_decision(workspace_path: str, launch_id: str, review_id: str, payload: Dict[str, Any]) -> None:
     """Writes the decision ONLY if none exists yet, ATOMICALLY: the complete, ownership-stamped document is staged beside the final name and then hard-linked to it
     (`os.link` fails with FileExistsError when the final name exists, whoever created it and however concurrently), so of any number of simultaneous writers exactly
     one succeeds and nobody ever overwrites a decision. A reader never sees a partial decision: the final name only ever appears complete."""
-    path = launch_review_decision_path(workspace_path, launch_id, review_id)
-    staging = f"{path}.staging-{os.getpid()}-{uuid.uuid4().hex[:8]}"
-    try:
-        _save_json_document(workspace_path, staging, payload, derived_from_active_run=False, expected_file_revision=raw_digest(b""))
-        os.link(staging, path)
-    finally:
-        try:
-            os.unlink(staging)
-        except FileNotFoundError:
-            pass
+    write_document(workspace_path, launch_review_decision_path(workspace_path, launch_id, review_id), payload, exclusive=True)
 
 
 def load_launch_review_decision(workspace_path: str, launch_id: str, review_id: str) -> Optional[Dict[str, Any]]:
@@ -162,12 +153,12 @@ def launch_review_diff_path(workspace_path: str, launch_id: str, review_id: str)
     not part of the evidence store and does not widen ``evidence.attempt_recorder.content_visibility``."""
     if not _valid_run_id(launch_id) or not _valid_run_id(review_id):
         raise ValueError("launch_id and review_id must contain only letters, digits, '-' or '_'")
-    return os.path.join(_control_dir(workspace_path), _LAUNCHES_DIRNAME, f"{launch_id}.review-diff-{review_id}.json")
+    return human_decision_path(workspace_path, f"{launch_id}.review-diff-{review_id}.json")
 
 
 def save_launch_review_diff(workspace_path: str, launch_id: str, review_id: str, payload: Dict[str, Any]) -> None:
     """Atomically writes the ownership-stamped diff document of one review (the same control writer as every control document)."""
-    _save_json_document(workspace_path, launch_review_diff_path(workspace_path, launch_id, review_id), payload, derived_from_active_run=False)
+    write_document(workspace_path, launch_review_diff_path(workspace_path, launch_id, review_id), payload)
 
 
 def load_launch_review_diff(workspace_path: str, launch_id: str, review_id: str) -> Optional[Dict[str, Any]]:

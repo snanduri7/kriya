@@ -7,8 +7,8 @@ exists), and a terminal record that does not depend on the host noticing a proce
 - the launch id IS the run id: ``begin_mutating_run`` accepts a caller-supplied id (``acquire_run_lock(run_id=...)``), so the RunRecord, the
   attempt-evidence store and the launch record share one name from the first write. The id is validated here (a fixed shape, never a path) and
   claimed exactly once, by the first top-level run that starts in the launch's own workspace.
-- the record lives beside the RunRecords (``<workspace>/.kriya/control/launches/<id>.json``), written through the same ownership-stamped,
-  revision-grounded control writer. It holds identities, digests and a phase - never the goal text, never model or tool content.
+- the record lives in the operator's authority home (``<authority home>/launches/<workspace identity>/<id>.json``, D2 M1a: outside the repository, see
+  kriya/control/human_decision_store.py), written through the ownership-stamped, fsynced private writer; the old workspace location is never read. It holds identities, digests and a phase - never the goal text, never model or tool content.
 - it adds NO second success authority: ``ended`` copies what the workflow itself returned (status, failure category) and says so; the
   RunRecord lifecycle, the evidence store and the trace row remain the sources the cockpit shows as the outcome.
 
