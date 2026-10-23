@@ -29,6 +29,7 @@ import { ProjectSetupHost } from './project_setup_host';
 import { ProjectHost } from './project_host';
 import { NotificationHost } from './notification_host';
 import { ExecutionHost } from './execution_host';
+import { ReviewChannelHost } from './review_channel';
 import { launchExecution } from './execution_process';
 import { resolveUiMode } from './ui_mode';
 import { mustRefuseStart } from './product_guard';
@@ -68,6 +69,7 @@ const services = new KriyaServiceHolder();
 let settings: SettingsStore;
 let workspaces: WorkspaceRegistry;
 let execution: ExecutionHost;
+let reviewChannels: ReviewChannelHost;
 let approvals: ApprovalHost;
 let runtimeCommands: RuntimeCommandHost;
 let configApprovals: ConfigApprovalHost;
@@ -352,8 +354,9 @@ async function confirmRuntimeCommands(commands: ReadonlyArray<readonly string[]>
 app.whenReady().then(async () => {
   app.setAboutPanelOptions(aboutPanelOptions(app.getVersion()));
   settings = new SettingsStore(join(app.getPath('userData'), 'kriya-ui-settings.json'));
+  reviewChannels = new ReviewChannelHost({ log: dev?.traceLine });
   execution = new ExecutionHost({
-    launch: launchExecution, prepare: prepareExecution, currentWorkspace: () => workspaces.current(), mintLaunchId, now: () => new Date(),
+    channels: reviewChannels, launch: launchExecution, prepare: prepareExecution, currentWorkspace: () => workspaces.current(), mintLaunchId, now: () => new Date(),
     preflight: (workspace) => kupQuery({ operation: 'execution.preflight', workspace }),
     log: dev?.traceLine,
   });
@@ -367,12 +370,12 @@ app.whenReady().then(async () => {
     currentWorkspace: () => workspaces.current(), runActive: () => execution.active(), log: dev?.traceLine,
   });
   approvals = new ApprovalHost({
-    run: (options) => runKriya({ executable: options.executable, argv: options.argv, cwd: options.cwd, env: options.env, limits: options.limits }), prepare: prepareExecution,
+    channel: reviewChannels, prepare: prepareExecution,
     reviewable: (workspace, launchId, reviewId) => kupQuery({ operation: 'change_approval.review', workspace, launch_id: launchId, review_id: reviewId }),
     currentWorkspace: () => workspaces.current(), log: dev?.traceLine,
   });
   runtimeCommands = new RuntimeCommandHost({
-    run: (options) => runKriya({ executable: options.executable, argv: options.argv, cwd: options.cwd, env: options.env, limits: options.limits }), prepare: prepareExecution,
+    channel: reviewChannels, prepare: prepareExecution,
     reviewable: (workspace, launchId, reviewId) => kupQuery({ operation: 'runtime_command.review', workspace, launch_id: launchId, review_id: reviewId }),
     confirm: confirmRuntimeCommands, currentWorkspace: () => workspaces.current(), log: dev?.traceLine,
   });

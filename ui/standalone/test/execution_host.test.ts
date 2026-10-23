@@ -18,6 +18,7 @@ class FakeChild extends EventEmitter implements ExecChild {
   stdin = { write: (chunk: string) => { this.written += chunk; return true; }, end: () => { this.ended = true; }, on: (_e: 'error', _cb: (e: Error) => void) => undefined };
   stdout = { on: (_e: 'data', cb: (chunk: Buffer | string) => void) => { this.onStdout = cb; } };
   stderr = { on: (_e: 'data', cb: (chunk: Buffer | string) => void) => { this.onStderr = cb; } };
+  stdio?: ReadonlyArray<unknown>;
   onStdout: (chunk: Buffer | string) => void = () => undefined;
   onStderr: (chunk: Buffer | string) => void = () => undefined;
   killsSignalsExit: string | null = 'SIGINT';
@@ -294,5 +295,46 @@ describe('quitting while a start is being admitted (reviewer P3-3)', () => {
     expect(await starting).toMatchObject({ started: false, refusal: { code: 'HOST_ERROR', message: expect.stringContaining('closing') } });
     expect(m.invocations).toHaveLength(0);
     expect(m.host.active()).toBe(false);
+  });
+});
+
+describe('the private review channel (D2 M2)', () => {
+  const socketLike = () => ({ on: () => undefined, write: () => true, destroy: () => undefined });
+  const registry = () => {
+    const events: string[] = [];
+    return { events, channels: { attach: (id: string, _s: unknown) => { events.push(`attach ${id}`); }, detach: (id: string) => { events.push(`detach ${id}`); } } };
+  };
+
+  it('hands the child\'s fourth stdio entry (its socket) to the registry under the launch id, and takes it back when the process exits', async () => {
+    const { events, channels } = registry();
+    const { host, children } = make({ channels, launch: () => { const c = new FakeChild(); c.stdio = [null, null, null, socketLike()]; children.push(c); return c; } } as never);
+    await host.start(request());
+    expect(events).toEqual([`attach ${LAUNCH}`]);
+    children[0]!.emit('exit', 0, null);
+    await host.shutdown();
+    expect(events).toEqual([`attach ${LAUNCH}`, `detach ${LAUNCH}`]);
+  });
+
+  it('attaches nothing when the child has no fourth stdio entry or it is not a socket (such a run can have no review answered)', async () => {
+    for (const stdio of [undefined, [null, null, null], [null, null, null, null], [null, null, null, 'not a socket'], [null, null, null, { on: () => undefined }]]) {
+      const { events, channels } = registry();
+      const { host, children } = make({ channels, launch: () => { const c = new FakeChild(); if (stdio) c.stdio = stdio; children.push(c); return c; } } as never);
+      await host.start(request());
+      expect(events, JSON.stringify(stdio)).toEqual([]);
+    }
+  });
+
+  it('detaches when the process errors out as well', async () => {
+    const { events, channels } = registry();
+    const { host, children } = make({ channels, launch: () => { const c = new FakeChild(); c.stdio = [null, null, null, socketLike()]; children.push(c); return c; } } as never);
+    await host.start(request());
+    children[0]!.emit('error', new Error('spawn failed'));
+    expect(events).toEqual([`attach ${LAUNCH}`, `detach ${LAUNCH}`]);
+  });
+
+  it('the production launcher opens exactly one extra pipe: stdio is [pipe, pipe, pipe, pipe]', async () => {
+    const source = (await import('node:fs')).readFileSync(new URL('../src/main/execution_process.ts', import.meta.url), 'utf8');
+    expect(source).toContain("stdio: ['pipe', 'pipe', 'pipe', 'pipe']");
+    expect(source).not.toMatch(/stdio: \[[^\]]*'inherit'/);
   });
 });

@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { DIALOG_COMMANDS_MAX, RuntimeCommandHost, commandsAreReviewable, confirmationDialog, dialogCommandLine, isRunResponse, CONFIRM_BUTTONS, CONFIRM_RUN_INDEX, type RuntimeCommandDeps } from '../src/main/runtime_command_host';
-import type { ApprovalRun } from '../src/main/approval_host';
+import type { ChannelAnswer, ChannelDecisionRequest } from '../src/main/review_channel';
 import { buildRuntimeCommandDecisionArgv } from '../src/main/kriya_argv';
 import { IPC_CHANNELS } from '../src/main/ipc_contract';
 
@@ -14,14 +14,14 @@ const REVIEW = 'ra-' + 'a1'.repeat(12);
 const FP = 'sha256:' + 'b2'.repeat(32);
 const SUBJECT = { error: null, data: { verified: true, review_id: REVIEW, command_fingerprint: FP, status: 'PENDING', commands: [['mvn', '-q', 'test'], ['java', '-cp', 'target/classes', 'App']], working_directory: '/wt/path', input_channel: 'none' } };
 const good = (over: Record<string, unknown> = {}) => ({ workspace: WS, launch_id: ID, review_id: REVIEW, command_fingerprint: FP, decision: 'approve', ...over });
-const ACCEPTED: ApprovalRun = { kind: 'json', json: { accepted: true, code: 'ACCEPTED', message: 'ok', launch_id: ID, review_id: REVIEW, decision: 'approve', decided_at: 't' }, exitCode: 0, stderrTail: '' };
+const ACCEPTED: ChannelAnswer = { accepted: true, code: 'ACCEPTED' };
 
-function harness(over: Partial<RuntimeCommandDeps> = {}, answer: ApprovalRun | (() => Promise<ApprovalRun>) = ACCEPTED) {
-  const calls: Array<Parameters<RuntimeCommandDeps['run']>[0]> = [];
+function harness(over: Partial<RuntimeCommandDeps> = {}, answer: ChannelAnswer | (() => Promise<ChannelAnswer>) = ACCEPTED) {
+  const calls: ChannelDecisionRequest[] = [];
   const order: string[] = [];
   let shown = 0;
   const deps: RuntimeCommandDeps = {
-    run: async (options) => { order.push('run'); calls.push(options); return typeof answer === 'function' ? answer() : answer; },
+    channel: { decide: async (request) => { order.push('relay'); calls.push(request); return typeof answer === 'function' ? answer() : answer; } },
     prepare: () => ({ ok: true, executable: '/opt/kriya/.venv/bin/kriya', env: { HOME: '/Users/x', PATH: '/usr/bin:/bin' } }),
     reviewable: async () => { order.push('prove'); return SUBJECT; },
     confirm: async (_commands) => { order.push('confirm'); shown += 1; return true; },
@@ -89,21 +89,20 @@ describe('the subject proof', () => {
 });
 
 describe('RuntimeCommandHost.decide', () => {
-  it('approve: proves the subject, THEN the native confirmation, THEN asks Kriya once with the fixed environment and reports Kriya\'s answer', async () => {
+  it('approve: proves the subject, THEN the native confirmation, THEN relays once over the run\'s channel as a runtime_command and reports the waiter\'s answer', async () => {
     const { host, calls, order } = harness();
     expect(await host.decide(good())).toMatchObject({ accepted: true, code: 'ACCEPTED', decision: 'approve', review_id: REVIEW });
-    expect(order).toEqual(['prove', 'confirm', 'run']);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ executable: '/opt/kriya/.venv/bin/kriya', cwd: WS, env: { HOME: '/Users/x', PATH: '/usr/bin:/bin' }, limits: { timeoutMs: 30_000 } });
-    expect(calls[0]!.argv).toEqual(buildRuntimeCommandDecisionArgv(good() as never));
+    expect(order).toEqual(['prove', 'confirm', 'relay']);
+    expect(calls).toEqual([{ launch_id: ID, review_id: REVIEW, kind: 'runtime_command', candidate_digest: FP, decision: 'approve' }]);
+    expect(Object.keys(calls[0]!)).not.toContain('capability'); // added inside the channel, never by the caller or the renderer
   });
 
   it('REJECT is the explicit refusal: no proof, no native dialog, Kriya is told', async () => {
     const { host, calls, order, shown } = harness();
     expect(await host.decide(good({ decision: 'reject' }))).toMatchObject({ accepted: true });
-    expect(order).toEqual(['run']);
+    expect(order).toEqual(['relay']);
     expect(shown()).toBe(0);
-    expect(calls[0]!.argv.slice(-4)).toEqual(['--decision', 'reject', '--kind', 'runtime_command']);
+    expect(calls[0]).toMatchObject({ kind: 'runtime_command', decision: 'reject', candidate_digest: FP });
   });
 
   it('native CANCEL is "no decision yet": nothing is sent, no rejection is recorded, the review stays pending', async () => {
@@ -111,7 +110,7 @@ describe('RuntimeCommandHost.decide', () => {
     const result = await host.decide(good());
     expect(result).toMatchObject({ accepted: false, code: 'CONFIRMATION_DECLINED', decision: null });
     expect(calls).toEqual([]);
-    expect(order).not.toContain('run');
+    expect(order).not.toContain('relay');
   });
 
   it('a renderer cannot invent or alter a command, a directory, another run or another unit: the request grammar has no such field', async () => {
@@ -139,10 +138,10 @@ describe('RuntimeCommandHost.decide', () => {
   });
 
   it('a wrong-kind or other-run review is a Kriya refusal passed through, and a change-review id is never approved here', async () => {
-    const refusal: ApprovalRun = { kind: 'json', json: { accepted: false, code: 'WRONG_REVIEW_KIND', message: 'that is a change review' }, exitCode: 1, stderrTail: '' };
+    const refusal: ChannelAnswer = { accepted: false, code: 'WRONG_REVIEW_KIND' };
     const { host } = harness({}, refusal);
     expect(await host.decide(good())).toMatchObject({ accepted: false, code: 'WRONG_REVIEW_KIND' });
-    const stale: ApprovalRun = { kind: 'json', json: { accepted: false, code: 'STALE_REVIEW', message: 'no longer the pending one' }, exitCode: 1, stderrTail: '' };
+    const stale: ChannelAnswer = { accepted: false, code: 'STALE_REVIEW' };
     expect(await harness({}, stale).host.decide(good())).toMatchObject({ accepted: false, code: 'STALE_REVIEW' });
   });
 
@@ -180,9 +179,9 @@ describe('RuntimeCommandHost.decide', () => {
     const { host, calls } = harness({ confirm: async () => { throw new Error('no window'); } });
     expect(await host.decide(good())).toMatchObject({ accepted: false, code: 'HOST_ERROR' });
     expect(calls).toEqual([]);
-    const silent: ApprovalRun = { kind: 'error', message: 'timeout', exitCode: null, stderrTail: '' };
+    const silent: ChannelAnswer = { accepted: false, code: 'CHANNEL_TIMEOUT' };
     const result = await harness({}, silent).host.decide(good());
-    expect(result).toMatchObject({ accepted: false, code: 'HOST_ERROR' });
+    expect(result).toMatchObject({ accepted: false, code: 'CHANNEL_TIMEOUT' });
     expect(result.message).toMatch(/nothing is known to be recorded/);
   });
 
@@ -194,8 +193,8 @@ describe('RuntimeCommandHost.decide', () => {
     expect([fixture.order, broken.order]).toEqual([[], []]);
   });
 
-  it('Kriya refusing an approve is reported as refused, never as accepted', async () => {
-    const refusal: ApprovalRun = { kind: 'json', json: { accepted: true, code: 'ACCEPTED' }, exitCode: 1, stderrTail: '' };
-    expect(await harness({}, refusal).host.decide(good())).toMatchObject({ accepted: false });
+  it('the waiter refusing an approve (it did not match the live review) is reported as refused, never as accepted', async () => {
+    const refusal: ChannelAnswer = { accepted: false, code: 'CAPABILITY_MISMATCH' };
+    expect(await harness({}, refusal).host.decide(good())).toMatchObject({ accepted: false, code: 'CAPABILITY_MISMATCH', decision: null });
   });
 });

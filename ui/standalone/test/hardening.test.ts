@@ -156,17 +156,17 @@ describe('M6 execution (hardening): Start Run is the only execution action and i
       if (f !== 'kriya_argv.ts') expect(src, f).not.toMatch(/--launch-id/);
     }
   });
-  it('the review decision is ONE typed action: one command line in one place, validated twice, no option that could approve more than the one review (GUI final)', () => {
-    const argv = read(join(MAIN, 'kriya_argv.ts'));
-    expect(argv).toContain("const argv = ['launch-decision', '--launch-id', request.launch_id, '--review-id', request.review_id, '--candidate-digest', request.candidate_digest, '--decision', request.decision];");
+  it('the review decision is ONE typed action: relayed over the run\'s private channel, validated twice, no option that could approve more than the one review (GUI final, D2 M2)', () => {
     for (const f of readdirSync(MAIN)) {
       const src = read(join(MAIN, f));
       expect(src, f).not.toMatch(/--yes|--always|--auto-approve|--autonomy|(['"])-y\1/);
-      if (f !== 'kriya_argv.ts' && f !== 'approval_host.ts') expect(src, f).not.toContain('launch-decision');
+      // the decision hosts no longer start a decision process: the CLI action is only still NAMED by the (to be deleted) argv grammar
+      if (f !== 'kriya_argv.ts') expect(src, f).not.toContain("'launch-decision'");
     }
     const host = read(join(MAIN, 'approval_host.ts'));
     expect(host).toContain('validateDecideApproval(raw)');
-    expect(host).toContain('buildLaunchDecisionArgv(request.value)');
+    expect(host).toContain('this.deps.channel.decide(relay)');
+    expect(host).not.toContain('kriya_argv');
     expect(host).toContain('this.deps.currentWorkspace() !== workspace');
     expect(host).not.toMatch(/from '(node:)?child_process'|from 'electron'|from '(node:)?fs'|writeFile|appendFile|mkdir/); // no process, no Electron, no file written by the proxy
     expect(mainTs).toContain('return approvals.decide(raw);');
@@ -176,7 +176,8 @@ describe('M6 execution (hardening): Start Run is the only execution action and i
   it('the runtime-command decision is ONE typed action with a native confirmation in main: validated, workspace-checked, no process/Electron/file in the proxy (Demo V2)', () => {
     const host = read(join(MAIN, 'runtime_command_host.ts'));
     expect(host).toContain('validateDecideRuntimeCommand(raw)');
-    expect(host).toContain('buildRuntimeCommandDecisionArgv(request.value)');
+    expect(host).toContain('this.deps.channel.decide(relay)');
+    expect(host).not.toContain('kriya_argv');
     expect(host).toContain('this.deps.currentWorkspace() !== workspace');
     expect(host).toContain('this.deps.reviewable(');
     expect(host).not.toMatch(/from '(node:)?child_process'|from 'electron'|from '(node:)?fs'|writeFile|appendFile|mkdir/);
@@ -187,6 +188,14 @@ describe('M6 execution (hardening): Start Run is the only execution action and i
     // the native text is fixed in main: the confirmation function takes no argument and builds the dialog from the constant
     expect(mainTs).toContain('async function confirmRuntimeCommands(commands: ReadonlyArray<readonly string[]>): Promise<boolean>');
     expect(mainTs).toContain('const options = runtimeConfirmationDialog(commands);');
+  });
+  it('the private review channel module is pure (no process, Electron or file) and the only descriptor beyond stdio handed to a Kriya process is the execution child\'s fourth pipe (D2 M2)', () => {
+    const channel = read(join(MAIN, 'review_channel.ts'));
+    expect(channel).not.toMatch(/from '(node:)?child_process'|from 'electron'|from '(node:)?fs'|writeFile|appendFile|mkdir/);
+    expect(read(join(MAIN, 'execution_process.ts'))).toContain("stdio: ['pipe', 'pipe', 'pipe', 'pipe']");
+    expect(read(join(MAIN, 'kriya_process.ts'))).toContain("stdio: ['ignore', 'pipe', 'pipe']");
+    expect(mainTs).toContain('channels: reviewChannels');
+    expect(mainTs).toContain('channel: reviewChannels');
   });
   it('the launch id is minted in main and never accepted from the renderer', () => {
     expect(mainTs).toContain('mintLaunchId,');

@@ -16,10 +16,10 @@
  * decision and re-proves the fingerprint (STALE_REVIEW / WRONG_REVIEW_KIND are Kriya's answers, passed through). There is no field for a command, argument, directory, environment
  * value or stdin, so the renderer cannot approve anything Kriya did not itself propose.
  */
-import { buildRuntimeCommandDecisionArgv } from './kriya_argv';
 import { validateDecideRuntimeCommand } from './ipc_contract';
 import type { Prepared } from './execution_host';
-import type { ApprovalRun, DecideApprovalResult } from './approval_host';
+import type { DecideApprovalResult } from './approval_host';
+import { decisionAnswer, type ChannelAnswer, type ChannelDecisionRequest } from './review_channel';
 
 export type DecideRuntimeCommandResult = DecideApprovalResult;
 
@@ -50,7 +50,9 @@ export function confirmationDialog(commands: ReadonlyArray<readonly string[]> = 
 export const isRunResponse = (response: number): boolean => response === CONFIRM_RUN_INDEX;
 
 export interface RuntimeCommandDeps {
-  run(options: { executable: string; argv: readonly string[]; cwd: string; env: Record<string, string>; limits: { timeoutMs: number } }): Promise<ApprovalRun>;
+  /** The run's private review channel (D2 M2): relays the decision with the capability the waiter drew for this review. */
+  channel: { decide(request: ChannelDecisionRequest): Promise<ChannelAnswer> };
+  now?(): Date;
   prepare(): Prepared | null;
   /** Kriya's `runtime_command.review` envelope for one review (the exact recorded command set, re-proved against its fingerprint). */
   reviewable(workspace: string, launchId: string, reviewId: string): Promise<unknown>;
@@ -60,9 +62,7 @@ export interface RuntimeCommandDeps {
   log?(line: string): void;
 }
 
-const TIMEOUT_MS = 30_000;
 const refused = (code: string, message: string): DecideRuntimeCommandResult => ({ accepted: false, code, message, launch_id: null, review_id: null, decision: null, decided_at: null });
-const text = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 function isObject(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
 
 /** The command set of an envelope that `commandsAreReviewable` accepted (empty otherwise). */
@@ -120,18 +120,10 @@ export class RuntimeCommandHost {
         // The sheet was up while other requests flowed: send only if the confirmed folder is still the open one.
         if (this.deps.currentWorkspace() !== workspace) return refused('WORKSPACE_NOT_OPEN', 'the open folder changed while the confirmation was shown; nothing was sent');
       }
-      const argv = buildRuntimeCommandDecisionArgv(request.value);
-      const outcome = await this.deps.run({ executable: prepared.executable, argv, cwd: workspace, env: prepared.env, limits: { timeoutMs: TIMEOUT_MS } });
-      if (outcome.kind !== 'json' || typeof outcome.json !== 'object' || outcome.json === null) {
-        this.deps.log?.(`runtime-command decision: ${outcome.message ?? 'no JSON'} (exit ${outcome.exitCode ?? 'null'}) ${outcome.stderrTail.slice(-300)}`);
-        return refused('HOST_ERROR', `Kriya did not answer the decision (${outcome.message ?? 'no JSON answer'}); nothing is known to be recorded - check the run before deciding again`);
-      }
-      const answer = outcome.json as Record<string, unknown>;
-      const accepted = answer.accepted === true && outcome.exitCode === 0;
-      return {
-        accepted, code: text(answer.code) ?? (accepted ? 'ACCEPTED' : 'HOST_ERROR'), message: text(answer.message) ?? (accepted ? 'recorded' : 'Kriya refused the decision'),
-        launch_id: text(answer.launch_id), review_id: text(answer.review_id), decision: text(answer.decision), decided_at: text(answer.decided_at),
-      };
+      const relay: ChannelDecisionRequest = { launch_id: request.value.launch_id, review_id: request.value.review_id, kind: 'runtime_command', candidate_digest: request.value.command_fingerprint, decision: request.value.decision };
+      const answer = await this.deps.channel.decide(relay);
+      if (!answer.accepted) this.deps.log?.(`runtime-command decision not accepted: ${answer.code}`);
+      return decisionAnswer(relay, answer, this.deps.now?.() ?? new Date());
     } finally {
       this.inFlight = false;
     }

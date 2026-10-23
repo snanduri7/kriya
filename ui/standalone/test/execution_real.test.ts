@@ -12,6 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ApprovalHost } from '../src/main/approval_host';
 import { ExecutionHost } from '../src/main/execution_host';
 import { launchExecution } from '../src/main/execution_process';
+import { ReviewChannelHost } from '../src/main/review_channel';
 import type { KupRequest } from '../src/main/ipc_contract';
 import { KriyaService } from '../src/main/kriya_service';
 import { runKriya } from '../src/main/kriya_process';
@@ -74,9 +75,10 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     for (const [file, text] of Object.entries(files)) writeFileSync(join(dir, file), text);
     return realpathSync(dir);
   }
+  const reviewChannels = new ReviewChannelHost(); // D2 M2: the run's private review channel, shared by the execution host and the approval host
   function host(ws: string, exe: string, over: { prepare?: ConstructorParameters<typeof ExecutionHost>[0]['prepare'] } = {}) {
     return new ExecutionHost({
-      launch: launchExecution, prepare: over.prepare ?? (() => ({ ok: true, executable: exe, env: { ...env } })),
+      channels: reviewChannels, launch: launchExecution, prepare: over.prepare ?? (() => ({ ok: true, executable: exe, env: { ...env } })),
       currentWorkspace: () => ws, mintLaunchId: mint, now: () => new Date(),
       preflight: (workspaceArg) => read({ operation: 'execution.preflight', workspace: workspaceArg }), graceMs: 4000,
     });
@@ -341,7 +343,7 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
   const realKriya = () => join(ROOT, '.venv', 'bin', 'kriya');
   function approvals(ws: string) {
     return new ApprovalHost({
-      run: (o) => runKriya({ executable: o.executable, argv: o.argv, cwd: o.cwd, env: o.env, limits: o.limits }),
+      channel: reviewChannels,
       prepare: () => ({ ok: true, executable: realKriya(), env: { ...env } }), currentWorkspace: () => ws,
       reviewable: (workspace, launchId, reviewId) => read({ operation: 'change_approval.review', workspace, launch_id: launchId, review_id: reviewId }),
     });

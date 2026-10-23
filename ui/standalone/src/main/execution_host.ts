@@ -15,6 +15,7 @@
  * this host (chosen with Open Folder - the registry's current workspace), so a compromised renderer cannot launch in a folder the person never opened.
  */
 import { LAUNCH_ID_RE, validateStartRun } from './ipc_contract';
+import type { ChannelSocket } from './review_channel';
 
 export interface ExecChild {
   pid?: number;
@@ -24,7 +25,15 @@ export interface ExecChild {
   on(event: 'exit', cb: (code: number | null, signal: string | null) => void): unknown;
   on(event: 'error', cb: (error: Error) => void): unknown;
   kill(signal?: NodeJS.Signals): boolean;
+  /** D2 M2: the spawned child's stdio array; entry 3 is the private review channel (a socket) when the launcher opened one. */
+  stdio?: ReadonlyArray<unknown>;
 }
+
+/** The slice of ReviewChannelHost the execution host needs: it hands each run's channel socket over and takes it back when the run ends. */
+export interface ChannelRegistry { attach(launchId: string, socket: ChannelSocket): void; detach(launchId: string): void }
+
+const isChannelSocket = (value: unknown): value is ChannelSocket =>
+  typeof value === 'object' && value !== null && typeof (value as ChannelSocket).on === 'function' && typeof (value as ChannelSocket).write === 'function' && typeof (value as ChannelSocket).destroy === 'function';
 
 export interface Invocation { executable: string; argv: readonly string[]; cwd: string; env: Readonly<Record<string, string>> }
 
@@ -40,6 +49,8 @@ export interface ExecutionDeps {
   currentWorkspace(): string | null;
   mintLaunchId(): string;
   now(): Date;
+  /** D2 M2: where a run's private review channel is registered (review_channel.ts). Absent: runs have no channel, so none of their reviews can be answered. */
+  channels?: ChannelRegistry;
   /** SIGINT -> wait -> SIGKILL on shutdown. */
   graceMs?: number;
   /** Bounded diagnostics for the developer log only (never the UI). */
@@ -142,8 +153,11 @@ export class ExecutionHost {
         return this.refuse('HOST_ERROR', `the Kriya execution process could not be started: ${error instanceof Error ? error.message : String(error)}`);
       }
       this.child = child;
+      const channelSocket = child.stdio?.[3];
+      if (isChannelSocket(channelSocket)) this.deps.channels?.attach(launchId, channelSocket);
       this.exited = new Promise<void>((resolve) => {
         const finish = (state: Partial<ExecutionState>) => {
+          this.deps.channels?.detach(launchId);
           if (this.child === child) {
             this.current = { ...this.current, phase: 'exited', ended_at: this.deps.now().toISOString(), ...state };
             this.child = null;

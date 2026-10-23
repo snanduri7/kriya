@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ExecutionHost } from '../src/main/execution_host';
 import { launchExecution } from '../src/main/execution_process';
+import { ReviewChannelHost } from '../src/main/review_channel';
 import type { KupRequest } from '../src/main/ipc_contract';
 import { KriyaService } from '../src/main/kriya_service';
 import { runKriya } from '../src/main/kriya_process';
@@ -58,12 +59,13 @@ describe.skipIf(!available)('runtime-command approval against real Kriya', () =>
     writeFileSync(join(dir, 'a.txt'), 'a');
     return realpathSync(dir);
   };
+  const reviewChannels = new ReviewChannelHost(); // D2 M2: the run's private review channel, shared by the execution host and the decision host
   const host = (ws: string, exe: string) => new ExecutionHost({
-    launch: launchExecution, prepare: () => ({ ok: true, executable: exe, env: { ...env } }), currentWorkspace: () => ws, mintLaunchId: mint, now: () => new Date(),
+    channels: reviewChannels, launch: launchExecution, prepare: () => ({ ok: true, executable: exe, env: { ...env } }), currentWorkspace: () => ws, mintLaunchId: mint, now: () => new Date(),
     preflight: (w) => read({ operation: 'execution.preflight', workspace: w }), graceMs: 4000,
   });
   const decider = (ws: string) => new RuntimeCommandHost({
-    run: (o) => runKriya({ executable: o.executable, argv: o.argv, cwd: o.cwd, env: o.env, limits: o.limits }),
+    channel: reviewChannels,
     prepare: () => ({ ok: true, executable: join(ROOT, '.venv', 'bin', 'kriya'), env: { ...env } }),
     reviewable: (workspaceArg, launchId, reviewId) => read({ operation: 'runtime_command.review', workspace: workspaceArg, launch_id: launchId, review_id: reviewId }),
     confirm: async () => { dialogs += 1; return nativeAnswer; }, currentWorkspace: () => openWorkspace ?? ws,

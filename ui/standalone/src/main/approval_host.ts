@@ -3,8 +3,10 @@
  * policy and the open-workspace check are injected, so the rules are tested with controlled executors.
  *
  * What this module IS: a narrow proxy. It takes ONE typed request {workspace, launch_id, review_id, candidate_digest, decision}, checks it against its closed
- * grammar and against the folder currently open in this host, runs Kriya's `launch-decision` action in that folder (no shell, the host's fixed child
- * environment) and reports Kriya's own answer.
+ * grammar and against the folder currently open in this host, relays the decision to the WAITING Kriya process over the run's private review channel
+ * (review_channel.ts: the capability that process drew for this exact review is echoed back; the renderer never holds it) and reports Kriya's own answer.
+ * D2 M2: there is no longer a separate `launch-decision` process and no decision file the host or a workload could write: the waiter's `result` frame
+ * is the only proof a decision was accepted.
  *
  * One refusal it DOES make of its own: it will not forward an APPROVE unless Kriya (`change_approval.review`, read through the injected `reviewable`) can still prove the exact
  * change under review - verified against the review's digests, the same review and digest as the request, still PENDING, shown in full. That keeps an approval of an
@@ -14,16 +16,16 @@
  * review and are re-checked by Kriya); it has no auto-approval, no `-y`, no autonomy option. Kriya validates the review is still the pending one for this
  * launch and workspace, records the decision durably, and the waiting run - not Electron - resumes from it.
  */
-import { buildLaunchDecisionArgv } from './kriya_argv';
 import { validateDecideApproval } from './ipc_contract';
 import type { Prepared } from './execution_host';
+import { decisionAnswer, type ChannelAnswer, type ChannelDecisionRequest } from './review_channel';
 
 export interface DecideApprovalResult { accepted: boolean; code: string; message: string; launch_id: string | null; review_id: string | null; decision: string | null; decided_at: string | null }
 
-export interface ApprovalRun { kind: 'json' | 'error'; json?: unknown; message?: string; exitCode: number | null; stderrTail: string }
 export interface ApprovalDeps {
-  /** One-shot Kriya runner (kriya_process.ts runKriya in production). */
-  run(options: { executable: string; argv: readonly string[]; cwd: string; env: Record<string, string>; limits: { timeoutMs: number } }): Promise<ApprovalRun>;
+  /** The run's private review channel (ReviewChannelHost in production): relays the decision with the capability the waiter drew for this review. */
+  channel: { decide(request: ChannelDecisionRequest): Promise<ChannelAnswer> };
+  now?(): Date;
   prepare(): Prepared | null;
   /** Kriya's `change_approval.review` envelope for one review (the exact proposed change, proved against its digests). */
   reviewable(workspace: string, launchId: string, reviewId: string): Promise<unknown>;
@@ -31,9 +33,7 @@ export interface ApprovalDeps {
   log?(line: string): void;
 }
 
-const TIMEOUT_MS = 30_000;
 const refused = (code: string, message: string): DecideApprovalResult => ({ accepted: false, code, message, launch_id: null, review_id: null, decision: null, decided_at: null });
-const text = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 function isObject(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
 
 /** True only for an answer that proves THIS review's exact change: no error, verified, same review id and digest, still PENDING, nothing truncated, at least one file. */
@@ -70,18 +70,10 @@ export class ApprovalHost {
         }
         if (!proved) return refused('CHANGE_NOT_REVIEWABLE', 'Kriya could not confirm the exact proposed change, so the approval was not sent. Review the change again, or reject it.');
       }
-      const argv = buildLaunchDecisionArgv(request.value);
-      const outcome = await this.deps.run({ executable: prepared.executable, argv, cwd: workspace, env: prepared.env, limits: { timeoutMs: TIMEOUT_MS } });
-      if (outcome.kind !== 'json' || typeof outcome.json !== 'object' || outcome.json === null) {
-        this.deps.log?.(`launch-decision: ${outcome.message ?? 'no JSON'} (exit ${outcome.exitCode ?? 'null'}) ${outcome.stderrTail.slice(-300)}`);
-        return refused('HOST_ERROR', `Kriya did not answer the decision (${outcome.message ?? 'no JSON answer'}); nothing is known to be recorded - check the run before deciding again`);
-      }
-      const answer = outcome.json as Record<string, unknown>;
-      const accepted = answer.accepted === true && outcome.exitCode === 0;
-      return {
-        accepted, code: text(answer.code) ?? (accepted ? 'ACCEPTED' : 'HOST_ERROR'), message: text(answer.message) ?? (accepted ? 'recorded' : 'Kriya refused the decision'),
-        launch_id: text(answer.launch_id), review_id: text(answer.review_id), decision: text(answer.decision), decided_at: text(answer.decided_at),
-      };
+      const relay: ChannelDecisionRequest = { launch_id: request.value.launch_id, review_id: request.value.review_id, kind: 'change_approval', candidate_digest: request.value.candidate_digest, decision: request.value.decision };
+      const answer = await this.deps.channel.decide(relay);
+      if (!answer.accepted) this.deps.log?.(`review decision not accepted: ${answer.code}`);
+      return decisionAnswer(relay, answer, this.deps.now?.() ?? new Date());
     } finally {
       this.inFlight = false;
     }
