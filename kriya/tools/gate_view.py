@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 from kriya.config.environment import KRIYA_DIRECTORY_NAME
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.repository.snapshot import _content_identity, _stat_identity, visible_repository_paths
 from kriya.tools.containment import ContainmentSetupError
 
@@ -75,18 +76,13 @@ class GateView:
                 changed.append(relpath)
         return sorted(changed)
 
-    def contains(self, path: str) -> bool:
-        return path == self.root or path.startswith(self.root + os.sep)
-
     def refers_to_origin(self, token: str) -> bool:
         """Whether ``token`` (an argv element or a cwd) names the origin tree or something in it - an absolute path the gate
-        would resolve to the shared worktree instead of its own view."""
-        if not os.path.isabs(token) or any(token == root or token.startswith(root + os.sep) for root in self.environment_roots):
+        would resolve to the shared worktree instead of its own view. Decided by filesystem identity (a case or symlink alias of the
+        origin is the origin), and an undecidable relation counts as naming it: the refusal fails closed."""
+        if not os.path.isabs(token) or any(path_relation(root, token) is PathRelation.WITHIN for root in self.environment_roots):
             return False
-        for candidate in {token, os.path.realpath(token)}:
-            if candidate == self.origin or candidate.startswith(self.origin + os.sep):
-                return True
-        return False
+        return path_relation(self.origin, token) is not PathRelation.OUTSIDE
 
     def close(self) -> None:
         """Remove the view. A view that cannot be removed is left behind and logged: cleanup is never part of a gate's truth, so it

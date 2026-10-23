@@ -409,6 +409,30 @@ def test_the_project_venv_is_the_one_path_into_the_origin_a_view_command_may_nam
         view.close()
 
 
+def test_a_symlink_alias_of_the_origin_is_the_origin_and_is_refused(tmp_path):
+    root = _repo(tmp_path)
+    alias = tmp_path / "alias"
+    alias.symlink_to(root)
+    view = _build(root, environment_roots=(str(root / ".kriya" / "venv"),))
+    try:
+        with pytest.raises(GateViewError):
+            gate_view.guard_against_origin(view, [str(alias / "calc.py")], view.root)
+    finally:
+        view.close()
+
+
+def test_a_path_whose_relation_to_the_origin_cannot_be_decided_is_refused_not_allowed(tmp_path, monkeypatch):
+    """Fail closed: an undecidable relation is not evidence that the path stays out of the shared worktree, and it is no evidence of an environment root either."""
+    root = _repo(tmp_path)
+    view = _build(root, environment_roots=(str(root / ".kriya" / "venv"),))
+    try:
+        monkeypatch.setattr(gate_view, "path_relation", lambda _root, _target: gate_view.PathRelation.UNKNOWN)
+        assert view.refers_to_origin(str(root / "calc.py")) is True
+        assert view.refers_to_origin(str(root / ".kriya" / "venv" / "bin" / "python")) is True
+    finally:
+        view.close()
+
+
 def test_the_closed_reason_code_table_is_exactly_these_three():
     assert GATE_VIEW_REASON_CODES == {"GATE_VIEW_UNAVAILABLE", "GATE_VIEW_IDENTITY_MISMATCH", "GATE_VIEW_PATH_CONFUSION"}
     assert issubclass(GateViewError, gate_view.ContainmentSetupError)  # the run's existing "refused, not run uncontained" handling applies
