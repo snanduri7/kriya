@@ -13,6 +13,7 @@ import pytest
 from _strict_doubles import strict_engine
 from test_milestones import mkv2
 
+from kriya.context.workspace_identity import ownership_metadata
 from kriya.control.contracts import CONTRACT_REGISTRY_CORRUPT, ContractRegistry, ContractRegistryCorruptError
 from kriya.control.persistence import contract_registry_path, load_contract_registry, save_contract_registry
 from kriya.workflow.milestones import MilestoneRunState, run_milestones
@@ -38,6 +39,15 @@ def test_missing_registry_is_a_valid_empty_registry(tmp_path):
     json.dumps({"contracts": {"m:cap": [{"id": "m:cap"}]}}),
 ])
 def test_corrupt_registry_raises_typed_error_and_is_left_untouched(tmp_path, content):
+    # D2 M4: a structurally damaged registry that Kriya wrote names its workspace (an unstamped one is refused as ownerless first); text that is
+    # not a JSON object stays raw
+    parsed = None
+    try:
+        parsed = json.loads(content)
+    except ValueError:
+        pass
+    if isinstance(parsed, dict):
+        content = json.dumps({**parsed, "_workspace": ownership_metadata(str(tmp_path))})
     path = _write_raw(tmp_path, content)
     with pytest.raises(ContractRegistryCorruptError) as exc_info:
         load_contract_registry(str(tmp_path))

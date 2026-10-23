@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from _fake_static_analysis import DISABLED_STATIC_ANALYSIS
 
+from kriya.context.workspace_identity import ownership_metadata
 from kriya.control.contracts import (
     CONTRACT_REGISTRY_CORRUPT,
     CONTRACT_REGISTRY_SCHEMA_VERSION,
@@ -101,7 +102,8 @@ def test_schema_one_payload_migrates_to_milestone_capability_records():
 def test_unsupported_or_invalid_registry_payloads_are_corrupt(tmp_path, payload):
     path = contract_registry_path(str(tmp_path))
     os.makedirs(os.path.dirname(path))
-    Path(path).write_text(json.dumps(payload))
+    # D2 M4: a registry Kriya wrote names its workspace; an unstamped one is refused as ownerless before its content is judged
+    Path(path).write_text(json.dumps({**payload, "_workspace": ownership_metadata(str(tmp_path))}))
     with pytest.raises(Exception) as exc_info:
         load_contract_registry(str(tmp_path))
     assert getattr(exc_info.value, "reason_code", None) == CONTRACT_REGISTRY_CORRUPT

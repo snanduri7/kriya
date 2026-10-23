@@ -8,6 +8,7 @@ import tempfile
 
 import pytest
 
+from kriya.context.workspace_identity import workspace_identity
 from kriya.control.decisions import DecisionLedger, load_decision_ledger
 from kriya.control.persistence import decision_ledger_path
 
@@ -85,9 +86,11 @@ def test_load_skips_a_malformed_trailing_line_without_losing_earlier_ones(worksp
     path = decision_ledger_path(workspace)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
-        f.write(json.dumps({"type": "triage", "kind": "task"}) + "\n")
+        # D2 M4: the lines Kriya wrote carry the workspace stamp (an unstamped line is refused, not skipped); only the damaged line is skipped
+        owner = {"_workspace_id": workspace_identity(workspace)}
+        f.write(json.dumps({"type": "triage", "kind": "task", **owner}) + "\n")
         f.write("not valid json\n")
-        f.write(json.dumps({"type": "policy", "decision": "deny"}) + "\n")
+        f.write(json.dumps({"type": "policy", "decision": "deny", **owner}) + "\n")
 
     ledger = load_decision_ledger(workspace)
     assert len(ledger.all()) == 2
