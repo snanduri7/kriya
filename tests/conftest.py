@@ -12,6 +12,7 @@
   local model endpoint running on the developer's machine. Tests marked
   live_model keep it enabled; probe tests inject their own transport. The
   PRD-014 qualification store is a per-test temp dir for the same reason.
+- D2: the Kriya-owned authority home (KRIYA_AUTHORITY_HOME) is a per-test temp dir, never the real ~/.kriya/authority.
 Tests of the precedence rules unset KRIYA_LOG_DIR / KRIYA_STATE_DIR themselves."""
 import os
 import sys
@@ -41,6 +42,16 @@ def _isolated_kriya_state_dir(tmp_path_factory, monkeypatch):
     monkeypatch.setenv(ENV_STATE_DIR, str(state_dir))
     monkeypatch.setattr(state_paths, "historical_default_trace_db",
                         lambda: str(state_dir / "no-historical-install" / "logs" / "traces.db"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_kriya_authority_home(tmp_path_factory, monkeypatch):
+    """D2: the Kriya-owned authority home (SEC-009 approvals; the human-decision records) is a per-test temp dir, never the
+    real ~/.kriya/authority. Exported through the environment, so CLI/waiter subprocesses a test starts inherit it. A test that
+    sets KRIYA_AUTHORITY_HOME itself (or unsets it to test the default) overrides this the ordinary monkeypatch way."""
+    from kriya.config.environment import AUTHORITY_HOME
+
+    monkeypatch.setenv(AUTHORITY_HOME, str(tmp_path_factory.mktemp("kriya-authority")))
 
 
 @pytest.fixture(autouse=True)
