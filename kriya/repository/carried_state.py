@@ -25,7 +25,7 @@ import subprocess
 from typing import Dict, List, Sequence
 
 from kriya.foundation.redaction import redact_text
-from kriya.repository.git import tracked_paths
+from kriya.repository.git import git_discovery, refuse_dubious_ownership, tracked_paths
 
 REPOSITORY_CARRIES_CONTROL_STATE = "REPOSITORY_CARRIES_CONTROL_STATE"
 CARRIED_STATE_UNINSPECTABLE = "CARRIED_STATE_UNINSPECTABLE"
@@ -69,6 +69,16 @@ def _is_static_input(path: str) -> bool:
     return path.startswith(_PLAN_DIRECTORY) and path.endswith(_PLAN_SUFFIX)
 
 
+def _refuse_if_git_refuses_ownership(top: str) -> None:
+    """S19e: a repository git itself refuses for its ownership is reported as that typed ownership refusal (``GIT_REPOSITORY_OWNERSHIP_REFUSED``,
+    the one detector), never as this module's "could not inspect": the cause is git's ownership check, which is never weakened here."""
+    try:
+        discovery = git_discovery(top)
+    except (OSError, subprocess.SubprocessError):
+        return
+    refuse_dubious_ownership(top, discovery)
+
+
 def refuse_repository_carried_control_state(root: str) -> None:
     """Raise :class:`RepositoryCarriesControlStateRefused` when the repository whose top is ``root`` tracks runtime/control state or cannot
     be inspected; return otherwise. A ``root`` that is not the top of a Git work tree (no ``.git``) carries nothing."""
@@ -80,6 +90,7 @@ def refuse_repository_carried_control_state(root: str) -> None:
     except subprocess.TimeoutExpired as error:
         raise RepositoryCarriesControlStateRefused(CARRIED_STATE_UNINSPECTABLE, top, detail=f"git did not answer within {error.timeout} s") from error
     except (OSError, subprocess.SubprocessError, ValueError) as error:
+        _refuse_if_git_refuses_ownership(top)
         raise RepositoryCarriesControlStateRefused(CARRIED_STATE_UNINSPECTABLE, top, detail=f"{type(error).__name__}: {error}") from error
     carried = sorted(path for path in tracked if not _is_static_input(path))
     if carried:

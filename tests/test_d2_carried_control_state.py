@@ -170,3 +170,17 @@ def test_the_reason_code_table_is_closed_and_every_message_renders():
 def test_the_namespaces_are_exactly_the_runtime_control_ones():
     assert carried_state.RUNTIME_CONTROL_PATHSPECS == (".kriya/control", ".kriya/checkpoints", ".kriya/milestones", ".kriya/run.lock")
 
+
+
+def test_a_repository_git_refuses_for_its_ownership_is_the_ownership_refusal_not_uninspectable(tmp_path, monkeypatch):
+    """OI-163/S19e: before the fix the carried-state inspection answered CARRIED_STATE_UNINSPECTABLE first and the S19e ownership refusal
+    (the cause git states) never surfaced."""
+    from kriya.repository.git import GIT_REPOSITORY_OWNERSHIP_REFUSED, RepositoryContentFilterRefused
+
+    repository = tmp_path / "owned_elsewhere"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")  # git's own test switch: every repository is foreign
+    with pytest.raises(RepositoryContentFilterRefused) as caught:
+        refuse_repository_carried_control_state(str(repository))
+    assert caught.value.reason_code == GIT_REPOSITORY_OWNERSHIP_REFUSED

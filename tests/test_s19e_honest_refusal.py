@@ -527,14 +527,16 @@ def test_a_genuine_bootstrap_commit_failure_is_still_the_bootstrap_failure(tmp_p
 
 
 def test_a_dubiously_owned_workspace_ends_a_real_run_with_the_ownership_refusal(tmp_path, monkeypatch):
-    """The real entry (begin_mutating_run + the engine): the run reaches the sandbox creation and ends with the typed
-    ownership refusal as itself (before: RuntimeError 'Failed to create an isolated generation sandbox: ... greenfield
-    Git bootstrap commit failed: fatal: detected dubious ownership'); no Developer call, nothing written."""
+    """The real entry (begin_mutating_run + the engine): the typed ownership refusal as itself (before: RuntimeError
+    'Failed to create an isolated generation sandbox: ... greenfield Git bootstrap commit failed: fatal: detected dubious
+    ownership'); no Developer call, nothing written. D2 M3 (owner decision 2026-10-23): the carried-state inspection at the
+    run entry asks git first, so the refusal now ends the run AT THE ENTRY, before the engine starts - no `.exception`
+    trace row exists any more (the run never began), exactly like the stale-host-filters sibling below."""
     from kriya.control.run_coordinator import begin_mutating_run
 
     workspace = _workspace(tmp_path)
     before = _tree(workspace)
-    eng, cfg, developer = _scripted_engine(lambda n: GOOD)
+    eng, _cfg, developer = _scripted_engine(lambda n: GOOD)
     _owned_elsewhere(monkeypatch)
     with pytest.raises(RepositoryContentFilterRefused) as raised:
         with begin_mutating_run(workspace):
@@ -542,8 +544,6 @@ def test_a_dubiously_owned_workspace_ends_a_real_run_with_the_ownership_refusal(
     monkeypatch.delenv("GIT_TEST_ASSUME_DIFFERENT_OWNER")
     _assert_ownership_refusal(raised, Path(workspace))
     assert developer == []
-    row = _exception_row(cfg)
-    assert (row["status"], row["failure_category"]) == ("error", "RepositoryContentFilterRefused")
     assert _tree(workspace) == before
 
 
