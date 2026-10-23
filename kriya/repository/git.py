@@ -268,6 +268,16 @@ def refuse_dubious_ownership(path: str, discovery: "subprocess.CompletedProcess[
         raise RepositoryContentFilterRefused(GIT_REPOSITORY_OWNERSHIP_REFUSED, path, detail=refusal)
 
 
+def tracked_paths(root: str, pathspecs: Sequence[str]) -> List[str]:
+    """D2 M3: the paths the index of the repository whose top is ``root`` TRACKS under ``pathspecs`` (``git ls-files -z``: reads
+    the index only, runs no filter and, through the seam, no fsmonitor/hook). Raises ``subprocess.SubprocessError`` /
+    ``OSError`` when git cannot answer and ``ValueError`` when it answers with a failure - never an empty list for "unknown"."""
+    done = _run(root, "ls-files", "-z", "--", *pathspecs)
+    if done.returncode != 0:
+        raise ValueError(f"git ls-files exited {done.returncode}: {os.fsdecode(done.stderr).strip()[:300]}")
+    return [os.fsdecode(entry) for entry in done.stdout.split(b"\0") if entry]
+
+
 def _uninspectable(repository: str, what: str, completed: "Optional[subprocess.CompletedProcess[bytes]]" = None) -> RepositoryContentFilterRefused:
     stderr = os.fsdecode(completed.stderr).strip()[:300] if completed is not None else ""
     detail = f"{what}" + (f": exit {completed.returncode}" if completed is not None else "") + (f", {stderr}" if stderr else "")

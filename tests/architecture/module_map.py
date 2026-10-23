@@ -107,7 +107,7 @@ MODULES: Dict[str, Module] = {
         owner_paths=("kriya/repository/",),
         public=("kriya.repository", "kriya.repository.port", "kriya.repository.atomic_write",
                 "kriya.repository.commit", "kriya.repository.snapshot", "kriya.repository.worktree",
-                "kriya.repository.git"),
+                "kriya.repository.git", "kriya.repository.carried_state"),
         layer=2),
     "EXECUTION": Module(
         owner_paths=("kriya/tools/", "kriya/capabilities/", "kriya/static_analysis/"),

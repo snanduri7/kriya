@@ -14,6 +14,7 @@ OWNERS = {
     "kriya/control/control_store.py": 1,
     "kriya/control/persistence.py": 2,        # the control dir + the legacy nested scan
     "kriya/control/retention.py": 1,
+    "kriya/control/run_coordinator.py": 1,    # D2 M3: the repository whose tracked state the run-entry refusal judges
     "kriya/control/run_ownership.py": 1,
     "kriya/production_doctor.py": 1,
     "kriya/repository/commit.py": 1,

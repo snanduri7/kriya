@@ -21,7 +21,7 @@ from dataclasses import dataclass, field, replace
 from functools import wraps
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
 
-from kriya.context.workspace_identity import workspace_identity
+from kriya.context.workspace_identity import authority_root, workspace_identity
 from kriya.control.commit_state import (
     REASON_RESULT_CONTRADICTS_RUN_RECORD,
     REASON_UNCERTAIN_RUN_RECORD,
@@ -35,6 +35,7 @@ from kriya.control.run_record import IllegalRunTransitionError, RunLifecycle, Ru
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.logging_setup import run_log
 from kriya.platform import git_argv
+from kriya.repository.carried_state import refuse_repository_carried_control_state
 from kriya.repository.git import refuse_repository_content_filters
 
 logger = logging.getLogger(__name__)
@@ -432,6 +433,8 @@ def begin_mutating_run(
     # S19 Q1 (OI-141): a workspace whose own git configuration defines a content-filter command is refused, typed,
     # before the run takes the lock, writes anything or runs any git (every mutating entry: CLI and KUP).
     refuse_repository_content_filters(canonical)
+    # D2 M3: Kriya runtime/control state that the repository itself TRACKS (a clone, a checkout, a pull) is never Kriya's own: refused, typed, before the lock.
+    refuse_repository_carried_control_state(authority_root(canonical))
     if run_id is None:
         # GUI M6: the first top-level run of a desktop launch takes the launch's own id (kriya/control/launch.py); every other run is unchanged.
         from kriya.control.launch import claim_run_id
