@@ -575,8 +575,11 @@ def judge_named_tests(
     if isinstance(report, dict):
         evidence["report"] = {"gate_id": report.get("gate_id"), "report_files": report.get("report_files")}
     after = OracleSurface(base, candidate_root, named).digests()[1]
-    if after != candidate_digests:
-        evidence["changed_during_run"] = changed_surface(candidate_digests, after)
+    # OI-142: the gate ran in a view of the candidate, so a dependency the code rewrote while it ran changed THE VIEW, not candidate_root:
+    # the gate reports what it changed there (re-reading candidate_root alone would never see it).
+    rewritten_in_run = sorted(set(getattr(validator, "last_gate_view_changes", ()) or ()) & set(candidate_digests))
+    if after != candidate_digests or rewritten_in_run:
+        evidence["changed_during_run"] = sorted(set(changed_surface(candidate_digests, after)) | set(rewritten_in_run))
         return OracleJudgment(ORACLE_CHANGED_DURING_RUN, "oracle dependency changed during the run: "
                               + ", ".join(evidence["changed_during_run"]), evidence)
     code, reason = judge_candidate_run(expected, result, runner)

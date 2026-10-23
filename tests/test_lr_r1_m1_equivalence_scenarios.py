@@ -38,6 +38,7 @@ from test_lr_r1_m1_equivalence import (
     _mask,
     _tree,
     _untimed,
+    _variant_dir,
     _volatile_paths,
     assert_recorder_has_no_effect,
 )
@@ -152,7 +153,7 @@ def _invalid_plan(criterion):
 
 def _enforce_observe(tmp_path: Path, monkeypatch, variant: str, plans: List[Callable], criterion,
                      tools: Callable = dict) -> Dict[str, Any]:
-    state = tmp_path / "states" / variant
+    state = tmp_path / "states" / _variant_dir(variant)  # fixed length: see tests/test_lr_r1_m1_equivalence.py
     state.mkdir(parents=True)
     monkeypatch.setenv(ENV_STATE_DIR, str(state))
     for name in ("GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE"):

@@ -118,7 +118,7 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
         ("CRLF", "LF", "MIXED", "MIXED_NEWLINE_UNSUPPORTED", "NO_NEWLINE", "SOURCE_CHANGED_SINCE_AUTHORIZATION", "SYMLINK_TARGET_UNSUPPORTED",
          "UNSUPPORTED_TEXT_ENCODING", "UTF8_BOM", "FileIntegrityError", "FileSnapshot", "_content_identity", "_stat_identity",
          "display_text", "file_raw_digest", "load_snapshot", "newline_style", "raw_digest", "read_shown_text", "require_unchanged",
-         "untracked_repository_paths"), "P1",
+         "untracked_repository_paths", "ignored_repository_paths"), "P1",
         "M1: snapshots and raw-byte revision identity owned by REPOSITORY; the edit engine (GENERATION) and VerificationTreeBinding "
         "(AUTHORITY, which looks up the identities and untracked_repository_paths here) stay"),
     "kriya/workflow/workflow_controller.py": (

@@ -440,9 +440,30 @@ def test_gap_b_a_candidate_changed_before_the_runtime_review_is_not_even_offered
 
 
 def test_gap_b_a_candidate_changed_by_the_execution_itself_is_not_applied(tmp_path):
-    """The last check, after the commands ran: bytes the run changed are not the bytes that were approved, and the typed reason says so."""
+    """Bytes the run changed are not the bytes that were approved. OI-142: the commands run in a view of the candidate, so a rewrite by the run lands in
+    the view and the 001 view check stops it at the earliest point with its typed reason (VERIFICATION_GATE_MUTATED_TRACKED_FILES); it never reaches the
+    shared tree, so nothing is applied."""
     edit = lambda workspace_path: (Path(workspace_path) / MAIN_FILE).write_text(FILES[MAIN_FILE] + "// edited while running\n")  # noqa: E731 - one-line test hook
     run = run_direct(tmp_path, tamper_during_execution=edit)
+    assert len(run.executed) == 1 and not _succeeded(run.result) and _applied(run) == set()
+    assert any("VERIFICATION_GATE_MUTATED_TRACKED_FILES" in str(g.get("output")) for g in run.gate_outcomes)
+
+
+def test_gap_b_a_candidate_changed_in_the_shared_tree_after_the_execution_is_not_applied(tmp_path):
+    """The last check, after the commands ran, is still the backstop for the SHARED tree: bytes changed there after the run (by anything that reached
+    it around the view) are not the bytes that were approved, and the typed reason says so."""
+    from kriya.workflow import runtime_verification as runtime_module  # noqa: PLC0415
+    real = runtime_module.clean_untracked_files_since
+    seen = []
+
+    def tamper_after_the_run(worktree_path, snapshot):
+        real(worktree_path, snapshot)
+        if not seen:
+            (Path(worktree_path) / MAIN_FILE).write_text(FILES[MAIN_FILE] + "// changed after the run\n")
+        seen.append(1)
+
+    with patch.object(runtime_module, "clean_untracked_files_since", new=tamper_after_the_run):
+        run = run_direct(tmp_path)
     assert len(run.executed) == 1 and not _succeeded(run.result) and _applied(run) == set()
     assert any("CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW" in str(g.get("output")) for g in run.gate_outcomes)
 

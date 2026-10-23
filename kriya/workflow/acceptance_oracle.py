@@ -516,7 +516,10 @@ def run_acceptance(
             if _file_digest(os.path.join(stage, name)) != hashlib.sha256(data).hexdigest():
                 run.integrity_problem = (ACCEPTANCE_ARTIFACT_CHANGED, f"{name} changed during the run")
                 break
-        if run.integrity_problem is None and _tree_digest(candidate_root, tracked) != run.candidate_digest:
+        # OI-142: the run executed in a view of the candidate; what the acceptance code rewrote while it ran changed THE VIEW, which the
+        # validator reports (re-reading candidate_root alone would never see it).
+        rewritten_in_run = set(getattr(validator, "last_gate_view_changes", ()) or ()) & set(tracked)
+        if run.integrity_problem is None and (rewritten_in_run or _tree_digest(candidate_root, tracked) != run.candidate_digest):
             run.integrity_problem = (ACCEPTANCE_CANDIDATE_CHANGED_DURING_RUN,
                                      "candidate files changed while the acceptance file ran")
     finally:

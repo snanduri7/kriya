@@ -67,9 +67,10 @@ class _FakeValidator:
     """Duck-typed stand-in for PolymorphicValidator - the function under
     test only ever calls build_subprocess_env_and_preexec() on it."""
 
-    def __init__(self, env=None, preexec_fn=None):
+    def __init__(self, env=None, preexec_fn=None, workspace_path=None):
         self._env = env
         self._preexec_fn = preexec_fn
+        self.workspace_path = str(workspace_path) if workspace_path is not None else None  # the root the build runs in (a gate view in production)
 
     def build_subprocess_env_and_preexec(self):
         return self._env, self._preexec_fn
@@ -82,7 +83,7 @@ def test_no_artifact_required_command_is_a_noop(tmp_path):
     don't need a packaged artifact."""
     state = _FakeState()
     ctx = _FakeCtx(tmp_path)
-    validator = _FakeValidator()
+    validator = _FakeValidator(workspace_path=tmp_path)
     _prepare_finite_command_runtime_artifacts(
         [["python", "manage.py", "runserver"]], validator, ctx, state,
     )
@@ -110,7 +111,7 @@ def test_artifact_already_current_skips_preparation(tmp_path):
 
     state = _FakeState()
     ctx = _FakeCtx(tmp_path)
-    validator = _FakeValidator(env={"PATH": str(tmp_path)})
+    validator = _FakeValidator(env={"PATH": str(tmp_path)}, workspace_path=tmp_path)
     _prepare_finite_command_runtime_artifacts(
         [["java", "-jar", "target/app.jar"]], validator, ctx, state,
     )
@@ -127,7 +128,7 @@ def test_missing_artifact_is_prepared_successfully(tmp_path):
 
     state = _FakeState()
     ctx = _FakeCtx(tmp_path)
-    validator = _FakeValidator()
+    validator = _FakeValidator(workspace_path=tmp_path)
     _prepare_finite_command_runtime_artifacts(
         [["java", "-jar", "target/app.jar"]], validator, ctx, state,
     )
@@ -145,7 +146,7 @@ def test_missing_artifact_via_classpath_flag_is_prepared(tmp_path):
 
     state = _FakeState()
     ctx = _FakeCtx(tmp_path)
-    validator = _FakeValidator()
+    validator = _FakeValidator(workspace_path=tmp_path)
     _prepare_finite_command_runtime_artifacts(
         [["java", "-cp", "target/app.jar", "com.example.Main"]], validator, ctx, state,
     )
@@ -166,7 +167,7 @@ def test_build_failure_is_reported_as_compile_failure_not_environment(tmp_path):
     )
     state = _FakeState()
     ctx = _FakeCtx(tmp_path)
-    validator = _FakeValidator()
+    validator = _FakeValidator(workspace_path=tmp_path)
     with pytest.raises(QualityGateFailure) as exc_info:
         _prepare_finite_command_runtime_artifacts(
             [["java", "-jar", "target/app.jar"]], validator, ctx, state,
@@ -192,7 +193,7 @@ def test_artifact_materialization_failure_is_not_environment_or_doctor_eligible(
     _write_mvnw(tmp_path, jar_relpath="target/app.jar", exit_code=0, create_jar=False)
     state = _FakeState()
     ctx = _FakeCtx(tmp_path)
-    validator = _FakeValidator()
+    validator = _FakeValidator(workspace_path=tmp_path)
     with pytest.raises(QualityGateFailure) as exc_info:
         _prepare_finite_command_runtime_artifacts(
             [["java", "-jar", "target/app.jar"]], validator, ctx, state,
@@ -213,7 +214,7 @@ def test_missing_mvn_binary_remains_verification_infrastructure_failure(tmp_path
     _write_pom(tmp_path)
     state = _FakeState()
     ctx = _FakeCtx(tmp_path)
-    validator = _FakeValidator(env={"PATH": str(tmp_path)})  # no mvn anywhere on this PATH
+    validator = _FakeValidator(env={"PATH": str(tmp_path)}, workspace_path=tmp_path)  # no mvn anywhere on this PATH
     with pytest.raises(QualityGateFailure) as exc_info:
         _prepare_finite_command_runtime_artifacts(
             [["java", "-jar", "target/app.jar"]], validator, ctx, state,
@@ -228,7 +229,7 @@ def test_no_pom_remains_verification_infrastructure_failure(tmp_path):
     existing (unchanged) behavior for this case."""
     state = _FakeState()
     ctx = _FakeCtx(tmp_path)
-    validator = _FakeValidator()
+    validator = _FakeValidator(workspace_path=tmp_path)
     with pytest.raises(QualityGateFailure) as exc_info:
         _prepare_finite_command_runtime_artifacts(
             [["java", "-jar", "target/app.jar"]], validator, ctx, state,

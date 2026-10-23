@@ -140,12 +140,26 @@ def _store(tmp_path, monkeypatch, run_id):
     return state, strict_config
 
 
+class _NoGateRoot:
+    """A stand-in validator that has no execution root to view (it never runs a command): the OI-142 scope hooks `_verification_gate` calls are
+    no-ops, so these tests keep exercising the recorder (`gate.result`) alone."""
+
+    def _enter_gate_scope(self, _name):
+        return None
+
+    def _leave_gate_scope(self, _name, _ephemeral):
+        return None
+
+    def _close_gate_scope(self, _view):
+        return None
+
+
 def test_a_raising_gate_is_recorded_and_the_exception_still_propagates(tmp_path, monkeypatch):
     from kriya.tools.validate import _verification_gate
 
     state, strict_config = _store(tmp_path, monkeypatch, "run-gate-raise")
 
-    class _Validator:
+    class _Validator(_NoGateRoot):
         tree_binding = None
         _gate = None
 
@@ -171,7 +185,7 @@ def test_oversized_gate_output_is_capped_with_the_full_digest(tmp_path, monkeypa
     monkeypatch.setattr(scope, "GATE_OUTPUT_CAP_BYTES", 100)
     output = "x" * 250
 
-    class _Validator:
+    class _Validator(_NoGateRoot):
         tree_binding = None
         _gate = None
 

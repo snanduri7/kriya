@@ -122,20 +122,25 @@ def test_creating_a_candidate_path_that_did_not_exist_yet_is_a_hard_stop(tmp_pat
         validator.run_app(_python(_writes(CANDIDATE)))
 
 
-def test_a_runtime_file_that_cannot_be_discarded_fails_closed(tmp_path):
+def test_runtime_state_that_cannot_be_removed_from_the_view_never_reaches_the_worktree_or_the_verdict(tmp_path):
+    """OI-142: the application runs in a gate view, so its runtime state is never in the shared tree and 'discarding' it is the removal of the view. The
+    property the old test pinned (undiscardable runtime state cannot survive to a later gate or the commit) now holds structurally; this pins that it still
+    holds when the state is made undeletable, that the verdict is unchanged, and that the leftover is cleaned up regardless."""
+    import os
+
+    from kriya.tools import gate_view
+
     ws, validator = _workspace(tmp_path)
     (ws / "locked").mkdir()
-    (ws / "locked/keep").write_text("pre-existing ignored? no: tracked")
+    (ws / "locked/keep").write_text("tracked")
     _git(ws, "add", "locked/keep")
     _git(ws, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "locked")
     validator.tree_binding = VerificationTreeBinding(str(ws), [POM, SOURCE, "locked/keep"], [CANDIDATE])
-    try:
-        result = None
-        with pytest.raises(VerificationGateCreatedFiles):
-            result = validator.run_app(_python(_writes("locked/new.dat") + "; import os; os.chmod('locked', 0o500)"))
-        assert result is None
-    finally:
-        (ws / "locked").chmod(0o700)
+    result = validator.run_app(_python(_writes("locked/new.dat") + "; import os; os.chmod('locked', 0o500)"))
+    assert result["success"] is True and result["runtime_artifacts"] == ["locked/new.dat"]
+    assert not (ws / "locked" / "new.dat").exists() and (ws / "locked" / "keep").read_text() == "tracked"
+    assert validator.tree_binding.created() == []
+    assert os.listdir(gate_view.views_directory(os.environ["KRIYA_STATE_DIR"])) == []  # even the read-only directory was removed
 
 
 def test_a_failing_runtime_gate_still_discards_its_artifacts(tmp_path):

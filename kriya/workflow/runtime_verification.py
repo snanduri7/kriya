@@ -66,7 +66,7 @@ from kriya.policy.approval import ask as ask_runtime_commands
 from kriya.policy.approval import build_subject as build_runtime_subject
 from kriya.policy.filesystem import WriteScopeMode, is_within_scope, make_workspace_scope
 from kriya.tools.process import ProcessController
-from kriya.tools.validate import execution_evidence, get_pom_dependencies
+from kriya.tools.validate import RUNTIME_VERIFICATION_GATE, execution_evidence, get_pom_dependencies
 from kriya.workflow.acceptance import (
     CANDIDATE_RUNTIME_ENTRYPOINT_INVALID,
     classify_runtime_entrypoint,
@@ -380,7 +380,7 @@ def _prepare_finite_command_runtime_artifacts(
     known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
     for command in resolved_run_commands:
         outcome = deps._prepare_required_artifact(
-            command, ctx.worktree_path, controller=controller, env=env, preexec_fn=preexec_fn,
+            command, validator.workspace_path, controller=controller, env=env, preexec_fn=preexec_fn,  # OI-142: in the session's view, where the run consumes it
         )
         if outcome.outcome is None:
             continue
@@ -1619,13 +1619,14 @@ async def _execute_runtime_verification_directly(
         % (command_verification_kind or "application_runtime")
         + " && ".join(" ".join(cmd) for cmd in resolved_run_commands)
     )
-    deps._prepare_finite_command_runtime_artifacts(resolved_run_commands, validator, ctx, state)
     pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
     _run_app_sequence_started = deps.time.monotonic()
-    run_res = validator.run_app_sequence(
-        resolved_run_commands, timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
-        stdin_payload=stdin_payload,
-    )
+    with validator.verification_session(RUNTIME_VERIFICATION_GATE):  # OI-142: the build the command needs and the run that consumes it share one view
+        deps._prepare_finite_command_runtime_artifacts(resolved_run_commands, validator, ctx, state)
+        run_res = validator.run_app_sequence(
+            resolved_run_commands, timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
+            stdin_payload=stdin_payload,
+        )
     # R1 Deliverable 5 - observational only. kind reflects the deterministic
     # command classification already computed above (command_verification_
     # kind), matching gate_type's own "test" vs "run_verification" split
@@ -1827,14 +1828,15 @@ async def _approve_and_execute_runtime_verification(
         # of a fresh one, producing task-ID drift and "not found"
         # failures that had nothing to do with the generated code.
         deps.assert_candidate_unchanged_since_source_review(state, ctx)  # before Maven prepares anything for the reviewed command
-        deps._prepare_finite_command_runtime_artifacts(resolved_run_commands, validator, ctx, state)
-        deps.assert_candidate_unchanged_since_source_review(state, ctx)
         pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
-        run_res = validator.run_app_sequence(
-            resolved_run_commands,
-            timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
-            stdin_payload=rv_stdin_payload,
-        )
+        with validator.verification_session(RUNTIME_VERIFICATION_GATE):  # OI-142: the build and the run that consumes it share one view
+            deps._prepare_finite_command_runtime_artifacts(resolved_run_commands, validator, ctx, state)
+            deps.assert_candidate_unchanged_since_source_review(state, ctx)
+            run_res = validator.run_app_sequence(
+                resolved_run_commands,
+                timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
+                stdin_payload=rv_stdin_payload,
+            )
         clean_untracked_files_since(ctx.worktree_path, pre_run_untracked)
         deps._raise_runtime_verification_infrastructure_failure(
             state, run_res, resolved_run_commands,
@@ -2070,14 +2072,15 @@ async def _approve_and_execute_runtime_verification(
                         f"infrastructure issue in {self_correction_result.turns_used} "
                         "turn(s) - re-running the actual application to confirm."
                     )
-                    deps._prepare_finite_command_runtime_artifacts(resolved_run_commands, validator, ctx, state)
                     pre_run_untracked_after_repair = snapshot_untracked_files(ctx.worktree_path)
-                    run_res = validator.run_app_sequence(
-                        resolved_run_commands,
-                        timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
-                        # The reviewed subject binds the stdin digest: the re-run executes the SAME input as the first run.
-                        stdin_payload=rv_stdin_payload,
-                    )
+                    with validator.verification_session(RUNTIME_VERIFICATION_GATE):  # OI-142: the build and the run share one view
+                        deps._prepare_finite_command_runtime_artifacts(resolved_run_commands, validator, ctx, state)
+                        run_res = validator.run_app_sequence(
+                            resolved_run_commands,
+                            timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
+                            # The reviewed subject binds the stdin digest: the re-run executes the SAME input as the first run.
+                            stdin_payload=rv_stdin_payload,
+                        )
                     clean_untracked_files_since(ctx.worktree_path, pre_run_untracked_after_repair)
                     # RUNTIME-VERIFICATION-ENV-STOP-001 residual (focused review
                     # 2026-10-10, F1): the repair may have changed what the run

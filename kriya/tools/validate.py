@@ -1,3 +1,4 @@
+import contextlib
 import functools
 import hashlib
 import json
@@ -12,9 +13,9 @@ import time
 import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
-from kriya.capabilities import BUILD_ADAPTERS, JAVA, JAVAC, PIP, PYTHON, build_adapter_for_tool
+from kriya.capabilities import BUILD_ADAPTERS, GRADLE, JAVA, JAVAC, PIP, PYTHON, build_adapter_for_tool
 from kriya.config.config import AutonomyConfig
-from kriya.config.environment import child_environment, expand_user
+from kriya.config.environment import KRIYA_DIRECTORY_NAME, child_environment, expand_user
 from kriya.config.environment import state_dir as environment_state_dir
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.enforcement import enforce_hard_invariants
@@ -22,7 +23,7 @@ from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy, extract_install_package_target
 from kriya.policy.filesystem import is_within_scope, make_workspace_scope
 from kriya.policy.model import ActionRequest, ActionType
-from kriya.tools import test_execution
+from kriya.tools import test_execution, venv_integrity
 from kriya.tools.containment import (
     ContainmentBackend,
     ContainmentProfile,
@@ -42,6 +43,14 @@ from kriya.tools.dependency_execution import (
 )
 from kriya.tools.dependency_execution import (
     MAVEN_VALIDATE_NO_VERDICT_CODES as MAVEN_VALIDATE_NO_VERDICT_CODES,  # re-exported: the gate words these codes (kriya/workflow imports this module, not dependency_execution)
+)
+from kriya.tools.gate_view import (
+    GATE_VIEW_UNAVAILABLE,
+    GateView,
+    GateViewError,
+    build_gate_view,
+    guard_against_origin,
+    is_git_work_tree,
 )
 from kriya.tools.process import ProcessController
 from kriya.tools.sandbox import ResourcePlan, build_restricted_env, resource_plan
@@ -402,7 +411,12 @@ def _verification_gate(name: str):
     into an ordinary result - by the check
     that repository content and candidate are exactly what was bound; a
     change raises the typed VerificationTreeMutated stop. It is checked on
-    the exception path too, so an error never hides a mutation."""
+    the exception path too, so an error never hides a mutation.
+
+    OI-142: the OUTERMOST gate (or ``verification_session``) of a validator runs in a fresh view of the bound tree (kriya/tools/
+    gate_view.py), not in the shared worktree; a gate nested in it shares that view. The tree binding is checked before the view is
+    built (the worktree still is the bound tree), against the view after the gate (the bound content is what the verdict is about,
+    and nothing unauthorized was created), and against the worktree after the gate (nothing reached it by an absolute path)."""
     # D6: only the gate that runs the candidate APPLICATION may leave untracked
     # runtime state; it is recorded and discarded (VerificationTreeBinding.check).
     ephemeral = name == RUNTIME_VERIFICATION_GATE
@@ -410,31 +424,36 @@ def _verification_gate(name: str):
     def decorate(method):
         @functools.wraps(method)
         def wrapper(self, *args, **kwargs):
-            if self.tree_binding is not None:
-                self.tree_binding.check(name, "before")
+            scope = self._enter_gate_scope(name)
             previous, self._gate = self._gate, name
             started = time.monotonic()
             try:
-                result = method(self, *args, **kwargs)
-            except BaseException as error:
-                _record_gate_result(name, None, started, error=error)
-                if self.tree_binding is not None:
-                    self.tree_binding.check(name, ephemeral_untracked=ephemeral)
-                raise
-            finally:
-                self._gate = previous
-            if self.tree_binding is not None:
-                artifacts = self.tree_binding.check(name, ephemeral_untracked=ephemeral)
-                if ephemeral and isinstance(result, dict):
+                try:
+                    result = method(self, *args, **kwargs)
+                except BaseException as error:
+                    _record_gate_result(name, None, started, error=error)
+                    self._leave_gate_scope(name, ephemeral)
+                    raise
+                finally:
+                    self._gate = previous
+                artifacts = self._leave_gate_scope(name, ephemeral)
+                if ephemeral and artifacts is not None and isinstance(result, dict):
                     result["runtime_artifacts"] = artifacts
-            _record_gate_result(name, result, started)
-            return result
+                _record_gate_result(name, result, started)
+                return result
+            finally:
+                self._close_gate_scope(scope)
         return wrapper
     return decorate
 
 
 class PolymorphicValidator:
     """Detects workspace language stack and executes syntactic compile checks and dynamic test runners."""
+
+    # OI-142: class-level defaults so an instance built without __init__ (a test double, a probe of one method) has no view, never an AttributeError.
+    _gate_view: Optional[GateView] = None
+    _gate_view_binding: Any = None
+    last_gate_view_changes: Tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -462,6 +481,13 @@ class PolymorphicValidator:
         # OD-1: the sanitized Git metadata mount resolved once per mounted tree (_bound_git_metadata).
         self._git_metadata_mounts: Dict[str, Any] = {}
         self._gate = "command"
+        # OI-142: the view the gate now running executes in (None: in place - not a Git work tree, or contained execution).
+        self._gate_view: Optional[GateView] = None
+        self._gate_view_binding: Any = None
+        # The bound paths the last viewed gate's execution rewrote, replaced or removed IN ITS VIEW (empty: it changed none, or it ran in
+        # place). A caller that judges a run by whether its inputs were left alone (the oracles' dependency checks) reads this, because
+        # the tree it would re-read is no longer the tree the code ran in.
+        self.last_gate_view_changes: Tuple[str, ...] = ()
         # Whether this run may change the repository's toolchain declaration
         # (the caller's structured write scope - see
         # kriya/workflow/toolchain.py::toolchain_declaration_mutable). Set
@@ -529,6 +555,117 @@ class PolymorphicValidator:
         self.python_interpreter_provenance: Optional[Dict[str, Any]] = None
         self.python_environment_error: Optional[Tuple[str, str]] = None
         self._venv_creation_error: Optional[str] = None
+
+    # --- OI-142: the execution root of a verification gate --------------------------------------------------------------------
+
+    @staticmethod
+    def _state_root() -> str:
+        from kriya.core.state_paths import default_state_directory
+
+        return os.path.realpath(expand_user(environment_state_dir() or default_state_directory()))
+
+    def _origin_root(self) -> str:
+        """The tree this validator belongs to, also while a gate executes in a view of it: what the execution-environment inputs
+        (the project venv, the dependency caches) are keyed by - never the view, which dies with the gate."""
+        return self._gate_view.workspace_path if self._gate_view is not None else self.workspace_path
+
+    def _open_gate_view(self) -> Optional[GateView]:
+        """A fresh view of the bound tree for the gate about to run, or None when there is nothing to be a view of: the root is not
+        a Git work tree (no repository content, no binding) or execution is contained (the OCI workspace is a bind mount and the
+        venv a mount-relative path; that backend was not run for this change - owner O4: stronger OCI mounts stay as they are).
+        A view that cannot be built or proven raises GateViewError: the gate is refused, never run in place."""
+        if self.autonomy_cfg.contained_execution_required or not is_git_work_tree(self.workspace_path):
+            return None
+        binding = self.tree_binding
+        if binding is not None and os.path.realpath(binding.root) != os.path.realpath(self.workspace_path):
+            binding = None  # bound to another tree than the one this validator executes in: no identity to prove the copy against
+        view = build_gate_view(
+            self.workspace_path, state_root=self._state_root(), manifest=binding.view_manifest() if binding is not None else None,
+            extra_paths=binding.view_untracked() if binding is not None else (),
+            environment_roots=(os.path.join(self.workspace_path, KRIYA_DIRECTORY_NAME, "venv"),),
+        )
+        self._gate_view, self._gate_view_binding = view, binding
+        self.workspace_path = view.root
+        return view
+
+    def _enter_gate_scope(self, name: str) -> Optional[GateView]:
+        """Before the gate: the bound tree is still the bound tree; then the view this gate opens (None: it runs in the view of the
+        gate it is nested in, or in place)."""
+        if self.tree_binding is not None:
+            self.tree_binding.check(name, "before")
+        if self._gate_view is not None:
+            return None
+        self.last_gate_view_changes = ()
+        return self._open_gate_view()
+
+    def _leave_gate_scope(self, name: str, ephemeral: bool) -> Optional[List[str]]:
+        """After the gate (also after an error): the view still holds the bound content and nothing unauthorized was created in it;
+        the worktree is untouched (nothing reached it by an absolute path). Runtime state the application created is returned."""
+        artifacts: Optional[List[str]] = None
+        if self._gate_view is not None:
+            self.last_gate_view_changes = tuple(self._gate_view.changed_paths())
+        if self._gate_view is not None and self._gate_view_binding is not None:
+            artifacts = list(self._gate_view_binding.check_view(
+                self._gate_view.root, name, output_roots=sorted(self._gate_view.output_roots), ephemeral_untracked=ephemeral))
+        if self.tree_binding is not None:
+            artifacts = sorted(set(artifacts or []) | set(self.tree_binding.check(name, ephemeral_untracked=ephemeral)))
+        return artifacts
+
+    def _close_gate_scope(self, view: Optional[GateView]) -> None:
+        if view is None:
+            return
+        self.workspace_path = view.workspace_path
+        self._gate_view, self._gate_view_binding = None, None
+        view.close()
+
+    @contextlib.contextmanager
+    def verification_session(self, name: str):
+        """One view for a sequence of steps that is a single verification: Kriya's own build preparation of a finite command and the
+        run that consumes its product (OI-142 O1: the product exists only in that view, never as residue in the worktree). Gates
+        called inside share the view; the same checks as a gate close it."""
+        scope = self._enter_gate_scope(name)
+        try:
+            try:
+                yield
+            except BaseException:
+                self._leave_gate_scope(name, name == RUNTIME_VERIFICATION_GATE)
+                raise
+            self._leave_gate_scope(name, name == RUNTIME_VERIFICATION_GATE)
+        finally:
+            self._close_gate_scope(scope)
+
+    _DECLARED_OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024
+
+    def _stage_declared_directory(self, relative_dir: str) -> Tuple[str, ...]:
+        """A DECLARED input of this gate: Kriya's own staging directory under ``.kriya/`` (the acceptance runner, its ini and request),
+        copied from the tree it was staged in into the view at the same relative path. Returns the names staged ((), when the gate
+        runs in place)."""
+        view = self._gate_view
+        if view is None:
+            return ()
+        parts = relative_dir.split(os.sep)
+        if os.path.isabs(relative_dir) or ".." in parts or parts[0] != KRIYA_DIRECTORY_NAME:
+            raise GateViewError(GATE_VIEW_UNAVAILABLE, f"{relative_dir} is not a Kriya staging directory a gate may import")
+        source = os.path.join(view.workspace_path, relative_dir)
+        shutil.copytree(source, os.path.join(view.root, relative_dir), symlinks=True)
+        return tuple(sorted(os.listdir(source)))
+
+    def _collect_declared_outputs(self, relative_dir: str, staged: Sequence[str]) -> None:
+        """The DECLARED outputs of this gate: the regular files the run wrote beside its staged inputs (the acceptance
+        ``observations.json``) are copied back to the staging directory they came from; a staged input is never replaced, and
+        nothing else leaves the view."""
+        view = self._gate_view
+        if view is None:
+            return
+        produced = os.path.join(view.root, relative_dir)
+        if not os.path.isdir(produced):
+            return
+        for name in sorted(os.listdir(produced)):
+            path = os.path.join(produced, name)
+            if name in staged or os.path.islink(path) or not os.path.isfile(path) \
+                    or os.path.getsize(path) > self._DECLARED_OUTPUT_LIMIT_BYTES:
+                continue
+            shutil.copy2(path, os.path.join(view.workspace_path, relative_dir, name))
 
     def _get_pom_dependencies(self, pom_path: str) -> List[str]:
         return get_pom_dependencies(pom_path)
@@ -614,7 +751,11 @@ class PolymorphicValidator:
         observed outcome, verbatim - not re-derived or reinterpreted)."""
         signature = self._venv_install_signature(install_args)
         if signature in self._venv_install_cache:
-            return self._venv_install_cache[signature]
+            venv_python = self._venv_install_cache[signature][0]
+            if venv_python is None or self.autonomy_cfg.contained_execution_required or not os.path.isabs(venv_python) \
+                    or not venv_integrity.mismatches(os.path.dirname(os.path.dirname(venv_python))):
+                return self._venv_install_cache[signature]
+            del self._venv_install_cache[signature]  # OI-142 / O4: changed since it was sealed - rebuilt below, not reused
         result = self._ensure_project_venv_impl(install_args)
         self._venv_install_cache[signature] = result
         return result
@@ -676,7 +817,7 @@ class PolymorphicValidator:
         # contained - exactly the same mechanism `cwd=self.workspace_path`
         # already relies on for every other command this class runs).
         contained = self.autonomy_cfg.contained_execution_required
-        venv_dir_host = os.path.join(self.workspace_path, ".kriya", "venv")
+        venv_dir_host = os.path.join(self._origin_root(), ".kriya", "venv")  # OI-142: an environment input of the origin tree, outside any gate view
         venv_python_host = os.path.join(venv_dir_host, "bin", "python")
         venv_relative = os.path.join(".kriya", "venv")
         venv_python_relative = os.path.join(venv_relative, "bin", "python")
@@ -702,7 +843,13 @@ class PolymorphicValidator:
         # new declaration drops any of them the venv is recreated from nothing.
         declared = _declared_specifiers(self.workspace_path, install_args)
         previous = _installed_specifiers(venv_dir_host)
-        if venv_present(venv_python_host) and (previous is None or not set(previous) <= set(declared)):
+        if venv_present(venv_python_host) and not contained and (unexpected := venv_integrity.mismatches(venv_dir_host)):
+            # OI-142 / owner O4: a venv is reused only as sealed. A gate ran candidate code with the operator's rights and changed
+            # it (or it was never sealed): it is not trusted - recreated from nothing, never reused.
+            logger.info("Project venv recreated: its content is not the sealed content (%s)", unexpected[:5])
+            shutil.rmtree(venv_dir_host, ignore_errors=True)
+            self.venv_recreations += 1
+        elif venv_present(venv_python_host) and (previous is None or not set(previous) <= set(declared)):
             # Review F5: a venv whose installed set is unknown (no marker: created
             # before this mechanism, or its marker could not be written) is never
             # trusted - it may already hold a removed package - and is rebuilt once.
@@ -765,6 +912,8 @@ class PolymorphicValidator:
                 f"'pip install {' '.join(install_args)}' failed:\n{install_res['stdout']}\n{install_res['stderr']}"
             )
         _record_installed_specifiers(venv_dir_host, declared)
+        if not contained:
+            venv_integrity.seal(venv_dir_host)
         return venv_python, None
 
     def _resolve_python_interpreter(self) -> Tuple[str, Optional[str]]:
@@ -1204,6 +1353,8 @@ class PolymorphicValidator:
         dependency_cache_path: Optional[str] = None, dependency_cache_writable: bool = False,
         acquisition: bool = False, workspace_path: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if self._gate_view is not None:
+            guard_against_origin(self._gate_view, cmd, cwd)
         self._audit_run_command(cmd, cwd)
         self._register_gate_output(cmd, cwd)
         profile, backend = self.build_containment_profile_and_backend(
@@ -1238,8 +1389,16 @@ class PolymorphicValidator:
         designates the output roots of the exact toolchain command it is
         about to run (gate_output_roots); nothing else it creates is
         accepted."""
-        binding, gate = self.tree_binding, self._gate
-        if binding is None or gate is None:
+        binding, gate, view = self.tree_binding, self._gate, self._gate_view
+        if gate is None:
+            return
+        if view is not None:  # the toolchain writes into the view: its output roots are relative to the view
+            for root in gate_output_roots(cmd, cwd):
+                relative = os.path.relpath(root, view.root)
+                if not relative.startswith(".."):
+                    view.output_roots.add(relative)
+            return
+        if binding is None:
             return
         for root in gate_output_roots(cmd, cwd):
             binding.authorize_gate_output(gate, os.path.relpath(root, binding.root))
@@ -1253,7 +1412,7 @@ class PolymorphicValidator:
         from kriya.core.state_paths import default_state_directory
 
         root = os.path.realpath(expand_user(environment_state_dir() or default_state_directory()))
-        workspace = os.path.realpath(self.original_workspace_path or self.workspace_path)
+        workspace = os.path.realpath(self.original_workspace_path or self._origin_root())
         key = hashlib.sha256(workspace.encode("utf-8")).hexdigest()[:16]
         cache_dir = os.path.join(root, "dependency-cache", tool, key)
         os.makedirs(cache_dir, exist_ok=True)
@@ -1275,13 +1434,13 @@ class PolymorphicValidator:
         from kriya.core.state_paths import default_state_directory
 
         root = os.path.realpath(expand_user(environment_state_dir() or default_state_directory()))
-        workspace = os.path.realpath(self.original_workspace_path or self.workspace_path)
+        workspace = os.path.realpath(self.original_workspace_path or self._origin_root())
         key = hashlib.sha256(workspace.encode("utf-8")).hexdigest()[:16]
         cache_dir = os.path.join(root, "dependency-cache", "maven", key)
         # The cache Kriya kept in the tree before must not stay where the
         # build walks it (a reused worktree keeps untracked .kriya/ content):
         # it becomes the new cache when there is none yet, else it is dropped.
-        legacy = os.path.join(self.workspace_path, ".kriya", "m2_cache")
+        legacy = os.path.join(self._origin_root(), ".kriya", "m2_cache")
         if os.path.isdir(legacy) and not os.path.islink(legacy):
             if not os.path.isdir(cache_dir) or not os.listdir(cache_dir):
                 os.makedirs(os.path.dirname(cache_dir), exist_ok=True)
@@ -1919,7 +2078,13 @@ class PolymorphicValidator:
             if binding.pytest_argument:
                 cmd.append(binding.pytest_argument)
             cmd.extend(arguments)
+            # OI-142: Kriya's staged runner/ini/request are DECLARED inputs of this gate (copied into its view), the observations
+            # the runner writes beside them its DECLARED output (copied back); nothing else crosses.
+            staging = os.path.dirname(runner_script)
+            staged = self._stage_declared_directory(staging) if staging else ()
             res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+            if staging:
+                self._collect_declared_outputs(staging, staged)
         except BaseException:
             test_execution.collect(binding)  # removes Kriya's own report destination
             raise
@@ -2373,6 +2538,15 @@ class PolymorphicValidator:
         tool = os.path.basename(command[0])
         return tool in ("mvn", "mvnw") or (tool == "java" and any("target/classes" in arg for arg in command[1:]))
 
+    def _runtime_needs_gradle_classes(self, command: List[str]) -> bool:
+        """OI-142 (owner O1): a JVM launched on this Gradle project's compiled classes (``build/classes/...``) consumes build output. Before
+        the per-gate views it found whatever an earlier compile gate left in the shared worktree; the view holds none of it, so the
+        classes are established from the CURRENT source exactly as D3 does for Maven. A Gradle invocation itself (``gradle run``,
+        ``test``) builds what it needs and needs no preparation."""
+        if not command or os.path.basename(command[0]) != "java" or not GRADLE.detects(self.workspace_path):
+            return False
+        return any("build/classes" in argument for argument in command[1:])
+
     def _java_sources(self) -> List[str]:
         """Every .java source of the project, workspace-relative (build output,
         VCS and Kriya state excluded)."""
@@ -2393,20 +2567,22 @@ class PolymorphicValidator:
         run compiles in its own command). Returns None when ready, else the
         runtime result that stops verification before anything runs, plus the
         prerequisite that ran (None when the command needs none)."""
-        if not any(self._runtime_needs_compiled_classes(c) for c in commands):
+        maven = any(self._runtime_needs_compiled_classes(c) for c in commands)
+        if not maven and not any(self._runtime_needs_gradle_classes(c) for c in commands):
             return None, None
+        build = "mvn clean compile" if maven else "gradle compileJava"
         if self.stack != "java":
             # A pom.xml is present, and _detect_stack checks it first: this is a
             # Java project even when the validator was built before it existed.
             self.stack = self._detect_stack()
             self._resolve_toolchain_identity()
-        prepared = self.run_compile_check(self._java_sources() or ["pom.xml"], deadline=self._run_deadline())
+        prepared = self.run_compile_check(self._java_sources() or ["pom.xml" if maven else "build.gradle"], deadline=self._run_deadline())
         if prepared["success"]:
-            return None, "mvn clean compile (current source): PASSED"
+            return None, f"{build} (current source): PASSED"
         return {"success": False, "timed_out": False, "returncode": None, "prerequisite_failed": True,
                 "output": (f"{self.RUNTIME_PREREQUISITE_FAILED}: the application could not be built from the "
-                           f"current source before runtime verification (mvn clean compile); nothing was run.\n\n"
-                           f"{prepared['output']}")}, "mvn clean compile (current source): FAILED"
+                           f"current source before runtime verification ({build}); nothing was run.\n\n"
+                           f"{prepared['output']}")}, f"{build} (current source): FAILED"
 
     def _run_runtime_step(self, command: List[str], timeout: int,
                           stdin_payload: Optional[str] = None) -> Dict[str, Any]:

@@ -75,8 +75,13 @@ def _validator(path):
 
 
 def _compile_in_new_work_unit(ws):
+    """An earlier work unit's compile leaves V1's classes in the sandbox. OI-142: the compile GATE now runs in its own view and leaves nothing, so the residue
+    this scenario is about (build output anything earlier left behind, which the reset keeps or deletes by Git semantics) is planted the way any earlier run
+    of a build tool would have left it; the gate itself must still pass."""
     sandbox = create_git_worktree(str(ws))
     assert _validator(sandbox).run_compile_check([SOURCE])["success"]
+    assert not os.path.exists(os.path.join(sandbox, CLASS))  # the gate left no output in the shared sandbox
+    subprocess.run(["javac", "-d", os.path.join(sandbox, "target", "classes"), os.path.join(sandbox, SOURCE)], check=True, capture_output=True)
     assert os.path.exists(os.path.join(sandbox, CLASS))
     return sandbox
 

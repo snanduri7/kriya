@@ -255,14 +255,17 @@ def test_the_untracked_listing_uses_gits_own_ignore_rules(tmp_path):
 
 def _gate_run(validator, gate, cmd, effect):
     """One real validator gate (the _verification_gate wrapper) that runs
-    ``cmd`` through the validator's own runner (process stubbed: ``effect``
-    plays the tool's file output) and then checks the bound tree."""
+    ``cmd`` through the validator's own runner (process stubbed: ``effect(where)``
+    plays the tool's file output in the directory the tool runs in) and then checks the bound tree.
+
+    OI-142: a gate executes in a fresh view of the bound tree, so ``where`` is that view (the validator's execution root at the
+    time), not the worktree: a tool's output belongs where the tool runs."""
     from kriya.tools.validate import PolymorphicValidator, _verification_gate
 
     def body(self):
         with patch("kriya.tools.validate.ProcessController.run") as run:
             run.return_value.to_dict.return_value = {"returncode": 0, "stdout": "", "stderr": "", "timeout": False}
-            effect()
+            effect(self.workspace_path)
             self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
         return {"success": True}
 
@@ -293,8 +296,8 @@ MVN = ["mvn", "-q", "compile"]
 def test_a_maven_gates_own_target_output_is_accepted_without_any_ignore_rule(tmp_path):
     root, validator = _maven_tree(tmp_path)
 
-    def maven_output():
-        for module in (root, root / "core"):
+    def maven_output(where):
+        for module in (Path(where), Path(where) / "core"):
             (module / "target" / "classes").mkdir(parents=True)
             (module / "target" / "classes" / "App.class").write_bytes(b"\xca\xfe")
 
@@ -307,11 +310,12 @@ def test_a_maven_gate_creating_anything_else_is_still_a_typed_stop(tmp_path, str
 
     root, validator = _maven_tree(tmp_path)
 
-    def maven_output_plus_stray():
-        (root / "target").mkdir()
-        (root / "target" / "App.class").write_bytes(b"\xca\xfe")
-        (root / stray).parent.mkdir(parents=True, exist_ok=True)
-        (root / stray).write_text("x\n")
+    def maven_output_plus_stray(where):
+        where = Path(where)
+        (where / "target").mkdir()
+        (where / "target" / "App.class").write_bytes(b"\xca\xfe")
+        (where / stray).parent.mkdir(parents=True, exist_ok=True)
+        (where / stray).write_text("x\n")
 
     with pytest.raises(VerificationGateCreatedFiles) as stopped:
         _gate_run(validator, "compile", MVN, maven_output_plus_stray)
@@ -326,12 +330,16 @@ def test_a_target_directory_is_never_inferred_outside_the_gate_that_runs_maven(t
     from kriya.workflow.file_integrity import VerificationGateCreatedFiles
 
     root, validator = _maven_tree(tmp_path)
-    _gate_run(validator, "compile", MVN, lambda: ((root / "target").mkdir(), (root / "target" / "A.class").write_bytes(b"x")))
+    _gate_run(validator, "compile", MVN, lambda where: (Path(where, "target").mkdir(), Path(where, "target", "A.class").write_bytes(b"x")))
     result = _gate_run(validator, "runtime_verification", ["java", "-cp", "target", "App"],
-                       lambda: (root / "target" / "written-by-the-app.txt").write_text("x"))
+                       lambda where: Path(where, "target", "written-by-the-app.txt").parent.mkdir(exist_ok=True) or
+                       Path(where, "target", "written-by-the-app.txt").write_text("x"))
     assert result["runtime_artifacts"] == ["target/written-by-the-app.txt"]
-    assert not (root / "target" / "written-by-the-app.txt").exists() and (root / "target" / "A.class").exists()
-    (root / "target" / "between.txt").write_text("x")
+    # OI-142 / O1: each gate has its own view, so neither the compile gate's output nor the app's state is left in the worktree
+    # (the runtime gate rebuilds what it consumes from the bound source, never from an earlier gate's output).
+    assert not (root / "target").exists()
+    (root / "target").mkdir()
+    (root / "target" / "between.txt").write_text("x")  # something writes into the WORKTREE between gates: still caught
     with pytest.raises(VerificationGateCreatedFiles):
         validator.tree_binding.check("tests", "before")
 
@@ -393,4 +401,5 @@ def test_a_real_greenfield_maven_compile_passes_its_gate(tmp_path):
         str(tmp_path), repository_content_paths(str(tmp_path)), ["pom.xml", "src/main/java/demo/App.java"])
     result = validator.run_compile_check(["src/main/java/demo/App.java"])
     assert result["success"], result.get("output")
-    assert (tmp_path / "target" / "classes" / "demo" / "App.class").exists()
+    # OI-142: the compile ran in its own view and its output died with it - nothing was left in the worktree to be consumed later
+    assert not (tmp_path / "target").exists()

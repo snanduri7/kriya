@@ -76,6 +76,7 @@ GIT_ENV = {
 # ----------------------------------------------------------------------------- normalization
 
 _RUN_ID = re.compile(r"\d{8}T\d{6}-[0-9a-f]{8}")
+_GATE_VIEW = re.compile(r"(?<=/gate-views/)view-[A-Za-z0-9_]+")  # OI-142: a gate's fresh view has a random directory name
 _ISO_TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[+-]\d{2}:\d{2}|Z)?")
 _HEX32 = re.compile(r"(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])")
 # Keys whose values are MEASURED to vary between two identical runs (wall clocks and durations); their values become
@@ -187,6 +188,7 @@ class Normalizer:
             if literal in value:
                 value = value.replace(literal, self._token(prefix, literal))
         value = _RUN_ID.sub(lambda m: self._token("run", m.group(0)), value)
+        value = _GATE_VIEW.sub("<view>", value)
         value = _ISO_TIME.sub("<time>", value)
         value = _TEXT_SECONDS.sub("<t>s", value)
         value = _TEXT_REMAINING.sub(lambda m: f"{m.group(1)}=<t>", value)

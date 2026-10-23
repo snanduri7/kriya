@@ -19,7 +19,7 @@ import os
 import stat
 import subprocess
 from dataclasses import dataclass, replace
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 
 from kriya.platform import git_argv
 
@@ -239,5 +239,29 @@ def untracked_repository_paths(root: str) -> frozenset:
                             capture_output=True)
     if result.returncode != 0:
         raise RuntimeError(f"git ls-files --others failed: {os.fsdecode(result.stderr).strip() or result.returncode}")
+    return frozenset(path for path in (os.fsdecode(item) for item in result.stdout.split(b"\0") if item)
+                     if path != ".kriya" and not path.startswith(".kriya/"))
+
+
+def ignored_repository_paths(root: str, relpaths: Sequence[str]) -> frozenset:
+    """Which of ``relpaths`` Git's own exclude rules (.gitignore, info/exclude, core.excludesFile) ignore in the work tree at
+    ``root``, decided by the path alone (``--no-index``): the answer is the repository's, also for a path that exists only in a
+    copy of the tree. A failing check raises (fail closed)."""
+    if not relpaths:
+        return frozenset()
+    payload = b"".join(os.fsencode(path) + b"\0" for path in relpaths)
+    result = subprocess.run(git_argv(["git", "check-ignore", "--no-index", "-z", "--stdin"]), cwd=root, input=payload,
+                            capture_output=True)
+    if result.returncode not in (0, 1):  # 0: some ignored, 1: none ignored
+        raise RuntimeError(f"git check-ignore failed: {os.fsdecode(result.stderr).strip() or result.returncode}")
+    return frozenset(os.fsdecode(item) for item in result.stdout.split(b"\0") if item)
+
+
+def visible_repository_paths(root: str) -> frozenset:
+    """Git's own view of the tree at ``root``: every tracked path and every untracked non-ignored one (its exclude semantics), Kriya's
+    ``.kriya/`` state excluded. A failing listing raises (fail closed)."""
+    result = subprocess.run(git_argv(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"]), cwd=root, capture_output=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"git ls-files failed: {os.fsdecode(result.stderr).strip() or result.returncode}")
     return frozenset(path for path in (os.fsdecode(item) for item in result.stdout.split(b"\0") if item)
                      if path != ".kriya" and not path.startswith(".kriya/"))

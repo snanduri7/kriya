@@ -83,8 +83,21 @@ _TIMING_KEY = re.compile(r"(seconds|latency|_ms|duration_sec)$")
 _DURATION_TEXT = re.compile(r"\bin \d+(?:\.\d+)?s\b")
 
 
+# OI-142: a gate runs in a view under the run's state root, and its output names that directory; two variants of one run keep separate state roots
+# (that is the point of the comparison), so the view's absolute path is the one place their texts legitimately differ.
+_GATE_VIEW_DIR = re.compile(r"[^\s\"']*/gate-views/view-[0-9a-f]+(?:-\d+)?")
+
+
+_VARIANT_SLOTS: Dict[str, int] = {}
+
+
+def _variant_dir(variant: str) -> str:
+    """A state directory name of one fixed length per variant (the variant's identity is kept in the key, not the path)."""
+    return "v%05d" % _VARIANT_SLOTS.setdefault(variant, len(_VARIANT_SLOTS))
+
+
 def _untimed(text: str) -> str:
-    return _DURATION_TEXT.sub("in <t>s", text)
+    return _GATE_VIEW_DIR.sub("<gate-view>", _DURATION_TEXT.sub("in <t>s", text))
 
 
 def _mask(value: Any, paths: set, path=()) -> Any:
@@ -136,7 +149,9 @@ def _observe(tmp_path: Path, monkeypatch, variant: str, responder: Callable, fil
     patch, inside the variant's patch context); ``drive(engine_factory,
     workspace)`` runs the scenario (default: one direct run of ``goal``) and
     returns the last result."""
-    state = tmp_path / "states" / variant
+    # OI-142: a gate's output (so the next prompt, and the output budget derived from its LENGTH) names the view under this state root, so the
+    # variants keep state directories of one fixed length - a variant-dependent path length would change max_tokens, not the behaviour compared.
+    state = tmp_path / "states" / _variant_dir(variant)
     state.mkdir(parents=True)
     monkeypatch.setenv(ENV_STATE_DIR, str(state))
     # Identical commit hashes in every variant (a commit hash covers its

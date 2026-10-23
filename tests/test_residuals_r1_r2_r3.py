@@ -28,6 +28,7 @@ import pytest
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
+from kriya.tools import venv_integrity
 from kriya.tools.validate import PolymorphicValidator, _record_installed_specifiers
 from kriya.workflow.attempt import _resolve_retry_member_hints
 from kriya.workflow.context_package import make_context_item
@@ -55,6 +56,7 @@ def _make_fake_venv(workspace_path: str) -> None:
     # set and is rebuilt once (review F5, tests/test_backend_readiness_004_venv_reuse.py). These tests are about the
     # install cache of a venv Kriya already owns, so the marker is present (an empty recorded set: nothing removed).
     _record_installed_specifiers(os.path.dirname(venv_bin), [])
+    venv_integrity.seal(os.path.dirname(venv_bin))  # ...and its seal (OI-142 / O4: a venv is reused only as sealed)
 
 
 class TestPerfDependency001VenvCache:

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kriya.config import AppConfig
+from kriya.tools import venv_integrity
 from kriya.tools.validate import (
     PolymorphicValidator,
     _record_installed_specifiers,
@@ -456,6 +457,7 @@ def test_run_app_sequence_uses_isolated_venv_interpreter_for_python(tmp_path):
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n")
     _record_installed_specifiers(str(venv_python.parent.parent), [])  # a venv Kriya built carries its marker (review F5)
+    venv_integrity.seal(str(venv_python.parent.parent))  # ...and its seal (OI-142 / O4: a venv is reused only as sealed)
 
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "python"
@@ -486,6 +488,7 @@ def test_run_app_sequence_reports_pip_install_failure_without_running_commands(t
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n")
     _record_installed_specifiers(str(venv_python.parent.parent), [])  # a venv Kriya built carries its marker (review F5)
+    venv_integrity.seal(str(venv_python.parent.parent))  # ...and its seal (OI-142 / O4: a venv is reused only as sealed)
 
     validator = PolymorphicValidator(str(tmp_path))
 
@@ -596,6 +599,7 @@ def test_python_run_tests_installs_requirements_into_isolated_venv_before_pytest
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n")  # simulates an already-created venv
     _record_installed_specifiers(str(venv_python.parent.parent), [])  # a venv Kriya built carries its marker (review F5)
+    venv_integrity.seal(str(venv_python.parent.parent))  # ...and its seal (OI-142 / O4: a venv is reused only as sealed)
 
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "python"
@@ -630,6 +634,7 @@ def test_python_run_tests_reports_pip_install_failure_without_running_pytest(tmp
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n")
     _record_installed_specifiers(str(venv_python.parent.parent), [])  # a venv Kriya built carries its marker (review F5)
+    venv_integrity.seal(str(venv_python.parent.parent))  # ...and its seal (OI-142 / O4: a venv is reused only as sealed)
 
     validator = PolymorphicValidator(str(tmp_path))
 

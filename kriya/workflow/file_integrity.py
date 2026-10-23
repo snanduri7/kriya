@@ -34,6 +34,7 @@ import os
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+from kriya.config.environment import KRIYA_DIRECTORY_NAME
 from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, path_identity, path_relation
 from kriya.repository.snapshot import CRLF as CRLF
 from kriya.repository.snapshot import LF as LF
@@ -50,6 +51,7 @@ from kriya.repository.snapshot import _content_identity as _content_identity
 from kriya.repository.snapshot import _stat_identity as _stat_identity
 from kriya.repository.snapshot import display_text as display_text
 from kriya.repository.snapshot import file_raw_digest as file_raw_digest
+from kriya.repository.snapshot import ignored_repository_paths as ignored_repository_paths
 from kriya.repository.snapshot import load_snapshot as load_snapshot
 from kriya.repository.snapshot import newline_style as newline_style
 from kriya.repository.snapshot import raw_digest as raw_digest
@@ -425,6 +427,50 @@ class VerificationTreeBinding:
                 except OSError:
                     break
                 parent = os.path.dirname(parent)
+
+    # --- OI-142: a verification gate that runs in a fresh view of the bound tree -------------------------------------------
+
+    def view_manifest(self) -> Dict[str, Optional[str]]:
+        """Every bound (tracked or candidate) path with the content identity it was bound to - what a gate's view of this tree
+        must hold, byte for byte and mode for mode (None: bound as absent)."""
+        return {relpath: expected for relpath, (_stat, expected) in self._expected.items()}
+
+    def view_untracked(self) -> Tuple[str, ...]:
+        """The untracked, non-ignored paths that already existed when the tree was bound: repository content by Git's own
+        semantics, so a view of the tree holds them too (they carry no bound identity)."""
+        return tuple(sorted(self._untracked_before))
+
+    def check_view(self, view_root: str, gate: str, *, output_roots: Iterable[str], ephemeral_untracked: bool = False) -> List[str]:
+        """The ``check`` of a gate that ran in a view of this tree instead of in ``self.root``: a bound path whose view content
+        differs from its bound identity is the VerificationTreeMutated stop (the verdict is about a tree other than the bound
+        one); a file the gate created in the view that Git neither tracks nor ignores (by this repository's rules) and that is not
+        under the toolchain's own output roots is VerificationGateCreatedFiles, except for the application-runtime gate, whose
+        runtime state is returned (and dies with the view). Nothing is removed here: the view is discarded as a whole."""
+        changed = []
+        for relpath, expected in sorted(self.view_manifest().items()):
+            actual = _content_identity(os.path.join(view_root, relpath))
+            if actual != expected:
+                changed.append((relpath, expected, actual))
+        if changed:
+            raise VerificationTreeMutated(gate, changed, "after")
+        created = self._view_created(view_root, tuple(root.strip("/") for root in output_roots if root.strip("/")))
+        if created and not ephemeral_untracked:
+            raise VerificationGateCreatedFiles(gate, created, "after")
+        return created
+
+    def _view_created(self, view_root: str, output_roots: Sequence[str]) -> List[str]:
+        known = set(self._expected) | set(self._untracked_before)
+        present = []
+        for directory, dirnames, filenames in os.walk(view_root):
+            relative = os.path.relpath(directory, view_root)
+            dirnames[:] = [name for name in dirnames if not (relative == "." and name in (KRIYA_DIRECTORY_NAME, ".git"))]
+            present.extend(os.path.normpath(os.path.join(relative, name)) for name in filenames)
+            present.extend(os.path.normpath(os.path.join(relative, name)) for name in dirnames
+                           if os.path.islink(os.path.join(directory, name)))
+        new = [path for path in present if path not in known
+               and not any(path == root or path.startswith(root + "/") for root in output_roots)]
+        ignored = ignored_repository_paths(self.root, new)
+        return sorted(path for path in new if path not in ignored)
 
     def created(self) -> List[str]:
         """Untracked, non-ignored files that appeared since the binding (or

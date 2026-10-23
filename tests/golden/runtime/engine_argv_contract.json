@@ -39,7 +39,7 @@
     "kriya-verification-input"
    ],
    "contained": false,
-   "cwd": "<workspace:1>/.kriya/worktree",
+   "cwd": "<state_dir:1>/gate-views/<view>",
    "env": true,
    "spawn": "app",
    "stdin": null,
