@@ -40,7 +40,6 @@ from _scripted_run import engine, git_workspace, script  # noqa: E402  # pylint:
 from _strict_doubles import strict_config, strict_engine  # noqa: E402  # pylint: disable=wrong-import-position
 
 from kriya.config.config import AppConfig  # noqa: E402
-from kriya.context.workspace_identity import workspace_identity  # noqa: E402
 from kriya.control.decisions import load_decision_ledger  # noqa: E402
 from kriya.control.persistence import list_run_records  # noqa: E402
 from kriya.core import LLMClient  # noqa: E402
@@ -478,12 +477,12 @@ def _strip_ownership(path: Path) -> None:
     path.write_text(json.dumps(payload))
 
 
-def test_oi63_current_behaviour_the_migration_decision_omits_the_sidecar_it_never_sees_ownerless(tmp_path):
-    """OI-63, SUSPECTED DEFECTIVE (audit-record completeness only): a resume over ownerless (pre-ownership) control
-    documents through the real ``execute_milestones``. The milestone sidecar is ownerless when the call starts and owned
-    when it ends, but the ``legacy_workspace_ownership_migrated`` decision does not list ``milestone_run_state``:
-    ``execute_milestones`` calls ``revalidate_completed_milestones`` (which re-saves, and so stamps, the sidecar) BEFORE
-    ``_migrate_legacy_milestone_ownership``, whose sidecar branch therefore never fires from this entry."""
+def test_oi63_is_moot_a_resume_over_ownerless_control_documents_is_refused_and_nothing_is_adopted(tmp_path):
+    """OI-63 (the migration decision omitted the sidecar it never saw ownerless) concerned the implicit ownership migration that D2 M4 (owner
+    decision 2026-10-23) RETIRED: a resume over ownerless (pre-ownership) control documents through the real ``execute_milestones`` shape is now a
+    typed refusal (``WORKSPACE_OWNERSHIP_MISSING``) before any model work, and every document keeps the bytes it had (nothing is stamped)."""
+    from kriya.context.workspace_identity import WorkspaceOwnershipMissing
+
     workspace = tmp_path / "ws"
     workspace.mkdir()
     (workspace / "calc.py").write_text(_CALC)
@@ -494,16 +493,16 @@ def test_oi63_current_behaviour_the_migration_decision_omits_the_sidecar_it_neve
     assert first.legacy_result["status"] == "milestone_failed"
     kriya_dir = workspace / ".kriya"
     sidecar = kriya_dir / "milestones" / f"{_GROUP}.json"
-    for path in (kriya_dir / "control" / "state.json", kriya_dir / "control" / "contracts.json", sidecar,
-                 *sorted((kriya_dir / "checkpoints").glob("*.json"))):
+    stripped = (kriya_dir / "control" / "state.json", kriya_dir / "control" / "contracts.json", sidecar,
+                *sorted((kriya_dir / "checkpoints").glob("*.json")))
+    for path in stripped:
         _strip_ownership(path)
-    second, units = _milestone_run(tmp_path, workspace, {2: _WITH_DIV, 3: _WITH_DIV})
-    assert second.legacy_result["status"] == "success" and units == [2, 3]
-    migrations = [d.fields for d in load_decision_ledger(str(workspace)).all()
-                  if d.type == "legacy_workspace_ownership_migrated"]
-    assert migrations == [{"milestone_group_id": _GROUP,
-                           "stores": ["checkpoints:1", "contract_registry", "control_state"]}]
-    assert json.loads(sidecar.read_text())["_workspace"]["workspace_id"] == workspace_identity(str(workspace))
+    before = {path: path.read_bytes() for path in stripped}
+    with pytest.raises(WorkspaceOwnershipMissing) as refused:
+        _milestone_run(tmp_path, workspace, {2: _WITH_DIV, 3: _WITH_DIV})
+    assert refused.value.reason_code == "WORKSPACE_OWNERSHIP_MISSING"
+    assert {path: path.read_bytes() for path in stripped} == before
+    assert not [d for d in load_decision_ledger(str(workspace)).all() if d.type == "legacy_workspace_ownership_migrated"]
 
 
 # ===================================================================================================== OI-65

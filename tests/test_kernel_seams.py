@@ -457,17 +457,13 @@ E11_CONTROLLER_NAMES: Dict[str, Tuple[str, str, Optional[str]]] = {
     'all_subtasks_completed': ('resume_support', 'def', "(current_plan_subtask_ids: 'Set[str]', latest_status_by_subtask: 'Dict[str, SubtaskStatus]') -> 'bool'"),
     'compute_abandoned_plan_files': ('resume_support', 'def', "(prior_subtask_states: 'Dict[str, str]', prior_subtask_written_files: 'Dict[str, List[str]]', new_plan_files: 'Any') -> 'List[str]'"),
     'quarantine_abandoned_plan_files': ('resume_support', 'def', "(workspace_path: 'str', abandoned_files: 'List[str]', quarantine_subdir: 'str') -> 'List[str]'"),
-    '_migrate_legacy_milestone_ownership': ('resume_support', 'def', "(workspace_path: 'str', run_state: 'Any', contract_registry: 'Any', artifact_registry: 'Any', *, prior_control_state_ownerless: 'bool') -> 'Tuple[str, ...]'"),
-    '_migrate_legacy_controller_ownership': ('resume_support', 'def', "(workspace_path: 'str', run_id: 'str') -> 'Tuple[str, ...]'"),
 }
 E11_DEPS_BUILDERS = {
     "_planning_deps": ("logger", "model_capacities", "assess_planned_edit", "collect_unit_grounding", "EditFeasibility",
                        "Feasibility", "topological_subtask_order"),
     "_revision_deps": ("topological_subtask_order",),
     "_owner_recovery_deps": ("logger", "DETERMINISTIC_ATTRIBUTION_TIERS"),
-    "_resume_deps": ("logger", "ArtifactRegistry", "ContractRegistry", "ControlState", "DecisionLedger",
-                     "stamp_legacy_decision_ledger_ownership", "save_artifact_registry", "save_control_state",
-                     "list_checkpoints", "save_checkpoint"),
+    "_resume_deps": ("logger",),   # D2 M4: the retired ownership migrations were the only users of the other collaborators
 }
 
 
@@ -500,7 +496,6 @@ def test_each_e11_deps_builder_resolves_the_controllers_names_at_call_time(build
 
 @pytest.mark.parametrize("loader, module, names", [
     ("_load_run_self_correction_loop", "kriya.workflow.self_correction", ("run_self_correction_loop",)),
-    ("_load_milestone_run_state_store", "kriya.workflow.milestones", ("MilestoneRunState", "save_milestone_run_state")),
 ])
 def test_each_e11_loader_imports_at_call_time(loader, module, names):
     controller = importlib.import_module(C)

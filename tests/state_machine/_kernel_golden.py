@@ -1439,12 +1439,14 @@ def _unsettled_prior_run(workspace: Path) -> None:
 
 
 def _in_progress_commit_evidence(workspace: Path) -> None:
-    """Commit evidence a crashed run left IN_PROGRESS."""
+    """Commit evidence a crashed run left IN_PROGRESS (stamped as Kriya writes it: D2 M4 refuses an unstamped file)."""
+    from kriya.context.workspace_identity import ownership_metadata
     directory = workspace / ".kriya" / "control" / "commits"
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "crashed.json").write_text(json.dumps({
         "schema_version": 1, "transaction_id": "crashed", "state": "in_progress", "started_at_unix": 1.0,
-        "updated_at_unix": 1.0, "operations": [], "result_revisions": {}, "failure": None}))
+        "updated_at_unix": 1.0, "operations": [], "result_revisions": {}, "failure": None,
+        "_workspace": ownership_metadata(str(workspace))}))
 
 
 @scenario("legacy_workspace_refused")

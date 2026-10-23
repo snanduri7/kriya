@@ -11,12 +11,12 @@ migrations take from the controller are resolved there at call time.
 """
 import json
 import logging
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from kriya.context.workspace_identity import workspace_identity
-from kriya.control.decisions import load_decision_ledger
 from kriya.control.state import ControlState
 from kriya.workflow import workflow_controller as wc
 from kriya.workflow.obligations import (
@@ -1025,55 +1025,42 @@ def _legacy_workspace(tmp_path, *, owned_checkpoint=True):
     ledger.write_text(json.dumps({"type": "x", "fields": {}, "timestamp": "t"}) + "\n")
 
 
-def test_the_controller_migration_stamps_every_legacy_store_and_records_one_decision(tmp_path):
-    _legacy_workspace(tmp_path)
-    saved = {"control": 0, "artifacts": 0}
-    from kriya.control.persistence import save_artifact_registry, save_control_state
-
-    def control_spy(*args, **kwargs):
-        saved["control"] += 1
-        return save_control_state(*args, **kwargs)
-
-    def artifacts_spy(*args, **kwargs):
-        saved["artifacts"] += 1
-        return save_artifact_registry(*args, **kwargs)
-
-    with patch("kriya.workflow.workflow_controller.save_control_state", side_effect=control_spy), \
-            patch("kriya.workflow.workflow_controller.save_artifact_registry", side_effect=artifacts_spy):
-        migrated = wc._migrate_legacy_controller_ownership(str(tmp_path), "new-run")
-    assert saved == {"control": 1, "artifacts": 1}   # the controller's names, resolved at call time
-    assert migrated == ("artifact_registry", "checkpoints:1", "contract_registry", "control_state",
-                        "decision_ledger_entries:1")
-    control = tmp_path / ".kriya" / "control"
-    for path in (control / "state.json", control / "contracts.json", control / "artifacts.json",
-                 tmp_path / ".kriya" / "checkpoints" / "legacy-run.json"):
-        assert _owned(path, tmp_path), path.name
-    decisions = [d for d in load_decision_ledger(str(tmp_path)).all() if d.type == "legacy_workspace_ownership_migrated"]
-    assert [d.fields for d in decisions] == [{"stores": list(migrated), "run_id": "new-run"}]
-    assert wc._migrate_legacy_controller_ownership(str(tmp_path), "again") == ()
-    assert len([d for d in load_decision_ledger(str(tmp_path)).all()
-                if d.type == "legacy_workspace_ownership_migrated"]) == 1
+def _kriya_files(root):
+    kriya = root / ".kriya"
+    return {str(p.relative_to(kriya)): p.read_bytes() for p in sorted(kriya.rglob("*")) if p.is_file()}
 
 
-def test_the_milestone_migration_stamps_the_legacy_milestone_stores(tmp_path):
-    from kriya.control.artifacts import ArtifactRegistry
-    from kriya.control.contracts import ContractRegistry
+def test_the_ownership_audit_names_every_ownerless_legacy_store_and_changes_nothing(tmp_path):
+    """D2 M4: the one-time migration is retired - a legacy (ownerless) store is REPORTED, never stamped, and no decision is recorded."""
+    from kriya.control.ownership_audit import audit_control_ownership
     from kriya.workflow.milestones import MilestoneRunState
 
     _legacy_workspace(tmp_path)
     run_state = MilestoneRunState(group_id="grp", original_goal="g", milestones=[])
     _ownerless(tmp_path / ".kriya" / "milestones" / "grp.json", run_state.to_dict())
-    with patch("kriya.workflow.workflow_controller.save_artifact_registry",
-               side_effect=__import__("kriya.control.persistence", fromlist=["x"]).save_artifact_registry) as artifacts:
-        migrated = wc._migrate_legacy_milestone_ownership(
-            str(tmp_path), run_state, ContractRegistry(), ArtifactRegistry(), prior_control_state_ownerless=True)
-    assert artifacts.call_count == 1
-    assert migrated == ("artifact_registry", "checkpoints:1", "contract_registry", "control_state",
-                        "decision_ledger_entries:1", "milestone_run_state")
-    for rel in ("control/contracts.json", "control/artifacts.json", "milestones/grp.json", "checkpoints/legacy-run.json"):
-        assert _owned(tmp_path / ".kriya" / rel, tmp_path), rel
-    assert not _owned(tmp_path / ".kriya" / "control" / "state.json", tmp_path)   # reported, never re-saved here
-    decisions = [d for d in load_decision_ledger(str(tmp_path)).all() if d.type == "legacy_workspace_ownership_migrated"]
-    assert [d.fields for d in decisions] == [{"stores": list(migrated), "milestone_group_id": "grp"}]
-    assert wc._migrate_legacy_milestone_ownership(
-        str(tmp_path), run_state, ContractRegistry(), ArtifactRegistry(), prior_control_state_ownerless=False) == ()
+    _ownerless(tmp_path / ".kriya" / "milestones" / "grp.plan.json", {"milestones": []})   # a hand-edited plan is an input, not state
+    before = _kriya_files(tmp_path)
+    findings = audit_control_ownership(str(tmp_path))
+    assert sorted(Path(f.path).name for f in findings) == sorted(
+        ["state.json", "contracts.json", "artifacts.json", "legacy-run.json", "no-id.json", "grp.json", "decisions.jsonl"])
+    assert {f.reason_code for f in findings} == {"WORKSPACE_OWNERSHIP_MISSING"}
+    assert _kriya_files(tmp_path) == before
+    # byte equality above covers the ledger too: no stamp was added to any line and no migration decision was appended
+
+
+def test_the_ownership_audit_reports_a_foreign_stamp_as_a_mismatch_and_accepts_the_legacy_spelling(tmp_path):
+    from kriya.context.workspace_identity import legacy_workspace_identity
+    from kriya.control.ownership_audit import audit_control_ownership
+    from kriya.control.persistence import save_control_state
+
+    save_control_state(str(tmp_path), ControlState.new(run_id="r"))
+    assert audit_control_ownership(str(tmp_path)) == ()
+    state_path = tmp_path / ".kriya" / "control" / "state.json"
+    payload = json.loads(state_path.read_text())
+    payload["_workspace"]["workspace_id"] = legacy_workspace_identity(str(tmp_path))      # the pre-PLAT-017 spelling of THIS workspace: an alias
+    state_path.write_text(json.dumps(payload))
+    assert audit_control_ownership(str(tmp_path)) == ()
+    payload["_workspace"]["workspace_id"] = "f" * 64
+    state_path.write_text(json.dumps(payload))
+    [finding] = audit_control_ownership(str(tmp_path))
+    assert finding.reason_code == "WORKSPACE_OWNERSHIP_MISMATCH" and Path(finding.path).name == "state.json"

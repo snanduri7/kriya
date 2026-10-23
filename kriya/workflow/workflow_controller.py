@@ -80,18 +80,18 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 from kriya.agents.contracts import (
     parse_planner_structured_output,
 )
-from kriya.context.workspace_identity import json_document_is_ownerless
-from kriya.control.artifacts import ArtifactRegistry
+from kriya.control.artifacts import (
+    ArtifactRegistry as ArtifactRegistry,  # re-export: the suite patches workflow_controller.ArtifactRegistry.derive_from_workspace
+)
 from kriya.control.commit_state import assess_workspace_commit_state
-from kriya.control.contracts import ContractRegistry, ContractRegistryCorruptError
+from kriya.control.contracts import ContractRegistryCorruptError
 from kriya.control.decisions import (
     Decision,
     DecisionLedger,
-    stamp_legacy_decision_ledger_ownership,
 )
+from kriya.control.ownership_audit import audit_control_ownership, refusal_fields
 from kriya.control.persistence import (
     UnreadableRunRecordError,
-    control_state_path,
     load_artifact_registry,
     load_contract_registry,
     load_control_state,
@@ -130,9 +130,7 @@ from kriya.workflow.checkpoint import (
     compute_registry_hash,
     compute_tree_hash,
     compute_workspace_content_hash,
-    list_checkpoints,
     new_run_id,
-    save_checkpoint,
     validate_resume_against_reality,
 )
 from kriya.workflow.commit_service import (
@@ -414,22 +412,8 @@ def _planning_deps() -> planning_request.PlanningDeps:
 
 def _resume_deps() -> resume_support.ResumeDeps:
     """The moved resume-support code's collaborators (kriya/workflow/resume_support.py), resolved through this module
-    NOW (at call time), so a test patch of ``save_artifact_registry`` / ``save_control_state`` (or any other of these
-    names) here reaches the moved migrations exactly as it reached them when they lived here."""
-    return resume_support.ResumeDeps(
-        logger=logger, ArtifactRegistry=ArtifactRegistry, ContractRegistry=ContractRegistry, ControlState=ControlState,
-        DecisionLedger=DecisionLedger, stamp_legacy_decision_ledger_ownership=stamp_legacy_decision_ledger_ownership,
-        save_artifact_registry=save_artifact_registry, save_control_state=save_control_state,
-        list_checkpoints=list_checkpoints, save_checkpoint=save_checkpoint,
-        load_milestone_run_state_store=_load_milestone_run_state_store,
-    )
-
-
-def _load_milestone_run_state_store() -> Any:
-    # E11: _migrate_legacy_milestone_ownership's function-local import of kriya.workflow.milestones (all-import
-    # cycle), done when the body reaches it (an ownerless milestone sidecar), exactly as before.
-    from kriya.workflow.milestones import MilestoneRunState, save_milestone_run_state
-    return MilestoneRunState, save_milestone_run_state
+    NOW (at call time), so a test patch of ``logger`` here reaches the moved quarantine exactly as it reached it when it lived here."""
+    return resume_support.ResumeDeps(logger=logger)
 
 
 def _shadow_mode() -> Any:
@@ -1177,26 +1161,6 @@ def quarantine_abandoned_plan_files(
     )
 
 
-def _migrate_legacy_milestone_ownership(
-    workspace_path: str,
-    run_state: Any,
-    contract_registry: Any,
-    artifact_registry: Any,
-    *,
-    prior_control_state_ownerless: bool,
-) -> Tuple[str, ...]:
-    """The body is kriya/workflow/resume_support.py (E11); its collaborators are resolved here, at call time (_resume_deps)."""
-    return resume_support._migrate_legacy_milestone_ownership(
-        _resume_deps(), workspace_path, run_state, contract_registry, artifact_registry,
-        prior_control_state_ownerless=prior_control_state_ownerless,
-    )
-
-
-def _migrate_legacy_controller_ownership(workspace_path: str, run_id: str) -> Tuple[str, ...]:
-    """The body is kriya/workflow/resume_support.py (E11); its collaborators are resolved here, at call time (_resume_deps)."""
-    return resume_support._migrate_legacy_controller_ownership(_resume_deps(), workspace_path, run_id)
-
-
 class WorkflowController:
     """Wraps an existing WorkflowEngine (kriya/workflow/workflow.py) -
     never constructs its own agents/LLM client, and deliberately reuses
@@ -1335,15 +1299,16 @@ class WorkflowController:
                 )
                 shared_skill_engine.discover_and_load()
                 legacy_kwargs["skill_engine_override"] = shared_skill_engine
-            try:
-                _migrate_legacy_controller_ownership(workspace_path, run_id)
-            except Exception as exc:
+            ownership_findings = audit_control_ownership(workspace_path)
+            if ownership_findings:  # D2 M4: control state that is not provably this workspace's is refused, never adopted by stamping it
+                refusal = refusal_fields(ownership_findings)
                 legacy_result = {
                     "status": "needs_review",
                     "quality_gates_passed": False,
                     "files": [],
-                    "reason_codes": ["LEGACY_STATE_MIGRATION_FAILED"],
-                    "error": str(exc),
+                    "reason_codes": refusal["reason_codes"],
+                    "ownership_findings": refusal["ownership_findings"],
+                    "error": refusal["message"],
                     "run_id": run_id,
                 }
                 return WorkflowResult(
@@ -1580,12 +1545,17 @@ class WorkflowController:
             sort_keys=True,
             separators=(",", ":"),
         )
-        prior_control_state_ownerless = json_document_is_ownerless(
-            control_state_path(workspace_path),
-        )
-        if prior_control_state_ownerless:
-            with open(control_state_path(workspace_path), "r", encoding="utf-8") as handle:
-                ControlState.from_dict(json.load(handle))
+        ownership_findings = audit_control_ownership(workspace_path)
+        if ownership_findings:  # D2 M4: control state that is not provably this workspace's is refused before any loader or writer touches it
+            refusal = refusal_fields(ownership_findings)
+            return WorkflowResult(
+                run_id=run_state.group_id, control_state=control_state, route=route,
+                legacy_result={
+                    "status": "needs_review", "group_id": run_state.group_id, "quality_gates_passed": False,
+                    "reason_codes": refusal["reason_codes"], "ownership_findings": refusal["ownership_findings"],
+                    "persistence_store": "workspace_ownership", "persistence_error": refusal["message"],
+                },
+            )
         try:
             contract_registry = load_contract_registry(workspace_path)
         except ContractRegistryCorruptError as exc:
@@ -1644,30 +1614,6 @@ class WorkflowController:
                 "quality_gates_passed": False,
                 "reason_codes": ["CONTROL_STATE_PERSISTENCE_FAILED"],
                 "persistence_store": "control_state",
-                "persistence_error": str(exc),
-            }
-            return WorkflowResult(
-                run_id=run_state.group_id,
-                control_state=control_state,
-                route=route,
-                legacy_result=legacy_result,
-            )
-
-        try:
-            _migrate_legacy_milestone_ownership(
-                workspace_path,
-                run_state,
-                contract_registry,
-                artifact_registry,
-                prior_control_state_ownerless=prior_control_state_ownerless,
-            )
-        except Exception as exc:
-            legacy_result = {
-                "status": "needs_review",
-                "group_id": run_state.group_id,
-                "quality_gates_passed": False,
-                "reason_codes": ["LEGACY_STATE_MIGRATION_FAILED"],
-                "persistence_store": "legacy_workspace_state",
                 "persistence_error": str(exc),
             }
             return WorkflowResult(

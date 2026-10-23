@@ -1454,7 +1454,7 @@ def _run_committed_paths(workspace_path: str) -> Tuple[Optional[str], Optional[s
         if cycle.get("result") != COMMIT_COMMITTED:
             continue
         evidence = load_commit_evidence(os.path.join(
-            commit_evidence_dir(workspace_path), f"{cycle['transaction_id']}.json"))
+            commit_evidence_dir(workspace_path), f"{cycle['transaction_id']}.json"), workspace_path=workspace_path)
         for operation in evidence.operations:
             if operation.get("before") != operation.get("after") and operation["target_path"] not in paths:
                 paths.append(operation["target_path"])

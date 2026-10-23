@@ -7,9 +7,39 @@ import json
 import os
 from typing import Any, Dict, Optional
 
+WORKSPACE_OWNERSHIP_MISSING = "WORKSPACE_OWNERSHIP_MISSING"
+WORKSPACE_OWNERSHIP_MISMATCH = "WORKSPACE_OWNERSHIP_MISMATCH"
+
+# D2 M4 (owner decision 2026-10-23): the one closed table of the reason codes an ownership refusal carries; the message is rendered from it only.
+OWNERSHIP_REFUSALS = {
+    WORKSPACE_OWNERSHIP_MISSING: (
+        "persistent state at {source!r} carries no workspace ownership stamp. Kriya writes every control document with one, so this file was "
+        "not written by Kriya for this workspace; Kriya never adopts it by stamping it. If you accept losing that state, move the file aside "
+        "(Kriya does not delete it) and run again."
+    ),
+    WORKSPACE_OWNERSHIP_MISMATCH: (
+        "persistent state at {source!r} belongs to workspace {actual!r}, not {expected!r}. If you accept losing that state, move the file aside "
+        "(Kriya does not delete it) and run again."
+    ),
+}
+
 
 class WorkspaceOwnershipError(RuntimeError):
-    """Persistent state belongs to a different workspace."""
+    """Persistent state is not provably this workspace's: it belongs to a different workspace, or carries no ownership stamp. The ownership stamp
+    is IDENTITY hygiene (a hash of the workspace path), not authentication: it stops accidental and carried state, nothing that can forge it."""
+
+    reason_code = WORKSPACE_OWNERSHIP_MISMATCH
+
+
+class WorkspaceOwnershipMissing(WorkspaceOwnershipError):
+    """D2 M4: a document that must carry an ownership stamp carries none. Never repaired by stamping it (no implicit migration)."""
+
+    reason_code = WORKSPACE_OWNERSHIP_MISSING
+
+
+def _ownership_error(reason_code: str, source: str, *, expected: str = "", actual: Any = None) -> WorkspaceOwnershipError:
+    message = OWNERSHIP_REFUSALS[reason_code].format(source=source, expected=expected, actual=actual)
+    return (WorkspaceOwnershipMissing if reason_code == WORKSPACE_OWNERSHIP_MISSING else WorkspaceOwnershipError)(message)
 
 
 # Directories Kriya itself owns: nothing beneath one is a user's workspace, so a repository search never ascends THROUGH one (a scoped snapshot,
@@ -77,24 +107,39 @@ def ownership_metadata(workspace_path: str) -> Dict[str, str]:
     return {"workspace_id": workspace_identity(workspace_path), "version": "2"}
 
 
-def json_document_is_ownerless(path: str) -> bool:
-    """True only for an existing, valid legacy JSON document without ownership."""
-    if not os.path.isfile(path):
-        return False
-    with open(path, "r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-    if not isinstance(payload, dict):
-        raise ValueError(f"persistent state at {path!r} is not a JSON object")
-    return payload.get("_workspace") is None
-
-
 def validate_ownership(workspace_path: str, payload: Dict[str, Any], source: str) -> None:
+    """D2 M4: a control document must carry the ownership stamp of THIS workspace. A missing stamp is ``WorkspaceOwnershipMissing``
+    (``WORKSPACE_OWNERSHIP_MISSING``), a stamp naming another workspace is ``WorkspaceOwnershipError`` (``WORKSPACE_OWNERSHIP_MISMATCH``);
+    neither is ever repaired by stamping the document. The pre-PLAT-017 spelling of the same workspace's identity stays readable (an alias,
+    not an adoption)."""
     owner = payload.get("_workspace")
     if owner is None:
-        return  # backward-compatible migration for pre-ownership state
-    expected = workspace_identity(workspace_path)
+        raise _ownership_error(WORKSPACE_OWNERSHIP_MISSING, source)
     actual = owner.get("workspace_id") if isinstance(owner, dict) else None
     if actual not in workspace_identities(workspace_path):  # the legacy (normcase) id stays readable
-        raise WorkspaceOwnershipError(
-            f"persistent state at {source!r} belongs to workspace {actual!r}, not {expected!r}"
-        )
+        raise _ownership_error(WORKSPACE_OWNERSHIP_MISMATCH, source, expected=workspace_identity(workspace_path), actual=actual)
+
+
+def validate_ledger_line_ownership(workspace_path: str, payload: Dict[str, Any], source: str) -> None:
+    """D2 M4: the decision ledger's per-line stamp (``_workspace_id``), strictly: absent is ``WorkspaceOwnershipMissing``, another workspace's
+    is ``WorkspaceOwnershipError`` (the ledger never accepted the legacy spelling, and still does not)."""
+    actual = payload.get("_workspace_id")
+    if actual is None:
+        raise _ownership_error(WORKSPACE_OWNERSHIP_MISSING, source)
+    expected = workspace_identity(workspace_path)
+    if actual != expected:
+        raise _ownership_error(WORKSPACE_OWNERSHIP_MISMATCH, source, expected=expected, actual=actual)
+
+
+def ensure_existing_document_owned(workspace_path: str, current: bytes, source: str) -> None:
+    """D2 M4: a control document is never overwritten while it is another workspace's or carries no stamp - overwriting would give it THIS workspace's
+    stamp, which is the adoption M4 retires. ``current`` is the file's present bytes (empty: nothing there). Content that is not a JSON object at
+    all is corrupt, not foreign: it is replaced exactly as before (recovery from a damaged store)."""
+    if not current:
+        return
+    try:
+        payload = json.loads(current.decode("utf-8"))
+    except ValueError:
+        return
+    if isinstance(payload, dict):
+        validate_ownership(workspace_path, payload, source)

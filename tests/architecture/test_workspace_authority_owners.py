@@ -12,6 +12,7 @@ OWNERS = {
     "kriya/context/workspace_identity.py": 1,  # the identity hash (the legacy id searches from the SPELLING it was given, by find_repository_root)
     "kriya/control/checkpoint.py": 1,
     "kriya/control/control_store.py": 1,
+    "kriya/control/ownership_audit.py": 1,    # D2 M4: the authority's checkpoint and milestone-sidecar directories audited for ownership
     "kriya/control/persistence.py": 2,        # the control dir + the legacy nested scan
     "kriya/control/retention.py": 1,
     "kriya/control/run_coordinator.py": 1,    # D2 M3: the repository whose tracked state the run-entry refusal judges

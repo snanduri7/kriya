@@ -6,36 +6,25 @@ Moved verbatim from ``kriya/workflow/workflow_controller.py`` (module-level code
 
 - resume revalidation of the structured plan: TOOL subtasks are never resume-completed
   (``exclude_tool_subtasks_from_resume``) and the terminal all-completed gate (``all_subtasks_completed``);
-- a re-plan's abandoned files (``compute_abandoned_plan_files``, ``quarantine_abandoned_plan_files``);
-- the one-time ownership migration of legacy (ownerless) control documents before an authoritative run
-  (``_migrate_legacy_milestone_ownership``, ``_migrate_legacy_controller_ownership``).
+- a re-plan's abandoned files (``compute_abandoned_plan_files``, ``quarantine_abandoned_plan_files``).
 
-Every decision, move and migration is unchanged, in the same order. ``kriya/workflow/workflow_controller.py`` keeps
-every one of these names (a forwarder). What arrives in ``ResumeDeps``, resolved through
-``kriya.workflow.workflow_controller`` by ``workflow_controller._resume_deps()`` when a forwarder runs: the
-controller's ``logger``; the state names the controller imports through allowlisted edges (``ArtifactRegistry``,
-``ContractRegistry``, ``ControlState``, ``DecisionLedger``, ``stamp_legacy_decision_ledger_ownership``: importing them
-here would add new allowlist entries); ``save_artifact_registry`` and ``save_control_state`` (patched on the
-controller by the suite); the checkpoint store's ``list_checkpoints``/``save_checkpoint`` as the controller binds them
-(``kriya.workflow.checkpoint``, all-import cycle); and a loader doing the milestone migration's call-time import of
-``milestones``' ``MilestoneRunState``/``save_milestone_run_state`` (all-import cycle). This module never imports
+D2 M4 (owner decision 2026-10-23): the one-time ownership migration of legacy (ownerless) control documents that used to live here
+(``_migrate_legacy_milestone_ownership``, ``_migrate_legacy_controller_ownership``) is RETIRED. A control document without an ownership
+stamp, or with another workspace's, is refused (``kriya.control.ownership_audit``, ``kriya.context.workspace_identity.validate_ownership``),
+never adopted by stamping it.
+
+Every decision and move is unchanged, in the same order. ``kriya/workflow/workflow_controller.py`` keeps every one of these names (a
+forwarder). What arrives in ``ResumeDeps``, resolved through ``kriya.workflow.workflow_controller`` by
+``workflow_controller._resume_deps()`` when a forwarder runs: the controller's ``logger``. This module never imports
 ``kriya.workflow.workflow_controller``, ``workflow``, ``attempt`` or ``kriya.cli``, nor any all-import-cycle module.
 """
 from __future__ import annotations
 
-import json
 import os
 import shutil
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
-from kriya.context.workspace_identity import json_document_is_ownerless
-from kriya.control.persistence import (
-    artifact_registry_path,
-    contract_registry_path,
-    control_state_path,
-    save_contract_registry,
-)
 from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod
 from kriya.workflow.workflow_types import SubtaskStatus
 
@@ -47,20 +36,6 @@ class ResumeDeps:
 
     # the controller's logger
     logger: Any
-    # STATE names imported by the controller through allowlisted edges (kriya.control.artifacts/contracts/state/decisions)
-    ArtifactRegistry: Any
-    ContractRegistry: Any
-    ControlState: Any
-    DecisionLedger: Any
-    stamp_legacy_decision_ledger_ownership: Callable[..., Any]
-    # kriya.control.persistence, patched on the controller by the suite
-    save_artifact_registry: Callable[..., Any]
-    save_control_state: Callable[..., Any]
-    # the checkpoint store as the controller binds it (kriya.workflow.checkpoint, all-import cycle)
-    list_checkpoints: Callable[..., Any]
-    save_checkpoint: Callable[..., Any]
-    # the milestone migration's call-time import (kriya.workflow.milestones, all-import cycle)
-    load_milestone_run_state_store: Callable[[], Any]
 
 
 def exclude_tool_subtasks_from_resume(
@@ -197,108 +172,3 @@ def quarantine_abandoned_plan_files(
         except OSError as e:
             deps.logger.warning(f"Could not quarantine abandoned plan file {rel_path!r} (non-fatal, left in place): {e}")
     return moved
-
-
-def _migrate_legacy_milestone_ownership(
-    deps: ResumeDeps,
-    workspace_path: str,
-    run_state: Any,
-    contract_registry: Any,
-    artifact_registry: Any,
-    *,
-    prior_control_state_ownerless: bool,
-) -> Tuple[str, ...]:
-    """One-time ownership migration for authoritative milestone state."""
-    migrated: List[str] = []
-    contracts_path = contract_registry_path(workspace_path)
-    if json_document_is_ownerless(contracts_path):
-        with open(contracts_path, "r", encoding="utf-8") as handle:
-            deps.ContractRegistry.from_dict(json.load(handle))
-        save_contract_registry(workspace_path, contract_registry)
-        migrated.append("contract_registry")
-    artifacts_path = artifact_registry_path(workspace_path)
-    if json_document_is_ownerless(artifacts_path):
-        with open(artifacts_path, "r", encoding="utf-8") as handle:
-            deps.ArtifactRegistry.from_dict(json.load(handle))
-        deps.save_artifact_registry(workspace_path, artifact_registry)
-        migrated.append("artifact_registry")
-    if prior_control_state_ownerless:
-        migrated.append("control_state")
-
-    sidecar_path = os.path.join(
-        workspace_path, ".kriya", "milestones", f"{run_state.group_id}.json",
-    )
-    if json_document_is_ownerless(sidecar_path):
-        MilestoneRunState, save_milestone_run_state = deps.load_milestone_run_state_store()
-        with open(sidecar_path, "r", encoding="utf-8") as handle:
-            MilestoneRunState.from_dict(json.load(handle))
-        save_milestone_run_state(workspace_path, run_state)
-        migrated.append("milestone_run_state")
-
-    migrated_checkpoints = 0
-    for checkpoint in deps.list_checkpoints(workspace_path):
-        if checkpoint.get("_workspace") is not None:
-            continue
-        run_id = checkpoint.get("run_id")
-        if run_id:
-            deps.save_checkpoint(workspace_path, run_id, checkpoint)
-            migrated_checkpoints += 1
-    if migrated_checkpoints:
-        migrated.append(f"checkpoints:{migrated_checkpoints}")
-
-    migrated_decisions = deps.stamp_legacy_decision_ledger_ownership(workspace_path)
-    if migrated_decisions:
-        migrated.append(f"decision_ledger_entries:{migrated_decisions}")
-
-    if migrated:
-        deps.DecisionLedger().record_and_persist(
-            workspace_path,
-            "legacy_workspace_ownership_migrated",
-            stores=sorted(migrated),
-            milestone_group_id=run_state.group_id,
-        )
-    return tuple(sorted(migrated))
-
-
-def _migrate_legacy_controller_ownership(deps: ResumeDeps, workspace_path: str, run_id: str) -> Tuple[str, ...]:
-    """Stamp ownerless control documents before authoritative plain execution."""
-    migrated: List[str] = []
-    state_path = control_state_path(workspace_path)
-    if json_document_is_ownerless(state_path):
-        with open(state_path, "r", encoding="utf-8") as handle:
-            prior_state = deps.ControlState.from_dict(json.load(handle))
-        deps.save_control_state(workspace_path, prior_state)
-        migrated.append("control_state")
-    contracts_path = contract_registry_path(workspace_path)
-    if json_document_is_ownerless(contracts_path):
-        with open(contracts_path, "r", encoding="utf-8") as handle:
-            contracts = deps.ContractRegistry.from_dict(json.load(handle))
-        save_contract_registry(workspace_path, contracts)
-        migrated.append("contract_registry")
-    artifacts_path = artifact_registry_path(workspace_path)
-    if json_document_is_ownerless(artifacts_path):
-        with open(artifacts_path, "r", encoding="utf-8") as handle:
-            artifacts = deps.ArtifactRegistry.from_dict(json.load(handle))
-        deps.save_artifact_registry(workspace_path, artifacts)
-        migrated.append("artifact_registry")
-    migrated_decisions = deps.stamp_legacy_decision_ledger_ownership(workspace_path)
-    if migrated_decisions:
-        migrated.append(f"decision_ledger_entries:{migrated_decisions}")
-    migrated_checkpoints = 0
-    for checkpoint in deps.list_checkpoints(workspace_path):
-        if checkpoint.get("_workspace") is not None:
-            continue
-        checkpoint_run_id = checkpoint.get("run_id")
-        if checkpoint_run_id:
-            deps.save_checkpoint(workspace_path, checkpoint_run_id, checkpoint)
-            migrated_checkpoints += 1
-    if migrated_checkpoints:
-        migrated.append(f"checkpoints:{migrated_checkpoints}")
-    if migrated:
-        deps.DecisionLedger().record_and_persist(
-            workspace_path,
-            "legacy_workspace_ownership_migrated",
-            stores=sorted(migrated),
-            run_id=run_id,
-        )
-    return tuple(sorted(migrated))

@@ -29,7 +29,12 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import Milestone, MilestoneMode, MilestoneV2
-from kriya.context.workspace_identity import authority_root, ownership_metadata, validate_ownership
+from kriya.context.workspace_identity import (
+    authority_root,
+    ensure_existing_document_owned,
+    ownership_metadata,
+    validate_ownership,
+)
 from kriya.control.contracts import (
     ContractRegistryCorruptError,
     ContractState,
@@ -404,6 +409,12 @@ def save_milestone_run_state(workspace_path: str, run_state: MilestoneRunState) 
     # and a fresh plan file (no schema key) must not read as legacy later.
     payload["milestone_completion_schema"] = MILESTONE_COMPLETION_SCHEMA_VERSION
     payload["_workspace"] = ownership_metadata(workspace_path)
+    try:
+        with open(path, "rb") as existing:
+            current = existing.read()
+    except FileNotFoundError:
+        current = b""
+    ensure_existing_document_owned(workspace_path, current, path)  # D2 M4: never stamp over another's/an unstamped sidecar
     write_control_file(
         workspace_path, path, json.dumps(payload, indent=2, sort_keys=True), expected_revision=read_file_revision(path),
     )

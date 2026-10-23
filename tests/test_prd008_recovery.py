@@ -157,7 +157,7 @@ def _only_record(workspace):
 
 
 def _evidence(workspace):
-    return load_commit_evidence(os.path.join(workspace, ".kriya/control/commits/tx1.json"))
+    return load_commit_evidence(os.path.join(workspace, ".kriya/control/commits/tx1.json"), workspace_path=str(workspace))
 
 
 def _staged(workspace):

@@ -22,7 +22,7 @@ from dataclasses import asdict, dataclass, replace
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from kriya.context.workspace_identity import authority_root
+from kriya.context.workspace_identity import authority_root, ownership_metadata, validate_ownership
 from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, fold_name, path_identity, path_relation
 from kriya.repository.atomic_write import _atomic_write_bytes, _audit_write_file, _fsync_directory, atomic_write_file
 from kriya.repository.snapshot import file_raw_digest, raw_digest
@@ -222,6 +222,7 @@ def _persist_commit_evidence(workspace_path: str, evidence: CommitEvidence) -> s
     directory = os.path.dirname(path)
     os.makedirs(directory, exist_ok=True)
     payload = evidence.to_dict()
+    payload["_workspace"] = ownership_metadata(workspace_path)  # D2 M4: every control document names the workspace it was written for
     fd, temp_path = tempfile.mkstemp(prefix=".commit-", suffix=".tmp", dir=directory)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -239,9 +240,13 @@ def _persist_commit_evidence(workspace_path: str, evidence: CommitEvidence) -> s
     return path
 
 
-def load_commit_evidence(path: str) -> CommitEvidence:
+def load_commit_evidence(path: str, *, workspace_path: str) -> CommitEvidence:
+    """The evidence document at ``path`` of the workspace ``workspace_path``. D2 M4: its ownership stamp is required and must name this workspace
+    (``WorkspaceOwnershipMissing`` / ``WorkspaceOwnershipError``); evidence is what recovery rolls files forward or back from, so a document
+    that was not written here is never read."""
     with open(path, "r", encoding="utf-8") as handle:
         payload = json.load(handle)
+    validate_ownership(workspace_path, payload, path)
     schema_version = int(payload["schema_version"])
     if schema_version not in _SUPPORTED_COMMIT_EVIDENCE_SCHEMAS:
         raise ValueError(f"Unsupported commit evidence schema: {schema_version}.")
@@ -273,7 +278,7 @@ def list_commit_evidence(
     for name in names:
         path = os.path.join(directory, name)
         try:
-            entries.append((path, load_commit_evidence(path), None))
+            entries.append((path, load_commit_evidence(path, workspace_path=workspace_path), None))
         except Exception as error:
             entries.append((path, None, f"{type(error).__name__}: {error}"))
     return entries
@@ -289,7 +294,7 @@ def settle_recovered_commit_evidence(
     settlement can never overwrite evidence that changed after it was read."""
     if state not in (CommitState.COMMITTED, CommitState.ROLLED_BACK):
         raise BatchCommitError(f"Recovery can only settle to committed/rolled_back, not {state.value}.")
-    current = load_commit_evidence(_evidence_path(workspace_path, expected.transaction_id))
+    current = load_commit_evidence(_evidence_path(workspace_path, expected.transaction_id), workspace_path=workspace_path)
     if current != expected or current.state not in (CommitState.IN_PROGRESS, CommitState.UNCERTAIN):
         raise BatchCommitError(
             f"Commit evidence {expected.transaction_id!r} changed since it was assessed; re-run recovery."
@@ -307,7 +312,7 @@ def commit_state_for_transaction(workspace_path: str, transaction_id: str) -> Co
     path = _evidence_path(workspace_path, transaction_id)
     if not os.path.exists(path):
         return CommitState.NOT_STARTED
-    return load_commit_evidence(path).state
+    return load_commit_evidence(path, workspace_path=workspace_path).state
 
 
 def find_uncertain_commit_evidence(workspace_path: str) -> Tuple[CommitEvidence, ...]:

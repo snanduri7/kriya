@@ -14,6 +14,7 @@ from __future__ import annotations
 import builtins
 import hashlib
 import os
+import re
 import stat
 import tempfile
 import time
@@ -219,7 +220,8 @@ def tree(root: str, recorder: Recorder) -> List[List[Any]]:
                     data = handle.read()
                 if path.endswith(".json") and "commits" in path:
                     # commit evidence embeds absolute paths in failure messages: digest the normalized text
-                    evidence = recorder.norm(data.decode("utf-8"))
+                    # D2 M4: the ownership stamp is a hash of the (temporary) workspace path: it is masked, like the path itself
+                    evidence = re.sub(r'"workspace_id":\s*"[0-9a-f]{64}"', '"workspace_id":"<workspace-id>"', recorder.norm(data.decode("utf-8")))
                     entries.append([rel, "file", mode, "normalized:" + hashlib.sha256(evidence.encode("utf-8")).hexdigest(), evidence])
                 else:
                     entries.append([rel, "file", mode, hashlib.sha256(data).hexdigest(), None])

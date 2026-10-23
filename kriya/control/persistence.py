@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from kriya.context.workspace_identity import (
     WorkspaceOwnershipError,
     authority_root,
+    ensure_existing_document_owned,
     ownership_metadata,
     validate_ownership,
 )
@@ -320,7 +321,7 @@ def nested_control_state(workspace_path: str) -> Tuple[Tuple[Tuple[str, str], ..
             if not name.endswith(".json"):
                 continue
             try:
-                evidence = load_commit_evidence(os.path.join(commits_dir, name))
+                evidence = load_commit_evidence(os.path.join(commits_dir, name), workspace_path=workspace_path)
             except Exception as error:  # pylint: disable=broad-except
                 reasons.append(f"{name}: unreadable ({type(error).__name__})")
                 continue
@@ -378,6 +379,15 @@ def load_approved_plan(workspace_path: str, plan_id: str) -> Optional[Dict[str, 
     return _load_json_document(approved_plan_path(workspace_path, plan_id), workspace_path)
 
 
+def _read_current_bytes(path: str) -> bytes:
+    """The raw bytes at ``path`` (empty when absent): one read serves the revision and the ownership check."""
+    try:
+        with open(path, "rb") as handle:
+            return handle.read()
+    except FileNotFoundError:
+        return b""
+
+
 def _save_json_document(
     workspace_path: str, path: str, payload: Dict[str, Any], *,
     derived_from_active_run: bool = True, expected_file_revision: Optional[str] = None,
@@ -395,9 +405,12 @@ def _save_json_document(
                 "revision": context.record_revision,
             }
     content = json.dumps(owned_payload, indent=2, sort_keys=True)
-    expected_revision = (
-        expected_file_revision if expected_file_revision is not None else read_file_revision(path)
-    )
+    if expected_file_revision is not None:
+        expected_revision = expected_file_revision  # the caller read (and ownership-validated) the current document itself
+    else:
+        current = _read_current_bytes(path)
+        ensure_existing_document_owned(workspace_path, current, path)
+        expected_revision = raw_digest(current)
     write_control_file(workspace_path, path, content, expected_revision=expected_revision)
 
 

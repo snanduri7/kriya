@@ -261,10 +261,12 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # artifact registry through this name).
     # E11: 3 -> 2 lookups: the two legacy-ownership migrations moved to resume_support and read
     # ResumeDeps.save_artifact_registry (one load in workflow_controller._resume_deps); the enforce loop keeps its own.
-    (C, 'save_artifact_registry'): P(4, 'kriya.control.persistence', ((C, 2),), ()),
+    # D2 M4: -2 sites (the two retired migration tests) and -1 lookup (the migrations' ResumeDeps entry).
+    (C, 'save_artifact_registry'): P(2, 'kriya.control.persistence', ((C, 1),), ()),
     # E11 characterization: +1 site (tests/test_e11_owner_modules.py: the controller migration stamps the control
     # state through this name).
-    (C, 'save_control_state'): P(7, 'kriya.control.persistence', ((C, 6),), ()),
+    # D2 M4: -1 site (the retired controller-migration test) and -1 lookup (the migrations' ResumeDeps entry).
+    (C, 'save_control_state'): P(6, 'kriya.control.persistence', ((C, 5),), ()),
     (C, 'subtask_executor.execute'): P(9, 'kriya.workflow.subtask_executor', None, ()),
     # E12: 5 -> 2 lookups: the enforce loop's loads moved to enforce_loop and read EnforceDeps (one load in
     # workflow_controller._enforce_deps); the shadow run's load is _shadow_deps' (E12 1/2); the patch sites above
@@ -434,7 +436,7 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # planted in the run's committed history of the measured end-to-end scenario)
     # RDCG-B-001 result-truth control (tests/test_rdcg_b001_result_truth.py): +1 W site (run_generation_workflow: the needs_review result the
     # generate command renders)
-    assert totals == {A: 114, W: 96, C: 386}
+    assert totals == {A: 114, W: 96, C: 383}  # D2 M4: 386 -> 383 (the three retired migration patch sites)
     assert len(PATCH_POINTS) == 132
 
 

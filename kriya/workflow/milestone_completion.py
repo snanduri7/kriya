@@ -425,7 +425,7 @@ def entries_from_cycles(
             path = _evidence_file(workspace, transaction_id)
             if path is None:
                 raise ValueError(f"invalid transaction id {transaction_id!r}")
-            operations = _operations_from_evidence(load_commit_evidence(path))
+            operations = _operations_from_evidence(load_commit_evidence(path, workspace_path=workspace))
         except Exception as exc:  # recorded; the entry then never verifies
             error = f"{type(exc).__name__}: {exc}"
         entries.append(MilestoneCommitEntry(
@@ -757,7 +757,7 @@ def _verify_entry(
     if not os.path.exists(evidence_path):
         return _reason(COMMIT_EVIDENCE_MISSING, "commit evidence file is missing", transaction_id=txid)
     try:
-        evidence = load_commit_evidence(evidence_path)
+        evidence = load_commit_evidence(evidence_path, workspace_path=workspace)
     except Exception as error:
         return _reason(COMMIT_EVIDENCE_UNREADABLE, f"{type(error).__name__}: {error}", transaction_id=txid)
     if evidence.schema_version < 2:
@@ -1314,7 +1314,7 @@ def find_completion_to_reconstruct(
     for entry in ordered:
         path = _evidence_file(workspace, entry.transaction_id)
         try:
-            recovery = load_commit_evidence(path).recovery if path is not None else None
+            recovery = load_commit_evidence(path, workspace_path=workspace).recovery if path is not None else None
         except Exception as error:
             recovery, candidate.failure = None, _reason(
                 RECOVERY_PROVENANCE_UNVERIFIED, f"commit evidence unreadable: {error}",

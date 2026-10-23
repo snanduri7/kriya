@@ -86,7 +86,7 @@ def test_mixed_batch_fault_after_each_mutation_rolls_back_every_path(tmp_path, f
     _assert_original_state(created, modified, deleted)
     evidence_files = list((tmp_path / ".kriya/control/commits").glob("*.json"))
     assert len(evidence_files) == 1
-    assert load_commit_evidence(str(evidence_files[0])).state is CommitState.ROLLED_BACK
+    assert load_commit_evidence(str(evidence_files[0]), workspace_path=str(tmp_path)).state is CommitState.ROLLED_BACK
 
 
 def test_mixed_batch_success_is_one_committed_result_and_preserves_mode(tmp_path):
@@ -102,7 +102,7 @@ def test_mixed_batch_success_is_one_committed_result_and_preserves_mode(tmp_path
     assert modified.stat().st_mode & 0o777 == 0o754
     assert result.evidence.state is CommitState.COMMITTED
     persisted = load_commit_evidence(
-        str(tmp_path / ".kriya/control/commits/mixed-success.json")
+        str(tmp_path / ".kriya/control/commits/mixed-success.json"), workspace_path=str(tmp_path),
     )
     assert persisted.state is CommitState.COMMITTED
     assert commit_state_for_transaction(str(tmp_path), "mixed-success") is CommitState.COMMITTED

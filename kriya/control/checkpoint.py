@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 from kriya.context.workspace_identity import (
     WorkspaceOwnershipError,
     authority_root,
+    ensure_existing_document_owned,
     ownership_metadata,
     validate_ownership,
 )
@@ -68,6 +69,11 @@ def save_checkpoint(workspace_path: str, run_id: str, data: Dict[str, Any]) -> N
         payload["run_id"] = run_id
         payload["saved_at"] = time.time()
         payload["_workspace"] = ownership_metadata(workspace_path)
+        try:
+            with open(path, "rb") as existing:
+                ensure_existing_document_owned(workspace_path, existing.read(), path)  # D2 M4: never stamp over another's/an unstamped checkpoint
+        except FileNotFoundError:
+            pass
         from kriya.control.run_coordinator import current_run_context
         context = current_run_context()
         if context is not None and context.record_revision is not None:
@@ -80,6 +86,8 @@ def save_checkpoint(workspace_path: str, run_id: str, data: Dict[str, Any]) -> N
             json.dump(payload, fh, indent=2)
         os.replace(tmp_path, path)
         logger.info(f"Checkpoint saved (run_id={run_id}, stage={data.get('stage')}): {path}")
+    except WorkspaceOwnershipError:
+        raise
     except Exception as e:
         logger.warning(f"Failed to save checkpoint '{run_id}' (non-fatal, resume for this run won't be available): {e}")
 

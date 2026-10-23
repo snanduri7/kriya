@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
-from kriya.context.workspace_identity import WorkspaceOwnershipError, workspace_identity
+from kriya.context.workspace_identity import WorkspaceOwnershipError, validate_ledger_line_ownership, workspace_identity
 from kriya.control.control_store import write_control_file
 from kriya.control.persistence import decision_ledger_path
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
@@ -122,14 +122,8 @@ class DecisionLedger:
         if os.path.isfile(path):
             with open(path, "r", encoding="utf-8") as f:
                 existing_lines = [line.rstrip("\n") for line in f if line.strip()]
-            expected_owner = workspace_identity(workspace_path)
-            for line in existing_lines:
-                payload = json.loads(line)
-                actual_owner = payload.get("_workspace_id")
-                if actual_owner is not None and actual_owner != expected_owner:
-                    raise WorkspaceOwnershipError(
-                        f"decision ledger at {path!r} belongs to workspace {actual_owner!r}"
-                    )
+            for line_number, line in enumerate(existing_lines, start=1):
+                validate_ledger_line_ownership(workspace_path, json.loads(line), f"{path} line {line_number}")
         serialized = redact_value(decision.to_dict())  # S20r (I-11): the stored line is redacted; the Decision is not touched
         serialized["_workspace_id"] = workspace_identity(workspace_path)
         from kriya.control.run_coordinator import current_run_context
@@ -153,43 +147,6 @@ class DecisionLedger:
         return decision
 
 
-def stamp_legacy_decision_ledger_ownership(workspace_path: str) -> int:
-    """Stamp valid ownerless legacy decision lines during authoritative migration."""
-    path = decision_ledger_path(workspace_path)
-    if not os.path.isfile(path):
-        return 0
-    expected_owner = workspace_identity(workspace_path)
-    migrated = 0
-    serialized_lines: List[str] = []
-    with open(path, "r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if not line.strip():
-                continue
-            try:
-                payload = json.loads(line)
-            except Exception:
-                logger.warning(
-                    "Preserving malformed decision-ledger line %d during ownership migration: %s",
-                    line_number,
-                    path,
-                )
-                serialized_lines.append(line.rstrip("\n"))
-                continue
-            actual_owner = payload.get("_workspace_id")
-            if actual_owner is not None and actual_owner != expected_owner:
-                raise WorkspaceOwnershipError(
-                    f"decision ledger at {path!r} line {line_number} belongs to workspace {actual_owner!r}"
-                )
-            if actual_owner is None:
-                payload["_workspace_id"] = expected_owner
-                migrated += 1
-            serialized_lines.append(json.dumps(payload, sort_keys=True))
-    if migrated:
-        content = "\n".join(serialized_lines) + "\n"
-        write_control_file(workspace_path, path, content, expected_revision=read_file_revision(path))
-    return migrated
-
-
 def load_decision_ledger(workspace_path: str) -> DecisionLedger:
     """Tolerant line-by-line load: a malformed trailing line (e.g. from a
     process killed mid-append before commit_file's own atomic replace could
@@ -202,18 +159,13 @@ def load_decision_ledger(workspace_path: str) -> DecisionLedger:
     if not os.path.isfile(path):
         return ledger
     with open(path, "r", encoding="utf-8") as f:
-        expected_owner = workspace_identity(workspace_path)
         for line_number, line in enumerate(f, start=1):
             line = line.strip()
             if not line:
                 continue
             try:
                 payload = json.loads(line)
-                actual_owner = payload.get("_workspace_id")
-                if actual_owner is not None and actual_owner != expected_owner:
-                    raise WorkspaceOwnershipError(
-                        f"decision ledger at {path!r} belongs to workspace {actual_owner!r}"
-                    )
+                validate_ledger_line_ownership(workspace_path, payload, f"{path} line {line_number}")
                 ledger._decisions.append(Decision.from_dict(payload))
             except WorkspaceOwnershipError:
                 raise

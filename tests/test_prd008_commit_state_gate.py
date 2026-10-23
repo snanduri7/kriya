@@ -33,6 +33,7 @@ import kriya.control.run_coordinator as run_coordinator_module
 import kriya.repository.commit as commit_module  # M1: the mechanism's own module (patch targets resolve there)
 from kriya.cli import main as cli_main
 from kriya.config.config import AppConfig
+from kriya.context.workspace_identity import ownership_metadata
 from kriya.control.commit_state import (
     RECOVERY_COMMAND,
     UncertainWorkspaceStateError,
@@ -108,7 +109,8 @@ def _evidence_file(workspace, name, payload):
     directory = Path(workspace) / ".kriya" / "control" / "commits"
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{name}.json"
-    path.write_text(payload if isinstance(payload, str) else json.dumps(payload))
+    # D2 M4: evidence Kriya wrote names its workspace (a raw string payload stays raw: it models a damaged file)
+    path.write_text(payload if isinstance(payload, str) else json.dumps({**payload, "_workspace": ownership_metadata(str(workspace))}))
     return path
 
 
@@ -308,7 +310,7 @@ def test_evidence_records_kind_and_exact_byte_state(tmp_path):
         StagedFileWrite(str(deleted), "", str(deleted), read_file_revision(str(deleted)),
                         expected_base_exists=True, delete=True),
     ], workspace_path=str(tmp_path), transaction_id="exact")
-    persisted = load_commit_evidence(str(tmp_path / ".kriya/control/commits/exact.json"))
+    persisted = load_commit_evidence(str(tmp_path / ".kriya/control/commits/exact.json"), workspace_path=str(tmp_path))
     # Schema 3 (FILE-INTEGRITY-CONTRACT-001): every revision is a raw-byte digest.
     assert persisted.schema_version == 3
     ops = {op["target_path"]: op for op in persisted.operations}
@@ -344,13 +346,13 @@ def test_evidence_candidate_hash_is_the_run_record_cycle_candidate_hash(tmp_path
         run_id = context.run_id
     assert outcome.committed
     record = load_run_record(str(workspace), run_id)
-    evidence = load_commit_evidence(str(workspace / ".kriya/control/commits/link.json"))
+    evidence = load_commit_evidence(str(workspace / ".kriya/control/commits/link.json"), workspace_path=str(workspace))
     assert record.commits[-1]["candidate_hash"] == evidence.candidate_hash is not None
 
 
 def test_schema_1_evidence_still_loads(tmp_path):
     path = _evidence_file(tmp_path, "old", _raw_evidence("old", "committed"))
-    evidence = load_commit_evidence(str(path))
+    evidence = load_commit_evidence(str(path), workspace_path=str(tmp_path))
     assert evidence.schema_version == 1 and evidence.candidate_hash is None
 
 
@@ -369,7 +371,7 @@ def test_run_record_intent_and_in_progress_evidence_precede_the_first_workspace_
     def checking_stage(item, transaction_id, index):
         stage_dir = os.path.dirname(item.target_path)
         assert not [n for n in os.listdir(stage_dir) if n.startswith(".kriya-stage-")]
-        evidence = load_commit_evidence(str(workspace / ".kriya/control/commits/ordered.json"))
+        evidence = load_commit_evidence(str(workspace / ".kriya/control/commits/ordered.json"), workspace_path=str(workspace))
         record = load_run_record(str(workspace), current_run_context().run_id)
         observed.append((
             evidence.state, evidence.operations[0]["before"]["exists"],
@@ -429,7 +431,7 @@ def test_prune_protects_every_run_that_may_still_be_needed(tmp_path):
     checkpoints = Path(tmp_path) / ".kriya" / "checkpoints"
     checkpoints.mkdir(parents=True)
     (checkpoints / "cp.json").write_text(json.dumps({
-        "stage": "plan", "run_id": "cp", "_run_record": {"run_id": "resumable"},
+        "stage": "plan", "run_id": "cp", "_run_record": {"run_id": "resumable"}, "_workspace": ownership_metadata(str(tmp_path)),
     }))
 
     report = prune_run_state(str(tmp_path), keep_terminal_runs=0, protect_run_ids=("caller",))

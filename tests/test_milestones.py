@@ -14,6 +14,7 @@ from kriya.agents.contracts import (
     ProvidedCapability,
     parse_milestone_list,
 )
+from kriya.context.workspace_identity import ownership_metadata
 from kriya.control.contracts import ContractState
 from kriya.control.persistence import (
     load_contract_registry,
@@ -376,6 +377,7 @@ def test_milestone_run_state_loads_a_legacy_v1_sidecar_file():
         "established_file_context": {"src/Foo.java": "class Foo {}"},
     }
     with tempfile.TemporaryDirectory() as tmp:
+        legacy["_workspace"] = ownership_metadata(tmp)   # D2 M4: the SCHEMA migrates; ownership is never adopted (an unstamped sidecar is refused)
         path = os.path.join(tmp, ".kriya", "milestones", "grp-legacy.json")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         import json as _json

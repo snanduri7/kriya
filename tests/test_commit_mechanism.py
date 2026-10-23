@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, Optional
 
 import pytest
 
+from kriya.context.workspace_identity import ownership_metadata
 from kriya.workflow import edit_safety as es
 from kriya.workflow import file_integrity as fi
 from tests._repository_mechanism_harness import Recorder, describe_error, tree
@@ -170,7 +171,8 @@ def _evidence_file(workspace: Path, transaction_id: str, payload: Any) -> Path:
     directory = workspace / ".kriya" / "control" / "commits"
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{transaction_id}.json"
-    path.write_text(payload if isinstance(payload, str) else json.dumps(payload, sort_keys=True))
+    # D2 M4: evidence Kriya wrote names its workspace (a raw string payload stays raw: it models a damaged file)
+    path.write_text(payload if isinstance(payload, str) else json.dumps({**payload, "_workspace": ownership_metadata(str(workspace))}, sort_keys=True))
     return path
 
 
@@ -268,7 +270,7 @@ def _binding(workspace: Path, _context):
 
 def _settle(state: str, target: Any):
     def body(workspace: Path, context):
-        expected = es.load_commit_evidence(str(context["path"]))
+        expected = es.load_commit_evidence(str(context["path"]), workspace_path=str(workspace))
         if context.get("mutate_after_read"):
             _evidence_file(workspace, "tx-settle", _evidence_payload("tx-settle", "in_progress", failure="changed"))
         return es.settle_recovered_commit_evidence(str(workspace), expected, state=target,
@@ -289,7 +291,7 @@ def _evidence_readers(workspace: Path, _context):
         path = _evidence_file(workspace, f"schema{schema}", _evidence_payload(f"schema{schema}", "committed", schema=schema,
                                                                               candidate_hash="h" if schema > 1 else None))
         try:
-            out[f"schema{schema}"] = es.load_commit_evidence(str(path)).to_dict()
+            out[f"schema{schema}"] = es.load_commit_evidence(str(path), workspace_path=str(workspace)).to_dict()
         except Exception as error:  # noqa: BLE001 - the refusal is the recorded form
             out[f"schema{schema}"] = [type(error).__name__, str(error)]
     os.unlink(workspace / ".kriya" / "control" / "commits" / "schema4.json")

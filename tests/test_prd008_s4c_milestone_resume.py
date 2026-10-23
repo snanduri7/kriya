@@ -494,7 +494,7 @@ def test_f_a_recovery_completed_milestone_is_reusable_and_its_run_stays_recovere
 
 def _tamper_recovery(workspace, txid, **changes):
     path = os.path.join(commit_evidence_dir(str(workspace)), f"{txid}.json")
-    evidence = load_commit_evidence(path)
+    evidence = load_commit_evidence(path, workspace_path=str(workspace))
     _persist_commit_evidence(str(workspace), dataclasses.replace(evidence, recovery=dict(evidence.recovery, **changes)))
 
 

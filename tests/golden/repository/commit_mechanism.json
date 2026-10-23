@@ -205,6 +205,10 @@
     "<root>/ws/.kriya/control/commits"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "mkstemp",
     ".commit-",
     ".tmp",
@@ -593,6 +597,10 @@
     "<root>/ws/.kriya/control/commits"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "mkstemp",
     ".commit-",
     ".tmp",
@@ -705,8 +713,8 @@
     "ws/.kriya/control/commits/tx-mixed.json",
     "file",
     "0o600",
-    "normalized:0d28362c137645d6741b04f5f6ec5cf12f16e442bd2e6429291a5500944acfd1",
-    "{\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":\"OSError: injected fault\",\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"rolled_back\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
+    "normalized:678afe8f1272db1026babdcfecb0c0c28be455b3999a9285e594fb8132763a21",
+    "{\"_workspace\":{\"version\":\"2\",\"workspace_id\":\"<workspace-id>\"},\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":\"OSError: injected fault\",\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"rolled_back\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
    ]
   ]
  },
@@ -802,6 +810,10 @@
    [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "mkstemp",
@@ -1022,6 +1034,10 @@
     "<root>/ws/.kriya/control/commits"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "mkstemp",
     ".commit-",
     ".tmp",
@@ -1138,8 +1154,8 @@
     "ws/.kriya/control/commits/tx-mixed.json",
     "file",
     "0o600",
-    "normalized:580797b292d55143f5174b3f514148c4b4c86802b527570b25c9f7530694ccc0",
-    "{\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":\"FileRevisionConflict: Refusing stale batch write to '<root>/ws/modified.txt': base changed during commit.\",\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"rolled_back\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
+    "normalized:656f3bd5c0a1eae5aa940953889a8769f7bbbb21d67ffef0daeb4d9eed7c6266",
+    "{\"_workspace\":{\"version\":\"2\",\"workspace_id\":\"<workspace-id>\"},\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":\"FileRevisionConflict: Refusing stale batch write to '<root>/ws/modified.txt': base changed during commit.\",\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"rolled_back\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
    ]
   ]
  },
@@ -1235,6 +1251,10 @@
    [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "mkstemp",
@@ -1511,6 +1531,10 @@
     "<root>/ws/.kriya/control/commits"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "mkstemp",
     ".commit-",
     ".tmp",
@@ -1613,8 +1637,8 @@
     "ws/.kriya/control/commits/tx-mixed.json",
     "file",
     "0o600",
-    "normalized:f96668bdd82218110455e79665379891403216cf4360490226e376a26ca4f05a",
-    "{\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":null,\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"in_progress\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000002.0}\n"
+    "normalized:cab7da92ffe28942dcd04fd662b4301cddc05929a62a045d8102dfb28822080b",
+    "{\"_workspace\":{\"version\":\"2\",\"workspace_id\":\"<workspace-id>\"},\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":null,\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"in_progress\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000002.0}\n"
    ],
    [
     "ws/nested/dir",
@@ -1724,6 +1748,10 @@
    [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "mkstemp",
@@ -2000,6 +2028,10 @@
     "<root>/ws/.kriya/control/commits"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "mkstemp",
     ".commit-",
     ".tmp",
@@ -2202,8 +2234,8 @@
     "ws/.kriya/control/commits/12345678123456781234567812345678.json",
     "file",
     "0o600",
-    "normalized:fb5e3d1a64b03588611ccc5d75c5562137ce57c5a3f71bf967d9841a996a30d5",
-    "{\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":null,\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-12345678123456781234567812345678-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-12345678123456781234567812345678-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-12345678123456781234567812345678-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{\"crlf.txt\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"deleted.txt\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"modified.txt\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"nested/dir/created.txt\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"committed\",\"transaction_id\":\"12345678123456781234567812345678\",\"updated_at_unix\":1000003.0}\n"
+    "normalized:f5e97872d0faa07498f4f8ba27c4ab6754500cc7534f21eed0da7d4abd75f07e",
+    "{\"_workspace\":{\"version\":\"2\",\"workspace_id\":\"<workspace-id>\"},\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":null,\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-12345678123456781234567812345678-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-12345678123456781234567812345678-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-12345678123456781234567812345678-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{\"crlf.txt\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"deleted.txt\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"modified.txt\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"nested/dir/created.txt\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"committed\",\"transaction_id\":\"12345678123456781234567812345678\",\"updated_at_unix\":1000003.0}\n"
    ],
    [
     "ws/nested/dir",
@@ -2313,6 +2345,10 @@
    [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "mkstemp",
@@ -2512,6 +2548,10 @@
     "<root>/ws/.kriya/control/commits"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "mkstemp",
     ".commit-",
     ".tmp",
@@ -2632,8 +2672,8 @@
     "ws/.kriya/control/commits/tx-mixed.json",
     "file",
     "0o600",
-    "normalized:0d28362c137645d6741b04f5f6ec5cf12f16e442bd2e6429291a5500944acfd1",
-    "{\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":\"OSError: injected fault\",\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"rolled_back\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
+    "normalized:678afe8f1272db1026babdcfecb0c0c28be455b3999a9285e594fb8132763a21",
+    "{\"_workspace\":{\"version\":\"2\",\"workspace_id\":\"<workspace-id>\"},\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":\"OSError: injected fault\",\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"rolled_back\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
    ]
   ]
  },
@@ -2729,6 +2769,10 @@
    [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "mkstemp",
@@ -2922,6 +2966,10 @@
    [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "mkstemp",
@@ -3312,6 +3360,10 @@
     "<root>/ws/.kriya/control/commits"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "mkstemp",
     ".commit-",
     ".tmp",
@@ -3419,8 +3471,8 @@
     "ws/.kriya/control/commits/tx-mixed.json",
     "file",
     "0o600",
-    "normalized:46e8b60e1080a0bb5dce52d4acfd19600fa897ee98c1de44debff651dd2c4b4d",
-    "{\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":\"KeyboardInterrupt: \",\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"rolled_back\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
+    "normalized:390237791bbf862a119a608b5ea4ca4dae7aa3f0c603ef95411e72a1269f8ce1",
+    "{\"_workspace\":{\"version\":\"2\",\"workspace_id\":\"<workspace-id>\"},\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":\"KeyboardInterrupt: \",\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"rolled_back\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
    ]
   ]
  },
@@ -3516,6 +3568,10 @@
    [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "mkstemp",
@@ -3790,6 +3846,10 @@
    [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "mkstemp",
@@ -3994,8 +4054,8 @@
     "ws/.kriya/control/commits/tx-mixed.json",
     "file",
     "0o600",
-    "normalized:339b902038162b84e88e056ee7fd56b9b88b5c0d118ef2cde5384ea0fa35528c",
-    "{\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":null,\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{\"crlf.txt\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"deleted.txt\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"modified.txt\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"nested/dir/created.txt\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"committed\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
+    "normalized:6deffb79c314a7ab80310fc03e91e0871ff9799aed2c302d47283a212a473162",
+    "{\"_workspace\":{\"version\":\"2\",\"workspace_id\":\"<workspace-id>\"},\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":null,\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{\"crlf.txt\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"deleted.txt\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"modified.txt\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"nested/dir/created.txt\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"committed\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
    ],
    [
     "ws/nested/dir",
@@ -4047,6 +4107,10 @@
     "open",
     "<root>/ws/.kriya/control/commits/prior.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ]
   ],
   "error": {
@@ -4113,8 +4177,8 @@
     "ws/.kriya/control/commits/prior.json",
     "file",
     "0o644",
-    "normalized:e4225d45af96d9a22d3dc24c01d20ac20c3825f2f0a2095cfef8793289bb20c3",
-    "{\"failure\": null, \"operations\": [{\"operation\": \"write\", \"target_path\": \"a.txt\"}], \"result_revisions\": {}, \"schema_version\": 3, \"started_at_unix\": 1.0, \"state\": \"uncertain\", \"transaction_id\": \"prior\", \"updated_at_unix\": 2.0}"
+    "normalized:1e987d3e4e7e79515bffa945865f974f7828ee64c3ea0c92e11ac5780a1961f4",
+    "{\"_workspace\": {\"version\": \"2\", \"workspace_id\":\"<workspace-id>\"}, \"failure\": null, \"operations\": [{\"operation\": \"write\", \"target_path\": \"a.txt\"}], \"result_revisions\": {}, \"schema_version\": 3, \"started_at_unix\": 1.0, \"state\": \"uncertain\", \"transaction_id\": \"prior\", \"updated_at_unix\": 2.0}"
    ]
   ]
  },
@@ -4317,6 +4381,10 @@
     "<root>/ws/.kriya/control/commits"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "mkstemp",
     ".commit-",
     ".tmp",
@@ -4695,6 +4763,10 @@
    [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "mkstemp",
@@ -4813,8 +4885,8 @@
     "ws/.kriya/control/commits/tx-mixed.json",
     "file",
     "0o600",
-    "normalized:752f71f21a7c64a5d92f8a72f2f0bdbd70571beaa5ec838505dc0938f37d009a",
-    "{\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":\"OSError: injected fault\",\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"uncertain\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
+    "normalized:c4178c8dfbebd81675543fc5fd23219803c9c7f3cdca8a9cfee5b8465549ec8c",
+    "{\"_workspace\":{\"version\":\"2\",\"workspace_id\":\"<workspace-id>\"},\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":\"OSError: injected fault\",\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"uncertain\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
    ]
   ]
  },
@@ -4910,6 +4982,10 @@
    [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "mkstemp",
@@ -5300,6 +5376,10 @@
     "<root>/ws/.kriya/control/commits"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "mkstemp",
     ".commit-",
     ".tmp",
@@ -5409,8 +5489,8 @@
     "ws/.kriya/control/commits/tx-mixed.json",
     "file",
     "0o600",
-    "normalized:f96668bdd82218110455e79665379891403216cf4360490226e376a26ca4f05a",
-    "{\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":null,\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"in_progress\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000002.0}\n"
+    "normalized:cab7da92ffe28942dcd04fd662b4301cddc05929a62a045d8102dfb28822080b",
+    "{\"_workspace\":{\"version\":\"2\",\"workspace_id\":\"<workspace-id>\"},\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":null,\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"in_progress\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000002.0}\n"
    ]
   ]
  },
@@ -5468,6 +5548,10 @@
    [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "mkstemp",
@@ -5580,6 +5664,10 @@
    [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "mkstemp",
@@ -5718,8 +5806,8 @@
     "ws/.kriya/control/commits/tx-one.json",
     "file",
     "0o600",
-    "normalized:a8c0d47aa5c887b7b5a2da60c5f8ab6b09c8378ba2903f759cddeea3c73283aa",
-    "{\"candidate_hash\":\"b6f34617e8923fe72ad8c8fe71062b4882bd5ced842b88b2f46e66659d060bc1\",\"failure\":null,\"operations\":[{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"f9ea4b8413f7b84383d16b6fdf36872439f9d7223623480c0eebfba0e5291ded\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"f9ea4b8413f7b84383d16b6fdf36872439f9d7223623480c0eebfba0e5291ded\",\"expected_base_exists\":null,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-one-\",\"target_path\":\"modified.txt\"}],\"recovery\":null,\"result_revisions\":{\"modified.txt\":\"f9ea4b8413f7b84383d16b6fdf36872439f9d7223623480c0eebfba0e5291ded\"},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"committed\",\"transaction_id\":\"tx-one\",\"updated_at_unix\":1000003.0}\n"
+    "normalized:a9376109c5f9818d24f6bdd110b7978b4358f6ed3e6f416b3c570206656147aa",
+    "{\"_workspace\":{\"version\":\"2\",\"workspace_id\":\"<workspace-id>\"},\"candidate_hash\":\"b6f34617e8923fe72ad8c8fe71062b4882bd5ced842b88b2f46e66659d060bc1\",\"failure\":null,\"operations\":[{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"f9ea4b8413f7b84383d16b6fdf36872439f9d7223623480c0eebfba0e5291ded\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"f9ea4b8413f7b84383d16b6fdf36872439f9d7223623480c0eebfba0e5291ded\",\"expected_base_exists\":null,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-one-\",\"target_path\":\"modified.txt\"}],\"recovery\":null,\"result_revisions\":{\"modified.txt\":\"f9ea4b8413f7b84383d16b6fdf36872439f9d7223623480c0eebfba0e5291ded\"},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"committed\",\"transaction_id\":\"tx-one\",\"updated_at_unix\":1000003.0}\n"
    ]
   ]
  },
@@ -5817,6 +5905,10 @@
     "<root>/ws/.kriya/control/commits"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "mkstemp",
     ".commit-",
     ".tmp",
@@ -5899,6 +5991,10 @@
    [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "mkstemp",
@@ -6009,8 +6105,8 @@
     "ws/.kriya/control/commits/tx-mixed.json",
     "file",
     "0o600",
-    "normalized:0d28362c137645d6741b04f5f6ec5cf12f16e442bd2e6429291a5500944acfd1",
-    "{\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":\"OSError: injected fault\",\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"rolled_back\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
+    "normalized:678afe8f1272db1026babdcfecb0c0c28be455b3999a9285e594fb8132763a21",
+    "{\"_workspace\":{\"version\":\"2\",\"workspace_id\":\"<workspace-id>\"},\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":\"OSError: injected fault\",\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"rolled_back\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
    ]
   ]
  },
@@ -6106,6 +6202,10 @@
    [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "mkstemp",
@@ -6208,6 +6308,10 @@
     "<root>/ws/.kriya/control/commits"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "mkstemp",
     ".commit-",
     ".tmp",
@@ -6320,8 +6424,8 @@
     "ws/.kriya/control/commits/tx-mixed.json",
     "file",
     "0o600",
-    "normalized:0d28362c137645d6741b04f5f6ec5cf12f16e442bd2e6429291a5500944acfd1",
-    "{\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":\"OSError: injected fault\",\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"rolled_back\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
+    "normalized:678afe8f1272db1026babdcfecb0c0c28be455b3999a9285e594fb8132763a21",
+    "{\"_workspace\":{\"version\":\"2\",\"workspace_id\":\"<workspace-id>\"},\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":\"OSError: injected fault\",\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"rolled_back\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
    ]
   ]
  },
@@ -6769,13 +6873,25 @@
     "<root>/ws/.kriya/control/commits"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "open",
     "<root>/ws/.kriya/control/commits/schema1.json",
     "r"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -6783,8 +6899,16 @@
     "r"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -6792,13 +6916,25 @@
     "r"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
     "<root>/ws/.kriya/control/commits/schema4.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "unlink",
@@ -6818,6 +6954,10 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
    ],
    [
@@ -6831,9 +6971,17 @@
     "r"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "open",
     "<root>/ws/.kriya/control/commits/schema1.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -6841,9 +6989,17 @@
     "r"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "open",
     "<root>/ws/.kriya/control/commits/schema3.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "listdir",
@@ -6864,9 +7020,17 @@
     "r"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "open",
     "<root>/ws/.kriya/control/commits/schema1.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -6874,9 +7038,17 @@
     "r"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "open",
     "<root>/ws/.kriya/control/commits/schema3.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "unlink",
@@ -6896,14 +7068,26 @@
     "r"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "open",
     "<root>/ws/.kriya/control/commits/schema1.json",
     "r"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "open",
     "<root>/ws/.kriya/control/commits/schema2.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -6915,9 +7099,17 @@
     "<root>"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "open",
     "<root>/ws/.kriya/control/commits/open.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "listdir",
@@ -7100,29 +7292,29 @@
     "ws/.kriya/control/commits/open.json",
     "file",
     "0o644",
-    "normalized:8bb303c360e3c09580b0e8f870a87e75dc7bf7dcfb34b6f478b76e3ca5d7be55",
-    "{\"failure\": null, \"operations\": [{\"operation\": \"write\", \"target_path\": \"a.txt\"}], \"result_revisions\": {}, \"schema_version\": 3, \"started_at_unix\": 1.0, \"state\": \"in_progress\", \"transaction_id\": \"open\", \"updated_at_unix\": 2.0}"
+    "normalized:ea59b27eb9441d3789f0b570030e4b9db839dd1d48e47c8d16892c2638ae66e3",
+    "{\"_workspace\": {\"version\": \"2\", \"workspace_id\":\"<workspace-id>\"}, \"failure\": null, \"operations\": [{\"operation\": \"write\", \"target_path\": \"a.txt\"}], \"result_revisions\": {}, \"schema_version\": 3, \"started_at_unix\": 1.0, \"state\": \"in_progress\", \"transaction_id\": \"open\", \"updated_at_unix\": 2.0}"
    ],
    [
     "ws/.kriya/control/commits/schema1.json",
     "file",
     "0o644",
-    "normalized:c996d56b53921ea3731250256dfb8bb876e5031e8416d53975858dbdc6c404de",
-    "{\"candidate_hash\": null, \"failure\": null, \"operations\": [{\"operation\": \"write\", \"target_path\": \"a.txt\"}], \"result_revisions\": {}, \"schema_version\": 1, \"started_at_unix\": 1.0, \"state\": \"committed\", \"transaction_id\": \"schema1\", \"updated_at_unix\": 2.0}"
+    "normalized:51b8653e0e050d18e0079f79c0f36a13a369ec6b234a59e67e8d29dcc6256b02",
+    "{\"_workspace\": {\"version\": \"2\", \"workspace_id\":\"<workspace-id>\"}, \"candidate_hash\": null, \"failure\": null, \"operations\": [{\"operation\": \"write\", \"target_path\": \"a.txt\"}], \"result_revisions\": {}, \"schema_version\": 1, \"started_at_unix\": 1.0, \"state\": \"committed\", \"transaction_id\": \"schema1\", \"updated_at_unix\": 2.0}"
    ],
    [
     "ws/.kriya/control/commits/schema2.json",
     "file",
     "0o644",
-    "normalized:5a4e9e443b43aaad86c8e976143b8798a5dd7a58ec11a87a26a19b6c8a00ad38",
-    "{\"candidate_hash\": \"h\", \"failure\": null, \"operations\": [{\"operation\": \"write\", \"target_path\": \"a.txt\"}], \"result_revisions\": {}, \"schema_version\": 2, \"started_at_unix\": 1.0, \"state\": \"committed\", \"transaction_id\": \"schema2\", \"updated_at_unix\": 2.0}"
+    "normalized:10c87191c1c754492ac48310e36598e736ee16b31d105378047af76d70ddb908",
+    "{\"_workspace\": {\"version\": \"2\", \"workspace_id\":\"<workspace-id>\"}, \"candidate_hash\": \"h\", \"failure\": null, \"operations\": [{\"operation\": \"write\", \"target_path\": \"a.txt\"}], \"result_revisions\": {}, \"schema_version\": 2, \"started_at_unix\": 1.0, \"state\": \"committed\", \"transaction_id\": \"schema2\", \"updated_at_unix\": 2.0}"
    ],
    [
     "ws/.kriya/control/commits/schema3.json",
     "file",
     "0o644",
-    "normalized:186de7cfe07fba1a68f71228d59e251a39784b9e603a8a124ce1afc397ef914f",
-    "{\"candidate_hash\": \"h\", \"failure\": null, \"operations\": [{\"operation\": \"write\", \"target_path\": \"a.txt\"}], \"result_revisions\": {}, \"schema_version\": 3, \"started_at_unix\": 1.0, \"state\": \"committed\", \"transaction_id\": \"schema3\", \"updated_at_unix\": 2.0}"
+    "normalized:ceab135072ca9a5cc224f9d8f12938fad523ce62b97c4b0188f139acc0f47dc8",
+    "{\"_workspace\": {\"version\": \"2\", \"workspace_id\":\"<workspace-id>\"}, \"candidate_hash\": \"h\", \"failure\": null, \"operations\": [{\"operation\": \"write\", \"target_path\": \"a.txt\"}], \"result_revisions\": {}, \"schema_version\": 3, \"started_at_unix\": 1.0, \"state\": \"committed\", \"transaction_id\": \"schema3\", \"updated_at_unix\": 2.0}"
    ]
   ]
  },
@@ -8261,9 +8453,17 @@
     "<root>"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "open",
     "<root>/ws/.kriya/control/commits/tx-settle.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "listdir",
@@ -8277,6 +8477,10 @@
    [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "mkstemp",
@@ -8376,8 +8580,8 @@
     "ws/.kriya/control/commits/tx-settle.json",
     "file",
     "0o600",
-    "normalized:b551b6183ad4288302d5e1144ed822a69926c4e3921d79ba9cdc8808601f51ba",
-    "{\"candidate_hash\":null,\"failure\":null,\"operations\":[{\"operation\":\"write\",\"target_path\":\"a.txt\"}],\"recovery\":{\"decision\":\"proved\",\"tool\":\"test\"},\"result_revisions\":{\"a.txt\":\"r\"},\"schema_version\":3,\"started_at_unix\":1.0,\"state\":\"committed\",\"transaction_id\":\"tx-settle\",\"updated_at_unix\":1000001.0}\n"
+    "normalized:2ba305ea484e7d1184d9992b1f6979ca00e91541bae821c70028bb5ea786c5be",
+    "{\"_workspace\":{\"version\":\"2\",\"workspace_id\":\"<workspace-id>\"},\"candidate_hash\":null,\"failure\":null,\"operations\":[{\"operation\":\"write\",\"target_path\":\"a.txt\"}],\"recovery\":{\"decision\":\"proved\",\"tool\":\"test\"},\"result_revisions\":{\"a.txt\":\"r\"},\"schema_version\":3,\"started_at_unix\":1.0,\"state\":\"committed\",\"transaction_id\":\"tx-settle\",\"updated_at_unix\":1000001.0}\n"
    ]
   ]
  },
@@ -8389,8 +8593,16 @@
     "r"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "listdir",
@@ -8400,6 +8612,10 @@
     "open",
     "<root>/ws/.kriya/control/commits/tx-settle.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ]
   ],
   "error": {
@@ -8444,8 +8660,8 @@
     "ws/.kriya/control/commits/tx-settle.json",
     "file",
     "0o644",
-    "normalized:a9080506a7a5084ed568ea73f313195a274211e7cdb0e8b927a9b7fcdcabf063",
-    "{\"failure\": \"changed\", \"operations\": [{\"operation\": \"write\", \"target_path\": \"a.txt\"}], \"result_revisions\": {}, \"schema_version\": 3, \"started_at_unix\": 1.0, \"state\": \"in_progress\", \"transaction_id\": \"tx-settle\", \"updated_at_unix\": 2.0}"
+    "normalized:6f6e234371e64e8495d31adb3ae2c1beb7095a6804a64a211401f6575c9dea10",
+    "{\"_workspace\": {\"version\": \"2\", \"workspace_id\":\"<workspace-id>\"}, \"failure\": \"changed\", \"operations\": [{\"operation\": \"write\", \"target_path\": \"a.txt\"}], \"result_revisions\": {}, \"schema_version\": 3, \"started_at_unix\": 1.0, \"state\": \"in_progress\", \"transaction_id\": \"tx-settle\", \"updated_at_unix\": 2.0}"
    ]
   ]
  },
@@ -8461,9 +8677,17 @@
     "<root>"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "open",
     "<root>/ws/.kriya/control/commits/tx-settle.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ]
   ],
   "error": {
@@ -8508,8 +8732,8 @@
     "ws/.kriya/control/commits/tx-settle.json",
     "file",
     "0o644",
-    "normalized:4476aff32fbbb36b6e16270e5940c1e0efbc2a486a0d2feafa0c1a648f8adb33",
-    "{\"failure\": null, \"operations\": [{\"operation\": \"write\", \"target_path\": \"a.txt\"}], \"result_revisions\": {}, \"schema_version\": 3, \"started_at_unix\": 1.0, \"state\": \"committed\", \"transaction_id\": \"tx-settle\", \"updated_at_unix\": 2.0}"
+    "normalized:cf105e9749c4429c07948012726851fbc486fb5ba966e7a76c98464e8fa00c4c",
+    "{\"_workspace\": {\"version\": \"2\", \"workspace_id\":\"<workspace-id>\"}, \"failure\": null, \"operations\": [{\"operation\": \"write\", \"target_path\": \"a.txt\"}], \"result_revisions\": {}, \"schema_version\": 3, \"started_at_unix\": 1.0, \"state\": \"committed\", \"transaction_id\": \"tx-settle\", \"updated_at_unix\": 2.0}"
    ]
   ]
  },
@@ -8519,6 +8743,10 @@
     "open",
     "<root>/ws/.kriya/control/commits/tx-settle.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ]
   ],
   "error": {
@@ -8563,8 +8791,8 @@
     "ws/.kriya/control/commits/tx-settle.json",
     "file",
     "0o644",
-    "normalized:7958f4ce528dd384cd5d5eba2159199a293e441123cb0ad65e33132bdfd0ec05",
-    "{\"failure\": null, \"operations\": [{\"operation\": \"write\", \"target_path\": \"a.txt\"}], \"result_revisions\": {}, \"schema_version\": 3, \"started_at_unix\": 1.0, \"state\": \"in_progress\", \"transaction_id\": \"tx-settle\", \"updated_at_unix\": 2.0}"
+    "normalized:2b3cc1244e0327d53a9fc7b49b3f025293044cf41b7d8161badd27087101e58d",
+    "{\"_workspace\": {\"version\": \"2\", \"workspace_id\":\"<workspace-id>\"}, \"failure\": null, \"operations\": [{\"operation\": \"write\", \"target_path\": \"a.txt\"}], \"result_revisions\": {}, \"schema_version\": 3, \"started_at_unix\": 1.0, \"state\": \"in_progress\", \"transaction_id\": \"tx-settle\", \"updated_at_unix\": 2.0}"
    ]
   ]
  },
@@ -8580,9 +8808,17 @@
     "<root>"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "open",
     "<root>/ws/.kriya/control/commits/tx-settle.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "listdir",
@@ -8596,6 +8832,10 @@
    [
     "mkdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "mkstemp",
@@ -8695,8 +8935,8 @@
     "ws/.kriya/control/commits/tx-settle.json",
     "file",
     "0o600",
-    "normalized:4687da51e0a2db3fd476b4a27fa6dd90b2ee469823635cf4f5da35a061b5b2a3",
-    "{\"candidate_hash\":null,\"failure\":null,\"operations\":[{\"operation\":\"write\",\"target_path\":\"a.txt\"}],\"recovery\":{\"decision\":\"proved\",\"tool\":\"test\"},\"result_revisions\":{\"a.txt\":\"r\"},\"schema_version\":3,\"started_at_unix\":1.0,\"state\":\"rolled_back\",\"transaction_id\":\"tx-settle\",\"updated_at_unix\":1000001.0}\n"
+    "normalized:459c95fd6ec962904413ad0c2856f53bca6ffb48cece3c270a11b8dd78dd4620",
+    "{\"_workspace\":{\"version\":\"2\",\"workspace_id\":\"<workspace-id>\"},\"candidate_hash\":null,\"failure\":null,\"operations\":[{\"operation\":\"write\",\"target_path\":\"a.txt\"}],\"recovery\":{\"decision\":\"proved\",\"tool\":\"test\"},\"result_revisions\":{\"a.txt\":\"r\"},\"schema_version\":3,\"started_at_unix\":1.0,\"state\":\"rolled_back\",\"transaction_id\":\"tx-settle\",\"updated_at_unix\":1000001.0}\n"
    ]
   ]
  },

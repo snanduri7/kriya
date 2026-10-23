@@ -20,6 +20,7 @@ from _strict_doubles import strict_config, strict_kernel
 import kriya.workflow.plan_validation as plan_validation_module
 import kriya.workflow.terminal_commit as terminal_commit_module
 import kriya.workflow.workflow_controller as workflow_controller_module
+from kriya.context.workspace_identity import ownership_metadata
 from kriya.control.persistence import load_approved_plan, load_control_state
 from kriya.control.state import ControlState
 from kriya.policy.filesystem import WriteScopeMode
@@ -10561,6 +10562,8 @@ async def test_enforce_refuses_to_start_when_prior_source_commit_is_uncertain(tm
         "operations": [],
         "result_revisions": {},
         "failure": None,
+        # D2 M4: a crashed Kriya commit names its workspace; an unstamped file is refused as ownerless instead
+        "_workspace": ownership_metadata(str(tmp_path)),
     }))
     we = _workflow_engine()
 

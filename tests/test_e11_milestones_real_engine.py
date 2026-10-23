@@ -25,8 +25,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kriya.config.config import AppConfig
-from kriya.context.workspace_identity import workspace_identity
+from kriya.context.workspace_identity import WorkspaceOwnershipMissing
 from kriya.control.decisions import load_decision_ledger
+from kriya.control.ownership_audit import audit_control_ownership
 from kriya.control.persistence import load_control_state
 from kriya.core import LLMClient
 from kriya.core.kernel import Kernel
@@ -123,8 +124,9 @@ def _outcome(result, state, workspace: Path) -> Dict[str, Any]:
     }
 
 
-def _migrations(workspace: Path) -> List[Dict[str, Any]]:
-    return [d.fields for d in load_decision_ledger(str(workspace)).all() if d.type == "legacy_workspace_ownership_migrated"]
+def _ownership_findings(workspace: Path) -> Any:
+    """Positive proof that Kriya's own writers stamp every control document: the ownership audit finds nothing."""
+    return audit_control_ownership(str(workspace))
 
 
 def _make_legacy(workspace: Path) -> List[str]:
@@ -158,7 +160,7 @@ def test_a_two_milestone_run_completes_through_the_real_engine(workspace, tmp_pa
     assert run.units == [1, 2, INTEGRATION] and run.developer_units == [1, 2, INTEGRATION]
     assert run.llm.complete.await_count == 11
     assert result.legacy_result["milestone_reuse"]["decisions"] == []
-    assert _migrations(workspace) == []   # nothing legacy to migrate on a fresh workspace
+    assert _ownership_findings(workspace) == ()   # nothing legacy to migrate on a fresh workspace
 
 
 def test_a_failed_milestone_stops_the_rest(workspace, tmp_path):
@@ -174,7 +176,7 @@ def test_a_failed_milestone_stops_the_rest(workspace, tmp_path):
     assert run.units == [1]                      # M2 and the integration unit never run
     assert run.developer_units == [1] * 7        # M1's own retry budget, then abandon (no failure callback)
     assert run.llm.complete.await_count == 11
-    assert _migrations(workspace) == []
+    assert _ownership_findings(workspace) == ()
 
 
 def _half_completed(workspace: Path, tmp_path: Path) -> Run:
@@ -207,26 +209,48 @@ def test_a_half_completed_run_resumes_reusing_the_completed_milestone(workspace,
     assert second.llm.complete.await_count == 7
     assert result.legacy_result["milestone_reuse"]["decisions"] == [
         {"milestone_id": "M1", "status": "MATCH", "action": "SKIP", "reasons": []}]
-    assert _migrations(workspace) == []   # the first run's documents are owned: nothing to migrate
+    assert _ownership_findings(workspace) == ()   # the first run's documents are owned: nothing to migrate
 
 
-def test_the_resume_migrates_legacy_ownerless_documents_first(workspace, tmp_path):
-    _half_completed(workspace, tmp_path)
+def _kriya_bytes(workspace: Path) -> Dict[str, bytes]:
     kriya = workspace / ".kriya"
-    [checkpoint] = sorted((kriya / "checkpoints").glob("*.json"))
-    sidecar = kriya / "milestones" / f"{GROUP}.json"
+    return {str(p.relative_to(kriya)): p.read_bytes() for sub in ("control", "milestones", "checkpoints") for p in sorted((kriya / sub).rglob("*.json"))}
+
+
+def test_the_resume_of_legacy_ownerless_documents_is_refused_and_adopts_nothing(workspace, tmp_path):
+    """D2 M4 (owner decision 2026-10-23): the one-time ownership migration is retired. The CLI shape (state reloaded from the plan and the
+    sidecar) meets an ownerless sidecar first: typed refusal, no model work, every document byte-identical (nothing was stamped)."""
+    _half_completed(workspace, tmp_path)
     assert sorted(_make_legacy(workspace)) == ["checkpoints/<run id>.json", "control/contracts.json",
                                                "control/state.json", f"milestones/{GROUP}.json"]
-    assert not (kriya / "control" / "artifacts.json").exists()   # no artifact registry in this run
+    before = _kriya_bytes(workspace)
     second = Run(tmp_path, {2: WITH_DIV, INTEGRATION: WITH_DIV})
-    result, state = second.execute(workspace)
-    assert _outcome(result, state, workspace)["status"] == "success"
-    assert second.units == [2, INTEGRATION]
-    # The sidecar is NOT among the migrated stores: execute_milestones' completion revalidation re-saves (and so
-    # stamps) it before the migration runs; the control state is reported from the ownerless flag read up front
-    # (execute_milestones saved, and so stamped, it before the migration).
-    assert _migrations(workspace) == [{"milestone_group_id": GROUP,
-                                       "stores": ["checkpoints:1", "contract_registry", "control_state"]}]
-    owner = workspace_identity(str(workspace))
-    for path in (checkpoint, sidecar, kriya / "control" / "state.json", kriya / "control" / "contracts.json"):
-        assert _owner(path) == owner, path.name
+    with pytest.raises(WorkspaceOwnershipMissing) as refused:
+        second.execute(workspace)
+    assert refused.value.reason_code == "WORKSPACE_OWNERSHIP_MISSING"
+    assert second.units == []
+    after = _kriya_bytes(workspace)
+    assert {name: after[name] for name in before} == before  # the refused run's own RunRecord is new; nothing that existed was touched
+
+
+def test_the_controller_refuses_ownerless_control_state_before_any_model_work_and_adopts_nothing(workspace, tmp_path):
+    """The controller's own preflight (the sidecar is stamped, so the load passes): a typed needs_review naming every ownerless document, no model
+    work, no document touched, no decision recorded."""
+    _half_completed(workspace, tmp_path)
+    sidecar = workspace / ".kriya" / "milestones" / f"{GROUP}.json"
+    stamped_sidecar = sidecar.read_bytes()
+    _make_legacy(workspace)
+    sidecar.write_bytes(stamped_sidecar)
+    before = _kriya_bytes(workspace)
+    second = Run(tmp_path, {2: WITH_DIV, INTEGRATION: WITH_DIV})
+    result, _state = second.execute(workspace)
+    legacy = result.legacy_result
+    assert legacy["status"] == "needs_review" and legacy["quality_gates_passed"] is False
+    assert legacy["reason_codes"] == ["WORKSPACE_OWNERSHIP_MISSING"]
+    assert sorted(Path(f["path"]).name for f in legacy["ownership_findings"]) == sorted(
+        ["contracts.json", "state.json", next((workspace / ".kriya" / "checkpoints").glob("*.json")).name])
+    assert "move the file aside" in legacy["persistence_error"]
+    assert second.units == []
+    after = _kriya_bytes(workspace)
+    assert {name: after[name] for name in before} == before  # the refused run's own RunRecord is new; nothing that existed was touched
+    assert not any(d.type == "legacy_workspace_ownership_migrated" for d in load_decision_ledger(str(workspace)).all())

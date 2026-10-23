@@ -87,6 +87,7 @@ MODULES: Dict[str, Module] = {
                 # D2 (the slice that defines STATE's public surface): the trace store moved here, the recovery assessment, the run
                 # lock probe and the launch records/phases are the STATE answers APPLICATION and the KERNEL read.
                 "kriya.control.trace", "kriya.control.recovery", "kriya.control.run_ownership", "kriya.control.launch",
+                "kriya.control.ownership_audit",  # D2 M4: the controller's read-only ownership preflight
                 "kriya.control.history.port"),
         layer=2),
     "EVIDENCE": Module(
