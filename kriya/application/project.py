@@ -31,7 +31,7 @@ from typing import Any, Dict, Optional
 
 from kriya.application.services import INVALID_REQUEST, WORKSPACE_UNAVAILABLE, ApplicationRefusal
 from kriya.context.model import RequestContext
-from kriya.context.workspace_identity import canonical_workspace, workspace_identity
+from kriya.context.workspace_identity import authority_root, canonical_workspace, workspace_identity
 from kriya.control.control_store import CONTROL_DIRECTORY
 from kriya.control.recovery import STATUS_CLEAN, STATUS_RUN_ACTIVE, assess_recovery
 from kriya.core.state_paths import resolve_state_directory, trace_db_path
@@ -114,7 +114,7 @@ class ProjectService:
                          "dirty": checkout.dirty, "changed_entries": checkout.changed_entries, "changed_truncated": checkout.changed_truncated,
                          "reason": checkout.reason},
             "recovery": {"status": assessment.status, "run_active": assessment.status == STATUS_RUN_ACTIVE},
-            "kriya_directory_present": os.path.isdir(os.path.join(workspace, CONTROL_DIRECTORY)),
+            "kriya_directory_present": os.path.isdir(os.path.join(authority_root(workspace), CONTROL_DIRECTORY)),
             "configuration": {"file_in_workspace": any(os.path.isfile(os.path.join(workspace, n)) for n in CONFIG_FILE_NAMES), "note": CONFIG_NOT_APPLIED},
             "state": {"directory": state_directory, "source": state_source, "trace_database_present": os.path.isfile(trace_db_path(cfg))},
         }

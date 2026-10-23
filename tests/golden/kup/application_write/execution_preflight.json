@@ -11,7 +11,7 @@
     "status": "no_findings"
    },
    "directory": "<TMP>/Work Space",
-   "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+   "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
    "file": null,
    "fingerprint": "29f228760c58c6e231fe1b0b4837bc91730284d676f24d2d6ddb410b8e820f05",
    "source": "packaged_default",

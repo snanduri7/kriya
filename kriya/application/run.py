@@ -66,7 +66,8 @@ def _interaction(cfg: Any) -> Dict[str, Any]:
         return {"approvals": "change_review", "autonomy_mode": mode, "knowledge_policy": KNOWLEDGE_POLICY, "note": INTERACTION_REVIEW}
     return {"approvals": "configured_mode", "autonomy_mode": mode, "knowledge_policy": KNOWLEDGE_POLICY, "note": INTERACTION_NO_REVIEW.format(mode=mode)}
 DISCOVERY = ("Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` "
-             "here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.")
+             "here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya "
+             "installation, is read; fields only the operator may set need a durable approval.")
 
 TOOLCHAIN_NOTE = ("Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; "
                   "a missing tool then ends the run with Kriya's own typed failure.")

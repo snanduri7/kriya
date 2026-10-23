@@ -23,7 +23,7 @@
     "status": "refused"
    },
    "directory": "<TMP>/refused",
-   "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+   "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
    "file": "<TMP>/refused/kriya.yaml",
    "fingerprint": null,
    "source": "auto_discovered_cwd",

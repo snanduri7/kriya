@@ -20,6 +20,7 @@ import yaml
 
 from kriya.config.environment import KRIYA_DIRECTORY_NAME, expand_user
 from kriya.context.working_directory import current_directory
+from kriya.context.workspace_identity import authority_root
 from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, path_identity, path_relation
 
 # The logger keeps the name the resolution logged under before D3 (kriya.config.config).
@@ -30,6 +31,11 @@ logger = logging.getLogger("kriya.config.config")
 
 class StateDirectoryError(ValueError):
     """The state directory is relative (outside config resolution) or invalid."""
+
+
+class ShadowedConfigurationError(ValueError):
+    """A ``kriya.yaml``/``kriya.yml`` sits between the invoked directory and the repository root (D-001). The repository's configuration is the ROOT's, so
+    a run started deeper reads that one; a second file it would no longer read may carry the tighter bound, so it is refused, never dropped silently."""
 
 
 WORKSPACE_STATE_PARENT = KRIYA_DIRECTORY_NAME
@@ -206,6 +212,25 @@ class ConfigResolutionState:
     config_source: Optional[str] = None
 
 
+_CONFIG_FILE_NAMES = ("kriya.yaml", "kriya.yml")
+
+
+def _refuse_shadowed_configuration(invoked_directory: str, root: str) -> None:
+    """Every directory from the invoked one up to (not including) the authority root: a configuration file in one of them is not read, so it is refused."""
+    directory = invoked_directory
+    while path_identity(directory, root) is not PathIdentity.SAME and path_relation(root, directory) is PathRelation.WITHIN:
+        for filename in _CONFIG_FILE_NAMES:
+            if os.path.lexists(os.path.join(directory, filename)):
+                raise ShadowedConfigurationError(
+                    f"{os.path.join(directory, filename)} is not this repository's configuration: the configuration of a repository is the one at its root "
+                    f"({root}), read from every directory inside it. Merge it into {os.path.join(root, _CONFIG_FILE_NAMES[0])}, remove it, or pass it with --config."
+                )
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            return
+        directory = parent
+
+
 def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionState:
     """Source -> provenance -> expansion -> field classification -> violation
     list. Never raises for a violation (that's load_config()'s job, after
@@ -237,7 +262,10 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
     # resolved value, not just the field name (paths.* containment check).
     classification_overrides: Dict[FieldPath, FieldClassification] = {}
 
-    workspace_root = os.path.realpath(current_directory())
+    # D-001: the workspace SEC-009 judges (trust-path containment, an explicit --config's provenance, the paths.state rule), the approval identity and
+    # the directory ``kriya.yaml`` is discovered in are the repository's authority root - the same for the root and every subdirectory of one repository.
+    invoked_directory = os.path.realpath(current_directory())
+    workspace_root = authority_root(invoked_directory)
 
     # Determine Kriya Installation Directory
     KRIYA_INSTALL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -270,14 +298,15 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
 
     # If no config_path is explicitly provided, look for 'kriya.yaml' or 'kriya.yml' in current directory
     # If not found, look for it in the Kriya Installation Directory
-    config_dir = current_directory()
+    config_dir = workspace_root
     source: Optional["ConfigSource"] = None
     if not config_path:
+        _refuse_shadowed_configuration(invoked_directory, workspace_root)
         for filename in ["kriya.yaml", "kriya.yml"]:
-            path = os.path.join(current_directory(), filename)
+            path = os.path.join(workspace_root, filename)
             if os.path.exists(path):
                 config_path = path
-                config_dir = current_directory()
+                config_dir = workspace_root
                 source = ConfigSource.AUTO_DISCOVERED_CWD
                 break
 

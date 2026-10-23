@@ -36,6 +36,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Iterable, List, Optional, Set
 
+from kriya.context.workspace_identity import authority_root
 from kriya.control.checkpoint import list_checkpoint_run_references
 from kriya.control.control_store import MILESTONE_SIDECAR_RELATIVE_DIR
 from kriya.control.persistence import (
@@ -141,7 +142,7 @@ def milestone_ledger_run_references(workspace_path: str) -> List[str]:
     protects them, or every completed milestone would silently become
     UNVERIFIED once its record aged out). An unreadable sidecar's proofs are
     unusable anyway, so it contributes nothing."""
-    directory = os.path.join(workspace_path, MILESTONE_SIDECAR_RELATIVE_DIR)
+    directory = os.path.join(authority_root(workspace_path), MILESTONE_SIDECAR_RELATIVE_DIR)
     try:
         names = sorted(name for name in os.listdir(directory) if name.endswith(".json"))
     except (FileNotFoundError, NotADirectoryError):

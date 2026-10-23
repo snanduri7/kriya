@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 
+from kriya.context.workspace_identity import authority_root
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.repository.commit import commit_revision_grounded_file
 
@@ -30,8 +31,11 @@ def write_control_file(workspace_path: str, path: str, content: str, *, expected
     ``.kriya/`` directory if its base revision is unchanged; returns the new
     revision. A target outside ``.kriya/`` (or whose location cannot be
     established) is refused before anything is written."""
+    # D-001: the control stores live under the AUTHORITY root's ``.kriya/`` (the repository's), the invoked directory's own ``.kriya/`` holds only
+    # that directory's scratch; a control write is legitimate beneath either, never elsewhere.
     control_root = os.path.join(workspace_path, CONTROL_DIRECTORY)
-    if path_relation(control_root, path) is not PathRelation.WITHIN:
+    authority_control_root = os.path.join(authority_root(workspace_path), CONTROL_DIRECTORY)
+    if path_relation(control_root, path) is not PathRelation.WITHIN and path_relation(authority_control_root, path) is not PathRelation.WITHIN:
         raise ControlStorePathError(f"control-state write outside {control_root!r} refused: {path!r}")
     return commit_revision_grounded_file(path, content, expected_revision=expected_revision,
                                          workspace_path=workspace_path)

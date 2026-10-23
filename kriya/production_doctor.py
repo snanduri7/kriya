@@ -518,9 +518,10 @@ def _store_check(check_id: str, path: str) -> DoctorCheck:
 
 
 def _check_checkpoints(ctx: _Context) -> DoctorCheck:
+    from kriya.context.workspace_identity import authority_root
     from kriya.control.checkpoint import CHECKPOINT_DIR
 
-    return _store_check("persistence.checkpoints", os.path.join(ctx.workspace, CHECKPOINT_DIR))
+    return _store_check("persistence.checkpoints", os.path.join(authority_root(ctx.workspace), CHECKPOINT_DIR))
 
 
 def _check_traces(ctx: _Context) -> DoctorCheck:

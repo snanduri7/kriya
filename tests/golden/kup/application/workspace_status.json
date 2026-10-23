@@ -7,6 +7,8 @@
   "assessment": {
    "evidence": [],
    "evidence_error": null,
+   "nested_scan_complete": true,
+   "nested_workspace_state": [],
    "records": [],
    "run_active": null,
    "status": "CLEAN",

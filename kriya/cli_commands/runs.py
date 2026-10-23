@@ -97,6 +97,12 @@ def _print_recovery_assessment(assessment) -> None:
                    "workspace files are as you expect), move it out of .kriya/control/runs/.")
     if assessment.evidence_error:
         click.secho(f"\nCommit evidence could not be listed: {assessment.evidence_error}", fg="red")
+    for directory, reason in assessment.nested_workspace_state:
+        click.secho(f"\nUnsettled state under {directory} ({reason}): an earlier Kriya treated that sub-directory as its own workspace. It is not in this "
+                    "repository's stores, so `kriya runs recover` cannot settle it; settle it with that earlier Kriya or review it by hand before running here.",
+                    fg="red")
+    if not assessment.nested_scan_complete:
+        click.secho("\nThe check for state left under sub-directories by an earlier Kriya did not finish (large tree); it is not proven absent.", fg="yellow")
 
     advice = {
         recovery.STATUS_CLEAN: "Nothing needs recovery.",

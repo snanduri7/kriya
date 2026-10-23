@@ -135,7 +135,15 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -164,6 +172,10 @@
    [
     "umask",
     "0o22"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -568,6 +580,10 @@
     "<root>/ws/nested"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "makedirs",
     "<root>/ws/.kriya/control/commits",
     "exist_ok=True"
@@ -718,7 +734,15 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -747,6 +771,10 @@
    [
     "umask",
     "0o22"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -981,6 +1009,10 @@
     "<root>/ws/nested"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "makedirs",
     "<root>/ws/.kriya/control/commits",
     "exist_ok=True"
@@ -1135,7 +1167,15 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -1164,6 +1204,10 @@
    [
     "umask",
     "0o22"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -1454,6 +1498,10 @@
     "<root>/ws"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "makedirs",
     "<root>/ws/.kriya/control/commits",
     "exist_ok=True"
@@ -1608,7 +1656,15 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -1637,6 +1693,10 @@
    [
     "umask",
     "0o22"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -1927,6 +1987,10 @@
     "<root>/ws"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "makedirs",
     "<root>/ws/.kriya/control/commits",
     "exist_ok=True"
@@ -2181,7 +2245,15 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -2210,6 +2282,10 @@
    [
     "umask",
     "0o22"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -2423,6 +2499,10 @@
     "<root>/ws/nested"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "makedirs",
     "<root>/ws/.kriya/control/commits",
     "exist_ok=True"
@@ -2581,7 +2661,15 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -2610,6 +2698,10 @@
    [
     "umask",
     "0o22"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -2762,7 +2854,15 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -2791,6 +2891,10 @@
    [
     "umask",
     "0o22"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -3195,6 +3299,10 @@
     "<root>/ws/nested"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "makedirs",
     "<root>/ws/.kriya/control/commits",
     "exist_ok=True"
@@ -3340,7 +3448,15 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -3369,6 +3485,10 @@
    [
     "umask",
     "0o22"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -3657,6 +3777,10 @@
    [
     "close",
     "<root>/ws"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -3913,6 +4037,10 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
    ],
    [
@@ -4011,6 +4139,10 @@
     "open",
     "<root>/ws/crlf.txt",
     "rb"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "listdir",
@@ -4115,7 +4247,15 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -4144,6 +4284,10 @@
    [
     "umask",
     "0o22"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -4538,6 +4682,10 @@
    [
     "rmdir",
     "<root>/ws/nested"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -4694,7 +4842,15 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -4723,6 +4879,10 @@
    [
     "umask",
     "0o22"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -5127,6 +5287,10 @@
     "<root>/ws/nested"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "makedirs",
     "<root>/ws/.kriya/control/commits",
     "exist_ok=True"
@@ -5259,12 +5423,24 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
     "<root>/ws/modified.txt",
     "rb"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -5391,6 +5567,10 @@
    [
     "close",
     "<root>/ws"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -5567,7 +5747,15 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -5596,6 +5784,10 @@
    [
     "umask",
     "0o22"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -5694,6 +5886,10 @@
    [
     "unlink",
     "<root>/ws/.kriya-stage-tx-mixed-0-#2"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -5842,7 +6038,15 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -5871,6 +6075,10 @@
    [
     "umask",
     "0o22"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -5985,6 +6193,10 @@
     "mkstemp",
     ".kriya-stage-tx-mixed-1-",
     "<root>/ws"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -6602,6 +6814,10 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
    ],
    [
@@ -6628,6 +6844,10 @@
     "open",
     "<root>/ws/.kriya/control/commits/schema3.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "listdir",
@@ -6664,6 +6884,10 @@
    ],
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
    ],
    [
@@ -6687,9 +6911,29 @@
     "r"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "open",
     "<root>/ws/.kriya/control/commits/open.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
+    "<root>/ws"
    ],
    [
     "listdir",
@@ -7567,6 +7811,10 @@
   "calls": [
    [
     "listdir",
+    "<root>"
+   ],
+   [
+    "listdir",
     "<root>/ws/.kriya/control/commits"
    ]
   ],
@@ -7632,6 +7880,10 @@
  },
  "preflight_empty_batch_default_id": {
   "calls": [
+   [
+    "listdir",
+    "<root>"
+   ],
    [
     "listdir",
     "<root>/ws/.kriya/control/commits"
@@ -7759,6 +8011,10 @@
     "open",
     "<root>/ws/new.txt",
     "rb"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "listdir",
@@ -8001,9 +8257,17 @@
     "r"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "open",
     "<root>/ws/.kriya/control/commits/tx-settle.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",
@@ -8129,6 +8393,10 @@
     "<root>/ws/.kriya/control/commits"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "open",
     "<root>/ws/.kriya/control/commits/tx-settle.json",
     "r"
@@ -8187,6 +8455,10 @@
     "open",
     "<root>/ws/.kriya/control/commits/tx-settle.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "open",
@@ -8304,9 +8576,17 @@
     "r"
    ],
    [
+    "listdir",
+    "<root>"
+   ],
+   [
     "open",
     "<root>/ws/.kriya/control/commits/tx-settle.json",
     "r"
+   ],
+   [
+    "listdir",
+    "<root>"
    ],
    [
     "makedirs",

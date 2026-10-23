@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import Milestone, MilestoneMode, MilestoneV2
-from kriya.context.workspace_identity import ownership_metadata, validate_ownership
+from kriya.context.workspace_identity import authority_root, ownership_metadata, validate_ownership
 from kriya.control.contracts import (
     ContractRegistryCorruptError,
     ContractState,
@@ -392,7 +392,7 @@ class MilestoneRunState:
 
 
 def _sidecar_path(workspace_path: str, group_id: str) -> str:
-    return os.path.join(workspace_path, MILESTONE_SIDECAR_RELATIVE_DIR, f"{group_id}.json")
+    return os.path.join(authority_root(workspace_path), MILESTONE_SIDECAR_RELATIVE_DIR, f"{group_id}.json")  # D-001: the authority's, like every control store
 
 
 def save_milestone_run_state(workspace_path: str, run_state: MilestoneRunState) -> None:

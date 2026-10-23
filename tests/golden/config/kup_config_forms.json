@@ -461,7 +461,7 @@
      "status": "failed"
     },
     "directory": "<TMP>/malformed",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": null,
     "fingerprint": null,
     "source": "unreadable",
@@ -525,7 +525,7 @@
      "status": "no_findings"
     },
     "directory": "<TMP>/plain",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/plain/kriya.yaml",
     "fingerprint": "29f228760c58c6e231fe1b0b4837bc91730284d676f24d2d6ddb410b8e820f05",
     "source": "auto_discovered_cwd",
@@ -610,7 +610,7 @@
      "status": "refused"
     },
     "directory": "<TMP>/protected",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/protected/kriya.yaml",
     "fingerprint": null,
     "source": "auto_discovered_cwd",
@@ -686,7 +686,7 @@
      "status": "refused"
     },
     "directory": "<TMP>/refused",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/refused/kriya.yaml",
     "fingerprint": null,
     "source": "auto_discovered_cwd",
@@ -755,7 +755,7 @@
      "status": "failed"
     },
     "directory": "<TMP>/state_relative",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": null,
     "fingerprint": null,
     "source": "unreadable",
@@ -1383,7 +1383,7 @@
      "status": "failed"
     },
     "directory": "<TMP>/malformed",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": null,
     "fingerprint": null,
     "source": "unreadable",
@@ -1447,7 +1447,7 @@
      "status": "no_findings"
     },
     "directory": "<TMP>/plain",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/plain/kriya.yaml",
     "fingerprint": "29f228760c58c6e231fe1b0b4837bc91730284d676f24d2d6ddb410b8e820f05",
     "source": "auto_discovered_cwd",
@@ -1525,7 +1525,7 @@
      "status": "failed"
     },
     "directory": "<TMP>/protected",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/protected/kriya.yaml",
     "fingerprint": null,
     "source": "auto_discovered_cwd",
@@ -1594,7 +1594,7 @@
      "status": "failed"
     },
     "directory": "<TMP>/refused",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/refused/kriya.yaml",
     "fingerprint": null,
     "source": "auto_discovered_cwd",
@@ -1663,7 +1663,7 @@
      "status": "failed"
     },
     "directory": "<TMP>/state_relative",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": null,
     "fingerprint": null,
     "source": "unreadable",
@@ -1865,7 +1865,7 @@
      "status": "failed"
     },
     "directory": "<TMP>/malformed",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": null,
     "fingerprint": null,
     "source": "unreadable",
@@ -1929,7 +1929,7 @@
      "status": "no_findings"
     },
     "directory": "<TMP>/plain",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/plain/kriya.yaml",
     "fingerprint": "29f228760c58c6e231fe1b0b4837bc91730284d676f24d2d6ddb410b8e820f05",
     "source": "auto_discovered_cwd",
@@ -2014,7 +2014,7 @@
      "status": "refused"
     },
     "directory": "<TMP>/protected",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/protected/kriya.yaml",
     "fingerprint": null,
     "source": "auto_discovered_cwd",
@@ -2090,7 +2090,7 @@
      "status": "refused"
     },
     "directory": "<TMP>/refused",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/refused/kriya.yaml",
     "fingerprint": null,
     "source": "auto_discovered_cwd",
@@ -2159,7 +2159,7 @@
      "status": "failed"
     },
     "directory": "<TMP>/state_relative",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": null,
     "fingerprint": null,
     "source": "unreadable",
@@ -2361,7 +2361,7 @@
      "status": "failed"
     },
     "directory": "<TMP>/malformed",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": null,
     "fingerprint": null,
     "source": "unreadable",
@@ -2425,7 +2425,7 @@
      "status": "no_findings"
     },
     "directory": "<TMP>/plain",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/plain/kriya.yaml",
     "fingerprint": "29f228760c58c6e231fe1b0b4837bc91730284d676f24d2d6ddb410b8e820f05",
     "source": "auto_discovered_cwd",
@@ -2503,7 +2503,7 @@
      "status": "failed"
     },
     "directory": "<TMP>/protected",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/protected/kriya.yaml",
     "fingerprint": null,
     "source": "auto_discovered_cwd",
@@ -2572,7 +2572,7 @@
      "status": "failed"
     },
     "directory": "<TMP>/refused",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/refused/kriya.yaml",
     "fingerprint": null,
     "source": "auto_discovered_cwd",
@@ -2641,7 +2641,7 @@
      "status": "failed"
     },
     "directory": "<TMP>/state_relative",
-    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": null,
     "fingerprint": null,
     "source": "unreadable",

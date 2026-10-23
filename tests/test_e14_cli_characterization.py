@@ -196,7 +196,7 @@ def test_the_recovery_display_names_states_and_shows_detail_only_for_unapplied_o
                                           op("PENDING", "todo.py", {"exists": False})],
                               roll_forward_refusal=None, leftover_staged_files=[])
     assessment = SimpleNamespace(workspace_path="/w", status="MANUAL_ACTION_REQUIRED", run_active=None, records=[],
-                                 evidence=[finding], unreadable_records=[], evidence_error=None)
+                                 evidence=[finding], unreadable_records=[], evidence_error=None, nested_workspace_state=(), nested_scan_complete=True)
     cli._print_recovery_assessment(assessment)
     lines = capsys.readouterr().out.splitlines()
     detail = [line for line in lines if line.strip().startswith("before ")]

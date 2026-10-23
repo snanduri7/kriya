@@ -9,6 +9,7 @@ import tempfile
 
 import pytest
 
+from kriya.context.workspace_identity import canonical_workspace
 from kriya.control.persistence import (
     approved_plan_path,
     control_state_path,
@@ -47,7 +48,7 @@ def test_save_creates_the_control_directory(workspace):
     save_control_state(workspace, state)
     path = control_state_path(workspace)
     assert os.path.isfile(path)
-    assert os.path.dirname(path) == os.path.join(workspace, ".kriya", "control")
+    assert os.path.dirname(path) == os.path.join(canonical_workspace(workspace), ".kriya", "control")      # D-001: the store's path is the canonical one, whatever spelling named it
 
 
 def test_save_overwrites_a_prior_state(workspace):

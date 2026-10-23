@@ -37,6 +37,8 @@ platform). Windows support is planned, not available (S5).
 
 Create a `kriya.yaml` configuration file in your workspace to manage model settings, paths, and egress policies.
 
+Kriya reads it from the root of the Git repository that contains the folder you run in (the folder itself when it is not inside a repository), so running from `<repo>` or from `<repo>/sub` uses the same configuration - and the same run lock and run records. A second `kriya.yaml` in a folder between the two is refused, never silently ignored: merge it into the root file or pass it with `--config`.
+
 This mirrors `kriya/config/config.py`'s actual `AppConfig` schema - there is no `llm.profiles`/`default_profile` concept; `llm` is a single flat block, and `llm_chain` is an ordered list of full fallback-model configs (each escalation attempt uses one entry directly, not a name lookup):
 
 ```yaml

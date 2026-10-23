@@ -167,6 +167,9 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         # owner: the new module; removal slice P2 unchanged)
         "kriya.cli": (3, "P2", _P2),
         "kriya.cli_commands.authority": (1, "P2", _P2),
+        # D-001: the stop-name of the repository-root search (never ascend through a Kriya-owned directory). CONTEXT may import only FOUNDATION and
+        # PLATFORM, so it cannot take kriya.config.environment.KRIYA_DIRECTORY_NAME; this is a name COMPARISON, no path is built from it.
+        "kriya.context.workspace_identity": (1, "P2", "D-001 repository-root search stop name; a comparison, not a path (CONTEXT cannot import CONFIG)"),
         "kriya.config.authority_approval": (1, "P2", _P2 + " (error-message prose naming the default ~/.kriya home; no path is built from it since D3: the home is kriya.config.environment's; P2 refines the finder or the message)"),
         "kriya.core.attempt_evidence.leak_check": (1, "P2", _P2 + " (re-tagged in D3: '.kriya/authority' is a leak-detection MARKER string searched for in model-facing blobs, not a path construction; P2 refines the finder)"),
         "kriya.mcp.invocation_approval": (1, "P2", _P2 + " (error-message prose naming the default ~/.kriya home; no path is built from it since D3: the home is kriya.config.environment's; P2 refines the finder or the message)"),

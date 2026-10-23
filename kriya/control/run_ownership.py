@@ -60,7 +60,7 @@ import uuid
 from contextlib import contextmanager
 from typing import Iterator, Optional
 
-from kriya.context.workspace_identity import ownership_metadata
+from kriya.context.workspace_identity import authority_root, ownership_metadata
 from kriya.platform.services import platform_services
 
 _LOCK_RELPATH = os.path.join(".kriya", "run.lock")
@@ -71,7 +71,8 @@ class WorkspaceLockHeldError(RuntimeError):
 
 
 def _lock_path(workspace_path: str) -> str:
-    return os.path.join(workspace_path, _LOCK_RELPATH)
+    """D-001: the lock is the AUTHORITY root's (the repository), so ``<repo>`` and ``<repo>/sub`` contend for ONE lock."""
+    return os.path.join(authority_root(workspace_path), _LOCK_RELPATH)
 
 
 def _diagnostic_payload(workspace_path: str, run_id: str) -> bytes:
@@ -123,8 +124,7 @@ def acquire_run_lock(workspace_path: str, run_id: Optional[str] = None) -> Itera
     automatically even if the process is killed before that ever runs.
     """
     run_id = run_id or _new_run_id()
-    lock_dir = os.path.join(workspace_path, ".kriya")
-    os.makedirs(lock_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(_lock_path(workspace_path)), exist_ok=True)
 
     lock = platform_services().workspace_lock
     fd = os.open(_lock_path(workspace_path), os.O_CREAT | os.O_RDWR)

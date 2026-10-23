@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass, replace
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from kriya.context.workspace_identity import authority_root
 from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, fold_name, path_identity, path_relation
 from kriya.repository.atomic_write import _atomic_write_bytes, _audit_write_file, _fsync_directory, atomic_write_file
 from kriya.repository.snapshot import file_raw_digest, raw_digest
@@ -171,7 +172,9 @@ _COMMIT_EVIDENCE_RELATIVE_DIR = os.path.join(".kriya", "control", "commits")
 
 
 def commit_evidence_dir(workspace_path: str) -> str:
-    return os.path.join(workspace_path, _COMMIT_EVIDENCE_RELATIVE_DIR)
+    """D-001: commit evidence is the workspace AUTHORITY's (its repository's), whichever directory of it the commit was made from - an unsettled
+    commit made from ``<repo>/sub`` must block ``<repo>`` and the reverse."""
+    return os.path.join(authority_root(workspace_path), _COMMIT_EVIDENCE_RELATIVE_DIR)
 
 
 def candidate_digest(writes: Iterable["StagedFileWrite"], workspace_root: Optional[str]) -> str:
@@ -211,9 +214,7 @@ def _within_workspace(workspace_path: str, path: str) -> bool:
 def _evidence_path(workspace_path: str, transaction_id: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", transaction_id):
         raise BatchCommitError(f"Invalid commit transaction id: {transaction_id!r}.")
-    return os.path.join(
-        workspace_path, _COMMIT_EVIDENCE_RELATIVE_DIR, f"{transaction_id}.json",
-    )
+    return os.path.join(commit_evidence_dir(workspace_path), f"{transaction_id}.json")
 
 
 def _persist_commit_evidence(workspace_path: str, evidence: CommitEvidence) -> str:

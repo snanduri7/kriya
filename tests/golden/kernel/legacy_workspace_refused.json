@@ -49,6 +49,8 @@
    "keys": [
     "error",
     "files",
+    "nested_scan_complete",
+    "nested_workspace_state",
     "quality_gates_passed",
     "reason_codes",
     "recovery_command",
@@ -61,6 +63,8 @@
    "values": {
     "error": null,
     "files": [],
+    "nested_scan_complete": true,
+    "nested_workspace_state": [],
     "quality_gates_passed": false,
     "reason_codes": [
      "UNCERTAIN_COMMIT_STATE"

@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from kriya.control.persistence import scan_run_records
+from kriya.control.persistence import nested_control_state, scan_run_records
 from kriya.repository.commit import find_uncertain_commit_evidence
 
 RECOVERY_COMMAND = "kriya runs recover"
@@ -29,6 +29,8 @@ REASON_RUN_RECORD_UNREADABLE = "RUN_RECORD_UNREADABLE"
 REASON_UNCERTAIN_COMMIT = "UNCERTAIN_COMMIT_STATE"
 # RDCG-B-001: a run's own result claimed success but the RunRecord that is the authority for that run ended in a different terminal state (not UNCERTAIN: that is the code above).
 REASON_RESULT_CONTRADICTS_RUN_RECORD = "RESULT_CONTRADICTS_RUN_RECORD"
+# D-001: unsettled control state exists under a sub-directory of the repository (written when that directory was its own workspace).
+REASON_NESTED_WORKSPACE_STATE = "NESTED_WORKSPACE_CONTROL_STATE"
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,9 @@ class WorkspaceCommitAssessment:
     unreadable_run_records: Tuple[Tuple[str, str], ...] = ()
     uncertain_commit_ids: Tuple[str, ...] = ()
     commit_evidence_error: Optional[str] = None
+    # D-001: ((directory, reason), ...) of unsettled/unreadable control state under a directory BELOW the authority root (the pre-authority-root layout).
+    nested_workspace_state: Tuple[Tuple[str, str], ...] = ()
+    nested_scan_complete: bool = True
 
     @property
     def safe(self) -> bool:
@@ -51,6 +56,8 @@ class WorkspaceCommitAssessment:
             codes.append(REASON_RUN_RECORD_UNREADABLE)
         if self.uncertain_commit_ids or self.commit_evidence_error:
             codes.append(REASON_UNCERTAIN_COMMIT)
+        if self.nested_workspace_state:
+            codes.append(REASON_NESTED_WORKSPACE_STATE)
         return codes
 
     def describe(self) -> str:
@@ -63,6 +70,9 @@ class WorkspaceCommitAssessment:
             parts.append(f"in-progress/uncertain commits: {', '.join(self.uncertain_commit_ids)}")
         if self.commit_evidence_error:
             parts.append(f"commit evidence unreadable: {self.commit_evidence_error}")
+        if self.nested_workspace_state:
+            parts.append("unsettled state left under a sub-directory of this repository by an earlier Kriya that treated that directory as its own workspace: "
+                         + "; ".join(f"{directory} ({reason})" for directory, reason in self.nested_workspace_state))
         return (
             "The workspace may hold a partial commit from an earlier run ("
             + "; ".join(parts)
@@ -81,6 +91,8 @@ class WorkspaceCommitAssessment:
                 {"path": path, "reason": reason} for path, reason in self.unreadable_run_records
             ],
             "uncertain_commit_ids": list(self.uncertain_commit_ids),
+            "nested_workspace_state": [{"directory": directory, "reason": reason} for directory, reason in self.nested_workspace_state],
+            "nested_scan_complete": self.nested_scan_complete,
             "error": self.commit_evidence_error,
             "recovery_command": RECOVERY_COMMAND,
             "run_id": run_id,
@@ -115,9 +127,12 @@ def assess_workspace_commit_state(
     else:
         commit_ids = tuple(item.transaction_id for item in evidence)
         evidence_error = None
+    nested, nested_complete = nested_control_state(workspace_path)
     return WorkspaceCommitAssessment(
         uncertain_run_ids=uncertain_runs,
         unreadable_run_records=unreadable,
         uncertain_commit_ids=commit_ids,
         commit_evidence_error=evidence_error,
+        nested_workspace_state=nested,
+        nested_scan_complete=nested_complete,
     )

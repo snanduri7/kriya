@@ -17,7 +17,12 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from kriya.context.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
+from kriya.context.workspace_identity import (
+    WorkspaceOwnershipError,
+    authority_root,
+    ownership_metadata,
+    validate_ownership,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +30,8 @@ CHECKPOINT_DIR = os.path.join(".kriya", "checkpoints")
 
 
 def _checkpoints_dir(workspace_path: str) -> str:
-    return os.path.join(workspace_path, CHECKPOINT_DIR)
+    """D-001: a resumable checkpoint is run-recovery state of the workspace AUTHORITY (its repository), not of the directory the run was invoked from."""
+    return os.path.join(authority_root(workspace_path), CHECKPOINT_DIR)
 
 
 def checkpoint_path(workspace_path: str, run_id: str) -> str:

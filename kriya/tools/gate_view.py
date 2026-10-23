@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 from kriya.config.environment import KRIYA_DIRECTORY_NAME
+from kriya.context.workspace_identity import find_repository_root
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.repository.snapshot import _content_identity, _stat_identity, visible_repository_paths
 from kriya.tools.containment import ContainmentSetupError
@@ -135,16 +136,9 @@ def views_directory(state_root: str) -> str:
 
 
 def is_git_work_tree(root: str) -> bool:
-    """Whether ``root`` is inside a Git work tree: a ``.git`` entry (directory, or the file of a linked work tree) at ``root`` or any
-    ancestor. Decided on the filesystem, not by spawning Git, so a directory that is no repository costs no process."""
-    directory = os.path.realpath(root)
-    while True:
-        if os.path.lexists(os.path.join(directory, ".git")):
-            return True
-        parent = os.path.dirname(directory)
-        if parent == directory:
-            return False
-        directory = parent
+    """Whether ``root`` is inside a Git work tree a gate can be a view of: the same repository search as the workspace identity's (one function, in
+    CONTEXT), which never ascends through a Kriya-owned directory."""
+    return find_repository_root(os.path.realpath(root)) is not None
 
 
 def build_gate_view(origin: str, *, state_root: str, manifest: Optional[Mapping[str, Optional[str]]] = None,

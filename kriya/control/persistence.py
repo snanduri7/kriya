@@ -29,7 +29,12 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from kriya.context.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
+from kriya.context.workspace_identity import (
+    WorkspaceOwnershipError,
+    authority_root,
+    ownership_metadata,
+    validate_ownership,
+)
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.contracts import ContractRegistry, ContractRegistryCorruptError, ContractRegistryTransitionError
 from kriya.control.control_store import write_control_file
@@ -57,7 +62,9 @@ class StaleRunRecordError(RuntimeError):
 
 
 def _control_dir(workspace_path: str) -> str:
-    return os.path.join(workspace_path, _CONTROL_DIR)
+    """D-001: the control plane (RunRecords, launches, decisions, contracts, artifacts, plans) belongs to the workspace's AUTHORITY root - its
+    repository - so ``<repo>`` and ``<repo>/sub`` read and write the same stores, never parallel ones."""
+    return os.path.join(authority_root(workspace_path), _CONTROL_DIR)
 
 
 def control_state_path(workspace_path: str) -> str:
@@ -268,6 +275,60 @@ def scan_run_records(workspace_path: str) -> RunRecordScan:
         if record is not None:
             records.append(record)
     return RunRecordScan(records, unreadable)
+
+
+_LEGACY_SCAN_PRUNED = frozenset({".git", ".kriya", "node_modules", "__pycache__", ".venv", "venv", ".tox", "target", "build", "dist", ".gradle", ".idea"})
+LEGACY_SCAN_DIRECTORY_BUDGET = 20000
+
+
+def nested_control_state(workspace_path: str) -> Tuple[Tuple[Tuple[str, str], ...], bool]:
+    """D-001: control state a build from BEFORE the authority-root rule left under a directory BELOW the workspace authority's root
+    (``<repo>/sub/.kriya/control``, written when ``<repo>/sub`` was itself the workspace). Those stores are no longer the workspace's, so an
+    unsettled commit or run record in one would make the repository look CLEAN again. Returns ((directory, reason), ...) for every such directory that
+    holds an UNSETTLED/uncertain record or one that cannot be read (fail closed), and whether the whole tree was examined (a nested repository is
+    its own authority and is not entered; the walk is bounded by LEGACY_SCAN_DIRECTORY_BUDGET directories)."""
+    from kriya.repository.commit import CommitState, load_commit_evidence
+
+    root = authority_root(workspace_path)
+    found: List[Tuple[str, str]] = []
+    visited = 0
+    complete = True
+    for directory, dirnames, _filenames in os.walk(root):
+        visited += 1
+        if visited > LEGACY_SCAN_DIRECTORY_BUDGET:
+            complete = False
+            break
+        dirnames[:] = sorted(name for name in dirnames if name not in _LEGACY_SCAN_PRUNED
+                             and not os.path.lexists(os.path.join(directory, name, ".git")))
+        if directory == root:
+            continue
+        control = os.path.join(directory, _CONTROL_DIR)
+        reasons: List[str] = []
+        runs_dir, commits_dir = os.path.join(control, _RUNS_DIRNAME), os.path.join(control, "commits")
+        for name in sorted(os.listdir(runs_dir)) if os.path.isdir(runs_dir) else []:
+            if not name.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(runs_dir, name), "rb") as handle:
+                    record = RunRecord.from_dict(json.loads(handle.read().decode("utf-8")))
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                reasons.append(f"{name}: unreadable ({type(error).__name__})")
+                continue
+            if record.commit_state_unknown:
+                reasons.append(f"{name}: unsettled commit state")
+        for name in sorted(os.listdir(commits_dir)) if os.path.isdir(commits_dir) else []:
+            if not name.endswith(".json"):
+                continue
+            try:
+                evidence = load_commit_evidence(os.path.join(commits_dir, name))
+            except Exception as error:  # pylint: disable=broad-except
+                reasons.append(f"{name}: unreadable ({type(error).__name__})")
+                continue
+            if evidence.state in (CommitState.IN_PROGRESS, CommitState.UNCERTAIN):
+                reasons.append(f"{name}: commit {evidence.state.value}")
+        if reasons:
+            found.append((directory, "; ".join(reasons)))
+    return tuple(found), complete
 
 
 def list_run_records(workspace_path: str) -> List[RunRecord]:

@@ -51,6 +51,7 @@ from kriya import __version__
 from kriya.control.persistence import (
     TRANSITION_NEEDS_REVIEW,
     complete_contract_transition,
+    nested_control_state,
     save_run_record,
     scan_run_records,
 )
@@ -211,12 +212,16 @@ class RecoveryAssessment:
     evidence: Tuple[EvidenceFinding, ...] = ()
     unreadable_records: Tuple[Tuple[str, str], ...] = ()
     evidence_error: Optional[str] = None
+    # D-001: ((directory, reason), ...) of unsettled/unreadable control state an earlier build left under a directory BELOW the repository root (it
+    # treated that directory as its own workspace). Not in this workspace's stores, so recovery cannot settle it: it needs a person.
+    nested_workspace_state: Tuple[Tuple[str, str], ...] = ()
+    nested_scan_complete: bool = True
 
     @property
     def status(self) -> str:
         if self.run_active is not None:
             return STATUS_RUN_ACTIVE
-        if self.unreadable_records or self.evidence_error or any(
+        if self.unreadable_records or self.evidence_error or self.nested_workspace_state or any(
             item.outcome == OUTCOME_MANUAL
             or (item.outcome == OUTCOME_PARTIAL and item.roll_forward_refusal is not None)
             for item in self.evidence
@@ -238,6 +243,8 @@ class RecoveryAssessment:
                 {"path": path, "reason": reason} for path, reason in self.unreadable_records
             ],
             "evidence_error": self.evidence_error,
+            "nested_workspace_state": [{"directory": directory, "reason": reason} for directory, reason in self.nested_workspace_state],
+            "nested_scan_complete": self.nested_scan_complete,
         }
 
 
@@ -535,10 +542,11 @@ def _assess_locked(workspace: str) -> RecoveryAssessment:
         _record_finding(record, by_id, evidence_error)
         for record in scan.records if record.needs_recovery
     )
+    nested, nested_complete = nested_control_state(workspace)
     return RecoveryAssessment(
         workspace_path=workspace, records=records, evidence=evidence,
         unreadable_records=tuple((item.path, item.reason) for item in scan.unreadable),
-        evidence_error=evidence_error,
+        evidence_error=evidence_error, nested_workspace_state=nested, nested_scan_complete=nested_complete,
     )
 
 
