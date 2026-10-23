@@ -1052,7 +1052,7 @@
       "additionalProperties": false
     },
     "DecideApprovalRequest": {
-      "description": "Review decision (GUI final): ONE human decision for the change review that is pending in a launch Kriya recorded. It carries the identities Kriya gave the pending review (launch id, review id, candidate digest) and nothing else - no option can approve 'whatever is current', approve always, or widen Kriya's authority. Kriya (`launch-decision`) validates every identity against its durable state and refuses a stale, replayed, foreign or late request.",
+      "description": "Review decision (GUI final): ONE human decision for the change review that is pending in a launch Kriya recorded. It carries the identities Kriya gave the pending review (launch id, review id, candidate digest) and nothing else - no option can approve 'whatever is current', approve always, or widen Kriya's authority. the waiting Kriya process (over the run's private review channel) validates every identity against the live review and refuses a stale, replayed, foreign or late request.",
       "type": "object",
       "required": [
         "workspace",
@@ -1137,7 +1137,7 @@
       "additionalProperties": false
     },
     "DecideRuntimeCommandRequest": {
-      "description": "Runtime-command decision (GUI-RUNTIME-COMMAND-APPROVAL-001): ONE human decision for the RUNTIME-COMMAND review that is pending in a launch Kriya recorded. It carries only the identities Kriya gave the pending review (launch id, review id, command fingerprint) and the decision - never a command, argument, directory or environment value, so a renderer cannot approve a command Kriya did not propose, change what runs, or approve another run or unit. The host re-proves the review through `runtime_command.review`, shows a native confirmation built from that answer, and only then asks Kriya (`launch-decision --kind runtime_command`), which validates every identity against its durable state.",
+      "description": "Runtime-command decision (GUI-RUNTIME-COMMAND-APPROVAL-001): ONE human decision for the RUNTIME-COMMAND review that is pending in a launch Kriya recorded. It carries only the identities Kriya gave the pending review (launch id, review id, command fingerprint) and the decision - never a command, argument, directory or environment value, so a renderer cannot approve a command Kriya did not propose, change what runs, or approve another run or unit. The host re-proves the review through `runtime_command.review`, shows a native confirmation built from that answer, and only then relays it to the waiting Kriya process over the run's private review channel, which validates every identity against the live review.",
       "type": "object",
       "required": [
         "workspace",

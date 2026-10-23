@@ -5,7 +5,6 @@
 import { describe, expect, it } from 'vitest';
 import { DIALOG_COMMANDS_MAX, RuntimeCommandHost, commandsAreReviewable, confirmationDialog, dialogCommandLine, isRunResponse, CONFIRM_BUTTONS, CONFIRM_RUN_INDEX, type RuntimeCommandDeps } from '../src/main/runtime_command_host';
 import type { ChannelAnswer, ChannelDecisionRequest } from '../src/main/review_channel';
-import { buildRuntimeCommandDecisionArgv } from '../src/main/kriya_argv';
 import { IPC_CHANNELS } from '../src/main/ipc_contract';
 
 const WS = '/Users/x/project';
@@ -30,12 +29,7 @@ function harness(over: Partial<RuntimeCommandDeps> = {}, answer: ChannelAnswer |
   return { host: new RuntimeCommandHost(deps), calls, order, shown: () => shown };
 }
 
-describe('the runtime-command decision command line', () => {
-  it('has exactly one shape, ends with --kind runtime_command, and carries no command text', () => {
-    const argv = buildRuntimeCommandDecisionArgv({ workspace: WS, launch_id: ID, review_id: REVIEW, command_fingerprint: FP, decision: 'reject' });
-    expect(argv).toEqual(['launch-decision', '--launch-id', ID, '--review-id', REVIEW, '--candidate-digest', FP, '--decision', 'reject', '--kind', 'runtime_command']);
-    expect(argv.join(' ')).not.toMatch(/(^| )(-y|--yes|--always|--auto|--autonomy|--mode)( |$)/);
-  });
+describe('the runtime-command decision channel', () => {
   it('has its own channel, distinct from the change review', () => {
     expect(IPC_CHANNELS.decideRuntimeCommand).toBe('kriya:host:execution:decide-runtime');
     expect(IPC_CHANNELS.decideRuntimeCommand).not.toBe(IPC_CHANNELS.decideApproval);

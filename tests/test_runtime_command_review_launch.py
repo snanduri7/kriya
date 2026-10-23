@@ -174,7 +174,7 @@ def test_a_runtime_review_expires_a_pending_change_review_into_the_history(ws):
         session.finish(0, None, None)
 
 
-def test_the_retired_cli_action_answers_channel_required_for_either_kind_and_the_channel_decides_the_runtime_review(ws, monkeypatch):
+def test_there_is_no_cli_action_for_either_kind_and_the_channel_decides_the_runtime_review(ws, monkeypatch):
     monkeypatch.chdir(ws)
 
     def scenario(canonical, pending):
@@ -185,8 +185,8 @@ def test_the_retired_cli_action_answers_channel_required_for_either_kind_and_the
         return wrong, right, _decide(canonical, pending, "approve")
     _canonical, out = _run_runtime(ws, scenario)
     wrong, right, channel = out["scenario"]
-    assert wrong.exit_code == 2 and json.loads(wrong.output)["code"] == "CHANNEL_REQUIRED"
-    assert right.exit_code == 2 and json.loads(right.output)["code"] == "CHANNEL_REQUIRED"
+    assert wrong.exit_code == 2 and "No such command" in wrong.output
+    assert right.exit_code == 2 and "No such command" in right.output
     assert channel["accepted"] is True and out["decision"].approved is True
 
 

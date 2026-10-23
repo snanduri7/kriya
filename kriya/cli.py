@@ -225,29 +225,6 @@ def kup_stdio(ctx: click.Context) -> None:
     sys.exit(run(ctx.obj.get('config_path'), ctx.obj.get('trust_file')))
 
 
-@main.command(name='launch-decision', hidden=True)
-@click.option('--launch-id', required=True, help='The desktop launch (its run id).')
-@click.option('--review-id', required=True, help='The pending review being decided (from launch.status).')
-@click.option('--candidate-digest', required=True, help='The digest of the change under review (from launch.status).')
-@click.option('--decision', required=True, type=click.Choice(['approve', 'reject']))
-@click.option('--kind', default='change_approval', type=click.Choice(['change_approval', 'runtime_command']), help='Which review this decision is for; refused for a review of the other kind.')
-def launch_decision(launch_id: str, review_id: str, candidate_digest: str, decision: str, kind: str) -> None:
-    """The typed approval action of the desktop host: record ONE human decision for the change review that is pending in this folder's launch.
-
-    The folder is the working directory (like `generate`). Prints one JSON object on stdout; exit 0 only when the decision was accepted. The waiting
-    `generate --launch-id` process records the decision durably and only then continues (kriya/control/launch_approval.py)."""
-    from kriya.application import ApprovalRefused, ApprovalService, ReviewDecisionRequest
-    from kriya.context import RequestContext
-
-    try:
-        result = ApprovalService().decide(RequestContext.local(os.getcwd(), request_id=f"launch-decision-{launch_id}"),
-                                          ReviewDecisionRequest(launch_id, review_id, candidate_digest, decision, kind))
-    except ApprovalRefused as refusal:
-        click.echo(json.dumps({"accepted": False, "code": refusal.code, "message": refusal.message}, sort_keys=True))
-        sys.exit(2)
-    click.echo(json.dumps(result, sort_keys=True))
-
-
 @main.command()
 @click.option('--json', 'as_json', is_flag=True, help='Machine-readable identity (stdout carries only the JSON).')
 def version(as_json: bool) -> None:
@@ -2868,7 +2845,7 @@ def _approval_decision(files: List[Dict[str, str]], reason: str, yes: bool) -> A
     launch (the launch refuses it, and this returns before consulting it). Outside a launch it is the terminal behaviour (a plain bool: True approves, False is the person's no); anything but an explicit y/n (end of file / closed stdin, a bare Enter, an intercepted Ctrl-C) is UNAVAILABLE, never either."""
     from kriya.control.launch import (
         note_approval_required,  # GUI M7: recorded when a desktop launch reaches a human decision it cannot take
-        request_change_approval,  # GUI final: a desktop launch's CHANGE review, answered by `kriya launch-decision`
+        request_change_approval,  # GUI final: a desktop launch's CHANGE review, answered over the launch's private review channel (D2 M2)
     )
     awaiting = request_change_approval(files, reason)
     if awaiting is not None:

@@ -2,7 +2,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApprovalHost, changeIsReviewable, type ApprovalDeps } from '../src/main/approval_host';
 import type { ChannelAnswer, ChannelDecisionRequest } from '../src/main/review_channel';
-import { buildLaunchDecisionArgv, isLaunchDecisionArgv, argvIsAllowed } from '../src/main/kriya_argv';
 
 const WS = '/Users/x/project';
 const ID = '20261010T101010-abcdef01';
@@ -22,23 +21,6 @@ function harness(answer: ChannelAnswer | (() => Promise<ChannelAnswer>) = ACCEPT
   };
   return { host: new ApprovalHost(deps), calls };
 }
-
-describe('the decision command line (retired in D2 M2 slice 4 with the CLI action)', () => {
-  it('has exactly one shape and nothing that could approve more than the one review', () => {
-    const argv = buildLaunchDecisionArgv({ workspace: WS, launch_id: ID, review_id: REVIEW, candidate_digest: DIGEST, decision: 'reject' });
-    expect(argv).toEqual(['launch-decision', '--launch-id', ID, '--review-id', REVIEW, '--candidate-digest', DIGEST, '--decision', 'reject']);
-    expect(argv.join(' ')).not.toMatch(/(^| )(-y|--yes|--always|--auto|--autonomy|--mode)( |$)/);
-    expect(argv).not.toContain(WS); // the workspace is the working directory, never an argument
-    expect(argvIsAllowed(argv)).toBe(true);
-  });
-  it('is recognised only in that exact shape', () => {
-    const argv = buildLaunchDecisionArgv({ workspace: WS, launch_id: ID, review_id: REVIEW, candidate_digest: DIGEST, decision: 'approve' });
-    for (const bad of [[...argv, '-y'], [...argv, '--yes'], argv.slice(0, -1), ['launch-decision', ...argv.slice(1, 8), 'maybe'], ['generate', '--yes'], [...argv.slice(0, 2), '../x', ...argv.slice(3)]]) {
-      expect(isLaunchDecisionArgv(bad), bad.join(' ')).toBe(false);
-      expect(argvIsAllowed(bad), bad.join(' ')).toBe(false);
-    }
-  });
-});
 
 describe('ApprovalHost.decide', () => {
   it('relays one valid decision over the run\'s channel, as a change_approval, with no capability of its own, and reports the waiter\'s answer', async () => {

@@ -28,7 +28,6 @@ class LocalKriyaClient:
     # The service attributes (KriyaClient): the composed services themselves, built on first use.
     projects = property(lambda self: self._services.projects)
     runs = property(lambda self: self._services.runs)
-    approvals = property(lambda self: self._services.approvals)
     reviews = property(lambda self: self._services.reviews)
     configuration = property(lambda self: self._services.configuration)
     models = property(lambda self: self._services.models)

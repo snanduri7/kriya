@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, Optional
 from kriya.config.service import ConfigService
 
 if TYPE_CHECKING:  # annotations only: each service module is imported when the service is first used
-    from kriya.application.approval import ApprovalService
     from kriya.application.catalog import SkillCatalogService, ToolCatalogService
     from kriya.application.configuration import ConfigurationService
     from kriya.application.evidence import EvidenceService
@@ -31,7 +30,7 @@ if TYPE_CHECKING:  # annotations only: each service module is imported when the 
     from kriya.application.review import ReviewService
     from kriya.application.run import RunService
 
-SERVICE_NAMES = ("projects", "runs", "approvals", "reviews", "configuration", "models", "skills", "tools", "evidence", "history", "health")
+SERVICE_NAMES = ("projects", "runs", "reviews", "configuration", "models", "skills", "tools", "evidence", "history", "health")
 
 
 class ApplicationServices:
@@ -50,11 +49,6 @@ class ApplicationServices:
     def runs(self) -> "RunService":
         from kriya.application.run import RunService
         return RunService(self._config)
-
-    @cached_property
-    def approvals(self) -> "ApprovalService":
-        from kriya.application.approval import ApprovalService
-        return ApprovalService()
 
     @cached_property
     def reviews(self) -> "ReviewService":

@@ -84,9 +84,9 @@ public class Launch {
     /**
      * The review the run is waiting on (or last waited on): a CHANGE review (the exact
      * candidate, Kriya's reviewer text) or a RUNTIME-COMMAND review (the exact commands Kriya
-     * asks to run), discriminated by `kind`. Only a PENDING review can be decided, by the typed
-     * action for its own kind; Kriya's `launch-decision` action and the waiting process record
-     * the decision BEFORE the run continues.
+     * asks to run), discriminated by `kind`. Only a PENDING review can be decided, over the
+     * run's private review channel for its own kind; the waiting process records the decision
+     * BEFORE the run continues.
      */
     @JsonProperty("pending_approval")
     public WorkspaceSchema getPendingApproval() { return pendingApproval; }

@@ -341,7 +341,7 @@ def approval_matches(decision: RuntimeCommandDecision, about_to_run: RuntimeComm
 
 REFUSAL_CODES = ("INVALID_REQUEST", "LAUNCH_NOT_FOUND", "LAUNCH_RECORD_UNREADABLE", "WRONG_WORKSPACE", "LAUNCH_ENDED", "LAUNCH_NOT_ACTIVE", "NOT_PENDING",
                  "STALE_REVIEW", "ALREADY_DECIDED", "REVIEW_EXPIRED", "DECISION_NOT_RECORDED", "WRONG_REVIEW_KIND",
-                 "CAPABILITY_MISMATCH", "CHANNEL_REQUIRED")  # D2 M2: the waiter's refusal of a decision that does not carry the live capability; the retired file action
+                 "CAPABILITY_MISMATCH")  # D2 M2: the waiter's refusal of a decision that does not carry the live capability
 # The two subjects a launch can hold for a human. A decision names the kind it is for, and `decide` refuses it for a review of the other kind: the change-approval action can never
 # approve a runtime-command review, nor the reverse.
 KIND_CHANGE, KIND_RUNTIME = "change_approval", "runtime_command"

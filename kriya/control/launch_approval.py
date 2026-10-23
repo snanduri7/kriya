@@ -194,9 +194,3 @@ async def _wait(session: Any, review_id: str, digest: str) -> _owner.ApprovalOut
     if outcome.kind == OUTCOME_EOF:
         return _unavailable(session, review_id, "host-gone", _owner.APPROVAL_REVIEW_EXPIRED)
     return _unavailable(session, review_id, "channel-failed", _owner.APPROVAL_CHANNEL_UNAVAILABLE)  # the channel failed closed (a protocol violation)
-
-
-def decide(workspace_path: str, launch_id: str, review_id: str, candidate_digest_value: str, decision: str, kind: str = KIND_CHANGE) -> Dict[str, Any]:
-    """RETIRED as an approval path (D2 M2): a decision is accepted only over the running launch's private review channel, so this action - which used to write a
-    decision file the waiter honoured - records nothing and refuses with the typed ``CHANNEL_REQUIRED``. Deleted with ``kriya launch-decision`` once every caller is converted."""
-    raise ApprovalRefused("CHANNEL_REQUIRED", "a review is decided only over the running launch's private review channel; this action no longer records a decision")

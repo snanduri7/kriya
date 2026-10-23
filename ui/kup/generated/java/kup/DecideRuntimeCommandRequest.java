@@ -11,8 +11,9 @@ import com.fasterxml.jackson.annotation.*;
  * the decision - never a command, argument, directory or environment value, so a renderer
  * cannot approve a command Kriya did not propose, change what runs, or approve another run
  * or unit. The host re-proves the review through `runtime_command.review`, shows a native
- * confirmation built from that answer, and only then asks Kriya (`launch-decision --kind
- * runtime_command`), which validates every identity against its durable state.
+ * confirmation built from that answer, and only then relays it to the waiting Kriya process
+ * over the run's private review channel, which validates every identity against the live
+ * review.
  */
 public class DecideRuntimeCommandRequest {
     // Added by generate.mjs: unknown properties are preserved verbatim (P-24).

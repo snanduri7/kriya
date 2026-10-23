@@ -16,7 +16,7 @@ callback - after re-proving that it is what the review is bound to:
 3. every file's text re-hashes to the ``diff_sha256`` the review recorded, in the same order, and the recomputed ``candidate_digest`` equals the recorded one.
 
 Any failure is a typed refusal and nothing is served (a diff that cannot be proved to be the reviewed one is never shown as if it were). Read-only: it approves nothing;
-the decision is ``kriya launch-decision``, which still refuses a review id / digest that is no longer the pending one (``STALE_REVIEW``).
+the decision is taken over the launch's private review channel (D2 M2), where the waiting process refuses a review id / digest that is no longer the pending one (``STALE_REVIEW``).
 """
 from __future__ import annotations
 

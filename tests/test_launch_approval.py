@@ -395,7 +395,8 @@ def test_a_planted_file_before_the_real_decision_neither_approves_nor_blocks_the
     assert planted["decision"] == "reject", "the audit write never overwrites a document that is already there; it is output only and changes nothing"
 
 
-def test_a_workload_cannot_reach_the_review_through_the_retired_cli_action(ws, monkeypatch):
+def test_a_workload_has_no_cli_action_that_reaches_the_review(ws, monkeypatch):
+    """`kriya launch-decision` is deleted (D2 M2): invoking it is a usage error that records nothing, so the only decision is the one over the channel."""
     monkeypatch.chdir(ws)
 
     def scenario(host, pending):
@@ -405,7 +406,7 @@ def test_a_workload_cannot_reach_the_review_through_the_retired_cli_action(ws, m
 
     canonical, outcome = _run(ws, scenario)
     forged, real = outcome["scenario"]
-    assert forged.exit_code == 2 and json.loads(forged.output) == {"accepted": False, "code": "CHANNEL_REQUIRED", "message": json.loads(forged.output)["message"]}
+    assert forged.exit_code == 2 and "No such command" in forged.output
     assert real["accepted"] is True and outcome["approved"] == ApprovalOutcome.decline()  # the forged approve changed nothing; the person's real reject stood
     audit = json.loads(Path(launch_review_decision_path(canonical, LID, outcome["record_at_resume"]["review_id"])).read_text())
     assert audit["decision"] == "reject", "the only document at the decision's name is the audit of the REAL decision"
@@ -509,18 +510,18 @@ def test_launch_status_exposes_the_pending_review_to_the_desktop_but_never_the_c
     assert seen["capability"] not in seen["view"]
 
 
-def test_the_cli_action_is_retired_it_answers_a_typed_channel_required_refusal_and_exits_non_zero(ws, monkeypatch):
-    monkeypatch.chdir(ws)
-    runner = CliRunner()
-    result = runner.invoke(main, ["launch-decision", "--launch-id", LID, "--review-id", "ra-" + "1" * 24, "--candidate-digest", "sha256:" + "2" * 64, "--decision", "approve"])
-    answer = json.loads(result.output)
-    assert result.exit_code == 2 and answer["accepted"] is False and answer["code"] == "CHANNEL_REQUIRED"
+def test_the_decision_action_is_deleted_everywhere_a_review_could_once_be_decided_from_outside_the_channel():
+    """Structural (D2 M2 slice 4): no CLI command, no application service, no client-contract entry, no authority-port member and no owner function remains."""
+    import glob
 
-
-def test_the_cli_action_has_no_option_that_could_broaden_authority():
-    names = {param.name for param in main.commands["launch-decision"].params}
-    # `kind` only NARROWS a decision to one subject (change or runtime command; refused for the other): it cannot broaden anything
-    assert names == {"launch_id", "review_id", "candidate_digest", "decision", "kind"}, "no -y, no always-approve, no autonomy selector"
+    from kriya.application.compose import SERVICE_NAMES
+    from kriya.client.contract import PORTS
+    from kriya.policy.authority import AuthorityPort
+    assert "launch-decision" not in main.commands and not hasattr(approval, "decide") and not hasattr(AuthorityPort, "decide_review")
+    assert "approvals" not in SERVICE_NAMES and "approvals" not in PORTS
+    assert not os.path.exists("kriya/application/approval.py")
+    leftovers = [p for p in glob.glob("kriya/**/*.py", recursive=True) if "launch-decision" in open(p, encoding="utf-8").read() and "docs" not in p]
+    assert leftovers == [], leftovers
 
 
 def test_inside_a_launch_a_change_is_held_for_review_and_everything_else_is_unavailable_synchronously(ws):

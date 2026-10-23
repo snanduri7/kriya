@@ -1,25 +1,21 @@
-"""RunService and ApprovalService (full modularization, slice B3): the service answers are the KUP/CLI answers, on success and refusal.
+"""RunService (full modularization, slice B3; its ApprovalService was deleted in D2 M2 slice 4 with the file-based decision action): the service answers are the KUP/CLI answers, on success and refusal.
 
 The envelopes themselves are pinned byte for byte by tests/test_application_write_services.py (goldens written before the extraction);
 this file pins the service boundary: what each method returns or raises is exactly what the adapter serializes, ``start`` composes the
 run from the names the CLI hands it (the documented ``kriya.cli`` patch points) in the CLI's construction order, ``mark_in_progress``
-really writes its trace row (its broad catch must not hide a coding error), and ``ApprovalService.decide`` reaches the authority's own
+really writes its trace row (its broad catch must not hide a coding error), (its decide tests moved to the channel tests)
 stale-candidate refusal with the reviewer's identities, never a substituted one.
 """
 from __future__ import annotations
 
-import asyncio
 import sqlite3
 from typing import Any, Dict, List
 
 import pytest
-from _review_channel_host import attach_review_channel, channel_decide
+from _review_channel_host import attach_review_channel
 
 from kriya.application import (
     ApplicationRefusal,
-    ApprovalRefused,
-    ApprovalService,
-    ReviewDecisionRequest,
     RunArtifacts,
     RunService,
     RunServiceDeps,
@@ -27,14 +23,10 @@ from kriya.application import (
 from kriya.config import AppConfig
 from kriya.context import RequestContext
 from kriya.context.workspace_identity import canonical_workspace, workspace_identity
-from kriya.control import launch as launch_module
 from kriya.control.launch import LaunchSession
-from kriya.control.persistence import load_launch_record
-from kriya.control.run_coordinator import begin_mutating_run
 from kriya.core.state_paths import trace_db_path
 from kriya.kup import execution
 from kriya.kup.cli_ops import run_kup_operation
-from kriya.policy.approval import ApprovalOutcome
 
 LID = "20261010T101010-abcdef01"
 TOOLS = [{"tool": "git", "available": True, "path": "/usr/bin/git", "checked": "ran --version"}]
@@ -167,51 +159,3 @@ def test_mark_in_progress_writes_the_in_progress_row_and_a_trace_failure_is_only
     assert "Failed to mark run 'run-456' in_progress: disk gone" in caplog.text
 
 
-# ------------------------------------------------------------------ ApprovalService.decide
-
-def _held(ws: str, scenario):
-    session = LaunchSession(ws, workspace_identity(ws), LID, "goal", {"ready": True}, {})
-    attach_review_channel(session)
-    session.open()
-    out: Dict[str, Any] = {}
-
-    async def main_():
-        task = asyncio.ensure_future(launch_module.request_change_approval(FILES, "review"))
-        for _ in range(500):
-            record = load_launch_record(ws, LID)
-            if record and record.get("pending_approval"):
-                break
-            await asyncio.sleep(0.01)
-        out["scenario"] = await asyncio.to_thread(scenario, record["pending_approval"])
-        out["approved"] = await asyncio.wait_for(task, 20)
-
-    try:
-        with begin_mutating_run(ws):
-            asyncio.run(main_())
-    finally:
-        session.finish(0, None, None)
-    return out
-
-
-def test_the_service_decide_is_the_retired_file_action_and_the_review_is_decided_over_the_channel(ws):
-    """D2 M2: ApprovalService.decide reaches the owner's retired action, which records nothing and answers the typed CHANNEL_REQUIRED - for a valid request as for a stale one.
-    The review is decided over the launch's private channel (deleted with `kriya launch-decision` in slice 4)."""
-    def scenario(pending):
-        service, ctx = ApprovalService(), _ctx(ws)
-        codes = []
-        for digest, review in (("sha256:" + "0" * 64, pending["review_id"]), (pending["candidate_digest"], pending["review_id"])):
-            with pytest.raises(ApprovalRefused) as caught:
-                service.decide(ctx, ReviewDecisionRequest(LID, review, digest, "approve", "change_approval"))
-            codes.append(caught.value.code)
-        return codes, channel_decide(str(ws), LID, pending["review_id"], pending["candidate_digest"], "approve")
-
-    out = _held(ws, scenario)
-    codes, accepted = out["scenario"]
-    assert codes == ["CHANNEL_REQUIRED", "CHANNEL_REQUIRED"], "the action no longer decides anything"
-    assert accepted["accepted"] is True and accepted["decision"] == "approve" and out["approved"] == ApprovalOutcome.approve()
-
-
-def test_a_decision_needs_a_workspace():
-    with pytest.raises(ValueError):
-        ApprovalService().decide(RequestContext.local(None), ReviewDecisionRequest(LID, "ra-" + "0" * 24, "sha256:" + "0" * 64, "approve",
-                                                                                   "change_approval"))

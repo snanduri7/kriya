@@ -9,8 +9,8 @@ import java.util.List;
  * data of `runtime_command.review`: the EXACT commands a runtime-command review asks the
  * person to allow Kriya to run, served only after Kriya re-proved them against the command
  * fingerprint the review is bound to (working directory, commands in order, input channel,
- * stdin digest). Approval-scoped and read-only: it approves nothing; the decision is `kriya
- * launch-decision --kind runtime_command`.
+ * stdin digest). Approval-scoped and read-only: it approves nothing; the decision is taken
+ * over the run's private review channel.
  */
 public class RuntimeCommandReview {
     // Added by generate.mjs: unknown properties are preserved verbatim (P-24).

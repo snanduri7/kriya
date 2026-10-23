@@ -8,9 +8,9 @@ import com.fasterxml.jackson.annotation.*;
  * Review decision (GUI final): ONE human decision for the change review that is pending in
  * a launch Kriya recorded. It carries the identities Kriya gave the pending review (launch
  * id, review id, candidate digest) and nothing else - no option can approve 'whatever is
- * current', approve always, or widen Kriya's authority. Kriya (`launch-decision`) validates
- * every identity against its durable state and refuses a stale, replayed, foreign or late
- * request.
+ * current', approve always, or widen Kriya's authority. the waiting Kriya process (over the
+ * run's private review channel) validates every identity against the live review and
+ * refuses a stale, replayed, foreign or late request.
  */
 public class DecideApprovalRequest {
     // Added by generate.mjs: unknown properties are preserved verbatim (P-24).

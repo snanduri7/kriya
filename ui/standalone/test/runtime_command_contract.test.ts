@@ -1,7 +1,8 @@
 /** GUI-RUNTIME-COMMAND-APPROVAL-001, host boundary grammar: a renderer can name ONLY identities and a decision for a runtime-command review - never a command, argument, directory,
  * environment value or stdin - and the runtime decision has its own closed argv, separate from the change decision (which can never carry `--kind`). */
 import { describe, expect, it } from 'vitest';
-import { argvIsAllowed, buildLaunchDecisionArgv, buildRuntimeCommandDecisionArgv, isLaunchDecisionArgv, isRuntimeCommandDecisionArgv } from '../src/main/kriya_argv';
+import * as argvModule from '../src/main/kriya_argv';
+import { argvIsAllowed } from '../src/main/kriya_argv';
 import { validateDecideApproval, validateDecideRuntimeCommand, validateKupRequest } from '../src/main/ipc_contract';
 
 const LID = '20261010T101010-abcdef01';
@@ -38,28 +39,17 @@ describe('runtime_command.review is a read with exactly three identities', () =>
   });
 });
 
-describe('the runtime decision has its own closed argv', () => {
-  const request = { workspace: ok.workspace, launch_id: LID, review_id: RID, command_fingerprint: FP, decision: 'approve' as const };
-  it('is exactly eleven tokens, ends with --kind runtime_command and carries the fingerprint as the digest', () => {
-    const argv = buildRuntimeCommandDecisionArgv(request);
-    expect(argv).toEqual(['launch-decision', '--launch-id', LID, '--review-id', RID, '--candidate-digest', FP, '--decision', 'approve', '--kind', 'runtime_command']);
-    expect(isRuntimeCommandDecisionArgv(argv)).toBe(true);
-    expect(argvIsAllowed(argv)).toBe(true);
+describe('no decision command line exists any more (D2 M2: a review is decided only over the run\'s private channel)', () => {
+  const lines: string[][] = [
+    ['launch-decision', '--launch-id', LID, '--review-id', RID, '--candidate-digest', FP, '--decision', 'approve'],
+    ['launch-decision', '--launch-id', LID, '--review-id', RID, '--candidate-digest', FP, '--decision', 'approve', '--kind', 'runtime_command'],
+    ['launch-decision', '--launch-id', LID, '--review-id', RID, '--candidate-digest', FP, '--decision', 'reject'],
+  ];
+  it('the argv grammar refuses every launch-decision shape, in any spelling', () => {
+    for (const argv of lines) expect(argvIsAllowed(argv), argv.join(' ')).toBe(false);
+    expect(argvIsAllowed(['launch-decision'])).toBe(false);
   });
-  it('the change decision argv never carries --kind and is not the runtime argv', () => {
-    const change = buildLaunchDecisionArgv({ workspace: ok.workspace, launch_id: LID, review_id: RID, candidate_digest: FP, decision: 'approve' });
-    expect(change).toHaveLength(9);
-    expect(change).not.toContain('--kind');
-    expect(isRuntimeCommandDecisionArgv(change)).toBe(false);
-    expect(isLaunchDecisionArgv(buildRuntimeCommandDecisionArgv(request))).toBe(false);           // eleven tokens are not the nine-token change grammar
-  });
-  it.each([
-    ['another kind', (a: string[]) => [...a.slice(0, 10), 'change_approval']], ['an extra option', (a: string[]) => [...a, '--yes']], ['a different subcommand', (a: string[]) => ['launch', ...a.slice(1)]],
-    ['an injected token before --kind', (a: string[]) => [...a.slice(0, 9), '--x', '--kind', 'runtime_command']], ['a malformed fingerprint', (a: string[]) => [...a.slice(0, 6), 'sha256:zz', ...a.slice(7)]],
-    ['a missing kind', (a: string[]) => a.slice(0, 9)], ['a decision outside the grammar', (a: string[]) => [...a.slice(0, 8), 'always', ...a.slice(9)]],
-  ])('refuses %s', (_name, mutate) => {
-    const argv = mutate(buildRuntimeCommandDecisionArgv(request));
-    expect(isRuntimeCommandDecisionArgv(argv)).toBe(false);
-    if (argv.length !== 9) expect(argvIsAllowed(argv)).toBe(false);
+  it('the module no longer exports a builder or a recogniser for one', () => {
+    for (const name of ['buildLaunchDecisionArgv', 'buildRuntimeCommandDecisionArgv', 'isLaunchDecisionArgv', 'isRuntimeCommandDecisionArgv']) expect(argvModule, name).not.toHaveProperty(name);
   });
 });

@@ -39,8 +39,6 @@ _EXPORTS = {
     "RunArtifacts": "kriya.application.run",
     "RunHandle": "kriya.application.run",
     "KNOWLEDGE_POLICY": "kriya.application.run",
-    "ApprovalService": "kriya.application.approval",
-    "ReviewDecisionRequest": "kriya.application.approval",
     "ApprovalRefused": "kriya.application.approval",
     "ToolVisibility": "kriya.application.run",
     "ProbeEndpoint": "kriya.application.model",

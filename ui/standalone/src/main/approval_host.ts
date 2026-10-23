@@ -5,7 +5,7 @@
  * What this module IS: a narrow proxy. It takes ONE typed request {workspace, launch_id, review_id, candidate_digest, decision}, checks it against its closed
  * grammar and against the folder currently open in this host, relays the decision to the WAITING Kriya process over the run's private review channel
  * (review_channel.ts: the capability that process drew for this exact review is echoed back; the renderer never holds it) and reports Kriya's own answer.
- * D2 M2: there is no longer a separate `launch-decision` process and no decision file the host or a workload could write: the waiter's `result` frame
+ * D2 M2: there is no longer a separate decision process and no decision file the host or a workload could write: the waiter's `result` frame
  * is the only proof a decision was accepted.
  *
  * One refusal it DOES make of its own: it will not forward an APPROVE unless Kriya (`change_approval.review`, read through the injected `reviewable`) can still prove the exact

@@ -55,10 +55,6 @@ class RunsPort(Protocol):
     def mark_in_progress(self, ctx: "RequestContext", cfg: "AppConfig", run_id: Optional[str], goal: str) -> None: ...
 
 
-class ApprovalsPort(Protocol):
-    def decide(self, ctx: "RequestContext", request: "_application.ReviewDecisionRequest") -> Dict[str, Any]: ...
-
-
 class ReviewsPort(Protocol):
     def change_review(self, ctx: "RequestContext", workspace: str, launch_id: str, review_id: str) -> Dict[str, Any]: ...
     def runtime_command_review(self, ctx: "RequestContext", workspace: str, launch_id: str, review_id: str) -> Dict[str, Any]: ...
@@ -120,7 +116,7 @@ class HealthPort(Protocol):
 
 
 PORTS: Mapping[str, type] = {
-    "projects": ProjectsPort, "runs": RunsPort, "approvals": ApprovalsPort, "reviews": ReviewsPort, "configuration": ConfigurationPort,
+    "projects": ProjectsPort, "runs": RunsPort, "reviews": ReviewsPort, "configuration": ConfigurationPort,
     "models": ModelsPort, "skills": SkillsPort, "tools": ToolsPort, "evidence": EvidencePort, "history": HistoryPort, "health": HealthPort,
 }
 
@@ -146,7 +142,6 @@ class KriyaClient(Protocol):
 
     projects: ProjectsPort
     runs: RunsPort
-    approvals: ApprovalsPort
     reviews: ReviewsPort
     configuration: ConfigurationPort
     models: ModelsPort
@@ -159,5 +154,5 @@ class KriyaClient(Protocol):
     def context(self, *, workspace_root: Optional[str], request_id: Optional[str] = None) -> "RequestContext": ...
 
 
-__all__ = ["ApprovalsPort", "ConfigurationPort", "EvidencePort", "HealthPort", "HistoryPort", "KriyaClient", "LOCAL_ONLY_PARAMETERS",
+__all__ = ["ConfigurationPort", "EvidencePort", "HealthPort", "HistoryPort", "KriyaClient", "LOCAL_ONLY_PARAMETERS",
            "ModelsPort", "PORTS", "ProjectsPort", "ReviewsPort", "RunsPort", "SkillsPort", "ToolsPort"]

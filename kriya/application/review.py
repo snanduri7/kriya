@@ -21,8 +21,8 @@ re-computes from the recorded working directory, commands in order, input channe
 in the record, so none can be served. S2d (OI-153 (c)): commands that carry a secret the redaction owner recognises are not served (a review
 recorded raw by an earlier Kriya; S2d records none) - raw they disclose it, redacted they are not what the fingerprint binds.
 
-Any failure is a typed refusal and nothing is served. Read-only: it approves nothing; the decision is ``kriya launch-decision``
-(``ApprovalService.decide``), which still refuses a review id / digest that is no longer the pending one (``STALE_REVIEW``). The adapter
+Any failure is a typed refusal and nothing is served. Read-only: it approves nothing; the decision is taken over the launch's private review channel (D2 M2),
+where the waiting process refuses a review id / digest that is no longer the pending one (``STALE_REVIEW``). The adapter
 validates the launch and review identities and admits the folder before either runs.
 """
 from __future__ import annotations

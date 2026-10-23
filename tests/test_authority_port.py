@@ -14,7 +14,7 @@ import asyncio
 import importlib
 
 import pytest
-from test_launch_approval import FILES, LID, _decide, _run
+from test_launch_approval import FILES, LID
 from test_prd031a_static_analysis import BASE_A, _workspace, _write
 
 import kriya.policy.authority as authority
@@ -79,27 +79,10 @@ def test_file_writer_and_reader_are_the_policy_classes_with_the_same_verdicts(tm
     assert writer.authorize(outside).decision.value == "deny" and writer.authorize(inside).decision.value != "deny"
 
 
-def test_candidate_digest_is_launch_approvals_and_decide_review_is_the_retired_file_action(tmp_path):
-    """D2 M2: the port still forwards `decide_review` to the owner by name, but a review is decided only over the launch's private channel, so the action records
-    nothing - for a perfectly valid request as for a bad one - and answers the typed CHANNEL_REQUIRED (deleted with `kriya launch-decision` in slice 4)."""
+def test_candidate_digest_is_launch_approvals_and_the_port_has_no_way_to_decide_a_review_outside_the_channel():
+    """D2 M2 slice 4: the file-based `decide_review` member is deleted; a review is decided only over the launch's private channel."""
     assert AuthorityPort().candidate_digest(FILES) == launch_approval.candidate_digest(FILES)
-    port = AuthorityPort()
-
-    def scenario(host, pending):
-        codes = []
-        for digest in ("sha256:" + "0" * 64, pending["candidate_digest"]):
-            with pytest.raises(launch_approval.ApprovalRefused) as refused:
-                port.decide_review(host.workspace, LID, pending["review_id"], digest, "approve")
-            codes.append(refused.value.code)
-        return codes, _decide(host.workspace, pending, "approve")
-
-    (tmp_path / "proj").mkdir()
-    _canonical, outcome = _run(tmp_path / "proj", scenario)
-    codes, accepted = outcome["scenario"]
-    assert codes == ["CHANNEL_REQUIRED", "CHANNEL_REQUIRED"] and outcome["approved"] == approval.ApprovalOutcome.approve()  # only the channel decision counted
-    with pytest.raises(launch_approval.ApprovalRefused) as invalid:
-        port.decide_review(str(tmp_path), "bad", "ra-" + "0" * 24, "sha256:" + "0" * 64, "approve")
-    assert invalid.value.code == "CHANNEL_REQUIRED"
+    assert not hasattr(AuthorityPort, "decide_review") and not hasattr(launch_approval, "decide")
 
 
 @pytest.mark.parametrize("answer", [approval.ApprovalOutcome.approve(), approval.ApprovalOutcome.decline(), approval.ApprovalOutcome.unavailable_because(approval.APPROVAL_REVIEW_EXPIRED)],

@@ -1,7 +1,7 @@
 /**
  * Runtime-command approval from the desktop against the REAL Kriya (Demo V2): the real `kriya generate --json --launch-id` command, launch record, run coordinator, the REAL
  * runtime-command approval path (`request_runtime_command_approval`, the call the executor awaits), the real persistent read process answering `runtime_command.review`, the
- * host's RuntimeCommandHost in front of it with a SCRIPTED native confirmation, and the real `launch-decision --kind runtime_command`. Only the workflow body that would call a
+ * host's RuntimeCommandHost in front of it with a SCRIPTED native confirmation, and the run's real private review channel. Only the workflow body that would call a
  * model is the controlled stand-in (fixtures/controlled_kriya.py: after an approval it RECORDS the approved commands as executed, exactly the gate outcome the executor writes).
  *
  * What this proves that the unit tests cannot: the commands the host re-proves and shows are the commands Kriya recorded; a native Cancel leaves the REAL record PENDING and the run
@@ -175,14 +175,13 @@ describe.skipIf(!available)('runtime-command approval against real Kriya', () =>
     expect(await decider(ws).decide(request(ws, id, pending, 'approve', { launch_id: '20261015T101099-deadbeef' }))).toMatchObject({ accepted: false, code: 'COMMAND_NOT_REVIEWABLE' });
     expect(await decider(ws).decide(request(ws, id, pending, 'approve', { review_id: 'ra-' + 'f'.repeat(24) }))).toMatchObject({ accepted: false, code: 'COMMAND_NOT_REVIEWABLE' });
     expect(dialogs).toBe(0);
-    // D2 M2: the retired file action records nothing for ANY request, a stale one or a perfectly valid one - it can never approve this review from outside the channel
+    // D2 M2: the file action is DELETED - the command does not exist, so nothing outside the channel can record a decision for ANY request
     for (const argv of [
       ['launch-decision', '--launch-id', id, '--review-id', pending.review_id, '--candidate-digest', bogus, '--decision', 'approve', '--kind', 'runtime_command'],
       ['launch-decision', '--launch-id', id, '--review-id', pending.review_id, '--candidate-digest', pending.command_fingerprint, '--decision', 'approve', '--kind', 'runtime_command'],
-      ['launch-decision', '--launch-id', id, '--review-id', pending.review_id, '--candidate-digest', pending.command_fingerprint, '--decision', 'approve'],
     ]) {
       const direct = await runKriya({ executable: join(ROOT, '.venv', 'bin', 'kriya'), cwd: ws, env, limits: { timeoutMs: 30_000 }, argv });
-      expect(direct.kind === 'json' ? (direct.json as Json).code : null).toBe('CHANNEL_REQUIRED');
+      expect(direct.kind, argv.join(' ')).toBe('error');
     }
     // and the waiter itself refuses a stale fingerprint or the wrong kind that DOES arrive on the channel (a reject is not gated by the host's proof)
     expect(await decider(ws).decide(request(ws, id, pending, 'reject', { command_fingerprint: bogus }))).toMatchObject({ accepted: false, code: 'STALE_REVIEW' });

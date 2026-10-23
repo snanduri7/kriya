@@ -365,7 +365,7 @@
       "additionalProperties": true
     },
     "RuntimeCommandReview": {
-      "description": "data of `runtime_command.review`: the EXACT commands a runtime-command review asks the person to allow Kriya to run, served only after Kriya re-proved them against the command fingerprint the review is bound to (working directory, commands in order, input channel, stdin digest). Approval-scoped and read-only: it approves nothing; the decision is `kriya launch-decision --kind runtime_command`.",
+      "description": "data of `runtime_command.review`: the EXACT commands a runtime-command review asks the person to allow Kriya to run, served only after Kriya re-proved them against the command fingerprint the review is bound to (working directory, commands in order, input channel, stdin digest). Approval-scoped and read-only: it approves nothing; the decision is taken over the run's private review channel.",
       "type": "object",
       "required": [
         "launch_id",
@@ -754,7 +754,7 @@
               "items": { "type": "object", "required": ["kind", "reason", "details", "noted_at"], "properties": { "kind": { "type": "string" }, "reason": { "type": "string" }, "details": { "type": "object", "additionalProperties": true }, "noted_at": { "type": "string" } }, "additionalProperties": true }
             },
             "pending_approval": {
-              "description": "The review the run is waiting on (or last waited on): a CHANGE review (the exact candidate, Kriya's reviewer text) or a RUNTIME-COMMAND review (the exact commands Kriya asks to run), discriminated by `kind`. Only a PENDING review can be decided, by the typed action for its own kind; Kriya's `launch-decision` action and the waiting process record the decision BEFORE the run continues.",
+              "description": "The review the run is waiting on (or last waited on): a CHANGE review (the exact candidate, Kriya's reviewer text) or a RUNTIME-COMMAND review (the exact commands Kriya asks to run), discriminated by `kind`. Only a PENDING review can be decided, over the run's private review channel for its own kind; the waiting process records the decision BEFORE the run continues.",
               "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/PendingChangeReview" }, { "$ref": "#/$defs/PendingRuntimeCommandReview" } ]
             },
             "approval_history": {

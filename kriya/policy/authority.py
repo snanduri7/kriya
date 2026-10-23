@@ -95,13 +95,6 @@ class AuthorityPort:
 
         return await launch_approval.await_runtime_decision(session, review_id, fingerprint)
 
-    def decide_review(self, workspace_path: str, launch_id: str, review_id: str, candidate_digest_value: str, decision: str,
-                      kind: str = "change_approval") -> Dict[str, Any]:
-        """``launch_approval.decide``: accept ONE decision for the pending review of ``kind`` or raise ``ApprovalRefused``."""
-        from kriya.control import launch_approval
-
-        return launch_approval.decide(workspace_path, launch_id, review_id, candidate_digest_value, decision, kind)
-
     def runtime_command_review(self) -> RuntimeCommandReviewPort:
         """``policy.approval.RUNTIME_COMMAND_REVIEW``: the subject's fingerprint, reviewability rule and typed decision, the port
         ``launch_approval.build_pending_runtime`` / ``await_runtime_decision`` take as their ``review`` parameter (the default they use)."""

@@ -713,7 +713,7 @@ export interface LaunchStatus {
       [k: string]: unknown;
     }[];
     /**
-     * The review the run is waiting on (or last waited on): a CHANGE review (the exact candidate, Kriya's reviewer text) or a RUNTIME-COMMAND review (the exact commands Kriya asks to run), discriminated by `kind`. Only a PENDING review can be decided, by the typed action for its own kind; Kriya's `launch-decision` action and the waiting process record the decision BEFORE the run continues.
+     * The review the run is waiting on (or last waited on): a CHANGE review (the exact candidate, Kriya's reviewer text) or a RUNTIME-COMMAND review (the exact commands Kriya asks to run), discriminated by `kind`. Only a PENDING review can be decided, over the run's private review channel for its own kind; the waiting process records the decision BEFORE the run continues.
      */
     pending_approval?: null | PendingChangeReview | PendingRuntimeCommandReview;
     /**
@@ -953,7 +953,7 @@ export interface ChangeApprovalReview {
 
 // ---- RuntimeCommandReview (workspace.schema.json#/$defs/RuntimeCommandReview) ----
 /**
- * data of `runtime_command.review`: the EXACT commands a runtime-command review asks the person to allow Kriya to run, served only after Kriya re-proved them against the command fingerprint the review is bound to (working directory, commands in order, input channel, stdin digest). Approval-scoped and read-only: it approves nothing; the decision is `kriya launch-decision --kind runtime_command`.
+ * data of `runtime_command.review`: the EXACT commands a runtime-command review asks the person to allow Kriya to run, served only after Kriya re-proved them against the command fingerprint the review is bound to (working directory, commands in order, input channel, stdin digest). Approval-scoped and read-only: it approves nothing; the decision is taken over the run's private review channel.
  */
 export interface RuntimeCommandReview {
   launch_id: string;
@@ -1959,7 +1959,7 @@ export interface ExecutionState {
 
 // ---- DecideApprovalRequest (host-contract.schema.json#/$defs/DecideApprovalRequest) ----
 /**
- * Review decision (GUI final): ONE human decision for the change review that is pending in a launch Kriya recorded. It carries the identities Kriya gave the pending review (launch id, review id, candidate digest) and nothing else - no option can approve 'whatever is current', approve always, or widen Kriya's authority. Kriya (`launch-decision`) validates every identity against its durable state and refuses a stale, replayed, foreign or late request.
+ * Review decision (GUI final): ONE human decision for the change review that is pending in a launch Kriya recorded. It carries the identities Kriya gave the pending review (launch id, review id, candidate digest) and nothing else - no option can approve 'whatever is current', approve always, or widen Kriya's authority. the waiting Kriya process (over the run's private review channel) validates every identity against the live review and refuses a stale, replayed, foreign or late request.
  */
 export interface DecideApprovalRequest {
   /**
@@ -1988,7 +1988,7 @@ export interface DecideApprovalResult {
 
 // ---- DecideRuntimeCommandRequest (host-contract.schema.json#/$defs/DecideRuntimeCommandRequest) ----
 /**
- * Runtime-command decision (GUI-RUNTIME-COMMAND-APPROVAL-001): ONE human decision for the RUNTIME-COMMAND review that is pending in a launch Kriya recorded. It carries only the identities Kriya gave the pending review (launch id, review id, command fingerprint) and the decision - never a command, argument, directory or environment value, so a renderer cannot approve a command Kriya did not propose, change what runs, or approve another run or unit. The host re-proves the review through `runtime_command.review`, shows a native confirmation built from that answer, and only then asks Kriya (`launch-decision --kind runtime_command`), which validates every identity against its durable state.
+ * Runtime-command decision (GUI-RUNTIME-COMMAND-APPROVAL-001): ONE human decision for the RUNTIME-COMMAND review that is pending in a launch Kriya recorded. It carries only the identities Kriya gave the pending review (launch id, review id, command fingerprint) and the decision - never a command, argument, directory or environment value, so a renderer cannot approve a command Kriya did not propose, change what runs, or approve another run or unit. The host re-proves the review through `runtime_command.review`, shows a native confirmation built from that answer, and only then relays it to the waiting Kriya process over the run's private review channel, which validates every identity against the live review.
  */
 export interface DecideRuntimeCommandRequest {
   /**

@@ -75,10 +75,10 @@ export interface WorkspaceHost {
 export interface ExecutionHostPort {
   startRun(request: StartRunRequest): Promise<StartRunResult>;
   state(): Promise<ExecutionState>;
-  /** Review decision (GUI final): the host forwards ONE typed decision to Kriya's `launch-decision` action and reports Kriya's answer. It never decides. */
+  /** Review decision (GUI final): the host relays ONE typed decision to the waiting Kriya process over the run's private review channel and reports Kriya's answer. It never decides. */
   decideApproval(request: DecideApprovalRequest): Promise<DecideApprovalResult>;
   /** Runtime-command decision (Demo V2): a DIFFERENT subject from the change review - allowing Kriya to run the exact verification commands it recorded. The host re-proves the pending review, shows a
-   * NATIVE confirmation (main process) and only then forwards ONE typed decision to Kriya's `launch-decision --kind runtime_command`. A native Cancel answers `CONFIRMATION_DECLINED` and sends nothing: the review stays pending. */
+   * NATIVE confirmation (main process) and only then relays ONE typed decision over the run's private review channel. A native Cancel answers `CONFIRMATION_DECLINED` and sends nothing: the review stays pending. */
   decideRuntimeCommand?(request: DecideRuntimeCommandRequest): Promise<DecideRuntimeCommandResult>;
   /** Configuration approval: the host forwards ONE typed request ({workspace, fingerprint of the configuration the person reviewed}) to Kriya's `configuration.approve` and reports Kriya's answer.
    * It never approves "whatever is current", never carries a setting, value or path, and holds no authority: Kriya re-resolves the configuration and refuses (APPROVAL_STALE) if it changed. Absent on a host with no execution backend. */

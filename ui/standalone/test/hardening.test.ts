@@ -160,8 +160,7 @@ describe('M6 execution (hardening): Start Run is the only execution action and i
     for (const f of readdirSync(MAIN)) {
       const src = read(join(MAIN, f));
       expect(src, f).not.toMatch(/--yes|--always|--auto-approve|--autonomy|(['"])-y\1/);
-      // the decision hosts no longer start a decision process: the CLI action is only still NAMED by the (to be deleted) argv grammar
-      if (f !== 'kriya_argv.ts') expect(src, f).not.toContain("'launch-decision'");
+      expect(src, f).not.toContain("'launch-decision'"); // the CLI action is deleted: no module names it
     }
     const host = read(join(MAIN, 'approval_host.ts'));
     expect(host).toContain('validateDecideApproval(raw)');
