@@ -176,3 +176,13 @@ def test_generate_from_milestones_with_an_ownerless_sidecar_is_a_typed_refusal_w
         assert "WorkspaceOwnershipMissing" in proc.stdout and SAFE_WORDING in proc.stdout
     assert sidecar.read_bytes() == before  # refused, never adopted or stamped
 
+
+
+def test_an_ownership_refused_launch_record_carries_its_reason_code(ws):
+    """The third UnreadableRunRecordError raise site (load_launch_record): the code travels with the error like the run-record and evidence sites."""
+    P.save_launch_record(str(ws), "20261023T120000-abcdef12", {"phase": "RUNNING", "pending_approval": None})
+    path = P.launch_record_path(str(ws), "20261023T120000-abcdef12")
+    _mutate(path, "json", "FOREIGN")
+    with pytest.raises(P.UnreadableRunRecordError) as unreadable:
+        P.load_launch_record(str(ws), "20261023T120000-abcdef12")
+    assert unreadable.value.reason_code == WORKSPACE_OWNERSHIP_MISMATCH

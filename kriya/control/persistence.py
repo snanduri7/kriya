@@ -202,7 +202,7 @@ def load_launch_record(workspace_path: str, launch_id: str) -> Optional[Dict[str
     try:
         validate_ownership(workspace_path, payload, path)
     except WorkspaceOwnershipError as error:
-        raise UnreadableRunRecordError(path, f"{type(error).__name__}: {error}") from error
+        raise UnreadableRunRecordError(path, f"{type(error).__name__}: {error}", reason_code=error.reason_code) from error
     return payload
 
 
