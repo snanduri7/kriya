@@ -22,7 +22,12 @@ from dataclasses import asdict, dataclass, replace
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from kriya.context.workspace_identity import authority_root, ownership_metadata, validate_ownership
+from kriya.context.workspace_identity import (
+    WorkspaceOwnershipError,
+    authority_root,
+    ownership_metadata,
+    validate_ownership,
+)
 from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, fold_name, path_identity, path_relation
 from kriya.repository.atomic_write import _atomic_write_bytes, _audit_write_file, _fsync_directory, atomic_write_file
 from kriya.repository.snapshot import file_raw_digest, raw_digest
@@ -45,6 +50,10 @@ class BatchCommitError(RuntimeError):
 
 class UncertainCommitError(BatchCommitError):
     """A prior process stopped while a source commit may have been active."""
+
+    # D2 M4: WORKSPACE_OWNERSHIP_MISSING / _MISMATCH when the evidence is unreadable because it does not carry THIS workspace's stamp. Such
+    # evidence is not "uncertain": ownership was never established, so recovery cannot settle it. None for every other cause.
+    ownership_reason_code: Optional[str] = None
 
 
 class CommitState(str, Enum):
@@ -264,24 +273,34 @@ def load_commit_evidence(path: str, *, workspace_path: str) -> CommitEvidence:
     )
 
 
-def list_commit_evidence(
+def _scan_commit_evidence(
     workspace_path: str,
-) -> List[Tuple[str, Optional[CommitEvidence], Optional[str]]]:
-    """Every evidence file as (path, evidence, error); unreadable files are
-    reported with their error, never skipped."""
+) -> List[Tuple[str, Optional[CommitEvidence], Optional[Exception]]]:
+    """Every evidence file as (path, evidence, error object); the one scan behind both public listings."""
     directory = commit_evidence_dir(workspace_path)
     try:
         names = sorted(name for name in os.listdir(directory) if name.endswith(".json"))
     except FileNotFoundError:
         return []
-    entries: List[Tuple[str, Optional[CommitEvidence], Optional[str]]] = []
+    entries: List[Tuple[str, Optional[CommitEvidence], Optional[Exception]]] = []
     for name in names:
         path = os.path.join(directory, name)
         try:
             entries.append((path, load_commit_evidence(path, workspace_path=workspace_path), None))
         except Exception as error:
-            entries.append((path, None, f"{type(error).__name__}: {error}"))
+            entries.append((path, None, error))
     return entries
+
+
+def list_commit_evidence(
+    workspace_path: str,
+) -> List[Tuple[str, Optional[CommitEvidence], Optional[str]]]:
+    """Every evidence file as (path, evidence, error); unreadable files are
+    reported with their error, never skipped."""
+    return [
+        (path, evidence, None if error is None else f"{type(error).__name__}: {error}")
+        for path, evidence, error in _scan_commit_evidence(workspace_path)
+    ]
 
 
 def settle_recovered_commit_evidence(
@@ -318,12 +337,15 @@ def commit_state_for_transaction(workspace_path: str, transaction_id: str) -> Co
 def find_uncertain_commit_evidence(workspace_path: str) -> Tuple[CommitEvidence, ...]:
     """Return durable commits whose process never recorded a safe terminal state."""
     uncertain = []
-    for path, evidence, error in list_commit_evidence(workspace_path):
+    for path, evidence, error in _scan_commit_evidence(workspace_path):
         if evidence is None:
-            raise UncertainCommitError(
+            refusal = UncertainCommitError(
                 f"Commit evidence {os.path.basename(path)!r} is unreadable; "
-                f"source state is uncertain: {error}"
+                f"source state is uncertain: {type(error).__name__}: {error}"
             )
+            if isinstance(error, WorkspaceOwnershipError):
+                refusal.ownership_reason_code = error.reason_code
+            raise refusal
         if evidence.state in (CommitState.IN_PROGRESS, CommitState.UNCERTAIN):
             uncertain.append(evidence)
     return tuple(uncertain)

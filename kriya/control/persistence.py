@@ -211,10 +211,13 @@ class UnreadableRunRecordError(RuntimeError):
     or owned by another workspace). Never treated as absent: a record that
     cannot be read may be the only evidence of an interrupted commit."""
 
-    def __init__(self, path: str, reason: str) -> None:
+    def __init__(self, path: str, reason: str, *, reason_code: Optional[str] = None) -> None:
         super().__init__(f"unreadable RunRecord {path}: {reason}")
         self.path = path
         self.reason = reason
+        # D2 M4: set only when the record was refused for its ownership stamp (WORKSPACE_OWNERSHIP_MISSING / _MISMATCH), so the public
+        # refusal can say so instead of a generic "unreadable".
+        self.reason_code = reason_code
 
 
 @dataclass(frozen=True)
@@ -242,7 +245,10 @@ def _read_run_record(workspace_path: str, run_id: str) -> Tuple[Optional[RunReco
         validate_ownership(workspace_path, payload, path)
         record = RunRecord.from_dict(payload)
     except (ValueError, WorkspaceOwnershipError) as error:
-        raise UnreadableRunRecordError(path, f"{type(error).__name__}: {error}") from error
+        raise UnreadableRunRecordError(
+            path, f"{type(error).__name__}: {error}",
+            reason_code=error.reason_code if isinstance(error, WorkspaceOwnershipError) else None,
+        ) from error
     if record.run_id != run_id:
         raise UnreadableRunRecordError(path, f"file names run {run_id!r} but holds {record.run_id!r}")
     return record, raw_digest(data)

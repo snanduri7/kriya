@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from kriya.context.workspace_identity import OWNERSHIP_REMEDIATION
 from kriya.control.persistence import nested_control_state, scan_run_records
 from kriya.repository.commit import find_uncertain_commit_evidence
 
@@ -42,20 +43,45 @@ class WorkspaceCommitAssessment:
     # D-001: ((directory, reason), ...) of unsettled/unreadable control state under a directory BELOW the authority root (the pre-authority-root layout).
     nested_workspace_state: Tuple[Tuple[str, str], ...] = ()
     nested_scan_complete: bool = True
+    # D2 M4 follow-up: ((path, WORKSPACE_OWNERSHIP_*), ...) of the unreadable run records refused for their ownership stamp (a subset of
+    # unreadable_run_records), and the same code when the commit evidence was. Ownership was never established for these, so they are neither
+    # "unreadable" nor "uncertain" in the recoverable sense: `kriya runs recover` cannot settle them.
+    run_record_ownership_refusals: Tuple[Tuple[str, str], ...] = ()
+    commit_evidence_ownership_code: Optional[str] = None
 
     @property
     def safe(self) -> bool:
         return not self.reason_codes
 
     @property
+    def ownership_reason_codes(self) -> List[str]:
+        codes = {code for _path, code in self.run_record_ownership_refusals}
+        if self.commit_evidence_ownership_code:
+            codes.add(self.commit_evidence_ownership_code)
+        return sorted(codes)
+
+    def _unreadable_for_other_reasons(self) -> Tuple[Tuple[str, str], ...]:
+        owned_out = {path for path, _code in self.run_record_ownership_refusals}
+        return tuple(item for item in self.unreadable_run_records if item[0] not in owned_out)
+
+    @property
+    def recoverable(self) -> bool:
+        """Whether any part of the refusal is something `kriya runs recover` can settle (everything except ownership)."""
+        return bool(
+            self.uncertain_run_ids or self._unreadable_for_other_reasons() or self.uncertain_commit_ids
+            or (self.commit_evidence_error and not self.commit_evidence_ownership_code) or self.nested_workspace_state
+        )
+
+    @property
     def reason_codes(self) -> List[str]:
         codes = []
         if self.uncertain_run_ids:
             codes.append(REASON_UNCERTAIN_RUN_RECORD)
-        if self.unreadable_run_records:
+        if self._unreadable_for_other_reasons():
             codes.append(REASON_RUN_RECORD_UNREADABLE)
-        if self.uncertain_commit_ids or self.commit_evidence_error:
+        if self.uncertain_commit_ids or (self.commit_evidence_error and not self.commit_evidence_ownership_code):
             codes.append(REASON_UNCERTAIN_COMMIT)
+        codes.extend(self.ownership_reason_codes)
         if self.nested_workspace_state:
             codes.append(REASON_NESTED_WORKSPACE_STATE)
         return codes
@@ -64,8 +90,12 @@ class WorkspaceCommitAssessment:
         parts = []
         if self.uncertain_run_ids:
             parts.append(f"runs with unsettled/uncertain commits: {', '.join(self.uncertain_run_ids)}")
-        if self.unreadable_run_records:
-            parts.append(f"unreadable run records: {', '.join(p for p, _ in self.unreadable_run_records)}")
+        other_unreadable = self._unreadable_for_other_reasons()
+        if other_unreadable:
+            parts.append(f"unreadable run records: {', '.join(p for p, _ in other_unreadable)}")
+        for code in sorted({code for _path, code in self.run_record_ownership_refusals}):
+            paths = ", ".join(path for path, item_code in self.run_record_ownership_refusals if item_code == code)
+            parts.append(f"run records refused for their ownership stamp ({code}): {paths}. {OWNERSHIP_REMEDIATION}")
         if self.uncertain_commit_ids:
             parts.append(f"in-progress/uncertain commits: {', '.join(self.uncertain_commit_ids)}")
         if self.commit_evidence_error:
@@ -73,15 +103,17 @@ class WorkspaceCommitAssessment:
         if self.nested_workspace_state:
             parts.append("unsettled state left under a sub-directory of this repository by an earlier Kriya that treated that directory as its own workspace: "
                          + "; ".join(f"{directory} ({reason})" for directory, reason in self.nested_workspace_state))
-        return (
-            "The workspace may hold a partial commit from an earlier run ("
-            + "; ".join(parts)
-            + f"). Run `{RECOVERY_COMMAND}` to settle it from the durable evidence."
-        )
+        if not self.recoverable:
+            # Every item already carries the ownership remediation (workspace_identity.OWNERSHIP_REMEDIATION); recovery is not advice here.
+            return "The workspace's Kriya control state is not provably this workspace's (" + "; ".join(parts) + ")."
+        tail = f"). Run `{RECOVERY_COMMAND}` to settle it from the durable evidence."
+        if self.ownership_reason_codes:
+            tail = f"). `{RECOVERY_COMMAND}` settles only the state that is provably this workspace's; the ownership refusals above need the preservation step they name."
+        return "The workspace may hold a partial commit from an earlier run (" + "; ".join(parts) + tail
 
     def to_payload(self, run_id: Optional[str] = None) -> Dict[str, Any]:
         """The structured refusal every workflow entry point returns."""
-        return {
+        payload = {
             "status": "needs_review",
             "quality_gates_passed": False,
             "files": [],
@@ -94,9 +126,12 @@ class WorkspaceCommitAssessment:
             "nested_workspace_state": [{"directory": directory, "reason": reason} for directory, reason in self.nested_workspace_state],
             "nested_scan_complete": self.nested_scan_complete,
             "error": self.commit_evidence_error,
-            "recovery_command": RECOVERY_COMMAND,
+            "recovery_command": RECOVERY_COMMAND if self.recoverable else None,
             "run_id": run_id,
         }
+        if self.run_record_ownership_refusals:  # additive: a refusal without ownership findings keeps its exact earlier shape
+            payload["ownership_findings"] = [{"path": path, "reason_code": code} for path, code in self.run_record_ownership_refusals]
+        return payload
 
 
 class UncertainWorkspaceStateError(RuntimeError):
@@ -119,11 +154,14 @@ def assess_workspace_commit_state(
         if record.run_id not in excluded and record.commit_state_unknown
     )
     unreadable = tuple((item.path, item.reason) for item in scan.unreadable)
+    run_record_ownership = tuple((item.path, item.reason_code) for item in scan.unreadable if item.reason_code)
+    evidence_ownership_code: Optional[str] = None
     try:
         evidence = find_uncertain_commit_evidence(workspace_path)
     except Exception as error:
         commit_ids: Tuple[str, ...] = ()
         evidence_error: Optional[str] = str(error)
+        evidence_ownership_code = getattr(error, "ownership_reason_code", None)
     else:
         commit_ids = tuple(item.transaction_id for item in evidence)
         evidence_error = None
@@ -135,4 +173,6 @@ def assess_workspace_commit_state(
         commit_evidence_error=evidence_error,
         nested_workspace_state=nested,
         nested_scan_complete=nested_complete,
+        run_record_ownership_refusals=run_record_ownership,
+        commit_evidence_ownership_code=evidence_ownership_code,
     )

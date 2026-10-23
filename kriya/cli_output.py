@@ -6,6 +6,8 @@ from typing import Any, Dict, Optional
 
 import click
 
+from kriya.context.workspace_identity import WorkspaceOwnershipError
+
 
 class GenerateOutput:
     """Keep workflow payloads intact; represent callback failures fail-closed.
@@ -31,6 +33,10 @@ class GenerateOutput:
         """Fail from the propagated exception itself: its message is the error and its class the ``failure_type`` - the one
         place the class is read, so the JSON result and the human line can never disagree."""
         self.fail(str(error) or type(error).__name__, failure_type=type(error).__name__)
+        if isinstance(error, WorkspaceOwnershipError):
+            # D2 M4 follow-up: an ownership refusal carries its closed reason code (WORKSPACE_OWNERSHIP_MISSING / _MISMATCH), so a consumer keys on
+            # it rather than on the class name or the message.
+            self.result["reason_codes"] = [error.reason_code]
 
     def failure_line(self) -> str:
         """The human wording of the failure just recorded: ``<failure_type>: <error>`` (or the error alone)."""

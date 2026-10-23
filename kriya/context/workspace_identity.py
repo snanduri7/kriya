@@ -10,16 +10,21 @@ from typing import Any, Dict, Optional
 WORKSPACE_OWNERSHIP_MISSING = "WORKSPACE_OWNERSHIP_MISSING"
 WORKSPACE_OWNERSHIP_MISMATCH = "WORKSPACE_OWNERSHIP_MISMATCH"
 
+# D2 M4 follow-up: the one remediation every ownership refusal carries. Recovery (`kriya runs recover`) settles owned evidence; it cannot establish
+# that a file is this workspace's, so it is never the advice here, and the file is preserved, never deleted.
+OWNERSHIP_REMEDIATION = (
+    "Automatic recovery cannot establish ownership of this file. Preserve or archive it outside the active Kriya control-state location "
+    "(do not delete it), and run again only after you have established that no interrupted mutation still requires recovery."
+)
+
 # D2 M4 (owner decision 2026-10-23): the one closed table of the reason codes an ownership refusal carries; the message is rendered from it only.
 OWNERSHIP_REFUSALS = {
     WORKSPACE_OWNERSHIP_MISSING: (
         "persistent state at {source!r} carries no workspace ownership stamp. Kriya writes every control document with one, so this file was "
-        "not written by Kriya for this workspace; Kriya never adopts it by stamping it. If you accept losing that state, move the file aside "
-        "(Kriya does not delete it) and run again."
+        "not written by Kriya for this workspace; Kriya never adopts it by stamping it. " + OWNERSHIP_REMEDIATION
     ),
     WORKSPACE_OWNERSHIP_MISMATCH: (
-        "persistent state at {source!r} belongs to workspace {actual!r}, not {expected!r}. If you accept losing that state, move the file aside "
-        "(Kriya does not delete it) and run again."
+        "persistent state at {source!r} belongs to workspace {actual!r}, not {expected!r}. " + OWNERSHIP_REMEDIATION
     ),
 }
 

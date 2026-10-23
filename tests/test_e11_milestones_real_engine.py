@@ -249,7 +249,7 @@ def test_the_controller_refuses_ownerless_control_state_before_any_model_work_an
     assert legacy["reason_codes"] == ["WORKSPACE_OWNERSHIP_MISSING"]
     assert sorted(Path(f["path"]).name for f in legacy["ownership_findings"]) == sorted(
         ["contracts.json", "state.json", next((workspace / ".kriya" / "checkpoints").glob("*.json")).name])
-    assert "move the file aside" in legacy["persistence_error"]
+    assert "outside the active Kriya control-state location" in legacy["persistence_error"]
     assert second.units == []
     after = _kriya_bytes(workspace)
     assert {name: after[name] for name in before} == before  # the refused run's own RunRecord is new; nothing that existed was touched

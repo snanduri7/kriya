@@ -259,7 +259,7 @@ def test_validate_ownership_distinguishes_missing_from_mismatch_and_keeps_the_le
     w = str(tmp_path)
     with pytest.raises(WorkspaceOwnershipMissing) as missing:
         validate_ownership(w, {}, "x.json")
-    assert missing.value.reason_code == WORKSPACE_OWNERSHIP_MISSING and "x.json" in str(missing.value) and "move the file aside" in str(missing.value)
+    assert missing.value.reason_code == WORKSPACE_OWNERSHIP_MISSING and "x.json" in str(missing.value) and "outside the active Kriya control-state location" in str(missing.value)
     for stamp in ({"workspace_id": FOREIGN}, "not a dict", {"workspace_id": None}, {}):
         with pytest.raises(WorkspaceOwnershipError) as mismatch:
             validate_ownership(w, {"_workspace": stamp}, "x.json")
@@ -277,7 +277,7 @@ def test_the_reason_code_table_is_closed_and_every_message_renders():
     assert set(OWNERSHIP_REFUSALS) == {WORKSPACE_OWNERSHIP_MISSING, WORKSPACE_OWNERSHIP_MISMATCH}
     for code, template in OWNERSHIP_REFUSALS.items():
         rendered = template.format(source="s", expected="e", actual="a")
-        assert "s" in rendered and "move the file aside" in rendered, code
+        assert "s" in rendered and "outside the active Kriya control-state location" in rendered, code
     assert issubclass(WorkspaceOwnershipMissing, WorkspaceOwnershipError)  # every existing handler of the base still catches the new refusal
 
 
