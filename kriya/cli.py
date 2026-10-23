@@ -2681,6 +2681,14 @@ def _launched_generate(ctx, launch_id, goal, file, yes, knowledge_policy, ack_kn
     if not json_output or extra or knowledge_policy != "warn":
         raise click.UsageError("--launch-id takes the goal on stdin and requires --json; it cannot be combined with "
                                + ", ".join(extra or ["--knowledge-policy (a launch is always strict)"]))
+    # D2 M2: the private review channel is the host's inherited socket at fd 3. It is taken over (and made non-inheritable) BEFORE anything else can spawn a
+    # process; a launch started without one has no way to be approved - its reviews are not offered (UNAVAILABLE -> approval_required), never a file fallback.
+    from kriya.control.review_channel import ChannelUnavailable, open_review_channel_from_fd
+    try:
+        review_channel = open_review_channel_from_fd()
+    except ChannelUnavailable as unavailable:
+        review_channel = None
+        logging.getLogger(__name__).warning("Launch %s: no private review channel (%s); no review can be answered", launch_id, unavailable.code)
     with GenerateOutput(True) as output:
         session = None
         try:
@@ -2690,6 +2698,7 @@ def _launched_generate(ctx, launch_id, goal, file, yes, knowledge_policy, ack_kn
                                                      tool_visibility=kup_execution.tool_visibility)
             session = LaunchSession(workspace, workspace_identity(workspace), launch_id, goal_text, preflight,
                                     {"knowledge_policy": KNOWLEDGE_POLICY, "interactive": False})
+            session.attach_review_channel(review_channel)
             session.open()
         except LaunchRefused as refusal:
             output.result = {"status": "refused", "quality_gates_passed": False, "code": refusal.code, "error": refusal.message, "launch_id": launch_id}

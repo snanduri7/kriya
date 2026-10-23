@@ -10,6 +10,7 @@ import json
 import os
 
 import pytest
+from _review_channel_host import attach_review_channel, channel_decide
 
 import kriya.control.launch_approval as approval
 from kriya.application.review import MAX_LINES_TOTAL, parse_unified_diff
@@ -31,11 +32,6 @@ FILES = [{"filepath": "src/Service.java", "content": DIFF_A}, {"filepath": "src/
 REASON = "Human-in-the-loop review policy\n\n=== Automated Code Review ===\nThe soft delete now persists."
 
 
-@pytest.fixture(autouse=True)
-def _fast(monkeypatch):
-    monkeypatch.setattr(approval, "POLL_SECONDS", 0.01)
-
-
 @pytest.fixture
 def ws(tmp_path):
     folder = tmp_path / "proj"
@@ -46,6 +42,7 @@ def ws(tmp_path):
 def _session(ws):
     canonical = canonical_workspace(str(ws))
     session = LaunchSession(canonical, workspace_identity(canonical), LID, "goal", {"ready": True}, {})
+    attach_review_channel(session)
     session.open()
     return canonical, session
 
@@ -88,7 +85,7 @@ def _hold(ws, scenario, files=FILES, reason=REASON):
 
 
 def _reject(canonical, pending):
-    return approval.decide(canonical, LID, pending["review_id"], pending["candidate_digest"], "reject")
+    return channel_decide(canonical, LID, pending["review_id"], pending["candidate_digest"], "reject")
 
 
 def test_the_pending_review_serves_the_exact_change_proved_against_its_digests(ws):
@@ -244,10 +241,10 @@ def test_a_new_candidate_supersedes_the_review_and_the_old_one_can_no_longer_be_
         seen["b"] = (await asyncio.to_thread(_review, ws, pending_b["review_id"]))["data"]
         # the person decides on what they SAW (A): refused, the digest is no longer the pending one
         with pytest.raises(approval.ApprovalRefused) as stale:
-            await asyncio.to_thread(approval.decide, canonical, LID, pending_a["review_id"], pending_a["candidate_digest"], "approve")
+            await asyncio.to_thread(channel_decide, canonical, LID, pending_a["review_id"], pending_a["candidate_digest"], "approve")
         seen["stale"] = stale.value.code
         seen["a_after"] = (await asyncio.to_thread(_review, ws, pending_a["review_id"]))["data"]
-        await asyncio.to_thread(approval.decide, canonical, LID, pending_b["review_id"], pending_b["candidate_digest"], "reject")
+        await asyncio.to_thread(channel_decide, canonical, LID, pending_b["review_id"], pending_b["candidate_digest"], "reject")
         await asyncio.wait_for(second, 20)
         first.cancel()  # the superseded waiter is abandoned by the gate (as in the launch-approval tests)
 

@@ -1,8 +1,11 @@
-"""GUI final: human review of a change inside a desktop launch (kriya/control/launch_approval.py).
+"""GUI final + D2 M2: human review of a change inside a desktop launch (kriya/control/launch_approval.py).
 
-The change gate's callback stays the one continuation point; these tests pin that the decision is Kriya-authoritative, bound to the exact pending
-review (launch, workspace, candidate digest, review id), durable BEFORE the workflow resumes, and fail-closed on every stale, replayed, foreign or
-late request."""
+The change gate's callback stays the one continuation point; these tests pin that the decision is Kriya-authoritative, bound to the exact pending review (launch,
+review id, kind, candidate digest, live capability), durable BEFORE the workflow resumes, and fail-closed on every stale, replayed, foreign or late request.
+
+D2 M2: the decision arrives ONLY over the launch's private review channel (kriya/control/review_channel.py; the host end is tests/_review_channel_host.py, a peer on a
+real socket pair). The persisted decision file is audit output - it is written after the decision was accepted and never consulted as authority, which the forgery
+tests below prove by planting every file a same-UID workload could write. The channel's own protocol is pinned in tests/test_d2_m2_review_channel.py."""
 from __future__ import annotations
 
 import asyncio
@@ -12,6 +15,7 @@ import re
 from pathlib import Path
 
 import pytest
+from _review_channel_host import OMIT, attach_review_channel, channel_decide
 from click.testing import CliRunner
 
 import kriya.control.launch_approval as approval
@@ -20,10 +24,11 @@ from kriya.config import AppConfig
 from kriya.context.workspace_identity import canonical_workspace, workspace_identity
 from kriya.control import launch as launch_module
 from kriya.control.launch import LaunchSession
-from kriya.control.persistence import launch_review_decision_path, load_launch_record
+from kriya.control.persistence import launch_review_decision_path, load_launch_record, save_launch_review_decision
 from kriya.control.run_coordinator import begin_mutating_run
 from kriya.kup.cli_ops import run_kup_operation
 from kriya.policy.approval import (
+    APPROVAL_CHANNEL_UNAVAILABLE,
     APPROVAL_DECISION_NOT_RECORDED,
     APPROVAL_LAUNCH_CANNOT_ASK,
     APPROVAL_REVIEW_EXPIRED,
@@ -36,11 +41,6 @@ FILES = [{"filepath": "hello.py", "content": "--- a/hello.py\n+++ b/hello.py\n@@
 REASON = "Human-in-the-loop review policy\n\n=== Automated Code Review ===\nLooks right."
 
 
-@pytest.fixture(autouse=True)
-def _fast(monkeypatch):
-    monkeypatch.setattr(approval, "POLL_SECONDS", 0.01)
-
-
 @pytest.fixture
 def ws(tmp_path):
     folder = tmp_path / "proj"
@@ -48,11 +48,24 @@ def ws(tmp_path):
     return folder
 
 
-def _session(ws, launch_id=LID):
+def _session(ws, launch_id=LID, *, channel=True):
     canonical = canonical_workspace(str(ws))
     session = LaunchSession(canonical, workspace_identity(canonical), launch_id, "goal", {"ready": True}, {})
+    host = attach_review_channel(session) if channel else None
     session.open()
-    return canonical, session
+    return canonical, session, host
+
+
+def _decide(canonical, pending, decision="approve", **override):
+    """The old test API over the channel (other test modules import it): a decision bound to the pending review's identities, with the overrides applied."""
+    return channel_decide(canonical, override.get("launch_id", LID), override.get("review_id", pending["review_id"]),
+                          override.get("candidate_digest", pending["candidate_digest"]), decision, override.get("kind", "change_approval"))
+
+
+def _refusal(canonical, pending, decision="approve", **override):
+    with pytest.raises(approval.ApprovalRefused) as caught:
+        _decide(canonical, pending, decision, **override)
+    return caught.value.code
 
 
 def _pending(canonical, launch_id=LID):
@@ -68,14 +81,9 @@ async def _wait_pending(canonical, launch_id=LID):
     raise AssertionError("no pending review was recorded")
 
 
-def _decide(canonical, pending, decision="approve", **override):
-    args = {"launch_id": LID, "review_id": pending["review_id"], "candidate_digest": pending["candidate_digest"], "decision": decision, **override}
-    return approval.decide(canonical, args["launch_id"], args["review_id"], args["candidate_digest"], args["decision"])
-
-
 def _run(ws, scenario, *, files=FILES, reason=REASON):
-    """Drive the real session inside a real run lock: `scenario(canonical, pending)` plays the part of the desktop host while the 'workflow' awaits."""
-    canonical, session = _session(ws)
+    """Drive the real session inside a real run lock: `scenario(host, pending)` plays the part of the desktop host (over the real socket) while the 'workflow' awaits."""
+    canonical, session, host = _session(ws)
     outcome = {}
 
     async def main_():
@@ -83,7 +91,7 @@ def _run(ws, scenario, *, files=FILES, reason=REASON):
         assert awaiting is not None
         task = asyncio.ensure_future(awaiting)
         pending = await _wait_pending(canonical)
-        outcome["scenario"] = await asyncio.to_thread(scenario, canonical, pending)
+        outcome["scenario"] = await asyncio.to_thread(scenario, host, pending)
         outcome["approved"] = await asyncio.wait_for(task, 20)
         outcome["record_at_resume"] = load_launch_record(canonical, LID)["pending_approval"]
 
@@ -92,184 +100,207 @@ def _run(ws, scenario, *, files=FILES, reason=REASON):
             asyncio.run(main_())
     finally:
         session.finish(0, None, None)
+        host.close()
     return canonical, outcome
-
-
-def _refusal(canonical, pending, decision="approve", **override):
-    with pytest.raises(approval.ApprovalRefused) as caught:
-        _decide(canonical, pending, decision, **override)
-    return caught.value.code
 
 
 # ------------------------------------------------------------------ the decision itself
 
-def test_valid_approval_is_durable_before_the_workflow_resumes(ws):
-    canonical, outcome = _run(ws, lambda c, p: _decide(c, p, "approve"))
+def test_valid_approval_is_durable_before_the_workflow_resumes_and_the_file_is_only_an_audit_record(ws):
+    canonical, outcome = _run(ws, lambda host, p: host.decide("approve"))
     assert outcome["approved"] == ApprovalOutcome.approve()
-    assert outcome["scenario"]["accepted"] is True and outcome["scenario"]["decision"] == "approve"
+    assert outcome["scenario"] == {"v": 1, "type": "result", "review_id": outcome["record_at_resume"]["review_id"], "accepted": True, "code": "ACCEPTED"}
     # the record the workflow sees AT THE MOMENT it resumes already says APPROVED
     assert outcome["record_at_resume"]["status"] == "APPROVED" and outcome["record_at_resume"]["decision"]["decision"] == "approve"
-    assert os.path.exists(launch_review_decision_path(canonical, LID, outcome["record_at_resume"]["review_id"]))
+    assert outcome["record_at_resume"]["decision"]["source"] == "review-channel"
+    audit = json.loads(Path(launch_review_decision_path(canonical, LID, outcome["record_at_resume"]["review_id"])).read_text())
+    assert audit["decision"] == "approve" and audit["source"] == "review-channel" and audit["candidate_digest"] == outcome["record_at_resume"]["candidate_digest"]
 
 
 def test_valid_rejection_declines_and_is_recorded(ws):
-    _canonical, outcome = _run(ws, lambda c, p: _decide(c, p, "reject"))
+    _canonical, outcome = _run(ws, lambda host, p: host.decide("reject"))
     assert outcome["approved"] == ApprovalOutcome.decline(), "the person said no: DECLINED, not unavailable"
     assert outcome["record_at_resume"]["status"] == "REJECTED" and outcome["record_at_resume"]["decision"]["decision"] == "reject"
 
 
-def test_the_pending_review_carries_the_exact_identities_the_decision_is_bound_to(ws):
+def test_the_pending_review_and_the_review_frame_carry_the_exact_identities_the_decision_is_bound_to(ws):
     seen = {}
 
-    def scenario(canonical, pending):
+    def scenario(host, pending):
         seen.update(pending)
-        return _decide(canonical, pending)
+        seen["frame"] = dict(host.review())
+        return host.decide("approve")
 
     canonical, _ = _run(ws, scenario)
     assert seen["status"] == "PENDING" and seen["kind"] == "change_approval" and seen["reason"] == REASON
     assert seen["candidate_digest"] == approval.candidate_digest(FILES) and re.match(r"^ra-[0-9a-f]{24}$", seen["review_id"])
     assert seen["files"][0]["filepath"] == "hello.py" and seen["files"][0]["lines_added"] == 1 and seen["files"][0]["lines_removed"] == 1
     assert seen["review_id"] == approval.review_identity(LID, workspace_identity(canonical), 1, seen["candidate_digest"], REASON)
+    frame = seen["frame"]
+    assert (frame["launch_id"], frame["review_id"], frame["kind"], frame["candidate_digest"]) == (LID, seen["review_id"], "change_approval", seen["candidate_digest"])
 
 
-def test_a_duplicate_approval_is_refused_before_and_after_the_waiter_acts(ws, monkeypatch):
-    monkeypatch.setattr(approval, "POLL_SECONDS", 5.0)  # the waiter has NOT seen the first decision when the second arrives
-
-    def scenario(canonical, pending):
-        first = _decide(canonical, pending, "approve")
-        second = _refusal(canonical, pending, "reject")
-        monkeypatch.setattr(approval, "POLL_SECONDS", 0.01)
-        return first, second
+def test_a_second_decision_for_an_accepted_review_changes_nothing_and_fails_the_channel_closed(ws):
+    def scenario(host, pending):
+        review = dict(host.review())
+        first = host.decide("approve")
+        host.send({"v": 1, "type": "decision", "launch_id": LID, "review_id": review["review_id"], "kind": review["kind"],
+                   "candidate_digest": review["candidate_digest"], "decision": "reject", "capability": review["capability"]})  # the same review again, with the genuine capability
+        return first
 
     canonical, outcome = _run(ws, scenario)
-    assert outcome["scenario"][1] == "ALREADY_DECIDED" and outcome["approved"] == ApprovalOutcome.approve(), "the second (reject) never overwrote the first (approve)"
-    assert _refusal(canonical, outcome["record_at_resume"]) in ("ALREADY_DECIDED", "LAUNCH_ENDED")
+    assert outcome["approved"] == ApprovalOutcome.approve(), "the second (reject) never overwrote the first (approve)"
+    assert outcome["record_at_resume"]["status"] == "APPROVED"
+    assert json.loads(Path(launch_review_decision_path(canonical, LID, outcome["record_at_resume"]["review_id"])).read_text())["decision"] == "approve"
 
 
-def test_a_stale_digest_or_review_id_fails_closed_and_the_run_keeps_waiting(ws):
-    def scenario(canonical, pending):
-        codes = [_refusal(canonical, pending, candidate_digest="sha256:" + "0" * 64),
-                 _refusal(canonical, pending, review_id="ra-" + "0" * 24)]
-        return codes, _decide(canonical, pending, "approve")
+def test_a_wrong_digest_or_review_id_is_refused_and_the_run_keeps_waiting(ws):
+    def scenario(host, pending):
+        codes = [host.decide("approve", candidate_digest="sha256:" + "0" * 64)["code"], host.decide("approve", review_id="ra-" + "0" * 24)["code"]]
+        return codes, host.decide("approve")
 
     _canonical, outcome = _run(ws, scenario)
     assert outcome["scenario"][0] == ["STALE_REVIEW", "STALE_REVIEW"] and outcome["approved"] == ApprovalOutcome.approve()
 
 
+def test_a_wrong_or_missing_capability_is_refused_and_does_not_spend_the_live_one(ws):
+    def scenario(host, pending):
+        codes = [host.decide("approve", capability="0" * 64)["code"], host.decide("approve", capability=OMIT)["code"], host.decide("approve", capability=None)["code"]]
+        return codes, host.decide("approve")
+
+    _canonical, outcome = _run(ws, scenario)
+    assert outcome["scenario"][0] == ["CAPABILITY_MISMATCH"] * 3 and outcome["approved"] == ApprovalOutcome.approve()
+
+
 def test_a_review_superseded_by_a_new_candidate_cannot_be_approved_any_more(ws):
-    canonical, session = _session(ws)
+    canonical, session, host = _session(ws)
     seen = {}
 
     async def main_():
         first = asyncio.ensure_future(launch_module.request_change_approval(FILES, REASON))
         old = await _wait_pending(canonical)
         seen["old"] = old
+        old_frame = await asyncio.to_thread(host.review)
         second = asyncio.ensure_future(launch_module.request_change_approval([{"filepath": "hello.py", "content": "different diff\n"}], REASON))
         for _ in range(500):
             if _pending(canonical)["review_id"] != old["review_id"]:
                 break
             await asyncio.sleep(0.01)
-        seen["code"] = await asyncio.to_thread(_refusal, canonical, old)
-        new = _pending(canonical)
-        await asyncio.to_thread(_decide, canonical, new, "approve")
+        new_frame = await asyncio.to_thread(host.next_review)
+        assert new_frame["review_id"] != old_frame["review_id"] and new_frame["capability"] != old_frame["capability"]
+        seen["code"] = (await asyncio.to_thread(host.decide, "approve", review_id=old_frame["review_id"], candidate_digest=old_frame["candidate_digest"], capability=old_frame["capability"]))["code"]
+        await asyncio.to_thread(host.decide, "approve")
         seen["second"] = await asyncio.wait_for(second, 20)
-        first.cancel()
+        seen["first"] = await asyncio.wait_for(first, 20)
 
     try:
         with begin_mutating_run(canonical):
             asyncio.run(main_())
     finally:
         session.finish(0, None, None)
+        host.close()
     assert seen["code"] == "STALE_REVIEW" and seen["second"] == ApprovalOutcome.approve()
+    assert seen["first"] == ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED), "the superseded waiter ends unavailable, never approved"
     history = load_launch_record(canonical, LID)["approval_history"]
     assert history and history[0]["review_id"] == seen["old"]["review_id"] and history[0]["status"] == "EXPIRED"
 
 
-def test_wrong_run_wrong_workspace_and_a_decision_after_the_run_ended_are_refused(ws, tmp_path, monkeypatch):
-    def scenario(canonical, pending):
-        wrong_run = approval.ApprovalRefused
-        with pytest.raises(wrong_run) as run_error:
-            approval.decide(canonical, OTHER_LID, pending["review_id"], pending["candidate_digest"], "approve")
-        elsewhere = tmp_path / "elsewhere"
-        elsewhere.mkdir()
-        with pytest.raises(wrong_run) as folder_error:
-            approval.decide(str(elsewhere), LID, pending["review_id"], pending["candidate_digest"], "approve")
-        with monkeypatch.context() as scoped:  # NOT monkeypatch.undo(): that would also revert the autouse KRIYA_AUTHORITY_HOME isolation
-            scoped.setattr(approval, "workspace_identity", lambda _path: "not-this-workspace")
-            identity_code = _refusal(canonical, pending)
-        monkeypatch.setattr(approval, "POLL_SECONDS", 0.01)
-        _decide(canonical, pending, "approve")
-        return run_error.value.code, folder_error.value.code, identity_code
+def test_a_decision_naming_another_launch_is_refused(ws):
+    def scenario(host, pending):
+        code = host.decide("approve", launch_id=OTHER_LID)["code"]
+        return code, host.decide("approve")
 
-    canonical, outcome = _run(ws, scenario)
-    assert outcome["scenario"] == ("LAUNCH_NOT_FOUND", "LAUNCH_NOT_FOUND", "WRONG_WORKSPACE")
-    ended = load_launch_record(canonical, LID)
-    assert ended["phase"] == "ENDED"
-    with pytest.raises(approval.ApprovalRefused) as late:
-        approval.decide(canonical, LID, outcome["record_at_resume"]["review_id"], outcome["record_at_resume"]["candidate_digest"], "approve")
-    assert late.value.code == "LAUNCH_ENDED"
+    _canonical, outcome = _run(ws, scenario)
+    assert outcome["scenario"][0] == "STALE_REVIEW" and outcome["approved"] == ApprovalOutcome.approve()
 
 
 @pytest.mark.parametrize("override", [
     {"review_id": "not-a-review"}, {"review_id": "ra-XYZ"}, {"candidate_digest": "sha256:abc"}, {"candidate_digest": "../../etc/passwd"},
     {"decision": "approve-always"}, {"decision": "Approve"}, {"decision": ""}, {"launch_id": "../escape"}, {"launch_id": "20261010T101010-ABCDEF01"},
+    {"kind": "anything"}, {"v": 2}, {"type": "approve"}, {"surprise": 1},
 ])
-def test_malformed_requests_are_refused_before_any_state_is_read(ws, override):
-    canonical, session = _session(ws)
-    try:
-        pending = {"review_id": "ra-" + "0" * 24, "candidate_digest": "sha256:" + "0" * 64}
-        args = {"launch_id": LID, **pending, "decision": "approve", **override}
-        with pytest.raises(approval.ApprovalRefused) as caught:
-            approval.decide(canonical, args["launch_id"], args["review_id"], args["candidate_digest"], args["decision"])
-        assert caught.value.code == "INVALID_REQUEST"
-    finally:
-        session.finish(0, None, None)
+def test_a_malformed_decision_frame_fails_the_channel_closed_and_the_review_ends_unavailable(ws, override):
+    def scenario(host, pending):
+        host.send({**host.decision_frame("approve"), **override})  # a frame that is NOT what the protocol allows
+        return None
 
-
-def test_a_review_whose_process_is_gone_cannot_be_approved(ws):
-    canonical, session = _session(ws)
-    try:
-        with begin_mutating_run(canonical):  # the launch is RUNNING and records its review ...
-            awaiting = launch_module.request_change_approval(FILES, REASON)
-            awaiting.close()
-            pending = _pending(canonical)
-        # ... and then the process that held the workspace is gone (lock released, record never sealed)
-        assert _refusal(canonical, pending) == "LAUNCH_NOT_ACTIVE"
-        assert not os.path.exists(launch_review_decision_path(canonical, LID, pending["review_id"]))
-    finally:
-        session.finish(0, None, None)
-
-
-def test_a_launch_that_never_started_running_has_nothing_to_approve(ws):
-    canonical, session = _session(ws)
-    try:
-        awaiting = launch_module.request_change_approval(FILES, REASON)
-        awaiting.close()
-        assert _refusal(canonical, _pending(canonical)) == "NOT_PENDING"
-    finally:
-        session.finish(0, None, None)
+    canonical, outcome = _run(ws, scenario)
+    assert outcome["approved"] == ApprovalOutcome.unavailable_because(APPROVAL_CHANNEL_UNAVAILABLE)
+    assert outcome["record_at_resume"]["status"] == "EXPIRED" and outcome["record_at_resume"]["decision"]["source"] == "channel-failed"
+    assert not os.path.exists(launch_review_decision_path(canonical, LID, outcome["record_at_resume"]["review_id"]))
 
 
 def test_a_review_nobody_answers_expires_and_declines(ws, monkeypatch):
-    monkeypatch.setattr(approval, "APPROVAL_WAIT_SECONDS", 0.05)
-    canonical, session = _session(ws)
+    monkeypatch.setattr(approval, "APPROVAL_WAIT_SECONDS", 0.2)
+    canonical, session, host = _session(ws)
     try:
         with begin_mutating_run(canonical):
             assert asyncio.run(asyncio.wait_for(launch_module.request_change_approval(FILES, REASON), 10)) == ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED)
         record = _pending(canonical)
         assert record["status"] == "EXPIRED" and record["decision"]["source"] == "timeout"
-        assert _refusal(canonical, record) in ("REVIEW_EXPIRED", "NOT_PENDING")
     finally:
         session.finish(0, None, None)
+        host.close()
 
 
-def test_a_run_interrupted_while_the_review_waits_closes_the_review_as_undecided(ws):
-    canonical, session = _session(ws)
+def test_a_decision_that_arrives_after_the_review_expired_is_not_honoured_even_if_it_is_valid(ws, monkeypatch):
+    monkeypatch.setattr(approval, "APPROVAL_WAIT_SECONDS", 0.3)
+    canonical, session, host = _session(ws)
     seen = {}
 
     async def main_():
         task = asyncio.ensure_future(launch_module.request_change_approval(FILES, REASON))
         await _wait_pending(canonical)
+        review = await asyncio.to_thread(host.review)
+        seen["approved"] = await asyncio.wait_for(task, 10)  # the review ran out with nobody deciding
+        host.send(host.decision_frame("approve"))  # a perfectly bound decision with the genuine capability, too late
+        seen["review"] = review
+
+    try:
+        with begin_mutating_run(canonical):
+            asyncio.run(main_())
+    finally:
+        session.finish(0, None, None)
+        host.close()
+    assert seen["approved"] == ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED)
+    assert _pending(canonical)["status"] == "EXPIRED"
+    assert not os.path.exists(launch_review_decision_path(canonical, LID, _pending(canonical)["review_id"]))
+
+
+def test_a_late_decision_poisons_the_channel_for_the_next_review_which_is_then_unavailable_not_approved(ws, monkeypatch):
+    """Review F3 under the channel: a decision for a review that already ended arrives when no review is open -> out of order -> the channel fails closed, so the NEXT
+    review can not be answered at all (UNAVAILABLE) rather than being open to a replay."""
+    monkeypatch.setattr(approval, "APPROVAL_WAIT_SECONDS", 0.2)
+    canonical, session, host = _session(ws)
+    seen = {}
+
+    async def main_():
+        first = asyncio.ensure_future(launch_module.request_change_approval(FILES, REASON))
+        await _wait_pending(canonical)
+        await asyncio.to_thread(host.review)
+        seen["first"] = await asyncio.wait_for(first, 10)
+        host.send(host.decision_frame("approve"))
+        await asyncio.sleep(0.1)
+        seen["second"] = await asyncio.wait_for(launch_module.request_change_approval([{"filepath": "x.py", "content": "d\n"}], REASON), 10)
+
+    try:
+        with begin_mutating_run(canonical):
+            asyncio.run(main_())
+    finally:
+        session.finish(0, None, None)
+        host.close()
+    assert seen["first"] == ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED)
+    assert seen["second"] == ApprovalOutcome.unavailable_because(APPROVAL_CHANNEL_UNAVAILABLE) and not seen["second"].approved
+
+
+def test_a_run_interrupted_while_the_review_waits_closes_the_review_as_undecided_and_forgets_its_capability(ws):
+    canonical, session, host = _session(ws)
+    seen = {}
+
+    async def main_():
+        task = asyncio.ensure_future(launch_module.request_change_approval(FILES, REASON))
+        await _wait_pending(canonical)
+        await asyncio.to_thread(host.review)
         await asyncio.sleep(0.1)  # the wait has begun
         task.cancel()  # the SIGINT path: the waiting coroutine is cancelled mid-wait
         try:
@@ -282,53 +313,65 @@ def test_a_run_interrupted_while_the_review_waits_closes_the_review_as_undecided
             asyncio.run(main_())
     finally:
         session.finish(130, None, "KeyboardInterrupt")
+        host.close()
     record = _pending(canonical)
     assert seen["cancelled"] is True
     assert record["status"] == "EXPIRED" and record["decision"]["source"] == "interrupted", "an interrupted run must not leave its review PENDING"
 
 
 def test_a_launch_that_ends_with_an_undecided_review_never_leaves_it_pending(ws):
-    canonical, session = _session(ws)
+    canonical, session, host = _session(ws)
     awaiting = launch_module.request_change_approval(FILES, REASON)
     awaiting.close()  # the wait never began (a crash between the callback and the await)
     assert _pending(canonical)["status"] == "PENDING"
     session.finish(1, None, "killed")
+    host.close()
     record = _pending(canonical)
     assert record["status"] == "EXPIRED" and record["decision"]["source"] == "launch-ended"
 
 
-def test_a_vanished_host_declines_instead_of_waiting_forever(ws, monkeypatch):
-    real = os.getppid()
-    canonical, session = _session(ws)  # the launch opened under `real`
-    monkeypatch.setattr(approval.os, "getppid", lambda: real + 1)  # the host died before the review was even requested
+def test_a_vanished_host_ends_the_review_unavailable_instead_of_waiting_forever(ws):
+    canonical, session, host = _session(ws)
+
+    async def main_():
+        task = asyncio.ensure_future(launch_module.request_change_approval(FILES, REASON))
+        await _wait_pending(canonical)
+        await asyncio.to_thread(host.review)
+        host.close()  # the host died with the review in front of it
+        return await asyncio.wait_for(task, 10)
+
     try:
         with begin_mutating_run(canonical):
-            assert asyncio.run(asyncio.wait_for(launch_module.request_change_approval(FILES, REASON), 10)) == ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED)
-            record = _pending(canonical)
-            assert record["decision"]["source"] == "host-gone"
-            # the run still holds the workspace, but the review is over: a late decision is refused and nothing is written for it
-            assert _refusal(canonical, record) == "REVIEW_EXPIRED"
-            assert not os.path.exists(launch_review_decision_path(canonical, LID, record["review_id"]))
+            result = asyncio.run(main_())
+        record = _pending(canonical)
     finally:
         session.finish(0, None, None)
+    assert result == ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED) and record["decision"]["source"] == "host-gone"
+    assert not os.path.exists(launch_review_decision_path(canonical, LID, record["review_id"]))
+
+
+# ------------------------------------------------------------------ D2 M2: files are never approval authority
+
+def _plant(canonical, pending, **forgery):
+    """The strongest file a same-UID workload could write: stamped by Kriya's own writer, every identity bound, an 'approve'."""
+    payload = {"schema": 1, "launch_id": LID, "review_id": pending["review_id"], "candidate_digest": pending["candidate_digest"],
+               "workspace_identity": workspace_identity(canonical), "decision": "approve", "decided_at": "now", "nonce": "x", **forgery}
+    save_launch_review_decision(canonical, LID, pending["review_id"], payload)
 
 
 @pytest.mark.parametrize("forgery", [
-    {"candidate_digest": "sha256:" + "1" * 64}, {"workspace_identity": "someone-elses-workspace"}, {"launch_id": OTHER_LID}, {"review_id": "ra-" + "9" * 24},
-    {"decision": "approve-always"}, {"schema": 2},
+    {}, {"candidate_digest": "sha256:" + "1" * 64}, {"workspace_identity": "someone-elses-workspace"}, {"launch_id": OTHER_LID}, {"review_id": "ra-" + "9" * 24},
+    {"decision": "approve-always"}, {"schema": 2}, {"capability": "0" * 64}, {"token_sha256": "0" * 64, "token": "attacker"},
 ])
-def test_a_decision_file_that_does_not_bind_every_identity_is_not_a_decision(ws, monkeypatch, forgery):
-    monkeypatch.setattr(approval, "APPROVAL_WAIT_SECONDS", 0.3)
-    canonical, session = _session(ws)
+def test_a_decision_file_is_never_a_decision_not_even_a_perfectly_forged_one(ws, monkeypatch, forgery):
+    monkeypatch.setattr(approval, "APPROVAL_WAIT_SECONDS", 0.4)
+    canonical, session, host = _session(ws)
     seen = {}
 
     async def main_():
         task = asyncio.ensure_future(launch_module.request_change_approval(FILES, REASON))
         pending = await _wait_pending(canonical)
-        from kriya.control.persistence import save_launch_review_decision
-        payload = {"schema": 1, "launch_id": LID, "review_id": pending["review_id"], "candidate_digest": pending["candidate_digest"],
-                   "workspace_identity": workspace_identity(canonical), "decision": "approve", "decided_at": "now", "nonce": "x", **forgery}
-        await asyncio.to_thread(save_launch_review_decision, canonical, LID, pending["review_id"], payload)
+        await asyncio.to_thread(_plant, canonical, pending, **forgery)
         seen["approved"] = await asyncio.wait_for(task, 20)
 
     try:
@@ -336,151 +379,70 @@ def test_a_decision_file_that_does_not_bind_every_identity_is_not_a_decision(ws,
             asyncio.run(main_())
     finally:
         session.finish(0, None, None)
-    assert not seen["approved"].approved, f"a forged approval ({forgery}) was honoured"
-    assert _pending(canonical)["status"] == "EXPIRED"
+        host.close()
+    assert not seen["approved"].approved, f"a forged approval file ({forgery}) was honoured"
+    assert seen["approved"] == ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED) and _pending(canonical)["status"] == "EXPIRED"
 
 
-def test_a_pending_review_whose_time_has_passed_cannot_be_decided_even_if_the_waiter_has_not_noticed(ws, monkeypatch):
-    monkeypatch.setattr(approval, "APPROVAL_WAIT_SECONDS", -1.0)  # already expired when recorded
-    monkeypatch.setattr(approval, "POLL_SECONDS", 5.0)  # and the waiter has not looked yet
+def test_a_planted_file_before_the_real_decision_neither_approves_nor_blocks_the_real_decision(ws):
+    def scenario(host, pending):
+        _plant(canonical_workspace(str(ws)), pending, decision="reject")  # an attacker pre-writes a REJECT at the decision's name
+        return host.decide("approve")
 
-    def scenario(canonical, pending):
-        code = _refusal(canonical, pending)
-        assert not os.path.exists(launch_review_decision_path(canonical, LID, pending["review_id"]))
-        return code
+    canonical, outcome = _run(ws, scenario)
+    assert outcome["approved"] == ApprovalOutcome.approve() and outcome["record_at_resume"]["status"] == "APPROVED"
+    planted = json.loads(Path(launch_review_decision_path(canonical, LID, outcome["record_at_resume"]["review_id"])).read_text())
+    assert planted["decision"] == "reject", "the audit write never overwrites a document that is already there; it is output only and changes nothing"
 
-    canonical, session = _session(ws)
+
+def test_a_workload_cannot_reach_the_review_through_the_retired_cli_action(ws, monkeypatch):
+    monkeypatch.chdir(ws)
+
+    def scenario(host, pending):
+        runner = CliRunner()
+        forged = runner.invoke(main, ["launch-decision", "--launch-id", LID, "--review-id", pending["review_id"], "--candidate-digest", pending["candidate_digest"], "--decision", "approve"])
+        return forged, host.decide("reject")
+
+    canonical, outcome = _run(ws, scenario)
+    forged, real = outcome["scenario"]
+    assert forged.exit_code == 2 and json.loads(forged.output) == {"accepted": False, "code": "CHANNEL_REQUIRED", "message": json.loads(forged.output)["message"]}
+    assert real["accepted"] is True and outcome["approved"] == ApprovalOutcome.decline()  # the forged approve changed nothing; the person's real reject stood
+    audit = json.loads(Path(launch_review_decision_path(canonical, LID, outcome["record_at_resume"]["review_id"])).read_text())
+    assert audit["decision"] == "reject", "the only document at the decision's name is the audit of the REAL decision"
+
+
+def test_the_capability_is_never_written_anywhere_durable_or_logged(ws, caplog):
+    caplog.set_level("DEBUG")
     seen = {}
 
-    async def main_():
-        task = asyncio.ensure_future(launch_module.request_change_approval(FILES, REASON))
-        pending = await _wait_pending(canonical)
-        seen["code"] = await asyncio.to_thread(scenario, canonical, pending)
-        monkeypatch.setattr(approval, "POLL_SECONDS", 0.01)
-        seen["approved"] = await asyncio.wait_for(task, 20)
+    def scenario(host, pending):
+        seen["capability"] = host.review()["capability"]
+        return host.decide("approve")
 
+    canonical, _outcome = _run(ws, scenario)
+    capability = seen["capability"]
+    home = Path(os.environ["KRIYA_AUTHORITY_HOME"])
+    leaked = [str(p) for p in list(home.rglob("*")) + list(Path(canonical).rglob("*")) if p.is_file() and capability in p.read_text(errors="ignore")]
+    assert leaked == [] and capability not in caplog.text
+
+
+def test_a_launch_without_a_private_channel_cannot_be_asked_to_approve_anything(ws):
+    canonical, session, _none = _session(ws, channel=False)
     try:
-        with begin_mutating_run(canonical):
-            asyncio.run(main_())
-    finally:
-        session.finish(0, None, None)
-    assert seen["code"] == "REVIEW_EXPIRED" and seen["approved"] == ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED)
-
-
-def test_a_decision_that_lost_the_race_is_reported_as_already_decided(ws, monkeypatch):
-    def scenario(canonical, pending):
-        real = approval.load_launch_review_decision
-
-        def other_writer_won(*args):
-            stored = real(*args)
-            return {**stored, "nonce": "somebody-else"} if stored else stored
-        monkeypatch.setattr(approval, "load_launch_review_decision", other_writer_won)
-        code = _refusal(canonical, pending)
-        monkeypatch.setattr(approval, "load_launch_review_decision", real)
-        return code
-
-    canonical, session = _session(ws)
-    seen = {}
-
-    async def main_():
-        task = asyncio.ensure_future(launch_module.request_change_approval(FILES, REASON))
-        pending = await _wait_pending(canonical)
-        seen["code"] = await asyncio.to_thread(scenario, canonical, pending)
-        task.cancel()
-
-    monkeypatch.setattr(approval, "POLL_SECONDS", 5.0)
-    try:
-        with begin_mutating_run(canonical):
-            asyncio.run(main_())
-    finally:
-        session.finish(0, None, None)
-    assert seen["code"] == "ALREADY_DECIDED"
-
-
-def test_a_decision_file_can_never_be_overwritten(ws):
-    from kriya.control import persistence
-    canonical, session = _session(ws)
-    try:
-        review = "ra-" + "5" * 24
-        persistence.save_launch_review_decision(canonical, LID, review, {"decision": "approve"})
-        with pytest.raises(FileExistsError):
-            persistence.save_launch_review_decision(canonical, LID, review, {"decision": "reject"})
-        assert persistence.load_launch_review_decision(canonical, LID, review)["decision"] == "approve"
-        leftovers = [n for n in os.listdir(os.path.dirname(launch_review_decision_path(canonical, LID, review))) if ".staging-" in n]
-        assert leftovers == [], "no staging file is left behind"
-    finally:
-        session.finish(0, None, None)
-
-
-def test_of_many_simultaneous_decisions_exactly_one_is_accepted_and_it_is_the_one_on_disk(ws):
-    """MEASURED defect (independent review F2): the exclusive create was check-then-replace, so two concurrent deciders could both be told 'accepted' with
-    contradictory decisions. Real concurrency: many threads race to decide the same review."""
-    import threading
-    canonical, session = _session(ws)
-    results = []
-    try:
-        with begin_mutating_run(canonical):
-            awaiting = launch_module.request_change_approval(FILES, REASON)
-            awaiting.close()
-            pending = _pending(canonical)
-            gate = threading.Barrier(12)
-
-            def contender(index):
-                gate.wait()
-                try:
-                    results.append((index, _decide(canonical, pending, "approve" if index % 2 == 0 else "reject")["decision"]))
-                except approval.ApprovalRefused as refusal:
-                    results.append((index, refusal.code))
-
-            threads = [threading.Thread(target=contender, args=(i,)) for i in range(12)]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join(30)
-        accepted = [r for r in results if r[1] in ("approve", "reject")]
-        refused = [r for r in results if r[1] not in ("approve", "reject")]
-        assert len(results) == 12 and len(accepted) == 1, results
-        assert all(code == "ALREADY_DECIDED" for _i, code in refused), results
-        from kriya.control.persistence import load_launch_review_decision
-        assert load_launch_review_decision(canonical, LID, pending["review_id"])["decision"] == accepted[0][1], "the accepted decision is the one that is on disk"
-    finally:
-        session.finish(0, None, None)
-
-
-def test_an_unstamped_decision_file_is_not_a_decision(ws):
-    from kriya.control import persistence
-    canonical, session = _session(ws)
-    try:
-        review = "ra-" + "6" * 24
-        path = launch_review_decision_path(canonical, LID, review)
-        with open(path, "w", encoding="utf-8") as handle:
-            json.dump({"schema": 1, "launch_id": LID, "review_id": review, "decision": "approve"}, handle)  # written by something other than Kriya's control writer
-        assert persistence.load_launch_review_decision(canonical, LID, review) is None
-    finally:
-        session.finish(0, None, None)
-
-
-def test_a_decision_that_arrives_after_the_review_expired_is_not_honoured_even_if_it_is_valid(ws, monkeypatch):
-    """Consume-time expiry (review F3): a perfectly bound decision file that is already on disk when the waiter looks, but dates from after the review's recorded end,
-    changes nothing - whoever wrote it."""
-    monkeypatch.setattr(approval, "APPROVAL_WAIT_SECONDS", -1.0)  # the review is past its end the moment it is recorded
-    canonical, session = _session(ws)
-    try:
-        with begin_mutating_run(canonical):
-            awaiting = launch_module.request_change_approval(FILES, REASON)
-            pending = _pending(canonical)
-            from kriya.control.persistence import save_launch_review_decision
-            payload = {"schema": 1, "launch_id": LID, "review_id": pending["review_id"], "candidate_digest": pending["candidate_digest"],
-                       "workspace_identity": workspace_identity(canonical), "decision": "approve", "decided_at": "now", "nonce": "x"}
-            save_launch_review_decision(canonical, LID, pending["review_id"], payload)  # present BEFORE the waiter's first look
-            assert asyncio.run(asyncio.wait_for(awaiting, 10)) == ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED)
-        assert _pending(canonical)["status"] == "EXPIRED" and _pending(canonical)["decision"]["source"] == "timeout"
+        assert launch_module.request_change_approval(FILES, REASON) is None, "no channel: the review is not even offered"
+        from kriya.workflow.runtime_command_approval import build_subject
+        subject = build_subject(unit_id="s1", criterion="prints Hello", working_directory="/wt/run-1", commands=[["python", "main.py"]], input_channel="none",
+                                stdin_payload=None, reason="Allow Kriya to execute these command(s)?")
+        assert launch_module.request_runtime_command_approval(subject) is None, "a REAL, showable subject is still not offered without a channel"
+        assert load_launch_record(canonical, LID)["pending_approval"] is None
+        outcome = asyncio.run(approval._wait(session, "ra-" + "1" * 24, "sha256:" + "a" * 64))  # the guard for a channel that went away mid-launch
+        assert outcome == ApprovalOutcome.unavailable_because(APPROVAL_CHANNEL_UNAVAILABLE)
     finally:
         session.finish(0, None, None)
 
 
 def test_resolving_a_review_requires_it_to_be_the_pending_one(ws):
-    canonical, session = _session(ws)
+    canonical, session, host = _session(ws)
     try:
         awaiting = launch_module.request_change_approval(FILES, REASON)
         awaiting.close()
@@ -492,20 +454,7 @@ def test_resolving_a_review_requires_it_to_be_the_pending_one(ws):
         assert _pending(canonical)["status"] == "APPROVED"
     finally:
         session.finish(0, None, None)
-
-
-def test_a_review_that_ended_without_a_decision_cannot_be_decided_later_while_the_run_lives(ws):
-    canonical, session = _session(ws)
-    try:
-        with begin_mutating_run(canonical):
-            awaiting = launch_module.request_change_approval(FILES, REASON)
-            awaiting.close()
-            pending = _pending(canonical)
-            assert session.resolve_review(pending["review_id"], "EXPIRED", {"decision": None, "source": "timeout"}) is True
-            assert _refusal(canonical, _pending(canonical)) == "REVIEW_EXPIRED"
-            assert not os.path.exists(launch_review_decision_path(canonical, LID, pending["review_id"]))
-    finally:
-        session.finish(0, None, None)
+        host.close()
 
 
 def test_if_the_approval_cannot_be_recorded_nothing_is_approved(ws):
@@ -513,7 +462,7 @@ def test_if_the_approval_cannot_be_recorded_nothing_is_approved(ws):
     # would then write the launch record into the real ~/.kriya/authority.
     local = pytest.MonkeyPatch()
 
-    def scenario(canonical, pending):
+    def scenario(host, pending):
         real_save = launch_module.save_launch_record
 
         def failing(workspace, launch_id, record):
@@ -521,55 +470,51 @@ def test_if_the_approval_cannot_be_recorded_nothing_is_approved(ws):
                 raise OSError("disk full")
             return real_save(workspace, launch_id, record)
         local.setattr(launch_module, "save_launch_record", failing)
-        return _decide(canonical, pending, "approve")
+        return host.decide("approve")
 
-    canonical, session = _session(ws)
+    canonical, session, host = _session(ws)
     outcome = {}
 
     async def main_():
         task = asyncio.ensure_future(launch_module.request_change_approval(FILES, REASON))
         pending = await _wait_pending(canonical)
-        await asyncio.to_thread(scenario, canonical, pending)
+        await asyncio.to_thread(scenario, host, pending)
         outcome["approved"] = await asyncio.wait_for(task, 20)
 
-    local.setattr(approval, "APPROVAL_WAIT_SECONDS", 5.0)  # was 0.5: under 8-way load the decision thread landed after the review expired (REVIEW_EXPIRED); this test is about a failed save, not expiry
+    local.setattr(approval, "APPROVAL_WAIT_SECONDS", 5.0)
     try:
         with begin_mutating_run(canonical):
             asyncio.run(main_())
     finally:
         local.undo()
         session.finish(0, None, None)
+        host.close()
     assert outcome["approved"] == ApprovalOutcome.unavailable_because(APPROVAL_DECISION_NOT_RECORDED), "an approval that could not be made durable must never let the workflow continue - and is not a decline either"
 
 
-# ------------------------------------------------------------------ the callback and the typed action
+# ------------------------------------------------------------------ the callback and the retired typed action
 
-def test_launch_status_exposes_the_pending_review_to_the_desktop(ws):
+def test_launch_status_exposes_the_pending_review_to_the_desktop_but_never_the_capability(ws):
     seen = {}
 
-    def scenario(canonical, pending):
+    def scenario(host, pending):
         view = run_kup_operation(AppConfig(), {"operation": "launch.status", "workspace": str(ws), "launch_id": LID})["data"]["launch"]
         seen["pending"] = view["pending_approval"]
-        return _decide(canonical, pending, "reject")
+        seen["capability"] = host.review()["capability"]
+        seen["view"] = json.dumps(view)
+        return host.decide("reject")
 
     _run(ws, scenario)
     assert seen["pending"]["status"] == "PENDING" and seen["pending"]["reason"] == REASON and seen["pending"]["files"][0]["filepath"] == "hello.py"
+    assert seen["capability"] not in seen["view"]
 
 
-def test_the_cli_action_answers_json_and_exits_non_zero_when_refused(ws, monkeypatch):
+def test_the_cli_action_is_retired_it_answers_a_typed_channel_required_refusal_and_exits_non_zero(ws, monkeypatch):
     monkeypatch.chdir(ws)
-
-    def scenario(canonical, pending):
-        runner = CliRunner()
-        base = ["launch-decision", "--launch-id", LID, "--review-id", pending["review_id"], "--candidate-digest", pending["candidate_digest"]]
-        refused = runner.invoke(main, [*base[:-1], "sha256:" + "2" * 64, "--decision", "approve"])
-        accepted = runner.invoke(main, [*base, "--decision", "approve"])
-        return refused, accepted
-
-    _canonical, outcome = _run(ws, scenario)
-    refused, accepted = outcome["scenario"]
-    assert refused.exit_code == 2 and json.loads(refused.output)["code"] == "STALE_REVIEW"
-    assert accepted.exit_code == 0 and json.loads(accepted.output)["accepted"] is True and outcome["approved"] == ApprovalOutcome.approve()
+    runner = CliRunner()
+    result = runner.invoke(main, ["launch-decision", "--launch-id", LID, "--review-id", "ra-" + "1" * 24, "--candidate-digest", "sha256:" + "2" * 64, "--decision", "approve"])
+    answer = json.loads(result.output)
+    assert result.exit_code == 2 and answer["accepted"] is False and answer["code"] == "CHANNEL_REQUIRED"
 
 
 def test_the_cli_action_has_no_option_that_could_broaden_authority():
@@ -582,7 +527,7 @@ def test_inside_a_launch_a_change_is_held_for_review_and_everything_else_is_unav
     import inspect
 
     import kriya.cli as cli
-    canonical, session = _session(ws)
+    canonical, session, host = _session(ws)
     try:
         for yes in (False, True):  # `--yes` can never take effect inside a launch
             awaiting = cli._approval_decision(FILES, REASON, yes)
@@ -595,6 +540,7 @@ def test_inside_a_launch_a_change_is_held_for_review_and_everything_else_is_unav
         assert load_launch_record(canonical, LID)["approval_required"]["kind"] == "other_approval"
     finally:
         session.finish(0, None, None)
+        host.close()
 
 
 def test_outside_a_launch_the_callback_is_the_terminal_behaviour_unchanged(monkeypatch):
@@ -644,11 +590,19 @@ def test_no_auto_approval_path_exists_in_the_launch_layer():
         assert "--yes" not in text and "auto_approve" not in text and "-y" not in re.findall(r"['\"](-y)['\"]", text)
 
 
+def test_the_waiter_never_reads_the_decision_file_as_authority():
+    """Structural: the production code has no reader of a persisted decision document at all (the audit file is written, never read)."""
+    import glob
+    readers = [p for p in glob.glob("kriya/**/*.py", recursive=True) if "load_launch_review_decision" in open(p, encoding="utf-8").read()]
+    assert readers == [], readers
+    assert "load_launch_review_decision" not in open(approval.__file__, encoding="utf-8").read()
+
+
 # --------------------------------------------------------------------------- N1: the real launch callback + the real workflow, end to end
 
 def _run_workflow_in_launch(ws, tmp_path, *, scenario):
-    """A real desktop-launch session, the real `cli._approval_decision` as the workflow's approval callback, the real direct workflow. `scenario(canonical)` plays the host while the
-    workflow waits. -> (result, trace row, whether the workflow's file reached its workspace)."""
+    """A real desktop-launch session, the real `cli._approval_decision` as the workflow's approval callback, the real direct workflow. `scenario(canonical, host)` plays the host
+    while the workflow waits. -> (result, trace row, whether the workflow's file reached its workspace)."""
     import sqlite3
     from unittest.mock import AsyncMock
 
@@ -663,21 +617,22 @@ def _run_workflow_in_launch(ws, tmp_path, *, scenario):
     cfg.autonomy.run_verification_enabled = False
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=["Step 1: Write code", "Design: Write app.py", '[{"filepath": "app.py", "content": "print(1)"}]', "Review: flagged for human judgment"])
-    canonical, session = _session(ws)
+    canonical, session, host = _session(ws)
     project = Path(canonical)   # the workflow runs in the launch's own workspace (one run context)
     seen = {}
 
     async def main_():
-        host = asyncio.ensure_future(scenario(canonical))
+        peer = asyncio.ensure_future(scenario(canonical, host))
         seen["result"] = await WorkflowEngine(Kernel(config=cfg), llm).run_generation_workflow(
             goal="Create app", workspace_path=str(project), approval_callback=lambda files, reason: cli._approval_decision(files, reason, False))
-        await host
+        await peer
 
     try:
         with begin_mutating_run(canonical):
             asyncio.run(main_())
     finally:
         session.finish(0, None, None)
+        host.close()
     connection = sqlite3.connect(trace_db_path(cfg))
     connection.row_factory = sqlite3.Row
     row = dict(connection.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone())
@@ -686,23 +641,32 @@ def _run_workflow_in_launch(ws, tmp_path, *, scenario):
 
 
 def test_a_person_who_rejects_in_a_launch_ends_the_run_human_rejected(ws, tmp_path):
-    async def host(canonical):
-        pending = await _wait_pending(canonical)
-        await asyncio.to_thread(_decide, canonical, pending, "reject")
+    async def peer(canonical, host):
+        await _wait_pending(canonical)
+        await asyncio.to_thread(host.decide, "reject")
 
-    result, row, applied = _run_workflow_in_launch(ws, tmp_path, scenario=host)
+    result, row, applied = _run_workflow_in_launch(ws, tmp_path, scenario=peer)
     assert result["review"] == "Rejected by user during approval gate review." and applied is False
     assert row["status"] == "human_rejected" and row["failure_category"] == "human_rejected"
+
+
+def test_a_person_who_approves_in_a_launch_lets_the_workflow_apply_its_change(ws, tmp_path):
+    async def peer(canonical, host):
+        await _wait_pending(canonical)
+        await asyncio.to_thread(host.decide, "approve")
+
+    result, row, applied = _run_workflow_in_launch(ws, tmp_path, scenario=peer)
+    assert applied is True and row["status"] != "human_rejected" and row["status"] != "approval_required"
 
 
 def test_a_launch_that_cannot_hold_the_review_ends_the_run_approval_required_not_human_rejected(ws, tmp_path, monkeypatch):
     """N1, MEASURED before the fix: the launch answered a plain False for a review it could not record, and the run ended `human_rejected` although no person decided anything."""
     monkeypatch.setattr(launch_module.LaunchSession, "_store_review_diff", lambda self, pending, files: False)   # the exact diff cannot be stored, so the review is not offered
 
-    async def host(canonical):
+    async def peer(canonical, host):
         return None
 
-    result, row, applied = _run_workflow_in_launch(ws, tmp_path, scenario=host)
+    result, row, applied = _run_workflow_in_launch(ws, tmp_path, scenario=peer)
     assert applied is False and result["files"] == []
     assert "no approval decision could be obtained (APPROVAL_LAUNCH_CANNOT_ASK)" in result["review"] and "nobody declined" in result["review"]
     assert row["status"] == "approval_required" and row["failure_category"] == "approval_required"
@@ -711,11 +675,10 @@ def test_a_launch_that_cannot_hold_the_review_ends_the_run_approval_required_not
 
 def test_a_review_nobody_decided_ends_the_run_approval_required_not_human_rejected(ws, tmp_path, monkeypatch):
     monkeypatch.setattr(approval, "APPROVAL_WAIT_SECONDS", -1.0)   # already expired when recorded: nobody can decide it
-    monkeypatch.setattr(approval, "POLL_SECONDS", 0.01)
 
-    async def host(canonical):
+    async def peer(canonical, host):
         return None
 
-    result, row, applied = _run_workflow_in_launch(ws, tmp_path, scenario=host)
+    result, row, applied = _run_workflow_in_launch(ws, tmp_path, scenario=peer)
     assert applied is False and "APPROVAL_REVIEW_EXPIRED" in result["review"]
     assert row["status"] == "approval_required"

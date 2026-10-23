@@ -231,6 +231,10 @@ class ReviewChannel:
                 pass
             sock.close()
 
+    def abandon(self) -> None:
+        """The wait for the open review ended without an outcome (cancelled): forget it - and its capability - so the channel can carry the next review."""
+        self._open = None
+
     def _fail(self, code: str) -> ChannelOutcome:
         self._failure = code
         logger.warning("review channel failed closed: %s", code)
@@ -278,8 +282,7 @@ class ReviewChannel:
         """Opens the review: draws its capability and sends the ``review`` frame. Raises ``ChannelUnavailable`` when the channel cannot carry it."""
         if self._failure is not None or self._sock is None:
             raise ChannelUnavailable(self._failure or "CHANNEL_CLOSED")
-        if self._open is not None:
-            raise ValueError("a review is already open on this channel")
+        self._open = None  # a newer review SUPERSEDES the open one: its capability is dropped and its waiter ends expired (await_decision checks it is still the open one)
         failed = self._drain_nowait()
         if failed is not None:
             raise ChannelUnavailable(failed.code or "CHANNEL_FAILED")
@@ -304,6 +307,8 @@ class ReviewChannel:
             raise ValueError("no review is open")
         loop = asyncio.get_running_loop()
         while True:
+            if self._open is not review:  # superseded by a newer review (or abandoned): this review is over and its capability is gone
+                return ChannelOutcome(OUTCOME_EXPIRED)
             while self._backlog:
                 outcome = await self._handle(self._backlog.popleft(), review, expires_at)
                 if outcome is not None:
@@ -360,9 +365,10 @@ class ReviewChannel:
         return ChannelOutcome(OUTCOME_DECIDED, decision=frame["decision"])
 
 
-def open_review_channel_from_fd(fd: int = CHANNEL_FD, *, clock: Callable[[], datetime] = _now) -> ReviewChannel:
+def open_review_channel_from_fd(fd: Optional[int] = None, *, clock: Callable[[], datetime] = _now) -> ReviewChannel:
     """Takes over the inherited descriptor: it must be a socket, and it is made non-inheritable IMMEDIATELY (before anything can spawn). Raises
-    ``ChannelUnavailable`` otherwise - a launch without a channel has no way to be approved."""
+    ``ChannelUnavailable`` otherwise - a launch without a channel has no way to be approved. ``fd`` defaults to the dedicated ``CHANNEL_FD``."""
+    fd = CHANNEL_FD if fd is None else fd
     try:
         mode = os.fstat(fd).st_mode
     except OSError as error:

@@ -30,6 +30,7 @@ import re
 import sqlite3
 
 import pytest
+from _review_channel_host import attach_review_channel
 
 from kriya.foundation.redaction import REDACTED
 
@@ -308,6 +309,7 @@ def _launch(tmp_path):
     ws.mkdir()
     canonical = canonical_workspace(str(ws))
     session = LaunchSession(canonical, workspace_identity(canonical), LID, "goal", {"ready": True}, {})
+    attach_review_channel(session)
     session.open()
     try:
         awaiting = launch_module.request_change_approval(
@@ -394,6 +396,7 @@ def _session_at(ws_path, launch_id):
     from kriya.control.launch import LaunchSession
 
     session = LaunchSession(ws_path, workspace_identity(ws_path), launch_id, "goal", {"ready": True}, {})
+    attach_review_channel(session)
     session.open()
     return session
 

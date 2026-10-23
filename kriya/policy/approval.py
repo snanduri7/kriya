@@ -239,7 +239,8 @@ APPROVAL_LAUNCH_CANNOT_ASK = "APPROVAL_LAUNCH_CANNOT_ASK"      # UNAVAILABLE: a 
 APPROVAL_REVIEW_EXPIRED = "APPROVAL_REVIEW_EXPIRED"            # UNAVAILABLE: the review ended with no decision (expired, the host went away, the wait was interrupted)
 APPROVAL_DECISION_NOT_RECORDED = "APPROVAL_DECISION_NOT_RECORDED"  # UNAVAILABLE: no decision was captured - one arrived but could not be made durable, or a terminal prompt ended without an explicit y/n (EOF, bare Enter, Ctrl-C) - so it is not honoured either way
 APPROVAL_RESULT_UNRECOGNIZED = "APPROVAL_RESULT_UNRECOGNIZED"  # UNAVAILABLE: the callback answered with something that is neither a bool nor an ApprovalOutcome (never read through truthiness)
-UNAVAILABLE_REASON_CODES = (APPROVAL_LAUNCH_CANNOT_ASK, APPROVAL_REVIEW_EXPIRED, APPROVAL_DECISION_NOT_RECORDED, APPROVAL_RESULT_UNRECOGNIZED)
+APPROVAL_CHANNEL_UNAVAILABLE = "APPROVAL_CHANNEL_UNAVAILABLE"  # UNAVAILABLE: a desktop launch's private review channel was not provided or failed closed (D2 M2), so no decision could be obtained - never a file fallback
+UNAVAILABLE_REASON_CODES = (APPROVAL_LAUNCH_CANNOT_ASK, APPROVAL_REVIEW_EXPIRED, APPROVAL_DECISION_NOT_RECORDED, APPROVAL_RESULT_UNRECOGNIZED, APPROVAL_CHANNEL_UNAVAILABLE)
 APPROVAL_REASON_CODES = (APPROVAL_GRANTED, APPROVAL_DECLINED, *UNAVAILABLE_REASON_CODES)
 
 
@@ -339,7 +340,8 @@ def approval_matches(decision: RuntimeCommandDecision, about_to_run: RuntimeComm
 # ----------------------------------------------------------------------------- review kinds, refusal codes, candidate digest (moved from kriya/control/launch_approval.py)
 
 REFUSAL_CODES = ("INVALID_REQUEST", "LAUNCH_NOT_FOUND", "LAUNCH_RECORD_UNREADABLE", "WRONG_WORKSPACE", "LAUNCH_ENDED", "LAUNCH_NOT_ACTIVE", "NOT_PENDING",
-                 "STALE_REVIEW", "ALREADY_DECIDED", "REVIEW_EXPIRED", "DECISION_NOT_RECORDED", "WRONG_REVIEW_KIND")
+                 "STALE_REVIEW", "ALREADY_DECIDED", "REVIEW_EXPIRED", "DECISION_NOT_RECORDED", "WRONG_REVIEW_KIND",
+                 "CAPABILITY_MISMATCH", "CHANNEL_REQUIRED")  # D2 M2: the waiter's refusal of a decision that does not carry the live capability; the retired file action
 # The two subjects a launch can hold for a human. A decision names the kind it is for, and `decide` refuses it for a review of the other kind: the change-approval action can never
 # approve a runtime-command review, nor the reverse.
 KIND_CHANGE, KIND_RUNTIME = "change_approval", "runtime_command"

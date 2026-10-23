@@ -85,7 +85,9 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
   }
   async function untilExited(h: ExecutionHost, ms = 60_000) { const end = Date.now() + ms; while (h.state().phase !== 'exited') { if (Date.now() > end) throw new Error('execution did not exit'); await sleep(40); } }
   const status = (ws: string, id: string) => read({ operation: 'launch.status', workspace: ws, launch_id: id });
-  const dirOf = (ws: string) => join(ws, '.kriya', 'control', 'launches');
+  // D2 M1a: launch records live in the operator's authority home (here under the test HOME), in one directory per workspace identity - never inside the workspace
+  const identityOf = (ws: string) => execFileSync(PYTHON, ['-c', 'import sys; from kriya.context.workspace_identity import workspace_identity as w; print(w(sys.argv[1]))', ws], { encoding: 'utf8', env: { ...process.env, PYTHONPATH: ROOT } }).trim();
+  const dirOf = (ws: string) => join(home, '.kriya', 'authority', 'launches', identityOf(ws));
 
   beforeAll(() => {
     base = mkdtempSync(join(tmpdir(), 'kriya-gui-exec-'));
@@ -379,7 +381,7 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     await untilExited(h);
     const d = (await status(ws, id)).data as Json;
     expect(d.run_record).toMatchObject({ found: true, terminal_status: 'SUCCESS' });
-    expect(d.launch.pending_approval).toMatchObject({ status: 'APPROVED', decision: { decision: 'approve', source: 'launch-decision' } });
+    expect(d.launch.pending_approval).toMatchObject({ status: 'APPROVED', decision: { decision: 'approve', source: 'review-channel' } });
     expect(d.launch.ended).toMatchObject({ exit_code: 0, workflow_status: 'success' });
     // the link is the REAL trace row (the controlled body's result run_id is not it)
     const snap = (await read({ operation: 'snapshot.acquire', workspace: ws })).data as Json;
@@ -416,7 +418,7 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     // Kriya's own authority layer, through the host: a REJECT is not gated by the host's reviewability check, so Kriya itself answers these
     expect(await a.decide(decision(ws, id, pending, 'reject', { candidate_digest: 'sha256:' + '0'.repeat(64) }))).toMatchObject({ accepted: false, code: 'STALE_REVIEW' });
     expect(await a.decide(decision(ws, id, pending, 'reject', { review_id: 'ra-' + '0'.repeat(24) }))).toMatchObject({ accepted: false, code: 'STALE_REVIEW' });
-    expect(await a.decide(decision(ws, '20200101T000000-00000000', pending, 'reject'))).toMatchObject({ accepted: false, code: 'LAUNCH_NOT_FOUND' });
+    expect(await a.decide(decision(ws, '20200101T000000-00000000', pending, 'reject'))).toMatchObject({ accepted: false, code: 'REVIEW_CHANNEL_NOT_READY' }); // no run with that id has a channel on this host
     // and an APPROVE for another candidate or review never gets that far: the host cannot prove that change, so it sends nothing
     expect(await a.decide(decision(ws, id, pending, 'approve', { candidate_digest: 'sha256:' + '0'.repeat(64) }))).toMatchObject({ accepted: false, code: 'CHANGE_NOT_REVIEWABLE' });
     expect(await a.decide(decision(ws, id, pending, 'approve', { review_id: 'ra-' + '0'.repeat(24) }))).toMatchObject({ accepted: false, code: 'CHANGE_NOT_REVIEWABLE' });
@@ -437,9 +439,8 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     const [first, second] = await Promise.all([a.decide(decision(ws, id, pending, 'approve')), a.decide(decision(ws, id, pending, 'reject'))]);
     expect([first.accepted, second.accepted].filter(Boolean)).toHaveLength(1); // exactly one decision was taken (the host serializes; Kriya would refuse the other anyway)
     await untilExited(h);
-    const late = await a.decide(decision(ws, id, pending, 'reject')); // Kriya's own refusal (a reject is not gated by the host)
-    expect(late).toMatchObject({ accepted: false });
-    expect(['LAUNCH_ENDED', 'ALREADY_DECIDED']).toContain(late.code);
+    const late = await a.decide(decision(ws, id, pending, 'reject')); // a reject is not gated by the host: the run is gone, so is its private channel
+    expect(late).toMatchObject({ accepted: false, code: 'REVIEW_CHANNEL_NOT_READY' });
     expect(await a.decide(decision(ws, id, pending, 'approve'))).toMatchObject({ accepted: false, code: 'CHANGE_NOT_REVIEWABLE' }); // and a late APPROVE is not even sent: the review is no longer pending
     const d = (await status(ws, id)).data as Json;
     expect(d.launch.pending_approval.status).toBe(first.accepted ? 'APPROVED' : 'REJECTED');
@@ -454,7 +455,7 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     process.kill(pid, 'SIGKILL');
     await untilExited(h);
     const refused = await approvals(ws).decide(decision(ws, id, pending, 'approve'));
-    expect(refused).toMatchObject({ accepted: false, code: 'LAUNCH_NOT_ACTIVE' });
+    expect(refused).toMatchObject({ accepted: false, code: 'REVIEW_CHANNEL_NOT_READY' }); // the process died: its private channel closed with it
     const d = (await status(ws, id)).data as Json;
     expect(d.liveness).toBe('interrupted');
     expect(d.launch.ended).toBeNull();
@@ -539,7 +540,7 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     expect(d.launch.pending_approval).toMatchObject({ status: 'EXPIRED', decision: { decision: null } });
     expect(['interrupted', 'launch-ended']).toContain(d.launch.pending_approval.decision.source);
     expect(d.workspace_lock.held).toBe(false);
-    expect(await approvals(ws).decide(decision(ws, id, pending, 'reject'))).toMatchObject({ accepted: false, code: 'LAUNCH_ENDED' }); // Kriya's own refusal
+    expect(await approvals(ws).decide(decision(ws, id, pending, 'reject'))).toMatchObject({ accepted: false, code: 'REVIEW_CHANNEL_NOT_READY' }); // the run ended: its private channel is gone
     expect(await approvals(ws).decide(decision(ws, id, pending, 'approve'))).toMatchObject({ accepted: false, code: 'CHANGE_NOT_REVIEWABLE' }); // a late APPROVE is not even sent
     // the application's OWN quit path leaves the folder clean and startable again: no recovery is needed after a quit
     const after = (await read({ operation: 'execution.preflight', workspace: ws })).data as Json;

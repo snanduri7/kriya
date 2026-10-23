@@ -1,5 +1,5 @@
 """Demo V2, controlled Greenfield end to end (Phase 22): Demo 00's exact goal through the REAL controller, workflow and launch layer, with a scripted model and the REAL decision functions
-a desktop uses (``approval.decide`` is what ``kriya launch-decision`` calls; the host/native-confirmation half is covered in ui/standalone/test/runtime_command_host.test.ts).
+a desktop uses (``channel_decide`` is what ``kriya launch-decision`` calls; the host/native-confirmation half is covered in ui/standalone/test/runtime_command_host.test.ts).
 
 Chain proved here: runtime detector true -> four units preserved -> three source changes, each held ONCE as a typed CHANGE review with files -> s4 (verification-only) never asks an
 empty source approval -> a typed RUNTIME-COMMAND review -> decided with its own kind and the fingerprint -> the exact reviewed commands execute -> recorded steps -> ApplicationOutcome
@@ -10,7 +10,7 @@ import threading
 import time
 
 import _enforce_unit_harness as harness
-import pytest
+from _review_channel_host import channel_decide
 from test_greenfield_runtime_verification_dropped import GOAL, JUDGE, MAIN, POM, TEST, _plan
 from test_launch_approval import LID, _session
 
@@ -25,13 +25,8 @@ UNITS = {"s1": (POM, "<project/>\n"),
          "s3": (TEST, "package com.example;\npublic class HelloKriyaTest {}\n")}
 
 
-@pytest.fixture(autouse=True)
-def _fast(monkeypatch):
-    monkeypatch.setattr(approval, "POLL_SECONDS", 0.01)
-
-
 class Person:
-    """The desktop's human + host, as a thread: it watches the launch record the way the cockpit does and answers each pending review with ``approval.decide`` and the review's OWN kind
+    """The desktop's human + host, as a thread: it watches the launch record the way the cockpit does and answers each pending review with ``channel_decide`` and the review's OWN kind
     and identity (exactly what ``kriya launch-decision`` receives). ``plan`` maps a review kind to ('approve'|'reject', seconds to think first)."""
 
     def __init__(self, canonical, plan=None):
@@ -58,7 +53,7 @@ class Person:
                 self.log.append(("pending", pending["kind"]))
                 time.sleep(think)
                 self.log.append(("deciding", pending["kind"]))
-                approval.decide(self.canonical, LID, pending["review_id"], pending["candidate_digest"], choice, pending["kind"])
+                channel_decide(self.canonical, LID, pending["review_id"], pending["candidate_digest"], choice, pending["kind"])
             time.sleep(0.01)
 
 
@@ -69,7 +64,7 @@ def _callback():
 def _launch_on(opened, plan, person_cls=Person):
     """`on_workspace` hook: open the launch session on the engine's own folder (the real arrangement: one folder, one launch, the run lock held under the launch id) and start the person."""
     def hook(workspace):
-        canonical, session = _session(workspace)
+        canonical, session, _host = _session(workspace)
         opened["canonical"], opened["session"] = canonical, session
         opened["person"] = person_cls(canonical, plan)
         opened["person"].start()
@@ -186,12 +181,12 @@ def test_a_decision_of_the_wrong_kind_cannot_approve_the_runtime_review(tmp_path
                     self.log.append(("pending", pending["kind"]))
                     if pending["kind"] == "runtime_command":
                         try:
-                            approval.decide(self.canonical, LID, pending["review_id"], pending["candidate_digest"], "approve", "change_approval")
+                            channel_decide(self.canonical, LID, pending["review_id"], pending["candidate_digest"], "approve", "change_approval")
                         except approval.ApprovalRefused as refused:
                             refusals.append(refused.code)
                         refusals.append((load_launch_record(self.canonical, LID) or {})["pending_approval"]["status"])
                     self.log.append(("deciding", pending["kind"]))
-                    approval.decide(self.canonical, LID, pending["review_id"], pending["candidate_digest"], "approve", pending["kind"])
+                    channel_decide(self.canonical, LID, pending["review_id"], pending["candidate_digest"], "approve", pending["kind"])
                 time.sleep(0.01)
 
     run, _person, _canonical, _executed_at = _go(tmp_path, person_cls=Confused)

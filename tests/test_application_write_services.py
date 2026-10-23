@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Tuple
 
 import pytest
 import yaml
+from _review_channel_host import attach_review_channel, channel_decide
 
 import kriya.control.launch_approval as approval
 from kriya.config import AppConfig
@@ -47,6 +48,7 @@ TOOLS = [{"tool": "git", "available": True, "path": "/usr/bin/git", "checked": "
 def _hold_and_reject(canonical: str, launch_id: str, request) -> str:
     """A real launch session inside a real run lock: one review is requested, then rejected by the real decision action."""
     session = LaunchSession(canonical, workspace_identity(canonical), launch_id, "goal", {"ready": True}, {})
+    attach_review_channel(session)
     session.open()
     seen: Dict[str, str] = {}
 
@@ -59,7 +61,7 @@ def _hold_and_reject(canonical: str, launch_id: str, request) -> str:
             await asyncio.sleep(0.01)
         pending = record["pending_approval"]
         seen["review_id"] = pending["review_id"]
-        await asyncio.to_thread(approval.decide, canonical, launch_id, pending["review_id"], pending["candidate_digest"], "reject",
+        await asyncio.to_thread(channel_decide, canonical, launch_id, pending["review_id"], pending["candidate_digest"], "reject",
                                 pending.get("kind", approval.KIND_CHANGE))
         await asyncio.wait_for(task, 20)
 
@@ -75,7 +77,6 @@ def _hold_and_reject(canonical: str, launch_id: str, request) -> str:
 def scenario(tmp_path, monkeypatch):
     """A plain workspace with one reviewed change launch and one reviewed runtime-command launch, a folder whose configuration needs
     an operator approval, a parent folder for workspace.create and an unconfigured folder for project.initialize."""
-    monkeypatch.setattr(approval, "POLL_SECONDS", 0.01)
     monkeypatch.setenv("KRIYA_AUTHORITY_HOME", str(tmp_path / "_authority_home"))
     monkeypatch.delenv("KRIYA_TRUST_FILE", raising=False)
     monkeypatch.setattr("kriya.kup.execution.tool_visibility", lambda: [dict(t) for t in TOOLS])

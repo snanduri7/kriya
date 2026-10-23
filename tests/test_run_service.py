@@ -13,8 +13,8 @@ import sqlite3
 from typing import Any, Dict, List
 
 import pytest
+from _review_channel_host import attach_review_channel, channel_decide
 
-import kriya.control.launch_approval as approval
 from kriya.application import (
     ApplicationRefusal,
     ApprovalRefused,
@@ -43,7 +43,6 @@ FILES = [{"filepath": "hello.py", "content": "--- a/hello.py\n+++ b/hello.py\n@@
 
 @pytest.fixture(autouse=True)
 def _stable(monkeypatch):
-    monkeypatch.setattr(approval, "POLL_SECONDS", 0.01)
     monkeypatch.setattr("kriya.kup.execution.tool_visibility", lambda: [dict(t) for t in TOOLS])
 
 
@@ -87,6 +86,7 @@ def test_an_unusable_cockpit_state_directory_is_a_typed_refusal_on_the_wire(ws, 
 
 def test_status_through_the_service_is_the_kup_answer_and_a_missing_launch_is_refused(ws):
     session = LaunchSession(ws, workspace_identity(ws), LID, "goal", {"ready": True}, {})
+    attach_review_channel(session)
     session.open()
     session.finish(0, {"status": "success", "quality_gates_passed": True, "run_id": "ab12cd34"}, None)
     data = RunService().status(_ctx(ws), AppConfig(), ws, LID)
@@ -171,6 +171,7 @@ def test_mark_in_progress_writes_the_in_progress_row_and_a_trace_failure_is_only
 
 def _held(ws: str, scenario):
     session = LaunchSession(ws, workspace_identity(ws), LID, "goal", {"ready": True}, {})
+    attach_review_channel(session)
     session.open()
     out: Dict[str, Any] = {}
 
@@ -192,20 +193,21 @@ def _held(ws: str, scenario):
     return out
 
 
-def test_the_decision_reaches_the_authoritys_stale_candidate_refusal_and_then_records_the_reviewed_one(ws):
+def test_the_service_decide_is_the_retired_file_action_and_the_review_is_decided_over_the_channel(ws):
+    """D2 M2: ApprovalService.decide reaches the owner's retired action, which records nothing and answers the typed CHANNEL_REQUIRED - for a valid request as for a stale one.
+    The review is decided over the launch's private channel (deleted with `kriya launch-decision` in slice 4)."""
     def scenario(pending):
         service, ctx = ApprovalService(), _ctx(ws)
         codes = []
-        for digest, review in (("sha256:" + "0" * 64, pending["review_id"]), (pending["candidate_digest"], "ra-" + "0" * 24)):
+        for digest, review in (("sha256:" + "0" * 64, pending["review_id"]), (pending["candidate_digest"], pending["review_id"])):
             with pytest.raises(ApprovalRefused) as caught:
                 service.decide(ctx, ReviewDecisionRequest(LID, review, digest, "approve", "change_approval"))
             codes.append(caught.value.code)
-        accepted = service.decide(ctx, ReviewDecisionRequest(LID, pending["review_id"], pending["candidate_digest"], "approve", "change_approval"))
-        return codes, accepted
+        return codes, channel_decide(str(ws), LID, pending["review_id"], pending["candidate_digest"], "approve")
 
     out = _held(ws, scenario)
     codes, accepted = out["scenario"]
-    assert codes == ["STALE_REVIEW", "STALE_REVIEW"], "a candidate or review the person was not shown is never approved"
+    assert codes == ["CHANNEL_REQUIRED", "CHANNEL_REQUIRED"], "the action no longer decides anything"
     assert accepted["accepted"] is True and accepted["decision"] == "approve" and out["approved"] == ApprovalOutcome.approve()
 
 

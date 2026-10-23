@@ -20,6 +20,7 @@ import os
 import re
 
 import pytest
+from _review_channel_host import attach_review_channel, channel_decide
 
 from kriya.foundation.redaction import REDACTED, redact_text, redact_value
 from kriya.policy.approval import ApprovalOutcome
@@ -160,7 +161,6 @@ def _hold_change_review(ws, files, reason, scenario):
     the desktop host, then rejects (test_kup_change_review's protocol)."""
     import asyncio
 
-    import kriya.control.launch_approval as approval
     from kriya.context.workspace_identity import canonical_workspace, workspace_identity
     from kriya.control import launch as launch_module
     from kriya.control.launch import LaunchSession
@@ -169,6 +169,7 @@ def _hold_change_review(ws, files, reason, scenario):
 
     canonical = canonical_workspace(str(ws))
     session = LaunchSession(canonical, workspace_identity(canonical), LID, "goal", {"ready": True}, {})
+    attach_review_channel(session)
     session.open()
 
     async def main_():
@@ -181,7 +182,7 @@ def _hold_change_review(ws, files, reason, scenario):
                 break
             await asyncio.sleep(0.01)
         await asyncio.to_thread(scenario, canonical, pending)
-        await asyncio.to_thread(approval.decide, canonical, LID, pending["review_id"], pending["candidate_digest"], "reject")
+        await asyncio.to_thread(channel_decide, canonical, LID, pending["review_id"], pending["candidate_digest"], "reject")
         return await asyncio.wait_for(task, 20)
 
     try:
@@ -210,7 +211,6 @@ def test_the_approval_diff_is_served_raw_and_byte_faithful_and_persisted_only_as
     from kriya.control.persistence import launch_record_path, launch_review_decision_path, launch_review_diff_path
     from kriya.policy.approval import candidate_digest
 
-    monkeypatch.setattr("kriya.control.launch_approval.POLL_SECONDS", 0.01)
     ws = tmp_path / "proj"
     ws.mkdir()
     seen = {}
@@ -479,6 +479,7 @@ def test_the_launch_status_the_gui_receives_hides_a_recorded_secret(tmp_path):
     ws.mkdir()
     canonical = canonical_workspace(str(ws))
     session = LaunchSession(canonical, workspace_identity(canonical), LID, "goal", {"ready": True}, {})
+    attach_review_channel(session)
     session.open()
     try:
         decision = _runtime_command_decision(RuntimeCommandSubject("u2", "c", canonical, (("run.sh", "--token", S),), "none", None,
@@ -520,7 +521,6 @@ def test_the_evidence_records_the_gui_receives_hide_a_secret_in_a_record_payload
 def test_the_change_review_reason_is_redacted_while_its_diff_stays_raw(tmp_path, monkeypatch):
     """Strict scope of OI-146: the DIFF is the raw surface; the review's reason (policy note + the automated review, model
     text) is not approval bytes (not in the candidate digest) and goes through the owner like every other display text."""
-    monkeypatch.setattr("kriya.control.launch_approval.POLL_SECONDS", 0.01)
     ws = tmp_path / "proj"
     ws.mkdir()
     seen = {}

@@ -95,11 +95,15 @@ class LaunchSession:
             "approval_required": None, "declined_decisions": [], "pending_approval": None, "approval_history": [],
         }
         self._review_sequence = 0
+        self.review_channel: Optional[Any] = None  # D2 M2: the waiter's end of the private review channel (kriya/control/review_channel.py); None = no review can be answered
         self.parent_pid = os.getppid()  # the host this process started under: a review whose host is gone ends UNAVAILABLE (kriya/control/launch_approval.py)
 
     @property
     def record(self) -> Dict[str, Any]:
         return self._record
+
+    def attach_review_channel(self, channel: Optional[Any]) -> None:
+        self.review_channel = channel
 
     def open(self) -> None:
         if load_launch_record(self.workspace, self.launch_id) is not None:
@@ -161,7 +165,7 @@ class LaunchSession:
         awaitable that resolves to the human's ApprovalOutcome (see kriya/control/launch_approval.py). None = no review could be recorded: the caller answers UNAVAILABLE, never a decline."""
         from kriya.control.launch_approval import await_decision, build_pending
 
-        if not files:
+        if not files or self.review_channel is None:  # D2 M2: with no private channel nothing could ever answer the review, so it is not offered (UNAVAILABLE, never a file fallback)
             return None
         self._review_sequence += 1
         pending = build_pending(self.launch_id, self._record["workspace"]["identity"], self._review_sequence, files, reason)
@@ -179,6 +183,8 @@ class LaunchSession:
         review) and returns the awaitable that resolves to a RuntimeCommandDecision. None - the caller declines - when no review could be recorded or the commands cannot be shown."""
         from kriya.control.launch_approval import await_runtime_decision, build_pending_runtime
 
+        if self.review_channel is None:  # D2 M2: see request_change_approval
+            return None
         self._review_sequence += 1
         pending = build_pending_runtime(self.launch_id, self._record["workspace"]["identity"], self._review_sequence, subject)
         if pending is None or not self._install_pending(pending):
@@ -272,6 +278,8 @@ class LaunchSession:
             "error": redact_text(message)[:400] if message else None,  # S20r: redacted, then cut
             "note": "copied from the workflow's own result; the RunRecord, evidence store and trace row are the outcome authority",
         })
+        if self.review_channel is not None:
+            self.review_channel.close()
         deactivate(self)
 
 

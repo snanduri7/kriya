@@ -93,6 +93,7 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.cli", "kriya.config.authority"): ("O2", _O2),  # direction ADAPTER-CLI -> AUTHORITY
     ("kriya.cli", "kriya.control.commit_state"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     ("kriya.cli", "kriya.control.launch"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
+    ("kriya.cli", "kriya.control.review_channel"): ("P2", _P2),  # D2 M2: non-public AUTHORITY module - the launched `generate` takes over the host's inherited review socket first thing
     ("kriya.cli", "kriya.control.persistence"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     ("kriya.cli", "kriya.control.retention"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     ("kriya.cli", "kriya.control.run_coordinator"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
@@ -192,8 +193,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.config.config", "kriya.static_analysis.registry"): ("P2", _P2 + " (SECURITY_AUTHORITY provider validation at schema construction; re-tagged in D3)"),  # direction CONFIG -> EXECUTION
     ("kriya.control.artifacts", "kriya.core.tomlcompat"): ("P1", _P1),  # non-public FOUNDATION module
     ("kriya.control.launch", "kriya.control.launch_approval"): ("P2", _P2),  # non-public AUTHORITY module
-    ("kriya.control.launch_approval", "kriya.control.launch"): ("P2", _P2),  # direction AUTHORITY -> STATE
-    ("kriya.control.launch_approval", "kriya.control.run_ownership"): ("P2", _P2),  # direction AUTHORITY -> STATE
     ("kriya.control.recovery", "kriya"): ("P1", _P1),  # non-public FOUNDATION module
     ("kriya.control.run_coordinator", "kriya.core.logging_setup"): ("P2", _P2),  # non-public CONFIG module
     ("kriya.core", "kriya.core.registry"): ("P2", _P2),  # non-public TOOLBOX module

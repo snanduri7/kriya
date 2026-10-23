@@ -71,7 +71,7 @@ MODULES: Dict[str, Module] = {
         layer=1),
     "AUTHORITY": Module(
         owner_paths=("kriya/policy/", "kriya/config/authority.py", "kriya/config/authority_approval.py",
-                     "kriya/control/launch_approval.py", "kriya/workflow/runtime_command_approval.py",
+                     "kriya/control/launch_approval.py", "kriya/control/review_channel.py", "kriya/workflow/runtime_command_approval.py",
                      "kriya/workflow/acceptance_approval.py", "kriya/workflow/verification_binding.py",
                      "kriya/workflow/authority_bundle.py", "kriya/workflow/authority_request.py",
                      "kriya/workflow/authority_escalation.py", "kriya/mcp/invocation_approval.py",

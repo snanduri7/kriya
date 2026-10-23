@@ -48,7 +48,7 @@
     "decision": {
      "decided_at": "<volatile>",
      "decision": "reject",
-     "source": "launch-decision"
+     "source": "review-channel"
     },
     "expires_at": "<volatile>",
     "files": [

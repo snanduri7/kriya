@@ -31,7 +31,6 @@ import pytest
 from _chaos_harness import snapshot_tree
 from _fake_static_analysis import DISABLED_STATIC_ANALYSIS
 from test_greenfield_direct_plan_runtime import FILES, MAIN_FILE, _applied, _succeeded, run_direct
-from test_greenfield_runtime_end_to_end import _fast  # noqa: F401 - autouse fixture (approval polling)
 from test_launch_approval import _decide, _refusal, _run
 from test_prd031a_static_analysis import BASE_A, _workspace, _write
 from test_tool002_mcp_invocation_authority import (

@@ -7,6 +7,7 @@ import json
 from unittest.mock import patch
 
 import pytest
+from _review_channel_host import channel_decide
 from click.testing import CliRunner
 from test_launch_approval import FILES, LID, REASON, _session, _wait_pending
 
@@ -35,18 +36,13 @@ def _subject(commands=(("javac", "-d", "classes", "A.java"), ("java", "-cp", "cl
                          stdin_payload=stdin, reason="Allow Kriya to execute these command(s)?")
 
 
-@pytest.fixture(autouse=True)
-def _fast(monkeypatch):
-    monkeypatch.setattr(approval, "POLL_SECONDS", 0.01)
-
-
 def _decide(canonical, pending, decision="approve", kind="runtime_command", **override):
     args = {"review_id": pending["review_id"], "candidate_digest": pending["candidate_digest"], **override}
-    return approval.decide(canonical, LID, args["review_id"], args["candidate_digest"], decision, kind)
+    return channel_decide(canonical, LID, args["review_id"], args["candidate_digest"], decision, kind)
 
 
 def _run_runtime(ws, scenario, subject=None):
-    canonical, session = _session(ws)
+    canonical, session, _host = _session(ws)
     out = {}
 
     async def main_():
@@ -113,15 +109,15 @@ def test_a_decision_of_the_other_kind_is_refused_both_ways(ws):
         return _decide(canonical, pending, "reject")
     _run_runtime(ws, scenario)
 
-    canonical, session = _session(ws, "20261010T101010-abcdef09")
+    canonical, session, _host = _session(ws, "20261010T101010-abcdef09")
     try:
         async def main_():
             task = asyncio.ensure_future(launch_module.request_change_approval(FILES, REASON))
             pending = await _wait_pending(canonical, "20261010T101010-abcdef09")
             with pytest.raises(approval.ApprovalRefused) as refused:
-                approval.decide(canonical, "20261010T101010-abcdef09", pending["review_id"], pending["candidate_digest"], "approve", "runtime_command")
+                await asyncio.to_thread(channel_decide, canonical, "20261010T101010-abcdef09", pending["review_id"], pending["candidate_digest"], "approve", "runtime_command")
             assert refused.value.code == "WRONG_REVIEW_KIND"
-            approval.decide(canonical, "20261010T101010-abcdef09", pending["review_id"], pending["candidate_digest"], "reject", "change_approval")
+            await asyncio.to_thread(channel_decide, canonical, "20261010T101010-abcdef09", pending["review_id"], pending["candidate_digest"], "reject", "change_approval")
             assert await asyncio.wait_for(task, 20) == ApprovalOutcome.decline()
         with begin_mutating_run(canonical):
             asyncio.run(main_())
@@ -156,7 +152,7 @@ def test_commands_that_cannot_be_shown_faithfully_are_not_offered(ws):
 
 
 def test_a_runtime_review_expires_a_pending_change_review_into_the_history(ws):
-    canonical, session = _session(ws)
+    canonical, session, _host = _session(ws)
     try:
         async def main_():
             change = asyncio.ensure_future(launch_module.request_change_approval(FILES, REASON))
@@ -169,7 +165,7 @@ def test_a_runtime_review_expires_a_pending_change_review_into_the_history(ws):
             record = load_launch_record(canonical, LID)
             assert record["pending_approval"]["kind"] == "runtime_command" and record["pending_approval"]["sequence"] == 2
             assert [h["review_id"] for h in record["approval_history"]] == [first["review_id"]] and record["approval_history"][0]["status"] == "EXPIRED"
-            approval.decide(canonical, LID, record["pending_approval"]["review_id"], record["pending_approval"]["candidate_digest"], "reject", "runtime_command")
+            await asyncio.to_thread(channel_decide, canonical, LID, record["pending_approval"]["review_id"], record["pending_approval"]["candidate_digest"], "reject", "runtime_command")
             assert (await asyncio.wait_for(runtime, 20)).approved is False
             change.cancel()
         with begin_mutating_run(canonical):
@@ -178,19 +174,20 @@ def test_a_runtime_review_expires_a_pending_change_review_into_the_history(ws):
         session.finish(0, None, None)
 
 
-def test_the_cli_action_refuses_the_default_kind_for_a_runtime_review(ws, monkeypatch):
+def test_the_retired_cli_action_answers_channel_required_for_either_kind_and_the_channel_decides_the_runtime_review(ws, monkeypatch):
     monkeypatch.chdir(ws)
 
     def scenario(canonical, pending):
         runner = CliRunner()
         base = ["launch-decision", "--launch-id", LID, "--review-id", pending["review_id"], "--candidate-digest", pending["candidate_digest"], "--decision", "approve"]
         wrong = runner.invoke(main, base)                                    # default --kind change_approval
-        right = runner.invoke(main, [*base, "--kind", "runtime_command"])
-        return wrong, right
+        right = runner.invoke(main, [*base, "--kind", "runtime_command"])    # even the matching kind records nothing now
+        return wrong, right, _decide(canonical, pending, "approve")
     _canonical, out = _run_runtime(ws, scenario)
-    wrong, right = out["scenario"]
-    assert wrong.exit_code == 2 and json.loads(wrong.output)["code"] == "WRONG_REVIEW_KIND"
-    assert right.exit_code == 0 and json.loads(right.output)["accepted"] is True and out["decision"].approved is True
+    wrong, right, channel = out["scenario"]
+    assert wrong.exit_code == 2 and json.loads(wrong.output)["code"] == "CHANNEL_REQUIRED"
+    assert right.exit_code == 2 and json.loads(right.output)["code"] == "CHANNEL_REQUIRED"
+    assert channel["accepted"] is True and out["decision"].approved is True
 
 
 def test_the_generate_callback_gives_the_executor_a_typed_channel_and_keeps_the_terminal_behaviour():
@@ -210,7 +207,7 @@ def test_the_generate_callback_gives_the_executor_a_typed_channel_and_keeps_the_
 
 def test_inside_a_launch_that_cannot_hold_the_review_the_run_is_stopped_not_approved(ws):
     """`--yes` can never take effect inside a launch; a runtime review that cannot be recorded declines and says which decision stopped the run."""
-    canonical, session = _session(ws)
+    canonical, session, _host = _session(ws)
     try:
         for yes in (False, True):
             assert cli._runtime_command_decision(_subject(commands=()), yes) == RuntimeCommandDecision(None)

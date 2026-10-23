@@ -126,7 +126,7 @@ describe.skipIf(!available)('runtime-command approval against real Kriya', () =>
     await untilExited(h);
     const done = await status(ws, id);
     expect(done.run_record).toMatchObject({ found: true, terminal_status: 'SUCCESS' });
-    expect(done.launch.pending_approval).toMatchObject({ kind: 'runtime_command', status: 'APPROVED', decision: { decision: 'approve', source: 'launch-decision' } });
+    expect(done.launch.pending_approval).toMatchObject({ kind: 'runtime_command', status: 'APPROVED', decision: { decision: 'approve', source: 'review-channel' } });
     // ApplicationOutcome: EXECUTED, exit 0, the printed output - from the recorded steps of the approved commands
     const snap = (await read({ operation: 'snapshot.acquire', workspace: ws })).data as Json;
     const detail = (await read({ operation: 'history.detail', snapshot_id: snap.snapshot_id, run_id: done.launch.ended.trace_run_id })).data as Json;
@@ -175,14 +175,17 @@ describe.skipIf(!available)('runtime-command approval against real Kriya', () =>
     expect(await decider(ws).decide(request(ws, id, pending, 'approve', { launch_id: '20261015T101099-deadbeef' }))).toMatchObject({ accepted: false, code: 'COMMAND_NOT_REVIEWABLE' });
     expect(await decider(ws).decide(request(ws, id, pending, 'approve', { review_id: 'ra-' + 'f'.repeat(24) }))).toMatchObject({ accepted: false, code: 'COMMAND_NOT_REVIEWABLE' });
     expect(dialogs).toBe(0);
-    // Kriya's own decision action refuses it independently (the host's proof is not the only line of defence)
-    const direct = await runKriya({ executable: join(ROOT, '.venv', 'bin', 'kriya'), cwd: ws, env, limits: { timeoutMs: 30_000 },
-      argv: ['launch-decision', '--launch-id', id, '--review-id', pending.review_id, '--candidate-digest', bogus, '--decision', 'approve', '--kind', 'runtime_command'] });
-    expect(direct.kind === 'json' ? (direct.json as Json).code : null).toBe('STALE_REVIEW');
-    // a change-review decision cannot approve a runtime review
-    const wrongKind = await runKriya({ executable: join(ROOT, '.venv', 'bin', 'kriya'), cwd: ws, env, limits: { timeoutMs: 30_000 },
-      argv: ['launch-decision', '--launch-id', id, '--review-id', pending.review_id, '--candidate-digest', pending.command_fingerprint, '--decision', 'approve'] });
-    expect(wrongKind.kind === 'json' ? (wrongKind.json as Json).code : null).toBe('WRONG_REVIEW_KIND');
+    // D2 M2: the retired file action records nothing for ANY request, a stale one or a perfectly valid one - it can never approve this review from outside the channel
+    for (const argv of [
+      ['launch-decision', '--launch-id', id, '--review-id', pending.review_id, '--candidate-digest', bogus, '--decision', 'approve', '--kind', 'runtime_command'],
+      ['launch-decision', '--launch-id', id, '--review-id', pending.review_id, '--candidate-digest', pending.command_fingerprint, '--decision', 'approve', '--kind', 'runtime_command'],
+      ['launch-decision', '--launch-id', id, '--review-id', pending.review_id, '--candidate-digest', pending.command_fingerprint, '--decision', 'approve'],
+    ]) {
+      const direct = await runKriya({ executable: join(ROOT, '.venv', 'bin', 'kriya'), cwd: ws, env, limits: { timeoutMs: 30_000 }, argv });
+      expect(direct.kind === 'json' ? (direct.json as Json).code : null).toBe('CHANNEL_REQUIRED');
+    }
+    // and the waiter itself refuses a stale fingerprint or the wrong kind that DOES arrive on the channel (a reject is not gated by the host's proof)
+    expect(await decider(ws).decide(request(ws, id, pending, 'reject', { command_fingerprint: bogus }))).toMatchObject({ accepted: false, code: 'STALE_REVIEW' });
     expect((await status(ws, id)).launch.pending_approval).toMatchObject({ status: 'PENDING', decision: null });
     expect(await decider(ws).decide(request(ws, id, pending, 'reject'))).toMatchObject({ accepted: true });   // clean up: let the run end
     await untilExited(h);

@@ -198,7 +198,7 @@ def test_decision_and_reason_code_can_only_be_paired_legally():
 
 def test_the_reason_code_table_is_closed():
     assert APPROVAL_REASON_CODES == ("APPROVAL_GRANTED", "APPROVAL_DECLINED", "APPROVAL_LAUNCH_CANNOT_ASK", "APPROVAL_REVIEW_EXPIRED",
-                                     "APPROVAL_DECISION_NOT_RECORDED", "APPROVAL_RESULT_UNRECOGNIZED")
+                                     "APPROVAL_DECISION_NOT_RECORDED", "APPROVAL_RESULT_UNRECOGNIZED", "APPROVAL_CHANNEL_UNAVAILABLE")  # D2 M2: + the private review channel missing / failed closed
     assert {APPROVAL_REVIEW_EXPIRED, APPROVAL_DECISION_NOT_RECORDED} <= set(APPROVAL_REASON_CODES)
 
 

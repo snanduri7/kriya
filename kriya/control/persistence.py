@@ -130,23 +130,6 @@ def save_launch_review_decision(workspace_path: str, launch_id: str, review_id: 
     write_document(workspace_path, launch_review_decision_path(workspace_path, launch_id, review_id), payload, exclusive=True)
 
 
-def load_launch_review_decision(workspace_path: str, launch_id: str, review_id: str) -> Optional[Dict[str, Any]]:
-    """None when no (complete, trustworthy) decision exists yet. A partially written or foreign file is 'not yet', never a decision."""
-    path = launch_review_decision_path(workspace_path, launch_id, review_id)
-    try:
-        with open(path, "rb") as handle:
-            payload = json.loads(handle.read().decode("utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(payload, dict) or "_workspace" not in payload:  # a decision document is always ownership-stamped by Kriya's control writer; an unstamped file is not one
-        return None
-    try:
-        validate_ownership(workspace_path, payload, path)
-    except WorkspaceOwnershipError:
-        return None
-    return payload
-
-
 def launch_review_diff_path(workspace_path: str, launch_id: str, review_id: str) -> str:
     """PRODUCT-UX-COMPLETION: the EXACT diff text of ONE change review, beside the launch record. Approval-scoped: it holds only what the person is asked to approve
     (the unified diffs the gate presented), is bound by digest to the pending review, and is served only by `change_approval.review` after re-verification. It is

@@ -451,3 +451,38 @@ def test_a_descriptor_that_is_not_a_socket_or_not_open_is_refused():
 
 def test_the_dedicated_descriptor_is_three():
     assert CHANNEL_FD == 3
+
+
+# --------------------------------------------------------------------------- a newer review supersedes the open one
+
+@pytest.mark.asyncio
+async def test_a_newer_review_supersedes_the_open_one_and_the_old_capability_dies_with_it(pair):
+    channel, host = pair
+    first = await _open(channel, host)
+    old_wait = asyncio.ensure_future(channel.await_decision(_soon()))
+    await asyncio.sleep(0.05)
+    second = await _open(channel, host, review_id=RID2, candidate_digest=DIGEST2)  # offered while the first still waits: no error, the first is replaced
+    assert second["capability"] != first["capability"]
+    assert await asyncio.wait_for(old_wait, 5) == ChannelOutcome(rc.OUTCOME_EXPIRED)  # the superseded waiter ends expired, it never judges a frame again
+    new_wait = asyncio.ensure_future(channel.await_decision(_soon()))
+    await host.send(_line(_decision(first["capability"])))  # the OLD review's decision, with its own (dead) capability
+    (stale,) = await host.frames(1)
+    assert stale["code"] == "STALE_REVIEW" and not new_wait.done()
+    await host.send(_line(_decision(second["capability"], review_id=RID2, digest=DIGEST2)))
+    assert await new_wait == ChannelOutcome(rc.OUTCOME_DECIDED, decision="approve")
+
+
+@pytest.mark.asyncio
+async def test_an_abandoned_review_is_forgotten_so_the_channel_can_carry_the_next_one(pair):
+    channel, host = pair
+    first = await _open(channel, host)
+    waiting = asyncio.ensure_future(channel.await_decision(_soon()))
+    await asyncio.sleep(0.05)
+    waiting.cancel()
+    channel.abandon()
+    second = await _open(channel, host, review_id=RID2, candidate_digest=DIGEST2)
+    waiting = asyncio.ensure_future(channel.await_decision(_soon()))
+    await host.send(_line(_decision(first["capability"], review_id=RID2, digest=DIGEST2)))  # the abandoned review's capability on the new identity
+    (refused,) = await host.frames(1)
+    assert refused["code"] == "CAPABILITY_MISMATCH"
+    assert second["review_id"] == RID2

@@ -6,8 +6,8 @@ import asyncio
 import json
 
 import pytest
+from _review_channel_host import attach_review_channel, channel_decide
 
-import kriya.control.launch_approval as approval
 from kriya.config import AppConfig
 from kriya.context.workspace_identity import canonical_workspace, workspace_identity
 from kriya.control import launch as launch_module
@@ -22,11 +22,6 @@ LID = "20261010T101010-abcdef01"
 WORKTREE = "/private/var/kriya/worktrees/run-1"
 COMMANDS = (("javac", "-d", "classes", "A.java"), ("java", "-cp", "classes", "A"))
 FILES = [{"filepath": "a.py", "content": "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n"}]
-
-
-@pytest.fixture(autouse=True)
-def _fast(monkeypatch):
-    monkeypatch.setattr(approval, "POLL_SECONDS", 0.01)
 
 
 @pytest.fixture
@@ -48,6 +43,7 @@ def _review(ws, review_id, launch_id=LID, operation="runtime_command.review"):
 def _hold(ws, scenario, subject=None):
     canonical = canonical_workspace(str(ws))
     session = LaunchSession(canonical, workspace_identity(canonical), LID, "goal", {"ready": True}, {})
+    attach_review_channel(session)
     session.open()
     out = {}
 
@@ -71,7 +67,7 @@ def _hold(ws, scenario, subject=None):
 
 
 def _reject(canonical, pending):
-    return approval.decide(canonical, LID, pending["review_id"], pending["candidate_digest"], "reject", "runtime_command")
+    return channel_decide(canonical, LID, pending["review_id"], pending["candidate_digest"], "reject", "runtime_command")
 
 
 def test_the_review_serves_the_exact_recorded_commands_after_re_proving_them(ws):
@@ -131,6 +127,7 @@ def test_a_record_whose_commands_are_not_the_bound_ones_is_never_served(ws, tamp
 def test_a_change_review_is_not_served_as_a_runtime_review_and_the_reverse(ws):
     canonical = canonical_workspace(str(ws))
     session = LaunchSession(canonical, workspace_identity(canonical), LID, "goal", {}, {})
+    attach_review_channel(session)
     session.open()
     try:
         async def main_():
@@ -143,7 +140,7 @@ def test_a_change_review_is_not_served_as_a_runtime_review_and_the_reverse(ws):
             pending = record["pending_approval"]
             error = _review(ws, pending["review_id"])["error"]
             assert error["code"] == policy.REVIEW_NOT_FOUND and error["reason"] == "wrong_kind"
-            approval.decide(canonical, LID, pending["review_id"], pending["candidate_digest"], "reject")
+            await asyncio.to_thread(channel_decide, canonical, LID, pending["review_id"], pending["candidate_digest"], "reject")
             await asyncio.wait_for(task, 20)
         with begin_mutating_run(canonical):
             asyncio.run(main_())

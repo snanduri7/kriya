@@ -20,7 +20,6 @@ from kriya.context.workspace_identity import (
     ownership_metadata,
     workspace_identity,
 )
-from kriya.control import launch_approval as approval
 from kriya.control import persistence as P
 from kriya.control.human_decision_store import HumanDecisionStorePathError, human_decision_dir
 
@@ -76,7 +75,7 @@ def test_the_three_document_kinds_live_in_the_authority_home_not_in_the_workspac
     assert sorted(os.listdir(directory)) == sorted([f"{LID}.json", f"{LID}.review-{RID}.json", f"{LID}.review-diff-{RID}.json"])
     assert not (Path(ws) / ".kriya" / "control" / "launches").exists()  # nothing was written into the repository
     assert P.load_launch_record(ws, LID)["phase"] == "RUNNING"
-    assert P.load_launch_review_decision(ws, LID, RID)["decision"] == "approve"
+    assert json.loads(Path(P.launch_review_decision_path(ws, LID, RID)).read_text())["decision"] == "approve"  # the audit document is written and readable as a file
     assert P.load_launch_review_diff(ws, LID, RID)["diffs"] == DIFF["diffs"]
 
 
@@ -95,11 +94,10 @@ def test_a_correctly_stamped_document_carried_in_the_repository_is_never_read_an
     planted = _plant_old(ws)
     before = {name: path.read_bytes() for name, path in planted.items()}
     assert P.load_launch_record(ws, LID) is None
-    assert P.load_launch_review_decision(ws, LID, RID) is None
     assert P.load_launch_review_diff(ws, LID, RID) is None
-    with pytest.raises(approval.ApprovalRefused) as refused:
-        approval.decide(ws, LID, RID, DIGEST, "approve")
-    assert refused.value.code == "LAUNCH_NOT_FOUND"  # the carried pending review is not a review: nothing to approve
+    assert not hasattr(P, "load_launch_review_decision"), "D2 M2: no reader of a persisted decision exists at all (the file is audit output only)"
+    from kriya.control.launch import read_launch
+    assert read_launch(ws, LID) is None  # the carried pending review is not a review: there is no launch to approve anything for
     assert {name: path.read_bytes() for name, path in planted.items()} == before  # not migrated, not touched, not deleted
 
 
@@ -140,7 +138,7 @@ def test_the_m4_contract_is_kept_an_unstamped_document_is_never_overwritten_and_
     with pytest.raises(P.UnreadableRunRecordError) as unreadable:
         P.load_launch_record(ws, LID)
     assert unreadable.value.reason_code == WORKSPACE_OWNERSHIP_MISSING
-    assert P.load_launch_review_decision(ws, LID, RID) is None and P.load_launch_review_diff(ws, LID, RID) is None
+    assert P.load_launch_review_diff(ws, LID, RID) is None
     assert {path: Path(path).read_bytes() for path in stripped} == stripped  # nothing was re-stamped
 
 

@@ -19,7 +19,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from _protocol_responses import sentinel
-from test_greenfield_runtime_end_to_end import Person, _callback, _fast  # noqa: F401 - _fast is an autouse fixture
+from _review_channel_host import channel_decide
+from test_greenfield_runtime_end_to_end import Person, _callback
 from test_launch_approval import LID, _session
 
 import kriya.control.launch_approval as approval
@@ -93,7 +94,7 @@ def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode
     for args in (("init", "-q"), ("add", "-A"), ("commit", "-qm", "base")):
         subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *args], cwd=workspace, check=True, capture_output=True)
     run = DirectRun(workspace=workspace)
-    run.canonical, session = _session(workspace)
+    run.canonical, session, _host = _session(workspace)
     run.person = person_cls(run.canonical, review_plan)
     run.person.start()
 
@@ -327,12 +328,12 @@ def test_gap_a_a_decision_of_the_wrong_kind_cannot_approve_the_runtime_review(tm
                     self.log.append(("pending", pending["kind"]))
                     if pending["kind"] == "runtime_command":
                         try:
-                            approval.decide(self.canonical, LID, pending["review_id"], pending["candidate_digest"], "approve", "change_approval")
+                            channel_decide(self.canonical, LID, pending["review_id"], pending["candidate_digest"], "approve", "change_approval")
                         except approval.ApprovalRefused as refused:
                             refusals.append(refused.code)
                         refusals.append((load_launch_record(self.canonical, LID) or {})["pending_approval"]["status"])
                     self.log.append(("deciding", pending["kind"]))
-                    approval.decide(self.canonical, LID, pending["review_id"], pending["candidate_digest"], "approve", pending["kind"])
+                    channel_decide(self.canonical, LID, pending["review_id"], pending["candidate_digest"], "approve", pending["kind"])
                 time.sleep(0.01)
 
     run = run_direct(tmp_path, person_cls=Confused)

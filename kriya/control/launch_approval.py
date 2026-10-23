@@ -1,4 +1,4 @@
-"""Human review of a change inside a desktop launch (GUI final).
+"""Human review of a change inside a desktop launch (GUI final; D2 M2).
 
 Kriya's change-approval gate is an in-process callback (``approval_callback``): returning True continues the workflow into its regression gates and
 the apply step; a DECLINED answer (a person said no) ends it as ``human_rejected`` and an UNAVAILABLE one (nobody decided) as ``approval_required``
@@ -6,34 +6,36 @@ the apply step; a DECLINED answer (a person said no) ends it as ``human_rejected
 instead of prompting, the callback of ``kriya generate --launch-id`` (kriya/cli.py ``on_approval``):
 
 1. records a PENDING review in the launch record - durable, bound to the launch id, the workspace identity, the exact candidate (a digest over the
-   unified diffs the gate was given) and the reviewer text it was given - and waits;
-2. is answered by ``kriya launch-decision`` (the typed action below): a separate, validated, one-shot process that writes ONE decision file per
-   review id, only if that review is still the pending one;
-3. records the decision in the launch record BEFORE returning, so the workflow can only continue after the approval is durable.
+   unified diffs the gate was given) and the reviewer text it was given - then offers it to the host over the launch's PRIVATE review channel
+   (kriya/control/review_channel.py: an inherited socket, a per-review capability that exists only in this process's memory and in that frame);
+2. waits for the host's ``decision`` frame, which carries the review identity and the capability. The waiter validates everything itself (launch, review,
+   kind, digest, capability in constant time, expiry, one-shot) and answers with a ``result`` frame; a wrong, missing, replayed or cross-review decision is
+   refused without consuming the live capability;
+3. records the decision in the launch record BEFORE returning, so the workflow can only continue after the approval is durable. The persisted decision
+   file is AUDIT OUTPUT ONLY: it is written after the decision was accepted and is never read as approval authority.
 
-Fail closed everywhere: a stale review id or digest, another workspace, an ended or dead launch, a duplicate, an expired review, a host that vanished
-- none of them approves. A durable ``reject`` by the person is DECLINED (``human_rejected``); an expired, abandoned or unrecordable review is UNAVAILABLE
-(``approval_required``): nobody said no. Nothing here approves anything by itself, passes ``-y`` or changes the autonomy mode; the human decision is the only input.
+Fail closed everywhere: a launch without a channel (the review is not even offered), a channel that failed closed, a stale or foreign decision, an
+expired review, a host that vanished (end of file) - none of them approves. A durable ``reject`` by the person is DECLINED (``human_rejected``); an
+expired, abandoned or unrecordable review is UNAVAILABLE (``approval_required``): nobody said no. Nothing here approves anything by itself, passes ``-y``
+or changes the autonomy mode; the human decision is the only input.
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
-import os
 import re
-import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from kriya.context.workspace_identity import canonical_workspace, workspace_identity
 from kriya.control.persistence import (
-    UnreadableRunRecordError,
-    load_launch_record,
-    load_launch_review_decision,
     save_launch_review_decision,
 )
-from kriya.control.run_ownership import probe_run_lock
+from kriya.control.review_channel import (
+    OUTCOME_DECIDED,
+    OUTCOME_EOF,
+    OUTCOME_EXPIRED,
+    ChannelUnavailable,
+)
 from kriya.foundation.redaction import redact_text, redact_value
 from kriya.policy import (
     approval as _owner,  # the typed ApprovalOutcome and its reason codes (used here, not re-exported)
@@ -52,7 +54,6 @@ from kriya.policy.approval import RuntimeCommandReviewPort as RuntimeCommandRevi
 from kriya.policy.approval import _sha as _sha
 from kriya.policy.approval import candidate_digest as candidate_digest
 from kriya.policy.approval import split_reason as split_reason
-from kriya.repository.commit import FileRevisionConflict
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,6 @@ DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 DECISIONS = ("approve", "reject")
 STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED, STATUS_EXPIRED = "PENDING", "APPROVED", "REJECTED", "EXPIRED"
 APPROVAL_WAIT_SECONDS = 3600.0   # a review nobody answers ends UNAVAILABLE (approval_required), never left holding the workspace forever
-POLL_SECONDS = 0.25
 REASON_MAX_CHARS = 60000
 HISTORY_MAX = 20
 
@@ -132,18 +132,14 @@ def build_pending_runtime(launch_id: str, workspace_identity_value: str, sequenc
     }
 
 
-def valid_decision_payload(payload: Optional[Dict[str, Any]], launch_id: str, review_id: str, digest: str, workspace_identity_value: str) -> bool:
-    """The waiting process re-validates what the typed action wrote; a file that does not bind every identity is not a decision."""
-    return (isinstance(payload, dict) and payload.get("schema") == 1 and payload.get("launch_id") == launch_id and payload.get("review_id") == review_id
-            and payload.get("candidate_digest") == digest and payload.get("workspace_identity") == workspace_identity_value and payload.get("decision") in DECISIONS)
-
-
 async def await_decision(session: Any, review_id: str, digest: str) -> _owner.ApprovalOutcome:
     """Block (cooperatively) until the review is decided, expired or abandoned. APPROVED only for a durable approval; DECLINED only for a durable rejection by the person;
     UNAVAILABLE (with its reason code) when nobody decided - the review expired, the host went away, the wait was interrupted - or the decision could not be made durable."""
     try:
         return await _wait(session, review_id, digest)
     except BaseException:  # the terminal's own cancellation (SIGINT -> KeyboardInterrupt) or a cancelled task: the review ends undecided, and the record says so
+        if getattr(session, "review_channel", None) is not None:
+            session.review_channel.abandon()  # its capability is forgotten with it
         session.resolve_review(review_id, STATUS_EXPIRED, {"decision": None, "decided_at": _stamp(_now()), "source": "interrupted"})
         raise
 
@@ -155,88 +151,52 @@ async def await_runtime_decision(session: Any, review_id: str, fingerprint: str,
     return review.decision(fingerprint if outcome.approved else None)
 
 
+def _unavailable(session: Any, review_id: str, source: str, reason_code: str) -> _owner.ApprovalOutcome:
+    """The review ended with nobody having decided it: recorded as expired (the record never keeps claiming it waits), answered UNAVAILABLE with its reason."""
+    session.resolve_review(review_id, STATUS_EXPIRED, {"decision": None, "decided_at": _stamp(_now()), "source": source})
+    return _owner.ApprovalOutcome.unavailable_because(reason_code)
+
+
+def _write_audit_decision(session: Any, review_id: str, digest: str, decision: str, decided_at: str) -> None:
+    """The persisted decision document: OUTPUT ONLY, written after the waiter accepted the decision, for the audit trail. Nothing ever reads it as authority; a
+    document someone planted at its name is simply not overwritten (the write-once link fails) and changes nothing."""
+    payload = {"schema": 1, "launch_id": session.launch_id, "review_id": review_id, "candidate_digest": digest, "workspace_identity": session.record["workspace"]["identity"],
+               "decision": decision, "decided_at": decided_at, "source": "review-channel"}
+    try:
+        save_launch_review_decision(session.workspace, session.launch_id, review_id, payload)
+    except Exception as error:  # audit output: its failure is logged, it never alters the decision
+        logger.warning("Launch %s: audit decision record not written (%s)", session.launch_id, type(error).__name__)
+
+
 async def _wait(session: Any, review_id: str, digest: str) -> _owner.ApprovalOutcome:
-    # The expiry is the WALL-CLOCK instant Kriya recorded (the same one `decide` enforces), not a monotonic timer that stops while the machine sleeps; and the host is the
-    # parent this PROCESS started under (sampled when the launch opened), so a host that died before the wait began is noticed too.
+    # The expiry is the WALL-CLOCK instant Kriya recorded, not a monotonic timer that stops while the machine sleeps. The decision arrives ONLY over the private
+    # review channel; a launch without one has no way to be approved (the review was not offered in the first place - this is the guard for a channel that went away).
+    channel = session.review_channel
+    if channel is None:
+        return _unavailable(session, review_id, "no-channel", _owner.APPROVAL_CHANNEL_UNAVAILABLE)
     pending = session.record.get("pending_approval") or {}
     expires = datetime.fromisoformat(str(pending.get("expires_at")))
-    parent = session.parent_pid
-    identity = session.record["workspace"]["identity"]
-    while True:
-        payload = load_launch_review_decision(session.workspace, session.launch_id, review_id)
-        if valid_decision_payload(payload, session.launch_id, review_id, digest, identity):
-            if _now() > expires:  # consume-time expiry: a decision file that arrives after the review's end is not honoured, whoever wrote it
-                session.resolve_review(review_id, STATUS_EXPIRED, {"decision": None, "decided_at": _stamp(_now()), "source": "timeout"})
-                return _owner.ApprovalOutcome.unavailable_because(_owner.APPROVAL_REVIEW_EXPIRED)
-            approved = payload["decision"] == "approve"
-            # DURABLE BEFORE RESUME: the record says APPROVED before the workflow is allowed to continue; if that cannot be written, nothing is applied
-            if session.resolve_review(review_id, STATUS_APPROVED if approved else STATUS_REJECTED, {"decision": payload["decision"], "decided_at": payload.get("decided_at"), "source": "launch-decision"}):
-                return _owner.ApprovalOutcome.approve() if approved else _owner.ApprovalOutcome.decline()
-            return _owner.ApprovalOutcome.unavailable_because(_owner.APPROVAL_DECISION_NOT_RECORDED)
-        if os.getppid() != parent:
-            session.resolve_review(review_id, STATUS_EXPIRED, {"decision": None, "decided_at": _stamp(_now()), "source": "host-gone"})
-            return _owner.ApprovalOutcome.unavailable_because(_owner.APPROVAL_REVIEW_EXPIRED)
-        if _now() > expires:
-            session.resolve_review(review_id, STATUS_EXPIRED, {"decision": None, "decided_at": _stamp(_now()), "source": "timeout"})
-            return _owner.ApprovalOutcome.unavailable_because(_owner.APPROVAL_REVIEW_EXPIRED)
-        await asyncio.sleep(POLL_SECONDS)
+    try:
+        await channel.offer(launch_id=session.launch_id, review_id=review_id, kind=pending.get("kind", KIND_CHANGE), candidate_digest=digest)
+    except ChannelUnavailable:
+        return _unavailable(session, review_id, "channel-unavailable", _owner.APPROVAL_CHANNEL_UNAVAILABLE)
+    outcome = await channel.await_decision(expires)
+    if outcome.kind == OUTCOME_DECIDED:
+        approved = outcome.decision == "approve"
+        decided_at = _stamp(_now())
+        _write_audit_decision(session, review_id, digest, str(outcome.decision), decided_at)
+        # DURABLE BEFORE RESUME: the record says APPROVED before the workflow is allowed to continue; if that cannot be written, nothing is applied
+        if session.resolve_review(review_id, STATUS_APPROVED if approved else STATUS_REJECTED, {"decision": outcome.decision, "decided_at": decided_at, "source": "review-channel"}):
+            return _owner.ApprovalOutcome.approve() if approved else _owner.ApprovalOutcome.decline()
+        return _owner.ApprovalOutcome.unavailable_because(_owner.APPROVAL_DECISION_NOT_RECORDED)
+    if outcome.kind == OUTCOME_EXPIRED:
+        return _unavailable(session, review_id, "timeout", _owner.APPROVAL_REVIEW_EXPIRED)
+    if outcome.kind == OUTCOME_EOF:
+        return _unavailable(session, review_id, "host-gone", _owner.APPROVAL_REVIEW_EXPIRED)
+    return _unavailable(session, review_id, "channel-failed", _owner.APPROVAL_CHANNEL_UNAVAILABLE)  # the channel failed closed (a protocol violation)
 
 
 def decide(workspace_path: str, launch_id: str, review_id: str, candidate_digest_value: str, decision: str, kind: str = KIND_CHANGE) -> Dict[str, Any]:
-    """The typed approval action (``kriya launch-decision``): accept ONE decision for the review of ``kind`` that is pending right now, or refuse with a closed code."""
-    from kriya.control.launch import (  # launch imports this module for its session methods
-        PHASE_ENDED,
-        PHASE_RUNNING,
-        valid_launch_id,
-    )
-
-    if not valid_launch_id(launch_id):
-        raise ApprovalRefused("INVALID_REQUEST", "launch id must have the shape YYYYMMDDTHHMMSS-xxxxxxxx")
-    if not isinstance(review_id, str) or not REVIEW_ID_RE.match(review_id):
-        raise ApprovalRefused("INVALID_REQUEST", "review id is malformed")
-    if not isinstance(candidate_digest_value, str) or not DIGEST_RE.match(candidate_digest_value):
-        raise ApprovalRefused("INVALID_REQUEST", "candidate digest is malformed")
-    if decision not in DECISIONS:
-        raise ApprovalRefused("INVALID_REQUEST", "decision must be approve or reject")
-    if kind not in KINDS:
-        raise ApprovalRefused("INVALID_REQUEST", "kind must be change_approval or runtime_command")
-    workspace = canonical_workspace(workspace_path)
-    try:
-        record = load_launch_record(workspace, launch_id)
-    except UnreadableRunRecordError as error:
-        raise ApprovalRefused("LAUNCH_RECORD_UNREADABLE", f"the launch record cannot be trusted: {error.reason}") from error
-    if record is None:
-        raise ApprovalRefused("LAUNCH_NOT_FOUND", f"no launch {launch_id} is recorded for this folder")
-    identity = workspace_identity(workspace)
-    recorded = record.get("workspace") if isinstance(record.get("workspace"), dict) else {}
-    if recorded.get("identity") != identity:
-        raise ApprovalRefused("WRONG_WORKSPACE", "this launch belongs to a different workspace")
-    if record.get("phase") == PHASE_ENDED:
-        raise ApprovalRefused("LAUNCH_ENDED", "the run has already ended; there is nothing left to approve")
-    pending = record.get("pending_approval")
-    if record.get("phase") != PHASE_RUNNING or not isinstance(pending, dict):
-        raise ApprovalRefused("NOT_PENDING", "no change is waiting for review in this launch")
-    if pending.get("review_id") != review_id or pending.get("candidate_digest") != candidate_digest_value:
-        raise ApprovalRefused("STALE_REVIEW", "the change under review is no longer the one you were shown; review it again")
-    if pending.get("kind", KIND_CHANGE) != kind:
-        raise ApprovalRefused("WRONG_REVIEW_KIND", f"the review waiting is not a {kind.replace('_', ' ')} review; nothing was recorded")
-    status = pending.get("status")
-    if status != STATUS_PENDING:
-        raise ApprovalRefused("REVIEW_EXPIRED" if status == STATUS_EXPIRED else "ALREADY_DECIDED", f"this review is already {str(status).lower()}")
-    if _now() > datetime.fromisoformat(str(pending.get("expires_at"))):
-        raise ApprovalRefused("REVIEW_EXPIRED", "this review expired; nothing was applied")
-    holder = probe_run_lock(workspace)
-    if holder is None or f"run_id={launch_id}," not in holder:
-        raise ApprovalRefused("LAUNCH_NOT_ACTIVE", "the process that was waiting for this decision is no longer running")
-    nonce = secrets.token_hex(8)
-    payload = {"schema": 1, "launch_id": launch_id, "review_id": review_id, "candidate_digest": candidate_digest_value, "workspace_identity": identity,
-               "decision": decision, "decided_at": _stamp(_now()), "nonce": nonce}
-    try:
-        save_launch_review_decision(workspace, launch_id, review_id, payload)
-    except (FileExistsError, FileRevisionConflict) as error:
-        raise ApprovalRefused("ALREADY_DECIDED", "this review already has a decision") from error
-    stored = load_launch_review_decision(workspace, launch_id, review_id)
-    if not isinstance(stored, dict) or stored.get("nonce") != nonce:
-        raise ApprovalRefused("ALREADY_DECIDED", "another decision for this review was recorded first")
-    return {"accepted": True, "code": "ACCEPTED", "message": f"{decision} recorded for review {review_id}; the waiting run records it and continues",
-            "launch_id": launch_id, "review_id": review_id, "decision": decision, "decided_at": payload["decided_at"]}
+    """RETIRED as an approval path (D2 M2): a decision is accepted only over the running launch's private review channel, so this action - which used to write a
+    decision file the waiter honoured - records nothing and refuses with the typed ``CHANNEL_REQUIRED``. Deleted with ``kriya launch-decision`` once every caller is converted."""
+    raise ApprovalRefused("CHANNEL_REQUIRED", "a review is decided only over the running launch's private review channel; this action no longer records a decision")

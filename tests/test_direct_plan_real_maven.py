@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from _protocol_responses import sentinel
 from test_greenfield_direct_plan_runtime import GOAL, MARKDOWN_PLAN, _succeeded
-from test_greenfield_runtime_end_to_end import Person, _callback, _fast  # noqa: F401 - _fast is an autouse fixture
+from test_greenfield_runtime_end_to_end import Person, _callback
 from test_launch_approval import _session
 
 from kriya.application.history import STATUS_EXECUTED, application_outcome
@@ -92,7 +92,7 @@ def _run(tmp_path, *, review_plan=None):
     (workspace / "README.md").write_text("base\n")
     for args in (("init", "-q"), ("add", "-A"), ("commit", "-qm", "base")):
         subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *args], cwd=workspace, check=True, capture_output=True)
-    canonical, session = _session(workspace)
+    canonical, session, _host = _session(workspace)
     person = Person(canonical, review_plan)
     person.start()
     facts = {"steps": [], "gate_outcomes": []}
