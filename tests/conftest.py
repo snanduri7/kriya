@@ -18,6 +18,9 @@ import os
 import sys
 
 import pytest
+from _authority_isolation import (
+    _authority_home_isolation as _authority_home_isolation,  # session fixture, registered here
+)
 
 from kriya.core.logging_setup import ENV_LOG_DIR
 from kriya.core.state_paths import ENV_STATE_DIR
@@ -48,7 +51,9 @@ def _isolated_kriya_state_dir(tmp_path_factory, monkeypatch):
 def _isolated_kriya_authority_home(tmp_path_factory, monkeypatch):
     """D2: the Kriya-owned authority home (SEC-009 approvals; the human-decision records) is a per-test temp dir, never the
     real ~/.kriya/authority. Exported through the environment, so CLI/waiter subprocesses a test starts inherit it. A test that
-    sets KRIYA_AUTHORITY_HOME itself (or unsets it to test the default) overrides this the ordinary monkeypatch way."""
+    sets KRIYA_AUTHORITY_HOME itself (or unsets it to test the default) overrides this the ordinary monkeypatch way. The value this
+    setenv saves - and a ``monkeypatch.undo()`` restores - is the SESSION sandbox (tests/_authority_isolation.py), never the operator's
+    real home, which the session fixture also watches (read-only) and fails the session over if it changes."""
     from kriya.config.environment import AUTHORITY_HOME
 
     monkeypatch.setenv(AUTHORITY_HOME, str(tmp_path_factory.mktemp("kriya-authority")))
