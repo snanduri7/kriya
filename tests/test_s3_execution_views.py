@@ -16,6 +16,7 @@ B. a Kriya-created disposable execution copy made without ``.git`` (the Java acc
 from __future__ import annotations
 
 import ast
+import asyncio
 import os
 import shutil
 import subprocess
@@ -278,3 +279,116 @@ def test_the_authority_bundle_copy_is_removed_on_every_path(tmp_path, script):
         assert script == "exception"
     scratch_root = os.path.join(state, ab.AUTHORITY_RUNS_DIR)
     assert not os.path.isdir(scratch_root) or os.listdir(scratch_root) == [], "no disposable copy outlives its run"
+
+
+# ----------------------------------------------------------------- the same, for the Java acceptance copy and the named-test base export
+
+class _CopyProbe(PolymorphicValidator):
+    """The REAL validator for a Kriya-created execution copy (declared, contained): what it runs is scripted, but every gate first builds the
+    REAL containment profile, which is what makes Kriya create the ``.git`` mount target in the copy. It records what existed at that moment."""
+
+    def __init__(self, root, *, origin, script, seen):
+        super().__init__(root, original_workspace_path=str(origin), autonomy_cfg=_contained(), execution_copy=True)
+        self._script, self._seen = script, seen
+
+    def _contained_gate(self, name):
+        profile, _backend = self.build_containment_profile_and_backend()
+        self._seen.append({"gate": name, "root": self.workspace_path, "git_target": os.path.isdir(os.path.join(self.workspace_path, ".git")),
+                           "bound": profile.git_metadata is not None, "viewed": self._open_gate_view() is not None})
+        return self._script(name)
+
+    def run_compile_check(self, *_args, **_kwargs):
+        return self._contained_gate("compile")
+
+    def run_tests(self, *_args, **_kwargs):
+        return self._contained_gate("tests")
+
+    def _test_runner(self):
+        return "pytest"
+
+
+def _scripted(outcome):
+    """The scripted gates: ``outcome`` is what the run-the-tests gate does (the compile gate passes)."""
+    def script(name):
+        if name == "compile":
+            return {"success": True}
+        if outcome == "success":
+            return {"success": True}
+        if outcome == "failure":
+            return {"success": False, "stdout": "FAILED"}
+        if outcome == "timeout":
+            return {"success": False, "returncode": -9, "timeout": True}
+        if outcome == "exception":
+            raise RuntimeError("the container runtime died")
+        raise asyncio.CancelledError()      # "cancellation": a BaseException, not an Exception
+    return script
+
+
+_OUTCOMES = ["success", "failure", "timeout", "exception", "cancellation"]
+_RAISES = {"exception": RuntimeError, "cancellation": asyncio.CancelledError}
+
+
+@pytest.mark.parametrize("outcome", _OUTCOMES)
+def test_the_java_acceptance_copy_and_its_git_target_are_removed_on_every_path(tmp_path, outcome):
+    from _b2c_fixtures import ACCEPTANCE, EXACT_GOAL, TARGET, base_revision, candidate, maven_workspace
+
+    from kriya.workflow import acceptance_jvm as jvm
+    from kriya.workflow import acceptance_oracle as ao
+    from kriya.workflow.requirements import derive_requirements
+
+    workspace = maven_workspace(tmp_path / "ws")
+    cand = candidate(workspace, tmp_path / "cand", "correct")
+    (tmp_path / "KriyaAcceptanceTest.java").write_text(ACCEPTANCE)
+    artifact = ao.load_acceptance(str(tmp_path / "KriyaAcceptanceTest.java"), derive_requirements(EXACT_GOAL), str(tmp_path / "artifacts"))
+    cand_before = _snapshot(cand)
+    seen = []
+    kwargs = dict(candidate_paths=[TARGET], base_revision=base_revision(workspace),
+                  validator_factory=lambda root: _CopyProbe(root, origin=workspace, script=_scripted(outcome), seen=seen))
+    if outcome in _RAISES:
+        with pytest.raises(_RAISES[outcome]):
+            jvm.run_java_acceptance(artifact, str(cand), **kwargs)
+    else:
+        jvm.run_java_acceptance(artifact, str(cand), **kwargs)
+    ran = [event for event in seen if event["gate"] == "tests"]
+    assert [event["gate"] for event in seen][:1] == ["compile"] and len(ran) == 1, seen          # the scripted outcome really was reached
+    assert all(event["git_target"] and event["bound"] and not event["viewed"] for event in seen), seen   # Kriya's .git target existed in the copy
+    copy = seen[0]["root"]
+    assert copy != str(cand) and not os.path.lexists(copy), "the copy, with its .git target, did not outlive its run"
+    assert not os.path.lexists(os.path.dirname(copy)), "nor did its staging directory"
+    assert _snapshot(cand) == cand_before and not os.path.lexists(cand / ".kriya"), "the candidate itself never received anything"
+
+
+@pytest.mark.parametrize("outcome", _OUTCOMES)
+def test_the_named_test_base_export_and_its_git_target_are_removed_on_every_path(tmp_path, outcome):
+    from _named_test_oracle_harness import NAMED, git, make_base
+
+    from kriya.workflow.named_test_oracle import ORACLE_BASELINE_INDETERMINATE, judge_named_tests
+
+    repo = make_base(tmp_path / "repo")
+    repo_before = _snapshot(repo)
+    seen = []
+
+    class _Candidate:
+        @staticmethod
+        def _test_runner():
+            return "pytest"
+
+        @staticmethod
+        def run_tests(**_kwargs):
+            pytest.fail("the candidate run must not happen when the base run did not produce an inventory")
+
+    def judge():
+        return judge_named_tests([NAMED], candidate_root=str(repo), base_revision=git(repo, "rev-parse", "HEAD").strip(), modified=[],
+                                 candidate_validator=lambda: _Candidate(),
+                                 base_validator=lambda root: _CopyProbe(root, origin=repo, script=_scripted(outcome), seen=seen))
+
+    if outcome == "cancellation":
+        with pytest.raises(asyncio.CancelledError):
+            judge()
+    else:
+        verdict = judge()                       # success carries no inventory, so it too ends at "indeterminate": the point is the cleanup
+        assert verdict.reason_code == ORACLE_BASELINE_INDETERMINATE, verdict
+    assert [event["gate"] for event in seen] == ["tests"], seen
+    assert seen[0]["git_target"] and seen[0]["bound"] and not seen[0]["viewed"], "Kriya's .git target existed in the export"
+    assert not os.path.lexists(seen[0]["root"]), "the export, with its .git target, did not outlive its run"
+    assert _snapshot(repo) == repo_before, "the repository itself was not touched"
