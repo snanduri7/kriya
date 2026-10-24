@@ -64,15 +64,20 @@ import logging
 import os
 import re
 import shutil
+import stat
 import subprocess
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.config.environment import oci_image
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
+from kriya.platform.services import platform_services
+from kriya.policy.authority_namespace import AuthorityNamespaceUnsafeError, create_workspace_authority_namespace
+from kriya.policy.protected_authority_paths import WORKSPACE_ANCHOR_RELPATH, WORKSPACE_AUTHORITY_RELPATHS
 from kriya.tools.containment import (
     BackendUnavailableError,
     ContainmentProfile,
@@ -247,6 +252,86 @@ def git_metadata_mount_args(profile: ContainmentProfile, workspace_host: str) ->
         return (bind_mount_args(mount.gitfile_path, f"{_CONTAINER_WORKSPACE}/.git", writable=False)
                 + bind_mount_args(mount.repo_dir, CONTAINER_GIT_METADATA, writable=False))
     return bind_mount_args(mount.repo_dir, f"{_CONTAINER_WORKSPACE}/.git", writable=False)
+
+
+# --- D2 EXEC-LAYER S1: the authority namespace of a mounted workspace -----------------------------------------------------------------
+#
+# MEASURED on real Docker (2026-10-24, before this slice): with ``<workspace>`` mounted read-write, a contained workload could rename or replace
+# ``.kriya`` (or ``.kriya/control``) and put a forged copy at the original host-visible name, or create ``.kriya/control`` itself where it did
+# not exist. A mask over a leaf protects that leaf's contents only; a writable ancestor of a masked path can be renamed away. So a writable
+# workspace mount gets (1) the STRUCTURAL ANCHOR - ``.kriya`` bound read-write onto itself, so it is a mount point and its rename, removal and
+# replacement fail with EBUSY - and (2) a read-only empty MASK over each protected leaf (``.kriya/control``, ``.kriya/checkpoints``). The anchor
+# and the leaves are created/validated on the HOST as real directories owned by this user by this backend before the container starts
+# (``ensure_authority_namespace`` -> ``kriya.policy.authority_namespace``): the workload is never the one that creates a
+# namespace Kriya will later trust, and a hostile or unusable one (symlink, file, foreign owner) is a typed refusal, not a skipped mask.
+_AUTHORITY_STATE_RELPATHS = WORKSPACE_AUTHORITY_RELPATHS  # the canonical protected set owns the names (kriya/policy/protected_authority_paths.py)
+
+
+def _verify_authority_directory(path: str, code: str) -> None:
+    """``path`` must exist as a real directory (``lstat``: a symlink is refused, never followed) owned by this user. Typed refusal otherwise."""
+    try:
+        info = os.lstat(path)
+    except OSError as error:
+        raise BackendUnavailableError(
+            f"{code}: {path!r} cannot be inspected ({error}); a writable workspace needs its protected directories created on the host "
+            "before launch (kriya.policy.authority_namespace)") from error
+    if not stat.S_ISDIR(info.st_mode):
+        raise BackendUnavailableError(f"{code}: {path!r} is not a real directory (symlink or file)")
+    if info.st_uid != platform_services().host_identity.current().uid:  # the platform port: no OS call here
+        raise BackendUnavailableError(f"{code}: {path!r} is owned by uid {info.st_uid}, not by this user")
+
+
+def ensure_authority_namespace(workspace_host: str, *, workspace_writable: bool) -> None:
+    """Create on the HOST, and verify, the authority namespace of a WRITABLE workspace mount - the one place every contained launch passes
+    through, so no consumer (ShellTool, the validator, MCP, the doctor's probe) can be missed, and a backend that mounts nothing writable
+    (the Null backend, a read-only mount) creates nothing. ``kriya.policy.authority_namespace`` owns the creation
+    (directories only, ``0700``, never chmod of an existing one, ``lstat`` so a symlink is refused); a symlink, a file, a foreign owner or an
+    unwritable workspace is a typed refusal here, before anything is started. The workload is never the one that creates these directories."""
+    if not workspace_writable:
+        return
+    try:
+        create_workspace_authority_namespace(workspace_host)
+    except AuthorityNamespaceUnsafeError as error:
+        raise BackendUnavailableError(f"AUTHORITY_NAMESPACE_UNAVAILABLE: {error}") from error
+
+
+def workspace_anchor_args(workspace_host: str) -> List[str]:
+    """The structural anchor of a writable workspace mount: ``<workspace>/.kriya`` bound READ-WRITE onto itself. A mount point cannot be renamed,
+    removed or replaced from inside the container (EBUSY; unmounting needs a capability the container drops), yet ordinary writes under it still
+    land on the host. The leaf masks beneath it keep protecting ``control``/``checkpoints``."""
+    anchor = os.path.join(workspace_host, WORKSPACE_ANCHOR_RELPATH)
+    _verify_authority_directory(anchor, "AUTHORITY_ANCHOR_UNAVAILABLE")
+    return bind_mount_args(anchor, f"{_CONTAINER_WORKSPACE}/{WORKSPACE_ANCHOR_RELPATH}", writable=True)
+
+
+def authority_state_mask_args(workspace_host: str, *, tmp_root: Optional[str] = None,
+                              workspace_writable: bool = False) -> Tuple[List[str], Optional[Callable[[], None]]]:
+    """The docker args protecting Kriya's own state inside a mounted workspace, and a cleanup for the scratch directories they use.
+
+    A WRITABLE mount gets the structural anchor first, then an empty read-only scratch directory bound over each protected leaf (each leaf must
+    already exist as a real host directory: ``ensure_authority_namespace`` made them so). A READ-ONLY mount gets a mask only over a leaf that exists (hiding
+    its content from a reader); a leaf that is not there cannot be created from a read-only mount, and an empty mask over nothing would be
+    indistinguishable from "not mounted". Each mask gets its OWN fresh scratch directory."""
+    args: List[str] = workspace_anchor_args(workspace_host) if workspace_writable else []
+    masked: List[str] = []
+    for relpath in _AUTHORITY_STATE_RELPATHS:  # every refusal happens HERE, before the first scratch directory exists: a refusal leaks nothing
+        real_path = os.path.join(workspace_host, relpath)
+        if workspace_writable:
+            _verify_authority_directory(real_path, "AUTHORITY_LEAF_UNAVAILABLE")
+        elif not os.path.lexists(real_path):
+            continue
+        masked.append(relpath)
+    scratch_dirs: List[str] = []
+    for relpath in masked:
+        empty = tempfile.mkdtemp(prefix="kriya-authority-mask-", dir=tmp_root)
+        scratch_dirs.append(empty)
+        args += bind_mount_args(empty, f"{_CONTAINER_WORKSPACE}/{relpath}", writable=False)
+
+    def _cleanup_masks() -> None:
+        for directory in scratch_dirs:
+            shutil.rmtree(directory, ignore_errors=True)
+
+    return args, (_cleanup_masks if scratch_dirs else None)
 
 
 def _git_metadata_env(profile: ContainmentProfile) -> Dict[str, str]:
@@ -1171,6 +1256,7 @@ class OCIContainmentBackend:
         # leaves this at its default True, unchanged. `workspace_write`
         # controls `ro` vs `rw` - every existing caller leaves this at its
         # default True (rw), unchanged.
+        mounted_workspace: Optional[str] = None
         if profile.mount_workspace:
             workspace_host = os.path.abspath(profile.workspace_path)
             if not os.path.isdir(workspace_host):
@@ -1179,9 +1265,11 @@ class OCIContainmentBackend:
                     "exist or is not a directory - refusing to start a container "
                     "with no valid workspace mount."
                 )
+            ensure_authority_namespace(workspace_host, workspace_writable=profile.workspace_write)  # S1: created/validated on the host before anything starts
             args += bind_mount_args(workspace_host, _CONTAINER_WORKSPACE, writable=profile.workspace_write)
             args += ["-w", _CONTAINER_WORKSPACE]
             args += git_metadata_mount_args(profile, workspace_host)
+            mounted_workspace = workspace_host
         else:
             args += ["-w", _CONTAINER_TEMP]
 
@@ -1295,6 +1383,12 @@ class OCIContainmentBackend:
 
         # PRD-011: run exactly the content that was attested - its immutable
         # image ID, never the tag, which could be re-pointed in between.
+        # S1: the anchor and the protected-leaf masks of the mounted workspace. Built last, right before the image, so no later refusal can leak
+        # the scratch directories the masks use; they are removed by the same teardown that removes the container.
+        mask_cleanup: Optional[Callable[[], None]] = None
+        if mounted_workspace is not None:
+            mask_args, mask_cleanup = authority_state_mask_args(mounted_workspace, workspace_writable=profile.workspace_write)
+            args += mask_args
         args.append(resolved_toolchain.image_digest if resolved_toolchain is not None else image)
 
         def _cleanup() -> None:
@@ -1307,6 +1401,9 @@ class OCIContainmentBackend:
                 )
             except Exception as e:
                 logger.debug("docker rm -f %s failed (best-effort cleanup): %s", container_name, e)
+            finally:
+                if mask_cleanup is not None:
+                    mask_cleanup()
 
         return PreparedContainment(
             env=None, preexec_fn=None, backend_name=self.name,
@@ -1367,6 +1464,8 @@ class OCIContainmentBackend:
         # never after already standing up infrastructure for a run that
         # cannot proceed.
         acquisition_uid, acquisition_gid = _resolve_acquisition_identity(workspace_host, cache_hosts)
+        # S1: after the existing identity refusal (which keeps its precedence) and before any network or proxy exists, so a refusal leaks nothing.
+        ensure_authority_namespace(workspace_host, workspace_writable=True)
 
         authority_id = compute_authority_id(hosts)
         if profile.toolchain_identity is not None:
@@ -1557,6 +1656,9 @@ class OCIContainmentBackend:
             args += ["--cpus", _CPU_RATE_CAP]
 
         run_image = resolved_toolchain.image_digest if resolved_toolchain is not None else acq_image_tag
+        # S1: the anchor and the protected-leaf masks of the writable workspace (verified above), built last so nothing after them can fail.
+        mask_args, mask_cleanup = authority_state_mask_args(workspace_host, workspace_writable=True)
+        args += mask_args
         args += ["--entrypoint", "/bin/sh", run_image, "-c", setup_script, "kriya-acq-cmd"]
 
         def _cleanup() -> None:
@@ -1564,6 +1666,9 @@ class OCIContainmentBackend:
                 subprocess.run([docker_path, "rm", "-f", container_name], capture_output=True, timeout=15)
             except Exception as e:
                 logger.debug("docker rm -f %s failed (best-effort cleanup): %s", container_name, e)
+            finally:
+                if mask_cleanup is not None:
+                    mask_cleanup()
             _remove_proxy_and_log_denied()
             _remove_network()
 

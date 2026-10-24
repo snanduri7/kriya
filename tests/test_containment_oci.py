@@ -618,7 +618,12 @@ def test_registry_scoped_never_mutates_host_permissions_on_timeout(tmp_path):
     )
     assert result.timeout is True
     after = _snapshot(str(tmp_path))
-    assert before == after
+    # D2 S1 (intentional contract change): the backend creates the workspace authority namespace on the host - three new 0700 directories owned by
+    # this user. What this test guards is unchanged: no EXISTING path's permissions or ownership change, and nothing else is created.
+    assert {path: meta for path, meta in after.items() if path in before} == before
+    created = set(after) - set(before)
+    assert {os.path.relpath(path, str(workspace)) for path in created} == {".kriya", ".kriya/control", ".kriya/checkpoints"}
+    assert all(after[path][0] == os.getuid() and after[path][2] == 0o700 for path in created)
 
 
 def test_registry_scoped_ownership_mismatch_fails_closed_before_any_container_starts(tmp_path):

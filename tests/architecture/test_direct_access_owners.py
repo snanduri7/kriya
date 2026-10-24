@@ -79,7 +79,10 @@ TABLES: Dict[str, Table] = {
     "skill_dir_reads": Table(sites.skill_dir_read_sites, frozenset({"SKILLS"}), frozenset(), ()),
     "tool_registry": Table(sites.tool_registry_sites, frozenset({"TOOLBOX"}),
                            frozenset({"kriya.workflow.subtask_executor"}), ()),
-    "kriya_dir": Table(sites.kriya_dir_sites, frozenset({"STATE", "REPOSITORY"}), frozenset({"kriya.config.environment"}), ()),
+    # D2 S1: kriya.policy.protected_authority_paths is the CANONICAL definition of the workspace authority namespace names (the structural anchor
+    # ".kriya" and its protected leaves); every other consumer (the OCI backend, the creation helper) imports the names from it.
+    "kriya_dir": Table(sites.kriya_dir_sites, frozenset({"STATE", "REPOSITORY"}),
+                       frozenset({"kriya.config.environment", "kriya.policy.protected_authority_paths"}), ()),
 }
 
 ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
