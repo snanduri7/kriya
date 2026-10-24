@@ -87,6 +87,21 @@ def test_the_projection_returns_a_new_structure_and_leaves_the_live_configuratio
     assert live["paths"]["skills"] == "/co/skills" and live["plugins"]["enabled"] == ["/co/plugins/x"] and "evidence" in live
 
 
+def test_a_symlink_alias_of_the_checkout_is_the_same_checkout_and_an_outside_symlink_is_not(tmp_path):
+    """Containment is decided by filesystem identity (``path_relation``), not by how the path is spelled: the same directory reached through a symlink
+    alias of the checkout is inside it; a link inside the checkout that points OUT of it is outside."""
+    real = tmp_path / "real-checkout"
+    (real / "skills").mkdir(parents=True)
+    alias = tmp_path / "alias-of-the-checkout"
+    alias.symlink_to(real)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (real / "points-out").symlink_to(outside)
+    assert identity_path(str(alias / "skills"), install_dir=str(real)) == f"{CHECKOUT_IDENTITY_TOKEN}/skills"
+    assert identity_path(str(real / "skills"), install_dir=str(alias)) == f"{CHECKOUT_IDENTITY_TOKEN}/skills"
+    assert identity_path(str(real / "points-out"), install_dir=str(real)) == str(real / "points-out")   # reaches outside: real identity, unchanged
+
+
 # ------------------------------------------------------------------ the invariant, through the real loader
 
 def test_the_same_configuration_at_two_checkout_roots_has_the_same_fingerprint_while_the_runtime_paths_stay_absolute(monkeypatch, tmp_path):

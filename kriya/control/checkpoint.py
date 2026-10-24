@@ -25,6 +25,7 @@ from kriya.context.workspace_identity import (
     ownership_metadata,
     validate_ownership,
 )
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 logger = logging.getLogger(__name__)
 
@@ -66,17 +67,21 @@ def identity_path(path: Any, *, install_dir: Optional[str] = None) -> Any:
     """``path`` in its identity form. An absolute path inside the Kriya checkout becomes ``<kriya-install>/<repo-relative path>`` (the checkout root
     itself, ``<kriya-install>``), so a different checkout root gives the same form and a different repo-relative target gives a different one. Every
     other value is returned UNCHANGED: a relative string, a non-string, and above all an absolute path OUTSIDE the checkout, whose location is real
-    identity. Pure string work (``normpath``, a separator-aware prefix test; no filesystem access beyond resolving the checkout root once), so a
-    look-alike sibling such as ``<checkout>-other/x`` is never mistaken for a path inside it."""
+    identity. Whether a path is inside is decided by ``path_relation`` (filesystem identity, the platform primitive: case and symlink aliases of the
+    checkout are recognized, a look-alike sibling such as ``<checkout>-other/x`` is not inside); a spelling that cannot be expressed relative to
+    the checkout is left as it is, never guessed."""
     if not isinstance(path, str) or not os.path.isabs(path):
         return path
     root = os.path.realpath(install_dir if install_dir is not None else kriya_install_dir())
     candidate = os.path.normpath(path)
-    if candidate == root:
+    if path_relation(root, candidate) is not PathRelation.WITHIN:
+        return path
+    relative = os.path.relpath(os.path.realpath(candidate), root)
+    if relative == os.curdir:
         return CHECKOUT_IDENTITY_TOKEN
-    if candidate.startswith(root + os.sep):
-        return f"{CHECKOUT_IDENTITY_TOKEN}/{candidate[len(root) + 1:]}"
-    return path
+    if relative.split(os.sep, 1)[0] == os.pardir:
+        return path
+    return f"{CHECKOUT_IDENTITY_TOKEN}/{relative}"
 
 
 def canonical_identity_config(config_dict: Dict[str, Any], *, install_dir: Optional[str] = None) -> Dict[str, Any]:
