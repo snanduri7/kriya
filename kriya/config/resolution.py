@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from kriya.config.environment import KRIYA_DIRECTORY_NAME, expand_user
+from kriya.config.environment import KRIYA_DIRECTORY_NAME, expand_user, kriya_install_dir
 from kriya.context.working_directory import current_directory
 from kriya.context.workspace_identity import authority_root
 from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, path_identity, path_relation
@@ -268,7 +268,7 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
     workspace_root = authority_root(invoked_directory)
 
     # Determine Kriya Installation Directory
-    KRIYA_INSTALL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    KRIYA_INSTALL_DIR = kriya_install_dir()
 
     # Try to load default configuration from package path
     default_path = os.path.join(os.path.dirname(__file__), "default_config.yaml")

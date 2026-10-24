@@ -17,6 +17,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from kriya.config.environment import kriya_install_dir
 from kriya.context.workspace_identity import (
     WorkspaceOwnershipError,
     authority_root,
@@ -54,8 +55,45 @@ def without_observational_config(config_dict: Dict[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in config_dict.items() if key not in OBSERVATIONAL_CONFIG_SECTIONS}
 
 
+# The identity form of a path that lies INSIDE the Kriya checkout (or installation): ``<kriya-install>/<path relative to the checkout>``. The packaged
+# defaults' ``plugins.directory``, ``paths.skills`` and ``paths.memory`` resolve to absolute paths under the checkout at load time
+# (kriya/config/resolution.py), and a runtime keeps them absolute; but the SAME repository and configuration checked out at another root is the same
+# semantic configuration, so an identity (a fingerprint) must not hash the directory the checkout happens to be in.
+CHECKOUT_IDENTITY_TOKEN = "<kriya-install>"
+
+
+def identity_path(path: Any, *, install_dir: Optional[str] = None) -> Any:
+    """``path`` in its identity form. An absolute path inside the Kriya checkout becomes ``<kriya-install>/<repo-relative path>`` (the checkout root
+    itself, ``<kriya-install>``), so a different checkout root gives the same form and a different repo-relative target gives a different one. Every
+    other value is returned UNCHANGED: a relative string, a non-string, and above all an absolute path OUTSIDE the checkout, whose location is real
+    identity. Pure string work (``normpath``, a separator-aware prefix test; no filesystem access beyond resolving the checkout root once), so a
+    look-alike sibling such as ``<checkout>-other/x`` is never mistaken for a path inside it."""
+    if not isinstance(path, str) or not os.path.isabs(path):
+        return path
+    root = os.path.realpath(install_dir if install_dir is not None else kriya_install_dir())
+    candidate = os.path.normpath(path)
+    if candidate == root:
+        return CHECKOUT_IDENTITY_TOKEN
+    if candidate.startswith(root + os.sep):
+        return f"{CHECKOUT_IDENTITY_TOKEN}/{candidate[len(root) + 1:]}"
+    return path
+
+
+def canonical_identity_config(config_dict: Dict[str, Any], *, install_dir: Optional[str] = None) -> Dict[str, Any]:
+    """The configuration as it enters an IDENTITY: observational sections removed, and every string value that is an absolute path inside the Kriya
+    checkout in its identity form (``identity_path``). A new structure; the live configuration, whose paths stay absolute for the runtime, is untouched."""
+    def project(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: project(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [project(item) for item in value]
+        return identity_path(value, install_dir=install_dir)
+
+    return project(without_observational_config(config_dict))
+
+
 def compute_config_fingerprint(config_dict: Dict[str, Any]) -> str:
-    blob = json.dumps(without_observational_config(config_dict), sort_keys=True, default=str)
+    blob = json.dumps(canonical_identity_config(config_dict), sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
@@ -169,6 +207,8 @@ def compute_registry_hash(registry_dict: Dict[str, Any]) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+# The legacy surface the old import path (kriya/workflow/checkpoint.py) re-exports name for name. The identity projection (``identity_path``,
+# ``canonical_identity_config``, ``CHECKOUT_IDENTITY_TOKEN``, Q0) is new and has no legacy importer: new code imports it from here.
 __all__ = [
     "CHECKPOINT_DIR", "OBSERVATIONAL_CONFIG_SECTIONS", "checkpoint_path", "compute_config_fingerprint", "compute_registry_hash",
     "delete_checkpoint", "find_latest_checkpoint", "list_checkpoint_run_references", "list_checkpoints", "load_checkpoint", "new_run_id",

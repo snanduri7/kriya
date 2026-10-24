@@ -22,6 +22,12 @@ from typing import Dict, Optional, Protocol, runtime_checkable
 # directory STATE keeps its control records in; CONFIG's paths.state rule refers to it: kriya/config/resolution.py).
 KRIYA_DIRECTORY_NAME = ".kriya"
 
+
+def kriya_install_dir() -> str:
+    """The Kriya checkout (or installation) root: the directory the packaged defaults' relative paths (``./plugins``, ``./skills``, ``./memory``)
+    are resolved against (kriya/config/resolution.py). Derived from this file's location, so it is where Kriya is, never where a workspace is."""
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
 # The closed vocabulary of variables Kriya reads (the owning modules keep their historical constant names as aliases of these).
 STATE_DIR = "KRIYA_STATE_DIR"
 LOG_DIR = "KRIYA_LOG_DIR"
@@ -205,5 +211,5 @@ __all__ = ["ADJUDICATION_HOME", "AUTHORITY_HOME", "CERTIFICATION_HOME", "EXECUTI
            "LOG_DIR", "MCP_APPROVAL_HOME", "MODEL_RUNTIME_PROBE", "OCI_IMAGES", "ProcessEnvironment", "QUALIFICATION_HOME", "STATE_DIR",
            "STATIC_ANALYSIS_HOME", "TOOLCHAIN_VARIABLES", "TRUST_FILE", "UnknownEnvironmentVariable", "VARIABLES", "adjudication_home",
            "authority_home", "certification_home", "child_environment", "default_log_dir", "default_state_dir", "execution_environment_probe_enabled",
-           "expand_user", "kriya_home", "log_dir", "mcp_approval_home", "model_runtime_probe_enabled", "oci_image", "process_environment",
+           "expand_user", "kriya_home", "kriya_install_dir", "log_dir", "mcp_approval_home", "model_runtime_probe_enabled", "oci_image", "process_environment",
            "qualification_home", "state_dir", "static_analysis_home", "toolchain", "trust_file", "user_home"]

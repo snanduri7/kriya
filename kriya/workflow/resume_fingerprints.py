@@ -427,9 +427,10 @@ def split_config_by_owner(config_dump: Mapping[str, Any]) -> Dict[str, Dict[str,
     """{"config": remainder, owner: {"a.b": value}} - each leaf in one bucket.
     Observational configuration (what Kriya records, never what it does) is
     in no bucket: LR-R1-M1 invariant I-2."""
-    from kriya.workflow.checkpoint import without_observational_config
+    from kriya.control.checkpoint import canonical_identity_config
 
-    remainder = copy.deepcopy(without_observational_config(dict(config_dump)))
+    # the one identity projection (STATE): observational sections out, checkout-owned absolute paths in their checkout-independent form
+    remainder = copy.deepcopy(canonical_identity_config(dict(config_dump)))
     owned: Dict[str, Dict[str, Any]] = {
         "config": remainder, "model_runtime": {}, "containment": {}, "verification_policy": {},
     }
@@ -486,10 +487,13 @@ _SKILL_IGNORED_FILES = frozenset({"staged_rules.txt", ".DS_Store", "Thumbs.db", 
 def skills_fingerprint(skill_source_dirs: Optional[Sequence[str]]) -> Fingerprint:
     if skill_source_dirs is None:
         return Fingerprint.unavailable("skill sources unknown (skill engine exposes no source directories)")
+    from kriya.control.checkpoint import identity_path
+
     sources = []
     try:
         for directory in skill_source_dirs:
-            entry: Dict[str, Any] = {"dir": os.path.realpath(directory), "files": []}
+            # a skills directory inside the Kriya checkout is identified by its checkout-relative form, any other by where it is
+            entry: Dict[str, Any] = {"dir": identity_path(os.path.realpath(directory)), "files": []}
             if os.path.isdir(directory):
                 for root, dirnames, filenames in os.walk(directory):
                     dirnames[:] = sorted(d for d in dirnames if d not in _SKILL_IGNORED_DIRS)

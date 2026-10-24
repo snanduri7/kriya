@@ -147,9 +147,9 @@
       "omitted_ranges": [],
       "omitted_windows": [],
       "package_truncated": false,
-      "rendered_bytes": 300,
-      "rendered_chars": 300,
-      "rendered_sha256": "f83408b8d7584a7809637386950522a6dd38da2ea1d322e99cb894cd6f031a38",
+      "rendered_bytes": 218,
+      "rendered_chars": 218,
+      "rendered_sha256": "d8b953f4997bf39ea3a9d687819071a49595717fb409081d503affc3ee64b9e8",
       "truncation": []
      }
     ]
@@ -266,9 +266,9 @@
       "omitted_ranges": [],
       "omitted_windows": [],
       "package_truncated": false,
-      "rendered_bytes": 161,
-      "rendered_chars": 161,
-      "rendered_sha256": "91a75bf16e6a66c44a541bc4deff2d0ae23714bbf2795028de3f239e0deb1514",
+      "rendered_bytes": 79,
+      "rendered_chars": 79,
+      "rendered_sha256": "40f13158a5c756a3d2d61a0c4c84e4f1e20f9bb736ad585793dcaff1e061972f",
       "truncation": []
      }
     ]

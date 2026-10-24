@@ -39,6 +39,7 @@ forms are byte-identical under several PYTHONHASHSEED values, basetemps of diffe
 a git-archive copy at another path.
 """
 import asyncio
+import hashlib
 import inspect
 import json
 import os
@@ -94,6 +95,28 @@ def _short(value: Any) -> Any:
 def _interpreter_literals() -> Dict[str, str]:
     """The interpreter a Python runtime command runs under, as a token (it is this machine's path)."""
     return {PYTHON: "python", os.path.realpath(PYTHON): "python"}
+
+
+def _evidence_digest_with_the_interpreter_as_a_token():
+    """The verifier evidence package pins what the verifier saw as a digest of its rendered text, and that text names the interpreter the runtime step
+    ran under (``=== Step 1/1: <interpreter> main.py ===``): this machine's path, so the digest differed between checkouts and between ways of starting
+    pytest while nothing the golden is about had changed. The form already spells the interpreter as a token everywhere else (``_interpreter_literals``);
+    this does the same inside the digest, so the golden still pins the whole rendered text, modulo how this machine spells its interpreter."""
+    from kriya.workflow.verifier_evidence import VerifierEvidencePackage
+
+    real_to_dict = VerifierEvidencePackage.to_dict
+    literals = sorted(_interpreter_literals().items(), key=lambda item: -len(item[0]))
+
+    def to_dict(self) -> Dict[str, Any]:
+        form = real_to_dict(self)
+        text = self.rendered
+        for literal, token in literals:
+            text = text.replace(literal, token)
+        encoded = text.encode("utf-8")
+        form.update(rendered_bytes=len(encoded), rendered_chars=len(text), rendered_sha256=hashlib.sha256(encoded).hexdigest())
+        return form
+
+    return patch.object(VerifierEvidencePackage, "to_dict", to_dict)
 
 
 # ============================================================================= the process boundary
@@ -340,6 +363,7 @@ class _Engine:
 
         with patch.object(scope, "emit", _evidence_recorder(self.trace, forward=True)):
             patches = self.processes.patches() + [
+                _evidence_digest_with_the_interpreter_as_a_token(),
                 patch("kriya.tools.service_runtime._check_readiness", return_value=True),
                 patch("kriya.tools.service_runtime._run_probe",
                       side_effect=lambda spec, timeout: (200, '{"status": "ok"}', True, "probe returned 200")),
