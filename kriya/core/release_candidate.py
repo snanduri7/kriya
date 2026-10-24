@@ -36,6 +36,7 @@ import os
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 from kriya.core.release_identity import _changes, _digest, compare_release_identity, release_identity
+from kriya.tools.containment import decide_external_execution
 
 RELEASE_CANDIDATE_VERSION = 1
 # A fixed salt makes the security-field digest a stable identity. SEC-009
@@ -127,8 +128,8 @@ def release_candidate_identity(cfg: Any, config_path: str, *, case_set: Mapping[
                                source_root: Optional[str] = None,
                                resolve_runtime: Optional[Callable[..., Any]] = None) -> Dict[str, Any]:
     """The candidate identity. ``digest`` covers every material field."""
-    release = (release_identity(cfg.autonomy.containment_backend) if source_root is None
-               else release_identity(cfg.autonomy.containment_backend, source_root=source_root))
+    backend_name = decide_external_execution(cfg.autonomy, subject="release identity").backend_name
+    release = (release_identity(backend_name) if source_root is None else release_identity(backend_name, source_root=source_root))
     material = {
         "version": RELEASE_CANDIDATE_VERSION,
         "release": release,

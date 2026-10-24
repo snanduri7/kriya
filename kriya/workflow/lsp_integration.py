@@ -7,7 +7,7 @@ from typing import Any, Dict, Iterable
 logger = logging.getLogger(__name__)
 
 
-async def _get_or_start_jdtls_client(existing_client: Any, project_root: str) -> Any:
+async def _get_or_start_jdtls_client(existing_client: Any, project_root: str, autonomy: Any = None) -> Any:
     """Lazily starts a JdtlsClient for this generation run if jdtls is
     available, reusing an already-started one across retries rather than
     spinning up a fresh process per attempt (real, observed startup/indexing
@@ -32,7 +32,7 @@ async def _get_or_start_jdtls_client(existing_client: Any, project_root: str) ->
         # negative signal removes that ambiguity going forward.
         logger.info("jdtls not found on PATH - no LSP grounding for this run.")
         return None
-    client = JdtlsClient(project_root, jdtls_path)
+    client = JdtlsClient(project_root, jdtls_path, autonomy)  # the autonomy configuration: the canonical containment decision is made from it
     try:
         await client.start()
         logger.info(f"jdtls started successfully ({jdtls_path}) - LSP grounding active for this run.")

@@ -31,6 +31,7 @@ from kriya.tools.containment import (
     ContainmentSetupError,
     NetworkAuthority,
     TrustClass,
+    decide_external_execution,
     resolve_containment_backend,
 )
 from kriya.tools.process import ProcessController
@@ -383,7 +384,8 @@ class ShellTool(BaseTool):
         shell_denied = self.autonomy_cfg.shell_network == "denied"
         network = NetworkAuthority.DENIED if shell_denied else NetworkAuthority.UNRESTRICTED
         network_destinations: Tuple[str, ...] = ()
-        if self.autonomy_cfg.contained_execution_required:
+        decision = decide_external_execution(self.autonomy_cfg, subject="ShellTool")  # D2 S2: the one canonical question
+        if decision.contained:
             acquisition_kind = classify_shell_acquisition_command(parsed_command) if parsed_command else None
             if acquisition_kind == "registry_scoped":
                 network = NetworkAuthority.DEPENDENCY_REGISTRY_ONLY
@@ -394,10 +396,10 @@ class ShellTool(BaseTool):
         backend = None
         # Required containment is never skipped because sandbox_execution is
         # off: that combination used to run the command on the host.
-        if (
-            self.autonomy_cfg.sandbox_execution or self.autonomy_cfg.contained_execution_required
-            or shell_denied
-        ):
+        if self.autonomy_cfg.sandbox_execution or decision.contained or shell_denied:
+            # mandatory containment: the isolating backend, or the owner's typed refusal; otherwise the configured sandbox backend, if any
+            backend = resolve_containment_backend(decision.backend_name)  # this module's own seam (patched by its tests); the OWNER judges the result
+            decision.require_isolating(backend)
             profile = ContainmentProfile(
                 trust_class=TrustClass.UNTRUSTED_EXECUTION,
                 workspace_path=os.getcwd(),
@@ -407,7 +409,6 @@ class ShellTool(BaseTool):
                 cpu_seconds=self.autonomy_cfg.sandbox_cpu_seconds,
                 memory_mb=self.autonomy_cfg.sandbox_memory_mb,
             )
-            backend = resolve_containment_backend(self.autonomy_cfg.containment_backend)
         controller = ProcessController()
         try:
             result = await controller.run_async(

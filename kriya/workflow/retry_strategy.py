@@ -1550,7 +1550,7 @@ async def _record_attempt_failure(
     # so it reaches the retry prompt through the same, already-
     # scoped injection point rather than needing new plumbing.
     if not state.jdtls_unavailable and os.path.exists(os.path.join(ctx.worktree_path, "pom.xml")):
-        state.jdtls_client = await _get_or_start_jdtls_client(state.jdtls_client, ctx.worktree_path)
+        state.jdtls_client = await _get_or_start_jdtls_client(state.jdtls_client, ctx.worktree_path, ctx.kernel.config.autonomy)
         if state.jdtls_client is None:
             state.jdtls_unavailable = True
             if state.lsp_warning is None:

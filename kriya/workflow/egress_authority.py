@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Any, Iterable, List, Tuple
 
 from kriya.policy.egress import EgressCapability, EgressDecision, capability_for
+from kriya.tools.containment import decide_external_execution
 
 
 def _model_endpoints(cfg: Any) -> Iterable[Tuple[str, str]]:
@@ -51,8 +52,9 @@ def describe_run_egress(cfg: Any) -> List[EgressDecision]:
     from kriya.tools.knowledge import REGISTRY_METADATA_HOSTS
 
     autonomy = cfg.autonomy
-    contained = autonomy.contained_execution_required is True
-    containment = {"required": contained, "backend": autonomy.containment_backend}
+    decision = decide_external_execution(autonomy, subject="egress report")
+    contained = decision.contained
+    containment = {"required": contained, "backend": decision.backend_name}
     decisions = [_model_decision(cfg, field, url) for field, url in _model_endpoints(cfg)]
 
     offline = cfg.knowledge.offline_mode

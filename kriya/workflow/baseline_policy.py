@@ -30,6 +30,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
+from kriya.tools.containment import decide_external_execution
+
 _BROWNFIELD_KINDS = ("task", "enhancement", "refactor")
 _RISKY_IMPACT = ("public_contract_change", "dependency_change", "build_system_change", "configuration_change",
                  "persistence_change", "security_boundary_change", "shared_entrypoint_change")
@@ -172,7 +174,7 @@ def baseline_environment_identity(
     declarations.update({k: v for k, v in (candidate_files or {}).items() if k in ALL_TOOLCHAIN_DECLARATION_FILES})
     fingerprint = toolchain_fingerprint(workspace_path, autonomy_cfg, goal=goal,
                                         candidate_files=declarations or None, declaration_mutable=True)
-    mode = ("contained" if getattr(autonomy_cfg, "contained_execution_required", False) is True
+    mode = ("contained" if decide_external_execution(autonomy_cfg, subject="baseline environment identity").contained
             else "sandbox" if getattr(autonomy_cfg, "sandbox_execution", False) else "host")
     return json.dumps({"execution": mode, "toolchain": fingerprint.value, "basis": fingerprint.basis,
                        "verification_policy": verification_policy_identity(autonomy_cfg)},

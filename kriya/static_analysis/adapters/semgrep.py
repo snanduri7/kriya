@@ -65,6 +65,7 @@ from kriya.tools.containment import (
     MountSpec,
     NetworkAuthority,
     TrustClass,
+    backend_provides_isolation,
 )
 from kriya.tools.process import ProcessController, ProcessResult
 from kriya.tools.sandbox import build_restricted_env
@@ -746,7 +747,7 @@ class SemgrepAdapter:
         backend = self._context.containment_backend
         if self._settings.image is None:
             return "containment is required but providers.semgrep.image is not set (no host fallback)"
-        if backend is None or getattr(backend, "name", None) == "none":
+        if backend is None or not backend_provides_isolation(backend):
             return "containment is required but no containment backend is configured (no host fallback)"
         return None
 

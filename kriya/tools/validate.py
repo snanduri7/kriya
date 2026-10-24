@@ -28,9 +28,10 @@ from kriya.tools.containment import (
     ContainmentBackend,
     ContainmentProfile,
     ContainmentSetupError,
+    ExternalExecutionDecision,
     NetworkAuthority,
     TrustClass,
-    resolve_containment_backend,
+    decide_external_execution,
 )
 from kriya.tools.containment_oci import MAVEN_CACHE_MOUNT, finalize_registry_acquisition_result
 from kriya.tools.dependency_execution import (
@@ -574,7 +575,7 @@ class PolymorphicValidator:
         a Git work tree (no repository content, no binding) or execution is contained (the OCI workspace is a bind mount and the
         venv a mount-relative path; that backend was not run for this change - owner O4: stronger OCI mounts stay as they are).
         A view that cannot be built or proven raises GateViewError: the gate is refused, never run in place."""
-        if self.autonomy_cfg.contained_execution_required or not is_git_work_tree(self.workspace_path):
+        if self.external_execution().contained or not is_git_work_tree(self.workspace_path):
             return None
         binding = self.tree_binding
         if binding is not None and os.path.realpath(binding.root) != os.path.realpath(self.workspace_path):
@@ -752,7 +753,7 @@ class PolymorphicValidator:
         signature = self._venv_install_signature(install_args)
         if signature in self._venv_install_cache:
             venv_python = self._venv_install_cache[signature][0]
-            if venv_python is None or self.autonomy_cfg.contained_execution_required or not os.path.isabs(venv_python) \
+            if venv_python is None or self.external_execution().contained or not os.path.isabs(venv_python) \
                     or not venv_integrity.mismatches(os.path.dirname(os.path.dirname(venv_python))):
                 return self._venv_install_cache[signature]
             del self._venv_install_cache[signature]  # OI-142 / O4: changed since it was sealed - rebuilt below, not reused
@@ -816,7 +817,7 @@ class PolymorphicValidator:
         # the host, the OCI backend's own fixed container workdir when
         # contained - exactly the same mechanism `cwd=self.workspace_path`
         # already relies on for every other command this class runs).
-        contained = self.autonomy_cfg.contained_execution_required
+        contained = self.external_execution().contained
         venv_dir_host = os.path.join(self._origin_root(), ".kriya", "venv")  # OI-142: an environment input of the origin tree, outside any gate view
         venv_python_host = os.path.join(venv_dir_host, "bin", "python")
         venv_relative = os.path.join(".kriya", "venv")
@@ -981,7 +982,7 @@ class PolymorphicValidator:
         # unchanged: sys.executable has pytest. The resolver is shared with
         # run_app_sequence()/run_app(), so runtime verification gets the
         # same venv.
-        contained = self.autonomy_cfg.contained_execution_required
+        contained = self.external_execution().contained
         default_interpreter = "python3" if contained else sys.executable
         from kriya.tools.dependency_execution import PYTHON_ENVIRONMENT_UNAVAILABLE
 
@@ -1229,8 +1230,13 @@ class PolymorphicValidator:
                 java_home_override=self._java_home_override,
                 declaration_mutable=self._toolchain_declaration_mutable,
             )
-            if self.autonomy_cfg.contained_execution_required else None
+            if self.external_execution().contained else None
         )
+
+    def external_execution(self) -> ExternalExecutionDecision:
+        """The canonical decision (kriya/tools/containment.py) for this validator's external workloads - the ONE answer every containment-dependent
+        path of this class and of the capabilities that run through it asks, evaluated at the call (never cached: the configuration is the input)."""
+        return decide_external_execution(self.autonomy_cfg, subject="PolymorphicValidator")
 
     def build_containment_profile_and_backend(
         self, *, network: NetworkAuthority = NetworkAuthority.DENIED,
@@ -1287,8 +1293,10 @@ class PolymorphicValidator:
         existed; no parallel containment/execution code path is
         introduced (Invariant: do not duplicate containment execution
         code)."""
-        if not self.autonomy_cfg.contained_execution_required:
+        decision = self.external_execution()
+        if not decision.contained:
             return None, None
+        backend = decision.backend()  # D2 S2: typed refusal first when containment is mandatory and the backend provides no isolation
         if acquisition:
             cpu_seconds = self.autonomy_cfg.acquisition_cpu_seconds
             memory_mb = self.autonomy_cfg.acquisition_memory_mb
@@ -1321,7 +1329,6 @@ class PolymorphicValidator:
             toolchain_identity=self.toolchain_identity,
             git_metadata=self._bound_git_metadata(workspace_path or self.workspace_path),
         )
-        backend = resolve_containment_backend(self.autonomy_cfg.containment_backend)
         return profile, backend
 
     def _bound_git_metadata(self, mounted_workspace: str) -> Optional[Any]:
@@ -1497,7 +1504,7 @@ class PolymorphicValidator:
             seed_gradle_distribution_from_host,
         )
 
-        if not self.autonomy_cfg.contained_execution_required:
+        if not self.external_execution().contained:
             return self._run_cmd_with_timeout([gradle_cmd] + tasks, cwd=cwd, timeout=timeout)
 
         cache_dir = self._dependency_cache_dir("gradle")
@@ -1649,7 +1656,7 @@ class PolymorphicValidator:
         Compile and test keep the goal-derived acquisition above: those goals
         build and test candidate code by design, and their dependency set is
         not knowable without the project's own build."""
-        if not self.autonomy_cfg.contained_execution_required:
+        if not self.external_execution().contained:
             # Byte-for-byte pass-through (stdin only when a runtime step has one).
             stdin = {"stdin_payload": stdin_payload} if stdin_payload is not None else {}
             return self._run_cmd_with_timeout(["mvn"] + goals, cwd=cwd, timeout=timeout, **stdin)
@@ -1922,7 +1929,7 @@ class PolymorphicValidator:
         used from an optional recovery tool call, not a Quality Gate."""
         if self.stack != "java" or not os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
             return None
-        if self.autonomy_cfg.contained_execution_required:
+        if self.external_execution().contained:
             # SEC-001-P6 Stage 2: NOT wired onto the contained path this
             # pass - `-Dmdep.outputFile` needs a path OUTSIDE the workspace
             # mount (tempfile.mkstemp's own system temp dir), which a

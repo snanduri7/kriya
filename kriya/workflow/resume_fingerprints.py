@@ -40,6 +40,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, FrozenSet, Iterable, Mapping, Optional, Sequence, Tuple
 
+from kriya.tools.containment import decide_external_execution
+
 UNAVAILABLE = "UNAVAILABLE"
 RESUME_FINGERPRINT_SCHEMA_VERSION = 1
 CHECKPOINT_KEY = "resume_fingerprints"
@@ -727,7 +729,7 @@ def toolchain_fingerprint(
     attests the same runtime, so observed versions add nothing. Host
     execution, an unresolvable or conflicting requirement, or an absent image
     is UNAVAILABLE, which every reuse decision treats as UNVERIFIED."""
-    if workspace_path is None or getattr(autonomy_cfg, "contained_execution_required", False) is not True:
+    if workspace_path is None or not decide_external_execution(autonomy_cfg, subject="toolchain fingerprint").contained:
         return Fingerprint.unavailable("host toolchain has no attested identity (containment not required)")
     import shutil
     import tempfile

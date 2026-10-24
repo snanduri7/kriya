@@ -247,7 +247,7 @@ def probe_oci_containment(cfg: AppConfig, docker: str, toolchain: Optional[Any])
         ContainmentProfile,
         NetworkAuthority,
         TrustClass,
-        resolve_containment_backend,
+        decide_external_execution,
     )
     from kriya.tools.containment_oci import _select_image_and_cache_mount, inspect_local_image
     from kriya.tools.process import ProcessController
@@ -258,7 +258,7 @@ def probe_oci_containment(cfg: AppConfig, docker: str, toolchain: Optional[Any])
     if not inspection.present:
         raise ContainmentImageUnavailableError(inspection)
 
-    backend = resolve_containment_backend(cfg.autonomy.containment_backend)
+    backend = decide_external_execution(cfg.autonomy, subject="doctor containment probe").configured_backend()
     scratch = tempfile.mkdtemp(prefix="kriya-doctor-oci-")
     before = set(_kriya_containers(docker))
     try:
@@ -824,25 +824,28 @@ def _check_no_host_fallback(ctx: _Context) -> DoctorCheck:
         NetworkAuthority,
         NullContainmentBackend,
         TrustClass,
+        backend_provides_isolation,
+        decide_external_execution,
         resolve_containment_backend,
     )
 
     autonomy = ctx.cfg.autonomy
+    decision = decide_external_execution(autonomy, subject="doctor no-host-fallback check")
     evidence: Dict[str, Any] = {
-        "contained_execution_required": autonomy.contained_execution_required,
+        "contained_execution_required": decision.contained,
         "mcp_servers": sorted(ctx.cfg.mcp),
         "mcp_contained_execution_required": autonomy.mcp_contained_execution_required,
-        "containment_backend": autonomy.containment_backend,
+        "containment_backend": decision.backend_name,
     }
     problems = []
-    if not autonomy.contained_execution_required:
+    if not decision.contained:
         problems.append("contained execution is not required")
     if ctx.cfg.mcp and not autonomy.mcp_contained_execution_required:
         problems.append("MCP servers are configured without required containment")
     try:
-        configured = resolve_containment_backend(autonomy.containment_backend)
+        configured = decision.configured_backend()
         evidence["configured_backend"] = configured.name
-        if isinstance(configured, NullContainmentBackend):
+        if not backend_provides_isolation(configured):
             problems.append("the configured backend provides no isolation")
     except BackendUnavailableError as error:
         problems.append(str(error))

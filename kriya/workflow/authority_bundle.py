@@ -52,7 +52,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from kriya.tools.containment import ContainmentSetupError, NetworkAuthority
+from kriya.tools.containment import ContainmentSetupError, NetworkAuthority, decide_external_execution
 from kriya.workflow.contract_compilation import (
     AUTHORITY_EXTERNAL_COMMAND,
     VISIBILITY_HIDDEN,
@@ -454,7 +454,7 @@ def run_authority_bundle(
             run.reason_code, run.reason = AUTHORITY_EXECUTION_UNAVAILABLE, f"containment refused: {error}"
             return run
         autonomy = getattr(validator, "autonomy_cfg", None)
-        if not getattr(autonomy, "contained_execution_required", False):
+        if not decide_external_execution(autonomy, subject="authority_bundle").contained:
             run.reason_code = AUTHORITY_EXECUTION_UNAVAILABLE
             run.reason = ("an external acceptance command runs only under Kriya's containment "
                           "(autonomy.contained_execution_required); never on the host")

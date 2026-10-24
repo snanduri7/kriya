@@ -469,6 +469,117 @@ def resolve_containment_backend(name: str) -> ContainmentBackend:
         ) from None
 
 
+# --- D2 EXEC-LAYER S2: the ONE canonical decision "does this external workload run in a real container?" --------------------------------------
+#
+# Before S2 each consumer decided this itself from the same two configuration fields (the validator at fourteen places, ShellTool, the pip
+# capability, static analysis, the acceptance-bundle runner, the egress report, the toolchain fingerprint), and a few consumers (JDTLS) never asked:
+# a copy of the decision per site, which is how a site gets missed. Now every consumer asks THIS function, and tests/architecture/
+# test_containment_decision_sites.py fails on a production read of the two fields anywhere else.
+#
+# The rule itself is ONE function (``_containment_is_mandatory``). The packaged-default migration (a later, separate step) changes that function
+# and the packaged defaults and nothing else: every consumer follows without another hunt. The old packaged defaults stay operational here:
+# (contained_execution_required False, backend "none") is "host execution permitted" and refuses nothing.
+CONTAINMENT_REQUIRED = "CONTAINMENT_REQUIRED"
+HOST_EXECUTION_PERMITTED = "HOST_EXECUTION_PERMITTED"
+CONTAINMENT_BACKEND_PROVIDES_NO_ISOLATION = "CONTAINMENT_BACKEND_PROVIDES_NO_ISOLATION"
+CONTAINMENT_BACKEND_UNKNOWN = "CONTAINMENT_BACKEND_UNKNOWN"
+CONTAINMENT_NOT_SUPPORTED_FOR_SUBJECT = "CONTAINMENT_NOT_SUPPORTED_FOR_SUBJECT"
+EXTERNAL_EXECUTION_REFUSAL_CODES = frozenset({
+    CONTAINMENT_BACKEND_PROVIDES_NO_ISOLATION, CONTAINMENT_BACKEND_UNKNOWN, CONTAINMENT_NOT_SUPPORTED_FOR_SUBJECT,
+})
+
+
+class ExternalExecutionRefused(BackendUnavailableError):
+    """Containment is mandatory for this workload and cannot be provided. A ``BackendUnavailableError`` (so every existing handler of a containment
+    setup failure treats it as one) that carries a stable ``reason_code`` from ``EXTERNAL_EXECUTION_REFUSAL_CODES`` and the ``subject`` that asked."""
+
+    def __init__(self, subject: str, reason_code: str, detail: str) -> None:
+        super().__init__(f"{reason_code}: {subject}: {detail}")
+        self.subject = subject
+        self.reason_code = reason_code
+        self.detail = detail
+
+
+def _containment_is_mandatory(autonomy: object, subject: str) -> bool:  # pylint: disable=unused-argument
+    """THE rule: must this external workload run in a real container. Today it is the operator's ``contained_execution_required``. The
+    packaged-default migration activates mandatory containment HERE (and in the packaged defaults); ``subject`` is part of the signature so a rule
+    that differs by consumer is expressed here, in one place, never at a consumer."""
+    return getattr(autonomy, "contained_execution_required", False) is True
+
+
+def backend_provides_isolation(backend: object) -> bool:
+    """The one fact "this backend isolates a workload from the host" (the Null backend - env allowlist and rlimits only - does not). The owner's
+    refusal and the static-analysis provider's own "never fall back to the host" guard both ask this, so the fact is defined once."""
+    return not isinstance(backend, NullContainmentBackend)
+
+
+@dataclass(frozen=True)
+class ExternalExecutionDecision:
+    """The answer for one consumer (``subject``): ``contained`` (a real backend must run it) or host execution is permitted. ``backend_name`` is
+    the configured backend; ``backend()`` resolves it, or refuses, typed."""
+    subject: str
+    contained: bool
+    backend_name: str
+    reason_code: str
+
+    def refusal(self) -> Optional[ExternalExecutionRefused]:
+        """The typed refusal ``backend()`` would raise, as a value (None when host execution is permitted or the backend isolates), for a consumer
+        that degrades or reports instead of raising."""
+        if not self.contained:
+            return None
+        try:
+            resolved = resolve_containment_backend(self.backend_name)
+        except BackendUnavailableError as error:
+            return ExternalExecutionRefused(self.subject, CONTAINMENT_BACKEND_UNKNOWN, str(error))
+        return self._refusal_for(resolved)
+
+    def _refusal_for(self, resolved: ContainmentBackend) -> Optional[ExternalExecutionRefused]:
+        if backend_provides_isolation(resolved):
+            return None
+        return ExternalExecutionRefused(
+            self.subject, CONTAINMENT_BACKEND_PROVIDES_NO_ISOLATION,
+            f"containment is required but the configured backend {self.backend_name!r} provides no filesystem, process or network isolation; "
+            "refusing rather than running the workload uncontained")
+
+    def require_isolating(self, resolved: ContainmentBackend) -> ContainmentBackend:
+        """For a consumer that resolves its backend through its OWN documented seam (ShellTool's module-level ``resolve_containment_backend``, which
+        its tests patch): the owner still decides, on the backend the consumer holds. Returns ``resolved``; raises ``ExternalExecutionRefused`` when
+        containment is mandatory and ``resolved`` provides no isolation."""
+        refusal = self._refusal_for(resolved) if self.contained else None
+        if refusal is not None:
+            raise refusal
+        return resolved
+
+    def backend(self) -> Optional[ContainmentBackend]:
+        """None when host execution is permitted; otherwise the resolved isolating backend. Raises ``ExternalExecutionRefused`` when containment is
+        mandatory and the configured backend cannot provide it (never a silent fallback to the host)."""
+        if not self.contained:
+            return None
+        refusal = self.refusal()
+        if refusal is not None:
+            raise refusal
+        return resolve_containment_backend(self.backend_name)
+
+    def configured_backend(self) -> ContainmentBackend:
+        """The backend the operator configured, resolved, WITHOUT the mandate: for a consumer that uses a sandbox when one is configured and is not
+        required to (ShellTool with ``sandbox_execution``), and for one that reports or degrades itself. Unknown names still fail closed."""
+        return resolve_containment_backend(self.backend_name)
+
+    def refuse_unsupported(self, why: str) -> None:
+        """For a consumer that has NO contained mode: raises ``ExternalExecutionRefused`` when containment is mandatory (it must not run on the
+        host), returns when host execution is permitted."""
+        if self.contained:
+            raise ExternalExecutionRefused(self.subject, CONTAINMENT_NOT_SUPPORTED_FOR_SUBJECT, why)
+
+
+def decide_external_execution(autonomy: object, *, subject: str) -> ExternalExecutionDecision:
+    """The canonical decision for ``subject`` under ``autonomy`` (an ``AutonomyConfig``). Pure: reads configuration, starts nothing."""
+    mandatory = _containment_is_mandatory(autonomy, subject)
+    return ExternalExecutionDecision(
+        subject=subject, contained=mandatory, backend_name=str(getattr(autonomy, "containment_backend", "none")),
+        reason_code=CONTAINMENT_REQUIRED if mandatory else HOST_EXECUTION_PERMITTED)
+
+
 # Annotation-only modules (PRD-001), imported at runtime so
 # typing.get_type_hints() resolves. Module imports at the end of this
 # module: they import it back, and a module object (unlike a name) can be

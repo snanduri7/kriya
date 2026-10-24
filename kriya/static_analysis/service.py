@@ -79,7 +79,7 @@ from kriya.static_analysis.waivers import (
     match_waivers,
     waiver_store_path,
 )
-from kriya.tools.containment import ContainmentSetupError, resolve_containment_backend
+from kriya.tools.containment import ContainmentSetupError, decide_external_execution
 
 logger = logging.getLogger(__name__)
 
@@ -118,10 +118,11 @@ def settings_digest(cfg: Any) -> str:
     """Everything configurable that can change a verdict: the static-analysis
     section and the execution authority it runs under."""
     autonomy = cfg.autonomy
+    decision = decide_external_execution(autonomy, subject="static_analysis")
     return canonical_digest({
         "static_analysis": cfg.static_analysis.model_dump(mode="json"),
-        "contained_execution_required": autonomy.contained_execution_required,
-        "containment_backend": autonomy.containment_backend,
+        "contained_execution_required": decision.contained,  # the field names and values are the digest's identity: unchanged
+        "containment_backend": decision.backend_name,
         "egress_policy": autonomy.egress_policy,
         "runtime_profile": cfg.runtime_profile,
     })
@@ -299,12 +300,12 @@ def disabled_result(static: Any) -> StaticAnalysisGateResult:
 
 
 def execution_context(cfg: Any, workspace_path: str) -> ExecutionContext:
-    autonomy = cfg.autonomy
-    backend = None
-    if autonomy.contained_execution_required:
-        backend = resolve_containment_backend(autonomy.containment_backend)
+    decision = decide_external_execution(cfg.autonomy, subject="static_analysis")
+    # soft on purpose: a provider that is handed a backend without isolation refuses with a reason (it never runs on the host); the typed
+    # refusal itself stays available as ``decision.refusal()``
+    backend = decision.configured_backend() if decision.contained else None
     return ExecutionContext(
-        contained=autonomy.contained_execution_required, containment_backend=backend,
+        contained=decision.contained, containment_backend=backend,
         workspace_root=os.path.realpath(workspace_path),
     )
 

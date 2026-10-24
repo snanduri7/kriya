@@ -17,6 +17,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from kriya.capabilities.ports import BuildAdapter
+from kriya.tools.containment import decide_external_execution
 
 MARKERS = ("requirements.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile")
 
@@ -66,7 +67,7 @@ class PipBuildAdapter(BuildAdapter):
         py_compile`` inside containment, else an in-process ``compile()``.
         Always decides (``deadline`` is unused: nothing here is long-running)."""
         del deadline
-        if v.autonomy_cfg.contained_execution_required:
+        if decide_external_execution(v.autonomy_cfg, subject="PolymorphicValidator").contained:
             python_files = [
                 os.path.relpath(os.path.join(v.workspace_path, f), v.workspace_path)
                 for f in files

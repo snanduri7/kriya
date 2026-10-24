@@ -31,6 +31,7 @@ import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.config.environment import child_environment
+from kriya.tools.containment import decide_external_execution
 from kriya.tools.process import spawn_subprocess_exec_fail_closed, terminate_process_tree
 
 logger = logging.getLogger(__name__)
@@ -74,9 +75,11 @@ class JdtlsClient:
     across separate generation runs, to avoid trusting a possibly-stale
     index (see module docstring)."""
 
-    def __init__(self, project_root: str, jdtls_path: str):
+    def __init__(self, project_root: str, jdtls_path: str, autonomy: Any = None):
         self.project_root = project_root
         self.jdtls_path = jdtls_path
+        # the configuration the canonical containment decision is made from (kriya/tools/containment.py); None is "no mandate" (tests)
+        self._autonomy = autonomy
         self.process: Optional[asyncio.subprocess.Process] = None
         self._data_dir: Optional[str] = None
         self._next_id = 1
@@ -107,6 +110,10 @@ class JdtlsClient:
             raise
 
     async def _start(self) -> None:
+        # D2 S2: jdtls imports the project's own Maven/Gradle build and has no contained mode, so while containment is mandatory it is not started
+        # at all (typed refusal; the caller degrades to no LSP grounding) - before any directory exists. A host spawn is never the fallback.
+        decide_external_execution(self._autonomy, subject="JdtlsClient").refuse_unsupported(
+            "jdtls imports the project's build on the host and has no contained mode; it is not started while containment is mandatory")
         self._data_dir = tempfile.mkdtemp(prefix="kriya-jdtls-data-")
         self._mirror = os.path.realpath(tempfile.mkdtemp(prefix="kriya-jdtls-mirror-"))
         self._sync_mirror()
