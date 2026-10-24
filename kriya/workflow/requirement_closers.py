@@ -157,7 +157,7 @@ def close_requirements_with_acceptance_tests(
         # B2-c: a Kriya-owned copy of the candidate; its build configuration is
         # the authorized base's (trust surface checked first), so no toolchain
         # declaration may differ there.
-        return PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
+        return PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg, execution_copy=True)
 
     base_revision = _oracle_base_revision(deps, candidate_root, workspace_path) if acceptance is not None else None
 
@@ -353,7 +353,7 @@ def close_requirements_with_authority_bundle_evidence(
 
     def validator_for(root: str) -> PolymorphicValidator:
         built = PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
-                                     toolchain_declaration_mutable=toolchain_declaration_mutable)
+                                     toolchain_declaration_mutable=toolchain_declaration_mutable, execution_copy=True)
         built.tree_binding = tree_binding
         return built
 
@@ -636,7 +636,7 @@ def close_requirements_with_named_tests(
 
     def base_validator(root: str) -> PolymorphicValidator:
         # The base revision declares its own toolchain; nothing is changed there.
-        validator = PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
+        validator = PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg, execution_copy=True)
         validator.java_home_override = java_home_override
         return validator
 

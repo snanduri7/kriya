@@ -18,6 +18,7 @@ from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.core.state_paths import trace_db_path
+from kriya.tools.containment_oci import _CONTAINER_WORKSPACE  # pylint: disable=protected-access
 from kriya.tools.process import ProcessResult
 from kriya.tools.validate import PolymorphicValidator, execution_evidence
 from kriya.workflow.workflow import WorkflowEngine
@@ -31,12 +32,23 @@ ATTESTED = {
 }
 
 
-def _contained_run(command, *_args, cwd=None, **_kwargs):
+def _host_path_of(containment_profile, workspace_relative):
+    """Where a path the container names under its workspace lands ON THE HOST: through the profile's ``additional_mounts`` when one covers it (D2 S3: the
+    project venv is bind-mounted into the gate view from the origin tree and a write through it lands in the origin), else in the mounted workspace.
+    The real container does exactly this; the fake used to ignore the mounts and wrote into whatever directory it was handed."""
+    container_path = f"{_CONTAINER_WORKSPACE}/{workspace_relative}"
+    for mount in getattr(containment_profile, "additional_mounts", ()) or ():
+        if container_path == mount.container_path or container_path.startswith(mount.container_path + "/"):
+            return os.path.join(mount.host_path, os.path.relpath(container_path, mount.container_path))
+    return os.path.join(containment_profile.workspace_path, workspace_relative)
+
+
+def _contained_run(command, *_args, cwd=None, containment_profile=None, **_kwargs):
     # A container that succeeds at `python3 -m venv <dir>` leaves the venv's interpreter on the bind mount; the fake
     # does the same (VERIFICATION-UNIT-ENV-FALLBACK-001: a venv that was asked for and never appeared is a typed
     # environment failure, no longer the bare container interpreter).
     if len(command) >= 4 and command[1:3] == ["-m", "venv"] and cwd:
-        venv_python = os.path.join(cwd, command[3], "bin", "python")
+        venv_python = _host_path_of(containment_profile, os.path.join(command[3], "bin", "python"))
         os.makedirs(os.path.dirname(venv_python), exist_ok=True)
         with open(venv_python, "w", encoding="utf-8") as handle:
             handle.write("")

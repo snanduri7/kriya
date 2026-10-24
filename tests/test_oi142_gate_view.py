@@ -451,15 +451,18 @@ def test_a_directory_that_is_not_a_git_work_tree_has_no_bound_set_and_runs_in_pl
     assert seen == [str(plain)]
 
 
-def test_contained_execution_keeps_the_workspace_mount_and_is_not_viewed(tmp_path):
-    """Scope statement (owner O4): the OCI backend mounts the workspace and a mount-relative venv; it was not run for this change."""
+def test_contained_execution_is_viewed_like_any_other_gate(tmp_path):
+    """D2 S3 (owner decision 2026-10-24; this test used to pin the OPPOSITE, owner O4's "the OCI backend was not run for this change"): a
+    contained gate runs in the exact-bound view, so the workspace the OCI backend mounts is the Kriya-owned view and never the candidate worktree
+    (whose ignored residue the verdict would otherwise describe). The real-OCI controls are tests/test_oi142_gate_view_oci.py."""
     root = _repo(tmp_path)
     validator = PolymorphicValidator(str(root), original_workspace_path=str(root), autonomy_cfg=AutonomyConfig(contained_execution_required=True))
     from kriya.tools.validate import _verification_gate
 
     seen = []
     _verification_gate("tests")(lambda self: seen.append(self.workspace_path) or {"success": True})(validator)
-    assert seen == [str(root)]
+    assert len(seen) == 1 and seen[0] != str(root) and os.path.basename(seen[0]).startswith("view-")
+    assert validator.workspace_path == str(root)  # restored after the gate
 
 
 # --- what the view holds -----------------------------------------------------------------------------------------------------------

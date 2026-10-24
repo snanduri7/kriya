@@ -154,6 +154,8 @@ _ATTESTED_TOOLCHAINS: Dict[Tuple[str, str, Optional[str]], str] = {}
 # module's own explicit mount tree, which the setup script chmods
 # world-writable before dropping privileges.
 MAVEN_CACHE_MOUNT = "/kriya/cache/m2"
+# D2 S3: where the project venv (an execution-environment input of the ORIGIN tree, hoisted outside every gate view) appears inside the workspace.
+VENV_CONTAINER_PATH = f"{_CONTAINER_WORKSPACE}/{WORKSPACE_ANCHOR_RELPATH}/venv"
 PIP_CACHE_MOUNT = "/kriya/cache/pip"
 # GRADLE-WRAPPER-CONTAINMENT-001: the Kriya-managed Gradle user home
 # (wrapper distributions under wrapper/dists, dependency/plugin caches under
@@ -1625,6 +1627,17 @@ class OCIContainmentBackend:
             "-w", _CONTAINER_WORKSPACE,
             *git_metadata_mount_args(profile, workspace_host),
         ]
+
+        for i, mount in enumerate(profile.additional_mounts):
+            # OI-142 under containment (D2 S3): the validator's origin-tree project venv, writable for the pip install that populates it. Same shape
+            # as the run path's loop - the acquisition container otherwise got only the workspace and the dependency caches, so an additional mount
+            # a profile declared was silently absent from every registry-scoped command.
+            mount_host = os.path.abspath(mount.host_path)
+            if not os.path.isdir(mount_host) and not os.path.isfile(mount_host):
+                _remove_proxy_and_log_denied()
+                _remove_network()
+                raise BackendUnavailableError(f"ContainmentProfile.additional_mounts[{i}] {mount_host!r} does not exist.")
+            args += bind_mount_args(mount_host, mount.container_path, writable=mount.writable)
 
         for i, cache_path in enumerate(profile.dependency_cache_paths):
             cache_host = os.path.abspath(cache_path)

@@ -11,7 +11,7 @@ import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 from kriya.capabilities import BUILD_ADAPTERS, GRADLE, JAVA, JAVAC, PIP, PYTHON, build_adapter_for_tool
 from kriya.config.config import AutonomyConfig
@@ -29,11 +29,12 @@ from kriya.tools.containment import (
     ContainmentProfile,
     ContainmentSetupError,
     ExternalExecutionDecision,
+    MountSpec,
     NetworkAuthority,
     TrustClass,
     decide_external_execution,
 )
-from kriya.tools.containment_oci import MAVEN_CACHE_MOUNT, finalize_registry_acquisition_result
+from kriya.tools.containment_oci import MAVEN_CACHE_MOUNT, VENV_CONTAINER_PATH, finalize_registry_acquisition_result
 from kriya.tools.dependency_execution import (
     MAVEN_INVOCATION_FAILED,
     OfflineFailureKind,
@@ -464,9 +465,20 @@ class PolymorphicValidator:
         java_home_override: Optional[str] = None,
         authorized_dependency_removals: Optional[Iterable[str]] = None,
         toolchain_declaration_mutable: bool = False,
+        execution_copy: bool = False,
     ) -> None:
         self.workspace_path = os.path.abspath(workspace_path)
         self.original_workspace_path = os.path.abspath(original_workspace_path) if original_workspace_path else None
+        # D2 S3: the trees THIS validator's executions may prepare a Git-metadata mount target in (realpaths): a gate view, a Kriya-created
+        # tooling directory, and ``execution_copy`` - a disposable copy its creator made WITHOUT ``.git`` and removes itself (the Java acceptance
+        # export, the authority-bundle scratch, the named-test base export). A canonical, original, candidate or authority-bearing tree is never
+        # in this set. For an execution copy the non-Git classification is decided HERE, once: containment's own ``.git`` mount target must
+        # never turn it into a Git work tree for a later gate (``_open_gate_view``).
+        self._owned_trees: Set[str] = set()
+        self._pinned_non_git = False
+        if execution_copy and not is_git_work_tree(self.workspace_path):
+            self._pinned_non_git = True
+            self._owned_trees.add(os.path.realpath(self.workspace_path))
         self.autonomy_cfg = autonomy_cfg or AutonomyConfig()
         self.stack = self._detect_stack()
         self.toolchain_identity = None
@@ -572,10 +584,13 @@ class PolymorphicValidator:
 
     def _open_gate_view(self) -> Optional[GateView]:
         """A fresh view of the bound tree for the gate about to run, or None when there is nothing to be a view of: the root is not
-        a Git work tree (no repository content, no binding) or execution is contained (the OCI workspace is a bind mount and the
-        venv a mount-relative path; that backend was not run for this change - owner O4: stronger OCI mounts stay as they are).
+        a Git work tree (no repository content, no binding), or it is a Kriya-created execution copy that was never one (it is its own
+        disposable execution view; containment's ``.git`` mount target in it does not make it a work tree). Contained execution is viewed
+        like any other (D2 S3, owner decision 2026-10-24): the view is what the OCI backend mounts as the workspace, so a contained verdict
+        describes the bound tree and not the candidate worktree's ignored residue. The project venv is the one execution-environment input
+        hoisted outside the view; under containment it is bind-mounted into the view at its mount-relative path (``_venv_mounts``).
         A view that cannot be built or proven raises GateViewError: the gate is refused, never run in place."""
-        if self.external_execution().contained or not is_git_work_tree(self.workspace_path):
+        if self._pinned_non_git or not is_git_work_tree(self.workspace_path):
             return None
         binding = self.tree_binding
         if binding is not None and os.path.realpath(binding.root) != os.path.realpath(self.workspace_path):
@@ -586,6 +601,7 @@ class PolymorphicValidator:
             environment_roots=(os.path.join(self.workspace_path, KRIYA_DIRECTORY_NAME, "venv"),),
         )
         self._gate_view, self._gate_view_binding = view, binding
+        self._owned_trees.add(os.path.realpath(view.root))
         self.workspace_path = view.root
         return view
 
@@ -617,6 +633,7 @@ class PolymorphicValidator:
             return
         self.workspace_path = view.workspace_path
         self._gate_view, self._gate_view_binding = None, None
+        self._owned_trees.discard(os.path.realpath(view.root))
         view.close()
 
     @contextlib.contextmanager
@@ -863,9 +880,11 @@ class PolymorphicValidator:
             self.venv_recreations += 1
 
         if not venv_present(venv_python_host):
+            if contained and self._gate_view is not None:
+                os.makedirs(venv_dir_host, exist_ok=True)  # the mount target of the origin venv (see _venv_mounts); Kriya-owned, inside the origin's .kriya
             try:
                 create_res = self._run_cmd_with_timeout(
-                    [create_interpreter, "-m", "venv", create_target], cwd=self.workspace_path, timeout=60,
+                    [create_interpreter, "-m", "venv", create_target], cwd=self.workspace_path, timeout=60, venv_writable=True,
                 )
                 if create_res["returncode"] != 0 or not venv_present(venv_python_host):
                     self._venv_creation_error = (f"`{create_interpreter} -m venv` exited {create_res['returncode']}: "
@@ -902,7 +921,7 @@ class PolymorphicValidator:
         self.venv_install_attempts += 1
         install_res = self._run_cmd_with_timeout(
             [venv_python, "-m", "pip", "install", "-q", *install_args, "pytest"],
-            cwd=self.workspace_path, timeout=300, network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
+            cwd=self.workspace_path, timeout=300, network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True, venv_writable=True,
         )
         log_acquisition_outcome(
             "python", f"pip install {' '.join(install_args)}",
@@ -1241,7 +1260,7 @@ class PolymorphicValidator:
     def build_containment_profile_and_backend(
         self, *, network: NetworkAuthority = NetworkAuthority.DENIED,
         dependency_cache_path: Optional[str] = None, dependency_cache_writable: bool = False,
-        acquisition: bool = False, workspace_path: Optional[str] = None,
+        acquisition: bool = False, workspace_path: Optional[str] = None, venv_writable: bool = False,
     ) -> Tuple[Optional[ContainmentProfile], Optional[ContainmentBackend]]:
         """SEC-001-P6 (2026-09-11): the real-containment counterpart to
         `build_subprocess_env_and_preexec`, gated by
@@ -1314,11 +1333,15 @@ class PolymorphicValidator:
             tuple(self.autonomy_cfg.acquisition_registry_hosts)
             if network is NetworkAuthority.DEPENDENCY_REGISTRY_ONLY else ()
         )
+        resolved_workspace_path = workspace_path or self.workspace_path
+        # D2 S3: the export is bound to the checkout the gate verifies; a gate view holds no `.git`, so it is keyed by the origin it is a view of.
+        git_metadata = self._bound_git_metadata(self._origin_root() if self._is_gate_view_root(resolved_workspace_path) else resolved_workspace_path)
+        self._prepare_git_metadata_target(resolved_workspace_path, git_metadata)
         profile = ContainmentProfile(
             trust_class=TrustClass.UNTRUSTED_EXECUTION,
             # D2B: a tooling-only acquisition mounts an empty Kriya-owned
             # directory instead of the candidate (never anything wider).
-            workspace_path=workspace_path or self.workspace_path,
+            workspace_path=resolved_workspace_path,
             network=network,
             network_destinations=network_destinations,
             env_allowlist=self.autonomy_cfg.sandbox_env_allowlist,
@@ -1327,9 +1350,55 @@ class PolymorphicValidator:
             dependency_cache_paths=[dependency_cache_path] if dependency_cache_path else [],
             dependency_cache_writable=dependency_cache_writable,
             toolchain_identity=self.toolchain_identity,
-            git_metadata=self._bound_git_metadata(workspace_path or self.workspace_path),
+            git_metadata=git_metadata,
+            additional_mounts=self._venv_mounts(resolved_workspace_path, writable=venv_writable),
         )
         return profile, backend
+
+    def _is_gate_view_root(self, mounted_workspace: str) -> bool:
+        return self._gate_view is not None and os.path.realpath(mounted_workspace) == os.path.realpath(self._gate_view.root)
+
+    @staticmethod
+    def _prepare_mount_directory(root: str, relpath: str) -> None:
+        """A mount TARGET inside a tree Kriya owns, created by Kriya (this user, 0700) before the container starts: the daemon would otherwise create
+        it as its own user, and a read-only workspace could not be given one at all."""
+        current = root
+        for part in relpath.split("/"):
+            current = os.path.join(current, part)
+            try:
+                os.mkdir(current, 0o700)
+            except FileExistsError:
+                pass
+
+    def _prepare_git_metadata_target(self, mounted_workspace: str, git_metadata: Optional[Any]) -> None:
+        """D2 S3: an export bound onto a workspace that has no `.git` needs a directory to be mounted on. Where the workspace is a tree Kriya
+        created for this execution (a gate view, a tooling directory, an execution copy) Kriya creates that target itself; anywhere else - a
+        canonical, original, candidate or authority-bearing tree - it never does: the daemon would put a `.git` into a tree whose repository
+        identity is not Kriya's to change, so the run is refused, typed. A present `.git` (a gitfile, a directory) is handled by the backend's
+        existing branches and creates nothing."""
+        if git_metadata is None or os.path.lexists(os.path.join(mounted_workspace, ".git")):
+            return
+        if os.path.realpath(mounted_workspace) not in self._owned_trees:
+            from kriya.tools.git_metadata import GIT_METADATA_TARGET_NOT_OWNED, GitMetadataError
+
+            raise GitMetadataError(
+                GIT_METADATA_TARGET_NOT_OWNED,
+                f"{mounted_workspace!r} has no .git and is not a tree Kriya created for this execution; mounting the sanitized Git metadata "
+                "would create a .git in it - refusing to start the container")
+        self._prepare_mount_directory(mounted_workspace, ".git")
+
+    def _venv_mounts(self, mounted_workspace: str, *, writable: bool) -> Tuple[MountSpec, ...]:
+        """OI-142 under containment: the project venv lives in the ORIGIN tree (so it persists across gates, and a venv created in a view would die
+        with it) while the gate's workspace mount is the view, which holds no `.kriya/venv`. The origin venv directory is bind-mounted at the
+        mount-relative path every contained command already uses (`.kriya/venv`): READ-ONLY for every gate, writable only for the two steps that
+        create and populate it. Nothing when the mounted workspace is not the open view (the venv is then inside it) or no venv directory exists yet."""
+        if not self._is_gate_view_root(mounted_workspace):
+            return ()
+        origin_venv = os.path.join(self._origin_root(), KRIYA_DIRECTORY_NAME, "venv")
+        if not os.path.isdir(origin_venv):
+            return ()
+        self._prepare_mount_directory(self._gate_view.root, f"{KRIYA_DIRECTORY_NAME}/venv")
+        return (MountSpec(host_path=os.path.realpath(origin_venv), container_path=VENV_CONTAINER_PATH, writable=writable),)
 
     def _bound_git_metadata(self, mounted_workspace: str) -> Optional[Any]:
         """OD-1 (BACKEND-FINAL-CLOSURE-005): the sanitized Git metadata export
@@ -1358,7 +1427,7 @@ class PolymorphicValidator:
         self, cmd: List[str], cwd: str, timeout: int = 300, stdin_payload: Optional[str] = None,
         network: NetworkAuthority = NetworkAuthority.DENIED,
         dependency_cache_path: Optional[str] = None, dependency_cache_writable: bool = False,
-        acquisition: bool = False, workspace_path: Optional[str] = None,
+        acquisition: bool = False, workspace_path: Optional[str] = None, venv_writable: bool = False,
     ) -> Dict[str, Any]:
         if self._gate_view is not None:
             guard_against_origin(self._gate_view, cmd, cwd)
@@ -1367,7 +1436,7 @@ class PolymorphicValidator:
         profile, backend = self.build_containment_profile_and_backend(
             network=network, dependency_cache_path=dependency_cache_path,
             dependency_cache_writable=dependency_cache_writable, acquisition=acquisition,
-            workspace_path=workspace_path,
+            workspace_path=workspace_path, venv_writable=venv_writable,
         )
         if profile is not None:
             result = ProcessController().run(
@@ -1816,6 +1885,7 @@ class PolymorphicValidator:
         argv = ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}", *(c + ":help" for c in coordinates)]
         with tempfile.TemporaryDirectory(prefix="kriya-maven-tooling-") as empty:
             empty = os.path.realpath(empty)
+            self._owned_trees.add(empty)  # Kriya created it and removes it below: a Git-metadata mount target may be prepared in it
             try:
                 result = self._run_cmd_with_timeout(
                     argv, cwd=empty, timeout=timeout, network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
@@ -1826,6 +1896,8 @@ class PolymorphicValidator:
             except Exception as e:
                 logger.warning(f"Maven tooling acquisition ({desc}) failed to invoke: {e}")
                 return acquisition_evidence(argv, None, reason=f"failed to invoke: {type(e).__name__}: {e}")
+            finally:
+                self._owned_trees.discard(empty)
         log_acquisition_outcome("maven", desc, returncode=result["returncode"], timed_out=result.get("timeout", False))
         return acquisition_evidence(argv, result)
 
