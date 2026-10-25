@@ -152,6 +152,8 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
                 convention_prompt += f"\n\n=== Engineering Skill Conventions: {skill.name} ===\n"
                 if skill.rules:
                     trusted_rules, unverified_rules = _split_rules_by_verification(skill)
+                    # P-B: a rule proven by a passing run of THIS run is trusted now, though its provenance flips only at the terminal boundary
+                    trusted_rules, unverified_rules = se.reclassify_held_rules(skill.name, trusted_rules, unverified_rules)
                     if trusted_rules:
                         convention_prompt += "Rules:\n" + "\n".join(f"- {r}" for r in trusted_rules) + "\n"
                     if unverified_rules:
@@ -189,7 +191,7 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
     # future runs don't keep re-asking about a skill the user already said is fine.
     unverified_relevant = [
         s for s in se.list_skills()
-        if s.name in active_skills and not s.verified and not s.verification_gap_acknowledged
+        if s.name in active_skills and not se.is_effectively_verified(s) and not s.verification_gap_acknowledged
     ]
 
     # Also detect goal-mentioned technologies with NO matching skill at all - the

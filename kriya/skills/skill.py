@@ -713,6 +713,24 @@ class SkillEngine:
         for item in held:
             self._held_verifications[item.skill_name] = item
 
+    def is_effectively_verified(self, skill: Skill) -> bool:
+        """The run-local verification truth: durably verified OR holding a valid verification earned by a passing Runtime
+        Verification run of THIS engine's run. A held verification is evidence of the current run only (it lives in this
+        object's memory, is dropped when the run's owner discards it and is never reconstructed after a restart), and
+        durable ``skill.verified`` is NOT advanced to make this true - persisting it is what must wait for the terminal
+        boundary."""
+        return bool(skill.verified) or skill.name in self._held_verifications
+
+    def reclassify_held_rules(self, skill_name: str, trusted: List[str], unverified: List[str]) -> Tuple[List[str], List[str]]:
+        """Moves the rules a held verification covers (its snapshot) from ``unverified`` to ``trusted``, preserving order: the
+        rule-level counterpart of `is_effectively_verified`, so a later work unit of the same run does not caution against a
+        rule this run already proved."""
+        held = self._held_verifications.get(skill_name)
+        if held is None or not held.rule_texts:
+            return trusted, unverified
+        proven = set(held.rule_texts)
+        return trusted + [r for r in unverified if r in proven], [r for r in unverified if r not in proven]
+
     def discard_held_verifications(self) -> int:
         """Drops every held verification, persisting nothing; returns how many were dropped."""
         count = len(self._held_verifications)

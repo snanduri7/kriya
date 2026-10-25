@@ -24,7 +24,7 @@ from _strict_doubles import strict_kernel
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.skills.skill import HeldSkillVerification, SkillEngine, load_rule_provenance
+from kriya.skills.skill import HeldSkillVerification, SkillEngine, load_rule_provenance, record_rule_provenance
 from kriya.tools.git_metadata import GIT_METADATA_STALE, GitMetadataError, bound_git_metadata
 from kriya.workflow.attempt_lifecycle import begin_attempt
 from kriya.workflow.workflow import WorkflowEngine
@@ -373,7 +373,7 @@ def _enforce_plan():
     return _two_subtask_plan()
 
 
-async def _enforce(tmp_path, *, commit_completes, config, engine):
+async def _enforce(tmp_path, *, commit_completes, config, engine, terminal_gates_fail=False):
     from test_workflow_controller_enforce import _patched, _workflow_engine
 
     from kriya.tools.knowledge import GapReport
@@ -395,6 +395,12 @@ async def _enforce(tmp_path, *, commit_completes, config, engine):
     p1, p2, p3 = _patched(_enforce_plan())
     contexts = [p1, p2, p3, patch("kriya.tools.knowledge.KnowledgeGuard.check_goal", return_value=GapReport()),
                 patch("kriya.skills.skill.SkillEngine.from_config", return_value=engine)]
+    if terminal_gates_fail:
+        from kriya.workflow.terminal_gate_service import TerminalGateReport, TerminalGateService
+
+        async def failing_gates(self, request, emit):
+            return TerminalGateReport(ran=True, requirement_gap="a requirement is unmet")
+        contexts.append(patch.object(TerminalGateService, "run", failing_gates))
     if not commit_completes:
         failed = MagicMock(completed=False, failure={"reason_code": "TEST_COMMIT_FAILED", "workspace_state": "UNCHANGED", "error": "boom"}, evidence=None,
                            contract_registry=None, record_errors=[])
@@ -457,3 +463,265 @@ async def test_an_enforce_run_reports_a_failed_skill_persistence_without_rewriti
         "error": "skill.yaml was not updated; the skill was not marked verified",
     }]
     assert "verified" not in _yaml_text(folder)
+
+
+# ---------------------------------------------------------------------------------------------- run-local effective verification
+
+def test_a_held_verification_is_the_runs_effective_truth_but_never_advances_the_durable_flag(tmp_path):
+    folder = _skill_workspace(tmp_path)
+    head = _head(tmp_path)
+    engine = _engine(tmp_path)
+    skill = engine.get_skill("widgetlib")
+    assert engine.is_effectively_verified(skill) is False
+
+    engine.hold_verifications([_held()])
+
+    assert engine.is_effectively_verified(skill) is True            # same-run decisions see it ...
+    assert skill.verified is False and "verified" not in _yaml_text(folder) and _head(tmp_path) == head   # ... durable truth waits
+    assert engine.discard_held_verifications() == 1
+    assert engine.is_effectively_verified(skill) is False            # a discarded promotion is no truth at all
+
+
+def test_a_failed_persistence_leaves_the_skill_unverified_for_the_effective_view_too(tmp_path):
+    _skill_workspace(tmp_path)
+    engine = _engine(tmp_path)
+    engine.hold_verifications([_held()])
+    with patch.object(SkillEngine, "mark_verified", return_value=False):
+        assert len(engine.apply_held_verifications()) == 1
+    assert engine.is_effectively_verified(engine.get_skill("widgetlib")) is False      # honest: not held, not persisted
+
+
+def test_the_rules_a_held_verification_covers_are_trusted_run_locally_and_only_those(tmp_path):
+    _skill_workspace(tmp_path)
+    engine = _engine(tmp_path)
+    trusted, unverified = ["t1"], ["u1", "u2", "u3"]
+    assert engine.reclassify_held_rules("widgetlib", trusted, unverified) == (trusted, unverified)       # nothing held
+    engine.hold_verifications([_held(rules=("u3", "u1", "not-a-rule"))])
+    assert engine.reclassify_held_rules("widgetlib", trusted, unverified) == (["t1", "u1", "u3"], ["u2"])
+    engine.hold_verifications([_held(rules=None)])                                                          # no rule snapshot: no rule flips
+    assert engine.reclassify_held_rules("widgetlib", trusted, unverified) == (trusted, unverified)
+    assert engine.reclassify_held_rules("otherlib", trusted, unverified) == (trusted, unverified)
+
+
+GAP_GOAL = "Build something with the widgetlib skill"
+GAP_ANSWERS = ["Step 1: Write code", "Design: Write app.py", '[{"filepath": "app.py", "content": "print(1)\\n"}]', "Review: Approved"]
+
+
+async def _gap_run(tmp_path, *, engine):
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.paths.skills = str(tmp_path / "skills")
+    cfg.autonomy.run_verification_enabled = False
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=list(GAP_ANSWERS))
+    asked = []
+
+    def gap_callback(reason, names):
+        asked.append(list(names))
+        return None
+    kwargs = {"skill_engine_override": engine} if engine is not None else {}
+    res = await WorkflowEngine(Kernel(config=cfg), llm).run_generation_workflow(
+        goal=GAP_GOAL, workspace_path=str(tmp_path), skill_gap_callback=gap_callback, **kwargs)
+    return res, asked, llm
+
+
+@pytest.mark.asyncio
+async def test_a_later_work_unit_does_not_ask_the_skill_gap_again_solely_because_persistence_is_deferred(tmp_path):
+    folder = _skill_workspace(tmp_path)
+    head = _head(tmp_path)
+    shared = _engine(tmp_path)
+    shared.hold_verifications([_held()])                    # an earlier work unit of this run passed runtime verification
+
+    res, asked, _ = await _gap_run(tmp_path, engine=shared)
+
+    assert res["quality_gates_passed"] is True
+    assert asked == []                                       # not asked: the run already proved the skill
+    assert _head(tmp_path) == head and "verified" not in _yaml_text(folder)       # and nothing was persisted early
+    assert shared.is_effectively_verified(shared.get_skill("widgetlib")) is True   # it stays the controller's to apply or discard
+
+
+@pytest.mark.asyncio
+async def test_without_a_held_verification_the_skill_gap_is_asked_as_before(tmp_path):
+    _skill_workspace(tmp_path)
+
+    res, asked, _ = await _gap_run(tmp_path, engine=_engine(tmp_path))
+
+    assert res["quality_gates_passed"] is True and asked == [["widgetlib"]]
+
+
+@pytest.mark.asyncio
+async def test_a_restarted_run_does_not_infer_a_held_verification_from_memory(tmp_path):
+    _skill_workspace(tmp_path)
+    before_restart = _engine(tmp_path)
+    before_restart.hold_verifications([_held()])
+    assert before_restart.is_effectively_verified(before_restart.get_skill("widgetlib")) is True
+
+    restarted = _engine(tmp_path)                            # a new process: a new engine over the same (unchanged) files
+    res, asked, _ = await _gap_run(tmp_path, engine=restarted)
+
+    assert restarted.is_effectively_verified(restarted.get_skill("widgetlib")) is False
+    assert res["quality_gates_passed"] is True and asked == [["widgetlib"]]
+
+
+def test_no_checkpoint_or_resume_code_can_carry_a_held_verification_across_a_restart():
+    """Held verifications live only in memory. If any other module ever starts to reference them (a checkpoint writer, a
+    resume reader, a serializer), this fails and the persistence semantics must be decided on purpose."""
+    root = pathlib.Path(__file__).resolve().parents[1] / "kriya"
+    allowed = {"skills/skill.py", "workflow/state.py", "workflow/attempt_lifecycle.py", "workflow/runtime_verification.py",
+               "workflow/workflow.py", "workflow/enforce_loop.py", "workflow/stage_analysis.py", "workflow/attempt.py"}
+    names = ("pending_skill_verifications", "_held_verifications", "hold_verifications", "HeldSkillVerification",
+             "is_effectively_verified", "reclassify_held_rules", "apply_held_verifications", "discard_held_verifications")
+    referencing = {path.relative_to(root).as_posix() for path in root.rglob("*.py")
+                   if any(name in path.read_text(encoding="utf-8") for name in names)}
+    assert referencing <= allowed, sorted(referencing - allowed)
+    assert not any(token in text for token in ("pending_skill_verifications", "HeldSkillVerification")
+                   for text in [(root / "workflow" / "checkpoint.py").read_text(encoding="utf-8"),
+                                (root / "control" / "checkpoint.py").read_text(encoding="utf-8")])
+
+
+@pytest.mark.asyncio
+async def test_a_terminal_gate_failure_ends_the_run_and_discards_what_the_run_held(tmp_path):
+    folder = _skill_workspace(tmp_path)
+    initial = _head(tmp_path)
+    engine = _engine(tmp_path)
+    runs = []
+    real_hold = engine.hold_verifications
+
+    def spy_hold(held):
+        runs.append("held")
+        return real_hold(held)
+    engine.hold_verifications = spy_hold
+
+    result, heads = await _enforce(tmp_path, commit_completes=True, config=_enforce_config(tmp_path), engine=engine,
+                                   terminal_gates_fail=True)
+
+    assert result.legacy_result["status"] != "success" and result.legacy_result["quality_gates_passed"] is False
+    assert runs == ["held", "held"] and heads == [initial, initial]      # both subtasks ran BEFORE the terminal gates; none after
+    assert engine.is_effectively_verified(engine.get_skill("widgetlib")) is False      # nothing held survives the failed run
+    assert _head(tmp_path) == initial and "verified" not in _yaml_text(folder)
+
+
+# ---------------------------------------------------------------------------------------------- mark_verified(False)
+
+def _unverified_rule_provenance(folder, rule="Widgets must be printed in uppercase."):
+    record_rule_provenance(str(folder), rule, "human_text")
+    return rule
+
+
+def _rule_verified(folder, rule):
+    return [r["verified"] for r in load_rule_provenance(str(folder)) if r["text"] == rule]
+
+
+def test_mark_verified_false_for_a_skill_with_no_source_path_is_a_persistence_failure_and_rules_do_not_advance(tmp_path):
+    from kriya.skills.skill import Skill
+    folder = _skill_workspace(tmp_path)
+    rule = _unverified_rule_provenance(folder)
+    engine = _engine(tmp_path)
+    engine._skills["pathless"] = Skill(name="pathless", description="no source path")        # known to the registry, nowhere on disk
+    head = _head(tmp_path)
+    assert engine.mark_verified("pathless", context="ctx") is False                            # the traced False cause
+
+    engine.hold_verifications([_held("pathless", rules=(rule,))])
+    failures = engine.apply_held_verifications()
+
+    assert failures == [{"operation": "skill_verification", "skill": "pathless",
+                         "error": "skill.yaml was not updated; the skill was not marked verified"}]
+    assert _head(tmp_path) == head and _rule_verified(folder, rule) == [False]
+
+
+def test_an_unknown_skill_is_reported_as_a_failure_with_its_error_and_nothing_is_persisted(tmp_path):
+    folder = _skill_workspace(tmp_path)
+    rule = _unverified_rule_provenance(folder)
+    engine = _engine(tmp_path)
+    head = _head(tmp_path)
+
+    engine.hold_verifications([_held("ghost", rules=(rule,))])
+    failures = engine.apply_held_verifications()
+
+    assert failures == [{"operation": "skill_verification", "skill": "ghost", "error": "KeyError: \"Skill 'ghost' not found.\""}]
+    assert _head(tmp_path) == head and _rule_verified(folder, rule) == [False]
+
+
+def test_a_refused_accidental_shared_skill_write_is_a_persistence_failure_and_rules_do_not_advance(tmp_path, monkeypatch):
+    folder = _skill_workspace(tmp_path)
+    rule = _unverified_rule_provenance(folder)
+    # the skill lives in Kriya's own shared install skills directory while this run's workspace is a different project
+    monkeypatch.setattr("kriya.skills.skill.get_global_skills_dir", lambda: str(tmp_path / "skills"))
+    engine = SkillEngine(str(tmp_path / "skills"), load_global=False, workspace_path=str(tmp_path.parent / "another-project"))
+    engine.discover_and_load()
+    head = _head(tmp_path)
+
+    engine.hold_verifications([_held(rules=(rule,))])
+    failures = engine.apply_held_verifications()
+
+    assert failures == [{"operation": "skill_verification", "skill": "widgetlib",
+                         "error": "skill.yaml was not updated; the skill was not marked verified"}]
+    assert _head(tmp_path) == head and "verified" not in _yaml_text(folder) and _rule_verified(folder, rule) == [False]
+
+
+def test_a_write_exception_is_a_persistence_failure_and_rules_do_not_advance(tmp_path):
+    folder = _skill_workspace(tmp_path)
+    rule = _unverified_rule_provenance(folder)
+    engine = _engine(tmp_path)
+    head = _head(tmp_path)
+    engine.hold_verifications([_held(rules=(rule,))])
+
+    with patch("kriya.skills.skill.yaml.safe_dump", side_effect=OSError("disk full")):
+        failures = engine.apply_held_verifications()
+
+    assert failures == [{"operation": "skill_verification", "skill": "widgetlib",
+                         "error": "skill.yaml was not updated; the skill was not marked verified"}]
+    assert _head(tmp_path) == head and _rule_verified(folder, rule) == [False]
+    assert engine.is_effectively_verified(engine.get_skill("widgetlib")) is False
+
+
+def test_a_successful_persistence_advances_the_rule_provenance_exactly_for_the_held_snapshot(tmp_path):
+    folder = _skill_workspace(tmp_path)
+    rule = _unverified_rule_provenance(folder)
+    other = _unverified_rule_provenance(folder, "Another unverified rule.")
+    engine = _engine(tmp_path)
+
+    engine.hold_verifications([_held(rules=(rule,))])
+    assert engine.apply_held_verifications() == []
+
+    assert _rule_verified(folder, rule) == [True] and _rule_verified(folder, other) == [False]
+
+
+def test_a_durably_verified_skill_is_effectively_verified_with_nothing_held(tmp_path):
+    _skill_workspace(tmp_path)
+    engine = _engine(tmp_path)
+    skill = engine.get_skill("widgetlib")
+    assert engine.is_effectively_verified(skill) is False
+    skill.verified = True
+    assert engine.is_effectively_verified(skill) is True and engine.discard_held_verifications() == 0
+
+
+@pytest.mark.asyncio
+async def test_a_durably_verified_skill_is_not_asked_about_either(tmp_path):
+    _skill_workspace(tmp_path, rules="Widgets must be printed in uppercase.\n")
+    (tmp_path / "skills" / "widgetlib" / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\nverified: true\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-q", "-m", "verified")
+
+    res, asked, _ = await _gap_run(tmp_path, engine=_engine(tmp_path))
+
+    assert res["quality_gates_passed"] is True and asked == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("held", [True, False])
+async def test_a_later_work_unit_trusts_a_rule_this_run_proved_in_its_prompt_only_while_it_is_held(tmp_path, held):
+    folder = _skill_workspace(tmp_path)
+    rule = "Always close every widget handle after use."
+    (folder / "rules.txt").write_text(rule + "\n")
+    record_rule_provenance(str(folder), rule, "human_text")        # auto-extracted earlier: unverified in the provenance file
+    engine = _engine(tmp_path)
+    if held:
+        engine.hold_verifications([_held(rules=(rule,))])
+
+    res, _, llm = await _gap_run(tmp_path, engine=engine)
+
+    planner_prompt = llm.complete.call_args_list[0].args[1]
+    assert res["quality_gates_passed"] is True
+    assert (rule in planner_prompt) and (("Unverified Rules" in planner_prompt) is (not held))
+    assert _rule_verified(folder, rule) == [False]                  # the provenance file is untouched either way until the terminal boundary
