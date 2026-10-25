@@ -453,6 +453,11 @@ _ERROR_LOCATION_PATTERN = re.compile(
     # whole sequence so an ordinary traceback frame is never read as a syntax-error location.
     r'|File "(?P<pc_file>[^"\r\n]+\.py)", line (?P<pc_line>\d+)[ \t]*\r?\n'
     r"(?:[ \t]+[^\r\n]*\r?\n){0,4}(?=(?:Syntax|Indentation|Tab)Error:)"
+    # py_compile's OTHER native report (measured on CPython 3.10, 3.12 and 3.14): IndentationError and TabError print ONE
+    # line with no trailing newline, `Sorry: IndentationError: <msg, may say "on line 1"> (x.py, line N)`. The location is
+    # the LAST parenthesised `(x.py, line N)`, which must end the line - never a `line N` inside the message.
+    r"|Sorry: (?:Syntax|Indentation|Tab)Error: [^\r\n]*\((?P<ps_file>[^()\r\n\"]+\.py), line (?P<ps_line>\d+)\)"
+    r"(?=[ \t]*(?:\r?\n|\Z))"
 )
 
 
@@ -499,22 +504,28 @@ def extract_error_source_locations(error_text: str) -> List[Tuple[str, int]]:
     does not touch, extract_error_search_terms()'s separate, narrowly-scoped
     live-lookup mechanism (a hard-coded Maven/Gradle-coordinate-only regex
     that never sees raw error/stack-trace text at all, by design - see its
-    own docstring). ALSO recognizes the native CPython syntax-error report
-    ('File "x.py", line N' + source/caret + 'SyntaxError: ...', pc_*) that
-    contained `py_compile` emits raw - P-A (S7, 2026-10-25): the host branch
-    that normalized it to the 'Syntax error in ...' shape is gone once
-    containment is mandatory. Only a frame that ends at the line number and is
-    followed by a SyntaxError-family line counts; runtime traceback frames
-    ('line N, in <fn>') are not syntax-error locations. All location shapes
-    share this one function/return contract; a match's file/line comes from
-    whichever alternative's named groups matched (jc_*/jt_*/py_*/pc_* for the
-    compile/stack-trace/Python-normalized/Python-native shapes respectively) - named rather than positional groups specifically
+    own docstring). ALSO recognizes the native CPython syntax-error reports
+    that contained `py_compile` emits raw - P-A (S7, 2026-10-25): the host
+    branch that normalized them to the 'Syntax error in ...' shape is gone once
+    containment is mandatory. Two shapes: the 'File "x.py", line N' +
+    source/caret + 'SyntaxError: ...' frame (pc_*; a frame only counts when it
+    ends at the line number and a SyntaxError-family line follows, so runtime
+    traceback frames 'line N, in <fn>' are never syntax-error locations), and
+    py_compile's one-line 'Sorry: IndentationError: ... (x.py, line N)' (ps_*;
+    the location is the trailing parenthesised group, never a 'line N' inside
+    the message). All location shapes share this one function/return
+    contract; a match's file/line comes from whichever alternative's named
+    groups matched (jc_*/jt_*/py_*/pc_*/ps_* for the compile/stack-trace/
+    Python-normalized/Python-native-frame/Python-native-Sorry shapes
+    respectively) - named rather than positional groups specifically
     so a future fourth shape doesn't need to renumber every existing one."""
     seen = set()
     locations: List[Tuple[str, int]] = []
     for m in _ERROR_LOCATION_PATTERN.finditer(error_text):
-        filepath = m.group("jc_file") or m.group("jt_file") or m.group("py_file") or m.group("pc_file")
-        line = m.group("jc_line") or m.group("jt_line") or m.group("py_line") or m.group("pc_line")
+        filepath = (m.group("jc_file") or m.group("jt_file") or m.group("py_file") or m.group("pc_file")
+                    or m.group("ps_file"))
+        line = (m.group("jc_line") or m.group("jt_line") or m.group("py_line") or m.group("pc_line")
+                or m.group("ps_line"))
         key = (os.path.basename(filepath), int(line))
         if key not in seen:
             seen.add(key)
