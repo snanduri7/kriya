@@ -944,7 +944,8 @@ def test_the_validator_has_exactly_these_verification_gate_entries():
     assert {name: gate_name(node) for name, node in methods.items() if gate_name(node)} == {
         "run_pom_validate": '"pom_validate"', "inspect_external_class": '"classpath_inspection"', "run_compile_check": '"compile"',
         "run_acceptance": "ACCEPTANCE_GATE", "run_tests": '"tests"', "run_app": "RUNTIME_VERIFICATION_GATE",
-        "run_app_sequence": "RUNTIME_VERIFICATION_GATE"}
+        "run_app_sequence": "RUNTIME_VERIFICATION_GATE",
+        "contained_maven_build": "RUNTIME_VERIFICATION_GATE"}  # D2 S4: the contained `mvn package` a finite command's artifact needs, inside the preparation's session
 
 
 def test_every_validator_method_that_can_start_a_process_is_reachable_only_through_a_gate():

@@ -375,12 +375,19 @@ def _prepare_finite_command_runtime_artifacts(
     itself could not be invoked (e.g. 'mvn' missing from PATH) - remains
     "verification_infrastructure_failure", the existing, correct
     environment/toolchain-eligible classification."""
-    env, preexec_fn = validator.build_subprocess_env_and_preexec()
+    # D2 S4: the validator's own canonical decision. Contained, the build runs through the validator's contained Maven path (never the host, never the
+    # project's ./mvnw); otherwise it keeps the host env/preexec policy of every other host gate, byte for byte.
+    if validator.external_execution().contained:
+        env, preexec_fn, contained_build = None, None, validator.contained_maven_build
+    else:
+        env, preexec_fn = validator.build_subprocess_env_and_preexec()
+        contained_build = None
     controller = ProcessController()
     known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
     for command in resolved_run_commands:
         outcome = deps._prepare_required_artifact(
             command, validator.workspace_path, controller=controller, env=env, preexec_fn=preexec_fn,  # OI-142: in the session's view, where the run consumes it
+            contained_build=contained_build,
         )
         if outcome.outcome is None:
             continue

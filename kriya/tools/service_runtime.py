@@ -47,7 +47,7 @@ from socket import create_connection
 from typing import Callable, Dict, List, Optional, Tuple
 
 from kriya.tools.containment import ContainmentBackend, ContainmentProfile
-from kriya.tools.process import ManagedProcess, ProcessController
+from kriya.tools.process import ManagedProcess, ProcessController, ProcessResult
 
 
 class ServiceVerificationOutcomeKind(str, Enum):
@@ -579,7 +579,7 @@ def _artifact_is_current(artifact_path: str, cwd: str) -> bool:
     return True
 
 
-def _maven_package_command(cwd: str) -> Optional[List[str]]:
+def _maven_package_command(cwd: str, *, allow_project_wrapper: bool = True) -> Optional[List[str]]:
     """The deterministic command to (re)build a Maven project's packaged
     artifact - the project's own `package` lifecycle phase (never a
     hand-constructed jar), `-DskipTests` because Kriya's own compile/test
@@ -588,13 +588,17 @@ def _maven_package_command(cwd: str) -> Optional[List[str]]:
     only duplicate already-passed evidence, not add any. Prefers the
     project's own wrapper (`./mvnw`) when present and executable - the same
     command a human working in this exact repository would run - falling
-    back to a bare `mvn` on PATH otherwise. Returns None when `cwd` has no
+    back to a bare `mvn` on PATH otherwise. D2 S4: ``allow_project_wrapper``
+    is False for a build run through the validator's contained path - the wrapper is a
+    project-supplied script that downloads a Maven distribution from a
+    project-chosen URL, which the toolchain image's own `mvn` (the one every
+    compile and test gate already uses) replaces. Returns None when `cwd` has no
     `pom.xml` at all: not a Maven project, so this function has no known
     way to prepare anything here and must not guess."""
     if not os.path.isfile(os.path.join(cwd, "pom.xml")):
         return None
     wrapper = os.path.join(cwd, "mvnw")
-    if os.path.isfile(wrapper) and os.access(wrapper, os.X_OK):
+    if allow_project_wrapper and os.path.isfile(wrapper) and os.access(wrapper, os.X_OK):
         return ["./mvnw"] + _MAVEN_PACKAGE_ARGS
     return ["mvn"] + _MAVEN_PACKAGE_ARGS
 
@@ -614,11 +618,20 @@ class _PreparationOutcome:
     toolchain_identity: Optional[Dict[str, object]] = None
 
 
+def _process_result(result: Dict[str, object]) -> ProcessResult:
+    """The validator's result dict (``ProcessResult.to_dict`` plus its evidence keys) as the ProcessResult this module reasons about."""
+    return ProcessResult(
+        returncode=int(result["returncode"]), stdout=str(result["stdout"]), stderr=str(result["stderr"]), timeout=bool(result["timeout"]),
+        toolchain_identity=result.get("toolchain_identity"),  # type: ignore[arg-type]
+    )
+
+
 def _prepare_required_artifact(
     service_command: List[str], cwd: str, *, controller: ProcessController,
     env: Optional[Dict[str, str]] = None, preexec_fn: Optional[Callable[[], None]] = None,
     containment_profile: Optional[ContainmentProfile] = None,
     containment_backend: Optional[ContainmentBackend] = None,
+    contained_build: Optional[Callable[[List[str], int], Dict[str, object]]] = None,
 ) -> _PreparationOutcome:
     """Artifact Preparation (P6 production-validation, 2026-09-07) - the
     deterministic PREPARE/BUILD phase that must complete, successfully,
@@ -651,6 +664,16 @@ def _prepare_required_artifact(
     checks use that same profile; readiness/probe route through docker exec
     inside the container network namespace, with no host port publication.
 
+    contained_build (D2 S4): the build step of a caller whose external
+    execution is contained. It receives the Maven argv (``["mvn", ...]``,
+    never the project's wrapper) and a timeout and returns the result dict of
+    the validator's own contained Maven path (``PolymorphicValidator.
+    contained_maven_build``: the same registry-scoped acquisition and offline
+    execution every compile and test gate gets). Given, the build never runs on
+    the host and never as the project's `./mvnw`. Mutually exclusive with
+    env/preexec_fn. (The managed-service caller keeps passing a containment
+    profile instead; that path was already contained.)
+
     Distinguishes exactly three failure shapes, matching the two dedicated
     outcome kinds above:
     - no known way to prepare a genuinely required, missing artifact (no
@@ -679,17 +702,23 @@ def _prepare_required_artifact(
         return _PreparationOutcome(
             None, f"{artifact} already exists and is current relative to pom.xml/src/main - no preparation needed",
         )
-    build_command = _maven_package_command(cwd)
+    contained = contained_build is not None
+    build_command = _maven_package_command(cwd, allow_project_wrapper=not contained)
     if build_command is None:
         return _PreparationOutcome(
             ServiceVerificationOutcomeKind.PREPARATION_FAILED,
             f"{artifact} does not exist and {cwd} has no known build system (no pom.xml) to prepare it",
         )
+    if contained_build is not None and (env is not None or preexec_fn is not None):
+        raise ValueError("Pass either (env, preexec_fn) or contained_build, never both.")
     try:
-        result = controller.run(
-            build_command, cwd=cwd, timeout=_MAVEN_PACKAGE_TIMEOUT_SECONDS, env=env, preexec_fn=preexec_fn,
-            containment_profile=containment_profile, containment_backend=containment_backend,
-        )
+        if contained_build is not None:
+            result = _process_result(contained_build(build_command, _MAVEN_PACKAGE_TIMEOUT_SECONDS))
+        else:
+            result = controller.run(
+                build_command, cwd=cwd, timeout=_MAVEN_PACKAGE_TIMEOUT_SECONDS, env=env, preexec_fn=preexec_fn,
+                containment_profile=containment_profile, containment_backend=containment_backend,
+            )
     except Exception as e:
         return _PreparationOutcome(
             ServiceVerificationOutcomeKind.PREPARATION_FAILED,

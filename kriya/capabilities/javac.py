@@ -58,16 +58,18 @@ class JavacBuildAdapter(BuildAdapter):
         # that physically exist in this sandbox to javac: a contextual name
         # that has not been materialized here must not turn an otherwise
         # valid compile into javac's unrelated "file not found" failure.
-        java_files = [
-            os.path.join(v.workspace_path, f)
-            for f in files
-            if f.endswith(".java")
-            and os.path.isfile(os.path.join(v.workspace_path, f))
-        ]
-        if not java_files:
+        present = [f for f in files if f.endswith(".java") and os.path.isfile(os.path.join(v.workspace_path, f))]
+        if not present:
             return {"success": True, "output": "No Java files to compile."}
 
-        cmd = ["javac", "-proc:none", "-d", os.path.join(v.workspace_path, OUTPUT_DIR)]
+        # D2 S4 (R4): a host path means nothing inside the container, whose workspace is mounted elsewhere; contained, javac gets workspace-RELATIVE
+        # paths (the command's cwd is the workspace, and the venv and every other contained command already work that way). Host mode: unchanged.
+        if v.external_execution().contained:
+            java_files, destination = [os.path.relpath(os.path.join(v.workspace_path, f), v.workspace_path) for f in present], OUTPUT_DIR
+        else:
+            java_files, destination = [os.path.join(v.workspace_path, f) for f in present], os.path.join(v.workspace_path, OUTPUT_DIR)
+
+        cmd = ["javac", "-proc:none", "-d", destination]
         cmd.extend(java_files)
         os.makedirs(os.path.join(v.workspace_path, OUTPUT_DIR), exist_ok=True)
 

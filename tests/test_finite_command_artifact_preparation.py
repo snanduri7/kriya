@@ -12,6 +12,7 @@ pattern as tests/test_service_runtime.py) - no LLM, no network, no real
 Maven/JDK dependency.
 """
 import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -65,15 +66,23 @@ class _FakeCtx:
 
 class _FakeValidator:
     """Duck-typed stand-in for PolymorphicValidator - the function under
-    test only ever calls build_subprocess_env_and_preexec() on it."""
+    test only ever calls external_execution() (D2 S4: the canonical decision;
+    host here), build_subprocess_env_and_preexec() and, when contained,
+    contained_maven_build() on it."""
 
-    def __init__(self, env=None, preexec_fn=None, workspace_path=None):
+    def __init__(self, env=None, preexec_fn=None, workspace_path=None, contained=False, contained_build=None):
         self._env = env
         self._preexec_fn = preexec_fn
+        self._contained = contained
+        self.contained_maven_build = contained_build
         self.workspace_path = str(workspace_path) if workspace_path is not None else None  # the root the build runs in (a gate view in production)
 
     def build_subprocess_env_and_preexec(self):
+        assert not self._contained, "a contained validator never asks for the host env/preexec policy"
         return self._env, self._preexec_fn
+
+    def external_execution(self):
+        return SimpleNamespace(contained=self._contained)
 
 
 # --- E: no artifact required - unchanged, fast no-op ------------------------

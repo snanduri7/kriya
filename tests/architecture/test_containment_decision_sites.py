@@ -114,14 +114,14 @@ ROUTED: Dict[SITE, Tuple[SITE, str]] = {
         ("kriya/static_analysis/service.py", "execution_context"), "decide_external_execution"),
     ("kriya/static_analysis/adapters/semgrep.py", "SemgrepAdapter.scan"): (
         ("kriya/static_analysis/service.py", "execution_context"), "decide_external_execution"),
+    # S4: these two are launched by callers that ask the validator's owner decision; the callers themselves are pinned in tests/test_s4_runtime_toolchain.py
+    ("kriya/tools/service_runtime.py", "_prepare_required_artifact"): (
+        ("kriya/workflow/runtime_verification.py", "_prepare_finite_command_runtime_artifacts"), "external_execution"),
+    ("kriya/tools/service_runtime.py", "run_managed_service_verification"): (
+        ("kriya/workflow/runtime_verification.py", "_execute_managed_service_verification"), "build_containment_profile_and_backend"),
 }
 # site -> the slice that routes it. Visible on purpose: S2 does not claim these.
 PENDING: Dict[SITE, str] = {
-    ("kriya/tools/service_runtime.py", "_prepare_required_artifact"): "S4 (the finite-command `mvn package` is a host spawn; its caller passes env/preexec_fn)",
-    ("kriya/tools/service_runtime.py", "run_managed_service_verification"): "S4",
-    ("kriya/tools/service_runtime.py", "_check_readiness_via_exec"): "S4",
-    ("kriya/tools/service_runtime.py", "_run_probe_via_exec"): "S4",
-    ("kriya/tools/validate.py", "check_java_toolchain"): "S4 (the Maven version probe runs in the inherited cwd and honors .mvn/jvm.config: MEASURED)",
     ("kriya/mcp/lifecycle.py", "spawn_mcp_process"): "S5 (MCP has its own mandate and capability profile)",
 }
 UNREFERENCED = {("kriya/tools/dependency_execution.py", name) for name in (

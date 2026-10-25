@@ -1470,7 +1470,7 @@ class PolymorphicValidator:
             return
         if view is not None:  # the toolchain writes into the view: its output roots are relative to the view
             for root in gate_output_roots(cmd, cwd):
-                relative = os.path.relpath(root, view.root)
+                relative = os.path.relpath(root if os.path.isabs(root) else os.path.join(cwd, root), view.root)  # a relative root (`javac -d build`) is the command's cwd's
                 if not relative.startswith(".."):
                     view.output_roots.add(relative)
             return
@@ -2663,6 +2663,17 @@ class PolymorphicValidator:
                            f"current source before runtime verification ({build}); nothing was run.\n\n"
                            f"{prepared['output']}")}, f"{build} (current source): FAILED"
 
+    @_verification_gate(RUNTIME_VERIFICATION_GATE)
+    def contained_maven_build(self, argv: List[str], timeout: int) -> Dict[str, Any]:
+        """D2 S4: a Maven build a runtime-verification step needs (``mvn package`` for the artifact a command launches) run through THIS validator's
+        contained Maven path - the registry-scoped acquisition and offline execution every compile and test gate gets - instead of as a host process.
+        ``argv`` is ``["mvn", ...]``; the project's own wrapper is never run (it would download a project-chosen Maven distribution). A gate like any
+        other process-starting validator method (OI-142): inside the preparation's verification session it shares that session's view, and the build's
+        output roots are registered as the gate's own."""
+        if not argv or os.path.basename(argv[0]) != "mvn":
+            raise ValueError(f"contained_maven_build runs `mvn` only, not {argv[:1]!r}")
+        return self._run_maven_cmd(list(argv[1:]), cwd=self.workspace_path, timeout=timeout, deadline=self._run_deadline())
+
     def _run_runtime_step(self, command: List[str], timeout: int,
                           stdin_payload: Optional[str] = None) -> Dict[str, Any]:
         """D2 (2026-10-01): a runtime-verification command. A Maven
@@ -2818,7 +2829,12 @@ def check_java_toolchain() -> Dict[str, Any]:
     (Homebrew's, silently upgraded to 26 - JDK 24+ removed the Security Manager
     entirely, so a flag that used to just be advisory became fatal). Returns
     found/version for each tool (None if not on PATH or unparseable) plus
-    'mismatch' when both are found and their major versions differ."""
+    'mismatch' when both are found and their major versions differ.
+
+    D2 S4: both probes run in a Kriya-created EMPTY directory, never in the process's inherited cwd. That cwd is the target repository
+    whenever Kriya is started inside it, and ``mvn -version`` loads the project's ``.mvn/jvm.config`` (and ``maven.config``) from it - a project
+    ``-javaagent:`` there ran as host code during a toolchain probe (MEASURED 2026-10-25). The probes read no project input, so they are
+    host infrastructure, not a workload; the operator's own environment (MAVEN_OPTS, JAVA_TOOL_OPTIONS, PATH) still applies."""
     result: Dict[str, Any] = {
         "java_found": False,
         "java_version": None,
@@ -2826,25 +2842,26 @@ def check_java_toolchain() -> Dict[str, Any]:
         "mvn_java_version": None,
         "mismatch": False,
     }
-    if shutil.which("java"):
-        try:
-            proc = subprocess.run(["java", "-version"], capture_output=True, text=True, timeout=5)
-            m = _JAVA_VERSION_PATTERN.search(proc.stdout + proc.stderr)
-            if m:
-                result["java_found"] = True
-                result["java_version"] = m.group(1)
-        except Exception as e:
-            logger.debug(f"Failed to resolve 'java -version': {e}")
+    with tempfile.TemporaryDirectory(prefix="kriya-toolchain-probe-") as probe_cwd:
+        if shutil.which("java"):
+            try:
+                proc = subprocess.run(["java", "-version"], capture_output=True, text=True, timeout=5, cwd=probe_cwd)
+                m = _JAVA_VERSION_PATTERN.search(proc.stdout + proc.stderr)
+                if m:
+                    result["java_found"] = True
+                    result["java_version"] = m.group(1)
+            except Exception as e:
+                logger.debug(f"Failed to resolve 'java -version': {e}")
 
-    if shutil.which("mvn"):
-        try:
-            proc = subprocess.run(["mvn", "-version"], capture_output=True, text=True, timeout=10)
-            m = _MVN_JAVA_VERSION_PATTERN.search(proc.stdout + proc.stderr)
-            if m:
-                result["mvn_found"] = True
-                result["mvn_java_version"] = m.group(1)
-        except Exception as e:
-            logger.debug(f"Failed to resolve 'mvn -version': {e}")
+        if shutil.which("mvn"):
+            try:
+                proc = subprocess.run(["mvn", "-version"], capture_output=True, text=True, timeout=10, cwd=probe_cwd)
+                m = _MVN_JAVA_VERSION_PATTERN.search(proc.stdout + proc.stderr)
+                if m:
+                    result["mvn_found"] = True
+                    result["mvn_java_version"] = m.group(1)
+            except Exception as e:
+                logger.debug(f"Failed to resolve 'mvn -version': {e}")
 
     if result["java_version"] and result["mvn_java_version"] and result["java_version"] != result["mvn_java_version"]:
         result["mismatch"] = True

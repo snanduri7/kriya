@@ -118,22 +118,34 @@ INVENTORY: Dict[Tuple[str, str], Site] = {
         "probe_oci_containment", "TRUSTED_KRIYA_INFRASTRUCTURE", ("S1",),
         "the script is the module constant _SMOKE_SCRIPT and the workspace is mkdtemp scratch; the backend creates the scratch namespace like any writable mount"),
     ("kriya/tools/service_runtime.py", "_prepare_required_artifact"): Site(
-        WORKLOAD, "mvn package (finite-command artifact preparation)", "yes", "the validator workspace (the gate view when open)",
-        HOST_ALL + " unless the caller passes a profile", "the caller (runtime_verification passes env/preexec_fn, no profile)", "UNTRUSTED_EXECUTION",
-        ("S4",), "finite-command Maven preparation is S4"),
+        WORKLOAD, "mvn package (finite-command artifact preparation); never the project's ./mvnw when contained", "yes",
+        "the validator workspace (the gate view when open)",
+        "host: " + HOST_ALL + " (env/preexec_fn of the validator's host policy); contained: the validator's contained Maven path, no host process",
+        "its callers: _prepare_finite_command_runtime_artifacts (the validator's external_execution decision) and run_managed_service_verification "
+        "(the profile its caller built from the same decision, so the build is contained whenever the service is)", "UNTRUSTED_EXECUTION", ("S4",),
+        "S4: the finite-command caller ran mvn / the project's ./mvnw on the HOST even under mandatory containment (MEASURED 2026-10-25: a project ./mvnw executed on the host); now a contained "
+        "caller passes contained_build (PolymorphicValidator.contained_maven_build, a gate), the wrapper is never run, and the host path is unchanged. The managed-service caller was already contained (profile)"),
     ("kriya/tools/service_runtime.py", "run_managed_service_verification"): Site(
-        WORKLOAD, "the managed service command", "yes", "the validator workspace", HOST_ALL + " unless contained", "the caller's profile",
-        "UNTRUSTED_EXECUTION", ("S4",), "managed service runtime is S4"),
+        WORKLOAD, "the managed service command (model-chosen), and its artifact build", "yes", "the validator workspace",
+        "host: " + HOST_ALL + " (spec.env, no resource plan: the host-mode policy, unchanged); contained: " + OCI_NO_MASK,
+        "its one production caller _execute_managed_service_verification (validator.build_containment_profile_and_backend)", "UNTRUSTED_EXECUTION", ("S4",),
+        "S4: classified, no code change: the launch and its artifact build take the caller's profile (None only when the validator's decision is not contained). "
+        "OBSERVED, not S4: the service runs on the candidate worktree, not in a gate view (OI-142 is not extended to managed services), and its contained `mvn package` has no registry acquisition"),
     ("kriya/tools/service_runtime.py", "_check_readiness_via_exec"): Site(
-        WORKLOAD, "bash -c <readiness script> inside the managed container", "yes", "the container", "the container the service already runs in",
-        "service_runtime (docker exec target of the managed process)", "UNTRUSTED_EXECUTION", ("S4",), "managed service runtime is S4"),
+        BACKEND, "docker exec -i <kriya-oci container> bash -c <fixed readiness script>", "no", "none (the docker CLI; the script runs in the container)", NONE,
+        "OCIContainmentBackend (PreparedContainment.exec_target)", "TRUSTED_KRIYA_INFRASTRUCTURE", ("EXEMPT",),
+        "the argv prefix is the exec_target only OCIContainmentBackend.prepare produces (pinned by tests/test_s4_runtime_toolchain.py); the function asserts it is set; "
+        "the script is Kriya's constant text over a loopback-validated host and port; it runs in the container the service already runs in"),
     ("kriya/tools/service_runtime.py", "_run_probe_via_exec"): Site(
-        WORKLOAD, "bash -c <TCP probe script> inside the managed container", "yes", "the container", "the container the service already runs in",
-        "service_runtime (docker exec target of the managed process)", "UNTRUSTED_EXECUTION", ("S4",), "managed service runtime is S4"),
+        BACKEND, "docker exec -i <kriya-oci container> bash -c <fixed TCP probe script>", "no", "none (the docker CLI; the script runs in the container)", NONE,
+        "OCIContainmentBackend (PreparedContainment.exec_target)", "TRUSTED_KRIYA_INFRASTRUCTURE", ("EXEMPT",),
+        "the same exec_target-only origin as _check_readiness_via_exec (pinned); the HTTP request text is data written to the socket inside the container"),
     ("kriya/tools/validate.py", "check_java_toolchain"): Site(
-        WORKLOAD, "java -version; mvn -version", "config", "the Kriya process's inherited cwd (the target repository when Kriya is started inside it)",
-        HOST_ALL, "none (a bare subprocess.run)", "UNTRUSTED_EXECUTION", ("S4",),
-        "MEASURED 2026-10-24: mvn -version in a directory with .mvn/jvm.config applies the project's JVM options (control directory: rc 0). S4 owns the Maven version probe"),
+        INFRA, "java -version; mvn -version", "no (Kriya-owned empty cwd: no .mvn/jvm.config or maven.config is reachable)",
+        "a Kriya-created EMPTY temporary directory", "the operator's own environment (MAVEN_OPTS, JAVA_TOOL_OPTIONS, PATH): host infrastructure, no workspace input",
+        "check_java_toolchain", "TRUSTED_HOST_INFRASTRUCTURE", ("S4",),
+        "MEASURED 2026-10-24/25: mvn -version in a directory with .mvn/jvm.config applies the project's JVM options (a project -javaagent ran as host code); S4 runs both probes "
+        "in an empty directory (tests/test_s4_runtime_toolchain.py: canary agent absent, premise control present)"),
     ("kriya/tools/lsp.py", "JdtlsClient._start"): Site(
         WORKLOAD, "jdtls (project import runs Maven / Gradle)", "yes", "a mirror directory that skips .kriya", HOST_ALL, "none (host spawn)",
         "UNTRUSTED_EXECUTION", ("S2",), "a host spawn that imports the project build: a policy decision (S2)"),
