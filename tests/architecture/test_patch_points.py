@@ -187,7 +187,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # _development_deps); the checkpoint opening and the run-contract baseline keep theirs.
     (W, 'compute_workspace_content_hash'): P(3, 'kriya.workflow.checkpoint', ((W, 3),), ()),
     # E5 characterization: +1 site (tests/test_development_loop.py: the prelude's sandbox failure).
-    (W, 'create_git_worktree'): P(3, 'kriya.workflow.worktree', ((W, 1),), ()),
+    (W, 'create_git_worktree'): P(4, 'kriya.workflow.worktree', ((W, 1),), ()),   # GIT-MIDRUN-COMMITS-S3-001: +1 (the detector observes the sandbox's creation)
     (W, 'delete_checkpoint'): P(2, 'kriya.control.checkpoint', ((W, 2),), ()),
     (W, 'derive_contract_transition'): P(4, 'kriya.workflow.contract_lifecycle', ((W, 1),), ()),
     # P-B (tests/test_skill_verification_deferral.py): the stage-5 closer seeded with a held skill verification, to prove a failed
@@ -441,7 +441,7 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # generate command renders)
     # P-B skill-verification deferral (tests/test_skill_verification_deferral.py): +1 W site (final_review: the stage-5 closer seeded
     # with a held verification on a failed run) and +1 C site (commit_verified_candidate: the enforce terminal commit it defers behind)
-    assert totals == {A: 114, W: 97, C: 384}  # D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C
+    assert totals == {A: 114, W: 98, C: 384}  # D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C
     assert len(PATCH_POINTS) == 133  # P-B: +1 row (W.final_review)
 
 
