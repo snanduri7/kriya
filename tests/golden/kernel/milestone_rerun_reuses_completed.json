@@ -21,6 +21,7 @@
     "integration_result",
     "milestone_reuse",
     "milestone_total",
+    "replay",
     "status",
     "work_unit_states"
    ],
@@ -55,6 +56,14 @@
      "schema_version": 1
     },
     "milestone_total": 2,
+    "replay": {
+     "milestones": [],
+     "not_evaluable": [],
+     "not_executed": [],
+     "passed": [],
+     "regressed": [],
+     "state": "nothing_to_replay"
+    },
     "status": "success",
     "work_unit_states": {
      "M1": {

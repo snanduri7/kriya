@@ -52,6 +52,7 @@ from kriya.control.persistence import (
 )
 from kriya.control.run_coordinator import annotate_run, coordinated_mutation, owning_run_commits
 from kriya.control.run_record import COMMIT_COMMITTED
+from kriya.workflow.acceptance import runtime_verification_infrastructure_reason
 from kriya.workflow.attempt import _build_python_runtime_grounding
 from kriya.workflow.checkpoint import compute_registry_hash, delete_checkpoint, list_checkpoints
 from kriya.workflow.context_projection import (
@@ -316,6 +317,10 @@ class MilestoneRunState:
     # milestone's real verification without re-asking the model to re-infer
     # it, and so --resume can pick up mid-sequence.
     verification_commands: Dict[str, List[List[str]]] = field(default_factory=dict)
+    # D2 S6: milestone id -> why its verification commands could NOT be captured for replay (the judge was unavailable, or capturing raised). Absence from
+    # verification_commands alone cannot say "nothing applicable" from "evidence lost"; this does, so the replay reports the milestone as NOT replayed
+    # (typed) instead of silently skipping a completed milestone.
+    replay_evidence_unavailable: Dict[str, str] = field(default_factory=dict)
     # filepath -> bounded real content (project_implementation_source, head+
     # tail if it doesn't fit) of every file an EARLIER, already-completed
     # milestone wrote - grows monotonically as milestones complete (see
@@ -344,6 +349,7 @@ class MilestoneRunState:
             "completed_milestone_ids": self.completed_milestone_ids,
             "established_dependencies": self.established_dependencies,
             "verification_commands": {str(k): v for k, v in self.verification_commands.items()},
+            "replay_evidence_unavailable": dict(self.replay_evidence_unavailable),
             "established_file_context": self.established_file_context,
             "stale_milestone_ids": self.stale_milestone_ids,
             "invalidation_evidence": self.invalidation_evidence,
@@ -386,6 +392,7 @@ class MilestoneRunState:
             completed_milestone_ids=completed_ids,
             established_dependencies=list(data.get("established_dependencies", [])),
             verification_commands=verification_commands,
+            replay_evidence_unavailable={str(k): str(v) for k, v in (data.get("replay_evidence_unavailable") or {}).items()},
             established_file_context=dict(data.get("established_file_context", {})),
             stale_milestone_ids=list(data.get("stale_milestone_ids", [])),
             invalidation_evidence=list(data.get("invalidation_evidence", [])),
@@ -448,6 +455,7 @@ def load_or_resume_milestone_run_state(workspace_path: str, plan_data: Dict[str,
         fresh_state.completed_milestone_ids = sidecar_state.completed_milestone_ids
         fresh_state.established_dependencies = sidecar_state.established_dependencies
         fresh_state.verification_commands = sidecar_state.verification_commands
+        fresh_state.replay_evidence_unavailable = sidecar_state.replay_evidence_unavailable
         fresh_state.established_file_context = sidecar_state.established_file_context
         fresh_state.stale_milestone_ids = sidecar_state.stale_milestone_ids
         fresh_state.invalidation_evidence = sidecar_state.invalidation_evidence
@@ -1065,66 +1073,153 @@ def check_dependency_regression(
     return sorted(set(established_deps) - current_deps)
 
 
-def replay_prior_milestone_verifications(
-    workspace_path: str, run_state: MilestoneRunState, *, autonomy_cfg: Any
-) -> List[Dict[str, Any]]:
-    """Re-executes every completed milestone's own persisted verification
-    command sequence against the CURRENT workspace state and re-checks the
-    [VERIFICATION] PASS/FAIL marker via the SAME extract_contract_verdict()
-    the normal pipeline already uses for a single goal - closing a gap
-    nothing else in Kriya covers today: the end-of-run full regression suite
-    (kriya/workflow/workflow.py) is framework-tests-only, and
-    RunVerifierAgent's own judge()/grade() never replays an EARLIER goal's
-    command sequence during a LATER one. Runs BEFORE the integration call
-    (not after) so a regression is attributable to milestone-to-milestone
-    drift specifically, not muddied by the integration call's own edits.
+# D2 S6: NO EXECUTION != EMPTY SUCCESS. A replay's outcome per milestone is one of these four; only the first two say anything about the milestone's behavior.
+REPLAY_PASSED = "passed"                # executed; the verification marker (or a deterministic process status) said PASS
+REPLAY_REGRESSED = "regressed"          # executed; it FAILED, timed out, or the deterministic command returned a non-zero status
+REPLAY_NOT_EVALUABLE = "not_evaluable"  # executed, but printed no verification marker and has no deterministic kind: no verdict exists (documented, non-blocking)
+REPLAY_NOT_EXECUTED = "not_executed"    # NOT executed: refused, backend/prerequisite unavailable, never started, invalid input or lost evidence
+MILESTONE_REPLAY_NOT_EXECUTED = "MILESTONE_REPLAY_NOT_EXECUTED"
+REPLAY_INPUT_INVALID = "REPLAY_INPUT_INVALID"
+REPLAY_EVIDENCE_UNAVAILABLE = "REPLAY_EVIDENCE_UNAVAILABLE"
 
-    Returns a list of {"milestone_id", "reason"} dicts, one per regressed
-    milestone, empty if everything replayed still passes. A milestone with no
-    deterministic marker in its captured output is silently skipped (not
-    counted as a failure) - a false alarm here would be worse than staying
-    silent, and the integration call's own full regression suite still runs
-    regardless of what this function finds.
+
+@dataclass
+class MilestoneReplayReport:
+    """What the replay of every completed milestone's persisted verification actually did, per milestone. ``state`` is the one word the final result and
+    the persisted evidence carry: ``not_executed`` (at least one milestone's replay did not run: NEVER a success), ``regressions_found``, ``executed``
+    (every replayed milestone ran; none regressed), ``nothing_to_replay``."""
+
+    entries: List[Dict[str, Any]] = field(default_factory=list)
+
+    def _ids(self, outcome: str) -> List[str]:
+        return [entry["milestone_id"] for entry in self.entries if entry["outcome"] == outcome]
+
+    @property
+    def regressions(self) -> List[Dict[str, Any]]:
+        return [{"milestone_id": entry["milestone_id"], "reason": entry["reason"]} for entry in self.entries if entry["outcome"] == REPLAY_REGRESSED]
+
+    @property
+    def not_executed(self) -> List[Dict[str, Any]]:
+        return [entry for entry in self.entries if entry["outcome"] == REPLAY_NOT_EXECUTED]
+
+    @property
+    def state(self) -> str:
+        if self.not_executed:
+            return "not_executed"
+        if self.regressions:
+            return "regressions_found"
+        return "executed" if self.entries else "nothing_to_replay"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"state": self.state, "milestones": [dict(entry) for entry in self.entries], "passed": self._ids(REPLAY_PASSED),
+                "regressed": self._ids(REPLAY_REGRESSED), "not_evaluable": self._ids(REPLAY_NOT_EVALUABLE), "not_executed": self._ids(REPLAY_NOT_EXECUTED)}
+
+
+class MilestoneReplayNotExecuted(RuntimeError):
+    """The replay could not run at least one completed milestone's verification: not a clean replay, not a regression. Carries the report."""
+
+    def __init__(self, report: MilestoneReplayReport) -> None:
+        super().__init__("milestone replay not executed for: " + ", ".join(
+            f"{entry['milestone_id']} ({entry['reason']}" + (f"; {entry['cause']}" if entry.get("cause") else "") + ")" for entry in report.not_executed))
+        self.report = report
+
+
+def _well_formed_commands(raw_commands: Any) -> bool:
+    return (isinstance(raw_commands, list) and bool(raw_commands) and all(
+        isinstance(command, list) and bool(command) and all(isinstance(token, str) and token for token in command) for command in raw_commands))
+
+
+def _not_executed_reason(run_res: Dict[str, Any]) -> Optional[str]:
+    """Why a validator result says nothing RAN, or None when something did. The verdict-bearing contract is the one the runtime-verification gate already uses
+    (``runtime_verification_infrastructure_reason``: a step with no exit code that did not time out, a failed prerequisite, an unacquirable dependency, an
+    unloadable entrypoint) plus the validator's own early-return shape (``returncode`` present and None with no timeout: no commands, an interpreter/environment
+    that could not be prepared). A run that merely FAILED has an exit code and is not this."""
+    reason = runtime_verification_infrastructure_reason(run_res)
+    if reason is not None:
+        return reason
+    if "returncode" in run_res and run_res["returncode"] is None and not run_res.get("timed_out"):
+        return "the verification sequence did not start: " + str(run_res.get("output") or "no output")[:300]
+    return None
+
+
+def _first_unstarted_cause(run_res: Dict[str, Any]) -> Optional[str]:
+    for step in run_res.get("steps") or []:
+        if step.get("exit_code") is None and not step.get("timed_out"):
+            return str(step.get("stderr") or "")[:500] or None
+    return None
+
+
+def replay_prior_milestone_report(
+    workspace_path: str, run_state: MilestoneRunState, *, autonomy_cfg: Any
+) -> MilestoneReplayReport:
+    """Re-executes every completed milestone's own persisted verification command sequence against the CURRENT workspace state and re-checks the
+    [VERIFICATION] PASS/FAIL marker via the SAME extract_contract_verdict() the normal pipeline already uses for a single goal - closing a gap nothing else in
+    Kriya covers today: the end-of-run full regression suite (kriya/workflow/workflow.py) is framework-tests-only, and RunVerifierAgent's own judge()/grade()
+    never replays an EARLIER goal's command sequence during a LATER one. Runs BEFORE the integration call (not after) so a regression is attributable to
+    milestone-to-milestone drift specifically, not muddied by the integration call's own edits.
+
+    Returns a MilestoneReplayReport: one entry per milestone with its OUTCOME. A replay that did not run (refused, no backend, never started, a failed
+    prerequisite, invalid persisted commands, evidence that could not be captured) is ``not_executed`` - never an empty list, never a pass. An executed
+    milestone with no deterministic marker and no deterministic command kind has no verdict (``not_evaluable``): it is recorded and not counted as a failure -
+    a false alarm here would be worse than staying silent, and the integration call's own full regression suite still runs regardless.
 
     ``autonomy_cfg`` is the RUN's autonomy configuration (required, no default: Wave-2 item 1(b)). The replay executes persisted argv, so it runs under the same containment and
     resource authority as every other validator construction in kriya/workflow; a default ``AutonomyConfig()`` here executed them on the host in a run that required containment."""
     from kriya.tools.validate import PolymorphicValidator
     from kriya.workflow.verification_authority import deterministic_sequence_kind
 
-    failures: List[Dict[str, Any]] = []
+    report = MilestoneReplayReport()
+
+    def record(milestone_id: str, outcome: str, reason: str, **extra: Any) -> None:
+        report.entries.append({"milestone_id": milestone_id, "outcome": outcome, "reason": reason, **extra})
+
     validator = PolymorphicValidator(workspace_path, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
-    for milestone_id in sorted(run_state.verification_commands):
-        raw_commands = run_state.verification_commands[milestone_id]
+    for milestone_id in sorted(set(run_state.verification_commands) | set(run_state.replay_evidence_unavailable)):
+        if milestone_id in run_state.replay_evidence_unavailable:  # the commands on record (if any) belong to an earlier attempt: not trusted
+            record(milestone_id, REPLAY_NOT_EXECUTED, f"{REPLAY_EVIDENCE_UNAVAILABLE}: {run_state.replay_evidence_unavailable[milestone_id]}")
+            continue
+        raw_commands = run_state.verification_commands.get(milestone_id)
         if not raw_commands:
+            continue
+        if not _well_formed_commands(raw_commands):
+            record(milestone_id, REPLAY_NOT_EXECUTED, f"{REPLAY_INPUT_INVALID}: the persisted verification commands are not a list of non-empty argv lists")
             continue
         resolved_commands = [_resolve_run_command(cmd, workspace_path) for cmd in raw_commands]
         run_res = validator.run_app_sequence(resolved_commands)
+        unstarted = _not_executed_reason(run_res)
+        if unstarted is not None:
+            cause = _first_unstarted_cause(run_res)
+            record(milestone_id, REPLAY_NOT_EXECUTED, unstarted, **({"cause": cause} if cause else {}))
+            continue
         if run_res["timed_out"]:
-            failures.append({
-                "milestone_id": milestone_id,
-                "reason": "replay timed out - possible resource-lifecycle regression",
-            })
+            record(milestone_id, REPLAY_REGRESSED, "replay timed out - possible resource-lifecycle regression")
             continue
         deterministic_kind = deterministic_sequence_kind(resolved_commands)
         if deterministic_kind is not None:
             if not run_res["success"]:
-                failures.append({
-                    "milestone_id": milestone_id,
-                    "reason": (
-                        f"replayed deterministic {deterministic_kind} verification "
-                        "returned a non-zero process status"
-                    ),
-                })
+                record(milestone_id, REPLAY_REGRESSED, f"replayed deterministic {deterministic_kind} verification returned a non-zero process status")
+            else:
+                record(milestone_id, REPLAY_PASSED, f"replayed deterministic {deterministic_kind} verification returned a zero process status")
             continue
         verdict = extract_contract_verdict(run_res["output"])
         if verdict is None:
-            continue
-        if not verdict.get("passed"):
-            failures.append({
-                "milestone_id": milestone_id,
-                "reason": verdict.get("reasoning") or "verification marker reported FAIL on replay",
-            })
-    return failures
+            record(milestone_id, REPLAY_NOT_EVALUABLE, "the replayed command ran but printed no [VERIFICATION] marker: no verdict exists", returncode=run_res.get("returncode"))
+        elif not verdict.get("passed"):
+            record(milestone_id, REPLAY_REGRESSED, verdict.get("reasoning") or "verification marker reported FAIL on replay")
+        else:
+            record(milestone_id, REPLAY_PASSED, "the verification marker reported PASS on replay")
+    return report
+
+
+def replay_prior_milestone_verifications(
+    workspace_path: str, run_state: MilestoneRunState, *, autonomy_cfg: Any
+) -> List[Dict[str, Any]]:
+    """The regressed milestones (``{"milestone_id", "reason"}``) of a replay that RAN every milestone it was asked to. An empty list therefore means exactly
+    "executed, none regressed (or no verdict to give)": a replay that did not run raises ``MilestoneReplayNotExecuted`` instead - it is never an empty list."""
+    report = replay_prior_milestone_report(workspace_path, run_state, autonomy_cfg=autonomy_cfg)
+    if report.not_executed:
+        raise MilestoneReplayNotExecuted(report)
+    return report.regressions
 
 
 class _MilestonePlanDriver(PlanDriver):
@@ -1163,6 +1258,7 @@ class _MilestonePlanDriver(PlanDriver):
         # Every commit a unit's loop makes (retries included) is attributed
         # to it from the RunRecord, never from its reported files.
         self._cycles_before: Dict[str, int] = {}
+        self._replay_evidence: Optional[Dict[str, Any]] = None
 
     def _milestone(self, unit: WorkUnit) -> Optional[MilestoneV2]:
         return self.by_id.get(unit.id) if unit.role is WorkUnitRole.PRIMARY else None
@@ -1421,6 +1517,9 @@ class _MilestonePlanDriver(PlanDriver):
         )
         return None
 
+    def _runtime_verification_enabled(self) -> bool:
+        return getattr(getattr(self.engine_config, "autonomy", None), "run_verification_enabled", True) is not False
+
     async def _capture_verification_commands(self, milestone: MilestoneV2, result: Dict[str, Any]) -> None:
         milestone_goal = self._goal[milestone.id]
         try:
@@ -1474,23 +1573,42 @@ class _MilestonePlanDriver(PlanDriver):
                     elif corrected_py_commands != judgment["run_commands"]:
                         judgment = dict(judgment)
                         judgment["run_commands"] = corrected_py_commands
+            if judgment.get("infrastructure_error"):
+                # the judge could not answer: "nothing applicable" is not what happened (recorded below unless the operator turned runtime verification off)
+                raise RuntimeError(f"the run-verification judge was unavailable: {judgment['infrastructure_error']}")
             if judgment.get("should_run") and judgment.get("run_commands"):
                 self.run_state.verification_commands[milestone.id] = judgment["run_commands"]
+            self.run_state.replay_evidence_unavailable.pop(milestone.id, None)
         except Exception as e:
             logger.warning(f"Could not capture milestone '{milestone.id}'s verification commands for later replay: {e}")
+            if self._runtime_verification_enabled():
+                self.run_state.replay_evidence_unavailable[milestone.id] = f"{type(e).__name__}: {e}"
 
     async def run_phase(self, phase: TerminalPhase) -> Optional[Dict[str, Any]]:
         if phase is not TerminalPhase.REPLAY_PRIOR_VERIFICATIONS:
             raise ValueError(f"milestone plans have no '{phase.value}' phase")
-        replay_failures = replay_prior_milestone_verifications(
+        report = replay_prior_milestone_report(
             self.workspace_path, self.run_state, autonomy_cfg=self.engine_config.autonomy,  # the run's config; a missing one is an error, never a default
         )
-        if replay_failures:
+        self._replay_evidence = report.to_dict()
+        if report.not_executed:  # D2 S6: a replay that did not run is its own typed terminal state, never "no regression"
+            return {
+                "status": "milestone_replay_not_executed",
+                "quality_gates_passed": False,
+                "reason_codes": [MILESTONE_REPLAY_NOT_EXECUTED],
+                "group_id": self.run_state.group_id,
+                "milestone_total": self.total,
+                "failures": report.regressions,
+                "not_executed": report.not_executed,
+                "replay": self._replay_evidence,
+            }
+        if report.regressions:
             return {
                 "status": "milestone_replay_failed",
                 "group_id": self.run_state.group_id,
                 "milestone_total": self.total,
-                "failures": replay_failures,
+                "failures": report.regressions,
+                "replay": self._replay_evidence,
             }
         return None
 
@@ -1503,6 +1621,8 @@ class _MilestonePlanDriver(PlanDriver):
             "milestone_total": self.total,
             "integration_result": last_result,
             "milestone_reuse": self.reuse_assessment.to_dict(),
+            # D2 S6: what the replay really did (executed / nothing to replay, which milestones had no verdict) - never implied by the absence of failures
+            **({"replay": self._replay_evidence} if self._replay_evidence is not None else {}),
         }
 
 

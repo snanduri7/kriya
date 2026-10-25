@@ -23,6 +23,7 @@
     "milestone_total",
     "recovery_errors",
     "recovery_rolled_forward",
+    "replay",
     "status",
     "work_unit_states"
    ],
@@ -87,6 +88,14 @@
     "recovery_rolled_forward": [
      "m2b.py"
     ],
+    "replay": {
+     "milestones": [],
+     "not_evaluable": [],
+     "not_executed": [],
+     "passed": [],
+     "regressed": [],
+     "state": "nothing_to_replay"
+    },
     "status": "success",
     "work_unit_states": {
      "M1": {

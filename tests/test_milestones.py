@@ -25,6 +25,7 @@ from kriya.control.state import CURRENT_SCHEMA_VERSION, ControlState
 from kriya.workflow.checkpoint import checkpoint_path, save_checkpoint
 from kriya.workflow.milestones import (
     MilestonePersistenceError,
+    MilestoneReplayReport,
     MilestoneRunState,
     build_integration_goal_text,
     build_milestone_goal_text,
@@ -1457,14 +1458,14 @@ async def test_run_milestones_stops_before_integration_call_on_replay_failure():
         we.run_generation_workflow = AsyncMock(side_effect=_committing({"quality_gates_passed": True, "design": "d", "files": ["a.py"]}))
         we.run_verifier = MagicMock()
         we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
-        with patch(
-            "kriya.workflow.milestones.replay_prior_milestone_verifications",
-            return_value=[{"milestone_id": "M1", "reason": "regressed"}],
-        ):
+        # D2 S6: the driver reads the replay REPORT (per-milestone outcomes), not a bare list of failures
+        regressed = MilestoneReplayReport(entries=[{"milestone_id": "M1", "outcome": "regressed", "reason": "regressed"}])
+        with patch("kriya.workflow.milestones.replay_prior_milestone_report", return_value=regressed):
             result = await run_milestones(we, state, tmp)
 
     assert result["status"] == "milestone_replay_failed"
     assert result["failures"][0]["milestone_id"] == "M1"
+    assert result["replay"]["state"] == "regressions_found" and result["replay"]["regressed"] == ["M1"]
     assert we.run_generation_workflow.await_count == 1  # integration call never fired
 
 

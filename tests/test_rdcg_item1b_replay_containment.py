@@ -94,6 +94,7 @@ def test_the_driver_without_an_engine_config_does_not_fall_back_to_a_default_aut
 def test_no_other_caller_of_the_replay_exists_outside_the_driver():
     """Structural: the single production caller is the driver's run_phase, so threading the config there covers every replay."""
     source = inspect.getsource(milestones)
-    assert source.count("replay_prior_milestone_verifications(") == 2  # the definition + the driver's call
+    assert source.count("replay_prior_milestone_verifications(") == 1  # D2 S6: the definition only - a compatibility wrapper with no production caller
+    assert source.count("replay_prior_milestone_report(") == 3  # the definition, that wrapper's call and the driver's call
     assert "autonomy_cfg=" in inspect.getsource(_MilestonePlanDriver.run_phase)
     assert os.path.basename(milestones.__file__) == "milestones.py"
