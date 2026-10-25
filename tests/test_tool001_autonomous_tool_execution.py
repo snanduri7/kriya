@@ -32,6 +32,7 @@ import sys
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from _mcp_containment_standin import app_config
 from _planned_tool_seam import admit_planned_test_tool
 from _plugin_test_support import load_core_tools_module
 from _strict_doubles import strict_kernel
@@ -51,6 +52,7 @@ from kriya.mcp.invocation_approval import (
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import MCPToolIdentity, compute_mcp_schema_digest
+from kriya.tools.containment import ExternalExecutionRefused
 from kriya.tools.tool import TOOL_OPERATOR_ONLY, BaseTool, ToolExecutionError, ToolGovernance
 from kriya.workflow import subtask_executor
 from kriya.workflow import workflow_controller as wc_module
@@ -146,6 +148,8 @@ def _docker_reachable() -> bool:
 
 DOCKER_OK = _docker_reachable()
 pytestmark_docker = pytest.mark.skipif(not DOCKER_OK, reason="docker CLI/daemon not available")
+# D2 S5: the MCP-tool semantics of this file run through the contained branch (the test-only stand-in); the real-OCI scenarios below stay real.
+pytestmark = pytest.mark.usefixtures("mcp_standin")
 
 
 @contextlib.contextmanager
@@ -336,7 +340,7 @@ async def test_policy_exception_fails_closed():
 
 def test_scenario_d_mcp_unapproved_autonomous_subtask_denied_zero_calls(tmp_path):
     with _cwd(tmp_path / "ws"):
-        kernel = Kernel(config=AppConfig())  # host mode, no approval created
+        kernel = Kernel(config=app_config())  # D2 S5: the contained branch (test-only stand-in); no approval created
 
         async def run():
             await kernel.mcp.start_all({"probe": {"command": sys.executable, "args": [MOCK_SERVER]}})
@@ -370,7 +374,7 @@ def test_scenario_e_mcp_approved_autonomous_subtask_exactly_one_call(tmp_path):
         artifact = add_approval(empty_artifact(wid), identity, profile_digest)
         save_approval_artifact(default_local_approval_path(workspace_root), artifact)
 
-        kernel = Kernel(config=AppConfig())
+        kernel = Kernel(config=app_config())
 
         async def run():
             await kernel.mcp.start_all({"probe": {"command": sys.executable, "args": [MOCK_SERVER]}})
@@ -408,7 +412,7 @@ def test_scenario_drift_schema_change_invalidates_approval_zero_calls(tmp_path):
         artifact = add_approval(empty_artifact(wid), identity, profile_digest)
         save_approval_artifact(default_local_approval_path(workspace_root), artifact)
 
-        kernel = Kernel(config=AppConfig())
+        kernel = Kernel(config=app_config())
 
         async def run():
             await kernel.mcp.start_all({"probe": {"command": sys.executable, "args": [MOCK_SERVER]}})
@@ -428,11 +432,10 @@ def test_scenario_drift_schema_change_invalidates_approval_zero_calls(tmp_path):
         assert call_count == 0
 
 
-@pytestmark_docker
 def test_scenario_containment_required_backend_unavailable_no_call_no_fallback(tmp_path):
     """TOOL-003: containment required but no real backend configured ->
     server refuses to start at all - no autonomous call, no host fallback,
-    reached via the SubtaskExecutor path."""
+    reached via the SubtaskExecutor path. D2 S5: the refusal is the canonical typed one, before anything starts (no Docker involved)."""
     with _cwd(tmp_path / "ws"):
         cfg = AppConfig(
             autonomy=AutonomyConfig(mcp_contained_execution_required=True, containment_backend="none"),
@@ -441,7 +444,7 @@ def test_scenario_containment_required_backend_unavailable_no_call_no_fallback(t
         kernel = Kernel(config=cfg)
 
         async def run():
-            with pytest.raises(Exception):
+            with pytest.raises(ExternalExecutionRefused):
                 await kernel.mcp.start_all({"probe": {"command": sys.executable, "args": [MOCK_SERVER]}})
             # Server never started - no tool was ever registered to dispatch to.
             assert kernel.registry.list_components("tool") == []
@@ -746,7 +749,7 @@ def test_no_retry_loop_exists_around_tool_dispatch_structurally():
 
 def test_dash_y_cannot_reach_or_manufacture_mcp_approval(tmp_path):
     with _cwd(tmp_path / "ws"):
-        kernel = Kernel(config=AppConfig())
+        kernel = Kernel(config=app_config())
 
         async def run():
             await kernel.mcp.start_all({"probe": {"command": sys.executable, "args": [MOCK_SERVER]}})
@@ -859,7 +862,7 @@ async def test_resumed_tool_subtask_revalidates_mcp_approval_fresh_after_revocat
         # Never approved at all in THIS run (simulating: it was approved
         # when the prior interrupted run completed it, but that approval
         # is gone now - revoked, or never persisted correctly).
-        kernel = Kernel(config=AppConfig())
+        kernel = Kernel(config=app_config())
 
         tool_st = _tool_subtask(id="t1", tool_name="probe_echo_test", tool_arguments={"message": "hi"})
         plan = _plan(tool_st)
@@ -936,7 +939,7 @@ def test_scenario_collision_two_servers_same_flattened_name_bind_correct_identit
     identity - approving one must never authorize the other, even when
     dispatched through the autonomous TOOL subtask path."""
     with _cwd(tmp_path / "ws"):
-        kernel = Kernel(config=AppConfig())
+        kernel = Kernel(config=app_config())
 
         async def run():
             await kernel.mcp.start_all({
@@ -982,7 +985,7 @@ def test_approval_for_different_server_does_not_transfer_via_flattened_name(tmp_
         artifact = add_approval(empty_artifact(wid), wrong_identity, profile_digest)
         save_approval_artifact(default_local_approval_path(workspace_root), artifact)
 
-        kernel = Kernel(config=AppConfig())
+        kernel = Kernel(config=app_config())
 
         async def run():
             await kernel.mcp.start_all({"probe": {"command": sys.executable, "args": [MOCK_SERVER]}})

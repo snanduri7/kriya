@@ -661,6 +661,21 @@ def chaos_case(request, tmp_path):
     close_case(request, case)
 
 
+@pytest.fixture
+def mcp_standin(monkeypatch):
+    """The TEST-ONLY MCP containment stand-in (tests/_mcp_containment_standin.py), registered under its name for THIS test only: the contained branch of
+    MCP startup, deterministic and without Docker. Not evidence of real isolation; production configuration cannot name it outside this fixture."""
+    import _mcp_containment_standin
+    from _mcp_containment_standin import STANDIN_BACKEND_NAME, ContainmentStandIn
+
+    from kriya.tools import containment
+
+    backend = ContainmentStandIn()
+    monkeypatch.setitem(containment._PRODUCTION_BACKEND_REGISTRY, STANDIN_BACKEND_NAME, lambda: backend)  # noqa: SLF001 - the test-only seam
+    monkeypatch.setattr(_mcp_containment_standin, "CURRENT", backend)
+    return backend
+
+
 def pytest_sessionfinish(session):
     from _strict_doubles import release_default_roots
 

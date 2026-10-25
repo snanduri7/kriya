@@ -826,21 +826,23 @@ def _check_no_host_fallback(ctx: _Context) -> DoctorCheck:
         TrustClass,
         backend_provides_isolation,
         decide_external_execution,
+        mcp_subject,
         resolve_containment_backend,
     )
 
     autonomy = ctx.cfg.autonomy
     decision = decide_external_execution(autonomy, subject="doctor no-host-fallback check")
+    mcp_decisions = {name: decide_external_execution(autonomy, subject=mcp_subject(name)) for name in sorted(ctx.cfg.mcp)}  # D2 S5: the owner's, per server
     evidence: Dict[str, Any] = {
         "contained_execution_required": decision.contained,
         "mcp_servers": sorted(ctx.cfg.mcp),
-        "mcp_contained_execution_required": autonomy.mcp_contained_execution_required,
+        "mcp_contained_execution_required": all(d.contained for d in mcp_decisions.values()) if mcp_decisions else None,
         "containment_backend": decision.backend_name,
     }
     problems = []
     if not decision.contained:
         problems.append("contained execution is not required")
-    if ctx.cfg.mcp and not autonomy.mcp_contained_execution_required:
+    if any(not d.contained for d in mcp_decisions.values()):
         problems.append("MCP servers are configured without required containment")
     try:
         configured = decision.configured_backend()

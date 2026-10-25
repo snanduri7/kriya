@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Any, Iterable, List, Tuple
 
 from kriya.policy.egress import EgressCapability, EgressDecision, capability_for
-from kriya.tools.containment import decide_external_execution
+from kriya.tools.containment import decide_external_execution, mcp_subject
 
 
 def _model_endpoints(cfg: Any) -> Iterable[Tuple[str, str]]:
@@ -110,8 +110,8 @@ def describe_run_egress(cfg: Any) -> List[EgressDecision]:
         ) if shell_denied else "privileged: shell commands keep the network of their execution environment",
         containment=containment,
     ))
-    mcp_contained = autonomy.mcp_contained_execution_required is True
     for name, server in sorted(cfg.mcp.items()):
+        mcp_contained = decide_external_execution(autonomy, subject=mcp_subject(name)).contained  # D2 S5: the owner's decision, per server
         declared = capability_for(server.capabilities.network)
         unenforceable = mcp_contained and declared is EgressCapability.EXPLICIT_DESTINATIONS
         decisions.append(EgressDecision(

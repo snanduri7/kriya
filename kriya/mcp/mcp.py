@@ -36,7 +36,12 @@ from kriya.policy.model import (
     compute_mcp_schema_digest,
 )
 from kriya.policy.telemetry import build_decision_record
-from kriya.tools.containment import ContainmentSetupError, resolve_containment_backend
+from kriya.tools.containment import (
+    ContainmentSetupError,
+    decide_external_execution,
+    mcp_subject,
+    require_isolating_backend,
+)
 from kriya.tools.sandbox import build_restricted_env
 from kriya.tools.tool import BaseTool, ToolExecutionError, ToolGovernance
 
@@ -306,12 +311,10 @@ class MCPClient:
             # already SEC-004-atomic (rolls back any earlier server in the
             # same start_all() call). There is no except-and-continue
             # anywhere on this path.
-            if self._containment_backend is None:
-                raise ContainmentSetupError(
-                    f"MCP server '{self.name}': autonomy.mcp_contained_execution_required "
-                    "is True but no containment backend was resolved - refusing to start "
-                    "uncontained."
-                )
+            # D2 S5: whether a held backend isolates is the canonical owner's fact, not this class's: a missing backend, or one that provides no
+            # isolation (the Null backend accepts an unrestricted-network profile and would run the server on the host), is the typed refusal here,
+            # before anything is prepared or started.
+            self._containment_backend = require_isolating_backend(mcp_subject(self.name), self._containment_backend)
             profile_digest = compute_mcp_capability_profile_digest(self.capability_profile)
             loop = asyncio.get_running_loop()
             # OCIContainmentBackend.prepare() does real, synchronous
@@ -329,6 +332,15 @@ class MCPClient:
 
             prepared = await loop.run_in_executor(None, _prepare)
             command_prefix = prepared.command_prefix
+            if not command_prefix:
+                # Evidence truth: a prepared containment launches the server THROUGH its prefix (`docker run -i ...`). A backend that prepared nothing to
+                # launch through has contained nothing, so the server is not started and never reported as contained.
+                if prepared.cleanup is not None:
+                    prepared.cleanup()
+                raise ContainmentSetupError(
+                    f"MCP server '{self.name}': containment backend {self._containment_backend.name!r} prepared no launch prefix - "
+                    "refusing to start the server uncontained."
+                )
             self._containment_cleanup = prepared.cleanup
             # The `docker` CLI itself is TRUSTED_KRIYA_INFRASTRUCTURE - it
             # needs its own normal host environment (PATH to find the
@@ -350,7 +362,7 @@ class MCPClient:
             max_stdout_line_bytes=self._lifecycle.max_stdout_line_bytes,
             command_prefix=command_prefix,
         )
-        self._containment_active = self._containment_required
+        self._containment_active = bool(command_prefix)  # launched through an isolating backend's prefix: the only thing "active" means
         self._state = _ConnState.RUNNING
         self._read_task = asyncio.create_task(self._read_stdout())
         self._read_stderr_task = asyncio.create_task(self._read_stderr())
@@ -368,6 +380,7 @@ class MCPClient:
             if self._state == _ConnState.CLOSED:
                 return
             self._state = _ConnState.CLOSING
+            self._containment_active = False  # a closing server is no longer a contained one: the evidence field describes a live containment only
             logger.info(f"Closing MCP server '{self.name}': {reason}")
 
             current = asyncio.current_task()
@@ -987,11 +1000,12 @@ class MCPManager:
                 # `prepare()` fails - see MCPClient._start_sequence()'s
                 # own "no raw-host fallback" comment for where that
                 # failure actually propagates from.
-                containment_required = bool(getattr(autonomy_cfg, "mcp_contained_execution_required", False))
-                containment_backend = None
-                if containment_required:
-                    backend_name = getattr(autonomy_cfg, "containment_backend", "none")
-                    containment_backend = resolve_containment_backend(backend_name)
+                # D2 S5: the canonical external-execution decision (kriya/tools/containment.py) - this manager interprets neither the flag, the backend name
+                # nor whether a backend isolates. Mandatory containment with a non-isolating, unknown or unavailable backend is the typed
+                # ExternalExecutionRefused HERE, before any client or process exists; host execution is permitted only when the decision says so.
+                decision = decide_external_execution(autonomy_cfg, subject=mcp_subject(server_name))
+                containment_required = decision.contained
+                containment_backend = decision.backend()
 
                 client = MCPClient(
                     name=server_name,

@@ -41,6 +41,7 @@ import sys
 import threading
 
 import pytest
+from _mcp_containment_standin import app_config
 
 from kriya.config.config import AppConfig, AutonomyConfig, MCPLifecycleConfig
 from kriya.context.workspace_identity import workspace_identity
@@ -192,9 +193,10 @@ def test_unapproved_containment_enabled_starts_contained_blocks_startup_attack_d
 # production stack (MCPManager + real MCP subprocess), host mode.
 # =====================================================================
 
+@pytest.mark.usefixtures("mcp_standin")
 def test_capability_profile_authorized_only_denies_invocation_real_stack(tmp_path):
     with _cwd(tmp_path / "ws"):
-        kernel = Kernel(config=AppConfig())  # containment disabled (default) - host mode
+        kernel = Kernel(config=app_config())  # D2 S5: the contained branch (test-only stand-in), not a host spawn
 
         async def run():
             await kernel.mcp.start_all({"probe": {
@@ -328,6 +330,7 @@ def test_telemetry_deny_case_still_carries_full_identity_binding():
 # for a server that has become unstartable.
 # =====================================================================
 
+@pytest.mark.usefixtures("mcp_standin")
 def test_revocation_gap_approval_persists_cannot_be_exercised_reactivates_if_identical(tmp_path):
     with _cwd(tmp_path / "ws"):
         workspace_root = os.path.realpath(os.getcwd())
@@ -355,7 +358,7 @@ def test_revocation_gap_approval_persists_cannot_be_exercised_reactivates_if_ide
         # partially registers a failed server's tools). Proven here with
         # a genuinely broken command (not "server unhealthy", but
         # "server literally cannot start").
-        kernel = Kernel(config=AppConfig())
+        kernel = Kernel(config=app_config())
 
         async def run():
             with pytest.raises(Exception):

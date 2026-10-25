@@ -21,9 +21,10 @@ import sys
 
 import pytest
 import yaml
+from _mcp_containment_standin import app_config, client_kwargs
 
 from kriya.config.authority import ConfigAuthorityError
-from kriya.config.config import AppConfig, MCPLifecycleConfig, load_config
+from kriya.config.config import MCPLifecycleConfig, load_config
 from kriya.core.kernel import Kernel
 from kriya.mcp.lifecycle import (
     MCPLifecycleError,
@@ -38,6 +39,9 @@ from kriya.policy.model import MCPToolIdentity, compute_mcp_schema_digest
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KRIYA_BIN = os.path.join(os.path.dirname(sys.executable), "kriya")
 FIXTURE = os.path.join(REPO_ROOT, "tests", "adversarial_mcp_server.py")
+
+# D2 S5: lifecycle semantics run through the contained branch (the test-only stand-in).
+pytestmark = pytest.mark.usefixtures("mcp_standin")
 
 
 @pytest.fixture(autouse=True)
@@ -62,11 +66,14 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
-def _client(name, mode, extra_env=None, lifecycle=FAST):
+def _client(name, mode, extra_env=None, lifecycle=FAST, contained=True):
+    """D2 S5: the lifecycle semantics run through the contained branch (the test-only stand-in); ``contained=False`` is the legacy host spawn, kept only
+    by the tests marked ``legacy_host_mcp`` (host rlimits, the real CLI) until the secure-default migration removes that contract."""
     env = {"ADVERSARIAL_MODE": mode}
     if extra_env:
         env.update(extra_env)
-    return MCPClient(name=name, command=sys.executable, args=[FIXTURE], env=env, lifecycle_config=lifecycle)
+    return MCPClient(name=name, command=sys.executable, args=[FIXTURE], env=env, lifecycle_config=lifecycle,
+                     **(client_kwargs() if contained else {}))
 
 
 # --- STARTUP -----------------------------------------------------------
@@ -349,6 +356,7 @@ async def test_stderr_log_line_cap_enforced(caplog):
 
 # --- RESOURCES -------------------------------------------------------------
 
+@pytest.mark.legacy_host_mcp
 @pytest.mark.asyncio
 async def test_cpu_over_limit_process_killed_by_os():
     """RLIMIT_CPU is a CUMULATIVE LIFETIME budget (SEC-001's existing
@@ -359,7 +367,7 @@ async def test_cpu_over_limit_process_killed_by_os():
         startup_timeout_seconds=5, request_timeout_seconds=5,
         shutdown_grace_seconds=1, force_kill_reap_seconds=2, cpu_seconds=1,
     )
-    c = _client("cpuspin", "spin_cpu", lifecycle=cfg)
+    c = _client("cpuspin", "spin_cpu", lifecycle=cfg, contained=False)
     await c.start()
     pid = c._process.pid
     with contextlib.suppress(Exception):
@@ -374,6 +382,7 @@ async def test_cpu_over_limit_process_killed_by_os():
     await c.stop()
 
 
+@pytest.mark.legacy_host_mcp
 @pytest.mark.asyncio
 async def test_memory_over_limit_outcome_platform_honest():
     """RLIMIT_AS is deterministic/fail-closed on Linux, ADVISORY-ONLY on
@@ -386,7 +395,7 @@ async def test_memory_over_limit_outcome_platform_honest():
         startup_timeout_seconds=5, request_timeout_seconds=5,
         shutdown_grace_seconds=1, force_kill_reap_seconds=2, memory_mb=64,
     )
-    c = _client("memhog", "allocate_memory", lifecycle=cfg)
+    c = _client("memhog", "allocate_memory", lifecycle=cfg, contained=False)
     await c.start()
     pid = c._process.pid
     with contextlib.suppress(Exception):
@@ -404,6 +413,7 @@ async def test_memory_over_limit_outcome_platform_honest():
     assert not _pid_alive(pid), "stop() must clean up regardless of whether the resource limit itself fired"
 
 
+@pytest.mark.legacy_host_mcp
 @pytest.mark.asyncio
 async def test_resource_setup_failure_fails_closed(monkeypatch):
     """If the resource-limit preexec_fn cannot be established, MCPClient
@@ -416,7 +426,7 @@ async def test_resource_setup_failure_fails_closed(monkeypatch):
         return _fn
 
     monkeypatch.setattr("kriya.mcp.lifecycle.posix_resource_limits_preexec_fn", _broken_preexec)
-    c = _client("brokenlimit", "normal")
+    c = _client("brokenlimit", "normal", contained=False)
     with pytest.raises(ContainmentSetupError):
         await c.start()
     assert c._process is None or not _pid_alive(c._process.pid)
@@ -426,7 +436,7 @@ async def test_resource_setup_failure_fails_closed(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_multiple_normal_servers_all_registered():
-    kernel = Kernel(config=AppConfig(mcp_lifecycle=FAST))
+    kernel = Kernel(config=app_config(mcp_lifecycle=FAST))
     manager = MCPManager(kernel)
     await manager.start_all({
         "s1": {"command": sys.executable, "args": [FIXTURE], "env": {"ADVERSARIAL_MODE": "normal"}},
@@ -441,7 +451,7 @@ async def test_multiple_normal_servers_all_registered():
 
 @pytest.mark.asyncio
 async def test_partial_start_failure_rolls_back_atomically():
-    kernel = Kernel(config=AppConfig(mcp_lifecycle=FAST))
+    kernel = Kernel(config=app_config(mcp_lifecycle=FAST))
     manager = MCPManager(kernel)
     with pytest.raises(MCPLifecycleError):
         await manager.start_all({
@@ -455,7 +465,7 @@ async def test_partial_start_failure_rolls_back_atomically():
 
 @pytest.mark.asyncio
 async def test_stop_all_deterministic_multiple_servers():
-    kernel = Kernel(config=AppConfig(mcp_lifecycle=FAST))
+    kernel = Kernel(config=app_config(mcp_lifecycle=FAST))
     manager = MCPManager(kernel)
     await manager.start_all({
         "s1": {"command": sys.executable, "args": [FIXTURE], "env": {"ADVERSARIAL_MODE": "normal"}},
@@ -471,7 +481,7 @@ async def test_stop_all_deterministic_multiple_servers():
 
 @pytest.mark.asyncio
 async def test_stale_registration_removed_after_unexpected_server_death():
-    kernel = Kernel(config=AppConfig(mcp_lifecycle=FAST))
+    kernel = Kernel(config=app_config(mcp_lifecycle=FAST))
     manager = MCPManager(kernel)
     await manager.start_all({"flaky": {"command": sys.executable, "args": [FIXTURE], "env": {"ADVERSARIAL_MODE": "normal"}}})
     tool_name = manager.registered_tools["flaky"][0]
@@ -527,7 +537,7 @@ async def test_sec003_cross_server_isolation_still_intact():
     for environment isolation - so they must supply the specific identities
     they call, exactly as production's own future operator-facing approval
     mechanism (TOOL-002 P2) will."""
-    kernel = Kernel(config=AppConfig(mcp_lifecycle=FAST))
+    kernel = Kernel(config=app_config(mcp_lifecycle=FAST))
     report_env_schema = {"type": "object", "properties": {
         "names": {"type": "string", "description": "comma-separated names"}}, "required": ["names"]}
     digest = compute_mcp_schema_digest(report_env_schema)
@@ -603,6 +613,7 @@ def _run_cli(args, cwd, extra_env=None, timeout=45):
     return r.returncode, r.stdout, r.stderr
 
 
+@pytest.mark.legacy_host_mcp
 @pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_cli_startup_hang_bounded_end_to_end(tmp_path):
     """Real adversarial fixture A (Startup hang), through the actual

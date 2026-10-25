@@ -25,6 +25,7 @@ import sys
 import tempfile
 
 import pytest
+from _mcp_containment_standin import app_config, client_kwargs
 
 from kriya.core.kernel import Kernel
 from kriya.mcp.mcp import MCPClient, MCPManager, MCPTool
@@ -35,6 +36,9 @@ from kriya.tools.tool import ToolExecutionError
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURE = os.path.join(REPO_ROOT, "tests", "tool002_mcp_fixture.py")
+
+# D2 S5: the invocation-authority semantics run through the contained branch (the test-only stand-in).
+pytestmark = pytest.mark.usefixtures("mcp_standin")
 
 
 @pytest.fixture(autouse=True)
@@ -48,7 +52,7 @@ def isolated_mcp_approval_home(tmp_path, monkeypatch):
 
 def _client(name="fixture", extra_env=None):
     env = dict(extra_env or {})
-    return MCPClient(name=name, command=sys.executable, args=[FIXTURE], env=env)
+    return MCPClient(name=name, command=sys.executable, args=[FIXTURE], env=env, **client_kwargs())
 
 
 def _read_call_log(path):
@@ -374,7 +378,7 @@ async def test_sec009_style_config_authorization_does_not_authorize_invocation()
     SEC-009-authorized config activation path) never, by itself, populates
     any approved MCP identity - config authority and invocation authority
     are separate decisions, never conflated."""
-    kernel = Kernel()
+    kernel = Kernel(config=app_config())
     manager = MCPManager(kernel)  # bare ExecutionPolicy() - nothing pre-approved
     await manager.start_all({"fixture": {"command": sys.executable, "args": [FIXTURE], "env": {}}})
     try:
@@ -402,7 +406,7 @@ def test_yes_flag_has_no_bearing_on_mcp_authorization():
 async def test_cli_shaped_route_is_gated():
     """Mirrors kriya/cli.py::tools_execute's exact dispatch shape
     (registry.get -> tool.execute(**args)) with nothing pre-approved."""
-    kernel = Kernel()
+    kernel = Kernel(config=app_config())
     manager = MCPManager(kernel)
     await manager.start_all({"fixture": {"command": sys.executable, "args": [FIXTURE], "env": {}}})
     try:
@@ -422,7 +426,7 @@ async def test_subtask_shaped_route_is_gated():
     unreachable in production (TOOL-001's own enforce-mode refusal), but
     proven governed by the SAME gate regardless, so it cannot bypass
     policy merely by becoming reachable later."""
-    kernel = Kernel()
+    kernel = Kernel(config=app_config())
     manager = MCPManager(kernel)
     await manager.start_all({"fixture": {"command": sys.executable, "args": [FIXTURE], "env": {}}})
     try:

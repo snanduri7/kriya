@@ -2,12 +2,16 @@ import os
 import sys
 
 import pytest
+from _mcp_containment_standin import app_config, client_kwargs
 
 from kriya.core.kernel import Kernel
 from kriya.mcp.mcp import MCPClient, MCPManager
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import MCPToolIdentity, compute_mcp_schema_digest
+
+# D2 S5: the MCP protocol/registration semantics here run through the contained branch (the test-only stand-in), not a host spawn.
+pytestmark = pytest.mark.usefixtures("mcp_standin")
 
 
 @pytest.fixture(autouse=True)
@@ -29,11 +33,13 @@ async def test_mcp_client_handshake_and_call():
     client = MCPClient(
         name="mock_svc",
         command=sys.executable,
-        args=[mock_server_path]
+        args=[mock_server_path],
+        **client_kwargs(),
     )
     
     await client.start()
     try:
+        assert client.containment_active is True
         # Check list tools
         tools = await client.list_tools()
         assert len(tools) == 1
@@ -56,7 +62,7 @@ async def test_mcp_manager_integration():
     that this call simply succeeded, which is no longer Kriya's actual,
     intended behavior for an unauthorized MCP invocation."""
     mock_server_path = os.path.join(os.path.dirname(__file__), "mock_mcp_server.py")
-    kernel = Kernel()
+    kernel = Kernel(config=app_config())
 
     # Set up config for the manager
     mcp_config = {
@@ -72,6 +78,7 @@ async def test_mcp_manager_integration():
         # Verify tool was registered dynamically into the Kernel Registry
         registered_tools = kernel.registry.list_components("tool")
         assert "mock_svc_echo_test" in registered_tools
+        assert manager.clients["mock_svc"].containment_active is True  # the contained branch, through the test stand-in
 
         # TOOL-002 P1: registration alone never grants invocation authority -
         # a default (nothing pre-approved) MCPManager must deny the call.
@@ -96,13 +103,13 @@ async def test_mcp_manager_integration_allowed_with_pre_approved_identity():
     pre-approved - proving the ALLOW mechanism itself is sound, not just
     that the default denies."""
     mock_server_path = os.path.join(os.path.dirname(__file__), "mock_mcp_server.py")
-    kernel = Kernel()
+    kernel = Kernel(config=app_config())
     mcp_config = {"mock_svc": {"command": sys.executable, "args": [mock_server_path]}}
 
     # Compute the expected identity ahead of time from the same fixture's
     # known schema shape (mirrors how an operator-facing mechanism would
     # eventually pre-approve a specific, already-known tool identity).
-    probe = MCPClient(name="mock_svc", command=sys.executable, args=[mock_server_path])
+    probe = MCPClient(name="mock_svc", command=sys.executable, args=[mock_server_path], **client_kwargs())
     await probe.start()
     tools = await probe.list_tools()
     await probe.stop()

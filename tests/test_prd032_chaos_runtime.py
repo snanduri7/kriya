@@ -37,8 +37,9 @@ from _chaos_harness import (
 )
 from _fake_inference_runtime import FakeServerError
 from _fake_static_analysis import FakeKnobs, FakeRegistration
+from _mcp_containment_standin import app_config
 
-from kriya.config.config import AppConfig, MCPLifecycleConfig
+from kriya.config.config import MCPLifecycleConfig
 from kriya.core.kernel import Kernel
 from kriya.mcp.mcp import MCPManager
 from kriya.policy.errors import PolicyDeniedError
@@ -107,11 +108,11 @@ def _echo_identity(server):
 
 
 @chaos("C02")
-def test_a_malformed_mcp_response_is_tolerated_and_authority_is_unchanged(chaos_case, tmp_path):
+def test_a_malformed_mcp_response_is_tolerated_and_authority_is_unchanged(chaos_case, tmp_path, mcp_standin):  # noqa: ARG001 - D2 S5: the contained branch
     chaos_case.arm()
 
     async def scenario():
-        kernel = Kernel(config=AppConfig(mcp_lifecycle=FAST))
+        kernel = Kernel(config=app_config(mcp_lifecycle=FAST))
         manager = MCPManager(kernel, execution_policy=ExecutionPolicy(
             approved_mcp_tool_identities=frozenset({_echo_identity("hostile")})))
         await manager.start_all({"hostile": {"command": sys.executable, "args": [FIXTURE],
@@ -132,11 +133,11 @@ def test_a_malformed_mcp_response_is_tolerated_and_authority_is_unchanged(chaos_
 
 
 @chaos("C03")
-def test_an_mcp_server_that_disappears_is_unregistered_and_fails_closed(chaos_case, tmp_path):
+def test_an_mcp_server_that_disappears_is_unregistered_and_fails_closed(chaos_case, tmp_path, mcp_standin):  # noqa: ARG001 - D2 S5: the contained branch
     chaos_case.arm()
 
     async def scenario():
-        kernel = Kernel(config=AppConfig(mcp_lifecycle=FAST))
+        kernel = Kernel(config=app_config(mcp_lifecycle=FAST))
         manager = MCPManager(kernel, execution_policy=ExecutionPolicy(
             approved_mcp_tool_identities=frozenset({_echo_identity("flaky")})))
         await manager.start_all({"flaky": {"command": sys.executable, "args": [FIXTURE],

@@ -22,6 +22,7 @@ import sys
 
 import pytest
 import yaml
+from _mcp_containment_standin import app_config, client_kwargs
 
 from kriya.core.kernel import Kernel
 from kriya.mcp.mcp import (
@@ -32,6 +33,10 @@ from kriya.mcp.mcp import (
 )
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import MCPToolIdentity, compute_mcp_schema_digest
+
+# D2 S5: the real-child environment semantics run through the contained branch (the test-only stand-in applies the profile's resolved environment, as the
+# OCI backend does with `-e`); the real-CLI end-to-end below is legacy-host characterization until the secure-default migration.
+pytestmark = pytest.mark.usefixtures("mcp_standin")
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KRIYA_BIN = os.path.join(os.path.dirname(sys.executable), "kriya")
@@ -183,7 +188,7 @@ async def test_ambient_sentinels_absent_in_real_child(monkeypatch):
     for name, value in SYNTHETIC_SENTINELS.items():
         monkeypatch.setenv(name, value)
 
-    client = MCPClient(name="probe", command=sys.executable, args=[ENV_REPORT_SERVER])
+    client = MCPClient(name="probe", command=sys.executable, args=[ENV_REPORT_SERVER], **client_kwargs())
     await client.start()
     try:
         res = await client.call_tool("report_env", {"names": ",".join(SYNTHETIC_SENTINELS)})
@@ -204,7 +209,7 @@ async def test_explicit_sentinel_present_in_real_child(monkeypatch):
 
     client = MCPClient(
         name="probe", command=sys.executable, args=[ENV_REPORT_SERVER],
-        env={"KRIYA_SEC003_SENTINEL": "explicitly-authorized-value"},
+        env={"KRIYA_SEC003_SENTINEL": "explicitly-authorized-value"}, **client_kwargs(),
     )
     await client.start()
     try:
@@ -227,7 +232,7 @@ async def test_home_ambient_denied_explicit_allowed_real_child(monkeypatch):
     authorized via mcp.<server>.env for a server that genuinely needs it."""
     monkeypatch.setenv("HOME", "/synthetic/private/home")
 
-    ambient_client = MCPClient(name="probe", command=sys.executable, args=[ENV_REPORT_SERVER])
+    ambient_client = MCPClient(name="probe", command=sys.executable, args=[ENV_REPORT_SERVER], **client_kwargs())
     await ambient_client.start()
     try:
         res = await ambient_client.call_tool("report_env", {"names": "HOME"})
@@ -238,7 +243,7 @@ async def test_home_ambient_denied_explicit_allowed_real_child(monkeypatch):
 
     explicit_client = MCPClient(
         name="probe", command=sys.executable, args=[ENV_REPORT_SERVER],
-        env={"HOME": "/explicit/home"},
+        env={"HOME": "/explicit/home"}, **client_kwargs(),
     )
     await explicit_client.start()
     try:
@@ -255,7 +260,7 @@ async def test_required_launch_environment_remains_functional():
     startup: the real production MCPClient/MCPManager tests in
     tests/test_mcp.py (unmodified by this change) already prove this, this
     is a direct re-check scoped to this file's own fixture server."""
-    client = MCPClient(name="probe", command=sys.executable, args=[ENV_REPORT_SERVER])
+    client = MCPClient(name="probe", command=sys.executable, args=[ENV_REPORT_SERVER], **client_kwargs())
     await client.start()
     try:
         res = await client.call_tool("report_env", {"names": "PATH"})
@@ -267,7 +272,7 @@ async def test_required_launch_environment_remains_functional():
 
 @pytest.mark.asyncio
 async def test_cross_server_isolation_no_leak_between_servers():
-    kernel = Kernel()
+    kernel = Kernel(config=app_config())
     manager = MCPManager(kernel, execution_policy=_pre_approved_policy("server_a", "server_b"))
     mcp_config = {
         "server_a": {"command": sys.executable, "args": [ENV_REPORT_SERVER], "env": {"SERVER_A_ONLY": "a-value"}},
@@ -288,7 +293,7 @@ async def test_cross_server_isolation_no_leak_between_servers():
 @pytest.mark.asyncio
 async def test_empty_mcp_env_dict_does_not_restore_ambient_real_child(monkeypatch):
     monkeypatch.setenv("KRIYA_SEC003_SENTINEL", "host-secret-must-not-leak")
-    client = MCPClient(name="probe", command=sys.executable, args=[ENV_REPORT_SERVER], env={})
+    client = MCPClient(name="probe", command=sys.executable, args=[ENV_REPORT_SERVER], env={}, **client_kwargs())
     await client.start()
     try:
         res = await client.call_tool("report_env", {"names": "KRIYA_SEC003_SENTINEL"})
@@ -341,6 +346,7 @@ def _run_cli(args, cwd, extra_env=None, timeout=20):
     return r.returncode, r.stdout, r.stderr
 
 
+@pytest.mark.legacy_host_mcp
 @pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_cli_mcp_tool_call_ambient_absent_then_explicit_present_via_durable_approval(tmp_path):
     """TOOL-002 P2 (2026-09-13) restores this test's original E4-tier

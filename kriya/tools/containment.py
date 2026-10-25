@@ -500,10 +500,22 @@ class ExternalExecutionRefused(BackendUnavailableError):
         self.detail = detail
 
 
-def _containment_is_mandatory(autonomy: object, subject: str) -> bool:  # pylint: disable=unused-argument
-    """THE rule: must this external workload run in a real container. Today it is the operator's ``contained_execution_required``. The
-    packaged-default migration activates mandatory containment HERE (and in the packaged defaults); ``subject`` is part of the signature so a rule
-    that differs by consumer is expressed here, in one place, never at a consumer."""
+# D2 S5: the subject of an MCP server. MCP servers have always had their own pre-migration mandate (``mcp_contained_execution_required``, a separate
+# operator decision from target-code containment); it is expressed HERE, in the one rule, never at the MCP consumer. The final production contract
+# makes containment unconditionally mandatory for every subject, and that is one edit to ``_containment_is_mandatory``.
+MCP_SUBJECT_PREFIX = "MCP server"
+
+
+def mcp_subject(server_name: str) -> str:
+    return f"{MCP_SUBJECT_PREFIX} {server_name!r}"
+
+
+def _containment_is_mandatory(autonomy: object, subject: str) -> bool:
+    """THE rule: must this external workload run in a real container. Today it is the operator's ``contained_execution_required`` (for an MCP
+    server: ``mcp_contained_execution_required``). The packaged-default migration activates mandatory containment HERE (and in the packaged
+    defaults); ``subject`` is part of the signature so a rule that differs by consumer is expressed here, in one place, never at a consumer."""
+    if subject.startswith(MCP_SUBJECT_PREFIX):
+        return getattr(autonomy, "mcp_contained_execution_required", False) is True
     return getattr(autonomy, "contained_execution_required", False) is True
 
 
@@ -570,6 +582,19 @@ class ExternalExecutionDecision:
         host), returns when host execution is permitted."""
         if self.contained:
             raise ExternalExecutionRefused(self.subject, CONTAINMENT_NOT_SUPPORTED_FOR_SUBJECT, why)
+
+
+def require_isolating_backend(subject: str, backend: Optional[ContainmentBackend]) -> ContainmentBackend:
+    """For a consumer that is HANDED the backend it must use (an MCP client constructed with one) rather than resolving it from configuration:
+    containment is mandatory for it, so a missing backend, or one that provides no isolation (the Null backend accepts an unrestricted-network
+    profile and runs the workload on the host), is the typed refusal - before anything starts. The one place that fact is applied to a held backend."""
+    if backend is None:
+        raise ExternalExecutionRefused(
+            subject, CONTAINMENT_BACKEND_UNKNOWN,
+            "containment is required but no containment backend was resolved; refusing rather than running the workload uncontained")
+    decision = ExternalExecutionDecision(
+        subject=subject, contained=True, backend_name=str(getattr(backend, "name", "")), reason_code=CONTAINMENT_REQUIRED)
+    return decision.require_isolating(backend)
 
 
 def decide_external_execution(autonomy: object, *, subject: str) -> ExternalExecutionDecision:

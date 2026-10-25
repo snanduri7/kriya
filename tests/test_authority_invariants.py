@@ -30,6 +30,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from _chaos_harness import snapshot_tree
 from _fake_static_analysis import DISABLED_STATIC_ANALYSIS
+from _mcp_containment_standin import client_kwargs
 from test_greenfield_direct_plan_runtime import FILES, MAIN_FILE, _applied, _succeeded, run_direct
 from test_launch_approval import _decide, _refusal, _run
 from test_prd031a_static_analysis import BASE_A, _workspace, _write
@@ -176,12 +177,13 @@ def test_required_runtime_reject_cannot_succeed_or_apply(tmp_path):
 # ----------------------------------------------------------------------------- tools requiring review
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mcp_standin")  # D2 S5: the MCP authority semantics run through the contained branch (the test-only stand-in)
 async def test_a_tool_requiring_review_never_executes_silently():
     """Attempted: a REAL MCP server's tool is called with nothing approved. Refused: ``MCP_TOOL_REQUIRES_APPROVAL`` (fail closed, never
     a bare ALLOW) and the server receives ZERO tools/call requests."""
     with tempfile.TemporaryDirectory() as directory:
         call_log = os.path.join(directory, "calls.log")
-        client = MCPClient(name="fixture", command=sys.executable, args=[FIXTURE], env={"CALL_LOG_FILE": call_log})
+        client = MCPClient(name="fixture", command=sys.executable, args=[FIXTURE], env={"CALL_LOG_FILE": call_log}, **client_kwargs())
         await client.start()
         try:
             echo_meta = next(t for t in await client.list_tools() if t["name"] == "echo")

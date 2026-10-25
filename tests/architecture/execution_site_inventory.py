@@ -171,9 +171,14 @@ INVENTORY: Dict[Tuple[str, str], Site] = {
         WORKLOAD, "python3 -m pip install --no-index", "yes", "the caller's workspace", "contained, workspace writable", "its own profile builders",
         "UNTRUSTED_EXECUTION", ("S2",), "NO PRODUCTION CALLER (pinned by test_dependency_execution_has_no_production_caller)"),
     ("kriya/mcp/lifecycle.py", "spawn_mcp_process"): Site(
-        WORKLOAD, "the configured MCP server command (host, or the docker prefix)", "yes", "the process cwd",
-        HOST_ALL + "; contained: per the MCP capability profile (kriya/mcp/containment_adapter.py)", "MCPClient._start_sequence (autonomy.mcp_contained_execution_required)",
-        "UNTRUSTED_EXECUTION", ("S5",), "MCP execution is S5; S1 changes only the backend's workspace-mount mechanics, which a writable MCP workspace also passes through"),
+        WORKLOAD, "the configured MCP server command (host: legacy HOST_EXECUTION_PERMITTED only; contained: THROUGH the prepared backend prefix)", "yes",
+        "host: the process cwd (project config visible, MEASURED 2026-10-25); contained: the container's workdir (no workspace unless granted)",
+        "host (legacy): the SEC-003 restricted env, cwd and rlimits; contained: " + OCI_NO_MASK + " only when workspace_write is granted (S1 leaf masks apply)",
+        "MCPManager.start_all -> decide_external_execution(subject=mcp_subject(name)); MCPClient._start_sequence -> require_isolating_backend", "UNTRUSTED_EXECUTION",
+        ("S5",),
+        "S5: MEASURED fail-open before: required + backend none + an unrestricted grant ran the server on the HOST with Kriya's full env and containment_active=True. Now the "
+        "owner refuses (typed, before any process) a non-isolating, unknown or unavailable backend, a prepared containment with no launch prefix is refused, and "
+        "containment_active means launched THROUGH the prefix. Host cwd/env hardening is deliberately NOT added: legacy state, unreachable after the migration"),
 }
 
 # Git launches through git_argv(...), counted per file (their evidence is tests/architecture/test_git_invocation_seam.py and the S19 tests).

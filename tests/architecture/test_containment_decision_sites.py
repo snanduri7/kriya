@@ -5,8 +5,9 @@ the pip capability, static analysis, the acceptance-bundle runner, the egress re
 (JDTLS) never asked. A copy of the decision per site is how a site gets missed, and it is why activating mandatory containment would have meant a
 consumer hunt. Now:
 
-- every production READ of the two fields (an attribute, ``getattr``, a constant subscript) outside the owner is in the closed table below, each with a
-  reason, and the only reads that remain are the owner's, a backend OBJECT held by the static-analysis context, and MCP's own flag and governance (S5);
+- every production READ of the fields (an attribute, ``getattr``, a constant subscript) outside the owner is in the closed table below, each with a
+  reason, and the only reads that remain are the owner's, a backend OBJECT held by the static-analysis context, and two places that RECORD the configured
+  backend name without deciding anything (S5 moved MCP's own flag, and its three decision consumers, into the owner);
 - every workload launch site of the S1 census is either routed through the owner (its boundary function is checked to call it) or explicitly PENDING the
   slice that owns it (S4/S5), so S2 cannot claim a site it did not route;
 - the one production caller of JDTLS passes the configuration the decision is made from.
@@ -24,7 +25,7 @@ from .execution_sites import REPO, ROOTS
 
 FIELDS = {"contained_execution_required", "containment_backend", "mcp_contained_execution_required"}
 
-OWNER, BACKEND_OBJECT, MCP = "OWNER", "BACKEND_OBJECT", "MCP_S5"
+OWNER, BACKEND_OBJECT, RECORD = "OWNER", "BACKEND_OBJECT", "RECORD"
 # (file, function) -> (kind, why). A new read anywhere else fails until it is classified (or, better, routed through the owner).
 READS: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya/tools/containment.py", "_containment_is_mandatory"): (OWNER, "THE rule; the packaged-default migration changes it, nothing else"),
@@ -33,10 +34,8 @@ READS: Dict[Tuple[str, str], Tuple[str, str]] = {
         BACKEND_OBJECT, "``self._context.containment_backend`` is the backend OBJECT the owner's decision resolved, not the configuration field"),
     ("kriya/static_analysis/adapters/semgrep.py", "SemgrepAdapter._run_probe"): (BACKEND_OBJECT, "the same context attribute (a backend object)"),
     ("kriya/static_analysis/adapters/semgrep.py", "SemgrepAdapter.scan"): (BACKEND_OBJECT, "the same context attribute (a backend object)"),
-    ("kriya/mcp/mcp.py", "MCPManager.start_all"): (MCP, "MCP servers have their OWN mandate (mcp_contained_execution_required, TOOL-003); routed in S5"),
-    ("kriya/production_doctor.py", "_check_no_host_fallback"): (MCP, "reports the MCP flag (S5); the non-MCP fields are read through the owner"),
-    ("kriya/workflow/egress_authority.py", "describe_run_egress"): (MCP, "reports the MCP flag (S5); the non-MCP fields are read through the owner"),
-    ("kriya/workflow/subtask_executor.py", "plannable_tool_names"): (MCP, "TOOL-003 planned-tool governance keys on the MCP backend name; S5"),
+    ("kriya/workflow/egress_authority.py", "describe_run_egress"): (RECORD, "displays the configured backend name beside each decision; every decision itself is the owner's (S5)"),
+    ("kriya/workflow/subtask_executor.py", "plannable_tool_names"): (RECORD, "passes the configured backend name to the planned-tool governance resolution, which records it and decides nothing"),
 }
 
 
@@ -79,15 +78,16 @@ def test_no_production_module_reads_the_containment_fields_outside_the_classifie
 
 
 def test_only_the_owner_reads_the_non_mcp_fields():
-    """``contained_execution_required`` and the configured backend NAME are read by the owner and by no one else; the static-analysis context's
-    ``containment_backend`` is a backend object, and the rest are MCP's own."""
+    """``contained_execution_required``, ``mcp_contained_execution_required`` and the configured backend NAME are read by the owner and by no one else
+    (except two places that only record the name); the static-analysis context's ``containment_backend`` is a backend object."""
     for (path, function), names in _reads().items():
         kind = READS[(path, function)][0]
         if kind == OWNER:
             continue
         assert "contained_execution_required" not in names, f"{path}::{function} reads contained_execution_required outside the owner"
-        if kind == MCP:
-            assert names <= {"mcp_contained_execution_required", "containment_backend"}, (path, function, names)
+        assert "mcp_contained_execution_required" not in names, f"{path}::{function} reads the MCP mandate outside the owner"
+        if kind == RECORD:
+            assert names <= {"containment_backend"}, (path, function, names)
 
 
 def test_the_activation_point_is_one_function_that_every_decision_goes_through():
@@ -119,11 +119,12 @@ ROUTED: Dict[SITE, Tuple[SITE, str]] = {
         ("kriya/workflow/runtime_verification.py", "_prepare_finite_command_runtime_artifacts"), "external_execution"),
     ("kriya/tools/service_runtime.py", "run_managed_service_verification"): (
         ("kriya/workflow/runtime_verification.py", "_execute_managed_service_verification"), "build_containment_profile_and_backend"),
+    # S5: the MCP launcher is reached only through MCPClient._start_sequence, which applies the owner's isolating-backend fact to the backend it holds
+    # (and MCPManager.start_all, which hands it that backend, asks decide_external_execution: pinned below)
+    ("kriya/mcp/lifecycle.py", "spawn_mcp_process"): (("kriya/mcp/mcp.py", "MCPClient._start_sequence"), "require_isolating_backend"),
 }
-# site -> the slice that routes it. Visible on purpose: S2 does not claim these.
-PENDING: Dict[SITE, str] = {
-    ("kriya/mcp/lifecycle.py", "spawn_mcp_process"): "S5 (MCP has its own mandate and capability profile)",
-}
+# site -> the slice that routes it. Visible on purpose; EMPTY once S5 routed MCP (every workload launch site is now routed or unreferenced).
+PENDING: Dict[SITE, str] = {}
 UNREFERENCED = {("kriya/tools/dependency_execution.py", name) for name in (
     "maven_acquire_dependencies", "maven_execute_offline", "python_acquire_dependencies", "python_execute_offline")}
 
@@ -179,3 +180,15 @@ def test_the_one_production_caller_of_jdtls_passes_the_autonomy_configuration():
     assert callers == [("kriya/workflow/lsp_integration.py", 3)], callers
     retry = (REPO / "kriya/workflow/retry_strategy.py").read_text(encoding="utf-8")
     assert "_get_or_start_jdtls_client(state.jdtls_client, ctx.worktree_path, ctx.kernel.config.autonomy)" in retry
+
+
+def test_the_mcp_manager_gets_its_decision_and_its_backend_from_the_owner_and_resolves_neither_itself():
+    start_all = _function("kriya/mcp/mcp.py", "MCPManager.start_all")
+    assert start_all is not None
+    called = {call.func.id if isinstance(call.func, ast.Name) else call.func.attr
+              for call in ast.walk(start_all) if isinstance(call, ast.Call) and isinstance(call.func, (ast.Name, ast.Attribute))}
+    assert {"decide_external_execution", "mcp_subject", "backend"} <= called, called
+    assert "resolve_containment_backend" not in called
+    module = ast.parse((REPO / "kriya/mcp/mcp.py").read_text(encoding="utf-8"))
+    imported = {alias.name for node in ast.walk(module) if isinstance(node, ast.ImportFrom) for alias in node.names}
+    assert "resolve_containment_backend" not in imported, "MCP resolves no backend by name: the owner's decision does"
