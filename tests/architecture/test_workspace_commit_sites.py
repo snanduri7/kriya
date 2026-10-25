@@ -317,3 +317,24 @@ def test_the_registry_row_exists_and_agrees_with_the_open_rows():
     has_open = any(site.status == "open" for site in ALL_SITES.values())
     assert (row["status"] != "CLOSED") == has_open
     assert row["target_scope"].strip() and row["closure_evidence"].strip()
+
+
+def test_an_enforce_run_always_has_a_kernel_so_the_shared_skill_engine_always_exists():
+    """Kernel-none enforce (S7 close #3 item 7): `WorkflowController` builds the enforce run's shared SkillEngine only when its
+    engine has a kernel. If a production entry point could run enforce without one, each subtask would persist its own skill
+    changes (the pre-P-B shape). It cannot: `WorkflowEngine.__init__` requires a kernel and every production construction passes
+    one, so the case exists only for test doubles. Classified SAFE (unreachable), pinned here."""
+    constructions = []
+    for path in sorted(PACKAGE.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Call) and getattr(node.func, "attr", getattr(node.func, "id", "")) == "WorkflowEngine":
+                constructions.append((path.relative_to(ROOT).as_posix(), node))
+    assert constructions, "no production WorkflowEngine construction found: the scan is broken"
+    for relative, node in constructions:
+        assert len(node.args) >= 2 and not (isinstance(node.args[0], ast.Constant) and node.args[0].value is None), relative
+
+    engine_module = ast.parse((PACKAGE / "workflow" / "workflow.py").read_text(encoding="utf-8"))
+    [engine_class] = [n for n in ast.walk(engine_module) if isinstance(n, ast.ClassDef) and n.name == "WorkflowEngine"]
+    [init] = [n for n in engine_class.body if isinstance(n, ast.FunctionDef) and n.name == "__init__"]
+    kernel_argument = init.args.args[1]
+    assert kernel_argument.arg == "kernel" and not init.args.defaults, "the kernel must stay a required constructor argument"
