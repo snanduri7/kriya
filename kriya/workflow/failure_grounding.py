@@ -447,6 +447,12 @@ _ERROR_LOCATION_PATTERN = re.compile(
     r"(?P<jc_file>[\w./\\-]+\.java):\[(?P<jc_line>\d+),\d+\]"      # javac compile-error shape: File.java:[line,col]
     r"|\((?P<jt_file>[\w.-]+\.java):(?P<jt_line>\d+)\)"            # Java stack-trace shape: (File.java:line)
     r"|Syntax error in (?P<py_file>[\w./\\-]+\.py) line (?P<py_line>\d+):"  # PolymorphicValidator's Python SyntaxError shape
+    # Native CPython syntax-error report (`python -m py_compile`, or the final frame of an import-time
+    # traceback): `File "x.py", line N` ENDS the line (a runtime frame continues with `, in <name>`),
+    # then 0-4 indented source/caret lines, then a SyntaxError-family exception line. Anchored on that
+    # whole sequence so an ordinary traceback frame is never read as a syntax-error location.
+    r'|File "(?P<pc_file>[^"\r\n]+\.py)", line (?P<pc_line>\d+)[ \t]*\r?\n'
+    r"(?:[ \t]+[^\r\n]*\r?\n){0,4}(?=(?:Syntax|Indentation|Tab)Error:)"
 )
 
 
@@ -493,16 +499,22 @@ def extract_error_source_locations(error_text: str) -> List[Tuple[str, int]]:
     does not touch, extract_error_search_terms()'s separate, narrowly-scoped
     live-lookup mechanism (a hard-coded Maven/Gradle-coordinate-only regex
     that never sees raw error/stack-trace text at all, by design - see its
-    own docstring). All three location shapes share this one function/return
-    contract; a match's file/line comes from whichever alternative's named
-    groups matched (jc_*/jt_*/py_* for the compile/stack-trace/Python
-    shapes respectively) - named rather than positional groups specifically
+    own docstring). ALSO recognizes the native CPython syntax-error report
+    ('File "x.py", line N' + source/caret + 'SyntaxError: ...', pc_*) that
+    contained `py_compile` emits raw - P-A (S7, 2026-10-25): the host branch
+    that normalized it to the 'Syntax error in ...' shape is gone once
+    containment is mandatory. Only a frame that ends at the line number and is
+    followed by a SyntaxError-family line counts; runtime traceback frames
+    ('line N, in <fn>') are not syntax-error locations. All location shapes
+    share this one function/return contract; a match's file/line comes from
+    whichever alternative's named groups matched (jc_*/jt_*/py_*/pc_* for the
+    compile/stack-trace/Python-normalized/Python-native shapes respectively) - named rather than positional groups specifically
     so a future fourth shape doesn't need to renumber every existing one."""
     seen = set()
     locations: List[Tuple[str, int]] = []
     for m in _ERROR_LOCATION_PATTERN.finditer(error_text):
-        filepath = m.group("jc_file") or m.group("jt_file") or m.group("py_file")
-        line = m.group("jc_line") or m.group("jt_line") or m.group("py_line")
+        filepath = m.group("jc_file") or m.group("jt_file") or m.group("py_file") or m.group("pc_file")
+        line = m.group("jc_line") or m.group("jt_line") or m.group("py_line") or m.group("pc_line")
         key = (os.path.basename(filepath), int(line))
         if key not in seen:
             seen.add(key)
