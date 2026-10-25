@@ -80,12 +80,17 @@ def is_accidental_shared_skill_write(skill_source_path: str, workspace_path: str
         return False
 
 
-def git_commit_if_tracked(path: str, message: str) -> None:
+def git_commit_if_tracked(path: str, message: str) -> bool:
     """Best-effort commit of a skill-file change, scoped to `path`, if it lives inside a
     git work tree. Gives skill content a structured undo/audit trail (git log/revert)
     instead of relying on the user to notice and manually fix a bad extraction or
     promotion. Never raises - this is a nice-to-have, not a correctness requirement,
-    and most skill directories won't be their own git repo."""
+    and most skill directories won't be their own git repo.
+
+    Returns False only when the path IS inside a git work tree and the change was NOT committed (`git add` or `git commit`
+    failed for a reason other than "nothing to commit", or a repository content filter refused the commit): the file is then
+    written but the repository holds an uncommitted change. True otherwise (committed, nothing to commit, or no work tree).
+    A caller that reports a durable result uses it so that failure is not lost; the others may ignore it."""
     try:
         directory = path if os.path.isdir(path) else os.path.dirname(path)
         check = subprocess.run(
@@ -93,13 +98,16 @@ def git_commit_if_tracked(path: str, message: str) -> None:
             cwd=directory, capture_output=True, text=True
         )
         if check.returncode != 0 or check.stdout.strip() != "true":
-            return
+            return True
         try:
             refuse_repository_content_filters(directory)    # S19 Q1: add / commit run clean filters
         except RepositoryContentFilterRefused as refusal:
             logger.warning(f"Skill change at '{path}' not committed: {refusal}")
-            return
-        subprocess.run(git_argv(["git", "add", path]), cwd=directory, capture_output=True)
+            return False
+        added = subprocess.run(git_argv(["git", "add", path]), cwd=directory, capture_output=True, text=True)
+        if added.returncode != 0:
+            logger.warning(f"Skill change at '{path}' not committed: git add failed: {added.stderr.strip()}")
+            return False
         # SEC-001-P1 (2026-09-11): suppresses any repository-defined
         # pre-commit/commit-msg/post-commit hook in whatever git work tree
         # the skill directory happens to live in - this commit is
@@ -111,11 +119,16 @@ def git_commit_if_tracked(path: str, message: str) -> None:
         )
         if res.returncode == 0:
             logger.info(f"Committed skill change: {message}")
-        else:
-            # Commonly just "nothing to commit" (e.g. value unchanged) - not an error.
-            logger.debug(f"git commit for skill change did not create a commit: {res.stdout.strip()} {res.stderr.strip()}")
+            return True
+        output = f"{res.stdout.strip()} {res.stderr.strip()}"
+        if "nothing to commit" in output or "no changes added to commit" in output or "nothing added to commit" in output:
+            logger.debug(f"git commit for skill change did not create a commit (nothing to commit): {output}")   # not an error
+            return True
+        logger.warning(f"Skill change at '{path}' not committed: git commit failed: {output}")
+        return False
     except Exception as e:
-        logger.debug(f"Failed to git-commit skill change at '{path}' (non-fatal): {e}")
+        logger.warning(f"Failed to git-commit skill change at '{path}' (non-fatal): {e}")
+        return False
 
 
 def _conflict_registry_path(skills_dir: str) -> str:
@@ -230,17 +243,20 @@ def record_rule_provenance(skill_source_path: str, rule_text: str, source: str) 
         logger.warning(f"Failed to persist rule provenance (non-fatal): {e}")
 
 
-def mark_rules_verified(skill_source_path: str, rule_texts: List[str]) -> None:
+def mark_rules_verified(skill_source_path: str, rule_texts: List[str]) -> Optional[bool]:
     """Flips verified=True for exactly the given rule texts that already have a
     provenance record - never creates a new record, since a rule with no record is
     pre-existing/untracked content that was never flagged unverified in the first
     place. Called after a passing Runtime Verification run, scoped to only the rules
     that were part of the skill when that run's context was actually built (a
     snapshot taken before the retry loop starts), not whatever the skill's rules.txt
-    happens to contain by the time verification finishes."""
+    happens to contain by the time verification finishes.
+
+    Returns the commit outcome (`git_commit_if_tracked`) when it changed the provenance file, None when there was nothing to
+    change or the write failed (logged)."""
     records = load_rule_provenance(skill_source_path)
     if not records:
-        return
+        return None
     texts = set(rule_texts)
     changed = False
     for r in records:
@@ -249,14 +265,15 @@ def mark_rules_verified(skill_source_path: str, rule_texts: List[str]) -> None:
             r["verified_at"] = date.today().isoformat()
             changed = True
     if not changed:
-        return
+        return None
     path = _rule_provenance_path(skill_source_path)
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(records, f, indent=2)
-        git_commit_if_tracked(path, f"Kriya: mark rule(s) verified in skill '{os.path.basename(skill_source_path)}'")
+        return git_commit_if_tracked(path, f"Kriya: mark rule(s) verified in skill '{os.path.basename(skill_source_path)}'")
     except Exception as e:
         logger.warning(f"Failed to persist rule verification (non-fatal): {e}")
+        return None
 
 
 def parse_version_parts(v_str: str) -> Tuple[int, int, int]:
@@ -464,6 +481,9 @@ class SkillEngine:
         self.skills_dir = supplied_dir
         self._skills: Dict[str, Skill] = {}
         self._held_verifications: Dict[str, HeldSkillVerification] = {}
+        # Whether the commit of the last `_set_skill_yaml_fields` write succeeded (False = the file is written but the repository
+        # holds an uncommitted change); None before any write or when the write itself did not happen.
+        self.last_write_committed: Optional[bool] = None
 
     @classmethod
     def from_config(cls, config: Any, workspace_path: Optional[str] = None) -> "SkillEngine":
@@ -641,6 +661,7 @@ class SkillEngine:
         Skill object consistent. Returns False (logged, non-fatal) if the skill isn't
         known or has no resolvable source_path rather than raising - callers treat this
         as best-effort bookkeeping, not something that should block generation."""
+        self.last_write_committed = None
         skill = self._resolve_skill(skill_name)
         if not skill or not skill.source_path:
             logger.warning(f"Cannot update skill '{skill_name}': not found or has no known source path.")
@@ -675,7 +696,7 @@ class SkillEngine:
                 yaml.safe_dump(meta, f, default_flow_style=False)
             for field, value in fields.items():
                 setattr(skill, field, value)
-            git_commit_if_tracked(yaml_path, commit_message)
+            self.last_write_committed = git_commit_if_tracked(yaml_path, commit_message)
             return True
         except Exception as e:
             logger.warning(f"Failed to update skill '{skill_name}': {e}")
@@ -753,8 +774,18 @@ class SkillEngine:
                         "error": "skill.yaml was not updated; the skill was not marked verified",
                     })
                     continue
+                if self.last_write_committed is False:
+                    failures.append({
+                        "operation": "skill_verification_commit", "skill": item.skill_name,
+                        "error": "skill.yaml was updated but its Git commit failed; the repository holds an uncommitted change",
+                    })
                 if skill.source_path and item.rule_texts is not None:
-                    mark_rules_verified(skill.source_path, list(item.rule_texts))
+                    if mark_rules_verified(skill.source_path, list(item.rule_texts)) is False:
+                        failures.append({
+                            "operation": "skill_verification_commit", "skill": item.skill_name,
+                            "error": "the rule provenance was updated but its Git commit failed; "
+                                     "the repository holds an uncommitted change",
+                        })
             except Exception as ex:  # noqa: BLE001 - bookkeeping after a settled verification must never raise; reported, not hidden
                 failures.append({
                     "operation": "skill_verification", "skill": item.skill_name,
