@@ -1248,9 +1248,9 @@ def _load_is_local_url() -> Any:
     return is_local_url
 
 
-def _load_mark_rules_verified() -> Any:
-    from kriya.skills.skill import mark_rules_verified
-    return mark_rules_verified
+def _load_held_skill_verification() -> Any:
+    from kriya.skills.skill import HeldSkillVerification
+    return HeldSkillVerification
 
 
 def _runtime_deps() -> "runtime_verification.RuntimeDeps":
@@ -1276,7 +1276,7 @@ def _runtime_deps() -> "runtime_verification.RuntimeDeps":
         runtime_evidence_outcome_fields=runtime_evidence_outcome_fields,
         _skill_verification_context=_skill_verification_context, request_capacity=request_capacity,
         load_is_local_url=_load_is_local_url, load_run_self_correction_loop=_load_run_self_correction_loop,
-        load_mark_rules_verified=_load_mark_rules_verified,
+        load_held_skill_verification=_load_held_skill_verification,
         _apply_candidate_pom_corrections=_apply_candidate_pom_corrections, _as_developer=_as_developer,
         _bind_verification_tree=_bind_verification_tree, _build_java_main_class_map=_build_java_main_class_map,
         _record_self_correction_scope_conflict=_record_self_correction_scope_conflict,

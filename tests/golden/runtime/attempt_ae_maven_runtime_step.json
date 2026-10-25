@@ -45,6 +45,12 @@
   "approved_fingerprint": false,
   "cached_basis": false,
   "cached_judgment": null,
+  "held_skill_verifications": {
+   "calc-conventions": {
+    "context": "version unspecified",
+    "rule_texts": null
+   }
+  },
   "java_home_override": null,
   "plan_scope_conflict": null,
   "run_verification_declined": false,
@@ -150,10 +156,6 @@
    },
    "success": true,
    "type": "run_verification"
-  },
-  {
-   "context": "version unspecified",
-   "skill_verified": "calc-conventions"
   }
  ],
  "worktree_changes": {

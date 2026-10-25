@@ -517,7 +517,9 @@ class _Writer:
 
 class _Skills:
     """The skill engine as the success bookkeeping sees it: the looked-up skill (``source_path`` when the case gives
-    one; ``fail`` makes the lookup raise) and every verification mark."""
+    one; ``fail`` makes the lookup raise). A passing run only HOLDS its skill verification (P-B: persisting commits into
+    the run's own repository mid-run, GIT_METADATA_STALE for the gates still to run), so a persisting call during the run
+    is recorded as a distinct trace entry the goldens must never contain."""
 
     def __init__(self, trace: List[Dict[str, Any]], source_path: Optional[str] = None, fail: bool = False):
         self.trace = trace
@@ -532,7 +534,7 @@ class _Skills:
         return types.SimpleNamespace(name=name, tags=[], source_path=self.source_path)
 
     def mark_verified(self, name: str, *, context: str) -> None:
-        self.trace.append({"skill_verified": name, "context": context})
+        self.trace.append({"skill_persisted_mid_run": name, "context": context})
 
 
 class _Repair:
@@ -708,7 +710,12 @@ class _AttemptRun:
                                             for t in state.validator_timings],
                       "plan_scope_conflict": state.plan_scope_conflict,
                       "validator_java_home_override": self.validator.java_home_override,
-                      "validator_tree_bound": self.validator.tree_binding is not None},
+                      "validator_tree_bound": self.validator.tree_binding is not None,
+                      **({"held_skill_verifications": {
+                          name: {"context": held.context,
+                                 "rule_texts": None if held.rule_texts is None else list(held.rule_texts)}
+                          for name, held in sorted(state.pending_skill_verifications.items())}}
+                         if state.pending_skill_verifications else {})},
             "worktree_changes": _changes(self.before, _tree(self.worktree)),
         }))
 
@@ -1594,7 +1601,7 @@ def _writes_state(name: str) -> Callable[[List[str], str], Dict[str, Any]]:
 
 def _rules_verified(run: _AttemptRun) -> Any:
     return patch("kriya.skills.skill.mark_rules_verified",
-                 side_effect=lambda path, rules: run.trace.append({"rules_verified": path, "rules": list(rules)}))
+                 side_effect=lambda path, rules: run.trace.append({"rules_persisted_mid_run": path, "rules": list(rules)}))
 
 
 class _Containment:
@@ -1623,7 +1630,7 @@ PIN_CASES: Dict[str, Any] = {
     "ae_rules_verified": (dict(skills={"source_path": "/skills/calc-conventions"},
                                ctx={"active_skill_rules_snapshot": {"calc-conventions": ["Name helpers with a verb."]}},
                                patches=(_rules_verified,)), _approve_and_execute,
-                          "a passing run marks the contributing skill verified and flips exactly its snapshot rules"),
+                          "a passing run HOLDS the contributing skill's verification with exactly its snapshot rules; nothing is persisted mid-run"),
     "ae_skill_lookup_fails": (dict(skills={"fail": True}), _approve_and_execute,
                               "a skill that cannot be looked up is skipped (logged), the pass stands"),
     "ae_typed_callback_authored": (dict(cfg=_config(**HITL), goal=AUTHORED_GOAL, ctx={}), None,

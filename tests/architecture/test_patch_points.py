@@ -190,6 +190,9 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (W, 'create_git_worktree'): P(3, 'kriya.workflow.worktree', ((W, 1),), ()),
     (W, 'delete_checkpoint'): P(2, 'kriya.control.checkpoint', ((W, 2),), ()),
     (W, 'derive_contract_transition'): P(4, 'kriya.workflow.contract_lifecycle', ((W, 1),), ()),
+    # P-B (tests/test_skill_verification_deferral.py): the stage-5 closer seeded with a held skill verification, to prove a failed
+    # run promotes nothing.
+    (W, 'final_review'): P(1, 'kriya.workflow.stage_review', ((W, 1),), ()),
     # E5 characterization: +1 site (tests/test_development_loop.py: a Best-of-N recorded failure is never handled again).
     (W, 'handle_attempt_failure'): P(3, 'kriya.workflow.retry_strategy', ((W, 1),), ()),
     # E3: +1 site (tests/test_work_unit_stages.py proves the moved architecture stage calls the facade name).
@@ -297,7 +300,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (C, 'check_plan_targets'): P(1, 'kriya.workflow.plan_targets', ((C, 1),), ()),
     (C, 'classify_planner_outcome'): P(1, 'kriya.workflow.planner_repair', ((C, 2),), ()),
     (C, 'coalesce_same_file_owners'): P(1, 'kriya.workflow.plan_normalization', ((C, 1),), ()),
-    (C, 'commit_verified_candidate'): P(2, 'kriya.workflow.commit_service', ((C, 1),), ()),
+    (C, 'commit_verified_candidate'): P(3, 'kriya.workflow.commit_service', ((C, 1),), ()),  # P-B: +1 (the deferral's enforce proof)
     (C, 'derive_verification_contracts'): P(1, 'kriya.workflow.plan_normalization', ((C, 1),), ()),
     (C, 'find_ownership_findings'): P(1, 'kriya.workflow.ownership_findings', ((C, 1),), ()),
     (C, 'findings_prompt_block'): P(1, 'kriya.workflow.ownership_findings', ((C, 1),), ()),
@@ -436,8 +439,10 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # planted in the run's committed history of the measured end-to-end scenario)
     # RDCG-B-001 result-truth control (tests/test_rdcg_b001_result_truth.py): +1 W site (run_generation_workflow: the needs_review result the
     # generate command renders)
-    assert totals == {A: 114, W: 96, C: 383}  # D2 M4: 386 -> 383 (the three retired migration patch sites)
-    assert len(PATCH_POINTS) == 132
+    # P-B skill-verification deferral (tests/test_skill_verification_deferral.py): +1 W site (final_review: the stage-5 closer seeded
+    # with a held verification on a failed run) and +1 C site (commit_verified_candidate: the enforce terminal commit it defers behind)
+    assert totals == {A: 114, W: 97, C: 384}  # D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C
+    assert len(PATCH_POINTS) == 133  # P-B: +1 row (W.final_review)
 
 
 # ----------------------------------------------------------------------------- owner modules (DEPENDENCY-RULES)

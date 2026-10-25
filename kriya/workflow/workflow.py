@@ -3072,6 +3072,19 @@ class WorkflowEngine:
             except Exception as ex:
                 logger.debug(f"jdtls shutdown failed (non-fatal): {ex}")
 
+        # P-B: the skill verifications this run's passing Runtime Verification earned are persisted only now, after the
+        # candidate's terminal apply, the final trace and the checkpoint removal - persisting commits into the git work tree
+        # holding the skill, which must not move the repository under a gate still verifying the candidate. A run owned
+        # by an authoritative controller (skill_engine_override: the shared engine of the enforce run's subtasks) only
+        # hands them to that engine; the controller persists them after ITS terminal commit. A run that did not pass
+        # persists nothing. A persistence failure is surfaced and never rewrites the verification result.
+        skill_engine = stage_ctx.se
+        if quality_passed and skill_engine is not None:
+            skill_engine.hold_verifications(state.pending_skill_verifications.values())
+            if skill_engine_override is None:
+                state.post_commit_persistence_errors.extend(skill_engine.apply_held_verifications())
+        state.pending_skill_verifications.clear()
+
         return completed_result(
             self._stage_deps(), state, quality_passed=quality_passed, failure_category=failure_category,
             failure_report_dicts=failure_report, plan=plan, design=design, review=review,

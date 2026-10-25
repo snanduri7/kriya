@@ -137,7 +137,7 @@ class RuntimeDeps:
     request_capacity: Callable[..., Any]
     load_is_local_url: Callable[[], Any]
     load_run_self_correction_loop: Callable[[], Any]
-    load_mark_rules_verified: Callable[[], Any]
+    load_held_skill_verification: Callable[[], Any]
     # attempt.py's own names that stay there (shared with code that stays, or moved by E8 to gate_orchestrator)
     _apply_candidate_pom_corrections: Callable[..., Any]
     _as_developer: Callable[..., Any]
@@ -2286,20 +2286,31 @@ async def _approve_and_execute_runtime_verification(
         state.record_gate_outcome(run_verification_outcome)
         deps.logger.info(f"Quality Gates: Runtime verification PASSED: {grade['reasoning']}")
         # A passing real-world run is exactly the proof the
-        # skill-verification gap check is looking for - mark every
-        # skill that contributed to this generation as verified so
-        # future runs stop asking about it.
+        # skill-verification gap check is looking for - every
+        # skill that contributed to this generation earns a
+        # verification so future runs stop asking about it.
+        # P-B: it is only HELD here (state.pending_skill_verifications).
+        # Persisting it commits into the git work tree holding the
+        # skill - by default the run's own workspace repository -
+        # which would move that repository's HEAD under every gate
+        # still to run on this candidate (GIT_METADATA_STALE) and
+        # claim a verification before the candidate's terminal
+        # verification exists. The run's owner persists it after the
+        # terminal apply (run_generation_workflow / the enforce
+        # terminal commit).
         for active_skill_name in ctx.active_skills:
             try:
                 active_skill_obj = ctx.skill_engine.get_skill(active_skill_name)
                 context = deps._skill_verification_context(active_skill_obj, ctx.goal)
-                ctx.skill_engine.mark_verified(active_skill_name, context=context)
-                # Also flip per-rule provenance for exactly the
+                # The per-rule provenance flips later for exactly the
                 # rules that were part of this skill when this
                 # run's context was built (the pre-retry-loop
                 # snapshot) - not whatever rules.txt contains now.
-                if active_skill_obj.source_path and active_skill_name in ctx.active_skill_rules_snapshot:
-                    mark_rules_verified = deps.load_mark_rules_verified()
-                    mark_rules_verified(active_skill_obj.source_path, ctx.active_skill_rules_snapshot[active_skill_name])
+                snapshot = ctx.active_skill_rules_snapshot.get(active_skill_name)
+                held_skill_verification = deps.load_held_skill_verification()
+                state.pending_skill_verifications[active_skill_name] = held_skill_verification(
+                    skill_name=active_skill_name, context=context,
+                    rule_texts=tuple(snapshot) if snapshot is not None else None,
+                )
             except Exception as ex:
-                deps.logger.debug(f"Failed to mark skill '{active_skill_name}' verified: {ex}")
+                deps.logger.debug(f"Failed to hold skill '{active_skill_name}' verification: {ex}")

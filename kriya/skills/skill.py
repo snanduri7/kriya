@@ -4,8 +4,9 @@ import logging
 import os
 import re
 import subprocess
+from dataclasses import dataclass
 from datetime import date
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import yaml
 from pydantic import BaseModel, Field
@@ -376,6 +377,17 @@ class Skill(BaseModel):
     source_path: Optional[str] = Field(default=None, description="Filesystem path to this skill's folder, set by discover_and_load - not part of skill.yaml itself.")
 
 
+@dataclass(frozen=True)
+class HeldSkillVerification:
+    """A passing Runtime Verification run's proof for one skill (P-B, S7 close #2), held in memory until the run's owner has
+    finished verifying the candidate. ``context`` is the advisory provenance `mark_verified` records; ``rule_texts`` is the
+    rules snapshot taken when the run's context was built (None: the skill had no snapshot, so no rule is flipped)."""
+
+    skill_name: str
+    context: str
+    rule_texts: Optional[Tuple[str, ...]]
+
+
 class SkillEngine:
     """Discovers, validates, and manages engineering skills."""
 
@@ -451,6 +463,7 @@ class SkillEngine:
 
         self.skills_dir = supplied_dir
         self._skills: Dict[str, Skill] = {}
+        self._held_verifications: Dict[str, HeldSkillVerification] = {}
 
     @classmethod
     def from_config(cls, config: Any, workspace_path: Optional[str] = None) -> "SkillEngine":
@@ -690,6 +703,46 @@ class SkillEngine:
             fields["verified_context"] = context
         suffix = f" ({context})" if context else ""
         return self._set_skill_yaml_fields(skill_name, fields, f"Kriya: mark skill '{skill_name}' verified{suffix}")
+
+    def hold_verifications(self, held: Iterable[HeldSkillVerification]) -> None:
+        """Queues skill verifications (latest per skill wins) WITHOUT touching any file or repository. A skill's
+        verification is persisted by `mark_verified` as a commit into whatever git work tree holds the skill - the run's
+        own workspace repository by default - so doing it while a candidate is still being verified would advance that
+        repository's HEAD under the gates (GIT_METADATA_STALE). The run's owner calls `apply_held_verifications` only
+        after the candidate's terminal verification has succeeded and been committed, or `discard_held_verifications`."""
+        for item in held:
+            self._held_verifications[item.skill_name] = item
+
+    def discard_held_verifications(self) -> int:
+        """Drops every held verification, persisting nothing; returns how many were dropped."""
+        count = len(self._held_verifications)
+        self._held_verifications = {}
+        return count
+
+    def apply_held_verifications(self) -> List[Dict[str, str]]:
+        """Persists the held verifications through the unchanged `mark_verified` / `mark_rules_verified` and empties the
+        queue. Returns one ``skill_verification`` failure record per skill that could NOT be persisted (a refused or failed
+        `mark_verified`, or an exception); such a skill is neither marked verified nor has its rules flipped. It never
+        raises: the candidate's verification result is already established, and a bookkeeping failure must not rewrite it."""
+        held, self._held_verifications = list(self._held_verifications.values()), {}
+        failures: List[Dict[str, str]] = []
+        for item in held:
+            try:
+                skill = self.get_skill(item.skill_name)
+                if not self.mark_verified(item.skill_name, context=item.context):
+                    failures.append({
+                        "operation": "skill_verification", "skill": item.skill_name,
+                        "error": "skill.yaml was not updated; the skill was not marked verified",
+                    })
+                    continue
+                if skill.source_path and item.rule_texts is not None:
+                    mark_rules_verified(skill.source_path, list(item.rule_texts))
+            except Exception as ex:  # noqa: BLE001 - bookkeeping after a settled verification must never raise; reported, not hidden
+                failures.append({
+                    "operation": "skill_verification", "skill": item.skill_name,
+                    "error": f"{type(ex).__name__}: {ex}",
+                })
+        return failures
 
     def mark_gap_acknowledged(self, skill_name: str) -> bool:
         """Marks that the user was asked to strengthen this unverified skill and

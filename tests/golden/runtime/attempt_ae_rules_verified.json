@@ -49,6 +49,14 @@
   "approved_fingerprint": false,
   "cached_basis": false,
   "cached_judgment": null,
+  "held_skill_verifications": {
+   "calc-conventions": {
+    "context": "version unspecified",
+    "rule_texts": [
+     "Name helpers with a verb."
+    ]
+   }
+  },
   "java_home_override": null,
   "plan_scope_conflict": null,
   "run_verification_declined": false,
@@ -57,7 +65,7 @@
   "validator_timings": [],
   "validator_tree_bound": false
  },
- "terminal_path": "a passing run marks the contributing skill verified and flips exactly its snapshot rules",
+ "terminal_path": "a passing run HOLDS the contributing skill's verification with exactly its snapshot rules; nothing is persisted mid-run",
  "trace": [
   {
    "interpreter_grounding": [
@@ -141,16 +149,6 @@
    },
    "success": true,
    "type": "run_verification"
-  },
-  {
-   "context": "version unspecified",
-   "skill_verified": "calc-conventions"
-  },
-  {
-   "rules": [
-    "Name helpers with a verb."
-   ],
-   "rules_verified": "/skills/calc-conventions"
   }
  ],
  "worktree_changes": {

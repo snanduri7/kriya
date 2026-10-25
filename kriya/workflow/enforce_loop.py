@@ -3557,6 +3557,17 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         aggregated["contract_registry"] = committed_contract_registry
         if terminal_observability_errors:
             aggregated["observability_errors"] = terminal_observability_errors
+        # P-B: the skills the subtasks' passing Runtime Verification earned (held on the run's shared engine) are persisted
+        # only now - after the terminal gates, the workspace commit and every identity-keyed write above - because
+        # persisting commits into the git work tree holding the skill, which would have moved the repository under every
+        # gate still verifying the candidate. Nothing is persisted for a run whose candidate was not committed; a
+        # persistence failure is reported with the other post-commit errors and never rewrites the verification result.
+        shared_skill_engine = legacy_kwargs.get("skill_engine_override")
+        if shared_skill_engine is not None:
+            if workspace_commit_completed:
+                post_commit_persistence_errors.extend(shared_skill_engine.apply_held_verifications())
+            else:
+                shared_skill_engine.discard_held_verifications()
         if post_commit_persistence_errors:
             aggregated["post_commit_persistence_errors"] = post_commit_persistence_errors
         if enforce_resume_decision is not None:

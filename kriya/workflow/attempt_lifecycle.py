@@ -133,6 +133,7 @@ def begin_attempt(state: RunState, attempt_ctx: Any) -> None:
     theoretical one. Resetting here, before run_attempt() is even called, guarantees no exception path can skip it."""
     state.pre_approval_review = None
     state.verified_candidate_binding = None
+    state.pending_skill_verifications.clear()   # P-B: a promotion earned by a superseded candidate is not this candidate's
     attempt_ctx.deferred_executing_gates = None
     attempt_ctx.post_source_review_guard = None
 
