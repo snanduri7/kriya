@@ -10,12 +10,11 @@ Two execution-view forms, one invariant - *containment's ``.git`` transport must
 A. normal verification: ``origin -> exact-bound gate view -> OCI workspace``. ``_open_gate_view`` used to return None whenever execution was contained,
    so the OCI workspace WAS the shared worktree (the first wrong decision). The mount target exists only inside the disposable view.
 B. a Kriya-created disposable execution copy made without ``.git`` (the Java acceptance export, the authority-bundle scratch, the named-test base
-   export) is its own execution view; its non-Git classification is fixed at construction. Only these - and a gate view and a tooling directory -
+   export) is its own execution view; its CREATOR declares it (``declare_execution_copy``) and its non-Git classification is fixed there. Only these - and a gate view and a tooling directory -
    may be given a ``.git`` mount target; any other tree is a typed refusal, and nothing is created in it.
 """
 from __future__ import annotations
 
-import ast
 import asyncio
 import os
 import shutil
@@ -68,7 +67,8 @@ def test_an_execution_copy_stays_non_git_after_containment_prepared_its_git_targ
     origin = _repo(tmp_path)
     copy = _copy_without_git(tmp_path, origin)
     origin_before = _snapshot(origin)
-    validator = PolymorphicValidator(str(copy), original_workspace_path=str(origin), autonomy_cfg=_contained(), execution_copy=True)
+    validator = PolymorphicValidator(str(copy), original_workspace_path=str(origin), autonomy_cfg=_contained())
+    validator.declare_execution_copy(str(copy))                                 # what the CREATOR of the copy does (S3 creator provenance)
 
     first, _backend = validator.build_containment_profile_and_backend()       # the first contained gate
     assert first.git_metadata is not None and first.git_metadata.base_revision == _head(origin)
@@ -98,7 +98,8 @@ def test_the_declaration_pins_only_a_tree_that_was_not_a_work_tree_when_the_vali
     origin = _repo(tmp_path)
     git_tree = tmp_path / "already-git"
     shutil.copytree(origin, git_tree)
-    declared_on_a_work_tree = PolymorphicValidator(str(git_tree), original_workspace_path=str(origin), autonomy_cfg=_contained(), execution_copy=True)
+    declared_on_a_work_tree = PolymorphicValidator(str(git_tree), original_workspace_path=str(origin), autonomy_cfg=_contained())
+    declared_on_a_work_tree.declare_execution_copy(str(git_tree))
     assert declared_on_a_work_tree._pinned_non_git is False and declared_on_a_work_tree._owned_trees == set()
     assert PolymorphicValidator(str(git_tree))._pinned_non_git is False
 
@@ -126,7 +127,8 @@ def test_a_tree_with_its_own_git_is_not_touched_by_the_target_preparation(tmp_pa
 def test_the_non_contained_validator_builds_no_profile_and_prepares_nothing(tmp_path):
     origin = _repo(tmp_path)
     copy = _copy_without_git(tmp_path, origin)
-    validator = PolymorphicValidator(str(copy), original_workspace_path=str(origin), autonomy_cfg=AutonomyConfig(), execution_copy=True)
+    validator = PolymorphicValidator(str(copy), original_workspace_path=str(origin), autonomy_cfg=AutonomyConfig())
+    validator.declare_execution_copy(str(copy))
     assert validator.build_containment_profile_and_backend() == (None, None) and not (copy / ".git").exists()
 
 
@@ -203,20 +205,10 @@ def test_no_venv_mount_without_a_venv_or_outside_a_view(tmp_path):
 
 # ----------------------------------------------------------------- the permission cannot spread silently
 
-def test_only_the_three_kriya_created_copy_factories_declare_an_execution_copy():
-    sites = []
-    for path in sorted((REPO_ROOT / "kriya").rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and any(keyword.arg == "execution_copy" for keyword in node.keywords):
-                owner = node
-                while owner in parents and not isinstance(owner, ast.FunctionDef):
-                    owner = parents[owner]
-                sites.append((path.relative_to(REPO_ROOT).as_posix(), owner.name if isinstance(owner, ast.FunctionDef) else "<module>"))
-    assert sorted(sites) == [("kriya/workflow/requirement_closers.py", "base_validator"),
-                     ("kriya/workflow/requirement_closers.py", "export_validator"),
-                     ("kriya/workflow/requirement_closers.py", "validator_for")], sites
+def test_no_downstream_factory_can_declare_an_execution_copy_because_the_constructor_no_longer_takes_one(tmp_path):
+    """The declaration belongs to the CREATOR of the copy (tests/architecture/test_execution_copy_creators.py pins the creators); a factory has no way to make it."""
+    with pytest.raises(TypeError):
+        PolymorphicValidator(str(tmp_path), execution_copy=True)    # pylint: disable=unexpected-keyword-arg
 
 
 # ----------------------------------------------------------------- the same, through the REAL OCI runtime
@@ -239,7 +231,8 @@ def test_real_oci_two_gates_on_an_execution_copy_and_a_gate_in_a_view_never_put_
     copy = _copy_without_git(tmp_path, origin)
     with monkeypatch.context() as scoped:  # only the copy: the origin's own view legitimately asks Git for its bound set
         scoped.setattr(gate_view, "visible_repository_paths", lambda *_a, **_k: pytest.fail("the execution copy was asked for its Git bound set"))
-        on_copy = PolymorphicValidator(str(copy), original_workspace_path=str(origin), autonomy_cfg=_contained(), execution_copy=True)
+        on_copy = PolymorphicValidator(str(copy), original_workspace_path=str(origin), autonomy_cfg=_contained())
+        on_copy.declare_execution_copy(str(copy))
         answers = []
         for _gate in range(2):
             result = on_copy._run_cmd_with_timeout(["git", "rev-parse", "HEAD"], cwd=str(copy))
@@ -284,11 +277,12 @@ def test_the_authority_bundle_copy_is_removed_on_every_path(tmp_path, script):
 # ----------------------------------------------------------------- the same, for the Java acceptance copy and the named-test base export
 
 class _CopyProbe(PolymorphicValidator):
-    """The REAL validator for a Kriya-created execution copy (declared, contained): what it runs is scripted, but every gate first builds the
-    REAL containment profile, which is what makes Kriya create the ``.git`` mount target in the copy. It records what existed at that moment."""
+    """The REAL validator a production factory returns for a Kriya-created execution copy (contained). It is built EXACTLY as the production factories build it -
+    it declares nothing about the tree: the CREATOR of the copy (run_java_acceptance, run_authority_bundle, judge_named_tests) must. What it runs is scripted, but
+    every gate first builds the REAL containment profile, which is what makes Kriya create the ``.git`` mount target in the copy. It records what existed then."""
 
     def __init__(self, root, *, origin, script, seen):
-        super().__init__(root, original_workspace_path=str(origin), autonomy_cfg=_contained(), execution_copy=True)
+        super().__init__(root, original_workspace_path=str(origin), autonomy_cfg=_contained())
         self._script, self._seen = script, seen
 
     def _contained_gate(self, name):

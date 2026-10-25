@@ -466,20 +466,17 @@ class PolymorphicValidator:
         java_home_override: Optional[str] = None,
         authorized_dependency_removals: Optional[Iterable[str]] = None,
         toolchain_declaration_mutable: bool = False,
-        execution_copy: bool = False,
     ) -> None:
         self.workspace_path = os.path.abspath(workspace_path)
         self.original_workspace_path = os.path.abspath(original_workspace_path) if original_workspace_path else None
         # D2 S3: the trees THIS validator's executions may prepare a Git-metadata mount target in (realpaths): a gate view, a Kriya-created
-        # tooling directory, and ``execution_copy`` - a disposable copy its creator made WITHOUT ``.git`` and removes itself (the Java acceptance
+        # tooling directory, and an execution copy - a disposable copy its CREATOR made WITHOUT ``.git`` and removes itself (the Java acceptance
         # export, the authority-bundle scratch, the named-test base export). A canonical, original, candidate or authority-bearing tree is never
-        # in this set. For an execution copy the non-Git classification is decided HERE, once: containment's own ``.git`` mount target must
-        # never turn it into a Git work tree for a later gate (``_open_gate_view``).
+        # in this set. An execution copy enters it only through ``declare_execution_copy``, called by the component that created the copy (never
+        # by a downstream factory, never inferred from a path): its non-Git classification is decided there, once - containment's own ``.git``
+        # mount target must never turn it into a Git work tree for a later gate (``_open_gate_view``).
         self._owned_trees: Set[str] = set()
         self._pinned_non_git = False
-        if execution_copy and not is_git_work_tree(self.workspace_path):
-            self._pinned_non_git = True
-            self._owned_trees.add(os.path.realpath(self.workspace_path))
         self.autonomy_cfg = autonomy_cfg or AutonomyConfig()
         self.stack = self._detect_stack()
         self.toolchain_identity = None
@@ -1252,6 +1249,23 @@ class PolymorphicValidator:
             )
             if self.external_execution().contained else None
         )
+
+    def declare_execution_copy(self, created_path: str) -> None:
+        """The CREATOR of a Kriya-owned, disposable, git-less copy of a project declares it here, on the validator it built over that copy.
+
+        ``created_path`` is the copy the caller created; it must be this validator's own tree (a factory that returned a validator over anything else is a
+        programming error, not a declaration). Never accepted for the run's original/canonical workspace. A copy that is already a Git work tree needs
+        nothing (there is no classification to pin). After this, the tree may be given a ``.git`` mount target by containment; every other git-less tree
+        is still refused (``GIT_METADATA_TARGET_NOT_OWNED``)."""
+        own = os.path.realpath(self.workspace_path)
+        if os.path.realpath(created_path) != own:
+            raise ValueError(f"declare_execution_copy: {created_path!r} is not this validator's tree ({self.workspace_path!r})")
+        if self.original_workspace_path is not None and os.path.realpath(self.original_workspace_path) == own:
+            raise ValueError("declare_execution_copy: the run's original workspace is never an execution copy")
+        if is_git_work_tree(self.workspace_path):
+            return
+        self._pinned_non_git = True
+        self._owned_trees.add(own)
 
     def external_execution(self) -> ExternalExecutionDecision:
         """The canonical decision (kriya/tools/containment.py) for this validator's external workloads - the ONE answer every containment-dependent

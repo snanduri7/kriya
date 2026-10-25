@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 from kriya.tools.sandbox import build_restricted_env, resource_plan
 
@@ -595,6 +595,16 @@ def require_isolating_backend(subject: str, backend: Optional[ContainmentBackend
     decision = ExternalExecutionDecision(
         subject=subject, contained=True, backend_name=str(getattr(backend, "name", "")), reason_code=CONTAINMENT_REQUIRED)
     return decision.require_isolating(backend)
+
+
+def declare_execution_copy(validator: Any, created_path: str) -> None:
+    """What the CREATOR of a Kriya-owned, disposable, git-less execution copy calls on the validator its factory returned for that copy (D2 S3, creator provenance):
+    only the component that made the copy may declare it, never a downstream factory and never a path convention. A factory may return a stand-in that executes
+    nothing (it has no ``declare_execution_copy``): there is nothing to declare for it; a real ``PolymorphicValidator`` always declares (and refuses a tree that is not its
+    own, or the run's original workspace)."""
+    declare = getattr(validator, "declare_execution_copy", None)
+    if declare is not None:
+        declare(created_path)
 
 
 def decide_external_execution(autonomy: object, *, subject: str) -> ExternalExecutionDecision:

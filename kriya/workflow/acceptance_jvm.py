@@ -57,6 +57,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set,
 from kriya.config.environment import expand_user
 from kriya.config.environment import state_dir as environment_state_dir
 from kriya.tools import test_execution
+from kriya.tools.containment import declare_execution_copy
 
 JVM_ACCEPTANCE_CONTRACT_VERSION = 1
 JVM_RUNNER = "maven"  # the legacy default; ``detect_jvm_runner`` decides per project
@@ -320,6 +321,7 @@ def run_java_acceptance(
         run.candidate_digest = _main_digest(export)
         run.candidate_classes = sorted(_main_classes(export))
         validator = validator_factory(export)
+        declare_execution_copy(validator, export)       # D2 S3 (creator provenance): THIS function made the git-less copy, so it, not the factory, declares it
         if getattr(validator, "stack", None) != "java":
             run.refusal = AcceptanceError("ACCEPTANCE_RUNNER_UNSUPPORTED",
                                           f"not a JVM project (stack: {getattr(validator, 'stack', None)})")

@@ -75,6 +75,7 @@ from kriya.core.tomlcompat import tomllib
 from kriya.platform import git_argv
 from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
 from kriya.tools import test_execution
+from kriya.tools.containment import declare_execution_copy
 
 NAMED_TEST_ORACLE_VERSION = 1
 CLOSURE_METHOD = "named_test_oracle"
@@ -550,6 +551,7 @@ def judge_named_tests(
         try:
             export_base(base, export)
             base_check = base_validator(export)
+            declare_execution_copy(base_check, export)  # D2 S3 (creator provenance): THIS function made the git-less base export, so it, not the factory, declares it
             base_runner = base_check._test_runner()
             base_result = base_check.run_tests(target_test=list(named)) if base_runner == runner else None
         except RepositoryContentFilterRefused:

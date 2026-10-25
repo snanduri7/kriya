@@ -52,7 +52,12 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from kriya.tools.containment import ContainmentSetupError, NetworkAuthority, decide_external_execution
+from kriya.tools.containment import (
+    ContainmentSetupError,
+    NetworkAuthority,
+    decide_external_execution,
+    declare_execution_copy,
+)
 from kriya.workflow.contract_compilation import (
     AUTHORITY_EXTERNAL_COMMAND,
     VISIBILITY_HIDDEN,
@@ -450,6 +455,7 @@ def run_authority_bundle(
         run.candidate_digest = _tree_digest(export)
         try:
             validator = validator_factory(export)
+            declare_execution_copy(validator, export)   # D2 S3 (creator provenance): THIS function made the git-less copy, so it, not the factory, declares it
         except ContainmentSetupError as error:
             run.reason_code, run.reason = AUTHORITY_EXECUTION_UNAVAILABLE, f"containment refused: {error}"
             return run
