@@ -126,11 +126,13 @@ INVENTORY: Dict[Tuple[str, str], Site] = {
         "S4: the finite-command caller ran mvn / the project's ./mvnw on the HOST even under mandatory containment (MEASURED 2026-10-25: a project ./mvnw executed on the host); now a contained "
         "caller passes contained_build (PolymorphicValidator.contained_maven_build, a gate), the wrapper is never run, and the host path is unchanged. The managed-service caller was already contained (profile)"),
     ("kriya/tools/service_runtime.py", "run_managed_service_verification"): Site(
-        WORKLOAD, "the managed service command (model-chosen), and its artifact build", "yes", "the validator workspace",
-        "host: " + HOST_ALL + " (spec.env, no resource plan: the host-mode policy, unchanged); contained: " + OCI_NO_MASK,
+        WORKLOAD, "the managed service command (model-chosen), and its artifact build", "yes", "the exact-bound view of the candidate (S4.1)",
+        "host (legacy HOST_EXECUTION_PERMITTED only): " + HOST_ALL + " (spec.env, no resource plan); contained: " + OCI_NO_MASK,
         "its one production caller _execute_managed_service_verification (validator.build_containment_profile_and_backend)", "UNTRUSTED_EXECUTION", ("S4",),
-        "S4: classified, no code change: the launch and its artifact build take the caller's profile (None only when the validator's decision is not contained). "
-        "OBSERVED, not S4: the service runs on the candidate worktree, not in a gate view (OI-142 is not extended to managed services), and its contained `mvn package` has no registry acquisition"),
+        "S4.1: the whole lifecycle (build, launch, readiness, probes, teardown, output collection) runs in ONE exact-bound view opened by its caller "
+        "_execute_managed_service_verification; the profile is the validator's (None only when the canonical decision is not contained) and a contained build takes "
+        "contained_maven_build (registry-scoped acquisition). Host-mode environment inheritance is the legacy HOST_EXECUTION_PERMITTED state, unreachable under any mandatory policy "
+        "(tests/test_s4_1_managed_service_view.py)"),
     ("kriya/tools/service_runtime.py", "_check_readiness_via_exec"): Site(
         BACKEND, "docker exec -i <kriya-oci container> bash -c <fixed readiness script>", "no", "none (the docker CLI; the script runs in the container)", NONE,
         "OCIContainmentBackend (PreparedContainment.exec_target)", "TRUSTED_KRIYA_INFRASTRUCTURE", ("EXEMPT",),

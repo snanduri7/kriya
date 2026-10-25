@@ -60,7 +60,7 @@
     true
    ]
   ],
-  "validator_tree_bound": false
+  "validator_tree_bound": true
  },
  "terminal_path": "managed_service routed to the managed-service verification: PROBE_PASSED",
  "trace": [

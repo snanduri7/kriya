@@ -47,6 +47,7 @@ from kriya.tools.dependency_execution import (
     MAVEN_VALIDATE_NO_VERDICT_CODES as MAVEN_VALIDATE_NO_VERDICT_CODES,  # re-exported: the gate words these codes (kriya/workflow imports this module, not dependency_execution)
 )
 from kriya.tools.gate_view import (
+    GATE_VIEW_PATH_CONFUSION,
     GATE_VIEW_UNAVAILABLE,
     GateView,
     GateViewError,
@@ -1429,8 +1430,7 @@ class PolymorphicValidator:
         dependency_cache_path: Optional[str] = None, dependency_cache_writable: bool = False,
         acquisition: bool = False, workspace_path: Optional[str] = None, venv_writable: bool = False,
     ) -> Dict[str, Any]:
-        if self._gate_view is not None:
-            guard_against_origin(self._gate_view, cmd, cwd)
+        self.guard_command_against_view(cmd, cwd)
         self._audit_run_command(cmd, cwd)
         self._register_gate_output(cmd, cwd)
         profile, backend = self.build_containment_profile_and_backend(
@@ -2662,6 +2662,23 @@ class PolymorphicValidator:
                 "output": (f"{self.RUNTIME_PREREQUISITE_FAILED}: the application could not be built from the "
                            f"current source before runtime verification ({build}); nothing was run.\n\n"
                            f"{prepared['output']}")}, f"{build} (current source): FAILED"
+
+    def guard_command_against_view(self, argv: List[str], cwd: str) -> None:
+        """No silent path back to the shared worktree (kriya/tools/gate_view.py::guard_against_origin): while a view is open, a command - or the
+        working directory - naming the origin tree is refused, typed, whoever launches it (a gate's command, or a managed service's)."""
+        if self._gate_view is not None:
+            guard_against_origin(self._gate_view, argv, cwd)
+
+    def view_command_refusal(self, argv: List[str], cwd: str) -> Optional[str]:
+        """The refusal text when a command for the open view names the origin tree (``guard_command_against_view`` as a value, for a caller that
+        reports instead of raising); None when it does not. Any other view failure still raises."""
+        try:
+            self.guard_command_against_view(argv, cwd)
+        except GateViewError as refusal:
+            if refusal.reason_code != GATE_VIEW_PATH_CONFUSION:
+                raise
+            return str(refusal)
+        return None
 
     @_verification_gate(RUNTIME_VERIFICATION_GATE)
     def contained_maven_build(self, argv: List[str], timeout: int) -> Dict[str, Any]:

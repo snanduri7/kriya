@@ -46,7 +46,7 @@ from enum import Enum
 from socket import create_connection
 from typing import Callable, Dict, List, Optional, Tuple
 
-from kriya.tools.containment import ContainmentBackend, ContainmentProfile
+from kriya.tools.containment import ContainmentBackend, ContainmentProfile, ContainmentSetupError
 from kriya.tools.process import ManagedProcess, ProcessController, ProcessResult
 
 
@@ -515,6 +515,8 @@ _JAR_LAUNCH_FLAG = "-jar"
 _CLASSPATH_FLAGS = ("-cp", "-classpath", "--class-path")
 _MAVEN_PACKAGE_TIMEOUT_SECONDS = 300
 _MAVEN_PACKAGE_ARGS = ["package", "-DskipTests"]
+# the validator's marker (PolymorphicValidator._MAVEN_ACQUISITION_INCOMPLETE_MARKER) for "offline execution still lacked what acquisition could fetch"
+_ACQUISITION_INCOMPLETE_MARKER = "MAVEN_ACQUISITION_INCOMPLETE:"
 
 
 def _detect_required_artifact(service_command: List[str], cwd: str) -> Optional[str]:
@@ -719,16 +721,24 @@ def _prepare_required_artifact(
                 build_command, cwd=cwd, timeout=_MAVEN_PACKAGE_TIMEOUT_SECONDS, env=env, preexec_fn=preexec_fn,
                 containment_profile=containment_profile, containment_backend=containment_backend,
             )
+    except ContainmentSetupError:
+        # D2 S4.1 (SEC-002/SEC-006): a containment or registry-acquisition SETUP failure is the distinct failure it is - never folded into "the
+        # build could not be invoked", which would hide the real cause from the caller's containment_setup_failed classification.
+        raise
     except Exception as e:
         return _PreparationOutcome(
             ServiceVerificationOutcomeKind.PREPARATION_FAILED,
             f"failed to invoke preparation command {build_command!r}: {e}", command=build_command,
         )
     if result.returncode != 0 or result.timeout:
+        incomplete = (
+            f" [{_ACQUISITION_INCOMPLETE_MARKER} the dependencies the build needs could not be acquired under the registry policy]"
+            if _ACQUISITION_INCOMPLETE_MARKER in result.stderr else ""
+        )
         return _PreparationOutcome(
             ServiceVerificationOutcomeKind.PREPARATION_FAILED,
             f"preparation command {' '.join(build_command)} failed (exit {result.returncode}, "
-            f"timeout={result.timeout})",
+            f"timeout={result.timeout}){incomplete}",
             stdout=result.stdout, stderr=result.stderr, command=build_command, returncode=result.returncode,
             toolchain_identity=result.toolchain_identity,
         )
@@ -750,6 +760,7 @@ def run_managed_service_verification(
     spec: ManagedServiceVerificationSpec, *, controller: Optional[ProcessController] = None,
     containment_profile: Optional[ContainmentProfile] = None,
     containment_backend: Optional[ContainmentBackend] = None,
+    contained_build: Optional[Callable[[List[str], int], Dict[str, object]]] = None,
 ) -> ManagedServiceVerificationResult:
     """The whole start -> readiness -> probe -> evidence -> terminate ->
     cleanup lifecycle, run synchronously (the caller decides concurrency,
@@ -764,6 +775,7 @@ def run_managed_service_verification(
     preparation = _prepare_required_artifact(
         spec.service_command, spec.cwd, controller=controller,
         containment_profile=containment_profile, containment_backend=containment_backend,
+        contained_build=contained_build,
     )
     if preparation.outcome is not None:
         return ManagedServiceVerificationResult(

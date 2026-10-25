@@ -49,6 +49,7 @@ nor any all-import-cycle module.
 spelled ``Any`` (``kriya/workflow/stage_context.py`` says why the state module is not imported; AttemptContext lives in
 attempt.py, OI-46; tests patch the validator class at its source).
 """
+import dataclasses
 import hashlib
 import os
 from dataclasses import dataclass
@@ -1179,16 +1180,29 @@ async def _execute_managed_service_verification(
     )
     pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
     _managed_service_started = deps.time.monotonic()
-    # SEC-001-P6: the SAME containment profile/backend PolymorphicValidator's
-    # own compile/test commands would get (gated by autonomy_cfg.
-    # contained_execution_required, default False/unchanged) - applies only
-    # to the artifact-preparation build step inside
-    # run_managed_service_verification, not the launched service itself
-    # (see service_runtime.py's own docstring on that residual limitation).
-    containment_profile, containment_backend = validator.build_containment_profile_and_backend()
-    result = deps.run_managed_service_verification(
-        spec, containment_profile=containment_profile, containment_backend=containment_backend,
-    )
+    # D2 S4.1 (OI-142): the build, the service, its readiness checks and its probes are ONE verification in ONE exact-bound view of the candidate,
+    # alive from before the build until the process is terminated and its output collected - so an ignored or untracked file in the worktree (a
+    # stale artifact, a planted module, build configuration, a prior run's state) can decide none of it, and what the build produces (target/)
+    # is what the service runs. Contained or not, the SAME containment decision the validator's gates take (build_containment_profile_and_backend,
+    # built for the view): its profile mounts the view, and a contained build takes the validator's contained Maven path (registry-scoped
+    # acquisition), never the host and never the project's ./mvnw.
+    with validator.verification_session(RUNTIME_VERIFICATION_GATE):
+        refusal = validator.view_command_refusal(spec.service_command, validator.workspace_path)
+        if refusal is not None:
+            message = f"MANAGED_SERVICE_CONTRACT_INVALID: {refusal}"
+            deps.logger.warning(message)
+            failure = Failure(
+                type="verification_infrastructure_failure", message=message,
+                raw_output=message, attempt=state.attempt_number,
+            )
+            state.record_gate_outcome(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        containment_profile, containment_backend = validator.build_containment_profile_and_backend()
+        result = deps.run_managed_service_verification(
+            dataclasses.replace(spec, cwd=validator.workspace_path),
+            containment_profile=containment_profile, containment_backend=containment_backend,
+            contained_build=validator.contained_maven_build if containment_profile is not None else None,
+        )
     # R1 Deliverable 5 - observational only, coarse phase only: prepare/
     # launch/readiness/probe/shutdown are not separately timed here because
     # they are not separable from OUTSIDE run_managed_service_verification()
@@ -1481,6 +1495,7 @@ async def _execute_runtime_verification_directly(
         state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
     if execution_mode == "managed_service":
+        validator.tree_binding = deps._bind_verification_tree(state, ctx)  # D2 S4.1: the service is verified against the bound tree, like every other gate here
         await deps._execute_managed_service_verification(state, ctx, judgment, known_files, validator)
         return
     if deterministic_sequence_kind(judgment.get("run_commands") or []) == "build":

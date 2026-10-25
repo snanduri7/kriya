@@ -34,7 +34,7 @@
   },
   {
    "contained": false,
-   "cwd": "<workspace:1>/.kriya/worktree",
+   "cwd": "<state_dir:1>/gate-views/<view>",
    "start_managed": [
     "<python:1>",
     "main.py"

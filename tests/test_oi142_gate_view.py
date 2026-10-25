@@ -1152,18 +1152,21 @@ def test_the_golden_normalizer_keeps_a_view_distinct_from_the_worktree():
     assert "gate-views" in view and "worktree" in worktree
 
 
-def test_every_application_and_maven_spawn_in_the_engine_goldens_runs_in_a_view_and_the_only_worktree_spawn_is_the_named_residual():
+def test_every_application_maven_and_managed_service_spawn_in_the_engine_goldens_runs_in_a_view_and_none_runs_in_the_worktree():
+    """The managed-service launch was the one named residual (outside the validator seam, on the worktree); D2 S4.1 closed it: it runs in the view too."""
     import json
 
     golden = Path(__file__).resolve().parent / "golden" / "runtime"
-    worktree_rows = []
+    view_rows, worktree_rows = [], []
     for path in sorted(golden.glob("engine_*.json")):
         for row in json.loads(path.read_text())["trace"]:
-            if row.get("spawn") in ("app", "maven"):
+            if row.get("spawn") in ("app", "maven") or "start_managed" in row:
                 assert row["cwd"] == "<state_dir:1>/gate-views/<view>", (path.name, row["cwd"])
+                view_rows.append((path.name, "start_managed" in row))
             elif "cwd" in row and row["cwd"] == "<workspace:1>/.kriya/worktree":
                 worktree_rows.append((path.name, "start_managed" in row))
-    assert worktree_rows == [("engine_managed_service_approved.json", True)]  # managed-service launch: outside the validator seam (residual)
+    assert worktree_rows == []
+    assert ("engine_managed_service_approved.json", True) in view_rows, "the managed-service launch is in the goldens, in a view"
 
 
 # --- a view's directory name is stable per tree (failure text names it; retry detection compares failures across attempts) ----------------
