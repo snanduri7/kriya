@@ -170,5 +170,7 @@ def test_inventory_counts_the_design_relies_on():
     # REQUIRED_RUNTIME_VERIFICATION_DECLINED; attempt.assert_candidate_unchanged_since_source_review, CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW)
     # and the rest of the movement is the extraction of the executing gates out of run_attempt (_run_executing_candidate_gates,
     # _run_pom_validation_gate, _approve_and_execute_runtime_verification) - every site still records through state.record_gate_outcome.
-    assert records == 94, records
+    # D2 rebuild S4.1: one more typed stop (runtime_verification: a managed-service command naming the shared worktree is refused
+    # MANAGED_SERVICE_CONTRACT_INVALID, as a verification_infrastructure_failure, before the service runs).
+    assert records == 95, records
     assert os.path.exists(ROOT / "kriya/workflow/context_budget.py")

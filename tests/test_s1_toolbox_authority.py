@@ -686,6 +686,7 @@ TOOL002_SCENARIOS_IN_HITL = (
 )
 
 
+@pytest.mark.usefixtures("mcp_standin")  # the scenario bodies start MCP servers under the test-only containment stand-in (D2 rebuild S5)
 @pytest.mark.parametrize("scenario", TOOL002_SCENARIOS_IN_HITL)
 def test_the_tool002_mcp_scenarios_hold_in_human_in_the_loop(tmp_path, monkeypatch, scenario):
     import test_tool001_autonomous_tool_execution as tool001

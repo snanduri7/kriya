@@ -881,7 +881,9 @@ _AUDITED_WRITE_SITES = {
     "kriya/memory/memory.py": 2, "kriya/metrics/adjudication.py": 2, "kriya/metrics/report.py": 2,
     "kriya/policy/approved_sources.py": 1, "kriya/production_doctor.py": 4, "kriya/skills/skill.py": 4,
     "kriya/static_analysis/scope.py": 1, "kriya/static_analysis/service.py": 2, "kriya/static_analysis/waivers.py": 2,
-    "kriya/tools/containment_oci.py": 0, "kriya/tools/knowledge.py": 1, "kriya/tools/lsp.py": 3,
+    # D2 rebuild S1: removal of Kriya's OWN scratch directories (the empty authority-mask mount sources it created under the
+    # system temp root) when a contained run ends - never a workspace or repository path.
+    "kriya/tools/containment_oci.py": 1, "kriya/tools/knowledge.py": 1, "kriya/tools/lsp.py": 3,
     "kriya/tools/test_execution.py": 2, "kriya/workflow/acceptance_oracle.py": 3,
     # GRADLE-WRAPPER-CONTAINMENT-001: the host-cache seed copies a verified Gradle distribution into the
     # Kriya-managed dependency cache under the state root (never a source tree) and writes its completion marker.
