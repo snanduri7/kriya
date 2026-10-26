@@ -61,6 +61,7 @@ INVENTORY: Dict[Tuple[str, str], Site] = {
     # --- the OCI backend's own docker CLI use -----------------------------------------------------------------------------------
     ("kriya/tools/containment_oci.py", "inspect_local_image"): _DOCKER_CLI,
     ("kriya/tools/containment_oci.py", "_inspect_once"): _DOCKER_CLI,
+    ("kriya/tools/containment_oci.py", "_confirm_absence_with_listing"): _DOCKER_CLI,       # IMAGE-INSPECT-FALSE-UNAVAILABLE-001: `docker image ls --no-trunc`, fixed argv
     ("kriya/tools/containment_oci.py", "_attest_toolchain_image"): _DOCKER_CLI,
     ("kriya/tools/containment_oci.py", "_observed_version"): _DOCKER_FIXED_IMAGE,
     ("kriya/tools/containment_oci.py", "_ensure_image"): _DOCKER_FIXED_IMAGE,

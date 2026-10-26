@@ -58,9 +58,10 @@ def test_a_present_image_is_present_with_one_inspect(monkeypatch):
 
 
 def test_a_missing_image_is_absent_only_after_the_running_engine_says_so(monkeypatch):
-    result, docker = _inspect(monkeypatch, (1, "", ENGINE_NOT_FOUND), (0, "", ""), (1, "", ENGINE_NOT_FOUND))
+    # IMAGE-INSPECT-FALSE-UNAVAILABLE-001: a still-not-found answer is confirmed by the exact-reference listing (the second witness) before it stands; an empty listing agrees
+    result, docker = _inspect(monkeypatch, (1, "", ENGINE_NOT_FOUND), (0, "", ""), (1, "", ENGINE_NOT_FOUND), (0, "", ""))
     assert result.status is ImageInspectStatus.IMAGE_NOT_FOUND and result.digest is None
-    assert docker.calls == [["image", "inspect"], ["image", "ls"], ["image", "inspect"]]
+    assert docker.calls == [["image", "inspect"], ["image", "ls"], ["image", "inspect"], ["image", "ls"]]
     assert result.describe() == f"image {IMAGE!r} is not present locally"
     assert result.remediation() == f"Run: docker pull {IMAGE}"
 
@@ -74,7 +75,7 @@ def test_a_cached_404_for_a_present_image_is_rechecked_and_found(monkeypatch):
 
 
 def test_a_cached_404_that_persists_is_never_reported_as_absence(monkeypatch):
-    result, _ = _inspect(monkeypatch, (1, "", CACHED_NOT_FOUND), (0, "", ""), (1, "", CACHED_NOT_FOUND))
+    result, _ = _inspect(monkeypatch, (1, "", CACHED_NOT_FOUND), (0, "", ""), (1, "", CACHED_NOT_FOUND), (0, "", ""))   # ...and the listing names no such image either
     assert result.status is ImageInspectStatus.DAEMON_UNAVAILABLE
     assert "not present" not in result.describe() and "docker pull" not in result.remediation()
     assert result.to_evidence()["stderr"] == CACHED_NOT_FOUND

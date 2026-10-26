@@ -417,6 +417,9 @@ class ImageInspectStatus(str, Enum):
     CLIENT_ERROR = "CLIENT_ERROR"
     TIMEOUT = "TIMEOUT"
     UNKNOWN_INSPECT_ERROR = "UNKNOWN_INSPECT_ERROR"
+    # IMAGE-INSPECT-FALSE-UNAVAILABLE-001: inspect-by-reference said the image does not exist while Docker's own image listing names it (or names it ambiguously / unreadably, or
+    # the listed immutable id then could not be inspected). The two witnesses disagree: the image may exist, so it is neither "absent" (no pull) nor attested.
+    IMAGE_WITNESS_CONFLICT = "IMAGE_WITNESS_CONFLICT"
 
 
 # (stderr fragment, status), checked in order. The running engine's own
@@ -443,6 +446,8 @@ _INSPECT_REMEDIATION = {
                                      "reference, then re-run.",
     ImageInspectStatus.TIMEOUT: "`docker image inspect` timed out; check the Docker daemon's health, then re-run.",
     ImageInspectStatus.UNKNOWN_INSPECT_ERROR: "Inspect the recorded docker stderr, then re-run.",
+    ImageInspectStatus.IMAGE_WITNESS_CONFLICT: "`docker image inspect <reference>` and `docker image ls --no-trunc` disagree about this image; Kriya does not pull or "
+                                               "rebuild while it may exist locally. Compare the two outputs, restart Docker if they keep disagreeing, then re-run.",
 }
 
 
@@ -456,6 +461,8 @@ class ImageInspection:
     # The first answer when it was re-checked against the running engine
     # (a not-found is never accepted without that check).
     first_answer: Optional[str] = None
+    # The presence witness besides inspect-by-reference, when it was consulted: Docker's exact image listing and what it named.
+    second_witness: Optional[str] = None
 
     @property
     def present(self) -> bool:
@@ -479,6 +486,8 @@ class ImageInspection:
                     "exit_code": self.exit_code, "stderr": self.stderr}
         if self.first_answer is not None:
             evidence["first_answer"] = self.first_answer
+        if self.second_witness is not None:
+            evidence["second_witness"] = self.second_witness
         return evidence
 
 
@@ -496,8 +505,13 @@ def inspect_local_image(docker_path: str, image: str, *, timeout: float = 30) ->
     A not-found answer (the engine's, or Docker Desktop's cached one while
     its engine VM is stopped) is re-checked once against the running engine
     before it is accepted: ``docker image ls`` is served by the engine and
-    wakes a stopped VM (MEASURED), then the image is inspected again. Only
-    that second answer can establish IMAGE_NOT_FOUND."""
+    wakes a stopped VM (MEASURED), then the image is inspected again.
+
+    IMAGE-INSPECT-FALSE-UNAVAILABLE-001 (MEASURED, Docker Desktop 27.5.1): inspect-by-reference can keep answering "No such image" for an image
+    Docker's own listing shows, and ``docker image inspect <immutable id>`` then succeeds. So a still-not-found answer is not proof of absence by
+    itself: it is confirmed against the EXACT-reference image listing (``_confirm_absence_with_listing``). Zero listed matches leave the answer as
+    it was; exactly one valid full image id is inspected BY THAT ID (the same immutable identity the reference would have given); anything
+    else is IMAGE_WITNESS_CONFLICT. A healthy inspect never reaches the listing."""
     first = _inspect_once(docker_path, image, timeout)
     cached_answer = _CACHED_ENGINE_NOT_FOUND in first.stderr
     if first.status is not ImageInspectStatus.IMAGE_NOT_FOUND and not cached_answer:
@@ -508,8 +522,82 @@ def inspect_local_image(docker_path: str, image: str, *, timeout: float = 30) ->
     except (OSError, subprocess.SubprocessError):
         pass  # the re-inspect below reports whatever state the daemon is in
     second = _inspect_once(docker_path, image, timeout)
-    return ImageInspection(second.image, second.status, second.digest, second.exit_code, second.stderr,
-                           first_answer=f"{first.status.value}: {first.stderr}")
+    answer = ImageInspection(second.image, second.status, second.digest, second.exit_code, second.stderr,
+                             first_answer=f"{first.status.value}: {first.stderr}")
+    if _reports_no_such_image(answer):
+        return _confirm_absence_with_listing(docker_path, image, answer, timeout)
+    return answer
+
+
+_FULL_IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
+_LISTING_FORMAT = "{{.Repository}}\t{{.Tag}}\t{{.ID}}"
+
+
+def _reports_no_such_image(inspection: ImageInspection) -> bool:
+    """The recognized absence condition of inspect-by-reference: the engine's plain answer or Docker Desktop's JSON-wrapped one (both say "No such image")."""
+    return (inspection.status in (ImageInspectStatus.IMAGE_NOT_FOUND, ImageInspectStatus.DAEMON_UNAVAILABLE)
+            and "No such image" in inspection.stderr)
+
+
+def _listed_name(image: str) -> Optional[Tuple[str, str]]:
+    """(repository, tag) of a plain ``NAME[:TAG]`` reference exactly as ``docker image ls`` prints it; None for a digest-pinned or otherwise unlistable form."""
+    if not image or "@" in image or any(character.isspace() for character in image):
+        return None
+    head, slash, last = image.rpartition("/")
+    if ":" in last:
+        name, _, tag = last.partition(":")
+        return (head + slash + name, tag) if name and tag else None
+    return image, "latest"
+
+
+def _listed_image_ids(listing: str, repository: str, tag: str) -> Optional[set]:
+    """The distinct full image ids the listing gives to EXACTLY this repository and tag (equality, never substring or prefix); None when the listing is not
+    readable as ``repository<TAB>tag<TAB>id`` lines or an id of a matching line is not a full ``sha256:<64 hex>`` id."""
+    ids = set()
+    for line in listing.splitlines():
+        if not line.strip():
+            continue
+        fields = line.split("\t")
+        if len(fields) != 3:
+            return None
+        if fields[0] == repository and fields[1] == tag:
+            if not _FULL_IMAGE_ID.fullmatch(fields[2]):
+                return None
+            ids.add(fields[2])
+    return ids
+
+
+def _confirm_absence_with_listing(docker_path: str, image: str, answer: ImageInspection, timeout: float) -> ImageInspection:
+    """The second presence witness (see ``inspect_local_image``). ``answer`` is returned unchanged when the listing cannot be consulted or lists no match
+    (both witnesses then agree, or the existing contract stands); a positive listing is verified by inspecting the listed immutable id."""
+    name = _listed_name(image)
+    if name is None:
+        return answer
+    try:
+        listing = subprocess.run([docker_path, "image", "ls", "--no-trunc", "--format", _LISTING_FORMAT],
+                                 capture_output=True, timeout=timeout, text=True)
+    except (OSError, subprocess.SubprocessError):
+        return answer
+    if listing.returncode != 0:
+        return answer
+
+    def conflict(why: str) -> ImageInspection:
+        return ImageInspection(image, ImageInspectStatus.IMAGE_WITNESS_CONFLICT, exit_code=answer.exit_code,
+                               stderr=f"inspect said: {answer.stderr}; {why}"[:500], first_answer=answer.first_answer, second_witness=why[:300])
+
+    ids = _listed_image_ids(listing.stdout or "", *name)
+    if ids is None:
+        return conflict("the image listing is malformed or names a partial image id")
+    if not ids:
+        return answer
+    if len(ids) > 1:
+        return conflict(f"the image listing names {len(ids)} different images for {image!r}: {sorted(ids)}")
+    [image_id] = ids
+    by_id = _inspect_once(docker_path, image_id, timeout)
+    if by_id.present and by_id.digest == image_id:
+        return ImageInspection(image, ImageInspectStatus.PRESENT, digest=image_id, exit_code=0, first_answer=answer.first_answer,
+                               second_witness=f"image ls --no-trunc: {image!r} is {image_id}; inspected by that id")
+    return conflict(f"the image listing names {image_id} for {image!r} but inspecting that id answered {by_id.status.value}: {by_id.stderr}")
 
 
 def _inspect_once(docker_path: str, image: str, timeout: float) -> ImageInspection:
@@ -558,7 +646,10 @@ def _attest_toolchain_image(
     docker_path: str, image: str, identity: ToolchainIdentity, *, allow_pull: bool,
 ) -> ToolchainIdentity:
     """Resolve an immutable image digest and prove its runtime before use."""
-    digest = _inspect_image_digest(docker_path, image)
+    inspection = inspect_local_image(docker_path, image)
+    if inspection.status is ImageInspectStatus.IMAGE_WITNESS_CONFLICT:
+        raise BackendUnavailableError(f"Required toolchain image {image!r} cannot be attested and is not pulled: {inspection.describe()}.")
+    digest = inspection.digest
     if digest is None and allow_pull:
         pulled = subprocess.run(
             [docker_path, "pull", image], capture_output=True, timeout=600, text=True,
@@ -879,11 +970,11 @@ def _ensure_image(docker_path: str, tag: str, dockerfile: str, *, purpose: str) 
     before any container is spawned) - never falls back to running the
     untrusted command in a toolless image or without the firewall
     tooling this image exists to provide."""
-    inspect = subprocess.run(
-        [docker_path, "image", "inspect", tag], capture_output=True, timeout=10,
-    )
-    if inspect.returncode == 0:
+    inspection = inspect_local_image(docker_path, tag, timeout=10)
+    if inspection.present:
         return
+    if inspection.status is ImageInspectStatus.IMAGE_WITNESS_CONFLICT:
+        raise BackendUnavailableError(f"The {purpose} image {tag!r} is not rebuilt: {inspection.describe()}.")
     build = subprocess.run(
         [docker_path, "build", "-q", "-t", tag, "-"],
         input=dockerfile, capture_output=True, timeout=300, text=True,
