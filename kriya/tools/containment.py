@@ -260,6 +260,39 @@ class ContainmentProfile:
         return self.trust_class is not TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE
 
 
+TARGET_NOT_STARTED_MARKER = "KRIYA_TARGET_NOT_STARTED:"
+
+
+@dataclass(frozen=True)
+class FiniteLaunchStage:
+    """REPLAY-CONTAINED-NOT-STARTED-001: the backend-owned fact "did the requested target process actually start?" for a FINITE contained command.
+
+    A container reports a target that cannot be executed through its own exit status (a shell or an image entrypoint answers 126/127), which a target that started and
+    exited 127 shares - so the status proves nothing. The stage is the backend's own launcher: it wraps the target argv, runs after the image entrypoint in the same container (same
+    mounts, working directory and environment), and ``exec``s the target. A launcher that is still alive after its ``exec`` means the exec failed, and only then does it write
+    one nonce-authenticated record (``marker``) to stderr. ``read`` separates that record from the captured stderr: it is never parsed English, and it is never produced by a target
+    that started (the nonce is in the launcher's argv, which the target's exec replaces). Absent record => the target started."""
+
+    prefix: Tuple[str, ...]
+    marker: str
+
+    def wrap(self, command: List[str]) -> List[str]:
+        return [*self.prefix, *command]
+
+    def read(self, stderr: str) -> Tuple[str, bool]:
+        """(stderr without the record, whether the target started). The record is the LAST line the launcher writes, so it must be the final non-empty line."""
+        lines = stderr.split("\n")
+        end = len(lines)
+        while end and not lines[end - 1].strip():
+            end -= 1
+        if not end or lines[end - 1] != self.marker:
+            return stderr, True
+        kept = lines[:end - 1]
+        if kept and not kept[-1].strip():  # the record is written on a line of its own (leading newline)
+            kept.pop()
+        return "\n".join(kept), False
+
+
 @dataclass(frozen=True)
 class PreparedContainment:
     """What a backend hands back to `ProcessController` once a profile is
@@ -319,6 +352,9 @@ class PreparedContainment:
     # enforced (kriya/tools/sandbox.py::ResourcePlan.evidence). None when no
     # limit applies or a container enforces them.
     resources: Optional[Dict[str, object]] = None
+    # REPLAY-CONTAINED-NOT-STARTED-001: the finite-command launch stage (see FiniteLaunchStage). None for a host process, a managed service and an MCP server: only
+    # ProcessController.run()/run_async() apply it.
+    finite_launch: Optional[FiniteLaunchStage] = None
 
 
 class ContainmentBackend(Protocol):

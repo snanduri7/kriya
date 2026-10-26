@@ -63,6 +63,7 @@ import hashlib
 import logging
 import os
 import re
+import secrets
 import shutil
 import stat
 import subprocess
@@ -79,8 +80,10 @@ from kriya.platform.services import platform_services
 from kriya.policy.authority_namespace import AuthorityNamespaceUnsafeError, create_workspace_authority_namespace
 from kriya.policy.protected_authority_paths import WORKSPACE_ANCHOR_RELPATH, WORKSPACE_AUTHORITY_RELPATHS
 from kriya.tools.containment import (
+    TARGET_NOT_STARTED_MARKER,
     BackendUnavailableError,
     ContainmentProfile,
+    FiniteLaunchStage,
     HostWriterIdentityRefused,
     NetworkAuthority,
     PreparedContainment,
@@ -1174,6 +1177,25 @@ def finalize_registry_acquisition_result(result: ProcessResult) -> None:
         logger.info("Registry-scoped acquisition containment steps completed: %s", steps)
 
 
+# REPLAY-CONTAINED-NOT-STARTED-001: the finite-command launch stage (kriya.tools.containment.FiniteLaunchStage). It runs AFTER the image entrypoint (both qualified toolchain entrypoints end
+# `exec "$@"`) and after the registry-scoped setup script's `setpriv`, so it sees the same container, mounts, working directory, environment and identity as the target would; it needs only
+# /bin/sh, which the setup script and every qualified image already require. `exec` replaces the shell, so the EXIT trap can run only when the exec FAILED; it then writes ONE record, on a line of
+# its own, carrying a per-call nonce that the target's exec replaces (a started target cannot forge it), and leaves the shell's own exit status untouched. Neither the exit status nor any
+# message text is evidence of anything here. (`exec "$@"`, not `exec -- "$@"`: dash reads `--` as the command name.)
+_FINITE_LAUNCH_SCRIPT = (
+    "n=$1; shift\n"
+    f"trap 'kriya_rc=$?; printf \"\\n{TARGET_NOT_STARTED_MARKER}%s\\n\" \"$n\" >&2; exit \"$kriya_rc\"' EXIT\n"
+    'exec "$@"\n'
+)
+
+
+def _finite_launch_stage() -> FiniteLaunchStage:
+    nonce = secrets.token_hex(16)
+    return FiniteLaunchStage(
+        prefix=("/bin/sh", "-c", _FINITE_LAUNCH_SCRIPT, "kriya-launch", nonce), marker=f"{TARGET_NOT_STARTED_MARKER}{nonce}",
+    )
+
+
 class OCIContainmentBackend:
     """Real containment via `docker run` - filesystem/network/process/
     resource controls actually enforced by the OCI runtime, not by
@@ -1501,6 +1523,9 @@ class OCIContainmentBackend:
         return PreparedContainment(
             env=None, preexec_fn=None, backend_name=self.name,
             command_prefix=args, cleanup=_cleanup,
+            # A pinned tool image (`image_reference`: Kriya's own semgrep) runs a fixed Kriya-chosen executable, not a project one, and its busybox shell would add PWD/SHLVL to the
+            # environment; a persistent-stdio profile is an MCP server (not a finite command). Neither gets the stage.
+            finite_launch=_finite_launch_stage() if profile.image_reference is None and not profile.persistent_stdio else None,
             # SEC-001-P6 (managed-service containment): lets a caller
             # (service_runtime.py, for a long-lived container started via
             # start_managed()) run a FOLLOW-UP command inside this exact
@@ -1780,6 +1805,7 @@ class OCIContainmentBackend:
             env=None, preexec_fn=None, backend_name=self.name,
             command_prefix=args, cleanup=_cleanup,
             toolchain_identity=resolved_toolchain,
+            finite_launch=_finite_launch_stage(),
         )
 
 

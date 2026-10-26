@@ -30,6 +30,7 @@ from kriya.tools.containment import (
     ContainmentBackend,
     ContainmentProfile,
     ContainmentSetupError,
+    FiniteLaunchStage,
     NetworkAuthority,
     PreparedContainment,
 )
@@ -54,6 +55,9 @@ class ProcessResult:
     # LINUX-JVM-RLIMIT-AS-001: the resource strategy a host process ran
     # under (kriya/tools/sandbox.py::ResourcePlan.evidence).
     resources: Optional[Dict[str, object]] = None
+    # REPLAY-CONTAINED-NOT-STARTED-001: False only when the containment backend reports that the requested target process never started (the exec of the target failed,
+    # kriya.tools.containment.FiniteLaunchStage). ``returncode`` is then the launcher's own exit status and is not evidence of anything.
+    target_started: bool = True
 
     def to_dict(self) -> Dict[str, object]:
         result = {
@@ -73,6 +77,8 @@ class ProcessResult:
             result["egress"] = self.egress
         if self.resources is not None:
             result["resources"] = self.resources
+        if not self.target_started:
+            result["target_started"] = False
         return result
 
 
@@ -306,6 +312,7 @@ class _ResolvedExecution:
     toolchain_identity: Optional[Dict[str, object]] = None
     egress: Optional[Dict[str, object]] = None
     resources: Optional[Dict[str, object]] = None
+    finite_launch: Optional[FiniteLaunchStage] = None
 
 
 def _prepare_env_and_preexec(
@@ -315,6 +322,7 @@ def _prepare_env_and_preexec(
     containment_backend: Optional[ContainmentBackend],
     env: Optional[Dict[str, str]],
     preexec_fn: Optional[Callable[[], None]],
+    finite: bool = False,
 ) -> _ResolvedExecution:
     """The single place `env`/`preexec_fn`/`command` get resolved, for
     every caller of every lifecycle in this module. A caller passes EITHER
@@ -329,7 +337,10 @@ def _prepare_env_and_preexec(
     return a `command_prefix` (e.g. `docker run ...` ahead of the real
     command, for a container backend) - composed onto `command` HERE, the
     one place every caller's actual spawned argv is decided, and a
-    `cleanup` hook the caller must run in `finally` regardless of outcome."""
+    `cleanup` hook the caller must run in `finally` regardless of outcome.
+
+    ``finite`` (``run()``/``run_async()`` only, never ``start_managed()``): a backend's FiniteLaunchStage wraps the target argv, so a target that could not be executed is a
+    backend-reported fact (REPLAY-CONTAINED-NOT-STARTED-001) and not an exit status."""
     if containment_profile is None and containment_backend is None:
         return _ResolvedExecution(env=env, preexec_fn=preexec_fn, command=command)
     if containment_profile is None or containment_backend is None:
@@ -341,13 +352,15 @@ def _prepare_env_and_preexec(
             "Pass either (env, preexec_fn) or (containment_profile, containment_backend), never both."
         )
     prepared: PreparedContainment = containment_backend.prepare(containment_profile, command)
-    effective_command = (list(prepared.command_prefix) + command) if prepared.command_prefix else command
+    launch = prepared.finite_launch if finite else None
+    target = launch.wrap(command) if launch is not None else command
+    effective_command = (list(prepared.command_prefix) + target) if prepared.command_prefix else target
     return _ResolvedExecution(
         env=prepared.env, preexec_fn=prepared.preexec_fn, command=effective_command, cleanup=prepared.cleanup,
         exec_target=prepared.exec_target,
         toolchain_identity=(prepared.toolchain_identity.to_dict() if prepared.toolchain_identity else None),
         egress=egress_evidence_for(containment_profile, containment_backend),
-        resources=prepared.resources,
+        resources=prepared.resources, finite_launch=launch,
     )
 
 
@@ -437,7 +450,7 @@ class ProcessController:
         # just the one that supplies a real payload.
         resolved = _prepare_env_and_preexec(
             command=command, containment_profile=containment_profile, containment_backend=containment_backend,
-            env=env, preexec_fn=preexec_fn,
+            env=env, preexec_fn=preexec_fn, finite=True,
         )
         try:
             process = _spawn_popen(
@@ -468,6 +481,9 @@ class ProcessController:
             # sufficient for a VM-mediated container runtime.
             if resolved.cleanup is not None:
                 resolved.cleanup()
+        target_started = True
+        if resolved.finite_launch is not None and not timed_out:
+            stderr, target_started = resolved.finite_launch.read(stderr or "")
         stdout, stdout_lost = _bounded_tail_counted(stdout or "", self.max_output_chars)
         stderr, stderr_lost = _bounded_tail_counted(stderr or "", self.max_output_chars)
         if timed_out:
@@ -484,7 +500,7 @@ class ProcessController:
             stdout_lost_chars=stdout_lost,
             stderr_lost_chars=stderr_lost,
             toolchain_identity=resolved.toolchain_identity,
-            egress=resolved.egress, resources=resolved.resources,
+            egress=resolved.egress, resources=resolved.resources, target_started=target_started,
         )
 
     async def run_async(
@@ -511,7 +527,7 @@ class ProcessController:
         `asyncio.create_subprocess_*` calls."""
         resolved = _prepare_env_and_preexec(
             command=command, containment_profile=containment_profile, containment_backend=containment_backend,
-            env=env, preexec_fn=preexec_fn,
+            env=env, preexec_fn=preexec_fn, finite=True,
         )
         try:
             process = await spawn_subprocess_exec_fail_closed(
@@ -547,6 +563,9 @@ class ProcessController:
                 resolved.cleanup()
         stdout = (stdout_b or b"").decode("utf-8", errors="replace")
         stderr = (stderr_b or b"").decode("utf-8", errors="replace")
+        target_started = True
+        if resolved.finite_launch is not None and not timed_out:
+            stderr, target_started = resolved.finite_launch.read(stderr)
         stdout, stdout_lost = _bounded_tail_counted(stdout, self.max_output_chars)
         stderr, stderr_lost = _bounded_tail_counted(stderr, self.max_output_chars)
         if timed_out:
@@ -563,7 +582,7 @@ class ProcessController:
             stdout_lost_chars=stdout_lost,
             stderr_lost_chars=stderr_lost,
             toolchain_identity=resolved.toolchain_identity,
-            egress=resolved.egress, resources=resolved.resources,
+            egress=resolved.egress, resources=resolved.resources, target_started=target_started,
         )
 
     def start_managed(

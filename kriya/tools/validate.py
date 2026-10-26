@@ -1802,7 +1802,7 @@ class PolymorphicValidator:
             return acquisition_evidence(argv, result)
 
         first = _offline_attempt()
-        if first["returncode"] == 0:
+        if first["returncode"] == 0 or first.get("target_started") is False:  # a Maven that never started has nothing to acquire for
             return first
         first_output = first.get("stdout", "") + first.get("stderr", "")
         if classify_maven_offline_failure_text(first_output) != OfflineFailureKind.MISSING_DEPENDENCY:
@@ -1962,6 +1962,10 @@ class PolymorphicValidator:
             return {"success": True, "output": "No pom.xml to validate."}
         try:
             res = self._run_maven_cmd(["validate"], cwd=self.workspace_path, timeout=120)
+            if res.get("target_started") is False:
+                # The containment backend reports that `mvn` itself never started (missing / not executable / a directory): the same toolchain problem as the host spawn failure below.
+                return {"success": False, "environment_reason_code": MAVEN_INVOCATION_FAILED,
+                        "output": f"Failed to invoke mvn validate: the contained mvn did not start:\n{res.get('stderr', '')}".rstrip()}
             if res["returncode"] == 0:
                 return {"success": True, "output": "Maven POM validation succeeded."}
             captured = f"{res.get('stdout', '')}\n{res.get('stderr', '')}"
@@ -2805,6 +2809,18 @@ class PolymorphicValidator:
                 steps.append({
                     "command": list(command), "exit_code": None, "stdout": "",
                     "stderr": f"Failed to execute: {e}", "timed_out": False,
+                })
+                overall_success = False
+                last_returncode = None
+                break
+            if res.get("target_started") is False:
+                # REPLAY-CONTAINED-NOT-STARTED-001: the containment backend reports that the target never started (its exec failed). The host spawn failure above is the same fact and
+                # has the same representation: no exit code, not timed out, and the sequence stops - a status the launcher itself answered is not the command's.
+                never_started = f"Failed to execute: the contained command did not start\n{res['stderr']}".rstrip()
+                output_parts.append(f"{step_label}\n{never_started}")
+                steps.append({
+                    "command": list(command), "exit_code": None, "stdout": res["stdout"],
+                    "stderr": never_started, "timed_out": False, "target_started": False, **execution_evidence(res),
                 })
                 overall_success = False
                 last_returncode = None
