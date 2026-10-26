@@ -1523,7 +1523,7 @@ class OCIContainmentBackend:
         return PreparedContainment(
             env=None, preexec_fn=None, backend_name=self.name,
             command_prefix=args, cleanup=_cleanup,
-            # A pinned tool image (`image_reference`: Kriya's own semgrep) runs a fixed Kriya-chosen executable, not a project one, and its busybox shell would add PWD/SHLVL to the
+            # A pinned tool image (`image_reference`: Kriya's own static-analysis tool image) runs a fixed Kriya-chosen executable, not a project one, and its busybox shell would add PWD/SHLVL to the
             # environment; a persistent-stdio profile is an MCP server (not a finite command). Neither gets the stage.
             finite_launch=_finite_launch_stage() if profile.image_reference is None and not profile.persistent_stdio else None,
             # SEC-001-P6 (managed-service containment): lets a caller
