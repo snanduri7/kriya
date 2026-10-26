@@ -71,6 +71,7 @@ KINDS: Dict[Tuple[str, str], str] = {
     (A, 'run_attempt'): 'async function',
     (A, 'run_managed_service_verification'): 'function',
     (A, 'time'): 'module',
+    (W, 'final_review'): 'async function',  # P-B (3d453cf): patched by tests/test_skill_verification_deferral.py
     (W, 'RepositoryAnalyzer'): 'class',
     (W, 'RepositoryAnalyzer.index_repository'): 'async function',
     (W, 'WorkflowEngine.run_generation_workflow'): 'async function',
@@ -222,7 +223,8 @@ CLASS_CALL_THROUGH: Dict[str, Tuple[Tuple[str, str], ...]] = {
 
 # Patched by the enforce harness itself (tests/_enforce_unit_harness.py): every enforce scenario's units are the
 # harness plan's units only because these two patches are what the controller called (asserted below).
-HARNESS_PATCHED = ((C, "parse_planner_structured_output"), (C, "build_engineering_plan_from_planner_output"))
+HARNESS_PATCHED = ((C, "parse_planner_structured_output"), (C, "build_engineering_plan_from_planner_output"),
+                   (W, "final_review"))     # P-B: tests/test_skill_verification_deferral.py seeds a held verification into the stage-5 closer
 
 NOT_REACHED: Dict[Tuple[str, str], str] = {
     # E14 characterization: patched by tests/test_e14_characterization.py, which calls the moved helper that looks each
