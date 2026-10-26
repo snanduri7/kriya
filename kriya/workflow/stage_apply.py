@@ -673,7 +673,7 @@ async def extract_lessons(
                 ),
             ))
             if facts:
-                skills_dir = deps.config.paths.skills
+                skills_dir = ctx.skills_dir or deps.config.paths.skills        # ctx.skills_dir: the engine's effective root
                 skill_folder = os.path.join(skills_dir, f"auto-{repo_slug}")
                 written = knowledge_staging.stage_facts(skill_folder, facts)
                 if written:

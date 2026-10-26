@@ -92,6 +92,9 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
         se.discover_and_load()
     else:
         se = skill_engine_override
+        # GIT-MIDRUN-COMMITS-S3-001: the conflict registry and every other same-run skills-root reader/writer below use the
+        # engine's effective root (the run-local shadow while one is active), never the canonical directory.
+        skills_dir = se.effective_skills_dir(skills_dir)
         
     convention_prompt = ""
     if supplementary_context:

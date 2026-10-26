@@ -527,6 +527,7 @@ E12_LOADERS = {
                                                                         "frozen_file_paths", "immutable_test_files")),
     "_load_goal_facts": ("kriya.workflow.goal_facts", ("delegating_shim_targets", "goal_facts_block")),
     "_load_run_contract_baseline": ("kriya.workflow.workflow", ("run_contract_baseline",)),
+    "_load_run_shadow_refused": ("kriya.skills.skill", ("RunShadowRefused",)),         # GIT-MIDRUN-COMMITS-S3-001
 }
 _E12_SELF_FIELDS = ("workflow_engine", "_build_context")
 

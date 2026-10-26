@@ -492,6 +492,9 @@ UNINSPECTED_GIT = {
                                                          "own inspection (the base worktree's reset after the "
                                                          "inspection of the base worktree itself, S19 P1c)",
     ("kriya/workflow/named_test_oracle.py", "_git"): "argv from BaseTree: ls-tree only (export_base inspects)",
+    ("kriya/skills/run_shadow.py", "_git"): "argv from the run-local skills shadow: rev-parse / check-ignore (read-only plumbing) and the "
+                                             "index-only `reset -q -- <flushed paths>` of its own rollback; the commit itself is "
+                                             "skill.py's funnel, which inspects",
 }
 # Exactly the call sites that read KRIYA'S OWN checkout as operator-managed application infrastructure, and why.
 INSTALLATION_STATE = {

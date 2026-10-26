@@ -474,6 +474,13 @@ def _load_write_outcome_trace() -> Any:
     return write_outcome_trace
 
 
+def _load_run_shadow_refused() -> Any:
+    # GIT-MIDRUN-COMMITS-S3-001: the typed refusal of the run-local skills shadow, imported when the enforce body reaches it (the skills
+    # package is an all-import cycle member; the enforce loop may not import it itself)
+    from kriya.skills.skill import RunShadowRefused
+    return RunShadowRefused
+
+
 def _enforce_deps(controller: WorkflowController) -> Any:
     """The moved enforce loop's collaborators (kriya/workflow/enforce_loop.py), resolved through this module and the
     controller instance NOW (once, when ``WorkflowController._run_structured_enforce`` is entered, never per loop
@@ -594,6 +601,7 @@ def _enforce_deps(controller: WorkflowController) -> Any:
         SubtaskResult=SubtaskResult, SubtaskStatus=SubtaskStatus, WorktreeSyncError=WorktreeSyncError,
         create_git_worktree=create_git_worktree, remove_git_worktree=remove_git_worktree,
         load_contract_planning_constraints=_load_contract_planning_constraints, load_goal_facts=_load_goal_facts,
+        load_run_shadow_refused=_load_run_shadow_refused,
         load_run_contract=_load_run_contract, load_run_contract_baseline=_load_run_contract_baseline,
     )
 

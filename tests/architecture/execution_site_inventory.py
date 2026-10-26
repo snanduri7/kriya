@@ -185,7 +185,7 @@ INVENTORY: Dict[Tuple[str, str], Site] = {
 GIT_LAUNCHES: Dict[str, int] = {
     "kriya/analyzer/analyzer.py": 5, "kriya/cli.py": 1, "kriya/code_intel/service.py": 1, "kriya/control/run_coordinator.py": 1,
     "kriya/distribution.py": 1, "kriya/production_doctor.py": 2, "kriya/repository/git.py": 3, "kriya/repository/snapshot.py": 4,
-    "kriya/skills/skill.py": 3, "kriya/static_analysis/operator_scan.py": 1, "kriya/tools/git_metadata.py": 2,
+    "kriya/skills/run_shadow.py": 1, "kriya/skills/skill.py": 3, "kriya/static_analysis/operator_scan.py": 1, "kriya/tools/git_metadata.py": 2,
     "kriya/workflow/checkpoint.py": 8, "kriya/workflow/named_test_oracle.py": 3, "kriya/workflow/worktree.py": 19,
     "plugins/core_tools/__init__.py": 3,
 }

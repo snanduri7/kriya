@@ -12,6 +12,7 @@ real isolated sandbox worktree (`create_git_worktree`), and measures for each si
 many commits, and would a bound gate over the sandbox now be refused (the real `bound_git_metadata` predicate).
 """
 import json
+import os
 import subprocess
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, patch
@@ -26,11 +27,14 @@ from kriya.knowledge.schema import KnowledgeFact
 from kriya.skills.skill import (
     HeldSkillVerification,
     SkillEngine,
+    find_conflict_resolution,
+    load_rule_provenance,
     mark_rules_verified,
     record_conflict_resolution,
     record_rule_provenance,
 )
 from kriya.tools.git_metadata import GIT_METADATA_STALE, GitMetadataError, bound_git_metadata
+from kriya.tools.knowledge import KnowledgeGuard
 from kriya.workflow.checkpoint import compute_workspace_content_hash
 from kriya.workflow.skill_extraction import _stage_skill_conflicts, _write_skill_extraction
 from kriya.workflow.worktree import create_git_worktree
@@ -97,11 +101,15 @@ def _drivers(ws, engine):
             source="human_text"),
         "stage_skill_conflicts": lambda: _stage_skill_conflicts(
             widget, [{"candidate_rule": "Widgets are lowercase.", "conflicts_with": RULE, "reason": "opposite"}]),
-        "record_conflict_resolution": lambda: record_conflict_resolution(skills, "widgetlib", RULE, "otherlib", RULE, "prefer_a"),
+        "record_conflict_resolution": lambda: record_conflict_resolution(
+            engine.effective_skills_dir(skills), "widgetlib", RULE, "otherlib", RULE, "prefer_a"),
         "record_rule_provenance": lambda: record_rule_provenance(widget.source_path, RULE, "human_text"),
         "mark_rules_verified": lambda: (record_rule_provenance(widget.source_path, RULE, "human_text"),
                                         mark_rules_verified(widget.source_path, [RULE])),
-        "stage_facts": lambda: knowledge_staging.stage_facts(str(ws / "skills" / "auto-ws"), _facts()),
+        "generate_skill_template": lambda: KnowledgeGuard(
+            skills_dir=engine.effective_skills_dir(skills), cutoff_date_str="2023-12-01", offline=True,
+            memory_dir=str(ws.parent / "memory")).generate_skill_template("org.example:mylib-core", "1.4.2"),
+        "stage_facts": lambda: knowledge_staging.stage_facts(engine.effective_skills_dir(str(ws / "skills")) + "/auto-ws", _facts()),
         "apply_held_verifications": lambda: (engine.hold_verifications([held]), engine.apply_held_verifications()),
     }
 
@@ -264,7 +272,7 @@ async def test_a_standalone_extraction_and_conflict_resolution_commit_before_the
 
 # ------------------------------------------------------------------------------------------ real enforce flow
 
-async def _run_enforce_with_site(tmp_path, site):
+async def _run_enforce_with_site(tmp_path, site, extra_patches=(), terminal_fails=False, during_second_subtask=None, seen_out=None, explode=False):
     """The real enforce route (WorkflowController -> EnforceLoop -> TerminalGateService), two subtasks, `paths.skills` inside the
     repository. Subtask 1's stand-in engine runs the production writer `site` the way its stage does (inside the run, after the
     plan's sandbox exists); the real terminal gate service is observed with the real S3 predicate over the plan's sandbox."""
@@ -283,14 +291,27 @@ async def _run_enforce_with_site(tmp_path, site):
     engine.discover_and_load()
     we = _workflow_engine()
     we.kernel = strict_kernel(config)
-    seen = {"sandbox": None, "subtask_binds": [], "terminal_bind": None, "head_at_sandbox": None}
+    seen = seen_out if seen_out is not None else {}
+    seen.update({"sandbox": None, "subtask_binds": [], "terminal_bind": None, "head_at_sandbox": None, "ws_at_sandbox": None,
+                 "ws_at_terminal": None, "later_sees": None, "engine": engine, "ws": ws})
+    probe = PROBES[site]
+
+    def workspace_identity():
+        return {"head": _git(ws, "rev-parse", "HEAD"), "content": compute_workspace_content_hash(str(ws)),
+                "status": _git(ws, "status", "--porcelain")}
 
     async def fake_run(**kwargs):
         sandbox = kwargs["workspace_path"]
         if seen["sandbox"] is None:
             seen["sandbox"], seen["head_at_sandbox"] = sandbox, _git(sandbox, "rev-parse", "HEAD")
+            seen["ws_at_sandbox"] = workspace_identity()
             _drivers(ws, engine)[site]()                                   # the stage's own writer, after the sandbox exists
+        else:
+            engine.discover_and_load()                                     # what the next unit's analysis stage does
+            seen["later_sees"] = probe(engine, ws)
         seen["subtask_binds"].append(_bind(ws, sandbox, tmp_path))
+        if during_second_subtask is not None and len(seen["subtask_binds"]) == 2:
+            during_second_subtask(ws)
         name = "a.py" if len(seen["subtask_binds"]) == 1 else "b.py"
         (__import__("pathlib").Path(sandbox) / name).write_text(f"# {name}")
         return {"status": "success", "quality_gates_passed": True, "files": [name]}
@@ -307,6 +328,9 @@ async def _run_enforce_with_site(tmp_path, site):
 
     async def observed_run(self, request, emit):
         seen["terminal_bind"] = _bind(ws, seen["sandbox"], tmp_path)
+        seen["ws_at_terminal"] = workspace_identity()
+        if explode:
+            raise RuntimeError("terminal gates exploded")
         terminal["active"] = True
         try:
             return await real_run(self, request, emit)
@@ -322,29 +346,190 @@ async def _run_enforce_with_site(tmp_path, site):
 
     we.run_generation_workflow = fake_run
     p1, p2, p3 = _patched(_two_subtask_plan())
+    if terminal_fails:
+        from kriya.workflow.terminal_gate_service import TerminalGateReport
+
+        async def failing_gates(self, request, emit):
+            seen["ws_at_terminal"] = workspace_identity()
+            return TerminalGateReport(ran=True, requirement_gap="a requirement is unmet")
+        extra_patches = (*extra_patches, patch.object(TerminalGateService, "run", failing_gates))
     with ExitStack() as stack:
-        for context in (p1, p2, p3, patch("kriya.tools.knowledge.KnowledgeGuard.check_goal", return_value=GapReport()),
+        for context in (*extra_patches, p1, p2, p3, patch("kriya.tools.knowledge.KnowledgeGuard.check_goal", return_value=GapReport()),
                         patch("kriya.skills.skill.SkillEngine.from_config", return_value=engine),
-                        patch.object(TerminalGateService, "run", observed_run),
+                        *([patch.object(TerminalGateService, "run", observed_run)] if not terminal_fails else []),
                         patch.object(PolymorphicValidator, "__init__", spy_init)):
             stack.enter_context(context)
         result = await WorkflowController(we).execute("goal", str(ws), migration_mode="enforce")
+    seen["engine"], seen["ws"] = engine, ws
     return result, seen
 
 
-OPEN_DEFECT = ("GIT-MIDRUN-COMMITS-S3-001: an in-run learning write commits into the workspace after the enforce plan's sandbox "
-               "exists, so the terminal gates' S3 binding (sandbox vs workspace HEAD) is stale")
-# the in-run learning writers whose commit lands between the plan's sandbox and its terminal gates (static row status "open")
-ENFORCE_REACHABLE = ["create_skill_skeleton", "mark_gap_acknowledged", "write_skill_extraction", "stage_skill_conflicts",
-                     "record_conflict_resolution"]
+
+# what each in-run learning write leaves for a LATER reader: probe(engine, ws) -> True when the engine's own view holds it
+def _skill_dir(engine, name="widgetlib"):
+    return engine.get_skill(name).source_path
+
+
+def _read(path):
+    return open(path).read() if os.path.exists(path) else ""
+
+
+PROBES = {
+    "create_skill_skeleton": lambda engine, ws: engine._resolve_skill("newlib") is not None,
+    "mark_gap_acknowledged": lambda engine, ws: engine.get_skill("widgetlib").verification_gap_acknowledged is True,
+    "write_skill_extraction": lambda engine, ws: "Always close every widget handle after use." in engine.get_skill("widgetlib").rules,
+    "stage_skill_conflicts": lambda engine, ws: "Widgets are lowercase." in _read(_skill_dir(engine) + "/staged_rules.txt"),
+    "record_conflict_resolution": lambda engine, ws: find_conflict_resolution(
+        engine.effective_skills_dir(str(ws / "skills")), "widgetlib", RULE, "otherlib", RULE) == "prefer_a",
+    "record_rule_provenance": lambda engine, ws: [r["text"] for r in load_rule_provenance(_skill_dir(engine))] == [RULE],
+    "mark_rules_verified": lambda engine, ws: [r["verified"] for r in load_rule_provenance(_skill_dir(engine))] == [True],
+    "generate_skill_template": lambda engine, ws: os.path.isfile(engine.effective_skills_dir(str(ws / "skills")) + "/org.example-mylib-core-1.4.2/skill.yaml"),
+    "stage_facts": lambda engine, ws: bool(knowledge_staging.load_staged(engine.effective_skills_dir(str(ws / "skills")) + "/auto-ws")),
+    "apply_held_verifications": lambda engine, ws: engine.get_skill("widgetlib").verified is True,
+}
+IN_RUN_LEARNING_WRITERS = sorted(PROBES)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("site", [pytest.param(name, marks=pytest.mark.xfail(strict=True, reason=OPEN_DEFECT)) for name in ENFORCE_REACHABLE]
-                         + ["stage_facts"])
-async def test_an_enforce_run_hands_its_terminal_gates_the_identity_its_plan_sandbox_was_created_from(tmp_path, site):
+@pytest.mark.parametrize("site", IN_RUN_LEARNING_WRITERS)
+async def test_an_enforce_run_keeps_the_candidate_repository_untouched_until_its_terminal_verification(tmp_path, site):
+    """GIT-MIDRUN-COMMITS-S3-001 acceptance: `paths.skills` inside the repository, one in-run learning write after the plan's
+    sandbox exists. From the first bind to the terminal gates the workspace has zero HEAD drift and zero content drift, the
+    S3 predicate over the sandbox holds at every gate, and the write is nonetheless visible to the next subtask."""
     result, seen = await _run_enforce_with_site(tmp_path, site)
 
     assert result.legacy_result["status"] == "success"
+    assert seen["ws_at_terminal"] == seen["ws_at_sandbox"]                       # no HEAD drift, no content drift, no dirty tree
     assert _git(seen["sandbox"], "rev-parse", "HEAD") == seen["head_at_sandbox"]
-    assert seen["terminal_bind"] == "bound"                    # the real S3 predicate over the plan sandbox, at the terminal gates
+    assert seen["subtask_binds"] == ["bound", "bound"] and seen["terminal_bind"] == "bound"
+    assert seen["later_sees"] is True                                            # subtask 2 consumes what subtask 1 learned
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("site", IN_RUN_LEARNING_WRITERS)
+async def test_the_learning_becomes_durable_only_after_the_terminal_commit_as_exactly_its_own_delta(tmp_path, site):
+    result, seen = await _run_enforce_with_site(tmp_path, site)
+    ws, before = seen["ws"], seen["ws_at_sandbox"]
+
+    assert "post_commit_persistence_errors" not in result.legacy_result
+    assert PROBES[site](_fresh_engine(ws), ws)                                  # a fresh engine over the canonical skills sees it
+    assert _git(ws, "status", "--porcelain", "--", "skills") == ""             # everything the run learned is committed ...
+    assert int(_git(ws, "rev-list", "--count", f"{before['head']}..HEAD")) >= 1  # ... after the candidate's own commit
+    assert not (seen["engine"].run_shadow_active)
+    assert not list(_shadow_dirs(tmp_path))                                     # the shadow is gone
+
+
+def _fresh_engine(ws):
+    fresh = SkillEngine(str(ws / "skills"), load_global=False, workspace_path=str(ws))
+    fresh.discover_and_load()
+    return fresh
+
+
+def _shadow_dirs(tmp_path):
+    import os
+    state = os.environ["KRIYA_STATE_DIR"]
+    base = os.path.join(state, "run_shadow")
+    return [d for d in (os.listdir(base) if os.path.isdir(base) else []) if os.listdir(os.path.join(base, d))]
+
+
+# ------------------------------------------------------------------------------------------ the end of the run: the transaction
+
+def _skills_state(ws):
+    return {"head": _git(ws, "rev-parse", "HEAD"), "status": _git(ws, "status", "--porcelain", "--", "skills"),
+            "tree": _git(ws, "ls-tree", "-r", "HEAD", "--", "skills"),
+            "files": {str(p.relative_to(ws)): p.read_bytes() for p in sorted((ws / "skills").rglob("*")) if p.is_file()}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("site", IN_RUN_LEARNING_WRITERS)
+async def test_a_terminal_verification_failure_discards_the_shadow_and_changes_no_canonical_skill(tmp_path, site):
+    result, seen = await _run_enforce_with_site(tmp_path, site, terminal_fails=True)
+    ws, engine = seen["ws"], seen["engine"]
+
+    assert result.legacy_result["status"] != "success"
+    assert seen["ws_at_terminal"] == seen["ws_at_sandbox"]
+    assert _skills_state(ws)["status"] == "" and _git(ws, "rev-parse", "HEAD") == seen["head_at_sandbox"]
+    assert not PROBES[site](_fresh_engine(ws), ws)                         # nothing learned is durable
+    assert engine.run_shadow_active is False and engine.skills_dir == engine.canonical_skills_dir
+    assert not list(_shadow_dirs(tmp_path))
+    assert engine.get_skill("widgetlib").verified is False and engine.is_effectively_verified(engine.get_skill("widgetlib")) is False
+
+
+@pytest.mark.asyncio
+async def test_a_commit_that_fails_after_the_flush_wrote_the_files_restores_the_canonical_skills_and_claims_nothing(tmp_path):
+    """Branch ref locked: `git add` succeeds, `git commit` cannot move the ref. The flush has already written the files and
+    staged them; it must put files AND index back, report it, and never claim the learning durable."""
+    def lock_the_branch(ws):
+        branch = _git(ws, "symbolic-ref", "HEAD")
+        (ws / ".git" / f"{branch}.lock").write_text("")
+
+    result, seen = await _run_enforce_with_site(tmp_path, "write_skill_extraction", during_second_subtask=lock_the_branch)
+    ws, engine = seen["ws"], seen["engine"]
+    errors = result.legacy_result["post_commit_persistence_errors"]
+
+    assert [e["operation"] for e in errors] == ["skill_learning_flush"] and errors[0]["reason_code"] == "SKILLS_FLUSH_FAILED"
+    assert "restored to their pre-flush state" in errors[0]["error"]
+    assert _git(ws, "rev-parse", "HEAD") == seen["head_at_sandbox"]
+    assert _git(ws, "status", "--porcelain", "--", "skills") == ""          # no dirty learning residue, nothing left staged
+    assert not PROBES["write_skill_extraction"](_fresh_engine(ws), ws)
+    assert not PROBES["write_skill_extraction"](engine, ws)                  # the engine does not claim it either
+    assert not list(_shadow_dirs(tmp_path))
+
+
+@pytest.mark.asyncio
+async def test_a_failing_commit_helper_is_reported_and_restores_every_path_it_wrote(tmp_path):
+    result, seen = await _run_enforce_with_site(
+        tmp_path, "write_skill_extraction", extra_patches=(patch("kriya.skills.skill.git_commit_paths", return_value=False),))
+    ws = seen["ws"]
+
+    assert [e["operation"] for e in result.legacy_result["post_commit_persistence_errors"]] == ["skill_learning_flush"]
+    assert _git(ws, "status", "--porcelain", "--", "skills") == "" and not PROBES["write_skill_extraction"](_fresh_engine(ws), ws)
+
+
+@pytest.mark.asyncio
+async def test_a_write_that_fails_part_way_through_the_flush_restores_what_it_had_already_written(tmp_path):
+    import shutil
+    real, calls = shutil.copy2, []
+
+    def failing_second_copy(source, target, *args, **kwargs):
+        calls.append(target)
+        if len(calls) == 2:
+            raise OSError("disk full")
+        return real(source, target, *args, **kwargs)
+
+    result, seen = await _run_enforce_with_site(
+        tmp_path, "write_skill_extraction", extra_patches=(patch("kriya.skills.run_shadow.shutil.copy2", failing_second_copy),))
+    ws = seen["ws"]
+
+    assert len(calls) == 2
+    errors = result.legacy_result["post_commit_persistence_errors"]
+    assert [e["operation"] for e in errors] == ["skill_learning_flush"] and "disk full" in errors[0]["error"]
+    assert _git(ws, "status", "--porcelain", "--", "skills") == "" and not PROBES["write_skill_extraction"](_fresh_engine(ws), ws)
+
+
+@pytest.mark.asyncio
+async def test_a_canonical_skill_changed_during_the_run_is_a_typed_conflict_and_nothing_is_overwritten(tmp_path):
+    def a_human_edits_a_skill(ws):
+        (ws / "skills" / "otherlib" / "rules.txt").write_text(RULE + "\nA human-added rule.\n")
+
+    result, seen = await _run_enforce_with_site(tmp_path, "write_skill_extraction", during_second_subtask=a_human_edits_a_skill)
+    ws = seen["ws"]
+    [error] = result.legacy_result["post_commit_persistence_errors"]
+
+    assert error["operation"] == "skill_learning_flush" and error["reason_code"] == "SKILLS_CANONICAL_CHANGED"
+    assert error["paths"] == ["otherlib/rules.txt"]
+    assert (ws / "skills" / "otherlib" / "rules.txt").read_text() == RULE + "\nA human-added rule.\n"      # the human's edit survives
+    assert not PROBES["write_skill_extraction"](_fresh_engine(ws), ws)                                         # and nothing of the run's was applied
+    assert _git(ws, "rev-parse", "HEAD") == seen["head_at_sandbox"] and not list(_shadow_dirs(tmp_path))
+
+
+@pytest.mark.asyncio
+async def test_an_error_in_the_terminal_phase_ends_the_run_with_the_shadow_dropped_and_nothing_persisted(tmp_path):
+    seen = {}
+    with pytest.raises(RuntimeError, match="terminal gates exploded"):
+        await _run_enforce_with_site(tmp_path, "write_skill_extraction", explode=True, seen_out=seen)
+    ws, engine = seen["ws"], seen["engine"]
+
+    assert engine.run_shadow_active is False and engine.skills_dir == engine.canonical_skills_dir
+    assert _skills_state(ws)["status"] == "" and _git(ws, "rev-parse", "HEAD") == seen["head_at_sandbox"]
+    assert not PROBES["write_skill_extraction"](_fresh_engine(ws), ws) and not list(_shadow_dirs(tmp_path))

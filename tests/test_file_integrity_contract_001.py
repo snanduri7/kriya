@@ -880,6 +880,9 @@ _AUDITED_WRITE_SITES = {
     "kriya/core/attempt_evidence/candidate_export.py": 2,
     "kriya/memory/memory.py": 2, "kriya/metrics/adjudication.py": 2, "kriya/metrics/report.py": 2,
     "kriya/policy/approved_sources.py": 1, "kriya/production_doctor.py": 4, "kriya/skills/skill.py": 4,
+    # GIT-MIDRUN-COMMITS-S3-001: the run-local shadow of the skills text: a copy under <state>/run_shadow/ (never a candidate or workspace write), and
+    # the end-of-run flush of exactly the run's delta into the canonical skills (journalled, restored on failure) - skill content, not source.
+    "kriya/skills/run_shadow.py": 11,
     "kriya/static_analysis/scope.py": 1, "kriya/static_analysis/service.py": 2, "kriya/static_analysis/waivers.py": 2,
     # D2 rebuild S1: removal of Kriya's OWN scratch directories (the empty authority-mask mount sources it created under the
     # system temp root) when a contained run ends - never a workspace or repository path.

@@ -29,7 +29,7 @@ WRITER_CALLEES = frozenset({
     "_set_skill_yaml_field", "_set_skill_yaml_fields", "create_skill_skeleton", "record_conflict_resolution", "record_rule_provenance",
     "mark_rules_verified", "mark_verified", "mark_unverified", "mark_gap_acknowledged", "_write_skill_extraction",
     "_stage_skill_conflicts", "stage_facts", "promote_staged", "record_direct_fact", "apply_held_verifications",
-    "git_commit_if_tracked",
+    "git_commit_if_tracked", "git_commit_paths", "generate_skill_template", "persist_run_learning",
 })
 GIT_VERBS = frozenset({"commit", "reset", "checkout", "merge", "rebase", "cherry-pick", "update-ref", "am", "stash", "commit-tree", "apply"})
 
@@ -46,7 +46,7 @@ class Site(NamedTuple):
     same_run_reader: str        # who in the same run reads what the site produced ("none" or the reader)
     semantic: str               # CANDIDATE | LEARNING | BOOKKEEPING | VERIFICATION | CLI | FUNNEL | SANDBOX
     disposition: str            # SAFE | DEFER_BOTH | RUN_LOCAL_DEFER_DURABILITY | CANDIDATE_MUTATION | CHAIN | NO_CALLER
-    status: str                 # closed | open (open rows are the defect GIT-MIDRUN-COMMITS-S3-001 until it is closed)
+    status: str                 # closed | open (an open row is the defect GIT-MIDRUN-COMMITS-S3-001: a learning write reachable in the bound window that the run-local shadow does not cover)
     note: str = ""
 
 
@@ -57,6 +57,8 @@ ENFORCE_WINDOW = "yes: runs inside a subtask after the plan-level sandbox exists
 TERMINAL_GATES = "yes: the terminal gates mount the plan sandbox against the original workspace (original_workspace_path=workspace_path)"
 POST_TERMINAL = "no: runs only after the terminal gates passed and the candidate was committed"
 
+SHADOWED = ("Closed by the run-local shadow (kriya/skills/run_shadow.py): in an enforce run the shared SkillEngine works on a copy of the "
+             "skills root, flushed after the terminal commit; the dynamic detector drives this writer through a real enforce run.")
 _LEARNING_ENFORCE = dict(standalone=PRE_SANDBOX, enforce=ENFORCE_WINDOW, later_bound_gate=TERMINAL_GATES)
 
 CALLER_SITES: Dict[Tuple[str, str, str], Site] = {
@@ -64,51 +66,68 @@ CALLER_SITES: Dict[Tuple[str, str, str], Site] = {
     ("kriya/workflow/stage_analysis.py", "analyze_work_unit", "create_skill_skeleton"): Site(
         "stage 1.2 skill-gap bootstrap of a new skill", "<skills>/<new skill>/ (3 files)", SKILLS_IN_REPO, True, True,
         semantic="LEARNING", same_run_reader="the skill registry reload: the new skill is matched and extended by later work units",
-        disposition="RUN_LOCAL_DEFER_DURABILITY", status="open", **_LEARNING_ENFORCE),
+        disposition="RUN_LOCAL_DEFER_DURABILITY", status="closed", **_LEARNING_ENFORCE),
     ("kriya/workflow/stage_analysis.py", "analyze_work_unit", "mark_gap_acknowledged"): Site(
         "stage 1.2 skill-gap decline", "<skills>/<skill>/skill.yaml", SKILLS_IN_REPO, True, True,
         semantic="LEARNING", same_run_reader="the gap check of later work units (not s.verified and not s.verification_gap_acknowledged)",
-        disposition="RUN_LOCAL_DEFER_DURABILITY", status="open", **_LEARNING_ENFORCE),
+        disposition="RUN_LOCAL_DEFER_DURABILITY", status="closed", **_LEARNING_ENFORCE),
     ("kriya/workflow/stage_analysis.py", "analyze_work_unit", "_write_skill_extraction"): Site(
         "stage 1.2 skill-gap extraction", "<skills>/<skill>/rules.txt, examples/, rule provenance", SKILLS_IN_REPO, True, True,
         semantic="LEARNING", same_run_reader="the skill registry reload and the unverified-rule labelling of later work units",
-        disposition="RUN_LOCAL_DEFER_DURABILITY", status="open", **_LEARNING_ENFORCE),
+        disposition="RUN_LOCAL_DEFER_DURABILITY", status="closed", **_LEARNING_ENFORCE),
     ("kriya/workflow/stage_analysis.py", "analyze_work_unit", "_stage_skill_conflicts"): Site(
         "stage 1.2 flagged conflicting candidate rules", "<skills>/<skill>/staged_rules.txt", SKILLS_IN_REPO, True, True,
         semantic="LEARNING", same_run_reader="none (staged_rules.txt is read only by `kriya skills` display and the resume fingerprint, which ignores it)",
-        disposition="DEFER_BOTH", status="open", **_LEARNING_ENFORCE),
+        disposition="DEFER_BOTH", status="closed", **_LEARNING_ENFORCE),
     ("kriya/workflow/stage_analysis.py", "analyze_work_unit", "record_conflict_resolution"): Site(
         "stage 1.3 human conflict decision", "<skills>/.skill_conflicts.json", SKILLS_IN_REPO, True, True,
         semantic="LEARNING", same_run_reader="find_conflict_resolution in later work units (so the human is not asked twice)",
-        disposition="RUN_LOCAL_DEFER_DURABILITY", status="open", **_LEARNING_ENFORCE),
+        disposition="RUN_LOCAL_DEFER_DURABILITY", status="closed", **_LEARNING_ENFORCE),
     ("kriya/workflow/stage_architecture.py", "design_work_unit", "create_skill_skeleton"): Site(
         "stage 2B design-time skill bootstrap", "<skills>/<new skill>/ (3 files)", SKILLS_IN_REPO, True, True,
-        semantic="LEARNING", same_run_reader="the skill registry reload", disposition="RUN_LOCAL_DEFER_DURABILITY", status="open",
+        semantic="LEARNING", same_run_reader="the skill registry reload", disposition="RUN_LOCAL_DEFER_DURABILITY", status="closed",
         **_LEARNING_ENFORCE),
     ("kriya/workflow/stage_architecture.py", "design_work_unit", "_write_skill_extraction"): Site(
         "stage 2B design-time skill extraction", "<skills>/<skill>/rules.txt, examples/, rule provenance", SKILLS_IN_REPO, True, True,
         semantic="LEARNING", same_run_reader="the in-prompt skills block of this work unit and the registry reload for later ones",
-        disposition="RUN_LOCAL_DEFER_DURABILITY", status="open", **_LEARNING_ENFORCE),
+        disposition="RUN_LOCAL_DEFER_DURABILITY", status="closed", **_LEARNING_ENFORCE),
     ("kriya/workflow/stage_architecture.py", "design_work_unit", "_stage_skill_conflicts"): Site(
         "stage 2B flagged conflicting candidate rules", "<skills>/<skill>/staged_rules.txt", SKILLS_IN_REPO, True, True,
-        semantic="LEARNING", same_run_reader="none (see stage_analysis)", disposition="DEFER_BOTH", status="open", **_LEARNING_ENFORCE),
+        semantic="LEARNING", same_run_reader="none (see stage_analysis)", disposition="DEFER_BOTH", status="closed", **_LEARNING_ENFORCE),
     ("kriya/workflow/stage_apply.py", "extract_lessons", "stage_facts"): Site(
         "stage 7 advisory lesson staging", "<skills>/auto-<repo>/staged_knowledge.json", SKILLS_IN_REPO, True, False,
         standalone=POST_TERMINAL, enforce="yes: runs at the end of each subtask, between subtasks and before the terminal gates",
         later_bound_gate="yes in enforce (a file write, no commit: HEAD does not move, the binding holds; the workspace content moves)",
         semantic="LEARNING", same_run_reader="none (staged knowledge awaits human approval via `kriya skills approve`)",
-        disposition="DEFER_BOTH", status="open",
+        disposition="DEFER_BOTH", status="closed",
         note="No HEAD change, so S3 is not tripped; deferred anyway so a run writes no workspace content before its terminal verification."),
+    ("kriya/workflow/stage_apply.py", "prepare_lessons", "generate_skill_template"): Site(
+        "stage 7 auto-accrual: scaffold a skill for a resolved dependency", "<skills>/<library>-<version>/ (skill.yaml, rules.txt, instructions)",
+        SKILLS_IN_REPO, True, False, standalone=POST_TERMINAL,
+        enforce="yes: runs at the end of each subtask, between subtasks and before the terminal gates",
+        later_bound_gate="yes in enforce (files written, no commit: HEAD does not move; the workspace content moves)",
+        semantic="LEARNING", same_run_reader="the skill registry reload: the new skill is matched by later work units",
+        disposition="RUN_LOCAL_DEFER_DURABILITY", status="closed",
+        note="Found by the shadow work (it was missing from the first census, which only matched committing writers). " + SHADOWED),
+    ("kriya/cli.py", "_generate_impl.run_workflow", "generate_skill_template"): Site(
+        "`kriya generate` knowledge-gap resolution (a human confirms the scaffold)", "<skills>/<library>-<version>/", SKILLS_IN_REPO, True, False,
+        NEVER_IN_RUN, NEVER_IN_RUN, "no", "none", "CLI", "SAFE", "closed", "Before the run starts."),
     # --- the verification promotion (P-B) ---------------------------------------------------------------------------------
     ("kriya/workflow/workflow.py", "WorkflowEngine.run_generation_workflow", "apply_held_verifications"): Site(
         "P-B: standalone run after the terminal apply", "<skills>/<skill>/skill.yaml + rule provenance", SKILLS_IN_REPO, True, True,
         standalone=POST_TERMINAL, enforce="n/a: a controller-owned run only hands over", later_bound_gate="no",
         semantic="VERIFICATION", same_run_reader="none after the flush", disposition="SAFE", status="closed"),
-    ("kriya/workflow/enforce_loop.py", "EnforceLoop.run", "apply_held_verifications"): Site(
-        "P-B: enforce run after the terminal commit", "<skills>/<skill>/skill.yaml + rule provenance", SKILLS_IN_REPO, True, True,
-        standalone="n/a", enforce=POST_TERMINAL, later_bound_gate="no", semantic="VERIFICATION",
-        same_run_reader="none after the flush", disposition="SAFE", status="closed"),
+    ("kriya/workflow/enforce_loop.py", "EnforceLoop.run", "persist_run_learning"): Site(
+        "enforce run after the terminal commit: held verifications + the run-local shadow's flush", "<skills>/ (the run's delta, one commit)",
+        SKILLS_IN_REPO, True, True, standalone="n/a", enforce=POST_TERMINAL, later_bound_gate="no", semantic="VERIFICATION",
+        same_run_reader="none after the flush", disposition="SAFE", status="closed",
+        note="The ONLY place an enforce run's learning becomes durable. Reached only when workspace_commit_completed; "
+             "otherwise discard_run_learning drops the shadow and the held verifications."),
     # --- chains (the skill subsystem's own internal calls; every public entry is classified above or below) -----------------
+    ("kriya/skills/skill.py", "SkillEngine.persist_run_learning", "apply_held_verifications"): Site(
+        "SkillEngine", "<skills>/<skill>/skill.yaml + rule provenance (into the shadow when one is active)", SKILLS_IN_REPO, True, False,
+        POST_TERMINAL, POST_TERMINAL, "no", "none", "VERIFICATION", "SAFE", "closed",
+        "With a shadow active the writes land in the copy and the commit helper is a no-op there (the copy is outside every work tree)."),
     ("kriya/skills/skill.py", "SkillEngine._set_skill_yaml_field", "_set_skill_yaml_fields"): Site(
         "SkillEngine", "<skills>/<skill>/skill.yaml", SKILLS_IN_REPO, True, True, "see callers", "see callers", "see callers",
         "see callers", "FUNNEL", "CHAIN", "closed", "Reached from mark_gap_acknowledged (a stage_analysis row) and nothing else."),
@@ -185,10 +204,14 @@ CALLER_SITES: Dict[Tuple[str, str, str], Site] = {
 }
 
 GIT_VERB_SITES: Dict[Tuple[str, str, str], Site] = {
-    ("kriya/skills/skill.py", "git_commit_if_tracked", "commit"): Site(
+    ("kriya/skills/skill.py", "_commit_in_work_tree", "commit"): Site(
         "the skill commit funnel", "the git work tree that holds the written skill path", SKILLS_IN_REPO, False, True, "see callers",
         "see callers", "see callers", "see callers", "FUNNEL", "CHAIN", "closed",
-        "Every caller is a CALLER_SITES row. Best-effort: it never raises (see the commit-failure characterization)."),
+        "The one commit funnel behind git_commit_if_tracked (any path) and git_commit_paths (an exact pathspec: the run-local shadow's flush, after the terminal commit). Every caller is a CALLER_SITES row. Best-effort: it never raises (see the commit-failure characterization); a run-local shadow path is never committed."),
+    ("kriya/skills/run_shadow.py", "_unstage", "reset"): Site(
+        "the run-local shadow's rollback", "the INDEX entries of the flushed paths only (`git reset -q -- <paths>`: no tree, no HEAD, no ref)",
+        SKILLS_IN_REPO, False, False, "n/a", POST_TERMINAL, "no", "none", "VERIFICATION", "SAFE", "closed",
+        "Runs only after a failed flush, after the candidate's terminal commit; it undoes the flush's own staging."),
     ("kriya/workflow/worktree.py", "_bootstrap_greenfield_repository", "commit"): Site(
         "greenfield bootstrap", "the workspace repository, created because the workspace had no repository", "the workspace has no git repository yet",
         False, True, "no: before the sandbox and before the run's base revision is read", "no: before the plan sandbox is created",
@@ -286,11 +309,21 @@ def test_the_dispositions_are_a_closed_vocabulary_and_each_semantic_class_has_a_
             assert site.semantic in {"VERIFICATION", "CLI", "SANDBOX"}, key
 
 
-def test_an_open_row_is_exactly_an_in_run_learning_write_reachable_between_the_plan_sandbox_and_the_terminal_gates():
-    for key, site in ALL_SITES.items():
-        window_open = site.enforce.startswith("yes")
-        assert (site.status == "open") == (window_open and site.semantic == "LEARNING"), key
-    assert any(site.status == "open" for site in ALL_SITES.values())     # the defect is tracked until it is closed
+def test_no_row_is_open_and_every_learning_write_reachable_in_the_enforce_window_is_driven_through_a_real_enforce_run():
+    """GIT-MIDRUN-COMMITS-S3-001 is closed by the run-local shadow: every learning write that can run between the plan's sandbox and the
+    terminal gates must have a dynamic driver in tests/test_midrun_workspace_mutations.py (a real enforce run asserts zero HEAD and
+    content drift, later-subtask visibility, and the end-of-run transaction for it)."""
+    from test_midrun_workspace_mutations import IN_RUN_LEARNING_WRITERS
+    driver_of = {
+        "create_skill_skeleton": "create_skill_skeleton", "mark_gap_acknowledged": "mark_gap_acknowledged",
+        "_write_skill_extraction": "write_skill_extraction", "_stage_skill_conflicts": "stage_skill_conflicts",
+        "record_conflict_resolution": "record_conflict_resolution", "stage_facts": "stage_facts",
+        "generate_skill_template": "generate_skill_template",
+    }
+    window = {key for key, site in ALL_SITES.items() if site.enforce.startswith("yes") and site.semantic == "LEARNING"}
+    assert window, "the census lost every enforce-window learning row"
+    assert {driver_of[callee] for (_, _, callee) in window} <= set(IN_RUN_LEARNING_WRITERS)
+    assert [key for key, site in ALL_SITES.items() if site.status == "open"] == []
 
 
 def test_the_head_and_write_columns_agree_with_the_measured_dynamic_detector():
@@ -315,7 +348,10 @@ def test_the_registry_row_exists_and_agrees_with_the_open_rows():
     rows = list(csv.DictReader(open(ROOT / "handover" / "BACKLOG_REGISTRY.csv", newline="", encoding="utf-8")))
     [row] = [r for r in rows if r["id"] == "GIT-MIDRUN-COMMITS-S3-001"]
     has_open = any(site.status == "open" for site in ALL_SITES.values())
-    assert (row["status"] != "CLOSED") == has_open
+    if has_open:
+        assert row["status"] != "CLOSED"
+    else:       # the fix is in; the row closes only after the integrated detector ran under the S7 containment stand-in
+        assert row["status"] == "CLOSED" or "INTEGRATED DETECTOR PENDING" in row["closure_evidence"]
     assert row["target_scope"].strip() and row["closure_evidence"].strip()
 
 

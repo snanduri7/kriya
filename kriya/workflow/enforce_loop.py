@@ -38,6 +38,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from kriya.core.state_paths import resolve_state_directory
 from kriya.repository.git import RepositoryContentFilterRefused
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.plan_schema import EngineeringPlan, Subtask, VerificationMethodType
@@ -278,6 +279,7 @@ class EnforceDeps:
     # function-local imports the owner may not do itself, done by the controller when the body reaches them
     load_contract_planning_constraints: Callable[[], Any]
     load_goal_facts: Callable[[], Any]
+    load_run_shadow_refused: Callable[[], Any]
     load_run_contract: Callable[[], Any]
     load_run_contract_baseline: Callable[[], Any]
 
@@ -1527,6 +1529,19 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # RuntimeError/ValueError propagate uncaught and crash the whole
         # enforce run; the caller already converts it into a clean
         # needs_review WorkflowResult.
+        # GIT-MIDRUN-COMMITS-S3-001: from here the candidate identity is bound, and the run keeps learning (skeletons, gap
+        # acknowledgements, extracted rules, conflict resolutions, lessons). When the skills root is inside the repository the
+        # sandbox is bound against, the shared engine works on a run-local shadow of it, so no learning write moves the
+        # repository's HEAD or content under the gates still verifying the candidate. It is flushed after the terminal commit
+        # (`persist_run_learning`) or dropped (`discard_run_learning`).
+        shared_skill_engine = legacy_kwargs.get("skill_engine_override")
+        if shared_skill_engine is not None:
+            run_shadow_refused = deps.load_run_shadow_refused()
+            try:
+                shared_skill_engine.activate_run_shadow(
+                    workspace_path, resolve_state_directory(deps.workflow_engine.kernel.config)[0])
+            except run_shadow_refused as refusal:
+                raise deps._StructuredPlanUnavailable(f"{refusal.reason_code}: {refusal}") from refusal
         try:
             plan_workspace_path = deps.create_git_worktree(workspace_path)
         except (deps.WorktreeSyncError, RepositoryContentFilterRefused):
@@ -1534,8 +1549,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # workspace's exact bytes is a typed stop (execute() reports its
             # reason code), never a planning problem; S19 Q1: so is a
             # repository-defined content filter.
+            if shared_skill_engine is not None:
+                shared_skill_engine.discard_run_learning()
             raise
         except Exception as e:
+            if shared_skill_engine is not None:
+                shared_skill_engine.discard_run_learning()
             raise deps._StructuredPlanUnavailable(
                 f"failed to create isolated plan-level worktree sandbox: {e}"
             ) from e
@@ -3357,6 +3376,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             if not all_completed and plan_workspace_path != workspace_path:
                 _discard_sandbox_completions()
         except BaseException:
+            if shared_skill_engine is not None:
+                shared_skill_engine.discard_run_learning()      # an error ends the run: nothing learned is persisted, nothing leaks
             # D-F1: an unexpected error (the terminal gates or the commit raised) ends the run as an error, and the durable
             # state must say what the ordinary path would have persisted for the decision already made. Before a durable
             # commit: the sandbox completions are discarded and the plan saved with the lifecycle the ordinary path derives
@@ -3562,12 +3583,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # persisting commits into the git work tree holding the skill, which would have moved the repository under every
         # gate still verifying the candidate. Nothing is persisted for a run whose candidate was not committed; a
         # persistence failure is reported with the other post-commit errors and never rewrites the verification result.
-        shared_skill_engine = legacy_kwargs.get("skill_engine_override")
+        # The run-local learning (the shadow of the skills root, when one is active) is flushed with them: one transaction,
+        # after the candidate's identity and result are pinned and committed, so the bookkeeping commit can never become the
+        # identity this run claims it verified.
         if shared_skill_engine is not None:
             if workspace_commit_completed:
-                post_commit_persistence_errors.extend(shared_skill_engine.apply_held_verifications())
+                post_commit_persistence_errors.extend(shared_skill_engine.persist_run_learning())
             else:
-                shared_skill_engine.discard_held_verifications()
+                shared_skill_engine.discard_run_learning()
         if post_commit_persistence_errors:
             aggregated["post_commit_persistence_errors"] = post_commit_persistence_errors
         if enforce_resume_decision is not None:

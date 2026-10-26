@@ -15,6 +15,10 @@ from kriya.analyzer.analyzer import RepositoryModel
 from kriya.platform import git_argv
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
+from kriya.skills.run_shadow import RunShadow, is_shadow_path
+from kriya.skills.run_shadow import (
+    RunShadowRefused as RunShadowRefused,  # re-export: the skills package's public contract for the typed shadow refusal
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,8 +95,22 @@ def git_commit_if_tracked(path: str, message: str) -> bool:
     failed for a reason other than "nothing to commit", or a repository content filter refused the commit): the file is then
     written but the repository holds an uncommitted change. True otherwise (committed, nothing to commit, or no work tree).
     A caller that reports a durable result uses it so that failure is not lost; the others may ignore it."""
+    directory = path if os.path.isdir(path) else os.path.dirname(path)
+    return _commit_in_work_tree(directory, path, None, message)
+
+
+def git_commit_paths(directory: str, paths: List[str], message: str) -> bool:
+    """`git_commit_if_tracked` for an exact set of paths (the run-local skills flush): stages and commits ONLY ``paths`` -
+    a deletion included - whatever else the index or the tree holds. Same contract: never raises; False only when inside a
+    work tree and not committed."""
+    return _commit_in_work_tree(directory, directory, list(paths), message)
+
+
+def _commit_in_work_tree(directory: str, path: str, only: Optional[List[str]], message: str) -> bool:
+    """The one commit funnel: ``only`` None commits `path` (and whatever else is staged), a list stages and commits exactly those paths."""
+    if is_shadow_path(path):
+        return True         # a run-local copy is not repository content: nothing to commit, whatever work tree holds the state directory
     try:
-        directory = path if os.path.isdir(path) else os.path.dirname(path)
         check = subprocess.run(
             git_argv(["git", "rev-parse", "--is-inside-work-tree"]),
             cwd=directory, capture_output=True, text=True
@@ -104,7 +122,8 @@ def git_commit_if_tracked(path: str, message: str) -> bool:
         except RepositoryContentFilterRefused as refusal:
             logger.warning(f"Skill change at '{path}' not committed: {refusal}")
             return False
-        added = subprocess.run(git_argv(["git", "add", path]), cwd=directory, capture_output=True, text=True)
+        added = subprocess.run(
+            git_argv(["git", "add", *(["-A", "--", *only] if only is not None else [path])]), cwd=directory, capture_output=True, text=True)
         if added.returncode != 0:
             logger.warning(f"Skill change at '{path}' not committed: git add failed: {added.stderr.strip()}")
             return False
@@ -114,7 +133,7 @@ def git_commit_if_tracked(path: str, message: str) -> bool:
         # Kriya-internal bookkeeping, never meant to trigger arbitrary
         # repository-controlled code as a side effect.
         res = subprocess.run(
-            git_argv(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", message]),
+            git_argv(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", message, *(["--", *only] if only is not None else [])]),
             cwd=directory, capture_output=True, text=True,
         )
         if res.returncode == 0:
@@ -479,6 +498,8 @@ class SkillEngine:
             self.skills_dirs.append(supplied_dir)
 
         self.skills_dir = supplied_dir
+        self.canonical_skills_dir = supplied_dir
+        self._shadow: Optional[RunShadow] = None
         self._skills: Dict[str, Skill] = {}
         self._held_verifications: Dict[str, HeldSkillVerification] = {}
         # Whether the commit of the last `_set_skill_yaml_fields` write succeeded (False = the file is written but the repository
@@ -494,10 +515,65 @@ class SkillEngine:
             workspace_path=workspace_path,
         )
 
+    # -- the run-local shadow (GIT-MIDRUN-COMMITS-S3-001) -------------------------------------------------------------
+    # While a shadow is active this engine's effective skills root is a run-local copy under the Kriya state directory:
+    # `skills_dirs` stays the CANONICAL set (the identity the resume fingerprint hashes), `skills_dir` and every loaded
+    # skill's `source_path` are the copy. See kriya/skills/run_shadow.py.
+
+    def activate_run_shadow(self, workspace_path: str, state_directory: str) -> bool:
+        """Starts the run-local shadow of every skills directory inside the bound candidate repository `workspace_path`
+        belongs to, and reloads the registry from it. False (the existing behaviour is kept) when none of this engine's
+        directories is inside that repository, or a shadow is already active. Raises `RunShadowRefused` when a directory
+        that must be shadowed cannot be."""
+        if self._shadow is not None:
+            return False
+        shadow = RunShadow.create(list(self.skills_dirs), workspace_path, state_directory)
+        if shadow is None:
+            return False
+        self._shadow = shadow
+        self.skills_dir = shadow.effective(self.canonical_skills_dir)
+        self.discover_and_load()
+        return True
+
+    @property
+    def run_shadow_active(self) -> bool:
+        return self._shadow is not None
+
+    def effective_skills_dir(self, configured: str) -> str:
+        """The directory a same-run reader or writer of `configured` (a configured skills root) must use: the shadow's copy
+        while a shadow covers it, otherwise `configured` unchanged."""
+        return self._shadow.effective(configured) if self._shadow is not None else configured
+
+    def canonical_path(self, path: str) -> str:
+        """`path` (a shadow path) as the durable path it will be flushed to; any other path unchanged."""
+        return self._shadow.canonical(path) if self._shadow is not None else path
+
+    def persist_run_learning(self) -> List[Dict[str, Any]]:
+        """The end of a run whose candidate was verified AND committed: persists the held verifications (into the shadow
+        when there is one), then flushes the shadow into the canonical skills as one transaction. Returns the failure records
+        (empty = everything durable)."""
+        failures: List[Dict[str, Any]] = list(self.apply_held_verifications())
+        shadow, self._shadow = self._shadow, None
+        if shadow is not None:
+            failures.extend(shadow.flush("Kriya: persist the skills this run learned", git_commit_paths))
+            self.skills_dir = self.canonical_skills_dir
+            self.discover_and_load()
+        return failures
+
+    def discard_run_learning(self) -> None:
+        """The end of a run whose candidate was NOT committed: drops the held verifications and the shadow, persisting
+        nothing; the canonical skills were never touched."""
+        self.discard_held_verifications()
+        shadow, self._shadow = self._shadow, None
+        if shadow is not None:
+            shadow.discard()
+            self.skills_dir = self.canonical_skills_dir
+            self.discover_and_load()
+
     def discover_and_load(self) -> None:
         """Walks the skills directories to discover and parse skills (later paths override earlier ones)."""
         self._skills = {}
-        for directory in self.skills_dirs:
+        for directory in (self._shadow.effective(d) for d in self.skills_dirs) if self._shadow is not None else self.skills_dirs:
             if not os.path.exists(directory):
                 continue
             
@@ -589,7 +665,7 @@ class SkillEngine:
             }, sort_keys=True, separators=(",", ":"))
             manifest.append({
                 "name": skill.name,
-                "source_path": skill.source_path,
+                "source_path": self.canonical_path(skill.source_path) if skill.source_path else skill.source_path,
                 "content_hash": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
                 "verified": skill.verified,
                 "supported_versions": skill.supported_versions,
@@ -674,7 +750,7 @@ class SkillEngine:
         # data. self.workspace_path always has a real value (defaults to
         # os.getcwd() in __init__, never None) - this check cannot be
         # silently skipped by a caller forgetting to pass one.
-        if is_accidental_shared_skill_write(skill.source_path, self.workspace_path):
+        if is_accidental_shared_skill_write(self.canonical_path(skill.source_path), self.workspace_path):
             logger.error(
                 f"Refusing to write skill.yaml for '{skill_name}': its source ({skill.source_path}) "
                 f"lives inside Kriya's own shared install skills directory, but this run's workspace "

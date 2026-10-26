@@ -31,8 +31,13 @@ async def check_knowledge_guard(ctx: StageContext, deps: StageDeps) -> Optional[
     if knowledge_config.training_cutoff != "2023-12-01":
         cutoff = knowledge_config.training_cutoff
 
+    # GIT-MIDRUN-COMMITS-S3-001: while the run's engine shadows the skills root, the guard reads (and scaffolds into) the
+    # engine's effective root, never the canonical directory inside the bound candidate repository.
+    skills_root = deps.config.paths.skills
+    if ctx.skill_engine_override is not None:
+        skills_root = ctx.skill_engine_override.effective_skills_dir(skills_root)
     guard = KnowledgeGuard(
-        skills_dir=deps.config.paths.skills,
+        skills_dir=skills_root,
         cutoff_date_str=cutoff,
         offline=knowledge_config.offline_mode,
         memory_dir=deps.config.paths.memory,
