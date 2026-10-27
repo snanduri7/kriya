@@ -26,7 +26,7 @@ class ControlStorePathError(ValueError):
     """A control-state write whose target is not beneath ``.kriya/``."""
 
 
-def write_control_file(workspace_path: str, path: str, content: str, *, expected_revision: str) -> str:
+def write_control_file(workspace_path: str, path: str, content: str, *, expected_revision: str, durable: bool = False) -> str:
     """Atomically write ``content`` to ``path`` beneath the workspace's
     ``.kriya/`` directory if its base revision is unchanged; returns the new
     revision. A target outside ``.kriya/`` (or whose location cannot be
@@ -38,4 +38,4 @@ def write_control_file(workspace_path: str, path: str, content: str, *, expected
     if path_relation(control_root, path) is not PathRelation.WITHIN and path_relation(authority_control_root, path) is not PathRelation.WITHIN:
         raise ControlStorePathError(f"control-state write outside {control_root!r} refused: {path!r}")
     return commit_revision_grounded_file(path, content, expected_revision=expected_revision,
-                                         workspace_path=workspace_path)
+                                         workspace_path=workspace_path, durable=durable)

@@ -142,7 +142,7 @@ def read_file_revision(full_path: str) -> str:
 
 def commit_revision_grounded_file(
     full_path: str, content: str, expected_revision: str,
-    workspace_path: Optional[str] = None, *, content_bytes: Optional[bytes] = None,
+    workspace_path: Optional[str] = None, *, content_bytes: Optional[bytes] = None, durable: bool = False,
 ) -> str:
     """Atomically commit a fully staged file only if its base is unchanged.
 
@@ -160,8 +160,9 @@ def commit_revision_grounded_file(
         )
     data = content_bytes if content_bytes is not None else content.encode("utf-8")
     mode = os.stat(full_path).st_mode & 0o7777 if os.path.exists(full_path) else None
-    atomic_write_file(full_path, content, workspace_path=workspace_path, content_bytes=data)
-    if mode is not None:
+    # durable (D1): the mode is set on the temp file BEFORE the replace, so it is covered by the same fsync as the content.
+    atomic_write_file(full_path, content, workspace_path=workspace_path, content_bytes=data, durable=durable, mode=mode if durable else None)
+    if mode is not None and not durable:
         os.chmod(full_path, mode)
     return raw_digest(data)
 

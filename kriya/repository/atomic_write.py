@@ -10,6 +10,7 @@ write reaches this through kriya/policy/filesystem.py's AuthorizedFileWriter and
 import contextlib
 import logging
 import os
+import uuid
 from typing import Optional
 
 from kriya.policy.execution import ExecutionPolicy
@@ -68,7 +69,7 @@ def _audit_write_file(full_path: str, workspace_path: Optional[str] = None) -> N
 
 def atomic_write_file(
     full_path: str, content: str, workspace_path: Optional[str] = None,
-    *, content_bytes: Optional[bytes] = None,
+    *, content_bytes: Optional[bytes] = None, durable: bool = False, mode: Optional[int] = None,
 ) -> None:
     """Writes `content` to `full_path` atomically - via a temp file in the SAME
     directory, then os.replace() (atomic on both POSIX and Windows NTFS) - so a
@@ -101,10 +102,57 @@ def atomic_write_file(
     filesystems silently degrades to a non-atomic copy+delete on some
     platforms, defeating the whole point."""
     _audit_write_file(full_path, workspace_path=workspace_path)
+    data = content_bytes if content_bytes is not None else content.encode("utf-8")
+    if durable:
+        # D1: an authoritative lifecycle transition - every step is required and a failure fails the transition (see durable_atomic_write_bytes).
+        durable_atomic_write_bytes(full_path, data, mode=mode)
+        return
     tmp_path = f"{full_path}.kriya-tmp-{os.getpid()}"
     with open(tmp_path, "wb") as f:
-        f.write(content_bytes if content_bytes is not None else content.encode("utf-8"))
+        f.write(data)
     os.replace(tmp_path, full_path)
+
+
+DURABLE_WRITE_STEPS = ("temp_write", "file_fsync", "replace", "directory_fsync")
+
+
+class DurableWriteError(OSError):
+    """D1: an authoritative durable transition did not complete. ``step`` is one of DURABLE_WRITE_STEPS and names the first operation that failed; the
+    original error is ``__cause__``. After ``replace`` the new content may already be visible but is NOT known to be durable, so the caller must treat the
+    transition as failed either way (a STARTED transition: the effect must not run; a COMPLETED transition: no authoritative success)."""
+
+    def __init__(self, step: str, path: str, cause: BaseException) -> None:
+        super().__init__(f"durable write of {path!r} failed at {step}: {cause}")
+        self.step = step
+        self.path = path
+
+
+def durable_atomic_write_bytes(full_path: str, data: bytes, *, mode: Optional[int] = None) -> None:
+    """The portable crash/restart durability contract for an authoritative transition: temp write -> file fsync -> atomic replace -> parent-directory fsync.
+
+    EVERY operation is required: a failure in any of them raises DurableWriteError (a temp file left behind before the replace is removed). This is the OS /
+    filesystem contract of fsync + rename + directory fsync; it makes no claim about physical-media or power-loss persistence beyond it (no F_FULLFSYNC)."""
+    directory = os.path.dirname(os.path.abspath(full_path))
+    tmp_path = f"{full_path}.kriya-durable-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    step = "temp_write"
+    try:
+        with open(tmp_path, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            if mode is not None:
+                os.fchmod(handle.fileno(), mode)
+            step = "file_fsync"
+            os.fsync(handle.fileno())
+        step = "replace"
+        os.replace(tmp_path, full_path)
+    except Exception as error:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise DurableWriteError(step, full_path, error) from error
+    try:
+        _fsync_directory(directory, strict=True)
+    except OSError as error:
+        raise DurableWriteError("directory_fsync", full_path, error) from error
 
 
 def _atomic_write_bytes(full_path: str, content: bytes) -> None:
@@ -121,15 +169,19 @@ def _atomic_write_bytes(full_path: str, content: bytes) -> None:
         raise
 
 
-def _fsync_directory(path: str) -> None:
-    """Best-effort metadata durability on platforms supporting directory fsync."""
+def _fsync_directory(path: str, *, strict: bool = False) -> None:
+    """Metadata durability of a directory entry. Best-effort by default (platforms that cannot fsync a directory are tolerated); ``strict=True`` is for an
+    authoritative durable transition (D1) and lets every error propagate - it may never swallow one."""
     try:
         descriptor = os.open(path, os.O_RDONLY)
     except OSError:
+        if strict:
+            raise
         return
     try:
         os.fsync(descriptor)
     except OSError:
-        pass
+        if strict:
+            raise
     finally:
         os.close(descriptor)

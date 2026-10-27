@@ -370,7 +370,7 @@ def _read_current_bytes(path: str) -> bytes:
 
 def _save_json_document(
     workspace_path: str, path: str, payload: Dict[str, Any], *,
-    derived_from_active_run: bool = True, expected_file_revision: Optional[str] = None,
+    derived_from_active_run: bool = True, expected_file_revision: Optional[str] = None, durable: bool = False,
 ) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     owned_payload = dict(payload)
@@ -391,7 +391,7 @@ def _save_json_document(
         current = _read_current_bytes(path)
         ensure_existing_document_owned(workspace_path, current, path)
         expected_revision = raw_digest(current)
-    write_control_file(workspace_path, path, content, expected_revision=expected_revision)
+    write_control_file(workspace_path, path, content, expected_revision=expected_revision, durable=durable)
 
 
 def _load_json_document(path: str, workspace_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -414,7 +414,7 @@ def _load_json_document(path: str, workspace_path: Optional[str] = None) -> Opti
         return None
 
 
-def save_control_state(workspace_path: str, state: ControlState) -> None:
+def save_control_state(workspace_path: str, state: ControlState, *, durable: bool = False) -> None:
     # Pure save - persists exactly the ControlState it is given, never
     # silently mutates a field first (a real caller-visible round-trip
     # invariant several existing tests rely on directly: save(x); reload();
@@ -426,7 +426,8 @@ def save_control_state(workspace_path: str, state: ControlState) -> None:
     # where real content changes between saves within the SAME run) -
     # deliberately NOT centralized here, where it would silently diverge
     # what every OTHER caller persists from what it explicitly passed in.
-    _save_json_document(workspace_path, control_state_path(workspace_path), state.to_dict())
+    # durable=True (D1): an authoritative TOOL lifecycle transition - fsync-grade, every step required (kriya/repository/atomic_write.py).
+    _save_json_document(workspace_path, control_state_path(workspace_path), state.to_dict(), durable=durable)
 
 
 def load_control_state(workspace_path: str) -> Optional[ControlState]:
