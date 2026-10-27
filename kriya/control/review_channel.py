@@ -277,6 +277,48 @@ class ReviewChannel:
                 return failed
         return None
 
+    async def _wait_readable(self, timeout: float) -> bool:
+        """True when the socket has bytes (or EOF) to read within ``timeout``. It waits for READINESS only and consumes nothing: a poll that times out, or a wait that is cancelled,
+        cannot discard a received frame (a ``wait_for(sock_recv(...))`` poll could: when the loop was delayed across the timeout the receive had already taken the bytes and
+        the cancellation then dropped them - a legitimate decision silently lost, the host given no result frame, the engine left waiting until the review expired)."""
+        sock = self._sock
+        if sock is None:
+            return False
+        loop = asyncio.get_running_loop()
+        ready: "asyncio.Future[None]" = loop.create_future()
+
+        def on_readable() -> None:
+            if not ready.done():
+                ready.set_result(None)
+        try:
+            fd = sock.fileno()
+            loop.add_reader(fd, on_readable)
+        except (OSError, ValueError):
+            return False
+        try:
+            await asyncio.wait_for(ready, timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+        finally:
+            try:
+                loop.remove_reader(fd)
+            except (OSError, ValueError, KeyError):
+                pass
+
+    def _read_once(self) -> Optional[ChannelOutcome]:
+        """Reads ONE chunk that readiness reported and absorbs it in the same synchronous step (the bytes are never held anywhere a cancellation could drop them)."""
+        if self._sock is None:
+            return None
+        try:
+            data = self._sock.recv(_READ_CHUNK)
+        except (BlockingIOError, InterruptedError):
+            return None  # another reader took it, or a spurious wakeup: nothing to absorb, poll again
+        except OSError:
+            self._eof = True
+            return None
+        return self._absorb(data)
+
     # ------------------------------------------------------------------ one review
     async def offer(self, *, launch_id: str, review_id: str, kind: str, candidate_digest: str) -> None:
         """Opens the review: draws its capability and sends the ``review`` frame. Raises ``ChannelUnavailable`` when the channel cannot carry it."""
@@ -305,7 +347,6 @@ class ReviewChannel:
         review = self._open
         if review is None:
             raise ValueError("no review is open")
-        loop = asyncio.get_running_loop()
         while True:
             if self._open is not review:  # superseded by a newer review (or abandoned): this review is over and its capability is gone
                 return ChannelOutcome(OUTCOME_EXPIRED)
@@ -322,14 +363,9 @@ class ReviewChannel:
             if remaining <= 0:
                 self._open = None
                 return ChannelOutcome(OUTCOME_EXPIRED)
-            try:
-                data = await asyncio.wait_for(loop.sock_recv(self._sock, _READ_CHUNK), timeout=min(remaining, _POLL_SECONDS))
-            except asyncio.TimeoutError:
+            if not await self._wait_readable(min(remaining, _POLL_SECONDS)):
                 continue
-            except OSError:
-                self._eof = True
-                continue
-            failed = self._absorb(data)
+            failed = self._read_once()
             if failed is not None:
                 self._open = None
                 return failed
