@@ -17,6 +17,9 @@ import time
 from typing import Optional
 from unittest.mock import patch
 
+from _containment_standin import MountAwareStandIn
+
+from kriya.tools.containment import ContainmentProfile, NetworkAuthority, TrustClass
 from kriya.tools.process import ProcessController
 from kriya.tools.service_runtime import (
     ManagedServiceVerificationSpec,
@@ -30,6 +33,16 @@ from kriya.tools.service_runtime import (
     _run_probe,
     run_managed_service_verification,
 )
+
+
+def _run_contained(spec: ManagedServiceVerificationSpec, **kwargs):
+    """S8-HELD-SERVICE-RUNTIME-HOST-HARNESS-001: these tests exercise the service-runtime CONTRACT (readiness, probe, outcomes, cleanup), not a host launch. The service is launched through the
+    test-owned containment stand-in (tests/_containment_standin.py: its launcher execs the real command, so the managed process is the real service), exactly as every other semantic test
+    gets a contained execution - the production host launch these tests used to borrow as a harness is gone."""
+    kwargs.setdefault("containment_profile", ContainmentProfile(
+        trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path=spec.cwd, network=NetworkAuthority.DENIED))
+    kwargs.setdefault("containment_backend", MountAwareStandIn())
+    return run_managed_service_verification(spec, **kwargs)
 
 
 def _free_port() -> int:
@@ -89,7 +102,7 @@ def _spec(port: int, script: str, *, startup_timeout=5.0, probe_timeout=5.0, shu
 
 class _TrackingController(ProcessController):
     """Records every ManagedProcess it starts so a test can confirm it was
-    actually terminated after run_managed_service_verification() returns -
+    actually terminated after _run_contained() returns -
     the whole point of the cleanup guarantee is observable from OUTSIDE the
     function under test, not just from its return value."""
 
@@ -134,6 +147,17 @@ def test_run_app_sequence_finite_command_behavior_is_unchanged(tmp_path):
 
 # --- (2)+(3)+(4) service starts without blocking; readiness waits for it ----
 
+def test_the_lifecycle_harness_really_launches_the_service_through_the_containment_standin():
+    """Non-vacuity of the F1 migration: the service the lifecycle tests probe was prepared by the stand-in backend (not launched bare), and it still passes real readiness and probe."""
+    backend = MountAwareStandIn()
+    port = _free_port()
+    spec = _spec(port, _http_service_script())
+    result = _run_contained(spec, containment_backend=backend, controller=_TrackingController())
+    assert result.outcome == ServiceVerificationOutcomeKind.PROBE_PASSED, result.reasoning
+    assert backend.prepared_commands == [spec.service_command], "the service was launched through the backend's prepared prefix"
+    assert backend.prepared_profiles and backend.prepared_profiles[0].network is NetworkAuthority.DENIED
+
+
 def test_readiness_waits_for_actual_availability_before_probing(tmp_path):
     """(2) starting a foreground service does not block orchestration - this
     whole test function returns well before the service's own artificial
@@ -149,7 +173,7 @@ def test_readiness_waits_for_actual_availability_before_probing(tmp_path):
     controller = _TrackingController()
 
     started_at = time.monotonic()
-    result = run_managed_service_verification(_spec(port, script), controller=controller)
+    result = _run_contained(_spec(port, script), controller=controller)
     elapsed = time.monotonic() - started_at
 
     assert elapsed < 5.0  # well inside the 5s startup_timeout - not blocked on anything else
@@ -165,7 +189,7 @@ def test_successful_probe_returns_pass_evidence():
     script = _http_service_script()
     controller = _TrackingController()
 
-    result = run_managed_service_verification(
+    result = _run_contained(
         _spec(port, script, expected_body_contains='"status": "ok"'), controller=controller,
     )
 
@@ -196,7 +220,7 @@ def test_failed_probe_returns_behavioral_failure_evidence():
         probe=ProbeSpec(port=port, path="/health", expected_status=200),
     )
 
-    result = run_managed_service_verification(spec, controller=controller)
+    result = _run_contained(spec, controller=controller)
 
     assert result.outcome == ServiceVerificationOutcomeKind.PROBE_FAILED
     assert result.passed is False
@@ -213,7 +237,7 @@ def test_startup_timeout_terminates_the_process():
     script = _http_service_script(delay_seconds=30.0)
     controller = _TrackingController()
 
-    result = run_managed_service_verification(
+    result = _run_contained(
         _spec(port, script, startup_timeout=0.6, shutdown_timeout=5.0), controller=controller,
     )
 
@@ -236,7 +260,7 @@ def test_readiness_timeout_via_wrong_status_cleans_up_process():
     script = _http_service_script(health_status=503)
     controller = _TrackingController()
 
-    result = run_managed_service_verification(
+    result = _run_contained(
         _spec(port, script, startup_timeout=0.6, shutdown_timeout=5.0), controller=controller,
     )
 
@@ -261,7 +285,7 @@ def test_probe_timeout_cleans_up_process():
         raise TimeoutError(f"probe exceeded its own {timeout}s budget")
 
     with patch("kriya.tools.service_runtime._run_probe", side_effect=_hanging_probe):
-        result = run_managed_service_verification(
+        result = _run_contained(
             _spec(port, script, probe_timeout=0.2), controller=controller,
         )
 
@@ -279,7 +303,7 @@ def test_service_early_exit_is_captured_with_returncode():
     script = _http_service_script(exit_code=3)
     controller = _TrackingController()
 
-    result = run_managed_service_verification(
+    result = _run_contained(
         _spec(port, script, startup_timeout=3.0), controller=controller,
     )
 
@@ -303,7 +327,7 @@ def test_unexpected_exception_during_readiness_still_cleans_up_process():
     controller = _TrackingController()
 
     with patch("kriya.tools.service_runtime._check_readiness", side_effect=RuntimeError("boom")):
-        result = run_managed_service_verification(_spec(port, script), controller=controller)
+        result = _run_contained(_spec(port, script), controller=controller)
 
     assert result.outcome == ServiceVerificationOutcomeKind.VERIFICATION_INTERNAL_ERROR
     assert result.passed is False
@@ -319,7 +343,7 @@ def test_cleanup_leaves_no_surviving_process_after_successful_probe():
     script = _http_service_script()
     controller = _TrackingController()
 
-    result = run_managed_service_verification(_spec(port, script), controller=controller)
+    result = _run_contained(_spec(port, script), controller=controller)
 
     assert result.outcome == ServiceVerificationOutcomeKind.PROBE_PASSED
     assert len(controller.started) == 1
@@ -343,8 +367,8 @@ def test_two_sequential_runs_on_the_same_port_do_not_conflict():
     script = _http_service_script()
     controller = _TrackingController()
 
-    first = run_managed_service_verification(_spec(port, script), controller=controller)
-    second = run_managed_service_verification(_spec(port, script), controller=controller)
+    first = _run_contained(_spec(port, script), controller=controller)
+    second = _run_contained(_spec(port, script), controller=controller)
 
     assert first.outcome == ServiceVerificationOutcomeKind.PROBE_PASSED
     assert second.outcome == ServiceVerificationOutcomeKind.PROBE_PASSED
@@ -387,10 +411,18 @@ def test_managed_service_result_maps_to_zero_developer_calls_for_infrastructure_
     assert infrastructure_outcomes.isdisjoint(behavioral_outcomes)
 
     port = _free_port()
-    controller = _TrackingController()
-    result = run_managed_service_verification(
+
+    class _CannotStart(_TrackingController):
+        """The service process cannot be started at all (the host spawn error this test used to provoke with a nonexistent binary has no contained equivalent: a container whose command
+        cannot be exec'd starts and exits, which is SERVICE_EXITED_BEFORE_READY)."""
+
+        def start_managed(self, *args, **kwargs):
+            raise OSError("cannot start the service process")
+
+    controller = _CannotStart()
+    result = _run_contained(
         ManagedServiceVerificationSpec(
-            service_command=["/no/such/executable-kriya-test"],
+            service_command=[sys.executable, "-c", "pass"],
             cwd=os.getcwd(),
             readiness=ReadinessSpec(kind="tcp", port=port),
             probe=ProbeSpec(port=port),
@@ -523,7 +555,7 @@ server.serve_forever()
     )
 
     started_at = time.monotonic()
-    result = run_managed_service_verification(spec, controller=controller)
+    result = _run_contained(spec, controller=controller)
     elapsed = time.monotonic() - started_at
 
     # The dribbling server takes 20 * 0.5s = 10s to actually finish
@@ -642,12 +674,12 @@ def test_probe_connection_error_maps_to_probe_failed_but_internal_bug_maps_to_in
 
     controller = _TrackingController()
     with patch("kriya.tools.service_runtime._run_probe", side_effect=ConnectionRefusedError("refused")):
-        connection_result = run_managed_service_verification(_spec(port, script), controller=controller)
+        connection_result = _run_contained(_spec(port, script), controller=controller)
     assert connection_result.outcome == ServiceVerificationOutcomeKind.PROBE_FAILED
 
     controller2 = _TrackingController()
     with patch("kriya.tools.service_runtime._run_probe", side_effect=KeyError("not_a_network_error")):
-        bug_result = run_managed_service_verification(_spec(port, script), controller=controller2)
+        bug_result = _run_contained(_spec(port, script), controller=controller2)
     assert bug_result.outcome == ServiceVerificationOutcomeKind.VERIFICATION_INTERNAL_ERROR
 
 
@@ -1014,7 +1046,7 @@ def test_p6_reproduction_missing_jar_is_prepared_then_service_launches_and_probe
     port = _free_port()
     controller = _TrackingController()
 
-    result = run_managed_service_verification(_p6_shaped_spec(tmp_path, port), controller=controller)
+    result = _run_contained(_p6_shaped_spec(tmp_path, port), controller=controller)
 
     assert jar.is_file()
     assert result.outcome == ServiceVerificationOutcomeKind.PROBE_PASSED
@@ -1031,7 +1063,7 @@ def test_preparation_runs_before_service_start_and_before_readiness_polling(tmp_
     port = _free_port()
     controller = _OrderTrackingController()
 
-    run_managed_service_verification(_p6_shaped_spec(tmp_path, port), controller=controller)
+    _run_contained(_p6_shaped_spec(tmp_path, port), controller=controller)
 
     assert len(controller.call_order) == 2
     assert controller.call_order[0][0] == "run"  # the mvnw prepare step
@@ -1047,7 +1079,7 @@ def test_preparation_failure_prevents_service_launch(tmp_path):
     port = _free_port()
     controller = _TrackingController()
 
-    result = run_managed_service_verification(_p6_shaped_spec(tmp_path, port), controller=controller)
+    result = _run_contained(_p6_shaped_spec(tmp_path, port), controller=controller)
 
     assert result.outcome == ServiceVerificationOutcomeKind.PREPARATION_FAILED
     assert result.passed is False
@@ -1062,7 +1094,7 @@ def test_artifact_still_missing_after_successful_build_fails_before_launch(tmp_p
     port = _free_port()
     controller = _TrackingController()
 
-    result = run_managed_service_verification(_p6_shaped_spec(tmp_path, port), controller=controller)
+    result = _run_contained(_p6_shaped_spec(tmp_path, port), controller=controller)
 
     assert result.outcome == ServiceVerificationOutcomeKind.ARTIFACT_MATERIALIZATION_FAILED
     assert result.passed is False
@@ -1078,7 +1110,7 @@ def test_service_exited_before_ready_stays_reserved_for_an_actually_started_proc
     script = _http_service_script(exit_code=3)
     controller = _TrackingController()
 
-    result = run_managed_service_verification(_spec(port, script), controller=controller)
+    result = _run_contained(_spec(port, script), controller=controller)
 
     assert result.outcome == ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY
     assert len(controller.started) == 1  # it WAS actually started this time
