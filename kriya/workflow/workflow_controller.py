@@ -109,7 +109,7 @@ from kriya.control.run_coordinator import (
     mark_run_stage,
 )
 from kriya.control.run_record import RunLifecycle
-from kriya.control.state import ControlState
+from kriya.control.state import SUBTASK_STATE_TOOL_STARTED, ControlState
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.llm import InferenceDeadlineError
 from kriya.policy.filesystem import WriteScopeMode
@@ -261,6 +261,7 @@ from kriya.workflow.requirements import (
     requirements_prompt_block,
     seed_requirement_obligations,
 )
+from kriya.workflow.resume_support import ToolResumeDecision
 from kriya.workflow.retry_progress import VERIFICATION_RETRY_NO_CHANGE_POSSIBLE
 from kriya.workflow.static_checks import (
     derive_stack_contract,
@@ -413,7 +414,7 @@ def _planning_deps() -> planning_request.PlanningDeps:
 def _resume_deps() -> resume_support.ResumeDeps:
     """The moved resume-support code's collaborators (kriya/workflow/resume_support.py), resolved through this module
     NOW (at call time), so a test patch of ``logger`` here reaches the moved quarantine exactly as it reached it when it lived here."""
-    return resume_support.ResumeDeps(logger=logger)
+    return resume_support.ResumeDeps(logger=logger, tool_started_state=SUBTASK_STATE_TOOL_STARTED)
 
 
 def _shadow_mode() -> Any:
@@ -519,7 +520,7 @@ def _enforce_deps(controller: WorkflowController) -> Any:
         build_subtask_semantic_context=build_subtask_semantic_context,
         compute_abandoned_plan_files=compute_abandoned_plan_files,
         evaluate_plan_edit_feasibility=evaluate_plan_edit_feasibility,
-        exclude_tool_subtasks_from_resume=exclude_tool_subtasks_from_resume,
+        classify_tool_resume=classify_tool_resume, SUBTASK_STATE_TOOL_STARTED=SUBTASK_STATE_TOOL_STARTED,
         find_missing_grounded_production_artifacts=find_missing_grounded_production_artifacts, logger=logger,
         nearest_mutating_upstream_owner=nearest_mutating_upstream_owner,
         quarantine_abandoned_plan_files=quarantine_abandoned_plan_files,
@@ -1135,11 +1136,11 @@ def revise_plan_for_runtime_plan_gap(
     )
 
 
-def exclude_tool_subtasks_from_resume(
+def classify_tool_resume(
     plan: EngineeringPlan, resumed_subtask_states: Dict[str, str],
-) -> Tuple[Dict[str, str], List[str]]:
-    """The body is kriya/workflow/resume_support.py (E11)."""
-    return resume_support.exclude_tool_subtasks_from_resume(plan, resumed_subtask_states)
+) -> ToolResumeDecision:
+    """The body is kriya/workflow/resume_support.py (E11; D1: the one authoritative TOOL resume classification)."""
+    return resume_support.classify_tool_resume(_resume_deps(), plan, resumed_subtask_states)
 
 
 def all_subtasks_completed(

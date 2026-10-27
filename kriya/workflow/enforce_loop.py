@@ -39,9 +39,15 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.core.state_paths import resolve_state_directory
+from kriya.repository.atomic_write import DurableWriteError
 from kriya.repository.git import RepositoryContentFilterRefused
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.plan_schema import EngineeringPlan, Subtask, VerificationMethodType
+from kriya.workflow.resume_support import (
+    TOOL_COMPLETED_NOT_DURABLE,
+    TOOL_EXECUTION_UNRESOLVED,
+    TOOL_STARTED_NOT_DURABLE,
+)
 from kriya.workflow.subtask_executor import plannable_tool_names
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus, VerificationReport
 
@@ -91,7 +97,9 @@ class EnforceDeps:
     build_subtask_semantic_context: Callable[..., Any]
     compute_abandoned_plan_files: Callable[..., Any]
     evaluate_plan_edit_feasibility: Callable[..., Any]
-    exclude_tool_subtasks_from_resume: Callable[..., Any]
+    classify_tool_resume: Callable[..., Any]
+    # D1: the persisted marker of a durably STARTED TOOL subtask (kriya.control.state.SUBTASK_STATE_TOOL_STARTED)
+    SUBTASK_STATE_TOOL_STARTED: str
     find_missing_grounded_production_artifacts: Callable[..., Any]
     logger: Any
     nearest_mutating_upstream_owner: Callable[..., Any]
@@ -417,7 +425,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         workspace by that point. Only a genuine bug in this method's own
         code propagates as a real (uncaught) exception."""
 
-        def _persist_control_state(cs: Any) -> Any:
+        def _persist_control_state(cs: Any, *, durable: bool = False) -> Any:
             """STATE-001 (2026-09-14): every real save of ControlState
             WITHIN this method's own per-subtask loop must reflect CURRENT
             workspace content, never a value computed once, early, before
@@ -445,7 +453,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             closure is the correct, narrow place: the ONE method whose own
             control flow actually needs per-save freshness."""
             cs = cs.with_updates(workspace_content_hash=deps.compute_workspace_content_hash(workspace_path))
-            deps.save_control_state(workspace_path, cs)
+            # durable=True (D1): an authoritative TOOL lifecycle transition - temp write, file fsync, atomic replace, parent-directory fsync, every step required.
+            deps.save_control_state(workspace_path, cs, **({"durable": True} if durable else {}))
             return cs
 
         ledger = deps.DecisionLedger()
@@ -1278,6 +1287,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         )
 
         resumed_subtask_states: Dict[str, str] = {}
+        resumed_tool_completed: set = set()   # D1: TOOL executions durably COMPLETED in the resumed run: their effect is never run again
+        resumed_tool_unresolved: set = set()  # D1: TOOL executions durably STARTED without a durable COMPLETED: needs_review, never retried
         # PRD-008: the structured record of what this resume reused (logged,
         # annotated on the RunRecord and returned), one per resume request.
         enforce_resume_decision: Optional[Dict[str, Any]] = None
@@ -1378,16 +1389,19 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         "Starting the plan fresh."
                     )
                 else:
-                    resumed_subtask_states, skipped_tool_subtasks = deps.exclude_tool_subtasks_from_resume(
-                        plan, dict(prior_control_state.subtask_states),
-                    )
-                    if skipped_tool_subtasks:
+                    # D1: the ONE authoritative TOOL resume classification (kriya/workflow/resume_support.py::classify_tool_resume); this loop only consumes it.
+                    tool_resume = deps.classify_tool_resume(plan, dict(prior_control_state.subtask_states))
+                    resumed_subtask_states = tool_resume.states
+                    resumed_tool_completed, resumed_tool_unresolved = set(tool_resume.completed), set(tool_resume.unresolved)
+                    if resumed_tool_completed:
+                        deps.logger.info(
+                            f"WorkflowController enforce run {run_id!r}: TOOL subtask(s) {sorted(resumed_tool_completed)!r} were durably COMPLETED by an earlier run: "
+                            "their side effect is NOT run again (authority is revalidated, effect-free)."
+                        )
+                    if resumed_tool_unresolved:
                         deps.logger.warning(
-                            f"WorkflowController enforce run {run_id!r}: TOOL-tagged subtask(s) "
-                            f"{skipped_tool_subtasks!r} were recorded completed by an earlier "
-                            "interrupted run, but TOOL subtasks are never resume-skipped "
-                            "(authority must always revalidate - see exclude_tool_subtasks_from_"
-                            "resume's own docstring) - they will re-execute for real."
+                            f"WorkflowController enforce run {run_id!r}: TOOL subtask(s) {sorted(resumed_tool_unresolved)!r} were STARTED by an earlier run and never durably "
+                            "COMPLETED: their effect may or may not have happened, so the run stops at them with needs_review and does NOT retry them."
                         )
                     enforce_resume_decision["reused_subtasks"] = sorted(
                         subtask_id for subtask_id, status in resumed_subtask_states.items()
@@ -1474,7 +1488,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             )
             for subtask_id in order
         }
-        control_state = control_state.with_updates(subtask_states=dict(approved_stage_states))
+        # D1: the run's own first save must NOT overwrite an unresolved TOOL record (it is the only evidence that an effect may have happened): the marker is carried through.
+        control_state = control_state.with_updates(subtask_states={
+            **approved_stage_states, **{i: deps.SUBTASK_STATE_TOOL_STARTED for i in resumed_tool_unresolved if i in approved_stage_states},
+        })
         # Persist the complete validated plan before any implementation can
         # begin. ControlState remains the compact resume index; this owned
         # document is the durable source for what was approved and how each
@@ -1771,6 +1788,55 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             if subtask is None:
                 continue
 
+            if subtask.execution_method == deps.ExecutionMethod.TOOL and subtask_id in resumed_tool_unresolved:
+                # D1: durably STARTED, never durably COMPLETED -> needs_review. The loop transports the classification (resume_support.classify_tool_resume); it never retries
+                # and never overwrites the persisted marker (the unresolved record must survive for the person who reviews it).
+                result = deps.SubtaskResult(
+                    subtask_id=subtask.id, status=deps.SubtaskStatus.NEEDS_REVIEW, execution_method=deps.ExecutionMethod.TOOL.value,
+                    error=(f"{TOOL_EXECUTION_UNRESOLVED}: TOOL subtask {subtask.id!r} ({subtask.tool_name}) was STARTED by an earlier run and never durably COMPLETED; its side "
+                           "effect may or may not have happened. It was NOT retried - inspect what it did before running again."),
+                    reason_codes=(TOOL_EXECUTION_UNRESOLVED,),
+                )
+                subtask_results.append(result)
+                deps.record_subtask_attempt(ledger, plan, result, attempt=1)
+                approved_stage_states[subtask.id] = "needs_review"
+                deps.save_approved_plan(
+                    workspace_path, plan.plan_id,
+                    deps.build_approved_plan_document(
+                        plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                        stage_states=approved_stage_states, lifecycle_state="needs_review",
+                    ),
+                )
+                deps.logger.warning(f"WorkflowController enforce run {run_id!r}: stopped at subtask {subtask_id!r} ({position}/{total}) - {TOOL_EXECUTION_UNRESOLVED}; nothing was run.")
+                break
+
+            if subtask.execution_method == deps.ExecutionMethod.TOOL and subtask_id in resumed_tool_completed:
+                # D1: durably COMPLETED: the effect is terminal for this execution and is NEVER run again. TOOL-001's authority requirement is kept separately: authority is
+                # revalidated through the effect-free seam; a refusal stops the run (the effect already happened - it is reported, not undone).
+                refusal = deps.subtask_executor.revalidate_tool_subtask_authority(
+                    subtask, kernel, (workspace_path, plan_workspace_path), plan, control_state.subtask_written_files,
+                )
+                if refusal is not None:
+                    subtask_results.append(refusal)
+                    deps.record_subtask_attempt(ledger, plan, refusal, attempt=1)
+                    approved_stage_states[subtask.id] = refusal.status.value
+                    deps.save_approved_plan(
+                        workspace_path, plan.plan_id,
+                        deps.build_approved_plan_document(
+                            plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                            stage_states=approved_stage_states,
+                            lifecycle_state="needs_review" if refusal.status == deps.SubtaskStatus.NEEDS_REVIEW else "failed",
+                        ),
+                    )
+                    deps.logger.warning(f"WorkflowController enforce run {run_id!r}: stopped at subtask {subtask_id!r} ({position}/{total}) - authority no longer holds for a "
+                                        f"durably COMPLETED TOOL execution (status={refusal.status.value}); its effect was not run again.")
+                    break
+                deps.logger.info(f"Subtask '{subtask.id}' ({position}/{total}) TOOL execution already durably completed (resume) - effect not run again; authority revalidated.")
+                subtask_results.append(deps.SubtaskResult(
+                    subtask_id=subtask.id, status=deps.SubtaskStatus.COMPLETED, execution_method=deps.ExecutionMethod.TOOL.value, error=None,
+                ))
+                continue
+
             if resumed_subtask_states.get(subtask_id) == "completed":
                 deps.logger.info(f"Subtask '{subtask.id}' ({position}/{total}) already completed (resume) - skipping.")
                 subtask_results.append(deps.SubtaskResult(
@@ -1797,9 +1863,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     established_provenance.record(planned_file.path, subtask_id)
                 continue
 
+            is_tool_subtask = subtask.execution_method == deps.ExecutionMethod.TOOL
             approved_stage_states[subtask_id] = "in_progress"
+            state_before_start = control_state
+            # D1: a TOOL subtask's STARTED is its own persisted marker (a MODEL subtask keeps "in_progress" and its retryable semantics).
             control_state = control_state.with_updates(
-                subtask_states={**control_state.subtask_states, subtask_id: "in_progress"},
+                subtask_states={**control_state.subtask_states, subtask_id: deps.SUBTASK_STATE_TOOL_STARTED if is_tool_subtask else "in_progress"},
             )
             deps.save_approved_plan(
                 workspace_path, plan.plan_id,
@@ -1808,7 +1877,23 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     stage_states=approved_stage_states, lifecycle_state="in_progress",
                 ),
             )
-            control_state = _persist_control_state(control_state)
+            if is_tool_subtask:
+                try:
+                    control_state = _persist_control_state(control_state, durable=True)
+                except DurableWriteError as error:
+                    # STARTED is not durable: the side effect MUST NOT run, and nothing may claim it started.
+                    control_state = state_before_start
+                    result = deps.SubtaskResult(
+                        subtask_id=subtask.id, status=deps.SubtaskStatus.FAILED, execution_method=deps.ExecutionMethod.TOOL.value,
+                        error=f"{TOOL_STARTED_NOT_DURABLE}: the STARTED record of TOOL subtask {subtask.id!r} could not be made durable ({error}); nothing was run.",
+                        reason_codes=(TOOL_STARTED_NOT_DURABLE,),
+                    )
+                    subtask_results.append(result)
+                    deps.record_subtask_attempt(ledger, plan, result, attempt=1)
+                    deps.logger.error(f"WorkflowController enforce run {run_id!r}: stopped before subtask {subtask_id!r} ({position}/{total}) - {TOOL_STARTED_NOT_DURABLE}; nothing was run.")
+                    break
+            else:
+                control_state = _persist_control_state(control_state)
 
             deps._log_phase_banner(f"SUBTASK '{subtask.id}' ({position}/{total}): {subtask.description[:40]}")
             deps.logger.info(
@@ -1860,11 +1945,30 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         candidate_writes=control_state.subtask_written_files,
                     )
                     evidence["result"] = result
+                completed_not_durable = False
+                if result.status == deps.SubtaskStatus.COMPLETED:
+                    # D1: COMPLETED must be durable BEFORE success is authoritative. If it cannot be, the lifecycle stays STARTED on disk (never "completed", never
+                    # retried): needs_review, with the tool's own output kept as the evidence.
+                    state_started = control_state
+                    control_state = control_state.with_updates(subtask_states={**control_state.subtask_states, subtask.id: result.status.value})
+                    try:
+                        control_state = _persist_control_state(control_state, durable=True)
+                    except DurableWriteError as error:
+                        completed_not_durable = True
+                        control_state = state_started  # a later save must never resurrect "completed" for this execution
+                        result = deps.SubtaskResult(
+                            subtask_id=subtask.id, status=deps.SubtaskStatus.NEEDS_REVIEW, execution_method=deps.ExecutionMethod.TOOL.value, tool_output=result.tool_output,
+                            error=(f"{TOOL_COMPLETED_NOT_DURABLE}: TOOL subtask {subtask.id!r} ran but its COMPLETED record could not be made durable ({error}); it is NOT "
+                                   "reported as success and will not be retried - inspect what it did."),
+                            reason_codes=(TOOL_COMPLETED_NOT_DURABLE,),
+                        )
+                        deps.logger.error(f"WorkflowController enforce run {run_id!r}: subtask {subtask_id!r} - {TOOL_COMPLETED_NOT_DURABLE}.")
                 subtask_results.append(result)
                 deps.record_subtask_attempt(ledger, plan, result, attempt=1)
-                control_state = control_state.with_updates(
-                    subtask_states={**control_state.subtask_states, subtask.id: result.status.value},
-                )
+                if result.status != deps.SubtaskStatus.COMPLETED and not completed_not_durable:
+                    control_state = control_state.with_updates(
+                        subtask_states={**control_state.subtask_states, subtask.id: result.status.value},
+                    )
                 approved_stage_states[subtask.id] = result.status.value
                 tool_lifecycle_state = (
                     "in_progress" if result.status == deps.SubtaskStatus.COMPLETED
@@ -1878,7 +1982,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         stage_states=approved_stage_states, lifecycle_state=tool_lifecycle_state,
                     ),
                 )
-                control_state = _persist_control_state(control_state)
+                if result.status != deps.SubtaskStatus.COMPLETED and not completed_not_durable:
+                    control_state = _persist_control_state(control_state)
                 if result.status != deps.SubtaskStatus.COMPLETED:
                     deps.logger.warning(
                         f"WorkflowController enforce run {run_id!r}: stopped at subtask {subtask_id!r} "

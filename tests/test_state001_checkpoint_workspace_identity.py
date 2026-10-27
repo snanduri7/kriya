@@ -456,7 +456,9 @@ def test_run_structured_enforce_uses_persist_control_state_closure_everywhere():
     # completions as landed in the workspace (subtask_completion_scope).
     # 11: BACKEND-FINAL-CLOSURE-005 - the verification-owner recovery persists
     # the owner's real written set before the verification rerun (review F8).
-    assert persist_calls == 11, persist_calls
+    # D1: 11 -> 13: the TOOL subtask's DURABLE STARTED save (before the dispatch) and its DURABLE COMPLETED save (after the result) go through the same closure (durable=True);
+    # raw save_control_state stays exactly 1 (inside the closure).
+    assert persist_calls == 13, persist_calls
 
 
 # ---------------------------------------------------------------------------

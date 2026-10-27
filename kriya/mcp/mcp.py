@@ -768,32 +768,14 @@ class MCPTool(BaseTool):
         TOOL-003's capability containment - in every mode; this declaration adds nothing and widens nothing."""
         return args
 
-    async def _run(self, args: BaseModel) -> Any:
-        # TOOL-002 P1 (Invariant 1/2/8/9/10): a deterministic Kriya
-        # authority decision, ALWAYS REAL ENFORCEMENT regardless of
-        # ExecutionPolicyConfig.mode (unlike every audit-only MA4 caller -
-        # every other current ExecutionPolicy consumer only enforces under
-        # mode="enforce" or via enforce_hard_invariants's own fixed 5-code
-        # set; MCP has no such carve-out, matching AuthorizedFileWriter's
-        # own precedent as the SECOND deliberate, explicit exception to
-        # MA4's audit-only mandate) - gates every path to
-        # the real MCP dispatch call below. DENY, REQUIRE_APPROVAL (no
-        # approval mechanism is safely reachable at this call site in P1 -
-        # see TASK 6/Invariant 9), and a THROWING/unavailable policy engine
-        # (Invariant 10) all mean zero tools/call, raised via the same
-        # typed PolicyDeniedError ExecutionPolicy's other real-enforcement
-        # callers (ShellTool, GitTool, AuthorizedFileWriter) already use -
-        # never a fallback to unauthorized execution. Only ALLOW/
-        # ALLOW_SANDBOXED let this method reach the dispatch call below;
-        # MCP has no sandboxing mechanism of its own to route
-        # ALLOW_SANDBOXED through (that is TOOL-003 containment's scope),
-        # so both are treated identically here.
-        #
-        # `self.identity` (bound once, at construction - see __init__'s
-        # own docstring) is the ONLY thing this decision is made against -
-        # never `self._description` (the server's own advertised text),
-        # never `args`/`raw_args` (Invariant: no authority inferred from
-        # argument names or values in P1 - that is TOOL-003 scope too).
+    def revalidate_authority(self, args: BaseModel, invocation: Any) -> None:
+        """D1: effect-free re-check of the TOOL-002 durable approval / TOOL-003 capability decision (see _decide_invocation_authority)."""
+        self._decide_invocation_authority()
+
+    def _decide_invocation_authority(self) -> None:
+        """The TOOL-002/TOOL-003 authority decision of one MCP call, with NO effect: raises PolicyDeniedError on DENY / REQUIRE_APPROVAL / an unavailable policy engine and
+        returns on ALLOW. It is the ONE place that decision is made: ``_run`` calls it immediately before the dispatch (unchanged behaviour) and a resume calls it through
+        ``revalidate_authority`` to re-check authority for an already-COMPLETED execution WITHOUT dispatching it again (D1)."""
         request = ActionRequest(
             action_type=ActionType.MCP_TOOL_CALL,
             metadata={
@@ -830,6 +812,34 @@ class MCPTool(BaseTool):
 
         if result.decision in (PolicyDecision.DENY, PolicyDecision.REQUIRE_APPROVAL):
             raise PolicyDeniedError(request=request, result=result)
+
+    async def _run(self, args: BaseModel) -> Any:
+        # TOOL-002 P1 (Invariant 1/2/8/9/10): a deterministic Kriya
+        # authority decision, ALWAYS REAL ENFORCEMENT regardless of
+        # ExecutionPolicyConfig.mode (unlike every audit-only MA4 caller -
+        # every other current ExecutionPolicy consumer only enforces under
+        # mode="enforce" or via enforce_hard_invariants's own fixed 5-code
+        # set; MCP has no such carve-out, matching AuthorizedFileWriter's
+        # own precedent as the SECOND deliberate, explicit exception to
+        # MA4's audit-only mandate) - gates every path to
+        # the real MCP dispatch call below. DENY, REQUIRE_APPROVAL (no
+        # approval mechanism is safely reachable at this call site in P1 -
+        # see TASK 6/Invariant 9), and a THROWING/unavailable policy engine
+        # (Invariant 10) all mean zero tools/call, raised via the same
+        # typed PolicyDeniedError ExecutionPolicy's other real-enforcement
+        # callers (ShellTool, GitTool, AuthorizedFileWriter) already use -
+        # never a fallback to unauthorized execution. Only ALLOW/
+        # ALLOW_SANDBOXED let this method reach the dispatch call below;
+        # MCP has no sandboxing mechanism of its own to route
+        # ALLOW_SANDBOXED through (that is TOOL-003 containment's scope),
+        # so both are treated identically here.
+        #
+        # `self.identity` (bound once, at construction - see __init__'s
+        # own docstring) is the ONLY thing this decision is made against -
+        # never `self._description` (the server's own advertised text),
+        # never `args`/`raw_args` (Invariant: no authority inferred from
+        # argument names or values in P1 - that is TOOL-003 scope too).
+        self._decide_invocation_authority()
 
         # SEC-004: a server that died after its tools were registered
         # (stale lifecycle state) must fail deterministically here, not

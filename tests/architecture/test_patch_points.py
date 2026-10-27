@@ -271,6 +271,8 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # D2 M4: -1 site (the retired controller-migration test) and -1 lookup (the migrations' ResumeDeps entry).
     (C, 'save_control_state'): P(6, 'kriya.control.persistence', ((C, 5),), ()),
     (C, 'subtask_executor.execute'): P(9, 'kriya.workflow.subtask_executor', None, ()),
+    # D1: the effect-free authority revalidation of a durably COMPLETED TOOL subtask on resume (tests/test_e12_enforce_characterization.py ER10 patches it to count that authority is revalidated while the effect is not run again).
+    (C, 'subtask_executor.revalidate_tool_subtask_authority'): P(1, 'kriya.workflow.subtask_executor', None, ()),
     # E12: 5 -> 2 lookups: the enforce loop's loads moved to enforce_loop and read EnforceDeps (one load in
     # workflow_controller._enforce_deps); the shadow run's load is _shadow_deps' (E12 1/2); the patch sites above
     # are the dynamic proof.
@@ -441,8 +443,8 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # generate command renders)
     # P-B skill-verification deferral (tests/test_skill_verification_deferral.py): +1 W site (final_review: the stage-5 closer seeded
     # with a held verification on a failed run) and +1 C site (commit_verified_candidate: the enforce terminal commit it defers behind)
-    assert totals == {A: 113, W: 98, C: 384}  # D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override)
-    assert len(PATCH_POINTS) == 133  # P-B: +1 row (W.final_review)
+    assert totals == {A: 113, W: 98, C: 385}  # D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
+    assert len(PATCH_POINTS) == 134  # P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
 
 
 # ----------------------------------------------------------------------------- owner modules (DEPENDENCY-RULES)

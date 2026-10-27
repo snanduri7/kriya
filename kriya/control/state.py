@@ -42,7 +42,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.policy.risk import EngineeringRoute, ProcessProfile
 
@@ -52,6 +52,10 @@ CURRENT_SCHEMA_VERSION = 1
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+
+# D1: the persisted value of a TOOL subtask whose side effect is about to run / is running: durably written BEFORE the effect and replaced by "completed" only by a
+# durable COMPLETED transition. Every other consumer compares against "completed" only, so a different marker is never mistaken for a completion or a retryable state.
+SUBTASK_STATE_TOOL_STARTED = "tool_started"
 
 @dataclass(frozen=True)
 class ControlState:
@@ -151,6 +155,12 @@ class ControlState:
 
     created_at: str = field(default_factory=_now_iso)
     updated_at: str = field(default_factory=_now_iso)
+
+    @property
+    def unresolved_tool_subtask_ids(self) -> Tuple[str, ...]:
+        """D1: the subtasks whose TOOL execution is durably STARTED (SUBTASK_STATE_TOOL_STARTED) and never durably COMPLETED. Reports the persisted fact only; whether a
+        resume may retry them is decided by exactly one owner (kriya/workflow/resume_support.py::classify_tool_resume) and the answer is never "yes"."""
+        return tuple(sorted(subtask_id for subtask_id, state in self.subtask_states.items() if state == SUBTASK_STATE_TOOL_STARTED))
 
     def with_updates(self, **changes: Any) -> "ControlState":
         """Returns a NEW ControlState with the given fields replaced and

@@ -971,13 +971,15 @@ def test_the_integration_obligation_with_provenance_mirrors_its_decision(tmp_pat
 
 # ============================================================================== resume support
 
-def test_tool_subtasks_are_never_resume_completed():
+def test_tool_resume_is_classified_by_the_one_owner_completed_never_reexecuted_started_needs_review():
+    """D1 (replaces test_tool_subtasks_are_never_resume_completed, which pinned that a completed TOOL subtask is re-executed on resume)."""
     p = plan(st("s1", ["a.py"]), st("t2", [], method=ExecutionMethod.TOOL, verification=(COMPILE,)),
-             st("t1", [], method=ExecutionMethod.TOOL, verification=(COMPILE,)))
-    states = {"s1": "completed", "t2": "completed", "t1": "completed", "gone": "completed", "t3": "failed"}
-    filtered, excluded = wc.exclude_tool_subtasks_from_resume(p, states)
-    assert excluded == ["t1", "t2"] and filtered == {"s1": "completed", "gone": "completed", "t3": "failed"}
-    assert wc.exclude_tool_subtasks_from_resume(p, {"s1": "completed"}) == ({"s1": "completed"}, [])
+             st("t1", [], method=ExecutionMethod.TOOL, verification=(COMPILE,)), st("t3", [], method=ExecutionMethod.TOOL, verification=(COMPILE,)))
+    states = {"s1": "completed", "t2": "completed", "t1": "tool_started", "gone": "completed", "t3": "failed"}
+    decision = wc.classify_tool_resume(p, states)
+    assert decision.completed == ("t2",) and decision.unresolved == ("t1",)
+    assert decision.states == states, "the classifier never rewrites the states (MODEL and failed TOOL entries keep their existing semantics)"
+    assert wc.classify_tool_resume(p, {"s1": "completed"}).completed == () and wc.classify_tool_resume(p, {"s1": "completed"}).unresolved == ()
 
 
 def test_all_subtasks_completed_reads_the_current_plan_only():

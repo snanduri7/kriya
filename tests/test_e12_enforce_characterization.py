@@ -560,19 +560,23 @@ async def test_a_prior_run_record_that_cannot_be_trusted_refuses_the_resume(tmp_
 
 
 @pytest.mark.asyncio
-async def test_a_tool_subtask_recorded_completed_is_executed_again_on_resume(tmp_path):
-    """ER10 (TOOL subtasks resume-skipped): authority always revalidates."""
+async def test_a_tool_subtask_durably_completed_is_not_executed_again_on_resume_and_its_authority_is_revalidated(tmp_path):
+    """ER10, rewritten by D1 (it used to pin "executed again on resume", i.e. a duplicate side effect): a TOOL subtask recorded COMPLETED is terminal - its effect is NEVER run
+    again for that execution - while TOOL-001's authority requirement is kept through the separate, effect-free revalidation."""
     tool = Subtask(id="t1", description="run a command", execution_method=ExecutionMethod.TOOL,
                    tool_name="shell", tool_arguments={"command": "true"})
     plan = _plan_of(tool, _unit("s2", "b.py", depends_on=["t1"]))
     done = SubtaskResult(subtask_id="t1", status=SubtaskStatus.COMPLETED, execution_method="tool")
     executor = AsyncMock(return_value=done)
-    with patch(f"{C}.subtask_executor.execute", new=executor):
+    revalidation = MagicMock(return_value=None)
+    with patch(f"{C}.subtask_executor.execute", new=executor), patch(f"{C}.subtask_executor.revalidate_tool_subtask_authority", new=revalidation):
         await _interrupted(tmp_path, plan)
-        assert executor.await_count == 1
+        assert executor.await_count == 1 and revalidation.call_count == 0
         result, calls = await _enforce(_enforce_engine(tmp_path), tmp_path, plan, resume=True)
-    assert result.legacy_result["resume_decision"]["reused_subtasks"] == []
-    assert executor.await_count == 2 and [c["current_subtask_id"] for c in calls] == ["s2"]
+    assert result.legacy_result["resume_decision"]["reused_subtasks"] == ["t1"]
+    assert executor.await_count == 1, "the TOOL effect ran again on resume (duplicate side effect)"
+    assert revalidation.call_count == 1, "authority was not revalidated for the completed TOOL execution"
+    assert [c["current_subtask_id"] for c in calls] == ["s2"]
 
 
 @pytest.mark.asyncio

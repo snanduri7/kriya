@@ -59,7 +59,7 @@ from kriya.workflow import workflow_controller as wc_module
 from kriya.workflow.context_package import build_context_package
 from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask
 from kriya.workflow.triage import ChangeKind
-from kriya.workflow.workflow_controller import all_subtasks_completed, exclude_tool_subtasks_from_resume
+from kriya.workflow.workflow_controller import all_subtasks_completed, classify_tool_resume
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus
 
 
@@ -809,71 +809,62 @@ def test_reason_codes_captured_from_policy_denied_error_cause():
 # TASK 10: checkpoint/resume cannot bypass revalidation.
 # =====================================================================
 
-def test_resume_excludes_completed_tool_subtasks_keeps_model_subtasks():
+def test_resume_classifies_a_completed_tool_subtask_as_terminal_never_re_executed_and_leaves_model_subtasks_alone():
+    """D1 (this used to pin that a completed TOOL subtask is EXCLUDED from resume and therefore re-executed - the duplicate side effect D1 removes)."""
     tool_st = _tool_subtask(id="t1")
     model_st = _model_subtask(id="m1")
     plan = _plan(model_st, tool_st)
     prior_states = {"m1": "completed", "t1": "completed"}
 
-    filtered, excluded = exclude_tool_subtasks_from_resume(plan, dict(prior_states))
+    decision = classify_tool_resume(plan, dict(prior_states))
 
-    assert excluded == ["t1"]
-    assert filtered == {"m1": "completed"}  # MODEL subtask resume is unaffected
+    assert decision.completed == ("t1",) and decision.unresolved == ()
+    assert decision.states == prior_states  # nothing is removed: the completed TOOL entry is KEPT so it is not re-run, and MODEL resume is unaffected
 
 
-def test_resume_exclusion_is_a_noop_when_no_tool_subtask_was_completed():
+def test_resume_classification_is_empty_when_no_tool_subtask_was_recorded():
     model_st = _model_subtask(id="m1")
     plan = _plan(model_st)
     prior_states = {"m1": "completed"}
 
-    filtered, excluded = exclude_tool_subtasks_from_resume(plan, dict(prior_states))
+    decision = classify_tool_resume(plan, dict(prior_states))
 
-    assert excluded == []
-    assert filtered == prior_states
+    assert decision.completed == () and decision.unresolved == ()
+    assert decision.states == prior_states
 
 
-def test_resume_exclusion_leaves_non_completed_tool_entries_untouched():
-    tool_st = _tool_subtask(id="t1")
-    plan = _plan(tool_st)
-    prior_states = {"t1": "failed"}
+def test_resume_classification_leaves_failed_tool_entries_untouched_and_never_calls_a_started_one_retryable():
+    tool_st, started_st = _tool_subtask(id="t1"), _tool_subtask(id="t2")
+    plan = _plan(tool_st, started_st)
+    prior_states = {"t1": "failed", "t2": "tool_started"}
 
-    filtered, excluded = exclude_tool_subtasks_from_resume(plan, dict(prior_states))
+    decision = classify_tool_resume(plan, dict(prior_states))
 
-    assert excluded == []
-    assert filtered == {"t1": "failed"}
+    assert decision.completed == () and decision.unresolved == ("t2",), "STARTED without COMPLETED is unresolved (needs_review), never retryable"
+    assert decision.states == prior_states
 
 
 @pytest.mark.asyncio
-async def test_resumed_tool_subtask_revalidates_mcp_approval_fresh_after_revocation(tmp_path):
-    """End-to-end proof of Invariant 18 at the exact mechanism level: a
-    TOOL subtask marked 'completed' by a prior interrupted run must not
-    let that record substitute for a fresh TOOL-002 check - if approval
-    was revoked in between, re-execution (never resume-skip, per
-    exclude_tool_subtasks_from_resume) denies for real."""
+async def test_resumed_completed_tool_subtask_revalidates_mcp_approval_fresh_after_revocation(tmp_path):
+    """Invariant 18 at the exact mechanism level, kept by D1 and separated from the effect: a TOOL subtask recorded COMPLETED by a prior run is NOT executed again, but
+    its authority is still revalidated fresh - if approval was revoked in between, the effect-free revalidation REFUSES (the earlier record cannot substitute for a TOOL-002 check)."""
     with _cwd(tmp_path / "ws"):
-        # Never approved at all in THIS run (simulating: it was approved
-        # when the prior interrupted run completed it, but that approval
-        # is gone now - revoked, or never persisted correctly).
+        # Never approved at all in THIS run (it was approved when the prior run completed it, but that approval is gone now).
         kernel = Kernel(config=app_config())
 
         tool_st = _tool_subtask(id="t1", tool_name="probe_echo_test", tool_arguments={"message": "hi"})
         plan = _plan(tool_st)
-        # A prior run recorded this TOOL subtask as completed.
-        prior_states = {"t1": "completed"}
-        filtered, excluded = exclude_tool_subtasks_from_resume(plan, dict(prior_states))
-        assert excluded == ["t1"]
-        assert "t1" not in filtered  # would have been resume-skipped without this fix
+        decision = classify_tool_resume(plan, {"t1": "completed"})
+        assert decision.completed == ("t1",) and decision.unresolved == ()  # terminal effect: the resume never runs it again
 
         await kernel.mcp.start_all({"probe": {"command": sys.executable, "args": [MOCK_SERVER]}})
         try:
-            result = await subtask_executor.execute(
-                subtask=tool_st, plan=plan, context=build_context_package(), kernel=kernel,
-            )
+            refusal = subtask_executor.revalidate_tool_subtask_authority(tool_st, kernel, (), plan, None)
         finally:
             await kernel.mcp.shutdown_all()
 
-        assert result.status == SubtaskStatus.FAILED
-        assert "MCP_TOOL_REQUIRES_APPROVAL" in result.error
+        assert refusal is not None and refusal.status == SubtaskStatus.FAILED
+        assert "MCP_TOOL_REQUIRES_APPROVAL" in refusal.error
 
 
 # =====================================================================

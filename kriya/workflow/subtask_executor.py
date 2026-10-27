@@ -66,9 +66,9 @@ from kriya.tools.tool import (
     ModelInvocationRefused,
     ModelToolInvocation,
     ToolExecutionError,
-    authorize_model_authored,
     execute_model_authored,
     resolve_planned_tool_governance,
+    revalidate_model_authored,
 )
 from kriya.workflow.context_package import ContextPackage
 from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, Subtask
@@ -310,7 +310,7 @@ def revalidate_tool_subtask_authority(subtask: Subtask, kernel: Any, tool_roots:
     if refusal is not None:
         return refusal
     try:
-        authorize_model_authored(tool, subtask.tool_arguments, invocation)
+        revalidate_model_authored(tool, subtask.tool_arguments, invocation)
     except (AutonomyModeError, ModelInvocationRefused, ToolExecutionError) as e:
         return _tool_error_result(subtask, e)
     return None

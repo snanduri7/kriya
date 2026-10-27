@@ -4,8 +4,8 @@
 Moved verbatim from ``kriya/workflow/workflow_controller.py`` (module-level code; ``execute``,
 ``execute_milestones`` and the enforce loop that call it stay in the controller):
 
-- resume revalidation of the structured plan: TOOL subtasks are never resume-completed
-  (``exclude_tool_subtasks_from_resume``) and the terminal all-completed gate (``all_subtasks_completed``);
+- resume revalidation of the structured plan: TOOL subtasks are classified authoritatively
+  (``classify_tool_resume``: completed = never re-executed, started-without-completed = needs_review) and the terminal all-completed gate (``all_subtasks_completed``);
 - a re-plan's abandoned files (``compute_abandoned_plan_files``, ``quarantine_abandoned_plan_files``).
 
 D2 M4 (owner decision 2026-10-23): the one-time ownership migration of legacy (ownerless) control documents that used to live here
@@ -36,55 +36,48 @@ class ResumeDeps:
 
     # the controller's logger
     logger: Any
+    # D1: the persisted marker of a durably STARTED TOOL subtask (kriya.control.state.SUBTASK_STATE_TOOL_STARTED), resolved by the controller (this module never imports kriya.control.state)
+    tool_started_state: str
 
 
-def exclude_tool_subtasks_from_resume(
-    plan: EngineeringPlan, resumed_subtask_states: Dict[str, str],
-) -> Tuple[Dict[str, str], List[str]]:
-    """TOOL-001 (2026-09-13), Invariant 18 ("resume/checkpoint cannot
-    bypass revalidation"): pure computation, separated out for direct unit
-    testing (mirrors compute_abandoned_plan_files's own "pure/testable,
-    real call site wires it in" split just above).
+TOOL_EXECUTION_UNRESOLVED = "TOOL_EXECUTION_UNRESOLVED"
+TOOL_STARTED_NOT_DURABLE = "TOOL_STARTED_NOT_DURABLE"
+TOOL_COMPLETED_NOT_DURABLE = "TOOL_COMPLETED_NOT_DURABLE"
 
-    A MODEL subtask's "completed" resume record is self-verifying via the
-    caller's own git tree_hash/base_commit match - the written file
-    content IS the artifact, and it's still on disk exactly as recorded.
-    A TOOL subtask's "completed" record has no such self-verifying
-    property: the side effect (an MCP tools/call, a Maven build, ...) left
-    no git-visible trace that check can confirm is still current, and
-    TOOL-002/TOOL-003's own authority state (durable approval, capability
-    profile) can drift independently of the git workspace entirely.
-    Rather than inventing new idempotency/staleness semantics for tool
-    side effects (explicitly out of scope), a TOOL-tagged subtask is never
-    treated as resume-completed - removed from the returned dict
-    unconditionally, so the caller's own per-subtask loop always
-    re-executes it through the full governed path, which always
-    re-consults current TOOL-002/TOOL-003/SEC-005/ExecutionPolicy
-    authority fresh. This is a disclosed behavior CHOICE, not a
-    side-effect-free compromise: a non-idempotent tool re-invoked on
-    resume is a plan-design hazard the existing governance layer surfaces
-    the same way it would on any fresh second run of the same plan,
-    whereas silently skipping TOOL-002 revalidation would be a
-    security-contract violation - the two are not symmetric risks, so
-    this does not split the difference.
 
-    Only ever REMOVES entries (never adds/completes one) - a subtask id
-    from `resumed_subtask_states` that is no longer present in the
-    (possibly freshly re-planned) `plan` is left exactly as the caller
-    passed it; this function has no opinion on plan-drift handling, only
-    on which currently-plan-present, currently-"completed" entries are
-    safe to treat as resume-skippable."""
-    tool_subtask_ids = {
-        st.id for st in plan.subtasks if st.execution_method == ExecutionMethod.TOOL
-    }
-    excluded = sorted(
-        subtask_id for subtask_id, status in resumed_subtask_states.items()
-        if status == "completed" and subtask_id in tool_subtask_ids
-    )
-    if not excluded:
-        return resumed_subtask_states, excluded
-    filtered = {k: v for k, v in resumed_subtask_states.items() if k not in excluded}
-    return filtered, excluded
+@dataclass(frozen=True)
+class ToolResumeDecision:
+    """The ONE authoritative resume classification of TOOL subtasks (D1). The enforce loop (and every other consumer) transports/displays it and never recomputes it.
+
+    completed:  TOOL executions durably COMPLETED. The side effect is terminal for that execution identity and is NEVER run again; authority may still be revalidated
+                (subtask_executor.revalidate_tool_subtask_authority) because TOOL-002/003 authority state can drift independently of the workspace.
+    unresolved: TOOL executions durably STARTED (the TOOL_STARTED marker, or a legacy "in_progress" record of a TOOL subtask) with no durable COMPLETED. The effect may or
+                may not have happened: the classification is ``needs_review`` and it is never retried automatically.
+    states:     the resumed states, unchanged (MODEL "in_progress"/"failed"/... keep their existing retryable semantics)."""
+
+    completed: Tuple[str, ...]
+    unresolved: Tuple[str, ...]
+    states: Dict[str, str]
+
+
+def classify_tool_resume(deps: ResumeDeps, plan: EngineeringPlan, resumed_subtask_states: Dict[str, str]) -> ToolResumeDecision:
+    """TOOL-001 (2026-09-13, Invariant 18: resume cannot bypass revalidation) + D1 (2026-10-28: no duplicate and no uncertain-retry of an external side effect).
+
+    A MODEL subtask's "completed" record is self-verifying (the written file IS the artifact, still on disk as recorded), and an interrupted MODEL subtask is safely
+    re-runnable. A TOOL subtask's side effect (an MCP tools/call, a Maven build, ...) leaves no such trace, so its persisted lifecycle is the only truth:
+
+    * "completed" (durably written AFTER the effect succeeded)      -> ``completed``: never executed again for this execution identity;
+    * the TOOL_STARTED marker (``deps.tool_started_state``) / legacy "in_progress" for a TOOL  -> ``unresolved``: needs_review, never auto-retried (it covers a crash before the effect began AND a
+                                                                         crash after the effect but before COMPLETED - conservative uncertainty is correct, duplicates are not);
+    * anything else (failed / needs_review from a typed pre-effect refusal / pending) keeps its existing semantics.
+
+    Pure and total over (plan, states); it only ever reads. Ids that are not TOOL subtasks of the CURRENT plan are left to the caller exactly as passed."""
+    tool_subtask_ids = {st.id for st in plan.subtasks if st.execution_method == ExecutionMethod.TOOL}
+    completed = tuple(sorted(i for i, state in resumed_subtask_states.items() if state == "completed" and i in tool_subtask_ids))
+    unresolved = tuple(sorted(
+        i for i, state in resumed_subtask_states.items()
+        if i in tool_subtask_ids and state in (deps.tool_started_state, "in_progress")))
+    return ToolResumeDecision(completed=completed, unresolved=unresolved, states=dict(resumed_subtask_states))
 
 
 def all_subtasks_completed(

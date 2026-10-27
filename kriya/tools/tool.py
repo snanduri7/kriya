@@ -77,6 +77,13 @@ class BaseTool(ABC):
         """Internal execution logic implementation."""
         pass
 
+    def revalidate_authority(self, args: BaseModel, invocation: "ModelToolInvocation") -> None:
+        """D1: an EFFECT-FREE re-check of whatever authority this tool evaluates at call time rather than at declaration. A resume uses it for a TOOL execution that is already
+        durably COMPLETED, so authority is revalidated without running the side effect again. Raises (PolicyDeniedError) when authority no longer holds. The default adds
+        nothing beyond ``authorize_model_invocation`` (which ``authorize_model_authored`` already ran); a tool whose ``_run`` makes its own authority decision overrides this
+        by delegating to that SAME decision (MCPTool: TOOL-002 durable approval + TOOL-003 capability)."""
+        return None
+
     def authorize_model_invocation(self, args: BaseModel, invocation: "ModelToolInvocation") -> BaseModel:
         """S1: how a MODEL-AUTHORED call to this tool is governed; returns the arguments to run with (paths resolved
         to exactly what is authorized) or raises before anything runs. This default is for a tool that declares
@@ -312,6 +319,18 @@ def authorize_model_authored(tool: Any, arguments: Mapping[str, Any], invocation
     except Exception as e:  # the reused authority's denial (PolicyDeniedError), or a broken check: refused either way
         logger.warning(f"Model-authored call to tool '{tool.name}' refused: {e}")
         raise ToolExecutionError(f"Tool call refused: {e}") from e
+
+
+def revalidate_model_authored(tool: Any, arguments: Mapping[str, Any], invocation: ModelToolInvocation) -> None:
+    """D1: ALL the authority of a model-authored call, with no effect: the declaration (``authorize_model_authored``) and the tool's call-time authority
+    (``BaseTool.revalidate_authority``). A refusal is raised exactly as the execute path raises it (ModelInvocationRefused / ToolExecutionError whose ``__cause__`` is the
+    PolicyDeniedError); ``_run_model_authored`` is never reached from here."""
+    authorized = authorize_model_authored(tool, arguments, invocation)
+    try:
+        tool.revalidate_authority(authorized, invocation)
+    except Exception as e:  # wrapped exactly as the effect path wraps a denial raised inside ``_run``
+        logger.error(f"Revalidation of tool '{tool.name}' refused: {e}")
+        raise ToolExecutionError(f"Tool execution failed: {e}") from e
 
 
 async def execute_model_authored(tool: Any, arguments: Mapping[str, Any], invocation: ModelToolInvocation) -> Any:
