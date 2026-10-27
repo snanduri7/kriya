@@ -66,6 +66,7 @@ from kriya.tools.tool import (
     ModelInvocationRefused,
     ModelToolInvocation,
     ToolExecutionError,
+    authorize_model_authored,
     execute_model_authored,
     resolve_planned_tool_governance,
 )
@@ -240,8 +241,32 @@ def reads_candidate_view(subtask: Subtask, plan: EngineeringPlan,
     return False
 
 
-async def _execute_tool_subtask(subtask: Subtask, kernel: Any, tool_roots: Sequence[str],
-                                plan: EngineeringPlan, candidate_writes: Optional[CandidateWrites]) -> SubtaskResult:
+def _tool_error_result(subtask: Subtask, error: Exception) -> SubtaskResult:
+    """The typed result of a TOOL refusal or failure, shared by the execute path and the revalidate-only path (so authority never diverges between them)."""
+    if isinstance(error, (AutonomyModeError, ModelInvocationRefused)):  # S18 / OI-135 malformed mode; S1 TOOLBOX refusal: typed NEEDS_REVIEW, never a permissive reading
+        logger.warning(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} refused: {error}")
+        return SubtaskResult(
+            subtask_id=subtask.id, status=SubtaskStatus.NEEDS_REVIEW, execution_method=ExecutionMethod.TOOL.value,
+            error=str(error), reason_codes=(error.reason_code,),
+        )
+    logger.info(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} failed: {error}")
+    # TOOL-001 (2026-09-13): BaseTool.execute() always wraps the REAL underlying exception into ToolExecutionError via `raise ... from e` (kriya/tools/tool.py) - when
+    # that real cause is a PolicyDeniedError (ExecutionPolicy DENY/REQUIRE_APPROVAL, including TOOL-002's MCP invocation denial), its own `result.reason_code` is
+    # surfaced here as structured evidence rather than only living inside the free-text error string - never re-derived or re-evaluated.
+    reason_codes: tuple = ()
+    if isinstance(error.__cause__, PolicyDeniedError):
+        reason_codes = (error.__cause__.result.reason_code,)
+    return SubtaskResult(
+        subtask_id=subtask.id, status=SubtaskStatus.FAILED,
+        execution_method=ExecutionMethod.TOOL.value, error=str(error),
+        reason_codes=reason_codes,
+    )
+
+
+def _tool_preflight(subtask: Subtask, kernel: Any, tool_roots: Sequence[str], plan: EngineeringPlan,
+                    candidate_writes: Optional[CandidateWrites]) -> Tuple[Optional[Any], Optional[ModelToolInvocation], Optional[SubtaskResult]]:
+    """Everything that happens BEFORE a TOOL subtask's authority decision and effect: the registry lookup, the mode, the human-in-the-loop confirmation stop and the
+    invocation. Returns (tool, invocation, None), or (None, None, the typed refusal result) with nothing run."""
     try:
         tool = kernel.registry.get("tool", subtask.tool_name)
     except (ComponentRegistryError, Exception) as e:
@@ -249,7 +274,7 @@ async def _execute_tool_subtask(subtask: Subtask, kernel: Any, tool_roots: Seque
             f"SubtaskExecutor: subtask {subtask.id!r} references tool_name "
             f"{subtask.tool_name!r}, not resolvable in the kernel's tool registry: {e}"
         )
-        return SubtaskResult(
+        return None, None, SubtaskResult(
             subtask_id=subtask.id, status=SubtaskStatus.NEEDS_REVIEW,
             execution_method=ExecutionMethod.TOOL.value,
             error=f"tool_name {subtask.tool_name!r} not registered",
@@ -259,60 +284,47 @@ async def _execute_tool_subtask(subtask: Subtask, kernel: Any, tool_roots: Seque
     try:
         _autonomy_mode(kernel)
     except AutonomyModeError as e:
-        logger.warning(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} refused: {e}")
-        return SubtaskResult(
-            subtask_id=subtask.id, status=SubtaskStatus.NEEDS_REVIEW, execution_method=ExecutionMethod.TOOL.value,
-            error=str(e), reason_codes=(e.reason_code,),
-        )
+        return None, None, _tool_error_result(subtask, e)
 
-    # Review of the runtime-approval stack (2026-10-15), B3: a tool that asks to be confirmed when an operator runs it (`kriya tools execute` honours `requires_confirmation`) must not run unasked
+    # Review of the runtime-approval stack (2026-10-15), B3: a tool that asks to be confirmed when an operator runs it (`kriya tools execute` honours `requires_confirmation`) must not run unconfirmed
     # from a planner-emitted subtask. Human-in-the-loop has no per-run review subject here, so it stops BEFORE the call (nothing executed) with a typed reason; every other mode is unchanged.
     if _hitl_blocks_tool_without_confirmation(tool, kernel):
-        logger.warning(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} requires confirmation and human-in-the-loop mode cannot approve a planner-chosen tool call; not executed")
-        return SubtaskResult(
+        logger.warning(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} requires confirmation and human-in-the-loop mode cannot approve a planner-chosen tool call; not executed.")
+        return None, None, SubtaskResult(
             subtask_id=subtask.id, status=SubtaskStatus.NEEDS_REVIEW, execution_method=ExecutionMethod.TOOL.value,
             error=f"{TOOL_CONFIRMATION_UNSUPPORTED}: tool {subtask.tool_name!r} requires your confirmation to run and this version cannot ask you from a planned step. Nothing was run.",
             reason_codes=(TOOL_CONFIRMATION_UNSUPPORTED,),
         )
 
-    # S1: the model-authored entry point - authorized by the tool's own declaration over these roots before anything
-    # runs; a refusal is typed (TOOLBOX code, NEEDS_REVIEW) or the reused authority's PolicyDeniedError (FAILED, below).
+    # S1: the model-authored entry point - authorized by the tool's own declaration over these roots before anything runs.
     invocation = ModelToolInvocation(roots=tuple(tool_roots), autonomy_mode=_autonomy_mode(kernel),
                                      reads_candidate=reads_candidate_view(subtask, plan, candidate_writes))
+    return tool, invocation, None
+
+
+def revalidate_tool_subtask_authority(subtask: Subtask, kernel: Any, tool_roots: Sequence[str], plan: EngineeringPlan,
+                                      candidate_writes: Optional[CandidateWrites]) -> Optional[SubtaskResult]:
+    """D1: the AUTHORITY decision of a TOOL subtask with NO effect. A resume uses it for a TOOL execution that is already durably COMPLETED: authority may be revalidated, but
+    the side effect is never run again for that execution identity. Returns None when the call is still authorized, else the same typed refusal result the execute path returns."""
+    tool, invocation, refusal = _tool_preflight(subtask, kernel, tool_roots, plan, candidate_writes)
+    if refusal is not None:
+        return refusal
+    try:
+        authorize_model_authored(tool, subtask.tool_arguments, invocation)
+    except (AutonomyModeError, ModelInvocationRefused, ToolExecutionError) as e:
+        return _tool_error_result(subtask, e)
+    return None
+
+
+async def _execute_tool_subtask(subtask: Subtask, kernel: Any, tool_roots: Sequence[str],
+                                plan: EngineeringPlan, candidate_writes: Optional[CandidateWrites]) -> SubtaskResult:
+    tool, invocation, refusal = _tool_preflight(subtask, kernel, tool_roots, plan, candidate_writes)
+    if refusal is not None:
+        return refusal
     try:
         output = await execute_model_authored(tool, subtask.tool_arguments, invocation)
-    except AutonomyModeError as e:  # S18 / OI-135: a malformed mode is a typed stop, never a permissive reading
-        logger.warning(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} refused: {e}")
-        return SubtaskResult(
-            subtask_id=subtask.id, status=SubtaskStatus.NEEDS_REVIEW, execution_method=ExecutionMethod.TOOL.value,
-            error=str(e), reason_codes=(e.reason_code,),
-        )
-    except ModelInvocationRefused as e:
-        logger.warning(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} refused: {e}")
-        return SubtaskResult(
-            subtask_id=subtask.id, status=SubtaskStatus.NEEDS_REVIEW, execution_method=ExecutionMethod.TOOL.value,
-            error=str(e), reason_codes=(e.reason_code,),
-        )
-    except ToolExecutionError as e:
-        logger.info(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} failed: {e}")
-        # TOOL-001 (2026-09-13): BaseTool.execute() always wraps the REAL
-        # underlying exception into ToolExecutionError via `raise ... from
-        # e` (kriya/tools/tool.py) - when that real cause is a
-        # PolicyDeniedError (ExecutionPolicy DENY/REQUIRE_APPROVAL,
-        # including TOOL-002's MCP invocation denial), its own
-        # `result.reason_code` is surfaced here as structured evidence
-        # (Task 9: "policy/authority decision where available") rather
-        # than only living inside the free-text error string - never
-        # re-derived or re-evaluated, purely read off the exception this
-        # tool call already raised.
-        reason_codes: tuple = ()
-        if isinstance(e.__cause__, PolicyDeniedError):
-            reason_codes = (e.__cause__.result.reason_code,)
-        return SubtaskResult(
-            subtask_id=subtask.id, status=SubtaskStatus.FAILED,
-            execution_method=ExecutionMethod.TOOL.value, error=str(e),
-            reason_codes=reason_codes,
-        )
+    except (AutonomyModeError, ModelInvocationRefused, ToolExecutionError) as e:
+        return _tool_error_result(subtask, e)
 
     return SubtaskResult(
         subtask_id=subtask.id, status=SubtaskStatus.COMPLETED,

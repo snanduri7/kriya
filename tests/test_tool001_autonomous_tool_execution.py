@@ -187,7 +187,8 @@ def isolated_homes(tmp_path, monkeypatch):
 
 def test_execute_tool_subtask_calls_the_governed_model_authored_entry():
     """S1: the dispatch is the model-authored entry point, never the operator's BaseTool.execute()."""
-    source = inspect.getsource(subtask_executor._execute_tool_subtask)
+    # D1: the registry lookup and the pre-authority checks moved into the shared `_tool_preflight` (so the revalidate-only path cannot diverge); the whole execute path is both.
+    source = inspect.getsource(subtask_executor._execute_tool_subtask) + inspect.getsource(subtask_executor._tool_preflight)
     assert "await execute_model_authored(" in source and "tool.execute(" not in source
     assert "kernel.registry.get(\"tool\"" in source
     # Never a second execution primitive - no subprocess/MCPClient
@@ -918,7 +919,7 @@ def test_all_subtasks_completed_never_inspects_tool_output_content():
 # =====================================================================
 
 def test_tool_subtask_resolves_by_real_registry_object_never_parses_flattened_name():
-    source = inspect.getsource(subtask_executor._execute_tool_subtask)
+    source = inspect.getsource(subtask_executor._execute_tool_subtask) + inspect.getsource(subtask_executor._tool_preflight)  # D1: lookup lives in the shared preflight
     assert "split(" not in source
     assert ".partition(" not in source
     assert "kernel.registry.get(\"tool\", subtask.tool_name)" in source

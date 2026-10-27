@@ -285,11 +285,11 @@ def resolve_planned_tool_governance(tool: Any, *, autonomy_mode: Optional[str],
     return decide(declared, None, "plannable")
 
 
-async def execute_model_authored(tool: Any, arguments: Mapping[str, Any], invocation: ModelToolInvocation) -> Any:
-    """The one entry point for a MODEL-AUTHORED tool call: validate, authorize (the tool's own declaration, every mode),
-    then run. Raises ModelInvocationRefused (TOOLBOX refusal), or ToolExecutionError whose ``__cause__`` is the reused
-    authority's PolicyDeniedError, before anything runs; failures while running are wrapped exactly as
-    ``BaseTool.execute`` wraps them."""
+def authorize_model_authored(tool: Any, arguments: Mapping[str, Any], invocation: ModelToolInvocation) -> Any:
+    """The AUTHORITY half of a model-authored call, with no effect: govern, validate, authorize (the tool's own declaration, every mode). Returns the validated, authorized
+    arguments. Raises ModelInvocationRefused (TOOLBOX refusal), or ToolExecutionError whose ``__cause__`` is the reused authority's PolicyDeniedError - exactly what
+    ``execute_model_authored`` raises before anything runs. D1: this is the seam a resume uses to REVALIDATE authority for an already-COMPLETED TOOL execution without
+    running its side effect again (``_run_model_authored`` is never reached from here)."""
     if not isinstance(tool, BaseTool):
         raise ModelInvocationRefused(
             TOOL_NOT_GOVERNED, f"{type(tool).__name__} is not a Kriya tool; a planned step reaches tools only through "
@@ -306,12 +306,20 @@ async def execute_model_authored(tool: Any, arguments: Mapping[str, Any], invoca
         logger.error(f"Validation failed for tool '{tool.name}': {ve}")
         raise ToolExecutionError(f"Argument validation failed: {ve.errors()}") from ve
     try:
-        authorized = tool.authorize_model_invocation(validated, invocation)
+        return tool.authorize_model_invocation(validated, invocation)
     except ToolExecutionError:
         raise
     except Exception as e:  # the reused authority's denial (PolicyDeniedError), or a broken check: refused either way
         logger.warning(f"Model-authored call to tool '{tool.name}' refused: {e}")
         raise ToolExecutionError(f"Tool call refused: {e}") from e
+
+
+async def execute_model_authored(tool: Any, arguments: Mapping[str, Any], invocation: ModelToolInvocation) -> Any:
+    """The one entry point for a MODEL-AUTHORED tool call: validate, authorize (the tool's own declaration, every mode),
+    then run. Raises ModelInvocationRefused (TOOLBOX refusal), or ToolExecutionError whose ``__cause__`` is the reused
+    authority's PolicyDeniedError, before anything runs; failures while running are wrapped exactly as
+    ``BaseTool.execute`` wraps them."""
+    authorized = authorize_model_authored(tool, arguments, invocation)
     try:
         logger.info(f"Executing tool '{tool.name}' (model-authored) with arguments: {authorized.model_dump()}")
         return await tool._run_model_authored(authorized, invocation)
