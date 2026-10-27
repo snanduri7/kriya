@@ -280,3 +280,43 @@ def test_a_managed_service_run_or_build_without_containment_is_refused_and_start
     assert controller.started == []
     with pytest.raises(TypeError):
         _prepare_required_artifact(["java", "-jar", "target/app.jar"], str(tmp_path), controller=controller, env={"A": "b"})  # pylint: disable=unexpected-keyword-arg
+
+
+# ----------------------------------------------------------------------------------------- SPAWN-MCP-PROCESS-HOST-MODE-001: spawn_mcp_process has no host mode
+
+def test_spawn_mcp_process_requires_a_containment_prefix_and_has_no_host_rlimit_branch():
+    import inspect
+
+    from kriya.mcp import lifecycle
+    parameters = inspect.signature(lifecycle.spawn_mcp_process).parameters
+    prefix = parameters["command_prefix"]
+    assert prefix.default is inspect.Parameter.empty and prefix.kind is inspect.Parameter.KEYWORD_ONLY, "the launch prefix is optional again"
+    assert not {"cpu_seconds", "memory_mb"} & set(parameters), "the host rlimit parameters are back"
+    node = _function("kriya/mcp/lifecycle.py", "spawn_mcp_process")
+    assert "posix_resource_limits_preexec_fn" not in _names(node) | _calls(node) and "preexec_fn" not in {kw.arg for c in ast.walk(node) if isinstance(c, ast.Call) for kw in c.keywords}
+    imported = {alias.name for n in ast.walk(ast.parse((ROOT / "kriya/mcp/lifecycle.py").read_text(encoding="utf-8"))) if isinstance(n, ast.ImportFrom) for alias in n.names}
+    assert "posix_resource_limits_preexec_fn" not in imported, "the host rlimit helper is imported again"
+    assert "ContainmentSetupError" in _names(node), "an empty prefix is no longer refused"
+
+    def calls_it(path):
+        return any(isinstance(c, ast.Call) and getattr(c.func, "id", getattr(c.func, "attr", None)) == "spawn_mcp_process"
+                   for c in ast.walk(ast.parse(path.read_text(encoding="utf-8"))))
+    callers = [str(p.relative_to(ROOT)) for p in _production_sources() if calls_it(p)]
+    assert callers == ["kriya/mcp/mcp.py"], f"another production caller of spawn_mcp_process appeared: {callers}"
+
+
+def test_spawn_mcp_process_refuses_a_missing_or_empty_prefix_and_spawns_nothing_but_composes_the_prefix_exactly():
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    from kriya.mcp import lifecycle
+    from kriya.tools.containment import ContainmentSetupError
+    with patch.object(lifecycle, "spawn_subprocess_exec_fail_closed", new=AsyncMock()) as spawn:
+        for prefix in ([], None):
+            with pytest.raises(ContainmentSetupError, match="no host mode"):
+                asyncio.run(lifecycle.spawn_mcp_process("srv", ["--x"], None, max_stdout_line_bytes=10, command_prefix=prefix))
+        with pytest.raises(TypeError):
+            asyncio.run(lifecycle.spawn_mcp_process("srv", ["--x"], None, max_stdout_line_bytes=10))  # pylint: disable=missing-kwoa
+        assert spawn.call_count == 0, "a process was spawned without a containment prefix"
+        asyncio.run(lifecycle.spawn_mcp_process("srv", ["--x"], None, max_stdout_line_bytes=10, command_prefix=["docker", "run", "-i", "img"]))
+        assert spawn.call_args.args == ("docker", "run", "-i", "img", "srv", "--x"), "the prefix is composed ahead of the server command, verbatim"

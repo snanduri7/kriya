@@ -356,7 +356,6 @@ class MCPClient:
         # uncaught - this method never falls back to an uncontrolled spawn.
         self._process = await spawn_mcp_process(
             self.command, self.args, spawn_env,
-            cpu_seconds=self._lifecycle.cpu_seconds, memory_mb=self._lifecycle.memory_mb,
             max_stdout_line_bytes=self._lifecycle.max_stdout_line_bytes,
             command_prefix=command_prefix,
         )

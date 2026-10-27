@@ -169,9 +169,9 @@ INVENTORY: Dict[Tuple[str, str], Site] = {
         WORKLOAD, "python3 -m pip install --no-index", "yes", "the caller's workspace", "contained, workspace writable", "its own profile builders",
         "UNTRUSTED_EXECUTION", ("S2",), "NO PRODUCTION CALLER (pinned by test_dependency_execution_has_no_production_caller)"),
     ("kriya/mcp/lifecycle.py", "spawn_mcp_process"): Site(
-        WORKLOAD, "the configured MCP server command (host: legacy HOST_EXECUTION_PERMITTED only; contained: THROUGH the prepared backend prefix)", "yes",
-        "host: the process cwd (project config visible, MEASURED 2026-10-25); contained: the container's workdir (no workspace unless granted)",
-        "host (legacy): the SEC-003 restricted env, cwd and rlimits; contained: " + OCI_NO_MASK + " only when workspace_write is granted (S1 leaf masks apply)",
+        WORKLOAD, "the configured MCP server command (always THROUGH the prepared backend prefix; no host mode)", "yes",
+        "the container's workdir (no workspace unless granted)",
+        OCI_NO_MASK + " only when workspace_write is granted (S1 leaf masks apply)",
         "MCPManager.start_all -> decide_external_execution(subject=mcp_subject(name)); MCPClient._start_sequence -> require_isolating_backend", "UNTRUSTED_EXECUTION",
         ("S5",),
         "S5: MEASURED fail-open before: required + backend none + an unrestricted grant ran the server on the HOST with Kriya's full env and containment_active=True. Now the "

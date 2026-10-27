@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from kriya.mcp.lifecycle import spawn_mcp_process, terminate_mcp_process
+from kriya.mcp.lifecycle import terminate_mcp_process
 from kriya.platform import services
 from kriya.platform.capabilities import (
     CapabilityStatus,
@@ -206,13 +206,19 @@ def test_managed_process_teardown_kills_the_grandchild(tmp_path, recording):
     assert _wait_gone(grandchild)
 
 
+async def _spawn_bidirectional(command):
+    """The long-lived, bidirectional-stdio spawn an MCP server needs, made through the port these tests are about (`spawn_subprocess_exec_fail_closed`). `spawn_mcp_process` itself only composes a containment
+    launch prefix in front of this call and has no host mode, so the port's own fail-closed behaviour (attach, tree kill, no start without tree termination) is exercised here directly."""
+    return await process_module.spawn_subprocess_exec_fail_closed(
+        *command, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=65536)
+
+
 def test_mcp_spawn_and_forced_teardown_use_the_port_and_kill_the_grandchild(tmp_path, recording):
     pid_file = tmp_path / "grandchild.pid"
 
     async def scenario():
         command = _tree_command(pid_file, ignore_sigterm=True)
-        process = await spawn_mcp_process(command[0], command[1:], None, cpu_seconds=None, memory_mb=None,
-                                          max_stdout_line_bytes=65536)
+        process = await _spawn_bidirectional(command)
         grandchild = await asyncio.to_thread(_grandchild, pid_file)
         await terminate_mcp_process(process, grace_seconds=0.5, reap_seconds=5)
         return process.pid, grandchild
@@ -239,8 +245,7 @@ def _refusals(tmp_path):
     yield lambda: ProcessController().run(_SLEEP, cwd=str(tmp_path), timeout=30)
     yield lambda: asyncio.run(ProcessController().run_async(_SLEEP, cwd=str(tmp_path), timeout=30))
     yield lambda: ProcessController().start_managed(_SLEEP, cwd=str(tmp_path))
-    yield lambda: asyncio.run(spawn_mcp_process(_SLEEP[0], _SLEEP[1:], None, cpu_seconds=None, memory_mb=None,
-                                                max_stdout_line_bytes=65536))
+    yield lambda: asyncio.run(_spawn_bidirectional(_SLEEP))
 
 
 def test_a_failed_attach_kills_and_reaps_the_new_process_on_every_spawn_path(tmp_path, attach_fails):
@@ -305,8 +310,7 @@ def test_without_tree_termination_async_and_managed_spawns_start_nothing(tmp_pat
     with pytest.raises(ContainmentSetupError):
         ProcessController().start_managed(command, cwd=str(tmp_path))
     with pytest.raises(ContainmentSetupError):
-        asyncio.run(spawn_mcp_process(command[0], command[1:], None, cpu_seconds=None, memory_mb=None,
-                                      max_stdout_line_bytes=65536))
+        asyncio.run(_spawn_bidirectional(command))
     assert not marker.exists()
 
 

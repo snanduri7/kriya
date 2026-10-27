@@ -235,7 +235,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.kup.review_ops", "kriya.control.launch"): ("O1", _O1),  # direction ADAPTER-KUP -> STATE
     ("kriya.kup.serve", "kriya.config.authority"): ("O1", _O1),  # direction ADAPTER-KUP -> AUTHORITY
     ("kriya.mcp.containment_adapter", "kriya.mcp.capability"): ("P2", _P2),  # non-public AUTHORITY module
-    ("kriya.mcp.lifecycle", "kriya.tools.sandbox"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.mcp.mcp", "kriya.core.kernel"): ("P2", _P2),  # direction TOOLBOX -> KERNEL
     ("kriya.mcp.mcp", "kriya.mcp.capability"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.mcp.mcp", "kriya.mcp.invocation_approval"): ("P2", _P2),  # non-public AUTHORITY module
