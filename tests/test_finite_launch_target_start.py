@@ -21,6 +21,7 @@ import pytest
 from _strict_doubles import strict_config
 
 from kriya.tools.containment import (
+    LAUNCHER_REACHED_MARKER,
     TARGET_NOT_STARTED_MARKER,
     ContainmentProfile,
     FiniteLaunchStage,
@@ -46,28 +47,48 @@ REAL_DOCKER = pytest.mark.skipif(not _daemon_ok(), reason="docker daemon not rea
 # ----------------------------------------------------------------------------------------- part 1: the stage and the controller plumbing (no Docker)
 
 MARKER = f"{TARGET_NOT_STARTED_MARKER}abc123"
+REACHED = f"{LAUNCHER_REACHED_MARKER}abc123"
+R = f"\n{REACHED}\n"   # exactly what the launcher writes before its exec
 
 
 def _stage():
-    return FiniteLaunchStage(prefix=("launcher",), marker=MARKER)
+    return FiniteLaunchStage(prefix=("launcher",), marker=MARKER, reached=REACHED)
 
 
 @pytest.mark.parametrize("stderr,started,kept", [
-    ("", True, ""),
-    ("plain error text\n", True, "plain error text\n"),
-    (f"launcher: exec: x: not found\n\n{MARKER}\n", False, "launcher: exec: x: not found"),
-    (f"{MARKER}\n", False, ""),
-    (f"partial line without newline\n{MARKER}\n", False, "partial line without newline"),
+    (R, True, ""),
+    (f"{R}plain error text\n", True, "plain error text\n"),
+    (f"{R}launcher: exec: x: not found\n\n{MARKER}\n", False, "launcher: exec: x: not found"),
+    (f"{R}\n{MARKER}\n", False, ""),
+    (f"{R}partial line without newline\n{MARKER}\n", False, "partial line without newline"),
     # a record that is not the launcher's LAST line is something the target (or anything else) wrote: it is not the launcher's record
-    (f"{MARKER}\nthe target kept writing\n", True, f"{MARKER}\nthe target kept writing\n"),
+    (f"{R}{MARKER}\nthe target kept writing\n", True, f"{MARKER}\nthe target kept writing\n"),
     # another nonce (a forged or stale record) never counts
-    (f"\n{TARGET_NOT_STARTED_MARKER}other\n", True, f"\n{TARGET_NOT_STARTED_MARKER}other\n"),
+    (f"{R}\n{TARGET_NOT_STARTED_MARKER}other\n", True, f"\n{TARGET_NOT_STARTED_MARKER}other\n"),
     # glued onto a partial line is not a record of its own (the launcher always writes a leading newline, so this can only be something else)
-    (f"text{MARKER}\n", True, f"text{MARKER}\n"),
-], ids=["empty", "plain", "record", "record-only", "after-partial-line", "not-last", "other-nonce", "glued"])
-def test_the_stage_reads_only_its_own_record_on_the_last_line(stderr, started, kept):
+    (f"{R}text{MARKER}\n", True, f"text{MARKER}\n"),
+    # text the image entrypoint wrote BEFORE the launcher ran is kept, whether or not it ended with a newline
+    (f"entrypoint warning\n{R}target output\n", True, "entrypoint warning\ntarget output\n"),
+    (f"entrypoint partial{R}target output\n", True, "entrypoint partial\ntarget output\n"),
+], ids=["reached-only", "plain", "record", "record-only", "after-partial-line", "not-last", "other-nonce", "glued", "entrypoint-text", "entrypoint-partial"])
+def test_the_stage_reads_only_its_own_records(stderr, started, kept):
     clean, did_start = _stage().read(stderr)
     assert did_start is started and clean == kept
+
+
+@pytest.mark.parametrize("stderr", [
+    "",
+    "docker: Error response from daemon: Minimum memory limit allowed is 6MB\n",
+    # another nonce's reached record, or one glued onto text, is not this launcher's record
+    f"\n{LAUNCHER_REACHED_MARKER}other\n",
+    f"text{REACHED}\n",
+    # the not-started record without a reached record is not a launcher that ran
+    f"\n{MARKER}\n",
+], ids=["empty", "runtime-refusal", "other-nonce", "glued", "no-reached"])
+def test_a_run_whose_launcher_never_reached_is_not_started_and_stderr_is_kept(stderr):
+    """FINITE-START-PRECONTAINER-REFUSAL-001: no `reached` record means no launcher, so no target process - whatever the exit status was."""
+    clean, did_start = _stage().read(stderr)
+    assert did_start is False and clean == stderr
 
 
 def test_the_stage_wraps_the_target_argv_verbatim_after_its_own_prefix():
@@ -78,6 +99,8 @@ def test_the_stage_wraps_the_target_argv_verbatim_after_its_own_prefix():
 _SIMULATED_LAUNCHER = (
     "import os, sys\n"
     "nonce, argv = sys.argv[1], sys.argv[2:]\n"
+    "sys.stderr.write('\\nKRIYA_LAUNCHER_REACHED:' + nonce + '\\n')\n"
+    "sys.stderr.flush()\n"
     "try:\n"
     "    os.execvp(argv[0], argv)\n"
     "except OSError:\n"
@@ -95,7 +118,8 @@ class _ScriptedBackend:
 
     def prepare(self, profile, command):  # noqa: ARG002 - the Protocol's signature
         self.seen.append(list(command))
-        launch = FiniteLaunchStage(prefix=(sys.executable, "-c", _SIMULATED_LAUNCHER, "n1"), marker=f"{TARGET_NOT_STARTED_MARKER}n1") if self.stage else None
+        launch = FiniteLaunchStage(prefix=(sys.executable, "-c", _SIMULATED_LAUNCHER, "n1"), marker=f"{TARGET_NOT_STARTED_MARKER}n1",
+                                  reached=f"{LAUNCHER_REACHED_MARKER}n1") if self.stage else None
         return PreparedContainment(env=None, preexec_fn=None, backend_name=self.name, finite_launch=launch)
 
 
@@ -170,6 +194,50 @@ def test_each_stage_has_its_own_unpredictable_nonce():
     assert first.prefix[:2] == ("/bin/sh", "-c") and first.prefix[-1] in first.marker
 
 
+# FINITE-START-PRECONTAINER-REFUSAL-001: a runtime that refuses BEFORE any container exists never runs the launcher. This backend's launcher models that: it answers like `docker run` does (a message on
+# stderr, status 125) and never writes the `reached` record - the same exit status a target that STARTED and exited 125 returns, which the next test pins as STARTED.
+_REFUSING_LAUNCHER = "import sys; sys.stderr.write('docker: Error response from daemon: refused\\n' + sys.argv[1]); sys.exit(125)"
+
+
+class _RefusingBackend(_ScriptedBackend):
+    def __init__(self, noise: str = ""):
+        super().__init__()
+        self.noise = noise
+
+    def prepare(self, profile, command):
+        launch = FiniteLaunchStage(prefix=(sys.executable, "-c", _REFUSING_LAUNCHER, self.noise), marker=f"{TARGET_NOT_STARTED_MARKER}n1", reached=f"{LAUNCHER_REACHED_MARKER}n1")
+        return PreparedContainment(env=None, preexec_fn=None, backend_name=self.name, finite_launch=launch)
+
+
+def test_a_runtime_refusal_before_any_container_is_not_started_and_keeps_its_message(tmp_path):
+    result = _run(tmp_path, ["true"], _RefusingBackend())
+    assert result.target_started is False and result.returncode == 125
+    assert "Error response from daemon: refused" in result.stderr, "the runtime's own message stays visible to the consumer"
+    assert result.to_dict()["target_started"] is False
+
+
+def test_a_target_that_started_and_exited_125_is_started_while_a_refusal_with_the_same_status_is_not(tmp_path):
+    """The exit status is not the evidence: 125 is a started target in one run and a pre-container refusal in the other."""
+    started = _run(tmp_path, [sys.executable, "-c", "import sys; sys.exit(125)"], _ScriptedBackend())
+    refused = _run(tmp_path, ["true"], _RefusingBackend())
+    assert started.returncode == refused.returncode == 125
+    assert started.target_started is True and refused.target_started is False
+
+
+def test_a_reached_record_with_another_nonce_does_not_turn_a_refusal_into_a_start(tmp_path):
+    result = _run(tmp_path, ["true"], _RefusingBackend(noise=f"\n{LAUNCHER_REACHED_MARKER}guess\n"))
+    assert f"{LAUNCHER_REACHED_MARKER}guess" in result.stderr, "the forged record really was on stderr"
+    assert result.target_started is False
+
+
+def test_the_launch_script_writes_the_reached_record_once_before_the_exec_and_the_trap():
+    from kriya.tools.containment_oci import _FINITE_LAUNCH_SCRIPT
+    lines = _FINITE_LAUNCH_SCRIPT.splitlines()
+    reached = [i for i, line in enumerate(lines) if LAUNCHER_REACHED_MARKER in line]
+    assert len(reached) == 1 and reached[0] < next(i for i, line in enumerate(lines) if line.startswith("trap ")) < lines.index('exec "$@"')
+    assert ">&2" in lines[reached[0]]
+
+
 # ----------------------------------------------------------------------------------------- part 2: the contract matrix against real Docker
 
 def _scripts(workspace: Path):
@@ -220,6 +288,22 @@ def test_real_docker_a_target_that_started_is_started_whatever_it_exits_in_an_en
     _scripts(tmp_path)
     result = _contained(tmp_path, command)
     assert result.target_started is True and result.returncode == code, (label, result)
+
+
+@REAL_DOCKER
+@pytest.mark.parametrize("memory_mb", [1, 4], ids=["1mb", "4mb"])
+def test_real_docker_a_runtime_refusal_before_any_container_exists_is_not_started(tmp_path, memory_mb):
+    """The ORIGINAL SYMPTOM (A2 review probe2, pre-fix: rc=125, target_started=True): Docker's 6 MB minimum refuses the run before a container exists."""
+    profile = ContainmentProfile(trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path=str(tmp_path), network=NetworkAuthority.DENIED, memory_mb=memory_mb)
+    result = ProcessController().run(["/bin/true"], cwd=str(tmp_path), timeout=120, containment_profile=profile, containment_backend=OCIContainmentBackend())
+    assert result.returncode == 125 and result.target_started is False, result
+    assert "Minimum memory limit" in result.stderr
+
+
+@REAL_DOCKER
+def test_real_docker_a_started_target_that_exits_125_is_still_started(tmp_path):
+    result = _contained(tmp_path, ["/bin/sh", "-c", "exit 125"])
+    assert result.returncode == 125 and result.target_started is True
 
 
 # The Maven image: its ENTRYPOINT is a shell script that `exec "$@"`s - the case no Docker/OCI-level signal covers. argv[0]'s basename (`java`, then `mvn`) selects the image (backend-internal);

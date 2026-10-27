@@ -261,6 +261,7 @@ class ContainmentProfile:
 
 
 TARGET_NOT_STARTED_MARKER = "KRIYA_TARGET_NOT_STARTED:"
+LAUNCHER_REACHED_MARKER = "KRIYA_LAUNCHER_REACHED:"
 
 
 @dataclass(frozen=True)
@@ -271,16 +272,29 @@ class FiniteLaunchStage:
     exited 127 shares - so the status proves nothing. The stage is the backend's own launcher: it wraps the target argv, runs after the image entrypoint in the same container (same
     mounts, working directory and environment), and ``exec``s the target. A launcher that is still alive after its ``exec`` means the exec failed, and only then does it write
     one nonce-authenticated record (``marker``) to stderr. ``read`` separates that record from the captured stderr: it is never parsed English, and it is never produced by a target
-    that started (the nonce is in the launcher's argv, which the target's exec replaces). Absent record => the target started."""
+    that started (the nonce is in the launcher's argv, which the target's exec replaces).
+
+    FINITE-START-PRECONTAINER-REFUSAL-001: the launcher also writes ONE ``reached`` record before its ``exec``. A target started only if that record is present and no
+    ``marker`` record follows it: a run whose stderr carries no ``reached`` record never reached the launcher at all (the container runtime refused before any container existed,
+    the image has no ``/bin/sh``, ...), which is NOT a started target whatever exit status the runtime answered. The ``reached`` record needs the same nonce, so a target
+    cannot forge one; and a forged ``reached`` could only make a never-started run look started, which is the pre-stage behaviour, never a start that did not happen."""
 
     prefix: Tuple[str, ...]
     marker: str
+    reached: str
 
     def wrap(self, command: List[str]) -> List[str]:
         return [*self.prefix, *command]
 
     def read(self, stderr: str) -> Tuple[str, bool]:
-        """(stderr without the record, whether the target started). The record is the LAST line the launcher writes, so it must be the final non-empty line."""
+        """(stderr without the launcher's records, whether the target started). The ``reached`` record is the launcher's own line, written once before the ``exec``; the ``marker``
+        record is the LAST line the launcher writes, so it must be the final non-empty line."""
+        record = f"\n{self.reached}\n"
+        at = stderr.find(record)
+        if at < 0:
+            return stderr, False
+        before = stderr[:at]
+        stderr = before + ("" if not before or before.endswith("\n") else "\n") + stderr[at + len(record):]
         lines = stderr.split("\n")
         end = len(lines)
         while end and not lines[end - 1].strip():

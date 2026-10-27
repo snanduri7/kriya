@@ -34,6 +34,7 @@ import tempfile
 from typing import Dict, List, Optional, Tuple
 
 from kriya.tools.containment import (
+    LAUNCHER_REACHED_MARKER,
     TARGET_NOT_STARTED_MARKER,
     ContainmentProfile,
     FiniteLaunchStage,
@@ -66,7 +67,9 @@ _LAUNCHER = (
     "args = sys.argv[2:]\n"
     "record = None\n"
     "if args[:1] == ['--kriya-finite-launch']:\n"
-    "    record, args = args[1], args[2:]\n"
+    "    record, reached, args = args[1], args[2], args[3:]\n"
+    "    sys.stderr.write('\\n' + reached + '\\n')\n"
+    "    sys.stderr.flush()\n"
     "argv = [fix_token(t) for t in args]\n"
     "if argv[1:4] == ['-m', 'pip', 'install']:\n"
     "    wanted = [re.split(r'[<>=!~\\[; ]', a)[0].lower().replace('_', '-') for a in argv[4:] if not a.startswith('-')]\n"
@@ -153,5 +156,8 @@ class MountAwareStandIn:
         config = {"mapping": path_mapping(profile), "site": site, "installable": installable}
         prefix = [sys.executable, "-c", _LAUNCHER, json.dumps(config)]
         nonce = secrets.token_hex(16)
-        stage = FiniteLaunchStage(prefix=("--kriya-finite-launch", f"{TARGET_NOT_STARTED_MARKER}{nonce}"), marker=f"{TARGET_NOT_STARTED_MARKER}{nonce}")
+        stage = FiniteLaunchStage(
+            prefix=("--kriya-finite-launch", f"{TARGET_NOT_STARTED_MARKER}{nonce}", f"{LAUNCHER_REACHED_MARKER}{nonce}"),
+            marker=f"{TARGET_NOT_STARTED_MARKER}{nonce}", reached=f"{LAUNCHER_REACHED_MARKER}{nonce}",
+        )
         return PreparedContainment(env=None, preexec_fn=None, backend_name=self.name, command_prefix=prefix, cleanup=None, finite_launch=stage)

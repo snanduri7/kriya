@@ -80,6 +80,7 @@ from kriya.platform.services import platform_services
 from kriya.policy.authority_namespace import AuthorityNamespaceUnsafeError, create_workspace_authority_namespace
 from kriya.policy.protected_authority_paths import WORKSPACE_ANCHOR_RELPATH, WORKSPACE_AUTHORITY_RELPATHS
 from kriya.tools.containment import (
+    LAUNCHER_REACHED_MARKER,
     TARGET_NOT_STARTED_MARKER,
     BackendUnavailableError,
     ContainmentProfile,
@@ -1181,9 +1182,11 @@ def finalize_registry_acquisition_result(result: ProcessResult) -> None:
 # `exec "$@"`) and after the registry-scoped setup script's `setpriv`, so it sees the same container, mounts, working directory, environment and identity as the target would; it needs only
 # /bin/sh, which the setup script and every qualified image already require. `exec` replaces the shell, so the EXIT trap can run only when the exec FAILED; it then writes ONE record, on a line of
 # its own, carrying a per-call nonce that the target's exec replaces (a started target cannot forge it), and leaves the shell's own exit status untouched. Neither the exit status nor any
-# message text is evidence of anything here. (`exec "$@"`, not `exec -- "$@"`: dash reads `--` as the command name.)
+# message text is evidence of anything here. (`exec "$@"`, not `exec -- "$@"`: dash reads `--` as the command name.) FINITE-START-PRECONTAINER-REFUSAL-001: before the `exec` it writes ONE nonce-bound
+# `reached` record, so a run whose stderr has none never reached the launcher (a refusal before any container existed, an image without /bin/sh) and is NOT a started target.
 _FINITE_LAUNCH_SCRIPT = (
     "n=$1; shift\n"
+    f"printf \"\\n{LAUNCHER_REACHED_MARKER}%s\\n\" \"$n\" >&2\n"
     f"trap 'kriya_rc=$?; printf \"\\n{TARGET_NOT_STARTED_MARKER}%s\\n\" \"$n\" >&2; exit \"$kriya_rc\"' EXIT\n"
     'exec "$@"\n'
 )
@@ -1193,6 +1196,7 @@ def _finite_launch_stage() -> FiniteLaunchStage:
     nonce = secrets.token_hex(16)
     return FiniteLaunchStage(
         prefix=("/bin/sh", "-c", _FINITE_LAUNCH_SCRIPT, "kriya-launch", nonce), marker=f"{TARGET_NOT_STARTED_MARKER}{nonce}",
+        reached=f"{LAUNCHER_REACHED_MARKER}{nonce}",
     )
 
 
