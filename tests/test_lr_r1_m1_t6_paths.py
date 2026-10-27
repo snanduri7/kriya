@@ -303,9 +303,25 @@ def test_t6_deadline_stop(tmp_path, monkeypatch):
 
     from _chaos_harness import ChaosRuntime, role_of
 
+    # TEST-T6-WALLCLOCK-BUDGET-001: the premise of this test is "the Developer call is dispatched with budget left and then cut by the deadline", which a real 3 s budget measured from the
+    # run's first model call only holds while every earlier stage is fast (under load the product correctly refuses the call before dispatch, INFERENCE_DEADLINE_EXHAUSTED - MEASURED, and that
+    # 0 ms contract is not what this test is about). The run's generation clock is therefore read as "just started" until the Developer call is dispatched and frozen at its dispatch after
+    # that: the budget is spent by the Developer call alone, whatever the earlier stages cost. The product's own deadline arithmetic is untouched.
+    import time
+
+    from kriya.control import run_coordinator
+    real_claim, charged = run_coordinator.claim_run_generation_clock, {"from": None}
+
+    def developer_clock():
+        if real_claim() is None:
+            return None
+        return charged["from"] if charged["from"] is not None else time.monotonic()
+    monkeypatch.setattr(run_coordinator, "claim_run_generation_clock", developer_clock)
+
     class Slow(ChaosRuntime):
         async def complete(self, client, request):
             if role_of(request) == "developer":
+                charged["from"] = time.monotonic()
                 await asyncio.sleep(30)
             return await super().complete(client, request)
     cfg = chaos_config()
