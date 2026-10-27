@@ -132,7 +132,7 @@ def test_jdtls_is_refused_with_the_packaged_defaults_before_anything_exists(tmp_
     with pytest.raises(ExternalExecutionRefused) as raised:
         asyncio.run(client.start())
     assert raised.value.reason_code == CONTAINMENT_NOT_SUPPORTED_FOR_SUBJECT
-    assert client._data_dir is None and client.process is None                       # pylint: disable=protected-access
+    assert getattr(client, "_data_dir", None) is None and getattr(client, "process", None) is None  # nothing was created (the machinery that held them is gone, S8-ORPHAN-HOST-CODE-001)
 
 
 # ------------------------------------------------------------------ C. every routed consumer follows the owner with the packaged defaults

@@ -111,7 +111,7 @@ def test_the_static_analysis_adapter_runs_only_through_a_containment_profile_and
 
 
 def test_jdtls_has_no_host_spawn_left_only_the_typed_refusal():
-    node = _function("kriya/tools/lsp.py", "JdtlsClient._start")
+    node = _function("kriya/tools/lsp.py", "JdtlsClient.start")
     assert _calls(node) == {"refuse_unsupported", "decide_external_execution"}
     source = (ROOT / "kriya/tools/lsp.py").read_text(encoding="utf-8")
     assert "spawn_subprocess_exec_fail_closed" not in source and "create_subprocess" not in source
@@ -194,3 +194,23 @@ def test_the_mcp_launcher_has_no_host_spawn_branch_left():
     assert all(not (isinstance(stmt.value, ast.Constant) and stmt.value.value is None) for stmt in assigned), "command_prefix can be None (a host spawn) again"
     constructor = _function("kriya/mcp/mcp.py", "MCPClient.__init__")
     assert "ContainmentSetupError" in _calls(constructor) | _names(constructor)
+
+
+JDTLS_CONTROL = "test_jdtls_has_no_process_machinery_and_cannot_be_started"
+
+
+def test_jdtls_has_no_process_machinery_and_cannot_be_started():
+    """Family D. jdtls has no contained mode, so `start()` is always the typed refusal and no process can exist; the stdio framing, reader loop, requests, private candidate mirror and tree-kill
+    shutdown that used to follow it were unreachable and are gone. This is also why jdtls can never write the candidate (the premise of the retired mirror tests): nothing of it runs."""
+    from kriya.config.config import AutonomyConfig
+    from kriya.tools.lsp import JdtlsClient
+    methods = {n.name for n in ast.walk(ast.parse((ROOT / "kriya/tools/lsp.py").read_text(encoding="utf-8"))
+                                        .body[next(i for i, n in enumerate(ast.parse((ROOT / "kriya/tools/lsp.py").read_text(encoding="utf-8")).body)
+                                                   if isinstance(n, ast.ClassDef) and n.name == "JdtlsClient")]) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    assert methods == {"__init__", "start"}, f"JdtlsClient grew machinery again: {sorted(methods)}"
+    source = (ROOT / "kriya/tools/lsp.py").read_text(encoding="utf-8")
+    for banned in ("subprocess", "terminate_process_tree", "killpg", "create_subprocess", "tempfile", "os.walk", "shutil.copy", "_mirror"):
+        assert banned not in source, f"lsp.py mentions {banned!r} again"
+    client = JdtlsClient("/project", "/opt/jdtls", AutonomyConfig())
+    assert not hasattr(client, "process"), "a process attribute exists on a client that can never start"
+    # the refusal itself is pinned by tests/test_s7_secure_default_contract.py::test_jdtls_is_never_started_on_the_host (a test that consults the decision is census-classified there)

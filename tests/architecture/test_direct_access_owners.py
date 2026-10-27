@@ -184,7 +184,6 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         "kriya.static_analysis.doctor": (1, "P2", _P2),
         "kriya.static_analysis.operator_scan": (1, "P2", _P2),
         "kriya.static_analysis.scope": (1, "P2", _P2),
-        "kriya.tools.lsp": (1, "P2", _P2),
         "kriya.tools.test_execution": (1, "P2", _P2),
         "kriya.tools.validate": (5, "P2", _P2),
         "kriya.workflow.acceptance_jvm": (1, "P2", _P2),

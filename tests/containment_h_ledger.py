@@ -58,9 +58,17 @@ TOOLCHAIN_FP = "tests/test_prd011_toolchain_fingerprint.py::"
 S4RT = "tests/test_s4_runtime_toolchain.py::"
 OCI = "tests/test_containment_oci.py::"
 SEC005 = "tests/test_sec005_shell_acquisition_network.py::"
-JDTLS_MIRROR = "tests/test_jdtls_candidate_isolation.py::"
-LSP_NA = ("jdtls has no contained mode and is refused while containment is mandatory (CONTAINMENT_NOT_SUPPORTED_FOR_SUBJECT): its start / launch / data-dir lifecycle is dead host code "
-          "S8 removes; the reachable parts of the module (framing, diagnostics formatting, tree-kill shutdown) keep their own non-H tests in tests/test_lsp.py")
+JDTLS_MIRROR = "tests/test_jdtls_candidate_isolation.py::"  # the H test ids' historical file (deleted with the mirror machinery); only the keys below use it
+JDTLS_NO_MACHINERY = "tests/test_s8_host_branches_are_gone.py::test_jdtls_has_no_process_machinery_and_cannot_be_started"
+LSP_NA = ("jdtls has no contained mode and is refused while containment is mandatory (CONTAINMENT_NOT_SUPPORTED_FOR_SUBJECT): its start / launch / data-dir lifecycle and, with S8-ORPHAN-HOST-CODE-001, "
+          "the whole process machinery behind it (framing, reader loop, requests, mirror, tree-kill shutdown) is deleted host code; only the PATH lookup and the diagnostics formatter remain, "
+          "with their own tests in tests/test_lsp.py, and the absence of the machinery is pinned by " + JDTLS_NO_MACHINERY)
+
+# S8-ORPHAN-HOST-CODE-001: a whole test file may be deleted when ALL of its tests exercised only machinery that was itself deleted as unreachable (never because it failed). Each such
+# file is named here with why; the guards require it to be ABSENT, so it cannot silently come back, and every LEDGER id in it is a historical record of an H test S8 had already removed.
+FILES_DELETED_WITH_DEAD_CODE: Dict[str, str] = {
+    "tests/test_jdtls_candidate_isolation.py": "its tests exercised the jdtls private-mirror machinery, deleted as unreachable (jdtls can never start while containment is mandatory)",
+}
 
 LEDGER: Dict[str, Entry] = {
     PY_GATE + "test_host_mode_dependency_free_project_still_uses_kriya_interpreter_without_any_command": _e(
@@ -86,11 +94,10 @@ LEDGER: Dict[str, Entry] = {
         ["tests/test_gradle_wrapper_containment_001.py::test_07_contained_offline_success_never_acquires_and_mounts_the_kriya_managed_home"]),
     JDTLS_MIRROR + "test_jdtls_is_rooted_at_the_private_mirror_never_the_candidate": _e(
         "a host jdtls process rooted at the private mirror", [JDTLS],
-        [JDTLS_MIRROR + "test_the_mirror_holds_the_candidates_source_and_never_writes_the_candidate",
-         JDTLS_MIRROR + "test_candidate_paths_map_to_canonical_mirror_paths_and_nothing_outside"]),
+        [JDTLS_NO_MACHINERY]),
     JDTLS_MIRROR + "test_the_real_jdtls_analyses_without_any_candidate_write": _e(
         "the real host jdtls analyses a candidate without writing it", [JDTLS],
-        [JDTLS_MIRROR + "test_the_mirror_holds_the_candidates_source_and_never_writes_the_candidate"]),
+        [JDTLS_NO_MACHINERY]),
     "tests/test_linux_jvm_resource_strategy.py::test_the_validator_records_the_strategy_with_the_gate_evidence": _e(
         "the host validator reports its JVM resource strategy with the gate evidence", [VALIDATOR],
         [OCI + "test_memory_limit_is_enforced", "tests/test_linux_jvm_resource_strategy.py::test_an_unenforceable_budget_is_refused_never_run_unbounded"]),

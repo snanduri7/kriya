@@ -21,7 +21,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 _IDIOM = re.compile(r"startswith\([^)]*os\.sep|os\.path\.commonpath\(|os\.path\.normcase\(")
 # Lexical by design: '..' escape checks on model-supplied RELATIVE path strings, and the legacy identity kept readable.
 _ALLOWED = {
-    "kriya/tools/lsp.py", "kriya/workflow/acceptance_oracle.py", "kriya/workflow/retry_strategy.py",
+    "kriya/workflow/acceptance_oracle.py", "kriya/workflow/retry_strategy.py",
     "kriya/workflow/file_resolution.py", "kriya/context/workspace_identity.py",
 }
 

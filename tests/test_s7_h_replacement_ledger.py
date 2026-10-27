@@ -73,4 +73,7 @@ def test_no_legacy_host_test_is_a_whole_file_and_each_named_file_still_holds_oth
     """S8's deletions must not delete a file that still carries live coverage by accident: every file with a recorded id still exists."""
     files = {test_id.partition("::")[0] for test_id in ledger.LEDGER}
     for relpath in files:
+        if relpath in ledger.FILES_DELETED_WITH_DEAD_CODE:
+            assert not (ROOT / relpath).exists(), f"{relpath} was deleted with the dead code it tested and is back"
+            continue
         assert (ROOT / relpath).is_file()

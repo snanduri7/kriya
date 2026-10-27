@@ -1,96 +1,14 @@
-"""Tests for kriya/tools/lsp.py's hand-rolled jdtls client - fully mocked,
-no real jdtls process, matching this repo's existing testing philosophy.
-Uses a small in-memory fake stdin/stdout to validate the actual Content-
-Length framing and request/notification handling logic, not just the
-public API shape."""
-import asyncio
-import json
-import os
-import tempfile
-from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock, patch
+"""Tests for kriya/tools/lsp.py: the PATH lookup and the diagnostics prompt formatter.
 
-import pytest
+S8-ORPHAN-HOST-CODE-001: the jdtls process machinery (stdio framing, reader loop, requests, the private candidate mirror, tree-kill shutdown) was unreachable - JdtlsClient.start() is
+always the typed refusal because containment is mandatory and jdtls has no contained mode - and is deleted with its tests. What this module now pins is what survives; the refusal and the
+absence of the machinery are pinned in tests/test_s7_secure_default_contract.py and tests/test_s8_host_branches_are_gone.py."""
+from unittest.mock import patch
 
 from kriya.tools.lsp import (
-    JdtlsClient,
     find_jdtls,
     format_diagnostics_for_prompt,
 )
-
-
-def _frame(message: Dict[str, Any]) -> bytes:
-    body = json.dumps(message).encode("utf-8")
-    return f"Content-Length: {len(body)}\r\n\r\n".encode("utf-8") + body
-
-
-class _FakeStdout:
-    """Serves a pre-canned sequence of Content-Length-framed LSP messages,
-    line-by-line for headers then exact-byte-count for the body - matching
-    real asyncio StreamReader semantics closely enough for _read_message(),
-    including BLOCKING (not EOF) when the buffer is temporarily empty but
-    more data may still arrive - a real stream doesn't signal EOF just
-    because nothing is queued yet. More messages can be pushed later via
-    append(), simulating a server's asynchronous notification after a
-    request was sent, distinct from close() (real EOF/process exit)."""
-    def __init__(self, messages: List[Dict[str, Any]]):
-        self._buffer = b"".join(_frame(m) for m in messages)
-        self._new_data = asyncio.Event()
-        self._new_data.set()
-        self._closed = False
-
-    def append(self, message: Dict[str, Any]) -> None:
-        self._buffer += _frame(message)
-        self._new_data.set()
-
-    def close(self) -> None:
-        self._closed = True
-        self._new_data.set()
-
-    async def readline(self) -> bytes:
-        while True:
-            idx = self._buffer.find(b"\n")
-            if idx != -1:
-                line, self._buffer = self._buffer[:idx + 1], self._buffer[idx + 1:]
-                return line
-            if self._closed:
-                line, self._buffer = self._buffer, b""
-                return line
-            self._new_data.clear()
-            await self._new_data.wait()
-
-    async def readexactly(self, n: int) -> bytes:
-        while len(self._buffer) < n:
-            if self._closed:
-                raise asyncio.IncompleteReadError(self._buffer, n)
-            self._new_data.clear()
-            await self._new_data.wait()
-        data, self._buffer = self._buffer[:n], self._buffer[n:]
-        return data
-
-
-class _FakeStdin:
-    def __init__(self):
-        self.written = b""
-
-    def write(self, data: bytes) -> None:
-        self.written += data
-
-    async def drain(self) -> None:
-        pass
-
-
-def _make_client(messages: List[Dict[str, Any]], project=None, mirror=None) -> JdtlsClient:
-    """A client over a fake process. ``project``/``mirror``: a real candidate
-    directory and JDTLS's private mirror of it, for tests that query
-    without start() (start() creates the mirror itself)."""
-    client = JdtlsClient(str(project) if project else "/fake/project", "/fake/jdtls")
-    if mirror is not None:
-        client._mirror = os.path.realpath(str(mirror))
-    client.process = MagicMock()
-    client.process.stdin = _FakeStdin()
-    client.process.stdout = _FakeStdout(messages)
-    return client
 
 
 def test_find_jdtls_returns_none_when_not_on_path():
@@ -101,117 +19,6 @@ def test_find_jdtls_returns_none_when_not_on_path():
 def test_find_jdtls_returns_path_when_found():
     with patch("shutil.which", return_value="/opt/homebrew/bin/jdtls"):
         assert find_jdtls() == "/opt/homebrew/bin/jdtls"
-
-
-@pytest.mark.asyncio
-async def test_read_message_parses_framed_json():
-    client = _make_client([{"jsonrpc": "2.0", "id": 1, "result": {"ok": True}}])
-    message = await client._read_message()
-    assert message == {"jsonrpc": "2.0", "id": 1, "result": {"ok": True}}
-
-
-@pytest.mark.asyncio
-async def test_write_message_uses_correct_content_length_framing():
-    client = _make_client([])
-    client._write_message({"jsonrpc": "2.0", "method": "initialized", "params": {}})
-    written = client.process.stdin.written.decode("utf-8")
-    header, _, body = written.partition("\r\n\r\n")
-    assert header == f"Content-Length: {len(body.encode())}"
-    assert json.loads(body) == {"jsonrpc": "2.0", "method": "initialized", "params": {}}
-
-
-@pytest.mark.asyncio
-async def test_check_file_sends_did_open_on_first_call_then_did_change(tmp_path):
-    (tmp_path / "project").mkdir()
-    (tmp_path / "mirror").mkdir()
-    client = _make_client([], tmp_path / "project", tmp_path / "mirror")
-    app = str(tmp_path / "project" / "App.java")
-    client._diagnostics["file://" + client._mirror_path(app)] = []  # pre-populate so polling returns immediately
-
-    await client.check_file(app, "class App {}", timeout=1)
-    first_write = client.process.stdin.written.decode("utf-8")
-    assert '"method": "textDocument/didOpen"' in first_write or "textDocument/didOpen" in first_write
-
-    client.process.stdin.written = b""
-    await client.check_file(app, "class App { int x; }", timeout=1)
-    second_write = client.process.stdin.written.decode("utf-8")
-    assert "textDocument/didChange" in second_write
-    assert '"version": 2' in second_write
-
-@pytest.mark.asyncio
-async def test_check_file_returns_empty_on_timeout_without_raising(tmp_path):
-    (tmp_path / "project").mkdir()
-    (tmp_path / "mirror").mkdir()
-    client = _make_client([], tmp_path / "project", tmp_path / "mirror")
-    # No diagnostics ever arrive - must degrade to empty, not hang or raise.
-    result = await client.check_file(str(tmp_path / "project" / "App.java"), "class App {}", timeout=0.3)
-    assert result == []
-
-
-@pytest.mark.asyncio
-async def test_shutdown_kills_the_whole_process_tree_and_reaps_the_leader():
-    """PLAT-LSP-TREE-KILL-001 (supersedes the 2026-08-12 SIGTERM/SIGKILL
-    regression): after the LSP handshake, _release kills jdtls's WHOLE tree
-    through the platform's process-tree port (the launcher and the JVM it
-    started) and reaps the leader - never a SIGTERM/SIGKILL of the direct PID
-    alone, which left a JVM child running past a timeout."""
-    client = _make_client([])
-    client._request = AsyncMock(side_effect=RuntimeError("simulated: no shutdown response"))
-    client.process.terminate = MagicMock()
-    client.process.kill = MagicMock()
-    client.process.wait = AsyncMock(return_value=None)
-    with patch("kriya.tools.lsp.terminate_process_tree") as tree_kill:
-        await client.shutdown()
-    tree_kill.assert_called_once_with(client.process)
-    client.process.wait.assert_awaited_once()
-    client.process.terminate.assert_not_called()
-    client.process.kill.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_shutdown_survives_a_leader_that_is_not_reaped_in_time():
-    client = _make_client([])
-    client._request = AsyncMock(side_effect=RuntimeError("simulated: no shutdown response"))
-
-    async def never_exits():
-        raise asyncio.TimeoutError()
-
-    client.process.wait = never_exits
-    with patch("kriya.tools.lsp.terminate_process_tree") as tree_kill:
-        await client.shutdown()  # logged, never raised
-    tree_kill.assert_called_once_with(client.process)
-
-
-@pytest.mark.asyncio
-async def test_request_removes_pending_future_on_timeout():
-    """Regression test for a finding from the 2026-08-12 SME review: a timed-
-    out request's entry in self._pending was never removed - it lived for
-    the rest of the client's lifetime instead of being cleaned up."""
-    client = _make_client([])  # no response ever arrives
-    with pytest.raises(asyncio.TimeoutError):
-        await client._request("initialize", {}, timeout=0.05)
-    assert client._pending == {}
-
-
-@pytest.mark.asyncio
-async def test_read_loop_logs_warning_and_stops_on_malformed_content_length():
-    """Regression test for a finding from the 2026-08-12 SME review: a
-    malformed Content-Length header raised an uncaught ValueError that ended
-    LSP grounding for the rest of the run with only a DEBUG-level log line -
-    invisible by default. Now explicitly surfaced at WARNING, matching the
-    project's own established pattern for an optional feature's failure
-    path (toolchain/skill warnings)."""
-    client = _make_client([])
-    client.process.stdout._buffer = b"Content-Length: notanumber\r\n\r\n"
-    client.process.stdout._new_data.set()
-
-    with patch("kriya.tools.lsp.logger") as mock_logger:
-        await client._read_loop()
-
-    assert mock_logger.warning.called
-    warning_text = mock_logger.warning.call_args[0][0]
-    assert "malformed message" in warning_text
-    assert "disabled for the rest of this run" in warning_text
 
 
 def test_format_diagnostics_for_prompt_filters_to_errors_only():
@@ -240,26 +47,3 @@ def test_format_diagnostics_for_prompt_is_forceful_ground_truth_framing():
     assert "ground truth" in result.lower()
     assert "not a guess" in result.lower()
     assert "same error WILL happen again" in result
-
-
-# --- LEAK-JDTLS-START-FAILURE-001: a failed start() releases what it acquired ---
-
-def _silent_jdtls(tmp_path) -> str:
-    """A real executable standing in for jdtls: never answers."""
-    script = tmp_path / "fake-jdtls"
-    script.write_text("#!/bin/sh\nexec sleep 120\n")
-    script.chmod(0o755)
-    return str(script)
-
-
-def _jdtls_data_dirs(temp_root) -> List[str]:
-    return sorted(p.name for p in temp_root.iterdir() if p.name.startswith("kriya-jdtls-data-"))
-
-
-@pytest.fixture
-def temp_root(tmp_path, monkeypatch):
-    root = tmp_path / "tmp"
-    root.mkdir()
-    monkeypatch.setattr(tempfile, "tempdir", str(root))
-    return root
-

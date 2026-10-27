@@ -18,7 +18,7 @@ The tests S8 deleted are the exact-id H list of tests/containment_census.py (54)
 controls for both are recorded in tests/containment_h_ledger.py ``LEDGER`` and ``MARKED_LEDGER``, and those controls are still pinned to exist)."""
 from __future__ import annotations
 
-from typing import Dict, NamedTuple
+from typing import Dict, NamedTuple, Tuple
 
 
 class Site(NamedTuple):
@@ -79,10 +79,23 @@ HELD_NOTES: Dict[str, str] = {
 }
 
 # Dead host code that is NOT on the frozen list (no read of the flag: it is keyed on a parameter, or it is a pure helper). Left in place; candidates for an owner-approved follow-up.
-ORPHANS: Dict[str, str] = {
-    "kriya/mcp/mcp.py::MCPClient._start_sequence": "the `containment_required=False` raw host spawn (MCPManager.start_all now always passes True)",
-    "kriya/tools/validate.py::PolymorphicValidator.build_subprocess_env_and_preexec": "the host env/preexec policy (no production caller outside _run_cmd_with_timeout's None-profile path)",
-    "kriya/tools/lsp.py::JdtlsClient": "everything after the typed refusal in start(): the reader loop, requests and mirror are unreachable (no process can exist)",
-    "kriya/static_analysis/adapters/semgrep.py::host_executable_digest": "host Semgrep engine identity (pure helper; locate_engine / EngineNotLocatedError and their direct tests remain)",
+ORPHANS: Dict[str, str] = {}   # S8-ORPHAN-HOST-CODE-001 is closed: every orphan recorded after S8 was deleted (ORPHANS_DELETED), so none is left to list
+
+# What the orphan removal deleted, with the negative-proof test that pins each absence (tests/test_s8_host_branches_are_gone.py). Reachability was TRACED per symbol first:
+# host_executable_digest had no caller; build_subprocess_env_and_preexec/host_resource_plan fed only the (None, None)-profile tail of _run_cmd_with_timeout; MCPClient._start_sequence is the
+# LIVE launcher and only its containment_required=False branch was the orphan; JdtlsClient.start() is always the typed refusal, so its process machinery could never run.
+_PROOFS = "tests/test_s8_host_branches_are_gone.py::"
+ORPHANS_DELETED: Dict[str, Tuple[str, str]] = {
+    "kriya/static_analysis/adapters/semgrep.py::host_executable_digest": (
+        "host Semgrep engine identity (no caller anywhere); its only helper _file_sha256 went with it", _PROOFS + "test_the_host_semgrep_engine_identity_helper_and_its_only_consumer_are_gone"),
+    "kriya/tools/validate.py::PolymorphicValidator.build_subprocess_env_and_preexec": (
+        "the host env/preexec policy, host_resource_plan and the host spawn tail of _run_cmd_with_timeout (a missing profile/backend is now a typed refusal)",
+        _PROOFS + "test_the_validator_has_no_host_env_and_preexec_policy_and_its_one_spawn_is_contained"),
+    "kriya/mcp/mcp.py::MCPClient._start_sequence": (
+        "the containment_required=False raw host spawn branch (the method itself is the live launcher); the constructor refuses a client that does not require containment",
+        _PROOFS + "test_the_mcp_launcher_has_no_host_spawn_branch_left"),
+    "kriya/tools/lsp.py::JdtlsClient": (
+        "the process machinery after the typed refusal in start(): framing, reader loop, requests, private mirror, tree-kill shutdown",
+        _PROOFS + "test_jdtls_has_no_process_machinery_and_cannot_be_started"),
 }
 

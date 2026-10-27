@@ -93,6 +93,9 @@ def test_the_test_half_is_gone_no_test_is_legacy_host_and_the_recorded_plain_ids
     assert len(ledger.LEDGER) == 54 and len(ledger.MARKED_LEDGER) == 3        # the record of what S8 deleted
     for test_id in (*ledger.LEDGER, *ledger.MARKED_LEDGER):
         path, _, name = test_id.partition("::")
+        if path in ledger.FILES_DELETED_WITH_DEAD_CODE:
+            assert not (ROOT / path).exists(), f"{path} is back"
+            continue
         if "[" in name:
             continue                  # a parameter set: the function may legitimately remain with its other parameters
         tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
@@ -110,3 +113,14 @@ def test_the_whole_s8_record_is_digest_pinned():
     material = "\n".join([*(f"code {site} {entry.outcome}" for site, entry in sorted(s8.S8_CODE.items())), *(f"test {test_id}" for test_id in sorted(ledger.LEDGER)),
                           *(f"marked {test_id}" for test_id in sorted(ledger.MARKED_LEDGER))])
     assert hashlib.sha256(material.encode("utf-8")).hexdigest() == S8_LIST_DIGEST
+
+
+def test_every_deleted_orphan_has_a_negative_proof_that_exists():
+    """S8-ORPHAN-HOST-CODE-001: the orphans are recorded as deleted, each with the test that pins its absence; the list of live orphans is empty."""
+    assert s8.ORPHANS == {}
+    assert len(s8.ORPHANS_DELETED) == 4
+    for site, (why, proof) in s8.ORPHANS_DELETED.items():
+        assert len(why) >= 40, site
+        path, _, name = proof.partition("::")
+        tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
+        assert name in {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}, f"{site}: its proof {proof} does not exist"

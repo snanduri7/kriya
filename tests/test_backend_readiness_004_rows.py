@@ -8,7 +8,6 @@ import os
 import re
 import sqlite3
 import subprocess
-import time
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -32,9 +31,6 @@ from kriya.memory.embedding import MAX_SEGMENT_DEPTH, EmbeddingInputTooLongError
 from kriya.metrics.derive import derive_metrics
 from kriya.metrics.evidence import load_trace_runs
 from kriya.metrics.report import build_report, render_markdown
-from kriya.tools import lsp as lsp_module
-from kriya.tools.lsp import JdtlsClient
-from kriya.tools.process import spawn_subprocess_exec_fail_closed
 from kriya.workflow.obligations import ObligationLedger
 from kriya.workflow.requirement_contract import CONTRACT_FORMAT, load_requirement_contract, requirement_set_for
 from kriya.workflow.requirements import (
@@ -365,57 +361,10 @@ def test_a_reviewer_endpoint_failure_after_the_commit_is_a_typed_non_success(tmp
 
 # ------------------------------------------------- PLAT-LSP-TREE-KILL-001
 
-def _alive(pid):
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    return True
 
-
-@pytest.mark.asyncio
-async def test_releasing_the_jdtls_client_kills_a_grandchild_the_launcher_started(tmp_path):
-    """The measured class: jdtls's launcher starts a JVM child; killing the
-    direct PID alone left it running past a timeout. The client owns the tree."""
-    client = JdtlsClient(str(tmp_path), "/fake/jdtls")
-    pidfile = tmp_path / "grandchild.pid"
-    client.process = await spawn_subprocess_exec_fail_closed(
-        "/bin/sh", "-c", f"sleep 300 & echo $! > {pidfile}; wait",
-        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-    )
-    deadline = time.monotonic() + 5
-    while not pidfile.exists() or not pidfile.read_text().strip():
-        assert time.monotonic() < deadline
-        await asyncio.sleep(0.05)
-    grandchild = int(pidfile.read_text().strip())
-    assert _alive(grandchild)
-    try:
-        await client._release()
-        deadline = time.monotonic() + 5
-        while _alive(grandchild) and time.monotonic() < deadline:
-            await asyncio.sleep(0.05)
-        assert not _alive(grandchild)
-        assert client.process.returncode is not None  # the leader was reaped
-    finally:
-        for pid in (grandchild,):
-            if _alive(pid):
-                os.kill(pid, 9)
-
-
-@pytest.mark.asyncio
-async def test_releasing_an_already_exited_jdtls_is_not_an_error(tmp_path):
-    client = JdtlsClient(str(tmp_path), "/fake/jdtls")
-    client.process = await spawn_subprocess_exec_fail_closed("/bin/sh", "-c", "exit 0", stdin=asyncio.subprocess.PIPE)
-    await client.process.wait()
-    await client._release()
-
-
-def test_jdtls_has_no_subprocess_spawn_of_its_own_and_is_released_through_the_process_tree_port():
-    """S8 removed the host spawn (jdtls is refused while containment is mandatory): lsp.py spawns nothing, directly or through the port, and what it holds is still torn down
-    through the process-tree port."""
-    source = open(lsp_module.__file__, encoding="utf-8").read()
-    assert "asyncio.create_subprocess_exec(" not in source and "spawn_subprocess_exec_fail_closed(" not in source
-    assert "terminate_process_tree(" in source
+# S8-ORPHAN-HOST-CODE-001: the jdtls release/tree-kill tests and the lsp.py source-shape test are gone with the unreachable process machinery they exercised (jdtls can never start while
+# containment is mandatory). Tree-kill of a started process's descendants stays covered through the platform port by tests/test_platform_process_control_contract.py; the absence of
+# the machinery is pinned by tests/test_s8_host_branches_are_gone.py::test_jdtls_has_no_process_machinery_and_cannot_be_started.
 
 
 # ------------------------------------------------- TRACE-ENFORCE-SUBTASK-LINKAGE-001

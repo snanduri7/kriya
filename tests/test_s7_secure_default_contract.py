@@ -192,7 +192,7 @@ def test_jdtls_is_never_started_on_the_host(tmp_path, backend):
     with pytest.raises(ExternalExecutionRefused) as raised:
         asyncio.run(client.start())
     assert raised.value.reason_code == CONTAINMENT_NOT_SUPPORTED_FOR_SUBJECT
-    assert client._data_dir is None and client.process is None                       # pylint: disable=protected-access
+    assert getattr(client, "_data_dir", None) is None and getattr(client, "process", None) is None  # nothing was created (the machinery that held them is gone, S8-ORPHAN-HOST-CODE-001)
 
 
 def test_the_refusal_names_what_the_operator_must_do_when_there_is_no_isolating_backend():
