@@ -82,7 +82,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:173cf94a866f2159"
+      "event": "sha256:4a37cba39e6c1e8a"
      },
      "event": "egress.authority",
      "kind": "mirror.event",
@@ -982,7 +982,7 @@
     {
      "attempt": 0,
      "authority": "auxiliary",
-     "details": "sha256:94849ebc5de11ca0",
+     "details": "sha256:b19c350714af33fd",
      "kind": "egress.authority",
      "source": "workflow.run_generation_workflow"
     },
@@ -1143,7 +1143,7 @@
    "commit_transaction_id": null,
    "commits": [],
    "created_at": "<clock>",
-   "effective_config_fingerprint": "20131fe76f24b38a80f008a430f5e365be8cd97c8753964abd7c1ad1ce0d8734",
+   "effective_config_fingerprint": "61db011f5a048a5c1d03542cdad31aa0bea70aacbb5d9952fff7ce8a0aae3e93",
    "execution_plan": {
     "commit_strategy": "incremental_work_unit",
     "fingerprint": "4e1f0d6216887b277a2ea6a9dd288f5ed4cbfdf950ea32d497f1042c2b806596",

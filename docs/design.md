@@ -634,7 +634,7 @@ A provider-neutral static-analysis gate at **both** terminal commit boundaries: 
   - evidence that is stale: batch, base scope, scope plan, provider runtime or rule packs (`runtime_fingerprint()`, recomputed without running the tool), or effective settings changed.
 
   The evidence id goes into the commit's `verification_evidence_ids`.
-- **Execution.** Contained when `autonomy.contained_execution_required`: OCI with `--network none`, a read-only snapshot, and a digest-pinned image via the new `ContainmentProfile.image_reference`, run with `--pull never`. There is no host fallback. Egress admission (PRD-012) happens before execution; source-uploading providers are refused in v1.
+- **Execution.** Always contained (`autonomy.contained_execution_required` is mandatory and cannot be disabled): OCI with `--network none`, a read-only snapshot, and a digest-pinned image via the new `ContainmentProfile.image_reference`, run with `--pull never`. There is no host fallback. Egress admission (PRD-012) happens before execution; source-uploading providers are refused in v1.
 - **Doctor and CLI.** Doctor has seven `static_analysis.*` rows and reuses PRD-027's NOT_APPLICABLE representation, with no schema change. The operator CLI is `kriya static-analysis status|scan|waive|revoke|waivers`.
 
 ### 2.9e Adversarial and Crash Chaos Harness (PRD-032, `tests/_chaos_harness.py`)

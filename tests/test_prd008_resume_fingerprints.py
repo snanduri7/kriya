@@ -291,8 +291,9 @@ def test_model_identity_change_leaves_config_fingerprint_alone_but_temperature_d
 
 def test_containment_and_verification_changes_are_their_own_fingerprints(git_repo):
     base = generation_resume_fingerprints(_config(), str(git_repo), goal=GOAL)
+    # S7: "oci" is the packaged default, so the containment change is the other legal spelling of the backend ("none" parses; it refuses at execution).
     contained = _config()
-    contained.autonomy.containment_backend = "oci"
+    contained.autonomy.containment_backend = "none"
     changed = generation_resume_fingerprints(contained, str(git_repo), goal=GOAL)
     assert changed["containment"] != base["containment"] and changed["config"] == base["config"]
     verified = _config()
@@ -308,11 +309,13 @@ def test_model_runtime_and_toolchain_are_declared_unavailable(git_repo):
     # match). tests/test_prd013_model_runtime.py covers the bound case.
     fingerprints = generation_resume_fingerprints(_config(), str(git_repo), goal=GOAL)
     assert not fingerprints["model_runtime"].available and "not exact" in fingerprints["model_runtime"].basis
-    # PRD-011 binds the toolchain only under contained execution (see
-    # tests/test_prd011_toolchain_fingerprint.py); a host-mode run still has
-    # no attested identity, so it stays UNAVAILABLE (never a match).
+    # PRD-011 binds the toolchain from a versioned toolchain profile and the
+    # image's content digest (see tests/test_prd011_toolchain_fingerprint.py);
+    # a workspace with no such profile has no attested identity, so it stays
+    # UNAVAILABLE (never a match). S7: every run is contained, so the reason is
+    # the missing profile, never "containment not required".
     assert not fingerprints["toolchain"].available
-    assert "containment not required" in fingerprints["toolchain"].basis
+    assert "no versioned toolchain profile for stack 'unknown'" in fingerprints["toolchain"].basis
     assert set(fingerprints) == set(FINGERPRINT_NAMES)
 
 

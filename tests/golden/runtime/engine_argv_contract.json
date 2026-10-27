@@ -38,9 +38,9 @@
     "main.py",
     "kriya-verification-input"
    ],
-   "contained": false,
+   "contained": true,
    "cwd": "<state_dir:1>/gate-views/<view>",
-   "env": true,
+   "env": false,
    "spawn": "app",
    "stdin": null,
    "timeout": 90
@@ -84,14 +84,6 @@
        "kriya-verification-input"
       ],
       "exit_code": 0,
-      "resources": {
-       "address_space_enforcement": "advisory",
-       "address_space_limit_mb": 4096,
-       "cpu_seconds": 240,
-       "jvm_options": [],
-       "memory_budget_mb": 4096,
-       "strategy": "address_space"
-      },
       "stderr": "",
       "stdout": "6\n",
       "timed_out": false

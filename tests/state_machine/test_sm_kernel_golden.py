@@ -9,6 +9,13 @@ file unchanged; a diff means the extraction changed observable behaviour. Regene
 behaviour is known good: ``KRIYA_WRITE_KERNEL_GOLDEN=<dir> .venv/bin/pytest tests/state_machine/test_sm_kernel_golden.py``
 writes the forms to ``<dir>`` (and fails, so a write is never mistaken for a pass); review the diff, then copy.
 
+S7 (final containment contract) regenerated all 41 once, from the S7 tree, after the content-level diff against the pre-S7 tree showed ONLY three families: (1) the
+egress.authority records describe contained execution (backend oci, required true, network capability denied, the acquisition registry destinations); (2) a verification
+outcome record carries ``egress`` and no host ``resources`` (rlimit evidence exists only on the host path, which the secure defaults no longer reach); (3) the
+``effective_config_fingerprint`` of the three flipped ``autonomy`` defaults (OLD config + those three fields == NEW default fingerprint, MEASURED). The ``egress.backend`` value
+is the pytest stand-in's class name: these goldens prove the kernel's observable shape under the containment seam, not isolation (real OCI tests own that). No behavioural key,
+terminal path, attempt count or lifecycle changed.
+
 HX1 (OI-41) made them portable: they pass at any absolute checkout path, under load and without the checkout's untracked
 ``./memory`` (the controls at the end of this file pin each normalization and the isolation).
 """

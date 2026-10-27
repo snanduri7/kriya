@@ -476,6 +476,27 @@ def parse_egress_policy(value: Any) -> str:
     return value
 
 
+class ContainmentOptOutError(ValueError):
+    """An attempt to disable a mandatory containment setting (``autonomy.contained_execution_required`` / ``autonomy.mcp_contained_execution_required`` set to anything
+    but True). A ValueError (pydantic turns it into a ValidationError inside a validator, and the assignment / model_copy paths keep raising a ValueError), named so the
+    `kriya authority` CLI and `kriya doctor` report it as the operator error it is. It never enables host execution and is never coerced to True."""
+
+
+CONTAINMENT_MANDATE_FIELDS = ("contained_execution_required", "mcp_contained_execution_required")
+
+
+def parse_containment_mandate(field: str, value: Any) -> bool:
+    """The ONE check of the containment mandate fields (the AutonomyConfig validators, assignment and model_copy AND the authority resolution all call it). Project-controlled
+    external execution always runs inside an isolating containment backend: there is NO operator opt-out, so the only accepted value is exactly True (the packaged default; the
+    production profile also writes it). False - and any other value - is a typed refusal, never a silent True and never host execution."""
+    if value is not True:
+        raise ContainmentOptOutError(
+            f"autonomy.{field} cannot be disabled (got {value!r}): project-controlled external execution always requires an isolating containment backend and there is no "
+            "host-execution opt-out. Remove the setting (the packaged default is true) or set it to true, and run a supported isolating backend (autonomy.containment_backend: oci, "
+            "with Docker running).")
+    return True
+
+
 def autonomy_mode_of(config: Any) -> str:
     """OI-135 (S18): the ONE fail-closed reader every autonomy-mode consumer calls. Re-checks the value at read time with
     parse_autonomy_mode, so an instance that bypassed validation (pydantic ``model_construct``, ``object.__setattr__``)

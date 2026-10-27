@@ -7,6 +7,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from _real_oci import REAL_OCI_MAVEN
 
 from kriya.workflow import contract_feedback as cf
 from kriya.workflow import example_oracle_java as ej
@@ -448,7 +449,8 @@ def test_end_to_end_the_terminal_examples_closer_still_evaluates_after_an_interm
 
 # --- real Maven/JUnit: the production runner path of the gate (skipped without mvn) -------------------------------------------
 
-@pytest.mark.skipif(__import__("shutil").which("mvn") is None, reason="real Maven is not installed")
+# S7: a real Maven build belongs to the REAL-OCI tier (owner decision): it needs the canonical provider image and cache, which no stand-in simulates.
+@REAL_OCI_MAVEN
 def test_real_runner_pass_and_violation_through_build_contract_feedback(tmp_path):
     from _b2c_fixtures import BASE_CALC, TARGET, maven_workspace
 

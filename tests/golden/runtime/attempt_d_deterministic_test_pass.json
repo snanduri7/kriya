@@ -13,14 +13,6 @@
    "deterministic_result": "PASS",
    "graded_by": "process_exit",
    "output": "=== Step 1/1: <python:1> -m pytest ===\n1 passed\n\n\n\n[Grader reasoning]: All deterministic test verification commands completed successfully (exit code 0).",
-   "resources": {
-    "address_space_enforcement": "advisory",
-    "address_space_limit_mb": 4096,
-    "cpu_seconds": 240,
-    "jvm_options": [],
-    "memory_budget_mb": 4096,
-    "strategy": "address_space"
-   },
    "runtime_artifacts": [],
    "runtime_disposition": {
     "authority": "process_exit",
@@ -38,14 +30,6 @@
       "pytest"
      ],
      "exit_code": 0,
-     "resources": {
-      "address_space_enforcement": "advisory",
-      "address_space_limit_mb": 4096,
-      "cpu_seconds": 240,
-      "jvm_options": [],
-      "memory_budget_mb": 4096,
-      "strategy": "address_space"
-     },
      "stderr": "",
      "stdout": "1 passed\n",
      "timed_out": false
@@ -114,9 +98,9 @@
     "-m",
     "pytest"
    ],
-   "contained": false,
-   "cwd": "<wt:1>",
-   "env": true,
+   "contained": true,
+   "cwd": "<state_dir:1>/gate-views/<view>",
+   "env": false,
    "spawn": "pytest",
    "stdin": null,
    "timeout": 37
@@ -141,14 +125,6 @@
     "deterministic_result": "PASS",
     "graded_by": "process_exit",
     "output": "=== Step 1/1: <python:1> -m pytest ===\n1 passed\n\n\n\n[Grader reasoning]: All deterministic test verification commands completed successfully (exit code 0).",
-    "resources": {
-     "address_space_enforcement": "advisory",
-     "address_space_limit_mb": 4096,
-     "cpu_seconds": 240,
-     "jvm_options": [],
-     "memory_budget_mb": 4096,
-     "strategy": "address_space"
-    },
     "runtime_artifacts": [],
     "runtime_disposition": {
      "authority": "process_exit",
@@ -166,14 +142,6 @@
        "pytest"
       ],
       "exit_code": 0,
-      "resources": {
-       "address_space_enforcement": "advisory",
-       "address_space_limit_mb": 4096,
-       "cpu_seconds": 240,
-       "jvm_options": [],
-       "memory_budget_mb": 4096,
-       "strategy": "address_space"
-      },
       "stderr": "",
       "stdout": "1 passed\n",
       "timed_out": false

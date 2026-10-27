@@ -34,6 +34,13 @@ What is pinned:
   the judgment basis, Python grounding) and of the Maven acquisition boundary of a runtime step (tooling-only, the
   run's root deadline).
 
+S7 (final containment contract) re-recorded 81 of the goldens ONCE, after each difference had been traced to the contained command flow (every run is contained now): the
+trace rows say ``contained`` true with no ``env``, the host rlimit ``resources`` evidence is gone (it exists only on the host path), a command runs in a gate view under the state
+directory (not in the worktree, so its build output and runtime state never reach the worktree and a Maven preparation build is itself a ``runtime_verification``
+gate.result), the Maven argv is the contained form, and two messages name the view's path. The interpreter token is unchanged (``.kriya/venv/bin/python`` is spelled like
+Kriya's own), and no verdict, outcome type, failure category or terminal path changed. A first regeneration that was NOT accepted had every run stop at the compile gate (the
+harness refused the contained Python gate and a scripted ``pytest`` matcher swallowed the environment's ``pip install pytest``): the harness, not the goldens, was wrong.
+
 Every golden was WRITTEN from 76f5e9a (``KRIYA_WRITE_RUNTIME_GOLDEN=1``) and is only ever compared afterwards; the
 forms are byte-identical under several PYTHONHASHSEED values, basetemps of different lengths, ``-n 3`` and serial, and
 a git-archive copy at another path.
@@ -94,7 +101,9 @@ def _short(value: Any) -> Any:
 
 def _interpreter_literals() -> Dict[str, str]:
     """The interpreter a Python runtime command runs under, as a token (it is this machine's path)."""
-    return {PYTHON: "python", os.path.realpath(PYTHON): "python"}
+    # S7: every run is contained, so a Python runtime command runs under the project environment's interpreter (``<worktree>/.kriya/venv``, spelled workspace-relative in the
+    # command), no longer Kriya's own: it is the same token, so the goldens still pin everything but how this machine spells its interpreter.
+    return {PYTHON: "python", os.path.realpath(PYTHON): "python", ".kriya/venv/bin/python": "python"}
 
 
 def _evidence_digest_with_the_interpreter_as_a_token():
@@ -141,10 +150,10 @@ class _Processes:
     def run(self, controller: ProcessController, command: List[str], **kwargs: Any) -> ProcessResult:
         label = self._label(list(command))
         if label is None:
-            # only git and the test gate's interpreter run for real: an unscripted application, build tool or JVM
+            # only git and the contained Python gate flow run for real: an unscripted application, build tool or JVM
             # would make a case depend on this machine's toolchain
             assert os.path.basename(command[0]) == "git" or (
-                os.path.realpath(command[0]) == os.path.realpath(PYTHON) and command[1:2] == ["-c"]), command
+                kwargs.get("containment_profile") is not None and _is_a_python_gate_step(list(command))), command
             return self.real_run(controller, command, **kwargs)
         _match, answers = self.scripted[label]
         answer = answers.pop(0) if len(answers) > 1 else answers[0]
@@ -171,6 +180,17 @@ class _Processes:
         return [patch.object(ProcessController, "run", lambda controller, command, **kw: processes.run(controller, command, **kw)),
                 patch.object(ProcessController, "start_managed",
                              lambda controller, command, **kw: processes.start_managed(controller, command, **kw))]
+
+
+def _is_a_python_gate_step(command: List[str]) -> bool:
+    """A step of the contained Python gate (S7: every run is contained): the compile check, the project environment's creation and its pytest installation (offline in the test
+    stand-in, tests/_containment_standin.py), and the test runner the environment's interpreter executes."""
+    program, args = command[0], command[1:]
+    if program == "python3":
+        return args[:2] in (["-m", "py_compile"], ["-m", "venv"])
+    if program.endswith("venv/bin/python"):
+        return args[:3] == ["-m", "pip", "install"] or args[:1] == ["-c"]
+    return False
 
 
 def _containment_form(profile: Any, backend: Any) -> Any:
@@ -205,6 +225,11 @@ class _FakeService:
 
 def _app(argv: List[str]) -> bool:
     return any(os.path.basename(token) == "main.py" for token in argv)
+
+
+def _runs_pytest(argv: List[str]) -> bool:
+    """The case's pytest RUN, not the contained flow's ``pip install -q pytest`` into the project environment (which also carries the word)."""
+    return "pytest" in argv and "pip" not in argv
 
 
 def _ok(stdout: str = "6\n") -> Dict[str, Any]:
@@ -476,15 +501,16 @@ def _git(repo: Path, *args: str) -> None:
 
 
 def _trees(tmp_path: Path, files: Dict[str, str], candidate: Dict[str, str]):
-    """A git workspace (the repository) and a separate worktree holding the repository plus the candidate."""
+    """A git workspace (the repository) and a separate REAL worktree of it (``git worktree add --detach``, the shape every run's candidate has - a bare directory would be
+    refused by the contained flow's Git-metadata ownership rule, S3) holding the repository plus the candidate."""
     workspace, worktree = tmp_path / "ws", tmp_path / "wt"
-    for root in (workspace, worktree):
-        for rel, text in files.items():
-            (root / rel).parent.mkdir(parents=True, exist_ok=True)
-            (root / rel).write_text(text)
+    for rel, text in files.items():
+        (workspace / rel).parent.mkdir(parents=True, exist_ok=True)
+        (workspace / rel).write_text(text)
     _git(workspace, "init", "-q")
     _git(workspace, "add", "-A")
     _git(workspace, "commit", "-qm", "base")
+    _git(workspace, "worktree", "add", "-q", "--detach", str(worktree))
     for rel, text in candidate.items():
         (worktree / rel).parent.mkdir(parents=True, exist_ok=True)
         (worktree / rel).write_text(text)
@@ -492,10 +518,12 @@ def _trees(tmp_path: Path, files: Dict[str, str], candidate: Dict[str, str]):
 
 
 def _tree(root: str) -> Dict[str, str]:
-    """relpath -> content digest of every file under ``root`` (outside .git and bytecode caches)."""
+    """relpath -> content digest of every file under ``root`` (outside .git, bytecode caches and Kriya's own project environment ``.kriya/venv``, which every contained
+    verification creates in the tree it verifies)."""
     found: Dict[str, str] = {}
     for directory, dirs, files in os.walk(root):
-        dirs[:] = sorted(d for d in dirs if d not in (".git", "__pycache__", ".pytest_cache"))
+        dirs[:] = sorted(d for d in dirs if d not in (".git", "__pycache__", ".pytest_cache")
+                         and os.path.relpath(os.path.join(directory, d), root) != os.path.join(".kriya", "venv"))
         for name in sorted(files):
             path = Path(directory) / name
             found[str(path.relative_to(root))] = kg.digest(path.read_bytes())
@@ -690,8 +718,12 @@ class _AttemptRun:
         return self
 
     def form(self) -> Dict[str, Any]:
+        from kriya.core.state_paths import ENV_STATE_DIR
+
+        state_dir = os.environ[ENV_STATE_DIR]
         norm = kg.Normalizer({os.path.realpath(self.worktree): "wt", self.worktree: "wt",
                               os.path.realpath(self.workspace): "ws", self.workspace: "ws",
+                              os.path.realpath(state_dir): "state_dir", state_dir: "state_dir",   # the contained flow runs in a gate view under the state directory
                               os.path.realpath(str(self.tmp_path)): "tmp", str(self.tmp_path): "tmp",
                               **_interpreter_literals()})
         state = self.state
@@ -901,10 +933,10 @@ ATTEMPT_CASES: Dict[str, Any] = {
     "ae_timed_out_output_wrong": (dict(scripted={"app": (_app, [{"returncode": -9, "stdout": "", "timeout": True}])},
                                        grades=(FAILED,)), _approve_and_execute,
                                   "a hang without the output: run_verification failure"),
-    "ae_deterministic_test_pass": (dict(scripted={"pytest": (lambda argv: "pytest" in argv, [_ok("1 passed\n")])}),
+    "ae_deterministic_test_pass": (dict(scripted={"pytest": (_runs_pytest, [_ok("1 passed\n")])}),
                                    _judged({**JUDGE, "run_commands": [["python3", "-m", "pytest", "-q"]]}),
                                    "a test command's exit status is the verdict (process_exit, no grader), gate 'test'"),
-    "ae_deterministic_test_fail": (dict(scripted={"pytest": (lambda argv: "pytest" in argv, [_crash("1 failed\n")])}),
+    "ae_deterministic_test_fail": (dict(scripted={"pytest": (_runs_pytest, [_crash("1 failed\n")])}),
                                    _judged({**JUDGE, "run_commands": [["python3", "-m", "pytest", "-q"]]}),
                                    "a failing test command: process_exit FAIL, no grader"),
     "ae_contract_marker_pass": (dict(candidate={"calc.py": MARKED_CALC},
@@ -1052,10 +1084,10 @@ DIRECT_CASES: Dict[str, Any] = {
                                    "a hang after correct output: run_verification_hung"),
     "d_timed_out_output_wrong": (_direct(scripted={"app": (_app, [{"returncode": -9, "timeout": True}])},
                                          grades=(FAILED,)), _directly, "a hang without the output"),
-    "d_deterministic_test_pass": (_direct(scripted={"pytest": (lambda argv: "pytest" in argv, [_ok("1 passed\n")])},
+    "d_deterministic_test_pass": (_direct(scripted={"pytest": (_runs_pytest, [_ok("1 passed\n")])},
                                           judgments=({**JUDGE, "run_commands": [["python3", "-m", "pytest"]]},)),
                                   _directly, "a test command: process_exit PASS, gate type 'test'"),
-    "d_deterministic_test_fail": (_direct(scripted={"pytest": (lambda argv: "pytest" in argv, [_crash("1 failed\n")])},
+    "d_deterministic_test_fail": (_direct(scripted={"pytest": (_runs_pytest, [_crash("1 failed\n")])},
                                           judgments=({**JUDGE, "run_commands": [["python3", "-m", "pytest"]]},)),
                                   _directly, "a failing test command: process_exit FAIL, gate type 'test'"),
     "d_entrypoint_missing": (_direct(scripted={"app": (_app, [_crash("ModuleNotFoundError: No module named 'calcx'\n")])}),
@@ -1485,11 +1517,14 @@ def test_engine_a_declined_required_review_records_the_refusal_and_spawns_nothin
 ])
 def test_a_refusal_is_recorded_and_the_reviewed_command_never_runs(name, refusal, tmp_path):
     """Capture ON: the refusal is the ONLY outcome recorded, after any review asked and any preparation run, and the
-    reviewed command is never spawned (no runtime gate.result, no grade)."""
+    reviewed command is never spawned (no grade, and no runtime gate.result of the reviewed command)."""
     kwargs, case, _terminal = ATTEMPT_CASES[name]
     run = _AttemptRun(tmp_path, **kwargs).call(case)
     steps = _steps(run.trace)
-    assert not run.spawned("app") and "gate.result:runtime_verification" not in steps and "model:grader" not in steps
+    assert not run.spawned("app") and "model:grader" not in steps
+    # S7: every run is contained, and a Maven preparation build is then itself a runtime_verification gate (``contained_maven_build``, OI-142): the only runtime gate.result
+    # a refused run may carry is one per preparation build, never one for the reviewed command.
+    assert steps.count("gate.result:runtime_verification") == len(run.spawned("maven")), steps
     outcomes = [step for step in steps if step.startswith("outcome:")]
     assert len(outcomes) == 1 and steps[-1] == outcomes[0], steps
     assert run.failure is not None and run.failure.message.startswith(refusal), run.outcome
@@ -1604,18 +1639,6 @@ def _rules_verified(run: _AttemptRun) -> Any:
                  side_effect=lambda path, rules: run.trace.append({"rules_persisted_mid_run": path, "rules": list(rules)}))
 
 
-class _Containment:
-    """A containment profile/backend pair the validator hands out (contained execution as configured)."""
-
-    def __init__(self, name: str):
-        self.name = name
-
-
-def _contained(run: _AttemptRun) -> Any:
-    return patch.object(PolymorphicValidator, "build_containment_profile_and_backend",
-                        lambda validator, **kwargs: (_Containment("candidate-profile"), _Containment("oci")))
-
-
 CORRECTABLE_POM = "<project><properties><exec.mainClass>com.example.App</exec.mainClass></properties></project>\n"
 PIN_CASES: Dict[str, Any] = {
     "ae_self_correction_deny_all": (
@@ -1656,12 +1679,12 @@ PIN_CASES: Dict[str, Any] = {
                                     "the user's own command with a Kriya-supplied stdin: not the user's words, asked"),
     "ae_self_correction_rerun_still_failing": (
         dict(cfg=_config(self_correction_loop_enabled=True),
-             scripted={"pytest": (lambda argv: "pytest" in argv, [_crash("1 failed\n")])}, repair=_Repair(True)),
+             scripted={"pytest": (_runs_pytest, [_crash("1 failed\n")])}, repair=_Repair(True)),
         _judged({**JUDGE, "run_commands": [["python3", "-m", "pytest"]]}),
         "a deterministic command still failing after a resolved self-correction: process_exit FAIL after repair"),
     "ae_self_correction_rerun_passing": (
         dict(cfg=_config(self_correction_loop_enabled=True),
-             scripted={"pytest": (lambda argv: "pytest" in argv, [_crash("1 failed\n"), _ok("1 passed\n")])},
+             scripted={"pytest": (_runs_pytest, [_crash("1 failed\n"), _ok("1 passed\n")])},
              repair=_Repair(True)),
         _judged({**JUDGE, "run_commands": [["python3", "-m", "pytest"]]}),
         "a deterministic command passing after a resolved self-correction: process_exit PASS, self_corrected"),
@@ -1669,7 +1692,7 @@ PIN_CASES: Dict[str, Any] = {
                                    "the project interpreter cannot be prepared: the typed environment stop, nothing run "
                                    "or graded"),
     "ae_deterministic_test_fail_naming_a_module": (
-        dict(scripted={"pytest": (lambda argv: "pytest" in argv,
+        dict(scripted={"pytest": (_runs_pytest,
                                   [_crash("E   ModuleNotFoundError: No module named 'calcx'\n1 failed\n")])}),
         _judged({**JUDGE, "run_commands": [["python3", "-m", "pytest"]]}),
         "a failing test command whose output names a missing module: the process status is the verdict, never "
@@ -1695,7 +1718,9 @@ PIN_CASES: Dict[str, Any] = {
             "Error occurred during initialization of VM\nModuleNotFoundError: No module named 'calc.settings'\n"))),
         _managed(JUDGE_SERVICE),
         "an environment verdict on the service's output outranks the missing-module plan gap: infrastructure"),
-    "m_contained": (dict(patches=(_contained,)), _managed(JUDGE_SERVICE),
+    # S7: every run is contained, so the profile and backend the validator builds (the census stand-in is the backend here) are the real pair, not a pair this case fakes: faking
+    # one would also hand it to the project environment's creation steps, which need a backend that can prepare a command.
+    "m_contained": (dict(), _managed(JUDGE_SERVICE),
                     "the validator's containment profile and backend reach the launched service"),
     "m_runtime_state_cleaned": (dict(service=lambda: _FakeService(writes="service.db")), _managed(JUDGE_SERVICE),
                                 "what the service wrote into the reused worktree is removed after it"),

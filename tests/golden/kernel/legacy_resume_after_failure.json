@@ -82,7 +82,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:d6e1c83a0fd7dd40"
+      "event": "sha256:1683c36299d299e0"
      },
      "event": "egress.authority",
      "kind": "mirror.event",
@@ -708,7 +708,7 @@
     {
      "attempt": 1,
      "content": {
-      "outcome": "sha256:5e67473172badc50"
+      "outcome": "sha256:ace6d38c550eefae"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:ebadd8f3cf4ea0cc",
@@ -1367,7 +1367,7 @@
     {
      "attempt": 2,
      "content": {
-      "outcome": "sha256:84ec2a6e9f3bb299"
+      "outcome": "sha256:77c0ee99fe710ff7"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:31811e66dffd7cdd",
@@ -2026,7 +2026,7 @@
     {
      "attempt": 3,
      "content": {
-      "outcome": "sha256:a2c975048c035b56"
+      "outcome": "sha256:bf19306d892db062"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:5fd9ded057d76046",
@@ -2685,7 +2685,7 @@
     {
      "attempt": 4,
      "content": {
-      "outcome": "sha256:0bb351e66798a1f4"
+      "outcome": "sha256:0e0521ee61b5a14d"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:ed0d9330a201c814",
@@ -3344,7 +3344,7 @@
     {
      "attempt": 5,
      "content": {
-      "outcome": "sha256:83846a96d9b45752"
+      "outcome": "sha256:a93ea5f61b0827ec"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:01525870067140a3",
@@ -3982,7 +3982,7 @@
     {
      "attempt": 6,
      "content": {
-      "outcome": "sha256:dd3781d0571f799b"
+      "outcome": "sha256:3d2af3e658478266"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:7e421ddcd0edd0eb",
@@ -4620,7 +4620,7 @@
     {
      "attempt": 7,
      "content": {
-      "outcome": "sha256:087812f0307e80e7"
+      "outcome": "sha256:020c402b12ea14b5"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:bf9f998a4afb7dd6",
@@ -5258,7 +5258,7 @@
     {
      "attempt": 8,
      "content": {
-      "outcome": "sha256:8bc1bece9b6ca11c"
+      "outcome": "sha256:f2eb1e95ddfd6f3b"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:fe618a42f233f7ce",
@@ -5647,7 +5647,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:d6e1c83a0fd7dd40"
+      "event": "sha256:1683c36299d299e0"
      },
      "event": "egress.authority",
      "kind": "mirror.event",
@@ -6273,7 +6273,7 @@
     {
      "attempt": 1,
      "content": {
-      "outcome": "sha256:5e67473172badc50"
+      "outcome": "sha256:ace6d38c550eefae"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:ebadd8f3cf4ea0cc",
@@ -6345,7 +6345,7 @@
     {
      "attempt": 1,
      "content": {
-      "outcome": "sha256:5fb1ea8ed0257fc2"
+      "outcome": "sha256:d177f4a428e8db27"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:685900c659ee570c",
@@ -6874,7 +6874,7 @@
     {
      "attempt": 0,
      "authority": "auxiliary",
-     "details": "sha256:63bec0eabfbb8010",
+     "details": "sha256:4ba038a97b113201",
      "kind": "egress.authority",
      "source": "workflow.run_generation_workflow"
     },
@@ -7720,7 +7720,7 @@
     {
      "attempt": 0,
      "authority": "auxiliary",
-     "details": "sha256:63bec0eabfbb8010",
+     "details": "sha256:4ba038a97b113201",
      "kind": "egress.authority",
      "source": "workflow.run_generation_workflow"
     },
@@ -7902,7 +7902,7 @@
    "commit_transaction_id": null,
    "commits": [],
    "created_at": "<clock>",
-   "effective_config_fingerprint": "53e0f6b7069ef494fe5540994152fa17bf3da6743a6528759e11a18a56bf9f08",
+   "effective_config_fingerprint": "0b722a5938d1514bf699630637dc353add0853e1ec20760eb01a5bb68b2b627f",
    "execution_plan": {
     "commit_strategy": "incremental_work_unit",
     "fingerprint": "4e1f0d6216887b277a2ea6a9dd288f5ed4cbfdf950ea32d497f1042c2b806596",
@@ -7981,7 +7981,7 @@
     }
    ],
    "created_at": "<clock>",
-   "effective_config_fingerprint": "53e0f6b7069ef494fe5540994152fa17bf3da6743a6528759e11a18a56bf9f08",
+   "effective_config_fingerprint": "0b722a5938d1514bf699630637dc353add0853e1ec20760eb01a5bb68b2b627f",
    "execution_plan": {
     "commit_strategy": "incremental_work_unit",
     "fingerprint": "4e1f0d6216887b277a2ea6a9dd288f5ed4cbfdf950ea32d497f1042c2b806596",

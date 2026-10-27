@@ -28,7 +28,7 @@ FIELDS = {"contained_execution_required", "containment_backend", "mcp_contained_
 OWNER, BACKEND_OBJECT, RECORD = "OWNER", "BACKEND_OBJECT", "RECORD"
 # (file, function) -> (kind, why). A new read anywhere else fails until it is classified (or, better, routed through the owner).
 READS: Dict[Tuple[str, str], Tuple[str, str]] = {
-    ("kriya/tools/containment.py", "_containment_is_mandatory"): (OWNER, "THE rule; the packaged-default migration changes it, nothing else"),
+    # S7: ``_containment_is_mandatory`` is unconditional and reads NO configuration field, so it has no entry here: this table failing on a read inside it is the tripwire.
     ("kriya/tools/containment.py", "decide_external_execution"): (OWNER, "the configured backend name enters the decision here"),
     ("kriya/static_analysis/adapters/semgrep.py", "SemgrepAdapter._containment_ready"): (
         BACKEND_OBJECT, "``self._context.containment_backend`` is the backend OBJECT the owner's decision resolved, not the configuration field"),

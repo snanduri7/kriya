@@ -4,10 +4,10 @@ Forms: ``Type.method(literals) -> literal`` and ``-> raises Exception``; a simpl
 compilation unit; everything else is rejected with a reason. The class passes the B2-c parser, carries markers,
 binds EXACT behaviour (B2-COV), and runs through the real Maven gate on the B2-c fixture project.
 """
-import shutil
 
 import pytest
 from _b2c_fixtures import TARGET, base_revision, candidate, maven_workspace
+from _real_oci import REAL_OCI_MAVEN
 
 from kriya.config.config import AutonomyConfig
 from kriya.tools.validate import PolymorphicValidator
@@ -88,7 +88,8 @@ def test_02_the_compiled_class_is_a_valid_b2c_artifact_bound_as_exact_behaviour_
     assert ej.derive_java_example_artifact(plain, derive_requirements(plain), state_root=str(tmp_path / "s2"), candidate_root=str(root))[0] is None
 
 
-@pytest.mark.skipif(shutil.which("mvn") is None, reason="real Maven is not installed")
+# S7: a real Maven build belongs to the REAL-OCI tier (owner decision): it needs the canonical provider image and cache, which no stand-in simulates.
+@REAL_OCI_MAVEN
 @pytest.mark.parametrize("variant, outcome", [("correct", ao.ACCEPTANCE_PASSED), ("wrong", ao.ACCEPTANCE_VIOLATED)])
 def test_03_the_derived_class_compiles_and_judges_a_real_maven_candidate(tmp_path, monkeypatch, variant, outcome):
     monkeypatch.setenv("KRIYA_STATE_DIR", str(tmp_path / "state"))

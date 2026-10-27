@@ -681,8 +681,9 @@ def test_j_a_reordered_ledger_cannot_rewrite_who_wrote_last(tmp_path):
 
 def test_i_an_edit_to_a_path_the_integration_pass_owns_is_charged_to_its_milestone(tmp_path):
     milestones = [_milestone("M1"), _milestone("M2", ["M1"]), _milestone("M3", ["M2"])]
-    outputs = {"M1": {"m1.py": b"1\n"}, "M2": {"pom.xml": b"<m2/>\n"}, "M3": {"m3.py": b"3\n"}}
-    integration = {"pom.xml": b"<m2/><int/>\n"}
+    # S7: every run is contained, so Kriya resolves the toolchain from a pom.xml: well-formed single-root payloads (the ownership semantics do not depend on the content)
+    outputs = {"M1": {"m1.py": b"1\n"}, "M2": {"pom.xml": b"<p><m2/></p>\n"}, "M3": {"m3.py": b"3\n"}}
+    integration = {"pom.xml": b"<p><m2/><int/></p>\n"}
     workspace = _workspace(tmp_path)
     _run(workspace, milestones, FakeEngine(milestones, outputs, integration))
     clean, _ = _run(workspace, milestones, FakeEngine(milestones, outputs, integration))

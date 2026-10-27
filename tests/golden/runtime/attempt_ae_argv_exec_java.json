@@ -33,18 +33,6 @@
       "-Dexec.args=kriya-verification-input"
      ],
      "exit_code": 0,
-     "resources": {
-      "address_space_enforcement": null,
-      "address_space_limit_mb": null,
-      "cpu_seconds": 240,
-      "jvm_options": [
-       "-Xmx2048m",
-       "-XX:MaxMetaspaceSize=512m",
-       "-XX:MaxDirectMemorySize=512m"
-      ],
-      "memory_budget_mb": 4096,
-      "strategy": "jvm_heap"
-     },
      "stderr": "",
      "stdout": "6\n",
      "timed_out": false
@@ -89,14 +77,17 @@
   {
    "argv": [
     "mvn",
+    "-B",
+    "-o",
+    "-Dmaven.repo.local=/kriya/cache/m2",
     "-e",
     "exec:java",
     "-Dexec.mainClass=App",
     "-Dexec.args=kriya-verification-input"
    ],
-   "contained": false,
-   "cwd": "<wt:1>",
-   "env": true,
+   "contained": true,
+   "cwd": "<state_dir:1>/gate-views/<view>",
+   "env": false,
    "spawn": "app",
    "stdin": null,
    "timeout": 37
@@ -151,18 +142,6 @@
        "-Dexec.args=kriya-verification-input"
       ],
       "exit_code": 0,
-      "resources": {
-       "address_space_enforcement": null,
-       "address_space_limit_mb": null,
-       "cpu_seconds": 240,
-       "jvm_options": [
-        "-Xmx2048m",
-        "-XX:MaxMetaspaceSize=512m",
-        "-XX:MaxDirectMemorySize=512m"
-       ],
-       "memory_budget_mb": 4096,
-       "strategy": "jvm_heap"
-      },
       "stderr": "",
       "stdout": "6\n",
       "timed_out": false

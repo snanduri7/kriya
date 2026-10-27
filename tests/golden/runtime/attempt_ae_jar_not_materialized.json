@@ -33,7 +33,7 @@
   "likely_files": [
    "pom.xml"
   ],
-  "message": "sha256:c6e67cc77c58058d+514",
+  "message": "sha256:d2fe7b85959733ca+539",
   "raised": "QualityGateFailure",
   "raw_output": "stdout:\n[INFO] BUILD SUCCESS\n\n\nstderr:\n",
   "self_correction_attempt": null,
@@ -56,15 +56,24 @@
   {
    "argv": [
     "mvn",
+    "-B",
+    "-o",
+    "-Dmaven.repo.local=/kriya/cache/m2",
     "package",
     "-DskipTests"
    ],
-   "contained": false,
-   "cwd": "<wt:1>",
-   "env": true,
+   "contained": true,
+   "cwd": "<state_dir:1>/gate-views/<view>",
+   "env": false,
    "spawn": "maven",
    "stdin": null,
    "timeout": 300
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "runtime_verification",
+   "stage": "validator",
+   "success": null
   },
   {
    "evidence": "mirror.gate_outcome",

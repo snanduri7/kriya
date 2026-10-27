@@ -22,6 +22,7 @@ import sys
 import pytest
 import yaml
 from _mcp_containment_standin import app_config, client_kwargs
+from _real_oci import REAL_OCI_MCP, contained_mcp_server, leftover_mcp_containers
 
 from kriya.config.authority import ConfigAuthorityError
 from kriya.config.config import MCPLifecycleConfig, load_config
@@ -613,7 +614,7 @@ def _run_cli(args, cwd, extra_env=None, timeout=45):
     return r.returncode, r.stdout, r.stderr
 
 
-@pytest.mark.legacy_host_mcp
+@REAL_OCI_MCP     # S7: the packaged default is mandatory containment, so the hang is bounded against the server CONTAINED in the real OCI backend (and its container is removed)
 @pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_cli_startup_hang_bounded_end_to_end(tmp_path):
     """Real adversarial fixture A (Startup hang), through the actual
@@ -625,12 +626,14 @@ def test_cli_startup_hang_bounded_end_to_end(tmp_path):
     ws = tmp_path / "repo"
     ws.mkdir()
     _write_yaml(ws / "kriya.yaml", {
-        "mcp": {"hanger": {"command": sys.executable, "args": [FIXTURE], "env": {"ADVERSARIAL_MODE": "never_initialize"}}}
+        "mcp": {"hanger": contained_mcp_server("adversarial_mcp_server.py", tests_dir=os.path.join(REPO_ROOT, "tests"), env={"ADVERSARIAL_MODE": "never_initialize"})}
     })
     env = {"KRIYA_AUTHORITY_HOME": str(home)}
     approve_code, _, approve_err = _run_cli(["authority", "approve", "--confirm"], cwd=str(ws), extra_env=env)
     assert approve_code == 0, approve_err
 
+    before = set(leftover_mcp_containers())
     code, out, err = _run_cli(["tools", "list"], cwd=str(ws), extra_env=env, timeout=45)
     assert code != 0
     assert "did not complete startup" in err or "MCPStartupTimeoutError" in err
+    assert set(leftover_mcp_containers()) == before, "the hung server's container must be removed (the containerized equivalent of 'no PID behind')"

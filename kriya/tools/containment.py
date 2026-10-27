@@ -512,11 +512,11 @@ def resolve_containment_backend(name: str) -> ContainmentBackend:
 # a copy of the decision per site, which is how a site gets missed. Now every consumer asks THIS function, and tests/architecture/
 # test_containment_decision_sites.py fails on a production read of the two fields anywhere else.
 #
-# The rule itself is ONE function (``_containment_is_mandatory``). The packaged-default migration (a later, separate step) changes that function
-# and the packaged defaults and nothing else: every consumer follows without another hunt. The old packaged defaults stay operational here:
-# (contained_execution_required False, backend "none") is "host execution permitted" and refuses nothing.
+# The rule itself is ONE function (``_containment_is_mandatory``). The packaged-default migration (S7, owner decision 2026-10-25) made it unconditional and flipped
+# the packaged defaults (backend "oci", both mandate fields true; explicit false is a typed config refusal, kriya.config.authority.parse_containment_mandate): there is
+# NO operator opt-out, so a project-controlled workload is either contained by an isolating backend or refused typed BEFORE any process starts. The legacy
+# HOST_EXECUTION_PERMITTED state no longer exists.
 CONTAINMENT_REQUIRED = "CONTAINMENT_REQUIRED"
-HOST_EXECUTION_PERMITTED = "HOST_EXECUTION_PERMITTED"
 CONTAINMENT_BACKEND_PROVIDES_NO_ISOLATION = "CONTAINMENT_BACKEND_PROVIDES_NO_ISOLATION"
 CONTAINMENT_BACKEND_UNKNOWN = "CONTAINMENT_BACKEND_UNKNOWN"
 CONTAINMENT_NOT_SUPPORTED_FOR_SUBJECT = "CONTAINMENT_NOT_SUPPORTED_FOR_SUBJECT"
@@ -547,12 +547,13 @@ def mcp_subject(server_name: str) -> str:
 
 
 def _containment_is_mandatory(autonomy: object, subject: str) -> bool:
-    """THE rule: must this external workload run in a real container. Today it is the operator's ``contained_execution_required`` (for an MCP
-    server: ``mcp_contained_execution_required``). The packaged-default migration activates mandatory containment HERE (and in the packaged
-    defaults); ``subject`` is part of the signature so a rule that differs by consumer is expressed here, in one place, never at a consumer."""
-    if subject.startswith(MCP_SUBJECT_PREFIX):
-        return getattr(autonomy, "mcp_contained_execution_required", False) is True
-    return getattr(autonomy, "contained_execution_required", False) is True
+    """THE rule: project-controlled external execution ALWAYS runs in a real container (packaged-default migration, owner decision 2026-10-25: there is NO operator opt-out).
+    Unconditional on purpose - it reads no configuration, so a forged, ``model_construct``-ed or legacy object (contained_execution_required False) cannot open a host
+    path; ``subject`` stays in the signature so a rule that differs by consumer is still expressed here, in one place, never at a consumer. The configuration fields are
+    validated to True at every ingress (kriya.config.authority.parse_containment_mandate); trusted host infrastructure (GitTool, the neutral-cwd toolchain probe) does not ask
+    this question - it is explicitly code-classified."""
+    del autonomy, subject
+    return True
 
 
 def backend_provides_isolation(backend: object) -> bool:
@@ -645,10 +646,9 @@ def declare_execution_copy(validator: Any, created_path: str) -> None:
 
 def decide_external_execution(autonomy: object, *, subject: str) -> ExternalExecutionDecision:
     """The canonical decision for ``subject`` under ``autonomy`` (an ``AutonomyConfig``). Pure: reads configuration, starts nothing."""
-    mandatory = _containment_is_mandatory(autonomy, subject)
     return ExternalExecutionDecision(
-        subject=subject, contained=mandatory, backend_name=str(getattr(autonomy, "containment_backend", "none")),
-        reason_code=CONTAINMENT_REQUIRED if mandatory else HOST_EXECUTION_PERMITTED)
+        subject=subject, contained=_containment_is_mandatory(autonomy, subject),
+        backend_name=str(getattr(autonomy, "containment_backend", "none")), reason_code=CONTAINMENT_REQUIRED)
 
 
 # Annotation-only modules (PRD-001), imported at runtime so

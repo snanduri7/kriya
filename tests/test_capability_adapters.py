@@ -28,6 +28,7 @@ from kriya.capabilities.ports import BuildAdapter, LanguageAdapter
 from kriya.config import AppConfig
 from kriya.tools import validate
 from kriya.tools.validate import PolymorphicValidator, gate_output_roots
+from kriya.workflow.failure_grounding import extract_error_source_locations
 
 POM = "<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId>" \
       "<version>1</version><dependencies>{deps}</dependencies></project>"
@@ -221,12 +222,16 @@ def test_gradle_output_roots_are_every_project_build_dir_and_the_root_cache(tmp_
     assert gate_output_roots(["gradle", "build"], str(tmp_path)) == GRADLE.output_roots(["gradle"], str(tmp_path))
 
 
+# S7: every Gradle run is contained, so it is offline against the contained dependency cache with no daemon and a plain console (the production contained command construction)
+GRADLE_CONTAINED_FLAGS = ("--offline", "--no-daemon", "--console=plain")
+
+
 @pytest.mark.parametrize("wrapper,expected", [(True, "./gradlew"), (False, "gradle")])
 def test_gradle_compile_uses_the_project_wrapper_when_it_ships_one(tmp_path, wrapper, expected):
     seen, patched = _gradle_runs(tmp_path, wrapper=wrapper)
     with patched:
         result = _validator(tmp_path).run_compile_check(["src/main/java/App.java"])
-    assert seen == [[expected, "compileJava"]]
+    assert seen == [[expected, *GRADLE_CONTAINED_FLAGS, "compileJava"]]
     assert result["success"] is True and "Gradle compilation succeeded." in result["output"]
 
 
@@ -234,7 +239,7 @@ def test_a_gradle_compile_failure_is_decided_with_its_output(tmp_path):
     seen, patched = _gradle_runs(tmp_path, result={"returncode": 1, "stdout": "e: App.java:3", "stderr": "FAILED"})
     with patched:
         result = _validator(tmp_path).run_compile_check(["App.java"])
-    assert seen == [["gradle", "compileJava"]]
+    assert seen == [["gradle", *GRADLE_CONTAINED_FLAGS, "compileJava"]]
     assert result["success"] is False and "Gradle compilation failed:\ne: App.java:3\nFAILED" in result["output"]
 
 
@@ -261,11 +266,11 @@ def test_the_gradle_test_gate_names_the_bare_test_class(tmp_path):
     seen, patched = _gradle_runs(tmp_path, wrapper=True)
     with patched:
         result = _validator(tmp_path).run_tests("src/test/java/a/LedgerTest.java")
-    assert seen == [["./gradlew", "test", "--tests", "LedgerTest"]] and result["success"] is True
+    assert seen == [["./gradlew", *GRADLE_CONTAINED_FLAGS, "test", "--tests", "LedgerTest"]] and result["success"] is True
     seen, patched = _gradle_runs(tmp_path)
     with patched:
         _validator(tmp_path).run_tests(None)
-    assert seen == [["./gradlew", "test"]]
+    assert seen == [["./gradlew", *GRADLE_CONTAINED_FLAGS, "test"]]
 
 
 def test_a_workspace_declaring_both_builds_stays_maven(tmp_path):
@@ -347,9 +352,14 @@ def test_the_pip_compile_gate_reports_a_syntax_error_and_passes_valid_source(tmp
     _write(tmp_path, "ok.py", "x = 1\n")
     _write(tmp_path, "bad.py", "def f(:\n")
     v = _validator(tmp_path)
-    assert v.run_compile_check(["ok.py"]) == {"success": True, "output": "Python files compiled successfully."}
+    ok = v.run_compile_check(["ok.py"])
+    assert (ok["success"], ok["output"]) == (True, "Python files compiled successfully.")
+    assert ok["egress"]["capability"] == "denied"      # S7: the compile ran contained, with no network
     bad = v.run_compile_check(["ok.py", "bad.py", "missing.py"])
-    assert bad["success"] is False and bad["output"].startswith("Syntax error in bad.py line 1")
+    # S7/P-A: contained, the gate returns the raw `py_compile` report (not the host branch's normalized "Syntax error in X line N:");
+    # failure_grounding grounds that native shape to the file and line.
+    assert bad["success"] is False and "SyntaxError" in bad["output"]
+    assert extract_error_source_locations(bad["output"]) == [("bad.py", 1)]
 
 
 def test_the_contained_compile_gate_runs_py_compile_through_the_validator(tmp_path):
@@ -422,8 +432,8 @@ def test_a_plain_java_workspace_compiles_with_the_javac_fallback(tmp_path):
         result = _validator(tmp_path).run_compile_check(["src/App.java", "src/Missing.java", "README.md",
                                                          "src/Util.java"])
     build = os.path.join(str(tmp_path), "build")
-    assert seen == [(["javac", "-proc:none", "-d", build, os.path.join(str(tmp_path), "src/App.java"),
-                      os.path.join(str(tmp_path), "src/Util.java")], str(tmp_path))]
+    # S7: the contained flow names the build directory and the sources workspace-relative (the container mounts the tree at its own path)
+    assert seen == [(["javac", "-proc:none", "-d", "build", "src/App.java", "src/Util.java"], str(tmp_path))]
     assert os.path.isdir(build)
     assert result["success"] is True and result["output"] == "Java classes compiled successfully."
 

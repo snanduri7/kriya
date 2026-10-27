@@ -7,6 +7,8 @@ the authorized writer.
 """
 import asyncio
 
+from _real_oci import REAL_OCI_MAVEN
+
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
@@ -376,7 +378,7 @@ def test_each_toolchain_command_designates_only_its_own_documented_output(tmp_pa
     assert found == sorted(roots)
 
 
-@pytest.mark.skipif(subprocess.run(["which", "mvn"], capture_output=True).returncode != 0, reason="mvn not on PATH")
+@REAL_OCI_MAVEN   # S7: a real Maven build belongs to the real-OCI tier (the canonical provider image and cache), never a host `mvn`
 def test_a_real_greenfield_maven_compile_passes_its_gate(tmp_path):
     """The regression this fixes (measured at 3d2bfd2): a greenfield Maven
     project has no .gitignore, so the real `mvn compile` gate's own target/

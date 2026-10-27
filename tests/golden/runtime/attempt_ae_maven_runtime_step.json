@@ -159,9 +159,7 @@
   }
  ],
  "worktree_changes": {
-  "added": [
-   "target/classes/org/example/App.class"
-  ],
+  "added": [],
   "changed": [],
   "removed": []
  }

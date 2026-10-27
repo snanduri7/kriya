@@ -26,6 +26,7 @@ import sys
 
 import pytest
 import yaml
+from _real_oci import REAL_OCI_MCP, contained_mcp_server
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KRIYA_BIN = os.path.join(os.path.dirname(sys.executable), "kriya")
@@ -64,14 +65,23 @@ def _call_log_lines(path) -> list:
         return [ln for ln in f.read().splitlines() if ln.strip()]
 
 
-@pytest.mark.legacy_host_mcp  # D2 S5: a real CLI process cannot use the in-process test stand-in; converts to real OCI at the secure-default migration
+# S7 (packaged-default migration): a real `kriya` CLI process cannot use the in-process test stand-in and the packaged default is mandatory containment, so these lifecycle
+# tests run the fixture server CONTAINED in the real OCI backend (tests/_real_oci.py::contained_mcp_server): container-side command, fixture mounted read-only, call log directory
+# mounted read-write.
+def contained_fixture_server(log_dir, **capabilities) -> dict:
+    return contained_mcp_server("tool002_mcp_fixture.py", tests_dir=os.path.join(REPO_ROOT, "tests"), log_dir=log_dir, **capabilities)
+
+
+@REAL_OCI_MCP
 @pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_real_cli_full_lifecycle_a_through_f(tmp_path):
     """Required tests 29/30/31/32 + Task 6 (-y cannot approve) + Task 13's
     full A-F sequence, all through the real, unmodified `kriya` binary."""
     ws = tmp_path / "repo"
     ws.mkdir()
-    call_log = tmp_path / "calls.log"
+    log_dir = ws / "calllog"
+    log_dir.mkdir()
+    call_log = log_dir / "calls.log"
     env = {
         "KRIYA_AUTHORITY_HOME": str(tmp_path / "_authority_home"),
         "KRIYA_MCP_APPROVAL_HOME": str(tmp_path / "_mcp_approval_home"),
@@ -79,12 +89,7 @@ def test_real_cli_full_lifecycle_a_through_f(tmp_path):
     # SEC-003: CALL_LOG_FILE must be an explicitly configured mcp.<server>.env
     # value, not an ambient env var - build_mcp_subprocess_env() never
     # forwards ambient os.environ, by design.
-    _write_yaml(ws / "kriya.yaml", {
-        "mcp": {"fixture": {
-            "command": sys.executable, "args": [FIXTURE],
-            "env": {"CALL_LOG_FILE": str(call_log)},
-        }},
-    })
+    _write_yaml(ws / "kriya.yaml", {"mcp": {"fixture": contained_fixture_server(log_dir)}})
 
     code, _, err = _run_cli(["authority", "approve", "--confirm"], cwd=str(ws), extra_env=env)
     assert code == 0, err
@@ -145,7 +150,7 @@ def test_real_cli_full_lifecycle_a_through_f(tmp_path):
     assert _call_log_lines(call_log) == ["echo", "echo"]  # unchanged - no new call
 
 
-@pytest.mark.legacy_host_mcp  # D2 S5: a real CLI process cannot use the in-process test stand-in; converts to real OCI at the secure-default migration
+@REAL_OCI_MCP
 @pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_real_cli_revoke_then_deny_does_not_require_restart(tmp_path):
     """Task 11: revocation must take effect on the very next invocation,
@@ -156,14 +161,14 @@ def test_real_cli_revoke_then_deny_does_not_require_restart(tmp_path):
     not merely 'eventually' after some warm state expires)."""
     ws = tmp_path / "repo"
     ws.mkdir()
-    call_log = tmp_path / "calls.log"
+    log_dir = ws / "calllog"
+    log_dir.mkdir()
+    call_log = log_dir / "calls.log"
     env = {
         "KRIYA_AUTHORITY_HOME": str(tmp_path / "_authority_home"),
         "KRIYA_MCP_APPROVAL_HOME": str(tmp_path / "_mcp_approval_home"),
     }
-    _write_yaml(ws / "kriya.yaml", {"mcp": {"fixture": {
-        "command": sys.executable, "args": [FIXTURE], "env": {"CALL_LOG_FILE": str(call_log)},
-    }}})
+    _write_yaml(ws / "kriya.yaml", {"mcp": {"fixture": contained_fixture_server(log_dir)}})
     assert _run_cli(["authority", "approve", "--confirm"], cwd=str(ws), extra_env=env)[0] == 0
     assert _run_cli(["mcp", "approve", "fixture_echo", "--confirm"], cwd=str(ws), extra_env=env)[0] == 0
     code, out, _ = _run_cli(["tools", "execute", "fixture_echo", '{"message":"x"}', "-y"], cwd=str(ws), extra_env=env)
@@ -174,7 +179,7 @@ def test_real_cli_revoke_then_deny_does_not_require_restart(tmp_path):
     assert _call_log_lines(call_log) == ["echo"]
 
 
-@pytest.mark.legacy_host_mcp  # D2 S5: a real CLI process cannot use the in-process test stand-in; converts to real OCI at the secure-default migration
+@REAL_OCI_MCP
 @pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_real_cli_capability_profile_drift_invalidates_approval(tmp_path):
     """Task 8's mandatory scenario, proven end-to-end through the real CLI
@@ -186,14 +191,14 @@ def test_real_cli_capability_profile_drift_invalidates_approval(tmp_path):
     validate, denying the very next invocation with zero new tools/call."""
     ws = tmp_path / "repo"
     ws.mkdir()
-    call_log = tmp_path / "calls.log"
+    log_dir = ws / "calllog"
+    log_dir.mkdir()
+    call_log = log_dir / "calls.log"
     env = {
         "KRIYA_AUTHORITY_HOME": str(tmp_path / "_authority_home"),
         "KRIYA_MCP_APPROVAL_HOME": str(tmp_path / "_mcp_approval_home"),
     }
-    _write_yaml(ws / "kriya.yaml", {"mcp": {"fixture": {
-        "command": sys.executable, "args": [FIXTURE], "env": {"CALL_LOG_FILE": str(call_log)},
-    }}})
+    _write_yaml(ws / "kriya.yaml", {"mcp": {"fixture": contained_fixture_server(log_dir)}})
     assert _run_cli(["authority", "approve", "--confirm"], cwd=str(ws), extra_env=env)[0] == 0
     assert _run_cli(["mcp", "approve", "fixture_echo", "--confirm"], cwd=str(ws), extra_env=env)[0] == 0
 
@@ -205,10 +210,7 @@ def test_real_cli_capability_profile_drift_invalidates_approval(tmp_path):
     # Same server, same tool, same schema - ONLY the capability profile
     # changes (mcp.* is SEC-009 SECURITY_AUTHORITY, so it must be
     # re-approved there too before Kriya will even load this config).
-    _write_yaml(ws / "kriya.yaml", {"mcp": {"fixture": {
-        "command": sys.executable, "args": [FIXTURE], "env": {"CALL_LOG_FILE": str(call_log)},
-        "capabilities": {"workspace_read": True},
-    }}})
+    _write_yaml(ws / "kriya.yaml", {"mcp": {"fixture": contained_fixture_server(log_dir, workspace_read=True)}})
     assert _run_cli(["authority", "approve", "--confirm"], cwd=str(ws), extra_env=env)[0] == 0
 
     code, out, err = _run_cli(["mcp", "inspect"], cwd=str(ws), extra_env=env)
@@ -220,24 +222,26 @@ def test_real_cli_capability_profile_drift_invalidates_approval(tmp_path):
     assert _call_log_lines(call_log) == ["echo"]  # unchanged - no new call
 
 
-@pytest.mark.legacy_host_mcp  # D2 S5: a real CLI process cannot use the in-process test stand-in; converts to real OCI at the secure-default migration
+@REAL_OCI_MCP
 @pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
-def test_real_cli_host_mode_explicitly_labeled_non_contained(tmp_path):
-    """Required test 27 / Task 15: with containment disabled (the default),
-    `kriya mcp inspect` must explicitly show containment as NOT active -
-    never silent omission, never a claim of TOOL-003 protection."""
+def test_real_cli_inspect_labels_a_running_contained_server_as_required_and_active(tmp_path):
+    """Required test 27 / Task 15, restated for the final contract (S7: there is no host mode any more): `kriya mcp inspect` starts the configured server under the packaged
+    defaults and must label it truthfully - containment REQUIRED, and ACTIVE because the server is running inside the real OCI backend (never silent omission, never a
+    claim of TOOL-003 protection for a server that is not contained)."""
     ws = tmp_path / "repo"
     ws.mkdir()
+    log_dir = ws / "calllog"
+    log_dir.mkdir()
     env = {
         "KRIYA_AUTHORITY_HOME": str(tmp_path / "_authority_home"),
         "KRIYA_MCP_APPROVAL_HOME": str(tmp_path / "_mcp_approval_home"),
     }
-    _write_yaml(ws / "kriya.yaml", {"mcp": {"fixture": {"command": sys.executable, "args": [FIXTURE]}}})
+    _write_yaml(ws / "kriya.yaml", {"mcp": {"fixture": contained_fixture_server(log_dir)}})
     assert _run_cli(["authority", "approve", "--confirm"], cwd=str(ws), extra_env=env)[0] == 0
     code, out, err = _run_cli(["mcp", "inspect"], cwd=str(ws), extra_env=env)
     assert code == 0, err
-    assert "containment required:  False" in out
-    assert "containment active:    False" in out
+    assert "containment required:  True" in out
+    assert "containment active:    True" in out
 
 
 # =====================================================================

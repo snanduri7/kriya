@@ -24,7 +24,8 @@ before grading, before Developer retry and before owner recovery - no new taxono
 output-text matching. A re-run that genuinely executed keeps its grading (application) and its process-exit verdict
 (deterministic sequence) exactly as before.
 """
-import sys
+import os
+import shutil
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -98,6 +99,13 @@ def _declare_dependency(worktree):
     return ["requirements.txt"]
 
 
+def _declare_dependency_and_lose_the_environment(worktree):
+    """S7: every run is contained, so the FIRST run already prepared a project environment; what makes the re-run need one that cannot be prepared is that the environment is
+    gone by then (host: the first run needed none, the declaration created the need)."""
+    shutil.rmtree(os.path.join(worktree, ".kriya", "venv"))
+    return _declare_dependency(worktree)
+
+
 def _venv_attempted(commands):
     return [c for c in commands if len(c) >= 3 and c[1:3] == ["-m", "venv"]]
 
@@ -106,23 +114,25 @@ def _venv_attempted(commands):
 @pytest.mark.asyncio
 async def test_f1_residual_a_rerun_whose_environment_cannot_be_prepared_stops_typed_before_grading(tmp_path):
     """First run: dependency-free, launched, exit 3, graded failed (one grade() call), self-correction repairs by
-    declaring a dependency. Re-run: the required environment cannot be created, nothing launches, the typed result
+    declaring a dependency (S7: and the project environment, which every contained first run prepares, is gone by then - see
+    ``_declare_dependency_and_lose_the_environment``). Re-run: the required environment cannot be created, nothing launches, the typed result
     comes back. Invariant: the typed environment stop, raised by the existing shared consumer - the grader is never
     asked a second time, the failure is not the candidate's, and the retry strategy takes STOP_ENVIRONMENT."""
     ctx, developer, run_verifier = _mutating_ctx(tmp_path, RUN_APP, grades=[GRADE_FAILED, GRADE_FAILED])
-    repair = _ScriptedRepair(_declare_dependency)
+    repair = _ScriptedRepair(_declare_dependency_and_lose_the_environment)
     state = GenerationState()
-    stub = _VenvCreationFails()
+    stub = _VenvCreationFails(fail_from=2)
     with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=stub.method), \
             patch("kriya.workflow.self_correction.run_self_correction_loop", new=repair):
         with pytest.raises(QualityGateFailure) as raised:
             await run_attempt(state, ctx)
-    # The trajectory really happened: one Developer write, one launched run, one repair, one venv attempt after it.
+    # The trajectory really happened: one Developer write, the environment prepared and one launched run, one repair, then a second (failing) creation attempt after it.
     assert developer.run_generation.await_count == 1 and len(repair.calls) == 1
     assert (tmp_path / "requirements.txt").exists()
     launched = _app_launched(stub.commands)
-    assert len(launched) == 1 and launched[0][0] == sys.executable, stub.commands
-    assert len(_venv_attempted(stub.commands)) == 1 and stub.commands.index(_venv_attempted(stub.commands)[0]) > stub.commands.index(launched[0])
+    assert len(launched) == 1 and launched[0][0] == ".kriya/venv/bin/python", stub.commands
+    created_at = [i for i, command in enumerate(stub.commands) if command in _venv_attempted(stub.commands)]      # positions, the two creation commands are equal lists
+    assert len(created_at) == 2 and created_at[0] < stub.commands.index(launched[0]) < created_at[1]
     # The invariant.
     failure = raised.value.failure
     assert failure.type == INFRA, (failure.type, failure.message[:300])
@@ -142,7 +152,7 @@ async def test_f1_residual_control_a_rerun_that_launched_and_still_fails_is_grad
     ctx, _developer, run_verifier = _mutating_ctx(tmp_path, RUN_APP, grades=[GRADE_FAILED, GRADE_FAILED])
     repair = _ScriptedRepair(lambda _worktree: [])  # resolved, changed nothing that matters
     state = GenerationState()
-    stub = _VenvCreationFails()
+    stub = _VenvCreationFails(fail_from=None)
     with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=stub.method), \
             patch("kriya.workflow.self_correction.run_self_correction_loop", new=repair):
         with pytest.raises(QualityGateFailure) as raised:
@@ -152,7 +162,7 @@ async def test_f1_residual_control_a_rerun_that_launched_and_still_fails_is_grad
     assert not (failure.diagnostics or {}).get("reason_code")
     assert failure.self_correction_attempt["turns_used"] == 1
     assert run_verifier.grade.await_count == 2 and len(repair.calls) == 1
-    assert len(_app_launched(stub.commands)) == 2 and _venv_attempted(stub.commands) == []
+    assert len(_app_launched(stub.commands)) == 2 and len(_venv_attempted(stub.commands)) == 1     # S7: the environment is created once, for the first run
     assert state.gate_outcomes[-1]["type"] == "run_verification" and state.gate_outcomes[-1]["graded_by"] == "llm"
     assert state.environment_failure is None
 
@@ -174,13 +184,13 @@ async def test_f1_residual_control_a_deterministic_rerun_that_executed_keeps_its
 
     repair = _ScriptedRepair(_fix_the_test)
     state = GenerationState()
-    stub = _VenvCreationFails()
+    stub = _VenvCreationFails(fail_from=None)
     with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=stub.method), \
             patch.object(PolymorphicValidator, "run_tests", return_value={"success": True, "output": ""}), \
             patch("kriya.workflow.self_correction.run_self_correction_loop", new=repair):
         await run_attempt(state, ctx)  # must not raise
     assert len(repair.calls) == 1 and run_verifier.grade.await_count == 0
-    assert len(_app_launched(stub.commands)) == 2 and _venv_attempted(stub.commands) == []
+    assert len(_app_launched(stub.commands)) == 2 and len(_venv_attempted(stub.commands)) == 1
     outcome = state.gate_outcomes[-1]
     assert outcome["type"] == "test" and outcome["success"] is True and outcome["graded_by"] == "process_exit"
     assert state.environment_failure is None

@@ -21,6 +21,7 @@ import sys
 
 import pytest
 import yaml
+from _real_oci import MCP_RW_PREFIX, REAL_OCI_MCP, contained_mcp_server
 
 from kriya.config import authority_approval as aa
 from kriya.config.authority import ConfigAuthorityError
@@ -624,6 +625,7 @@ def test_cli_plugin_and_mcp_sentinels_absent_without_approval(tmp_path):
     assert not mcp_sentinel.exists()
 
 
+@REAL_OCI_MCP
 @pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_cli_approval_gates_real_plugin_import_and_mcp_spawn(tmp_path):
     """P2 is proving AUTHORIZATION, not containment - once approved, the
@@ -631,7 +633,10 @@ def test_cli_approval_gates_real_plugin_import_and_mcp_spawn(tmp_path):
     as it would have pre-SEC-009. This does not claim the resulting
     process/plugin is safe; only that authorization correctly gates
     reachability. The disposable plugin here is a harmless module-level
-    sentinel only, per this risk's own instruction."""
+    sentinel only, per this risk's own instruction.
+
+    S7: an MCP server is project-controlled execution and always runs CONTAINED (there is no host path), so the approved server starts in the real OCI backend
+    (tests/_real_oci.py::contained_mcp_server): its script is mounted read-only and the directory it writes its sentinel into read-write; the sentinel's HOST path is the proof."""
     home = tmp_path / "_home"
     ws = tmp_path / "repo"
     plugin_pkg = ws / "safe_plugins" / "greet"
@@ -644,17 +649,19 @@ def test_cli_approval_gates_real_plugin_import_and_mcp_spawn(tmp_path):
         f"    @property\n    def name(self): return 'greet'\n"
         f"    @property\n    def version(self): return '0.0.1'\n"
     )
-    mcp_sentinel = tmp_path / "MCP_SENTINEL.txt"
-    server_script = tmp_path / "server.py"
+    server_dir, out_dir = tmp_path / "server", tmp_path / "out"
+    server_dir.mkdir()
+    out_dir.mkdir()
+    mcp_sentinel = out_dir / "MCP_SENTINEL.txt"
     # Writes its sentinel immediately, then sleeps - proving spawn happened
     # does not require completing a real MCP handshake (a separate,
     # out-of-scope SEC-003/004/005 concern), only that the process started.
-    server_script.write_text(
-        f"import pathlib, time\npathlib.Path({str(mcp_sentinel)!r}).write_text('started')\ntime.sleep(30)\n"
+    (server_dir / "server.py").write_text(
+        f"import pathlib, time\npathlib.Path({MCP_RW_PREFIX + '/MCP_SENTINEL.txt'!r}).write_text('started')\ntime.sleep(30)\n"
     )
     _write_yaml(ws / "kriya.yaml", {
         "plugins": {"directory": "./safe_plugins", "enabled": ["greet"]},
-        "mcp": {"approved_server": {"command": sys.executable, "args": [str(server_script)]}},
+        "mcp": {"approved_server": contained_mcp_server("server.py", tests_dir=str(server_dir), log_dir=out_dir)},
     })
 
     extra_env = {"KRIYA_AUTHORITY_HOME": str(home)}
@@ -663,7 +670,7 @@ def test_cli_approval_gates_real_plugin_import_and_mcp_spawn(tmp_path):
 
     # This run is expected to time out (the disposable server never speaks
     # real MCP protocol) - the sentinels, not the exit code, are the proof.
-    _run_cli(["plugins"], cwd=str(ws), extra_env=extra_env, timeout=8)
+    _run_cli(["plugins"], cwd=str(ws), extra_env=extra_env, timeout=30)
 
     assert plugin_sentinel.exists(), "approved plugin must be imported"
-    assert mcp_sentinel.exists(), "approved MCP server must be spawned"
+    assert mcp_sentinel.exists(), "approved MCP server must be spawned (contained)"

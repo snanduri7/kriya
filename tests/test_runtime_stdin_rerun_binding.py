@@ -33,7 +33,7 @@ async def _run_with_rerun(tmp_path, input_channel):
         stdin_seen.append(kwargs.get("stdin_payload"))
         return original(self, commands, *args, **kwargs)
 
-    stub = _VenvCreationFails()
+    stub = _VenvCreationFails(fail_from=None)  # S7: every run is contained and gets a project environment; here it is prepared for real (the stub only records)
     with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=stub.method), \
             patch.object(PolymorphicValidator, "run_app_sequence", new=spy), \
             patch("kriya.workflow.self_correction.run_self_correction_loop", new=repair):

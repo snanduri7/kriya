@@ -1407,7 +1407,7 @@ def test_f4_every_validator_gate_checks_the_tree_after_its_command(tmp_path, mar
         return {"returncode": 0, "stdout": "ok", "stderr": "", "timeout": False}
 
     with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", mutating_command), \
-            patch.object(PolymorphicValidator, "_ensure_project_venv", lambda self: None, create=True):
+            patch.object(PolymorphicValidator, "_ensure_project_venv", lambda self, install_args: (".kriya/venv/bin/python", None), create=True):   # the real signature: (install_args) -> (venv_python, error)
         with pytest.raises(VerificationTreeMutated) as raised:
             call(validator)
     assert raised.value.gate == gate

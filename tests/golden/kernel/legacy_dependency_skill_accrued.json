@@ -82,7 +82,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:0bd2c5d09bc018be"
+      "event": "sha256:e94de920121f41c4"
      },
      "event": "egress.authority",
      "kind": "mirror.event",
@@ -1207,7 +1207,7 @@
     {
      "attempt": 2,
      "content": {
-      "outcome": "sha256:771d75cb65538e95"
+      "outcome": "sha256:d60833ba24a5ab39"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:c0caa21b579582a2",
@@ -1279,7 +1279,7 @@
     {
      "attempt": 2,
      "content": {
-      "outcome": "sha256:56cc233a704edbf6"
+      "outcome": "sha256:f93b6d825f976b83"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:041483e34747a61e",
@@ -1958,7 +1958,7 @@
     {
      "attempt": 0,
      "authority": "auxiliary",
-     "details": "sha256:0f2f3c9f35e0b6bc",
+     "details": "sha256:3d0c12f10e467ecb",
      "kind": "egress.authority",
      "source": "workflow.run_generation_workflow"
     },

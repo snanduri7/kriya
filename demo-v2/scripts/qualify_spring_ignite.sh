@@ -85,7 +85,7 @@ else fail "the reference needs a remote repository even though everything is cac
 run_runtime_leg() {
   local label="$1"; shift
   local out="$EVIDENCE/runtime-$label.json"
-  if env -i "$@" PYTHONDONTWRITEBYTECODE=1 "$KRIYA_PY" -I "$HELPER" runtime --repo "$REPO_ROOT" --fixture "$DEMO_V2_DIR/$REFERENCE_DIR" ${RUNTIME_ARGS:-} >"$out" 2>"$EVIDENCE/runtime-$label.err"; then
+  if env -i "$@" PYTHONDONTWRITEBYTECODE=1 "$KRIYA_PY" -I "$HELPER" runtime --repo "$REPO_ROOT" --fixture "$DEMO_V2_DIR/$REFERENCE_DIR" --contained ${RUNTIME_ARGS:-} >"$out" 2>"$EVIDENCE/runtime-$label.err"; then
     if [ -n "${RUNTIME_ARGS:-}" ]; then WHAT="the cache itself stored a different Protocol (time + 1000, both versions + 1, one body byte more) and the program printed exactly those values: the [RESULT] line is built from the whole value READ BACK from Ignite"
     else WHAT="exact [RESULT] line printed from the retrieved Protocol, a Protocol was put into an Ignite cache (marshaller registry)"; fi
     pass "runtime leg '$label': Spring XML loaded, Ignite 2.18.0 started and stopped, ProtocolParser ran, $WHAT, exit 0 ($("$KRIYA_PY" -I -c "import json; r=json.load(open('$out')); print(str(r['elapsed_seconds'])+' s')"))"

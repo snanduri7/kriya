@@ -19,7 +19,6 @@ before Developer retry and before owner recovery - keyed on structured fields on
 deterministic-sequence early return stays for commands that actually executed with process authority. No
 false-success semantics change: failure typing and retry suppression only.
 """
-import sys
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -57,15 +56,20 @@ def _workspace(tmp_path, *, app=APP_OK, manifest=True, tests=None):
 
 class _VenvCreationFails:
     """The one stub (shared shape with test_repair_003_p2_2_venv_environment_failure): ``python -m venv`` exits 1,
-    nothing is created; every other command runs for real. ``commands`` records every argv launched."""
+    nothing is created; every other command runs for real. ``commands`` records every argv launched. S7: every run is contained, so even a
+    dependency-free project gets a project environment; ``fail_from`` is the 1-based number of the creation attempt from which creation fails (1: every attempt, the
+    default; 2: the first environment is prepared for real and a LATER re-creation fails; None: never - the negative controls, an environment that IS prepared)."""
 
-    def __init__(self):
+    def __init__(self, fail_from=1):
         self.commands = []
+        self.venv_attempts = 0
         real = PolymorphicValidator._run_cmd_with_timeout
 
         def method(validator, cmd, cwd, **kwargs):
             self.commands.append(list(cmd))
             if len(cmd) >= 3 and cmd[1:3] == ["-m", "venv"]:
+                self.venv_attempts += 1
+            if fail_from is not None and len(cmd) >= 3 and cmd[1:3] == ["-m", "venv"] and self.venv_attempts >= fail_from:
                 return {"returncode": 1, "stdout": "", "stderr": ENSUREPIP_FAILURE, "timeout": False}
             return real(validator, cmd, cwd, **kwargs)
         self.method = method
@@ -73,7 +77,8 @@ class _VenvCreationFails:
 
 def _app_launched(commands):
     """Runtime steps the validator really launched (run_app_sequence -> _run_runtime_step -> _run_cmd_with_timeout)."""
-    return [c for c in commands if "app.py" in c or "pytest" in c]
+    # S7: not the contained flow's own steps - the compile gate's ``py_compile app.py`` and the environment's ``pip install pytest``
+    return [c for c in commands if ("app.py" in c or "pytest" in c) and c[1:3] not in (["-m", "pip"], ["-m", "py_compile"])]
 
 
 def _validator(root):
@@ -181,10 +186,10 @@ async def test_f1_managed_service_admission_carries_the_environment_code_not_a_c
 async def test_f1_control_an_application_that_ran_and_failed_is_still_graded_and_retried(tmp_path):
     """No environment code: the application really launched (exit 3). The runtime gate grades its behaviour and the
     failure stays in the run_verification family, routed exactly as before (no environment stop)."""
-    _workspace(tmp_path, app=APP_CRASH, manifest=False)  # dependency-free: Kriya's own interpreter, no venv needed
+    _workspace(tmp_path, app=APP_CRASH, manifest=False)  # dependency-free; S7: the project environment is still created (for real here), then the application launches
     ctx, _developer, run_verifier = _verification_only_ctx(tmp_path, RUN_APP)
     state = GenerationState()
-    stub = _VenvCreationFails()
+    stub = _VenvCreationFails(fail_from=None)
     with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=stub.method):
         with pytest.raises(QualityGateFailure) as raised:
             await run_attempt(state, ctx)
@@ -207,11 +212,12 @@ def test_f1_control_a_deterministic_sequence_that_executed_keeps_the_early_retur
     """process authority: the sequence ran (pytest exit 1 on a failing test) and its exit status is the verdict; the
     consumer returns without raising, as before."""
     _workspace(tmp_path, manifest=False, tests=TESTS_FAIL)
-    stub = _VenvCreationFails()
+    stub = _VenvCreationFails(fail_from=None)
     with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=stub.method):
         run_res = _validator(tmp_path).run_app_sequence(RUN_PYTEST)
     assert run_res["success"] is False and "environment_reason_code" not in run_res
-    assert len(_app_launched(stub.commands)) == 1 and _app_launched(stub.commands)[0][0] == sys.executable
+    launched = _app_launched(stub.commands)
+    assert len(launched) == 1 and launched[0][0] == ".kriya/venv/bin/python"      # S7: the project environment's interpreter, no longer Kriya's own
     state = GenerationState()
     assert _raise_runtime_verification_infrastructure_failure(state, run_res, RUN_PYTEST) is None
     assert state.gate_outcomes == []

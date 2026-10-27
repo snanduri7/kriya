@@ -15,12 +15,13 @@ the verification-only path keeps the model's Maven command (a POM without
 dependencies is grounded to javac/java instead) - and neither compile nor
 exec:java needs that test dependency resolved."""
 import os
-import shutil
 import subprocess
 import sys
+import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from _real_oci import REAL_OCI_MAVEN
 from _strict_doubles import developer_double
 from test_workflow import _runtime_verifier_ctx
 
@@ -31,7 +32,8 @@ from kriya.workflow.attempt import run_attempt
 from kriya.workflow.state import GenerationState
 from kriya.workflow.worktree import create_git_worktree
 
-pytestmark = pytest.mark.skipif(shutil.which("mvn") is None, reason="real Maven is not installed")
+# S7: a real Maven build belongs to the REAL-OCI tier (owner decision): it needs the canonical provider image and cache, which no stand-in simulates.
+pytestmark = REAL_OCI_MAVEN
 
 POM = """<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>
 <groupId>demo</groupId><artifactId>d3</artifactId><version>1</version>
@@ -71,7 +73,14 @@ def _workspace(tmp_path, ignored):
 
 
 def _validator(path):
-    return PolymorphicValidator(str(path), autonomy_cfg=AutonomyConfig(contained_execution_required=False))
+    return PolymorphicValidator(str(path), autonomy_cfg=AutonomyConfig())
+
+
+def _warm_cache(path):
+    """The workflow's earlier TEST gate. The contained build resolves the project's dependencies into its managed cache there, and runtime verification (D2B: its acquisition
+    resolves only the plugins the runtime command names, never the project's dependencies) relies on that - the host `~/.m2` that used to hold junit is not the contained cache."""
+    result = _validator(path).run_tests()
+    assert result["success"], result["output"]
 
 
 def _compile_in_new_work_unit(ws):
@@ -81,6 +90,7 @@ def _compile_in_new_work_unit(ws):
     sandbox = create_git_worktree(str(ws))
     assert _validator(sandbox).run_compile_check([SOURCE])["success"]
     assert not os.path.exists(os.path.join(sandbox, CLASS))  # the gate left no output in the shared sandbox
+    _warm_cache(sandbox)
     subprocess.run(["javac", "-d", os.path.join(sandbox, "target", "classes"), os.path.join(sandbox, SOURCE)], check=True, capture_output=True)
     assert os.path.exists(os.path.join(sandbox, CLASS))
     return sandbox
@@ -133,13 +143,15 @@ def test_a_prerequisite_build_failure_stops_before_anything_runs(tmp_path):
 def test_the_prerequisite_build_is_bounded_by_the_runs_root_deadline(tmp_path):
     ws = _workspace(tmp_path, ignored=False)
     sandbox = create_git_worktree(str(ws))
+    _warm_cache(sandbox)
     validator = _validator(sandbox)
-    with patch.object(validator, "_run_deadline", return_value=12345.0), \
+    root_deadline = time.monotonic() + 3600.0     # a REAL deadline: the contained flow enforces it (a past one would cap every step to a second and skip acquisition)
+    with patch.object(validator, "_run_deadline", return_value=root_deadline), \
             patch.object(validator, "_run_maven_cmd", wraps=validator._run_maven_cmd) as maven:  # pylint: disable=protected-access
         assert validator.run_app_sequence([RUN])["success"]
-    prerequisite, runtime = maven.call_args_list  # host mode: one Maven call each
-    assert prerequisite.args[0][:2] == ["clean", "compile"] and prerequisite.kwargs["deadline"] == 12345.0
-    assert runtime.args[0] == RUN[1:] and runtime.kwargs["deadline"] == 12345.0
+    prerequisite, runtime = maven.call_args_list  # one _run_maven_cmd call each (the offline-first acquisition happens inside it)
+    assert prerequisite.args[0][:2] == ["clean", "compile"] and prerequisite.kwargs["deadline"] == root_deadline
+    assert runtime.args[0] == RUN[1:] and runtime.kwargs["deadline"] == root_deadline
 
 
 def test_an_interpreted_python_runtime_gets_no_build_prerequisite(tmp_path):
@@ -158,6 +170,7 @@ async def test_a_verification_only_work_unit_runs_the_current_application(tmp_pa
     (tmp_path / "src/main/java/demo").mkdir(parents=True)
     (tmp_path / "pom.xml").write_text(POM)
     (tmp_path / SOURCE).write_text(_app("D3_VERIFIED"))
+    _warm_cache(tmp_path)
     developer = developer_double()
     developer.run_generation = AsyncMock(side_effect=AssertionError("verification-only: no Developer"))
     run_verifier = AsyncMock()
@@ -182,6 +195,7 @@ def test_a_validator_built_before_the_pom_existed_still_rebuilds(tmp_path):
     (tmp_path / "src/main/java/demo").mkdir(parents=True)
     (tmp_path / "pom.xml").write_text(POM)
     (tmp_path / SOURCE).write_text(_app("LATE_POM"))
+    _warm_cache(tmp_path)
     result = validator.run_app_sequence([RUN])
     assert result["success"], result["output"]
     assert "LATE_POM" in result["output"]

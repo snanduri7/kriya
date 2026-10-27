@@ -24,6 +24,11 @@ What is pinned, at boundaries the move does not rebind:
   ``candidate.change``, the content-mismatch stop), the deferred gates' order, and the static-analysis /
   commit-binding ordering (SLICE-PLAN E8's named mutant; lesson 5: no ordering test existed).
 
+S7 (final containment contract) re-recorded 9 engine goldens ONCE: the only difference is the content digest of the ``mirror.gate_outcome`` blobs, and the content-level
+diff against the pre-S7 tree (19 records) is exactly two things - an outcome carries ``egress`` (the network the contained run was granted: denied, by the containment
+profile) and a test outcome no longer carries the host rlimit ``resources`` evidence (it exists only on the host path). The ``egress.backend`` value is the pytest stand-in's
+class name (these goldens pin the gate sequence, not isolation). No gate order, verdict, type or attempt count changed.
+
 Every golden was WRITTEN from 74f01ac (``KRIYA_WRITE_GATE_GOLDEN=1``) and is only ever compared afterwards; the forms
 are byte-identical under PYTHONHASHSEED 0/1/2/3/5/7/11/13, basetemps of different lengths and a git-archive copy at
 another path. The cases added after the first pre-move mutant pass (118 mutants of the to-be-moved code: 13 survived)

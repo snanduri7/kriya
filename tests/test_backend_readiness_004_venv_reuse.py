@@ -48,7 +48,7 @@ def _faithful_runner(installs):
 
 
 def _validator(root):
-    return PolymorphicValidator(str(root), autonomy_cfg=AutonomyConfig(contained_execution_required=False))
+    return PolymorphicValidator(str(root), autonomy_cfg=AutonomyConfig())
 
 
 def test_01_dropping_a_declared_dependency_rebuilds_the_venv_so_the_removed_module_is_gone(tmp_path):
@@ -59,7 +59,7 @@ def test_01_dropping_a_declared_dependency_rebuilds_the_venv_so_the_removed_modu
     installs = []
     with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=_faithful_runner(installs)):
         python1, error = validator._resolve_python_interpreter()
-        assert error is None and python1.startswith(str(root / ".kriya" / "venv"))
+        assert error is None and python1 == os.path.join(".kriya", "venv", "bin", "python")   # S7: the contained flow names the mount-relative interpreter
         site = _site_packages(str(root / ".kriya" / "venv"))
         assert os.path.exists(os.path.join(site, "six.py")) and os.path.exists(os.path.join(site, "attrs.py"))
         marker = json.load(open(os.path.join(root, ".kriya", "venv", v._VENV_INSTALLED_MARKER)))

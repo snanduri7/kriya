@@ -12,11 +12,11 @@ first 2000 characters of output, all Maven offline warnings.
 Fixtures are real output: the runtime-3 s4 failure, and Spring 5.3.39 under
 `mvn -o -e exec:java` (evidence/demo-defect-d5; the `file [...]` fixture's
 absolute path is rewritten to a neutral outside-workspace path)."""
-import shutil
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from _real_oci import REAL_OCI_MAVEN
 from _strict_doubles import developer_double
 from test_workflow import _runtime_verifier_ctx
 from test_workflow_controller_enforce import _patched, _workflow_engine
@@ -333,8 +333,8 @@ async def test_identical_bytes_from_the_right_owner_are_still_no_progress(tmp_pa
 # ---------------------------------------------------------------- real Spring + Maven, through the validator
 
 _SPRING = Path.home() / ".m2/repository/org/springframework/spring-context/5.3.39/spring-context-5.3.39.jar"
-needs_spring = pytest.mark.skipif(shutil.which("mvn") is None or not _SPRING.exists(),
-                                  reason="real Maven with Spring 5.3.39 in the local repository is not available")
+# S7: a real Maven build belongs to the REAL-OCI tier; the host ~/.m2 is not the contained build's cache (the canonical acquisition provides Spring).
+needs_spring = REAL_OCI_MAVEN
 
 
 @needs_spring
@@ -358,7 +358,7 @@ async def test_a_real_spring_failure_through_the_validator_grounds_the_xml(tmp_p
         'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.springframework.org/'
         'schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd"><bean class="java.util.ArrayList">'
         '<property name="notARealProperty" value="1"/></bean></beans>')
-    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=AutonomyConfig(contained_execution_required=False))
+    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=AutonomyConfig())
     result = validator.run_app_sequence([["mvn", "-e", "exec:java", "-Dexec.mainClass=demo.App"]])
     assert result["success"] is False and "notARealProperty" in result["output"]
     known = ["pom.xml", APP, "src/main/resources/bad-config.xml"]

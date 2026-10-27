@@ -1,26 +1,29 @@
 """Demo V2 (owner decision 2026-10-15): the bounded, deterministic REAL-toolchain check of the direct plan. NO MODEL: the transport is scripted exactly as in
 tests/test_greenfield_direct_plan_runtime.py, but nothing else is stubbed - POM validation, the build, the tests and the runtime command run on the real JDK and the real Maven
-against a curated tiny Java 17 candidate (one pom, one class, one JUnit 4 test) in Kriya's isolated worktree, offline (Maven's local repository must already hold the plugins and
-junit 4.13.2; otherwise the test skips instead of reaching for the network).
+against a curated tiny Java 17 candidate (one pom, one class, one JUnit 4 test) in Kriya's isolated worktree.
+
+S7 (secure-default migration): project-controlled execution is always contained, so this tier now runs in the REAL OCI backend (the canonical maven:3.9-eclipse-temurin-17 image and
+the canonical dependency cache, registry-scoped acquisition on first use) instead of a host JDK and a host ~/.m2; it skips, never fakes, when Docker or the image is missing (the
+skip reason names docker, so tests/conftest.py pins it to the single docker xdist worker).
 
 Proved with the real tools, in order: source review pending/decided -> real `mvn validate` -> real build -> real tests with a NONZERO count -> runtime-command review -> the exact reviewed
 command executed -> real stdout "Hello from Kriya" -> ApplicationOutcome EXECUTED; the same bytes were reviewed, built, tested, executed and applied. A rejected runtime review runs nothing
 and applies nothing. The ledger stays pending (owner decision on REQ-LEDGER-RUNTIME-CLOSURE-001).
 
-Tier: `real_toolchain`, excluded by default (needs a JDK 17 and Maven on PATH); run with `pytest -m real_toolchain tests/test_direct_plan_real_maven.py`. Set KRIYA_REAL_MAVEN_EVIDENCE to a file path
+Tier: `real_toolchain`, excluded by default (needs Docker and the canonical Maven image); run with `pytest -m real_toolchain tests/test_direct_plan_real_maven.py`. Set KRIYA_REAL_MAVEN_EVIDENCE to a file path
 to write the measured toolchain versions and per-step facts as JSON.
 """
 import asyncio
 import json
 import os
 import re
-import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from _protocol_responses import sentinel
+from _real_oci import MAVEN_IMAGE, REAL_OCI_MAVEN
 from test_greenfield_direct_plan_runtime import GOAL, MARKDOWN_PLAN, _succeeded
 from test_greenfield_runtime_end_to_end import Person, _callback
 from test_launch_approval import _session
@@ -34,7 +37,7 @@ from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.state import GenerationState
 from kriya.workflow.workflow import WorkflowEngine
 
-pytestmark = pytest.mark.real_toolchain
+pytestmark = [pytest.mark.real_toolchain, REAL_OCI_MAVEN]
 
 POM = "pom.xml"
 MAIN_FILE = "src/main/java/hellokriya/App.java"
@@ -55,28 +58,6 @@ JUDGE = {"should_run": True, "execution_mode": "finite_command", "run_commands":
          "command_source": "goal_explicit", "input_channel": "none", "success_criteria": "The command output contains 'Hello from Kriya'",
          "reasoning": "the goal asks for a runnable application"}
 
-
-def _version(command):
-    try:
-        done = subprocess.run(command, capture_output=True, text=True, timeout=60, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return (done.stdout + done.stderr).strip()
-
-
-def _offline_toolchain_ready(tmp_path) -> bool:
-    """A JDK 17+, Maven, and the plugins/junit this candidate needs in the local repository: proven by building the fixture once offline in a scratch copy."""
-    if shutil.which("java") is None or shutil.which("mvn") is None:
-        return False
-    scratch = tmp_path / "probe"
-    for relpath, content in REAL_FILES.items():
-        (scratch / relpath).parent.mkdir(parents=True, exist_ok=True)
-        (scratch / relpath).write_text(content)
-    done = subprocess.run(["mvn", "-o", "-q", "test"], cwd=scratch, capture_output=True, text=True, timeout=600, check=False)
-    if done.returncode != 0:
-        return False
-    shutil.rmtree(scratch)
-    return True
 
 
 def _run(tmp_path, *, review_plan=None):
@@ -149,11 +130,9 @@ def _run(tmp_path, *, review_plan=None):
 
 
 @pytest.fixture(scope="module")
-def toolchain(tmp_path_factory):
-    probe = tmp_path_factory.mktemp("probe")
-    if not _offline_toolchain_ready(probe):
-        pytest.skip("a JDK and Maven with the plugins and junit 4.13.2 in the local repository are required (the check never reaches for the network)")
-    return {"java": _version(["java", "-version"]), "maven": _version(["mvn", "-version"])}
+def toolchain():
+    """The contained toolchain this run uses (the evidence file records it); availability is the module's REAL_OCI_MAVEN gate."""
+    return {"java": f"container: {MAVEN_IMAGE}", "maven": f"container: {MAVEN_IMAGE}"}
 
 
 def test_real_jdk_and_maven_build_test_and_run_the_reviewed_candidate_in_order(tmp_path, toolchain):

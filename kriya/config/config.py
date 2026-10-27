@@ -393,6 +393,13 @@ def _egress_policy(value: Any) -> str:
     return parse_egress_policy(value)
 
 
+def _containment_mandate(field: str, value: Any) -> bool:
+    """S7: the config authority's one check of the containment mandate fields (kriya.config.authority.parse_containment_mandate); lazy, like ``_autonomy_mode``."""
+    from kriya.config.authority import parse_containment_mandate
+
+    return parse_containment_mandate(field, value)
+
+
 class AutonomyConfig(BaseModel):
     # S16a (OI-130): a closed vocabulary (kriya.config.authority.AUTONOMY_MODES), validated at construction, on
     # assignment and on a model_copy update; a malformed value is AutonomyModeError, never a mode.
@@ -413,6 +420,8 @@ class AutonomyConfig(BaseModel):
             value = _autonomy_mode(value)
         elif name == "egress_policy":
             value = _egress_policy(value)
+        elif name in ("contained_execution_required", "mcp_contained_execution_required"):
+            value = _containment_mandate(name, value)
         super().__setattr__(name, value)
 
     def model_copy(self, *, update: Optional[Dict[str, Any]] = None, deep: bool = False) -> "AutonomyConfig":
@@ -420,6 +429,9 @@ class AutonomyConfig(BaseModel):
             _autonomy_mode(update["mode"])
         if update and "egress_policy" in update:
             _egress_policy(update["egress_policy"])
+        for name in ("contained_execution_required", "mcp_contained_execution_required"):
+            if update and name in update:
+                _containment_mandate(name, update[name])
         return super().model_copy(update=update, deep=deep)
 
     # A closed vocabulary like its siblings (shell_network, contract_change_escalation): exactly "local_only" (the default;
@@ -551,7 +563,7 @@ class AutonomyConfig(BaseModel):
     # registered yet - see docs/architecture/SEC001_HOSTILE_CODE_CONTAINMENT_DESIGN.md;
     # an unrecognized value fails closed (BackendUnavailableError), never
     # silently falls back to uncontained execution.
-    containment_backend: str = Field(default="none")
+    containment_backend: str = Field(default="oci")
     # OD-1 (BACKEND-FINAL-CLOSURE-005, owner decision 2026-10-08): a contained
     # build that deterministically needs repository metadata (JavaHamcrest's
     # `git describe` at Gradle configuration time) sees a sanitized, read-only
@@ -573,7 +585,12 @@ class AutonomyConfig(BaseModel):
     # flag means "these paths must be really contained", not merely "try
     # to". Versioned toolchain selection and image attestation are owned by
     # PolymorphicValidator/OCIContainmentBackend (PRD-011).
-    contained_execution_required: bool = Field(default=False)
+    contained_execution_required: bool = Field(default=True)
+
+    @field_validator("contained_execution_required", mode="before")
+    @classmethod
+    def _containment_mandate_cannot_be_disabled(cls, value: Any) -> bool:
+        return _containment_mandate("contained_execution_required", value)
     # TOOL-003 P2 (2026-09-13): the MCP analogue of contained_execution_required
     # immediately above, deliberately a SEPARATE flag rather than reusing that
     # one - contained_execution_required governs target-code compile/test/
@@ -600,7 +617,12 @@ class AutonomyConfig(BaseModel):
     # every real MCP connection's own telemetry records this fact explicitly
     # (kriya/mcp/mcp.py's own "containment_required"/"containment_active"
     # fields) - a host-side run must never be misread as containment evidence.
-    mcp_contained_execution_required: bool = Field(default=False)
+    mcp_contained_execution_required: bool = Field(default=True)
+
+    @field_validator("mcp_contained_execution_required", mode="before")
+    @classmethod
+    def _mcp_containment_mandate_cannot_be_disabled(cls, value: Any) -> bool:
+        return _containment_mandate("mcp_contained_execution_required", value)
     # CORR-018 (2026-09-13): opt-in strict semantic-region enforcement for
     # ordinary generate/fix Java brownfield mutations - the general-case
     # analogue of contained_execution_required/mcp_contained_execution_

@@ -47,7 +47,7 @@ def _autonomy(**fields):
 
 
 REFUSED = dict(contained_execution_required=True, containment_backend="none")       # the owner's typed ExternalExecutionRefused
-HOST = dict(contained_execution_required=False)
+DEFAULT = dict()                                                                    # the packaged defaults: contained (S7 - there is no host opt-out); the semantic stand-in carries the command
 
 
 @pytest.fixture
@@ -119,14 +119,14 @@ def test_an_unavailable_backend_is_not_executed(tmp_path, failing_backend):
 
 
 def test_a_process_that_never_started_is_not_executed(tmp_path):
-    report, _workspace = _replay(tmp_path, _state(M1=[["kriya-no-such-binary-xyz", "--check"]]), **HOST)
+    report, _workspace = _replay(tmp_path, _state(M1=[["kriya-no-such-binary-xyz", "--check"]]), **DEFAULT)
     assert _outcomes(report) == {"M1": "not_executed"}
     assert "No such file" in report.entries[0]["cause"], report.entries[0]
 
 
 @pytest.mark.parametrize("corrupted", [[[]], [["python3", 3]], "python3 -m x", [[""]], [[], PASS]], ids=["empty-argv", "non-string", "not-a-list", "empty-token", "empty-first"])
 def test_corrupted_persisted_commands_are_a_typed_invalid_input_and_nothing_runs(tmp_path, corrupted):
-    report, _workspace = _replay(tmp_path, _state(M1=corrupted), **HOST)
+    report, _workspace = _replay(tmp_path, _state(M1=corrupted), **DEFAULT)
     assert _outcomes(report) == {"M1": "not_executed"} and report.entries[0]["reason"].startswith(REPLAY_INPUT_INVALID)
 
 
@@ -140,7 +140,7 @@ def test_a_validators_early_return_shapes_are_not_executed_too(tmp_path, monkeyp
     ]
     for shape in shapes:
         monkeypatch.setattr(PolymorphicValidator, "run_app_sequence", lambda self, commands, shape=shape: dict(shape))
-        report, _workspace = _replay(tmp_path, _state(M1=[PASS]), **HOST)
+        report, _workspace = _replay(tmp_path, _state(M1=[PASS]), **DEFAULT)
         assert _outcomes(report) == {"M1": "not_executed"}, shape
 
 
@@ -149,7 +149,7 @@ def test_a_validators_early_return_shapes_are_not_executed_too(tmp_path, monkeyp
 def test_a_completed_milestone_whose_verification_could_not_be_captured_is_not_silently_skipped(tmp_path):
     state = _state(M2=[PASS])
     state.replay_evidence_unavailable["M1"] = "RuntimeError: the run-verification judge was unavailable"
-    report, _workspace = _replay(tmp_path, state, **HOST)
+    report, _workspace = _replay(tmp_path, state, **DEFAULT)
     assert _outcomes(report) == {"M1": "not_executed", "M2": "passed"} and report.state == "not_executed"
     assert report.entries[0]["reason"].startswith(REPLAY_EVIDENCE_UNAVAILABLE)
 
@@ -226,21 +226,21 @@ def test_a_later_successful_capture_clears_the_loss(tmp_path):
 # ----------------------------------------------------------------- the critical negative control: a replay that RAN with zero regressions still succeeds
 
 def test_a_replay_that_really_ran_with_zero_regressions_succeeds_and_is_distinguishable_from_one_that_never_ran(tmp_path):
-    ran, workspace = _replay(tmp_path, _state(M1=[PASS], M2=[PASS]), **HOST)
+    ran, workspace = _replay(tmp_path, _state(M1=[PASS], M2=[PASS]), **DEFAULT)
     never, _ = _replay(tmp_path, _state(M1=[PASS], M2=[PASS]), **REFUSED)
     assert ran.state == "executed" and _outcomes(ran) == {"M1": "passed", "M2": "passed"}
     assert never.state == "not_executed" and _outcomes(never) == {"M1": "not_executed", "M2": "not_executed"}
     assert ran.to_dict() != never.to_dict()
-    assert replay_prior_milestone_verifications(str(workspace), _state(M1=[PASS], M2=[PASS]), autonomy_cfg=_autonomy(**HOST)) == []
-    driver = _driver(workspace, _state(M1=[PASS], M2=[PASS]), **HOST)
+    assert replay_prior_milestone_verifications(str(workspace), _state(M1=[PASS], M2=[PASS]), autonomy_cfg=_autonomy(**DEFAULT)) == []
+    driver = _driver(workspace, _state(M1=[PASS], M2=[PASS]), **DEFAULT)
     assert _phase(driver) is None, "a replay that ran clean lets the plan proceed"
     assert driver._replay_evidence["state"] == "executed" and driver._replay_evidence["passed"] == ["M1", "M2"]
 
 
 def test_a_genuine_regression_is_reported_with_the_evidence(tmp_path):
-    report, workspace = _replay(tmp_path, _state(M1=[PASS], M2=[FAIL]), **HOST)
+    report, workspace = _replay(tmp_path, _state(M1=[PASS], M2=[FAIL]), **DEFAULT)
     assert report.state == "regressions_found" and _outcomes(report) == {"M1": "passed", "M2": "regressed"}
-    result = _phase(_driver(workspace, _state(M1=[PASS], M2=[FAIL]), **HOST))
+    result = _phase(_driver(workspace, _state(M1=[PASS], M2=[FAIL]), **DEFAULT))
     assert result["status"] == "milestone_replay_failed" and [f["milestone_id"] for f in result["failures"]] == ["M2"]
     assert result["replay"]["state"] == "regressions_found" and result["replay"]["regressed"] == ["M2"]
 
@@ -248,22 +248,22 @@ def test_a_genuine_regression_is_reported_with_the_evidence(tmp_path):
 def test_a_regression_beside_a_milestone_that_did_not_run_is_still_a_replay_that_did_not_complete(tmp_path):
     state = _state(M1=[FAIL])
     state.replay_evidence_unavailable["M2"] = "capture failed"
-    result = _phase(_driver(tmp_path, state, **HOST))
+    result = _phase(_driver(tmp_path, state, **DEFAULT))
     assert result["status"] == "milestone_replay_not_executed", "an incomplete replay cannot claim anything but incomplete"
     assert [f["milestone_id"] for f in result["failures"]] == ["M1"] and [e["milestone_id"] for e in result["not_executed"]] == ["M2"]
 
 
 def test_an_executed_command_with_no_verdict_is_recorded_as_not_evaluable_never_as_passed(tmp_path):
     """The documented policy (a missing marker is no failure) stays, but it is no longer indistinguishable from a pass."""
-    report, _workspace = _replay(tmp_path, _state(M1=[NO_MARKER_CRASH]), **HOST)
+    report, _workspace = _replay(tmp_path, _state(M1=[NO_MARKER_CRASH]), **DEFAULT)
     assert _outcomes(report) == {"M1": "not_evaluable"} and report.entries[0]["returncode"] == 3
     assert report.state == "executed" and report.regressions == [] and report.to_dict()["passed"] == []
 
 
 def test_nothing_to_replay_says_so(tmp_path):
-    report, workspace = _replay(tmp_path, _state(), **HOST)
+    report, workspace = _replay(tmp_path, _state(), **DEFAULT)
     assert report.state == "nothing_to_replay" and report.entries == []
-    driver = _driver(workspace, _state(), **HOST)
+    driver = _driver(workspace, _state(), **DEFAULT)
     assert _phase(driver) is None and driver._replay_evidence["state"] == "nothing_to_replay"
 
 

@@ -215,6 +215,13 @@ workflow_controller:
 #   autonomy.contained_execution_required: true
 #   autonomy.mcp_contained_execution_required: true
 #   autonomy.brownfield_full_regression_baseline_policy: required
+# The three containment settings above are ALSO the packaged defaults of every
+# profile: project-controlled external execution always requires an isolating
+# containment backend, and there is no host-execution opt-out. An explicit
+# `contained_execution_required: false` / `mcp_contained_execution_required: false`
+# is a typed configuration error (never coerced to true, never host execution);
+# `containment_backend: none` still parses but refuses typed, before any process
+# starts, whenever such execution is attempted.
 # A contradictory explicit value is rejected at load time; matching values
 # are accepted. Candidate worktree isolation, persistent checkpoints/traces,
 # and refusal to fall back to raw-host execution are fixed runtime mechanisms,

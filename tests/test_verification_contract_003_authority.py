@@ -163,9 +163,9 @@ def test_03_a_bundle_bound_to_another_workspace_revision_is_refused(tmp_path):
 class _Validator:
     """Records what the adapter asks the production boundary to run; answers from a script."""
 
-    def __init__(self, root, script, contained=True, raise_setup=False):
+    def __init__(self, root, script, raise_setup=False):
         self.workspace_path = root
-        self.autonomy_cfg = AutonomyConfig(contained_execution_required=contained)
+        self.autonomy_cfg = AutonomyConfig()      # S7: the packaged defaults ARE the mandate; there is no host variant to construct
         self.calls = []
         self.script = list(script)
         self.raise_setup = raise_setup
@@ -279,20 +279,14 @@ def test_05_verdict_protocol_and_integrity(tmp_path):
     assert run.reason_code == ab.AUTHORITY_CANDIDATE_CHANGED_DURING_RUN and run.verdict == ab.VERDICT_INDETERMINATE
 
 
-def test_06_never_on_the_host_and_typed_when_containment_is_unavailable(tmp_path):
+def test_06_typed_when_containment_is_unavailable(tmp_path):
+    """S7: the 'validator is not contained' half is gone with the host opt-out (a host validator cannot be constructed: explicit false is a config refusal, and the owner is
+    unconditional - tests/test_s7_secure_default_contract.py). What remains is the typed 'unavailable' outcome: a validator that cannot establish containment runs nothing."""
     ws, reqs, bundle = _loaded(tmp_path)
     state = str(tmp_path / "state")
-    recorder = {}
-
-    def host(root):
-        recorder["v"] = _Validator(root, [_ok, _ok], contained=False)
-        return recorder["v"]
-    run = ab.run_authority_bundle(bundle, str(ws), state_root=state, validator_factory=host)
-    assert run.reason_code == ab.AUTHORITY_EXECUTION_UNAVAILABLE and run.verdict == ab.VERDICT_INDETERMINATE
-    assert recorder["v"].calls == []  # nothing ran
     run = ab.run_authority_bundle(bundle, str(ws), state_root=state,
                                   validator_factory=lambda r: _Validator(r, [_ok, _ok], raise_setup=True))
-    assert run.reason_code == ab.AUTHORITY_EXECUTION_UNAVAILABLE
+    assert run.reason_code == ab.AUTHORITY_EXECUTION_UNAVAILABLE and run.verdict == ab.VERDICT_INDETERMINATE
 
     def refuses(root):
         raise ContainmentSetupError("toolchain mismatch")

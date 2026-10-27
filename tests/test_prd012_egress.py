@@ -209,7 +209,8 @@ async def test_required_containment_is_not_skipped_when_sandbox_execution_is_off
 @pytest.mark.asyncio
 async def test_denied_shell_network_without_a_network_capable_backend_fails_closed():
     cfg = AppConfig()
-    cfg.autonomy.shell_network = "denied"  # backend stays "none"
+    cfg.autonomy.shell_network = "denied"
+    cfg.autonomy.containment_backend = "none"   # S7: the packaged default is "oci"; the case is a backend that cannot isolate
     with pytest.raises(ToolExecutionError) as refused:
         await ShellTool(autonomy_cfg=cfg.autonomy).execute(command=f"curl {ATTACKER}")
     assert isinstance(refused.value.__cause__, BackendUnavailableError)  # refused, never run on the host

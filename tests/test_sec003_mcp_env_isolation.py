@@ -23,6 +23,7 @@ import sys
 import pytest
 import yaml
 from _mcp_containment_standin import app_config, client_kwargs
+from _real_oci import REAL_OCI_MCP, contained_mcp_server
 
 from kriya.core.kernel import Kernel
 from kriya.mcp.mcp import (
@@ -346,7 +347,7 @@ def _run_cli(args, cwd, extra_env=None, timeout=20):
     return r.returncode, r.stdout, r.stderr
 
 
-@pytest.mark.legacy_host_mcp
+@REAL_OCI_MCP     # S7: the packaged default is mandatory containment, so the differential runs against the server CONTAINED in the real OCI backend (container env = the profile's)
 @pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_cli_mcp_tool_call_ambient_absent_then_explicit_present_via_durable_approval(tmp_path):
     """TOOL-002 P2 (2026-09-13) restores this test's original E4-tier
@@ -376,7 +377,7 @@ def test_cli_mcp_tool_call_ambient_absent_then_explicit_present_via_durable_appr
     }
 
     _write_yaml(ws / "kriya.yaml", {
-        "mcp": {"envprobe": {"command": sys.executable, "args": [ENV_REPORT_SERVER]}}
+        "mcp": {"envprobe": contained_mcp_server("env_report_mcp_server.py", tests_dir=os.path.join(REPO_ROOT, "tests"))}
     })
     approve_code, _, approve_err = _run_cli(["authority", "approve", "--confirm"], cwd=str(ws), extra_env=ambient_env)
     assert approve_code == 0, approve_err
@@ -401,10 +402,8 @@ def test_cli_mcp_tool_call_ambient_absent_then_explicit_present_via_durable_appr
     # env value: it must be PRESENT verbatim, and the ambient host secret
     # must still never appear - the decisive differential.
     _write_yaml(ws / "kriya.yaml", {
-        "mcp": {"envprobe": {
-            "command": sys.executable, "args": [ENV_REPORT_SERVER],
-            "env": {"KRIYA_SEC003_SENTINEL": "explicitly-authorized-value"},
-        }}
+        "mcp": {"envprobe": contained_mcp_server("env_report_mcp_server.py", tests_dir=os.path.join(REPO_ROOT, "tests"),
+                                                 env={"KRIYA_SEC003_SENTINEL": "explicitly-authorized-value"})}
     })
     approve_code2, _, approve_err2 = _run_cli(["authority", "approve", "--confirm"], cwd=str(ws), extra_env=ambient_env)
     assert approve_code2 == 0, approve_err2

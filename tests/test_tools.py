@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from _plugin_test_support import load_core_tools_module
+from _real_oci import REAL_OCI_DAEMON
 
 from kriya.tools.tool import ToolExecutionError
 
@@ -70,6 +71,7 @@ def test_other_tools_do_not_require_confirmation():
     assert GitTool().requires_confirmation is False
 
 @pytest.mark.asyncio
+@REAL_OCI_DAEMON    # S7: the environment restriction is the contained backend's property (the container receives only the profile's env); the stand-in proves no env isolation
 async def test_shell_tool_env_is_restricted_by_default(monkeypatch):
     monkeypatch.setenv("KRIYA_TEST_SECRET", "super-secret-value")
     tool = ShellTool()

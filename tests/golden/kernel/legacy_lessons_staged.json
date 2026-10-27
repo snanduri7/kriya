@@ -82,7 +82,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:bbcddc4ecffb52e5"
+      "event": "sha256:8f08e547d11c0ff0"
      },
      "event": "egress.authority",
      "kind": "mirror.event",
@@ -708,7 +708,7 @@
     {
      "attempt": 1,
      "content": {
-      "outcome": "sha256:5e67473172badc50"
+      "outcome": "sha256:ace6d38c550eefae"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:ebadd8f3cf4ea0cc",
@@ -1367,7 +1367,7 @@
     {
      "attempt": 2,
      "content": {
-      "outcome": "sha256:84ec2a6e9f3bb299"
+      "outcome": "sha256:77c0ee99fe710ff7"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:31811e66dffd7cdd",
@@ -2026,7 +2026,7 @@
     {
      "attempt": 3,
      "content": {
-      "outcome": "sha256:a2c975048c035b56"
+      "outcome": "sha256:bf19306d892db062"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:5fd9ded057d76046",
@@ -2685,7 +2685,7 @@
     {
      "attempt": 4,
      "content": {
-      "outcome": "sha256:0bb351e66798a1f4"
+      "outcome": "sha256:0e0521ee61b5a14d"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:ed0d9330a201c814",
@@ -3344,7 +3344,7 @@
     {
      "attempt": 5,
      "content": {
-      "outcome": "sha256:83846a96d9b45752"
+      "outcome": "sha256:a93ea5f61b0827ec"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:01525870067140a3",
@@ -4042,7 +4042,7 @@
     {
      "attempt": 6,
      "content": {
-      "outcome": "sha256:dd3781d0571f799b"
+      "outcome": "sha256:3d2af3e658478266"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:7e421ddcd0edd0eb",
@@ -4114,7 +4114,7 @@
     {
      "attempt": 6,
      "content": {
-      "outcome": "sha256:7218efd1564a7079"
+      "outcome": "sha256:0047385f9738ce01"
      },
      "kind": "mirror.gate_outcome",
      "payload": "sha256:7ba2d74fd74f4830",
@@ -5048,7 +5048,7 @@
     {
      "attempt": 0,
      "authority": "auxiliary",
-     "details": "sha256:5b581d31cada63f0",
+     "details": "sha256:ff89600b152149ff",
      "kind": "egress.authority",
      "source": "workflow.run_generation_workflow"
     },

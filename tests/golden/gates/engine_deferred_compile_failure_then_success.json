@@ -133,7 +133,7 @@
   },
   {
    "attempt": 3,
-   "content": "sha256:053818cbfa496eec",
+   "content": "sha256:57c4940738ba831a",
    "kind": "mirror.gate_outcome",
    "payload": "sha256:ff3bb4e959e10502",
    "success": true,
@@ -155,7 +155,7 @@
   },
   {
    "attempt": 3,
-   "content": "sha256:84ff02cdf6c2df06",
+   "content": "sha256:82fc03caea29645a",
    "kind": "mirror.gate_outcome",
    "payload": "sha256:4d71d95b1a3c7ecb",
    "success": true,

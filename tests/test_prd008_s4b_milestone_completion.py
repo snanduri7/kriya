@@ -367,9 +367,11 @@ def test_an_unrelated_milestone_sharing_a_path_with_a_rerun_also_reruns(tmp_path
 def test_milestones_modifying_each_others_files_stay_valid_when_nothing_changed(tmp_path):
     # pom.xml created by M1, modified by M2 and again by integration: the
     # latest verified writer owns each path, so a clean rerun skips both.
-    outputs = {"M1": {"pom.xml": b"<m1/>\n"}, "M2": {"pom.xml": b"<m1/><m2/>\n"}}
+    # S7: every run is contained, so Kriya resolves the toolchain from a pom.xml: the payloads are well-formed single-root documents (a multi-root payload is a malformed pom,
+    # a typed ToolchainResolutionError); the path-ownership semantics under test do not depend on the pom's content
+    outputs = {"M1": {"pom.xml": b"<p><m1/></p>\n"}, "M2": {"pom.xml": b"<p><m1/><m2/></p>\n"}}
     workspace = _workspace(tmp_path)
-    integration = {"pom.xml": b"<m1/><m2/><int/>\n"}
+    integration = {"pom.xml": b"<p><m1/><m2/><int/></p>\n"}
     _run(workspace, CHAIN, FakeEngine(CHAIN, outputs, integration))
     engine = FakeEngine(CHAIN, outputs, integration)
     result, _ = _run(workspace, CHAIN, engine)

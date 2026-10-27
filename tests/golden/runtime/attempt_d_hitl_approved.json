@@ -12,14 +12,6 @@
    "deterministic_result": null,
    "graded_by": "llm",
    "output": "=== Step 1/1: <python:1> main.py ===\n6\n\n\n\n[Grader reasoning]: the output shows 6",
-   "resources": {
-    "address_space_enforcement": "advisory",
-    "address_space_limit_mb": 4096,
-    "cpu_seconds": 240,
-    "jvm_options": [],
-    "memory_budget_mb": 4096,
-    "strategy": "address_space"
-   },
    "runtime_artifacts": [],
    "runtime_disposition": {
     "authority": "llm",
@@ -36,14 +28,6 @@
       "main.py"
      ],
      "exit_code": 0,
-     "resources": {
-      "address_space_enforcement": "advisory",
-      "address_space_limit_mb": 4096,
-      "cpu_seconds": 240,
-      "jvm_options": [],
-      "memory_budget_mb": 4096,
-      "strategy": "address_space"
-     },
      "stderr": "",
      "stdout": "6\n",
      "timed_out": false
@@ -114,9 +98,9 @@
     "<python:1>",
     "main.py"
    ],
-   "contained": false,
-   "cwd": "<wt:1>",
-   "env": true,
+   "contained": true,
+   "cwd": "<state_dir:1>/gate-views/<view>",
+   "env": false,
    "spawn": "app",
    "stdin": null,
    "timeout": 37
@@ -151,14 +135,6 @@
     "deterministic_result": null,
     "graded_by": "llm",
     "output": "=== Step 1/1: <python:1> main.py ===\n6\n\n\n\n[Grader reasoning]: the output shows 6",
-    "resources": {
-     "address_space_enforcement": "advisory",
-     "address_space_limit_mb": 4096,
-     "cpu_seconds": 240,
-     "jvm_options": [],
-     "memory_budget_mb": 4096,
-     "strategy": "address_space"
-    },
     "runtime_artifacts": [],
     "runtime_disposition": {
      "authority": "llm",
@@ -175,14 +151,6 @@
        "main.py"
       ],
       "exit_code": 0,
-      "resources": {
-       "address_space_enforcement": "advisory",
-       "address_space_limit_mb": 4096,
-       "cpu_seconds": 240,
-       "jvm_options": [],
-       "memory_budget_mb": 4096,
-       "strategy": "address_space"
-      },
       "stderr": "",
       "stdout": "6\n",
       "timed_out": false

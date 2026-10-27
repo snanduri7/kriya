@@ -6,6 +6,7 @@ import time
 from unittest.mock import MagicMock, patch
 
 import pytest
+from _validator_runner import ScriptedRunner, fail, ok
 
 from kriya.config import AppConfig
 from kriya.tools import venv_integrity
@@ -20,11 +21,48 @@ from kriya.workflow.acceptance import (
     runtime_application_step_started,
     runtime_verification_infrastructure_reason,
 )
+from kriya.workflow.failure_grounding import extract_error_source_locations
 from kriya.workflow.file_resolution import ground_java_entrypoint_in_no_build_file_projects
 from kriya.workflow.verification_authority import (
     deterministic_sequence_kind,
     deterministic_verification_kind,
 )
+
+
+def _venv_creator(workspace):
+    """A scripted answer for the project environment's creation that leaves what a real ``python -m venv`` leaves: the interpreter, at its host path."""
+    venv_python = os.path.join(str(workspace), ".kriya", "venv", "bin", "python")
+
+    def create(_cmd, _cwd):
+        os.makedirs(os.path.dirname(venv_python), exist_ok=True)
+        with open(venv_python, "w", encoding="utf-8") as stream:
+            stream.write("#!/bin/sh\n")
+        return ok()
+    return create
+
+
+def _maven_writes(*relpaths, stdout="BUILD SUCCESS"):
+    """What a real Maven leaves in the tree it ran in - the gate view the contained flow builds in, not the workspace: empty files at the given relative paths."""
+    def run(_cmd, cwd):
+        for rel in relpaths:
+            path = os.path.join(cwd, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb"):
+                pass
+        return ok(stdout)
+    return run
+
+
+def _missing_binary(name):
+    def run(_cmd, _cwd):
+        raise FileNotFoundError(2, "No such file or directory", name)
+    return run
+
+
+def _pytest_command(runner):
+    """The one pytest invocation of a scripted run (the contained flow creates the project environment before it)."""
+    assert runner.roles()[-1] == "pytest", runner.commands
+    return runner.commands[-1]
 
 
 def test_polymorphic_stack_detection(tmp_path):
@@ -63,8 +101,9 @@ def test_standalone_javac_ignores_contextual_files_absent_from_sandbox(tmp_path)
 
     assert result["success"] is True
     command = run_cmd.call_args.args[0]
-    assert str(tmp_path / "App.java") in command
-    assert str(tmp_path / "Earlier.java") not in command
+    # S7: the contained flow names the sources workspace-relative (the container sees the tree at its own mount, not at the host path)
+    assert "App.java" in command and str(tmp_path / "App.java") not in command
+    assert "Earlier.java" not in command and str(tmp_path / "Earlier.java") not in command
 
 
 def test_polymorphic_stack_detection_unknown_for_unsupported_stack(tmp_path):
@@ -135,7 +174,9 @@ def test_python_compile_check(tmp_path):
     (tmp_path / "invalid.py").write_text("def bad()\n    pass\n")
     res2 = validator.run_compile_check(["invalid.py"])
     assert res2["success"] is False
-    assert "Syntax error" in res2["output"]
+    # S7/P-A: contained, the gate returns the raw `py_compile` report; failure_grounding grounds that native shape.
+    assert "SyntaxError" in res2["output"]
+    assert extract_error_source_locations(res2["output"]) == [("invalid.py", 1)]
 
 def test_run_app_success(tmp_path):
     validator = PolymorphicValidator(str(tmp_path))
@@ -286,26 +327,28 @@ def test_run_app_sequence_multi_step_success(tmp_path):
         [[sys.executable, "app.py", "add", "Task 1"], [sys.executable, "app.py", "list"]],
         timeout=10,
     )
-    # Each step carries its execution evidence: in host sandbox mode, the
-    # resource strategy it ran under (LINUX-JVM-RLIMIT-AS-001).
-    resources = validator.host_resource_plan([sys.executable]).evidence()
-    assert resources["strategy"] == "address_space"
-    assert res["steps"] == [
+    # Each step carries its execution evidence. S7: every run is contained, where the resource limits are the container's, so a step carries no host rlimit
+    # strategy (LINUX-JVM-RLIMIT-AS-001 evidence exists only on the host path).
+    # What a contained step carries instead is its egress evidence: no network was granted to the application.
+    steps = [dict(step) for step in res["steps"]]
+    for step in steps:
+        assert step.pop("egress")["capability"] == "denied"
+        step["command"] = [os.path.realpath(step["command"][0]), *step["command"][1:]]      # the interpreter is the same file however the launcher spells it
+    interpreter = os.path.realpath(sys.executable)
+    assert steps == [
         {
-            "command": [sys.executable, "app.py", "add", "Task 1"],
+            "command": [interpreter, "app.py", "add", "Task 1"],
             "exit_code": 0,
             "stdout": "Added Task 1\n",
             "stderr": "",
             "timed_out": False,
-            "resources": resources,
         },
         {
-            "command": [sys.executable, "app.py", "list"],
+            "command": [interpreter, "app.py", "list"],
             "exit_code": 0,
             "stdout": "Task 1\n",
             "stderr": "",
             "timed_out": False,
-            "resources": resources,
         },
     ]
 
@@ -443,14 +486,15 @@ def test_run_app_sequence_no_commands():
     res = validator.run_app_sequence([])
     assert res["success"] is False
 
-def test_run_app_sequence_uses_isolated_venv_interpreter_for_python(tmp_path):
+def test_run_app_sequence_uses_isolated_venv_interpreter_for_python(tmp_path, monkeypatch):
     """Regression test for a real bug found live (2026-08-07,
     django_healthcheck_gap): run_tests() got an isolated, dependency-
     installed venv, but run_app_sequence() (Runtime Verification) still ran
     via sys.executable directly - a goal needing a real third-party package
     hit the identical ModuleNotFoundError one gate later, after the goal
     finally got far enough to reach Runtime Verification at all. Both gates
-    must resolve to the SAME interpreter."""
+    must resolve to the SAME interpreter. (S7: the process seam is the validator's own choke point, and the interpreter is the project
+    environment's, spelled as the contained flow spells it: workspace-relative.)"""
     (tmp_path / "requirements.txt").write_text("django==5.2\n")
     (tmp_path / "manage.py").write_text("print('would run django here')\n")
     venv_python = tmp_path / ".kriya" / "venv" / "bin" / "python"
@@ -462,26 +506,17 @@ def test_run_app_sequence_uses_isolated_venv_interpreter_for_python(tmp_path):
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "python"
 
-    with patch("subprocess.Popen") as mock_popen:
-        install_process = MagicMock()
-        install_process.returncode = 0
-        install_process.communicate.return_value = ("Successfully installed django", "")
-
-        run_process = MagicMock()
-        run_process.returncode = 0
-        run_process.communicate.return_value = ("ok", "")
-
-        mock_popen.side_effect = [install_process, run_process]
-        res = validator.run_app_sequence([["python", "manage.py", "runserver", "--help"]])
+    runner = ScriptedRunner(monkeypatch, ok("Successfully installed django"), ok("ok"))
+    res = validator.run_app_sequence([["python", "manage.py", "runserver", "--help"]])
 
     assert res["success"] is True, res["output"]
-    assert mock_popen.call_count == 2
-    run_cmd = mock_popen.call_args_list[1].args[0]
-    assert run_cmd[0] == str(venv_python)
+    assert runner.roles() == ["pip", "other"], runner.commands
+    run_cmd = runner.commands[1]
+    assert run_cmd[0] == ".kriya/venv/bin/python"
     assert run_cmd[0] != sys.executable
     assert run_cmd[1:] == ["manage.py", "runserver", "--help"]
 
-def test_run_app_sequence_reports_pip_install_failure_without_running_commands(tmp_path):
+def test_run_app_sequence_reports_pip_install_failure_without_running_commands(tmp_path, monkeypatch):
     (tmp_path / "requirements.txt").write_text("this-package-does-not-exist==999.0\n")
     (tmp_path / "manage.py").write_text("pass\n")
     venv_python = tmp_path / ".kriya" / "venv" / "bin" / "python"
@@ -492,19 +527,14 @@ def test_run_app_sequence_reports_pip_install_failure_without_running_commands(t
 
     validator = PolymorphicValidator(str(tmp_path))
 
-    with patch("subprocess.Popen") as mock_popen:
-        install_process = MagicMock()
-        install_process.returncode = 1
-        install_process.communicate.return_value = ("", "ERROR: No matching distribution found")
-        mock_popen.return_value = install_process
-
-        res = validator.run_app_sequence([["python", "manage.py", "runserver"]])
+    runner = ScriptedRunner(monkeypatch, fail(stderr="ERROR: No matching distribution found"), strict=True)
+    res = validator.run_app_sequence([["python", "manage.py", "runserver"]])
 
     assert res["success"] is False
     assert "pip install" in res["output"]
     # Only the failed install call should have been made - the run command
     # must never execute against a dependency environment known to be broken.
-    assert mock_popen.call_count == 1
+    assert runner.roles() == ["pip"], runner.commands
 
 def test_run_app_sequence_without_requirements_txt_uses_sys_executable(tmp_path):
     # No requirements.txt (e.g. a stdlib-only Python goal) - must behave
@@ -582,7 +612,7 @@ def test_python_run_tests_resolves_maven_style_invented_layout(tmp_path):
     res = validator.run_tests()
     assert res["success"] is True, res["output"]
 
-def test_python_run_tests_installs_requirements_into_isolated_venv_before_pytest(tmp_path):
+def test_python_run_tests_installs_requirements_into_isolated_venv_before_pytest(tmp_path, monkeypatch):
     """Regression test for a real bug found live (2026-08-07 eval harness,
     django_healthcheck_gap): a goal needing a real third-party package (e.g.
     Django) failed every attempt with ModuleNotFoundError, since
@@ -592,7 +622,8 @@ def test_python_run_tests_installs_requirements_into_isolated_venv_before_pytest
     install` fix. A requirements.txt with real content must get installed
     into an ISOLATED project-local venv (not sys.executable directly, which
     would risk breaking Kriya's own environment) before pytest runs, and
-    pytest itself must then run under THAT venv's interpreter."""
+    pytest itself must then run under THAT venv's interpreter. (S7: the process seam is the
+    validator's choke point; the command is the contained one, so the venv and the requirements file are workspace-relative.)"""
     (tmp_path / "requirements.txt").write_text("django==5.2\n")
     (tmp_path / "app.py").write_text("import django\n")
     venv_python = tmp_path / ".kriya" / "venv" / "bin" / "python"
@@ -604,30 +635,20 @@ def test_python_run_tests_installs_requirements_into_isolated_venv_before_pytest
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "python"
 
-    with patch("subprocess.Popen") as mock_popen:
-        install_process = MagicMock()
-        install_process.returncode = 0
-        install_process.communicate.return_value = ("Successfully installed django", "")
-
-        pytest_process = MagicMock()
-        pytest_process.returncode = 0
-        pytest_process.communicate.return_value = ("1 passed", "")
-
-        mock_popen.side_effect = [install_process, pytest_process]
-        res = validator.run_tests()
+    runner = ScriptedRunner(monkeypatch, ok("Successfully installed django"), ok("1 passed"), strict=True)
+    res = validator.run_tests()
 
     assert res["success"] is True, res["output"]
-    assert mock_popen.call_count == 2
-    install_cmd = mock_popen.call_args_list[0].args[0]
-    pytest_cmd = mock_popen.call_args_list[1].args[0]
-    assert install_cmd == [str(venv_python), "-m", "pip", "install", "-q", "-r", str(tmp_path / "requirements.txt"), "pytest"]
+    assert runner.roles() == ["pip", "pytest"], runner.commands
+    install_cmd, pytest_cmd = runner.commands
+    assert install_cmd == [".kriya/venv/bin/python", "-m", "pip", "install", "-q", "-r", "requirements.txt", "pytest"]
     # pytest itself must run under the VENV's interpreter, not sys.executable -
     # installing into an isolated venv is pointless if the test run doesn't
     # actually use it.
-    assert pytest_cmd[0] == str(venv_python)
+    assert pytest_cmd[0] == ".kriya/venv/bin/python"
     assert pytest_cmd[0] != sys.executable
 
-def test_python_run_tests_reports_pip_install_failure_without_running_pytest(tmp_path):
+def test_python_run_tests_reports_pip_install_failure_without_running_pytest(tmp_path, monkeypatch):
     (tmp_path / "requirements.txt").write_text("this-package-does-not-exist==999.0\n")
     (tmp_path / "app.py").write_text("pass\n")
     venv_python = tmp_path / ".kriya" / "venv" / "bin" / "python"
@@ -638,20 +659,15 @@ def test_python_run_tests_reports_pip_install_failure_without_running_pytest(tmp
 
     validator = PolymorphicValidator(str(tmp_path))
 
-    with patch("subprocess.Popen") as mock_popen:
-        install_process = MagicMock()
-        install_process.returncode = 1
-        install_process.communicate.return_value = ("", "ERROR: No matching distribution found for this-package-does-not-exist==999.0")
-        mock_popen.return_value = install_process
-
-        res = validator.run_tests()
+    runner = ScriptedRunner(monkeypatch, fail(stderr="ERROR: No matching distribution found for this-package-does-not-exist==999.0"), strict=True)
+    res = validator.run_tests()
 
     assert res["success"] is False
     assert "pip install" in res["output"]
     assert "this-package-does-not-exist" in res["output"]
     # Only the failed install call should have been made - pytest must never
     # run against a dependency environment known to be broken.
-    assert mock_popen.call_count == 1
+    assert runner.roles() == ["pip"], runner.commands
 
 def test_python_run_tests_skips_venv_without_requirements_txt(tmp_path):
     # No requirements.txt at all (e.g. python_task_tracker/python_greeter,
@@ -696,73 +712,78 @@ def test_python_run_tests_skips_venv_for_comments_only_requirements_txt(tmp_path
     cmd = mock_popen.call_args_list[0].args[0]
     assert cmd[0] == sys.executable
 
-def test_python_run_tests_creates_venv_from_scratch_when_not_already_present(tmp_path):
+def test_python_run_tests_creates_venv_from_scratch_when_not_already_present(tmp_path, monkeypatch):
     (tmp_path / "requirements.txt").write_text("requests==2.31.0\n")
     (tmp_path / "app.py").write_text("import requests\n")
     venv_python_path = str(tmp_path / ".kriya" / "venv" / "bin" / "python")
 
-    def _popen_side_effect(cmd, **kwargs):
-        process = MagicMock()
-        process.returncode = 0
-        if "venv" in cmd:
-            # Real venv creation would produce this file - simulate that side
-            # effect so PolymorphicValidator's own os.path.exists check (its
-            # actual success signal, not just the mocked returncode) passes.
-            os.makedirs(os.path.dirname(venv_python_path), exist_ok=True)
-            with open(venv_python_path, "w") as f:
-                f.write("#!/bin/sh\n")
-            process.communicate.return_value = ("", "")
-        elif "pip" in cmd:
-            process.communicate.return_value = ("Successfully installed requests", "")
-        else:
-            process.communicate.return_value = ("1 passed", "")
-        return process
+    def create_venv(_cmd, _cwd):
+        # Real venv creation would produce this file - simulate that side
+        # effect so PolymorphicValidator's own os.path.exists check (its
+        # actual success signal, not just the mocked returncode) passes.
+        os.makedirs(os.path.dirname(venv_python_path), exist_ok=True)
+        with open(venv_python_path, "w", encoding="utf-8") as f:
+            f.write("#!/bin/sh\n")
+        return ok()
 
     validator = PolymorphicValidator(str(tmp_path))
     assert not os.path.exists(venv_python_path)
 
-    with patch("subprocess.Popen") as mock_popen:
-        mock_popen.side_effect = _popen_side_effect
-        res = validator.run_tests()
+    runner = ScriptedRunner(monkeypatch, create_venv, ok("Successfully installed requests"), ok("1 passed"), strict=True)
+    res = validator.run_tests()
 
     assert res["success"] is True, res["output"]
-    assert mock_popen.call_count == 3
-    venv_cmd = mock_popen.call_args_list[0].args[0]
-    assert venv_cmd == [sys.executable, "-m", "venv", str(tmp_path / ".kriya" / "venv")]
+    assert runner.roles() == ["venv", "pip", "pytest"], runner.commands
+    assert runner.commands[0][1:] == ["-m", "venv", ".kriya/venv"]
 
-def test_java_ruby_compile_invocation(tmp_path):
+
+def test_python_run_tests_without_requirements_creates_the_project_environment_with_pytest_only(tmp_path, monkeypatch):
+    """The contained counterpart of the two host-only 'skips venv' tests (census class H, deleted in S8): every run is contained, so even a stdlib-only project gets its
+    project environment - but the install carries no requirements file, only pytest."""
+    (tmp_path / "app.py").write_text("pass\n")
+    (tmp_path / "test_app.py").write_text("def test_ok():\n    assert True\n")
+    venv_python_path = str(tmp_path / ".kriya" / "venv" / "bin" / "python")
+
+    def create_venv(_cmd, _cwd):
+        os.makedirs(os.path.dirname(venv_python_path), exist_ok=True)
+        with open(venv_python_path, "w", encoding="utf-8") as f:
+            f.write("#!/bin/sh\n")
+        return ok()
+
+    runner = ScriptedRunner(monkeypatch, create_venv, ok(), ok("1 passed"), strict=True)
+    res = PolymorphicValidator(str(tmp_path)).run_tests()
+
+    assert res["success"] is True, res["output"]
+    assert runner.roles() == ["venv", "pip", "pytest"], runner.commands
+    assert runner.commands[1] == [".kriya/venv/bin/python", "-m", "pip", "install", "-q", "pytest"]
+
+
+def test_java_ruby_compile_invocation(tmp_path, monkeypatch):
     # Test Java compile invocation mocks
     (tmp_path / "pom.xml").write_text("<project></project>")
     (tmp_path / "UserService.java").write_text("class UserService {}")
-    
+
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "java"
 
-    (tmp_path / "target" / "classes").mkdir(parents=True)
-    (tmp_path / "target" / "classes" / "UserService.class").write_bytes(b"")
+    runner = ScriptedRunner(monkeypatch, _maven_writes("target/classes/UserService.class"))
+    res = validator.run_compile_check(["UserService.java"])
+    assert runner.calls
+    assert res["success"] is True
 
-    with patch("subprocess.Popen") as mock_popen:
-        mock_process = MagicMock()
-        mock_process.returncode = 0
-        mock_process.communicate.return_value = ("", "")
-        mock_popen.return_value = mock_process
+    # Test Ruby compile invocation mocks
+    (tmp_path / "pom.xml").unlink()
+    (tmp_path / "Gemfile").write_text("")
+    (tmp_path / "test.rb").write_text("puts 123")
 
-        res = validator.run_compile_check(["UserService.java"])
-        assert mock_popen.called
-        assert res["success"] is True
-        
-        # Test Ruby compile invocation mocks
-        (tmp_path / "pom.xml").unlink()
-        (tmp_path / "Gemfile").write_text("")
-        (tmp_path / "test.rb").write_text("puts 123")
-        
-        validator_rb = PolymorphicValidator(str(tmp_path))
-        assert validator_rb.stack == "ruby"
-        
-        res_rb = validator_rb.run_compile_check(["test.rb"])
-        assert res_rb["success"] is True
+    validator_rb = PolymorphicValidator(str(tmp_path))
+    assert validator_rb.stack == "ruby"
 
-def test_ruby_run_tests_installs_gems_before_rspec(tmp_path):
+    res_rb = validator_rb.run_compile_check(["test.rb"])
+    assert res_rb["success"] is True
+
+
+def test_ruby_run_tests_installs_gems_before_rspec(tmp_path, monkeypatch):
     """Regression test for a real bug found live (eval harness batch
     20260804-115621): a fresh sandbox never has gems installed, so `bundle exec
     rspec` fails with 'bundler: command not found: rspec' regardless of whether
@@ -776,28 +797,17 @@ def test_ruby_run_tests_installs_gems_before_rspec(tmp_path):
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "ruby"
 
-    with patch("subprocess.Popen") as mock_popen:
-        install_process = MagicMock()
-        install_process.returncode = 0
-        install_process.communicate.return_value = ("Bundle complete.", "")
-
-        rspec_process = MagicMock()
-        rspec_process.returncode = 0
-        rspec_process.communicate.return_value = ("1 example, 0 failures", "")
-
-        mock_popen.side_effect = [install_process, rspec_process]
-
-        res = validator.run_tests()
+    runner = ScriptedRunner(monkeypatch, ok("Bundle complete."), ok("1 example, 0 failures"), strict=True)
+    res = validator.run_tests()
 
     assert res["success"] is True, res["output"]
-    assert mock_popen.call_count == 2
-    first_cmd = mock_popen.call_args_list[0].args[0]
-    second_cmd = mock_popen.call_args_list[1].args[0]
+    assert len(runner.commands) == 2
+    first_cmd, second_cmd = runner.commands
     assert first_cmd == ["bundle", "install", "--path", "vendor/bundle"]
     assert second_cmd[:3] == ["bundle", "exec", "rspec"]
 
 
-def test_java_run_tests_converts_test_file_path_to_class_name_for_maven(tmp_path):
+def test_java_run_tests_converts_test_file_path_to_class_name_for_maven(tmp_path, monkeypatch):
     """Regression test for a real bug found live (2026-08-07,
     kriya-protocol-parser-app): extract_target_test() returns a raw file
     path (e.g. "src/test/java/com/example/ProtocolTest.java"), and that
@@ -810,51 +820,35 @@ def test_java_run_tests_converts_test_file_path_to_class_name_for_maven(tmp_path
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "java"
 
-    with patch("subprocess.Popen") as mock_popen:
-        process = MagicMock()
-        process.returncode = 0
-        process.communicate.return_value = ("Tests run: 1", "")
-        mock_popen.return_value = process
-
-        res = validator.run_tests(target_test="src/test/java/com/example/ProtocolTest.java")
+    runner = ScriptedRunner(monkeypatch, ok("Tests run: 1"), strict=True)
+    res = validator.run_tests(target_test="src/test/java/com/example/ProtocolTest.java")
 
     assert res["success"] is True
-    cmd = mock_popen.call_args_list[0].args[0]
+    cmd = runner.commands[0]
     assert "-Dtest=ProtocolTest" in cmd
     assert not any("src/test/java" in arg for arg in cmd)
 
-def test_java_run_tests_converts_test_file_path_to_class_name_for_gradle(tmp_path):
+def test_java_run_tests_converts_test_file_path_to_class_name_for_gradle(tmp_path, monkeypatch):
     (tmp_path / "build.gradle").write_text("")
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "java"
 
-    with patch("subprocess.Popen") as mock_popen:
-        process = MagicMock()
-        process.returncode = 0
-        process.communicate.return_value = ("BUILD SUCCESSFUL", "")
-        mock_popen.return_value = process
-
-        res = validator.run_tests(target_test="src/test/java/com/example/ProtocolTest.java")
+    runner = ScriptedRunner(monkeypatch, ok("BUILD SUCCESSFUL"), strict=True)
+    res = validator.run_tests(target_test="src/test/java/com/example/ProtocolTest.java")
 
     assert res["success"] is True
-    cmd = mock_popen.call_args_list[0].args[0]
-    assert cmd[-2:] == ["--tests", "ProtocolTest"]
+    assert runner.commands[0][-2:] == ["--tests", "ProtocolTest"]
 
-def test_java_run_tests_no_target_test_omits_dtest_flag(tmp_path):
+def test_java_run_tests_no_target_test_omits_dtest_flag(tmp_path, monkeypatch):
     (tmp_path / "pom.xml").write_text("<project></project>")
     validator = PolymorphicValidator(str(tmp_path))
 
-    with patch("subprocess.Popen") as mock_popen:
-        process = MagicMock()
-        process.returncode = 0
-        process.communicate.return_value = ("Tests run: 3", "")
-        mock_popen.return_value = process
-
-        res = validator.run_tests()
+    runner = ScriptedRunner(monkeypatch, ok("Tests run: 3"), strict=True)
+    res = validator.run_tests()
 
     assert res["success"] is True
-    cmd = mock_popen.call_args_list[0].args[0]
-    assert cmd == ["mvn", "test"]
+    # S7: Maven runs offline against the contained dependency cache; no target means no ``-Dtest`` selector at all.
+    assert runner.commands[0] == ["mvn", "-B", "-o", "-Dmaven.repo.local=/kriya/cache/m2", "test"]
 
 
 # ---------------------------------------------------------------------------
@@ -862,27 +856,17 @@ def test_java_run_tests_no_target_test_omits_dtest_flag(tmp_path):
 # entries, never a shell-joined string)
 # ---------------------------------------------------------------------------
 
-def test_python_run_tests_multi_target_uses_separate_argv_entries_never_joined_string(tmp_path):
-    """Structural proof: a tuple of two targets becomes TWO separate argv
-    entries at the end of the real command list, never one space/newline-
-    joined string. This is the exact shape G1-R3 PREPARE proved was
-    required - a single opaque token containing a space is NOT multiple
-    paths to pytest's own arg parser (empirically confirmed against a real
-    Graphify worktree during PREPARE: 0 collected, "file or directory not
-    found" for the joined-string form)."""
+def test_python_run_tests_multi_target_uses_separate_argv_entries_never_joined_string(tmp_path, monkeypatch):
+    """G1-R3 PREPARE regression: a multi-target request must reach pytest as separate argv entries, never as one joined string, which pytest would treat as a single (nonexistent)
+    path. The empirical confirmation against a real Graphify worktree: 0 collected, "file or directory not found" for the joined-string form."""
     (tmp_path / "app.py").write_text("pass\n")
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "python"
 
-    with patch("subprocess.Popen") as mock_popen:
-        process = MagicMock()
-        process.returncode = 0
-        process.communicate.return_value = ("2 passed", "")
-        mock_popen.return_value = process
+    runner = ScriptedRunner(monkeypatch, _venv_creator(tmp_path), ok(), ok("2 passed"), strict=True)
+    validator.run_tests(target_test=("tests/a.py", "tests/b.py"))
 
-        validator.run_tests(target_test=("tests/a.py", "tests/b.py"))
-
-    cmd = mock_popen.call_args_list[0].args[0]
+    cmd = _pytest_command(runner)
     assert cmd[-2:] == ["tests/a.py", "tests/b.py"], (
         f"expected the two targets as separate trailing argv entries, got {cmd}"
     )
@@ -890,41 +874,30 @@ def test_python_run_tests_multi_target_uses_separate_argv_entries_never_joined_s
     assert not any(" " in arg and "tests/a.py" in arg and "tests/b.py" in arg for arg in cmd)
 
 
-def test_python_run_tests_multi_target_list_form_equivalent_to_tuple(tmp_path):
+def test_python_run_tests_multi_target_list_form_equivalent_to_tuple(tmp_path, monkeypatch):
     """A plain list (the shape a YAML-loaded config field actually produces)
     behaves identically to a tuple - both are just "an ordered sequence of
     strings" to run_tests()."""
     (tmp_path / "app.py").write_text("pass\n")
     validator = PolymorphicValidator(str(tmp_path))
 
-    with patch("subprocess.Popen") as mock_popen:
-        process = MagicMock()
-        process.returncode = 0
-        process.communicate.return_value = ("2 passed", "")
-        mock_popen.return_value = process
+    runner = ScriptedRunner(monkeypatch, _venv_creator(tmp_path), ok(), ok("2 passed"), strict=True)
+    validator.run_tests(target_test=["tests/a.py", "tests/b.py"])
 
-        validator.run_tests(target_test=["tests/a.py", "tests/b.py"])
-
-    cmd = mock_popen.call_args_list[0].args[0]
-    assert cmd[-2:] == ["tests/a.py", "tests/b.py"]
+    assert _pytest_command(runner)[-2:] == ["tests/a.py", "tests/b.py"]
 
 
-def test_python_run_tests_single_string_target_unchanged_single_argv_entry(tmp_path):
+def test_python_run_tests_single_string_target_unchanged_single_argv_entry(tmp_path, monkeypatch):
     """Existing single-target behavior remains compatible: a bare string
     still produces exactly one trailing argv entry, identical to before
     multi-target support existed."""
     (tmp_path / "app.py").write_text("pass\n")
     validator = PolymorphicValidator(str(tmp_path))
 
-    with patch("subprocess.Popen") as mock_popen:
-        process = MagicMock()
-        process.returncode = 0
-        process.communicate.return_value = ("1 passed", "")
-        mock_popen.return_value = process
+    runner = ScriptedRunner(monkeypatch, _venv_creator(tmp_path), ok(), ok("1 passed"), strict=True)
+    validator.run_tests(target_test="tests/a.py")
 
-        validator.run_tests(target_test="tests/a.py")
-
-    cmd = mock_popen.call_args_list[0].args[0]
+    cmd = _pytest_command(runner)
     assert cmd[-1] == "tests/a.py"
     assert cmd.count("tests/a.py") == 1
 
@@ -956,7 +929,7 @@ def test_python_run_tests_multi_target_real_execution_selects_exactly_both_files
     assert "test_never_runs" not in res["output"]
 
 
-def test_java_run_tests_multi_target_honors_only_first_target(tmp_path):
+def test_java_run_tests_multi_target_honors_only_first_target(tmp_path, monkeypatch):
     """Disclosed, minimal-scope limitation: multi-target selection is a
     Python-stack (pytest) concept today - Java honors only the first target,
     unchanged single-target behavior for the (so far only real) case of one
@@ -964,24 +937,19 @@ def test_java_run_tests_multi_target_honors_only_first_target(tmp_path):
     (tmp_path / "pom.xml").write_text("<project></project>")
     validator = PolymorphicValidator(str(tmp_path))
 
-    with patch("subprocess.Popen") as mock_popen:
-        process = MagicMock()
-        process.returncode = 0
-        process.communicate.return_value = ("Tests run: 1", "")
-        mock_popen.return_value = process
-
-        res = validator.run_tests(target_test=(
-            "src/test/java/com/example/ProtocolTest.java",
-            "src/test/java/com/example/OtherTest.java",
-        ))
+    runner = ScriptedRunner(monkeypatch, ok("Tests run: 1"), strict=True)
+    res = validator.run_tests(target_test=(
+        "src/test/java/com/example/ProtocolTest.java",
+        "src/test/java/com/example/OtherTest.java",
+    ))
 
     assert res["success"] is True
-    cmd = mock_popen.call_args_list[0].args[0]
+    cmd = runner.commands[0]
     assert "-Dtest=ProtocolTest" in cmd
     assert not any("OtherTest" in arg for arg in cmd)
 
 
-def test_ruby_run_tests_multi_target_extends_argv(tmp_path):
+def test_ruby_run_tests_multi_target_extends_argv(tmp_path, monkeypatch):
     """rspec accepts multiple positional path args natively - same
     structural argv-extend treatment as the Python branch, not limited to
     the first target the way Java's -Dtest=/--tests single-class-name
@@ -990,40 +958,29 @@ def test_ruby_run_tests_multi_target_extends_argv(tmp_path):
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "ruby"
 
-    with patch("subprocess.Popen") as mock_popen:
-        process = MagicMock()
-        process.returncode = 0
-        process.communicate.return_value = ("2 examples, 0 failures", "")
-        mock_popen.return_value = process
-
-        res = validator.run_tests(target_test=["spec/a_spec.rb", "spec/b_spec.rb"])
+    runner = ScriptedRunner(monkeypatch, ok("2 examples, 0 failures"), strict=True)
+    res = validator.run_tests(target_test=["spec/a_spec.rb", "spec/b_spec.rb"])
 
     assert res["success"] is True
-    cmd = mock_popen.call_args_list[0].args[0]
-    assert cmd[-2:] == ["spec/a_spec.rb", "spec/b_spec.rb"]
+    assert runner.commands[0][-2:] == ["spec/a_spec.rb", "spec/b_spec.rb"]
 
 
-def test_ruby_run_tests_reports_bundle_install_failure_without_running_rspec(tmp_path):
+def test_ruby_run_tests_reports_bundle_install_failure_without_running_rspec(tmp_path, monkeypatch):
     (tmp_path / "Gemfile").write_text("source 'https://rubygems.org'\ngem 'rspec'\n")
 
     validator = PolymorphicValidator(str(tmp_path))
 
-    with patch("subprocess.Popen") as mock_popen:
-        install_process = MagicMock()
-        install_process.returncode = 1
-        install_process.communicate.return_value = ("", "Could not find gem 'rspec'.")
-        mock_popen.return_value = install_process
-
-        res = validator.run_tests()
+    runner = ScriptedRunner(monkeypatch, fail(stderr="Could not find gem 'rspec'."), strict=True)
+    res = validator.run_tests()
 
     assert res["success"] is False
     assert "bundle install" in res["output"]
     # Only the failed `bundle install` call should have been made - rspec must
     # never run against a gem environment that's known to be broken.
-    assert mock_popen.call_count == 1
+    assert len(runner.commands) == 1
 
 
-def test_ruby_run_tests_skips_bundle_install_without_a_gemfile(tmp_path):
+def test_ruby_run_tests_skips_bundle_install_without_a_gemfile(tmp_path, monkeypatch):
     # Stack detection also accepts a bare Rakefile/*.gemspec with no Gemfile -
     # `bundle install` has nothing to act on in that case and must be skipped,
     # not attempted and failed.
@@ -1032,17 +989,12 @@ def test_ruby_run_tests_skips_bundle_install_without_a_gemfile(tmp_path):
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "ruby"
 
-    with patch("subprocess.Popen") as mock_popen:
-        rspec_process = MagicMock()
-        rspec_process.returncode = 0
-        rspec_process.communicate.return_value = ("0 examples, 0 failures", "")
-        mock_popen.return_value = rspec_process
-
-        res = validator.run_tests()
+    runner = ScriptedRunner(monkeypatch, ok("0 examples, 0 failures"), strict=True)
+    res = validator.run_tests()
 
     assert res["success"] is True, res["output"]
-    assert mock_popen.call_count == 1
-    assert mock_popen.call_args_list[0].args[0][:3] == ["bundle", "exec", "rspec"]
+    assert len(runner.commands) == 1
+    assert runner.commands[0][:3] == ["bundle", "exec", "rspec"]
 
 
 def test_resolve_maven_classpath_writes_and_reads_the_output_file(tmp_path):
@@ -1064,6 +1016,17 @@ def test_resolve_maven_classpath_writes_and_reads_the_output_file(tmp_path):
         classpath = validator.resolve_maven_classpath()
 
     assert classpath == "/home/user/.m2/repository/org/apache/ignite/ignite-core/2.18.0/ignite-core-2.18.0.jar"
+
+
+def test_resolve_maven_classpath_runs_nothing_and_degrades_to_none_under_the_mandatory_containment(tmp_path, monkeypatch):
+    """The contained counterpart of the host-only test above (census class H, deleted in S8): ``-Dmdep.outputFile`` needs a path outside the workspace mount, which a container
+    cannot write, so the lookup is not wired onto the contained path - an optional recovery-tool lookup honestly returns nothing and starts no process (documented
+    SEC-001-P6 Stage 2 degrade; with containment mandatory it is now the only behaviour)."""
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    validator = PolymorphicValidator(str(tmp_path))
+    runner = ScriptedRunner(monkeypatch, strict=True)
+    assert validator.resolve_maven_classpath() is None
+    assert not runner.calls
 
 
 def test_resolve_maven_classpath_returns_none_without_pom(tmp_path):
@@ -1113,7 +1076,7 @@ def test_inspect_external_class_returns_none_when_class_not_on_classpath(tmp_pat
         assert validator.inspect_external_class("com.nonexistent.Thing") is None
 
 
-def test_java_compile_check_enables_rawtypes_unchecked_lint_flags(tmp_path):
+def test_java_compile_check_enables_rawtypes_unchecked_lint_flags(tmp_path, monkeypatch):
     """javac's default one-line "uses unchecked or unsafe operations" summary
     carries no file:line location at all - useless for pointing a retry at the
     actual mistake. showWarnings + compilerArgument are standard, portable
@@ -1125,22 +1088,19 @@ def test_java_compile_check_enables_rawtypes_unchecked_lint_flags(tmp_path):
     same root cause precisely, for free, once these flags are on."""
     (tmp_path / "pom.xml").write_text("<project></project>")
     (tmp_path / "App.java").write_text("class App {}")
-    (tmp_path / "target" / "classes").mkdir(parents=True)
-    (tmp_path / "target" / "classes" / "App.class").write_bytes(b"")
 
     validator = PolymorphicValidator(str(tmp_path))
 
-    mock_process = MagicMock(returncode=0)
-    mock_process.communicate.return_value = ("BUILD SUCCESS", "")
-    with patch("subprocess.Popen", return_value=mock_process) as mock_popen:
-        res = validator.run_compile_check(["App.java"])
+    runner = ScriptedRunner(monkeypatch, _maven_writes("target/classes/App.class"))
+    res = validator.run_compile_check(["App.java"])
 
     assert res["success"] is True
-    invoked_cmd = mock_popen.call_args.args[0]
-    assert "-Dmaven.compiler.showWarnings=true" in invoked_cmd
-    assert "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked" in invoked_cmd
+    compile_cmds = [cmd for cmd in runner.commands if "compile" in cmd]
+    assert compile_cmds, runner.commands
+    assert "-Dmaven.compiler.showWarnings=true" in compile_cmds[-1]
+    assert "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked" in compile_cmds[-1]
 
-def test_java_compile_check_catches_maven_false_positive_when_nothing_actually_compiled(tmp_path):
+def test_java_compile_check_catches_maven_false_positive_when_nothing_actually_compiled(tmp_path, monkeypatch):
     """Regression test for a real live incident, 2026-08-22
     (ignite_qpid_protocol milestone 3/4): Maven's default sourceDirectory
     (src/main/java) covered none of this project's actual .java files (they
@@ -1157,29 +1117,23 @@ def test_java_compile_check_catches_maven_false_positive_when_nothing_actually_c
     # exact condition (Maven never actually compiled anything).
 
     validator = PolymorphicValidator(str(tmp_path))
-    mock_process = MagicMock(returncode=0)
-    mock_process.communicate.return_value = ("BUILD SUCCESS", "")
-    with patch("subprocess.Popen", return_value=mock_process):
-        res = validator.run_compile_check(["App.java"])
+    ScriptedRunner(monkeypatch, ok("BUILD SUCCESS"))
+    res = validator.run_compile_check(["App.java"])
 
     assert res["success"] is False
     assert "zero .class files" in res["output"]
     assert "sourceDirectory" in res["output"]
 
-def test_java_compile_check_trusts_maven_success_when_something_really_compiled(tmp_path):
+def test_java_compile_check_trusts_maven_success_when_something_really_compiled(tmp_path, monkeypatch):
     """Sibling of the false-positive regression above: a real compile that
     actually produced .class output must still be trusted as success -
     this check should only catch the "nothing was ever compiled" case."""
     (tmp_path / "pom.xml").write_text("<project></project>")
     (tmp_path / "App.java").write_text("class App {}")
-    (tmp_path / "target" / "classes").mkdir(parents=True)
-    (tmp_path / "target" / "classes" / "App.class").write_bytes(b"")
 
     validator = PolymorphicValidator(str(tmp_path))
-    mock_process = MagicMock(returncode=0)
-    mock_process.communicate.return_value = ("BUILD SUCCESS", "")
-    with patch("subprocess.Popen", return_value=mock_process):
-        res = validator.run_compile_check(["App.java"])
+    ScriptedRunner(monkeypatch, _maven_writes("target/classes/App.class"))
+    res = validator.run_compile_check(["App.java"])
 
     assert res["success"] is True
 
@@ -1205,18 +1159,6 @@ _REACTOR_POM = """<project>
 </project>"""
 
 
-def _mock_mvn_success():
-    mock_process = MagicMock(returncode=0)
-    mock_process.communicate.return_value = ("BUILD SUCCESS", "")
-    return mock_process
-
-
-def _mock_mvn_failure():
-    mock_process = MagicMock(returncode=1)
-    mock_process.communicate.return_value = ("", "COMPILATION ERROR")
-    return mock_process
-
-
 def test_get_pom_reactor_modules_parses_real_declared_modules(tmp_path):
     (tmp_path / "pom.xml").write_text(_REACTOR_POM)
     assert get_pom_reactor_modules(str(tmp_path / "pom.xml")) == ["core", "repository", "api"]
@@ -1230,30 +1172,26 @@ def test_get_pom_reactor_modules_empty_for_genuinely_single_module_pom(tmp_path)
     assert get_pom_reactor_modules(str(tmp_path / "pom.xml")) == []
 
 
-def test_reactor_compile_check_succeeds_when_owning_modules_have_real_classes(tmp_path):
+def test_reactor_compile_check_succeeds_when_owning_modules_have_real_classes(tmp_path, monkeypatch):
     """(1) The exact P7 reproduction shape: root pom.xml declares a real
     reactor; both candidate .java files' owning modules (core, repository)
     have real .class output in their OWN target/classes; the aggregator
     root's own target/classes never exists at all (packaging=pom - a real
     Maven aggregator produces nothing there) - must succeed."""
     (tmp_path / "pom.xml").write_text(_REACTOR_POM)
-    (tmp_path / "core" / "target" / "classes").mkdir(parents=True)
-    (tmp_path / "core" / "target" / "classes" / "UserService.class").write_bytes(b"")
-    (tmp_path / "repository" / "target" / "classes").mkdir(parents=True)
-    (tmp_path / "repository" / "target" / "classes" / "UserServiceImpl.class").write_bytes(b"")
     assert not (tmp_path / "target").exists()  # (7) aggregator root has none - still valid
 
     validator = PolymorphicValidator(str(tmp_path))
-    with patch("subprocess.Popen", return_value=_mock_mvn_success()):
-        res = validator.run_compile_check([
-            "core/src/main/java/com/narendra/app/core/ports/UserService.java",
-            "repository/src/main/java/com/narendra/app/serviceImpl/UserServiceImpl.java",
-        ])
+    ScriptedRunner(monkeypatch, _maven_writes("core/target/classes/UserService.class", "repository/target/classes/UserServiceImpl.class"))
+    res = validator.run_compile_check([
+        "core/src/main/java/com/narendra/app/core/ports/UserService.java",
+        "repository/src/main/java/com/narendra/app/serviceImpl/UserServiceImpl.java",
+    ])
 
     assert res["success"] is True
 
 
-def test_reactor_compile_check_fails_when_owning_module_produced_no_classes(tmp_path):
+def test_reactor_compile_check_fails_when_owning_module_produced_no_classes(tmp_path, monkeypatch):
     """(3) Maven reports success, but the module that actually owns the
     candidate .java file produced zero .class files - the real live
     failure this fix exists to correctly diagnose (rather than falsely
@@ -1262,17 +1200,17 @@ def test_reactor_compile_check_fails_when_owning_module_produced_no_classes(tmp_
     # repository/target/classes deliberately does not exist at all.
 
     validator = PolymorphicValidator(str(tmp_path))
-    with patch("subprocess.Popen", return_value=_mock_mvn_success()):
-        res = validator.run_compile_check([
-            "repository/src/main/java/com/narendra/app/serviceImpl/UserServiceImpl.java",
-        ])
+    ScriptedRunner(monkeypatch, ok("BUILD SUCCESS"))
+    res = validator.run_compile_check([
+        "repository/src/main/java/com/narendra/app/serviceImpl/UserServiceImpl.java",
+    ])
 
     assert res["success"] is False
     assert "repository" in res["output"]
     assert "target/classes" in res["output"]
 
 
-def test_reactor_compile_check_scans_every_owning_module_not_just_the_first(tmp_path):
+def test_reactor_compile_check_scans_every_owning_module_not_just_the_first(tmp_path, monkeypatch):
     """Candidates span TWO reactor modules (the real P7 shape - it modifies
     Java in both core and repository): core produced real output,
     repository did not. Must not stop after finding the first owning
@@ -1295,53 +1233,49 @@ def test_reactor_compile_check_scans_every_owning_module_not_just_the_first(tmp_
     assert missing == ["repository"]
 
     (tmp_path / "pom.xml").write_text(_REACTOR_POM)
-    with patch("subprocess.Popen", return_value=_mock_mvn_success()):
-        res = validator.run_compile_check([
-            "core/src/main/java/com/narendra/app/core/A.java",
-            "repository/src/main/java/com/narendra/app/serviceImpl/B.java",
-        ])
+    ScriptedRunner(monkeypatch, _maven_writes("core/target/classes/A.class"))     # the contained build runs in the gate view: it is where the classes appear
+    res = validator.run_compile_check([
+        "core/src/main/java/com/narendra/app/core/A.java",
+        "repository/src/main/java/com/narendra/app/serviceImpl/B.java",
+    ])
     assert res["success"] is False
     assert "repository" in res["output"]
 
 
-def test_reactor_compile_check_stale_unrelated_module_classes_do_not_grant_false_success(tmp_path):
+def test_reactor_compile_check_stale_unrelated_module_classes_do_not_grant_false_success(tmp_path, monkeypatch):
     """(4) core has real, stale .class output; repository (the module that
     actually owns the ONLY candidate file) has none - the fix must not be
     satisfiable by ANY declared module having classes, only the module(s)
     that genuinely own a candidate in this change set."""
     (tmp_path / "pom.xml").write_text(_REACTOR_POM)
-    (tmp_path / "core" / "target" / "classes").mkdir(parents=True)
-    (tmp_path / "core" / "target" / "classes" / "Unrelated.class").write_bytes(b"")
     # repository/target/classes deliberately does not exist.
 
     validator = PolymorphicValidator(str(tmp_path))
-    with patch("subprocess.Popen", return_value=_mock_mvn_success()):
-        res = validator.run_compile_check([
-            "repository/src/main/java/com/narendra/app/serviceImpl/UserServiceImpl.java",
-        ])
+    ScriptedRunner(monkeypatch, _maven_writes("core/target/classes/Unrelated.class"))   # core's output exists in the view the build ran in; repository's does not
+    res = validator.run_compile_check([
+        "repository/src/main/java/com/narendra/app/serviceImpl/UserServiceImpl.java",
+    ])
 
     assert res["success"] is False
     assert "repository" in res["output"]
 
 
-def test_reactor_compile_check_does_not_require_every_module_to_produce_classes(tmp_path):
+def test_reactor_compile_check_does_not_require_every_module_to_produce_classes(tmp_path, monkeypatch):
     """(2)/(7) A module (api) that owns NO candidate file in this change
     set must never be required to have compiled output - api has no
     target/classes at all here, and is correctly never mentioned, because
     only core (which owns the one real candidate) is checked."""
     (tmp_path / "pom.xml").write_text(_REACTOR_POM)
-    (tmp_path / "core" / "target" / "classes").mkdir(parents=True)
-    (tmp_path / "core" / "target" / "classes" / "Foo.class").write_bytes(b"")
     # repository/ and api/ have no target/classes at all, and own no candidate.
 
     validator = PolymorphicValidator(str(tmp_path))
-    with patch("subprocess.Popen", return_value=_mock_mvn_success()):
-        res = validator.run_compile_check(["core/src/main/java/com/narendra/app/core/Foo.java"])
+    ScriptedRunner(monkeypatch, _maven_writes("core/target/classes/Foo.class"))
+    res = validator.run_compile_check(["core/src/main/java/com/narendra/app/core/Foo.java"])
 
     assert res["success"] is True
 
 
-def test_reactor_compile_check_maven_failure_still_fails(tmp_path):
+def test_reactor_compile_check_maven_failure_still_fails(tmp_path, monkeypatch):
     """(5) A genuine Maven compile failure (non-zero exit) must still be a
     failure for a reactor exactly as it already is for a single-module
     project - the reactor-awareness only changes how a returncode==0
@@ -1349,16 +1283,16 @@ def test_reactor_compile_check_maven_failure_still_fails(tmp_path):
     (tmp_path / "pom.xml").write_text(_REACTOR_POM)
 
     validator = PolymorphicValidator(str(tmp_path))
-    with patch("subprocess.Popen", return_value=_mock_mvn_failure()):
-        res = validator.run_compile_check([
-            "repository/src/main/java/com/narendra/app/serviceImpl/UserServiceImpl.java",
-        ])
+    ScriptedRunner(monkeypatch, fail(stderr="COMPILATION ERROR"))
+    res = validator.run_compile_check([
+        "repository/src/main/java/com/narendra/app/serviceImpl/UserServiceImpl.java",
+    ])
 
     assert res["success"] is False
     assert "COMPILATION ERROR" in res["output"]
 
 
-def test_java_compile_check_reports_missing_mvn_without_javac_fallback(tmp_path):
+def test_java_compile_check_reports_missing_mvn_without_javac_fallback(tmp_path, monkeypatch):
     # Regression test: previously a missing 'mvn' binary was silently logged at
     # debug level and execution fell through to the raw javac fallback below -
     # for any project with real Maven dependencies (e.g. Ignite/Qpid), this
@@ -1372,24 +1306,17 @@ def test_java_compile_check_reports_missing_mvn_without_javac_fallback(tmp_path)
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "java"
 
-    with patch("subprocess.Popen", side_effect=FileNotFoundError(2, "No such file or directory", "mvn")) as mock_popen:
-        res = validator.run_compile_check(["UserService.java"])
+    runner = ScriptedRunner(monkeypatch, _missing_binary("mvn"))
+    res = validator.run_compile_check(["UserService.java"])
 
     assert res["success"] is False
     assert "Failed to invoke mvn compile" in res["output"]
     assert "No such file or directory" in res["output"]
     # Must not silently fall through to a javac (or gradle) fallback attempt.
-    assert mock_popen.call_count == 1
+    assert len(runner.commands) == 1
 
 
-def _mock_popen_result(returncode, stdout="", stderr=""):
-    mock_process = MagicMock()
-    mock_process.communicate.return_value = (stdout, stderr)
-    mock_process.returncode = returncode
-    return mock_process
-
-
-def test_run_pom_validate_catches_wrong_root_element(tmp_path):
+def test_run_pom_validate_catches_wrong_root_element(tmp_path, monkeypatch):
     """Regression test for a real live incident, 2026-08-16 (ignite_qpid_person,
     run b-6): a generated pom.xml with root element <plugin> instead of
     <project> is perfectly well-formed XML - find_structural_corruption()'s
@@ -1405,46 +1332,44 @@ def test_run_pom_validate_catches_wrong_root_element(tmp_path):
     )
     validator = PolymorphicValidator(str(tmp_path))
 
-    mock_process = _mock_popen_result(
-        1, stdout="[ERROR] Malformed POM ...: Expected root element 'project' but found 'plugin'"
-    )
-    with patch("subprocess.Popen", return_value=mock_process) as mock_popen:
-        res = validator.run_pom_validate()
+    runner = ScriptedRunner(monkeypatch, fail(stdout="[ERROR] Malformed POM ...: Expected root element 'project' but found 'plugin'"), strict=True)
+    res = validator.run_pom_validate()
 
     assert res["success"] is False
     assert "Expected root element 'project' but found 'plugin'" in res["output"]
-    assert mock_popen.call_args[0][0] == ["mvn", "validate"]
+    assert runner.commands[0][0] == "mvn" and runner.commands[0][-1] == "validate", runner.commands
+    assert "-o" in runner.commands[0]          # S7: offline against the contained dependency cache
 
-def test_run_pom_validate_passes_a_valid_pom(tmp_path):
+def test_run_pom_validate_passes_a_valid_pom(tmp_path, monkeypatch):
     (tmp_path / "pom.xml").write_text(
         '<?xml version="1.0"?>\n<project xmlns="http://maven.apache.org/POM/4.0.0">'
         "<modelVersion>4.0.0</modelVersion></project>\n"
     )
     validator = PolymorphicValidator(str(tmp_path))
 
-    with patch("subprocess.Popen", return_value=_mock_popen_result(0)):
-        res = validator.run_pom_validate()
+    ScriptedRunner(monkeypatch, ok(), strict=True)
+    res = validator.run_pom_validate()
 
     assert res["success"] is True
 
-def test_run_pom_validate_noop_when_no_pom_exists(tmp_path):
+def test_run_pom_validate_noop_when_no_pom_exists(tmp_path, monkeypatch):
     # Safe to call unconditionally - never invokes a subprocess if there's
     # genuinely nothing to validate.
     validator = PolymorphicValidator(str(tmp_path))
-    with patch("subprocess.Popen") as mock_popen:
-        res = validator.run_pom_validate()
+    runner = ScriptedRunner(monkeypatch, strict=True)
+    res = validator.run_pom_validate()
     assert res["success"] is True
-    assert mock_popen.call_count == 0
+    assert not runner.calls
 
-def test_run_pom_validate_reports_missing_mvn_honestly(tmp_path):
+def test_run_pom_validate_reports_missing_mvn_honestly(tmp_path, monkeypatch):
     # Same reasoning as test_java_compile_check_reports_missing_mvn_without_
     # javac_fallback above - a missing 'mvn' binary is a toolchain problem,
     # must be returned as a real failure, not silently treated as "valid."
     (tmp_path / "pom.xml").write_text("<project></project>")
     validator = PolymorphicValidator(str(tmp_path))
 
-    with patch("subprocess.Popen", side_effect=FileNotFoundError(2, "No such file or directory", "mvn")):
-        res = validator.run_pom_validate()
+    ScriptedRunner(monkeypatch, _missing_binary("mvn"))
+    res = validator.run_pom_validate()
 
     assert res["success"] is False
     assert "Failed to invoke mvn validate" in res["output"]

@@ -16,6 +16,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from _real_oci import REAL_OCI_MAVEN
 from _strict_doubles import developer_double
 from test_workflow import _runtime_verifier_ctx
 
@@ -50,7 +51,7 @@ def _workspace(tmp_path):
     _git(ws, "add", POM, SOURCE)
     _git(ws, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base")
     (ws / CANDIDATE).write_text("greeting=hello\n")
-    validator = PolymorphicValidator(str(ws), autonomy_cfg=AutonomyConfig(contained_execution_required=False))
+    validator = PolymorphicValidator(str(ws), autonomy_cfg=AutonomyConfig())
     validator.tree_binding = VerificationTreeBinding(str(ws), [POM, SOURCE], [CANDIDATE])
     return ws, validator
 
@@ -153,7 +154,7 @@ def test_a_failing_runtime_gate_still_discards_its_artifacts(tmp_path):
             (ws / "logs/app.log").write_text("boom")
             raise RuntimeError("the application crashed")
 
-    probe = Probe(str(ws), autonomy_cfg=AutonomyConfig(contained_execution_required=False))
+    probe = Probe(str(ws), autonomy_cfg=AutonomyConfig())
     probe.tree_binding = validator.tree_binding
     with pytest.raises(RuntimeError, match="crashed"):
         probe.crash()
@@ -173,7 +174,7 @@ def test_other_gates_still_refuse_the_same_untracked_file(tmp_path, gate):
             (ws / "work/runtime.dat").write_text("x")
             return {"success": True}
 
-    probe = Probe(str(ws), autonomy_cfg=AutonomyConfig(contained_execution_required=False))
+    probe = Probe(str(ws), autonomy_cfg=AutonomyConfig())
     probe.tree_binding = validator.tree_binding
     with pytest.raises(VerificationGateCreatedFiles) as raised:
         probe.make()
@@ -239,8 +240,8 @@ async def test_a_failing_application_never_offers_its_runtime_state_to_recovery(
 # ---------------------------------------------------------------- 10: the real Ignite application (KNOW B's candidate)
 
 _IGNITE = Path.home() / ".m2/repository/org/apache/ignite/ignite-spring/2.18.0"
-needs_ignite = pytest.mark.skipif(shutil.which("mvn") is None or not _IGNITE.exists(),
-                                  reason="real Maven with Ignite 2.18 in the local repository is not available")
+# S7: a real Maven build belongs to the REAL-OCI tier; the host ~/.m2 is not the contained build's cache (the canonical acquisition provides Ignite).
+needs_ignite = REAL_OCI_MAVEN
 
 
 @needs_ignite
@@ -249,7 +250,7 @@ def test_the_real_ignite_application_passes_and_its_work_directory_is_discarded(
     shutil.copytree(Path(__file__).parent / "fixtures" / "d6_knowb_candidate", ws)
     _git(ws, "init", "-q")
     candidate = [POM, "src/main/resources/ignite-config.xml", "src/main/java/com/example/IgniteDemoApp.java"]
-    validator = PolymorphicValidator(str(ws), autonomy_cfg=AutonomyConfig(contained_execution_required=False))
+    validator = PolymorphicValidator(str(ws), autonomy_cfg=AutonomyConfig())
     validator.tree_binding = VerificationTreeBinding(str(ws), [], candidate)
     result = validator.run_app_sequence(
         [["mvn", "-e", "-q", "compile", "exec:exec", "-Dexec.mainClass=com.example.IgniteDemoApp"]])

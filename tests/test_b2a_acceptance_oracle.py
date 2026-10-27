@@ -228,7 +228,8 @@ def test_a_flat_package_or_module_imports_through_the_acceptance_runner(tmp_path
     assert judgment.code == ao.ACCEPTANCE_PASSED, judgment.reason
     assert run.observations["modules"]["calc"].startswith(os.path.realpath(root))
     assert run.report.complete and run.report.runner == "pytest"
-    assert not list(root.rglob("__pycache__")) and not (root / ".pytest_cache").exists()  # -B, no cache
+    # -B, no cache: S7 - every run is contained and gets Kriya's own project environment under .kriya (its pip carries bytecode); the candidate's tree gets none
+    assert not [p for p in root.rglob("__pycache__") if ".kriya" not in p.relative_to(root).parts] and not (root / ".pytest_cache").exists()
     assert not os.listdir(root / ao.STAGING_DIR)  # staging removed
     assert judgment.evidence["acceptance_digest"] == artifact.digest
     assert judgment.evidence["runner_contract_digest"] == ao.RUNNER_CONTRACT_DIGEST

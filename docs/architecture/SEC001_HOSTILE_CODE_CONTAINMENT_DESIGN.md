@@ -1,5 +1,7 @@
 # SEC-001 — Hostile-Code Containment: Design Investigation
 
+> **S7 supersession (2026-10-26).** The packaged default described below (`containment_backend: "none"`, `contained_execution_required: false`, "zero behavior change out of the box") no longer exists: containment is mandatory and has no host opt-out (see `handover/claude-context/config-resolution-and-authority.md`, "Containment mandate has no opt-out"). The text below is the historical design record.
+
 **Status: DESIGN_INVESTIGATION, no implementation.** Drafted 2026-09-11
 from the `kriya-v0.9.0-demo-validated` baseline (code state `740ddfd`,
 reconciliation commit `8524739`, pushed to `origin/milestone-decomposition`

@@ -46,7 +46,7 @@
   },
   {
    "attempt": 1,
-   "content": "sha256:5e67473172badc50",
+   "content": "sha256:ace6d38c550eefae",
    "kind": "mirror.gate_outcome",
    "payload": "sha256:ebadd8f3cf4ea0cc",
    "success": true,
@@ -131,7 +131,7 @@
   },
   {
    "attempt": 2,
-   "content": "sha256:84ec2a6e9f3bb299",
+   "content": "sha256:77c0ee99fe710ff7",
    "kind": "mirror.gate_outcome",
    "payload": "sha256:31811e66dffd7cdd",
    "success": true,
@@ -164,7 +164,7 @@
   },
   {
    "attempt": 2,
-   "content": "sha256:c0254eaae32d56a3",
+   "content": "sha256:7ca4757992253e31",
    "kind": "mirror.gate_outcome",
    "payload": "sha256:e3b39c0b68ede7d3",
    "success": true,

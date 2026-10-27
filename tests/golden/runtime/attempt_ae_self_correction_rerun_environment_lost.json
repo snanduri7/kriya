@@ -72,9 +72,9 @@
     "<python:1>",
     "main.py"
    ],
-   "contained": false,
-   "cwd": "<wt:1>",
-   "env": true,
+   "contained": true,
+   "cwd": "<state_dir:1>/gate-views/<view>",
+   "env": false,
    "spawn": "app",
    "stdin": null,
    "timeout": 37

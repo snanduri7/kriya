@@ -22,6 +22,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from _mcp_containment_standin import STANDIN_BACKEND_NAME, ContainmentStandIn, NoPrefixBackend
@@ -249,12 +250,13 @@ async def _run_one(config: AppConfig, servers: dict) -> None:
 # ----------------------------------------------------------------- the owner's rule: per subject, one function
 
 @pytest.mark.parametrize("contained_flag, mcp_flag", [(False, False), (True, False), (False, True), (True, True)])
-def test_the_mandate_of_each_subject_follows_its_own_flag_and_no_other(contained_flag, mcp_flag):
-    autonomy = AutonomyConfig(contained_execution_required=contained_flag, mcp_contained_execution_required=mcp_flag, containment_backend="oci")
-    assert decide_external_execution(autonomy, subject=mcp_subject("srv")).contained is mcp_flag
-    assert decide_external_execution(autonomy, subject="PolymorphicValidator").contained is contained_flag
-    assert decide_external_execution(autonomy, subject=mcp_subject("srv")).reason_code == (
-        containment.CONTAINMENT_REQUIRED if mcp_flag else containment.HOST_EXECUTION_PERMITTED)
+def test_every_subject_is_mandatory_whatever_a_forged_flag_says(contained_flag, mcp_flag):
+    """S7: the per-subject flags are gone as inputs (the owner is unconditional; explicit false is a config refusal). A forged / legacy object carrying either flag in any
+    combination yields the SAME answer for an MCP server and for every other subject - and the reason is always CONTAINMENT_REQUIRED."""
+    forged = SimpleNamespace(contained_execution_required=contained_flag, mcp_contained_execution_required=mcp_flag, containment_backend="oci")
+    for subject in (mcp_subject("srv"), "PolymorphicValidator"):
+        decision = decide_external_execution(forged, subject=subject)
+        assert decision.contained is True and decision.reason_code == containment.CONTAINMENT_REQUIRED
 
 
 def test_the_subject_text_the_operator_sees_in_a_refusal_names_the_server():
@@ -315,30 +317,20 @@ def _cfg_with_mcp(**autonomy):
 def test_the_egress_report_reads_the_owner_per_server():
     from kriya.workflow.egress_authority import describe_run_egress
 
-    def rows(cfg):
-        return {d.channel: d for d in describe_run_egress(cfg) if d.channel.startswith("mcp_server:")}
-
-    host = rows(_cfg_with_mcp(mcp_contained_execution_required=False))
-    assert all(d.capability.name == "UNRESTRICTED" and d.allowed and d.containment["required"] is False for d in host.values())
-    contained = rows(_cfg_with_mcp(mcp_contained_execution_required=True, containment_backend="oci"))
-    assert contained["mcp_server:a"].allowed is True and contained["mcp_server:a"].containment == {"required": True, "backend": "oci"}
-    assert contained["mcp_server:b"].allowed is False, "explicit_destinations is not enforceable yet: refused, unchanged"
+    rows = {d.channel: d for d in describe_run_egress(_cfg_with_mcp(containment_backend="oci")) if d.channel.startswith("mcp_server:")}
+    assert rows["mcp_server:a"].allowed is True and rows["mcp_server:a"].containment == {"required": True, "backend": "oci"}
+    assert rows["mcp_server:b"].allowed is False, "explicit_destinations is not enforceable yet: refused, unchanged"
 
 
-def test_the_doctor_reports_mcp_without_required_containment_from_the_owners_decision():
+def test_the_doctor_reads_the_owner_for_every_configured_server():
     from kriya import production_doctor
 
     class Ctx:
         def __init__(self, cfg):
             self.cfg = cfg
-    check = production_doctor._check_no_host_fallback(Ctx(_cfg_with_mcp(contained_execution_required=True, mcp_contained_execution_required=False,  # noqa: SLF001
-                                                                         containment_backend="oci")))
-    assert "MCP servers are configured without required containment" in check.evidence["problems"]
-    assert check.evidence["mcp_contained_execution_required"] is False
-    ok = production_doctor._check_no_host_fallback(Ctx(_cfg_with_mcp(contained_execution_required=True, mcp_contained_execution_required=True,  # noqa: SLF001
-                                                                      containment_backend="oci")))
-    assert "MCP servers are configured without required containment" not in ok.evidence["problems"]
-    assert ok.evidence["mcp_contained_execution_required"] is True
+    check = production_doctor._check_no_host_fallback(Ctx(_cfg_with_mcp(containment_backend="oci")))   # noqa: SLF001
+    assert "MCP servers are configured without required containment" not in check.evidence["problems"]
+    assert check.evidence["mcp_contained_execution_required"] is True and check.evidence["contained_execution_required"] is True
 
 
 def test_the_wire_up_the_json_dumps_of_the_profile_digest_are_unchanged_by_the_decision(mcp_standin):
@@ -383,27 +375,38 @@ def test_every_test_module_that_starts_an_mcp_server_runs_the_contained_branch_o
         assert (TESTS_DIR / name).exists(), f"stale exemption {name}"
 
 
-LEGACY_HOST_TESTS = {
-    ("test_s5_mcp_containment.py", "test_legacy_host_execution_reports_containment_not_required_and_not_active"),
-    ("test_sec003_mcp_env_isolation.py", "test_cli_mcp_tool_call_ambient_absent_then_explicit_present_via_durable_approval"),
-    ("test_sec004_mcp_lifecycle.py", "test_cpu_over_limit_process_killed_by_os"),
-    ("test_sec004_mcp_lifecycle.py", "test_memory_over_limit_outcome_platform_honest"),
-    ("test_sec004_mcp_lifecycle.py", "test_resource_setup_failure_fails_closed"),
-    ("test_sec004_mcp_lifecycle.py", "test_cli_startup_hang_bounded_end_to_end"),
-    ("test_tool002_p2_real_cli.py", "test_real_cli_full_lifecycle_a_through_f"),
-    ("test_tool002_p2_real_cli.py", "test_real_cli_revoke_then_deny_does_not_require_restart"),
-    ("test_tool002_p2_real_cli.py", "test_real_cli_capability_profile_drift_invalidates_approval"),
-    ("test_tool002_p2_real_cli.py", "test_real_cli_host_mode_explicitly_labeled_non_contained"),
+# The owner's closed accounting of the ten ``legacy_host_mcp`` tests (S7, 2026-10-25): where each one went when the packaged default made host MCP unreachable by policy.
+#   STILL_MARKED  the characterization of the LEGACY host state itself; skipped (census class H) or direct-MCPClient host mechanics; S8 deletes them with the host branch;
+#                 the replacement controls are tests/test_s7_secure_default_contract.py and the contained-MCP tier (tests/test_s5_mcp_real_oci.py).
+#   CONVERTED     the intent is independent of host execution, so the test now runs the fixture server CONTAINED in the real OCI backend (marker removed).
+LEGACY_HOST_ACCOUNTING = {
+    ("test_s5_mcp_containment.py", "test_legacy_host_execution_reports_containment_not_required_and_not_active"): "STILL_MARKED",
+    ("test_sec004_mcp_lifecycle.py", "test_cpu_over_limit_process_killed_by_os"): "STILL_MARKED",
+    ("test_sec004_mcp_lifecycle.py", "test_memory_over_limit_outcome_platform_honest"): "STILL_MARKED",
+    ("test_sec004_mcp_lifecycle.py", "test_resource_setup_failure_fails_closed"): "STILL_MARKED",
+    ("test_sec003_mcp_env_isolation.py", "test_cli_mcp_tool_call_ambient_absent_then_explicit_present_via_durable_approval"): "CONVERTED",
+    ("test_sec004_mcp_lifecycle.py", "test_cli_startup_hang_bounded_end_to_end"): "CONVERTED",
+    ("test_tool002_p2_real_cli.py", "test_real_cli_full_lifecycle_a_through_f"): "CONVERTED",
+    ("test_tool002_p2_real_cli.py", "test_real_cli_revoke_then_deny_does_not_require_restart"): "CONVERTED",
+    ("test_tool002_p2_real_cli.py", "test_real_cli_capability_profile_drift_invalidates_approval"): "CONVERTED",
+    ("test_tool002_p2_real_cli.py", "test_real_cli_host_mode_explicitly_labeled_non_contained"): "CONVERTED",   # now test_real_cli_inspect_labels_a_running_contained_server_as_required_and_active
 }
+LEGACY_HOST_TESTS = {key for key, fate in LEGACY_HOST_ACCOUNTING.items() if fate == "STILL_MARKED"}
 
 
-def test_the_legacy_host_characterization_tests_are_exactly_the_closed_list_the_migration_deletes():
-    """Per the final production contract there is no host MCP execution: these tests exist only while the legacy ``mcp_contained_execution_required=False``
-    state does. The secure-default migration proves host MCP unreachable and DELETES them (or converts the real-CLI ones to real OCI)."""
-    marked = set()
+def test_the_legacy_host_characterization_tests_are_exactly_the_closed_list_s8_deletes():
+    """Per the final production contract there is no host MCP execution. Exactly the STILL_MARKED tests keep the ``legacy_host_mcp`` marker; every other one of the ten was
+    converted (its marker is gone, and the converted test exists under its new real-OCI form)."""
+    assert len(LEGACY_HOST_ACCOUNTING) == 10
+    marked, defined = set(), set()
     for path in sorted(TESTS_DIR.glob("test_*.py")):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
-                    "legacy_host_mcp" in ast.dump(decorator) for decorator in node.decorator_list):
-                marked.add((path.name, node.name))
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defined.add((path.name, node.name))
+                if any("legacy_host_mcp" in ast.dump(decorator) for decorator in node.decorator_list):
+                    marked.add((path.name, node.name))
     assert marked == LEGACY_HOST_TESTS, (sorted(marked - LEGACY_HOST_TESTS), sorted(LEGACY_HOST_TESTS - marked))
+    converted = {key for key, fate in LEGACY_HOST_ACCOUNTING.items() if fate == "CONVERTED"}
+    renamed = ("test_tool002_p2_real_cli.py", "test_real_cli_host_mode_explicitly_labeled_non_contained")
+    assert all(key in defined for key in converted - {renamed}), "a converted legacy test must still exist"
+    assert renamed not in defined and ("test_tool002_p2_real_cli.py", "test_real_cli_inspect_labels_a_running_contained_server_as_required_and_active") in defined

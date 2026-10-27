@@ -312,7 +312,14 @@ def test_baseline_replay_reproduces_failure_and_is_isolated(tmp_path):
     before_fingerprint = _dir_fingerprint(workspace)
     before_entries = set(os.listdir(workspace))
 
-    with patch("subprocess.Popen", return_value=_mock_mvn_success()):
+    # S7: every run is contained, so a git-metadata export (git rev-parse) and the containment launcher run before Maven. Only the MAVEN spawn is faked; a blanket
+    # patch of subprocess.Popen also answered git, whose `subprocess.run` then failed unpacking the fake process
+    real_popen = subprocess.Popen
+
+    def popen(cmd, *args, **kwargs):
+        return _mock_mvn_success() if "mvn" in [os.path.basename(str(token)) for token in cmd] else real_popen(cmd, *args, **kwargs)
+
+    with patch("subprocess.Popen", side_effect=popen):
         result = replay_deterministic_verification_against_baseline(
             fail_type="compile",
             authoritative_workspace_path=workspace,

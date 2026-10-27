@@ -28,18 +28,6 @@
    "deterministic_result": null,
    "graded_by": "llm",
    "output": "=== Step 1/2: javac -d .kriya/runtime-verification/classes src/main/java/org/example/App.java ===\n6\n\n\n\n=== Step 2/2: java -cp .kriya/runtime-verification/classes org.example.App ===\n6\n\n\n\n[Grader reasoning]: the output shows 6",
-   "resources": {
-    "address_space_enforcement": null,
-    "address_space_limit_mb": null,
-    "cpu_seconds": 240,
-    "jvm_options": [
-     "-Xmx2048m",
-     "-XX:MaxMetaspaceSize=512m",
-     "-XX:MaxDirectMemorySize=512m"
-    ],
-    "memory_budget_mb": 4096,
-    "strategy": "jvm_heap"
-   },
    "runtime_artifacts": [],
    "runtime_disposition": {
     "authority": "llm",
@@ -58,18 +46,6 @@
       "src/main/java/org/example/App.java"
      ],
      "exit_code": 0,
-     "resources": {
-      "address_space_enforcement": null,
-      "address_space_limit_mb": null,
-      "cpu_seconds": 240,
-      "jvm_options": [
-       "-Xmx2048m",
-       "-XX:MaxMetaspaceSize=512m",
-       "-XX:MaxDirectMemorySize=512m"
-      ],
-      "memory_budget_mb": 4096,
-      "strategy": "jvm_heap"
-     },
      "stderr": "",
      "stdout": "6\n",
      "timed_out": false
@@ -82,18 +58,6 @@
       "org.example.App"
      ],
      "exit_code": 0,
-     "resources": {
-      "address_space_enforcement": null,
-      "address_space_limit_mb": null,
-      "cpu_seconds": 240,
-      "jvm_options": [
-       "-Xmx2048m",
-       "-XX:MaxMetaspaceSize=512m",
-       "-XX:MaxDirectMemorySize=512m"
-      ],
-      "memory_budget_mb": 4096,
-      "strategy": "jvm_heap"
-     },
      "stderr": "",
      "stdout": "6\n",
      "timed_out": false
@@ -173,9 +137,9 @@
     ".kriya/runtime-verification/classes",
     "src/main/java/org/example/App.java"
    ],
-   "contained": false,
-   "cwd": "<wt:1>",
-   "env": true,
+   "contained": true,
+   "cwd": "<state_dir:1>/gate-views/<view>",
+   "env": false,
    "spawn": "jvm",
    "stdin": null,
    "timeout": 37
@@ -187,9 +151,9 @@
     ".kriya/runtime-verification/classes",
     "org.example.App"
    ],
-   "contained": false,
-   "cwd": "<wt:1>",
-   "env": true,
+   "contained": true,
+   "cwd": "<state_dir:1>/gate-views/<view>",
+   "env": false,
    "spawn": "jvm",
    "stdin": null,
    "timeout": 37
@@ -232,18 +196,6 @@
     "deterministic_result": null,
     "graded_by": "llm",
     "output": "=== Step 1/2: javac -d .kriya/runtime-verification/classes src/main/java/org/example/App.java ===\n6\n\n\n\n=== Step 2/2: java -cp .kriya/runtime-verification/classes org.example.App ===\n6\n\n\n\n[Grader reasoning]: the output shows 6",
-    "resources": {
-     "address_space_enforcement": null,
-     "address_space_limit_mb": null,
-     "cpu_seconds": 240,
-     "jvm_options": [
-      "-Xmx2048m",
-      "-XX:MaxMetaspaceSize=512m",
-      "-XX:MaxDirectMemorySize=512m"
-     ],
-     "memory_budget_mb": 4096,
-     "strategy": "jvm_heap"
-    },
     "runtime_artifacts": [],
     "runtime_disposition": {
      "authority": "llm",
@@ -262,18 +214,6 @@
        "src/main/java/org/example/App.java"
       ],
       "exit_code": 0,
-      "resources": {
-       "address_space_enforcement": null,
-       "address_space_limit_mb": null,
-       "cpu_seconds": 240,
-       "jvm_options": [
-        "-Xmx2048m",
-        "-XX:MaxMetaspaceSize=512m",
-        "-XX:MaxDirectMemorySize=512m"
-       ],
-       "memory_budget_mb": 4096,
-       "strategy": "jvm_heap"
-      },
       "stderr": "",
       "stdout": "6\n",
       "timed_out": false
@@ -286,18 +226,6 @@
        "org.example.App"
       ],
       "exit_code": 0,
-      "resources": {
-       "address_space_enforcement": null,
-       "address_space_limit_mb": null,
-       "cpu_seconds": 240,
-       "jvm_options": [
-        "-Xmx2048m",
-        "-XX:MaxMetaspaceSize=512m",
-        "-XX:MaxDirectMemorySize=512m"
-       ],
-       "memory_budget_mb": 4096,
-       "strategy": "jvm_heap"
-      },
       "stderr": "",
       "stdout": "6\n",
       "timed_out": false

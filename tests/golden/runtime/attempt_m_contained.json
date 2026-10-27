@@ -48,10 +48,10 @@
   },
   {
    "contained": {
-    "backend": "oci",
-    "profile": "candidate-profile"
+    "backend": "containment-test-standin",
+    "profile": "ContainmentProfile"
    },
-   "cwd": "<wt:1>",
+   "cwd": "<state_dir:1>/gate-views/<view>",
    "start_managed": [
     "<python:1>",
     "main.py"

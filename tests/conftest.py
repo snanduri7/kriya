@@ -14,6 +14,7 @@
   PRD-014 qualification store is a per-test temp dir for the same reason.
 - D2: the Kriya-owned authority home (KRIYA_AUTHORITY_HOME) is a per-test temp dir, never the real ~/.kriya/authority.
 Tests of the precedence rules unset KRIYA_LOG_DIR / KRIYA_STATE_DIR themselves."""
+import functools
 import os
 import sys
 
@@ -201,6 +202,8 @@ def pytest_addoption(parser):
                      help="PRD-034: write skips.json (every skip, allowlisted or not) to DIR")
     parser.addoption("--model-certification", default=None, metavar="DIR",
                      help="PRD-035: write model-certification.json/.md (the live matrix report) to DIR")
+    parser.addoption("--census-ids", default=None, metavar="FILE",
+                     help="S7: run exactly the node ids in this JSON list (tests/_census_selection.py); an id that is not collected is a usage error")
 
 
 # --- state-machine tier ------------------------------------------------------------
@@ -544,6 +547,13 @@ def _needs_real_docker(item):
 # suffix that --dist loadgroup schedules on; it must see the marker.
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
+    import containment_census
+
+    for item in items:
+        entry = containment_census.classify(base_nodeid(item))
+        if entry is not None and entry[0] == "H":
+            item.add_marker(pytest.mark.skip(reason="S7 census class H (legacy project-controlled host mechanics): unreachable under the final containment contract, "
+                                                    "replaced by the secure-default controls (tests/test_s7_secure_default_contract.py); deleted in S8"))
     for item in items:
         if item.path.name in STATE_MACHINE_TIER_FILES:
             item.add_marker(pytest.mark.state_machine)
@@ -552,6 +562,26 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(getattr(pytest.mark, marker))
         if _needs_real_docker(item):
             item.add_marker(pytest.mark.xdist_group("docker"))
+
+
+def base_nodeid(item):
+    """The node id without xdist's ``@<group>`` scheduling suffix (``--dist loadgroup`` appends it for a test carrying an xdist_group marker)."""
+    return item.nodeid.rsplit("@", 1)[0] if item.get_closest_marker("xdist_group") is not None and "@" in item.nodeid else item.nodeid
+
+
+@pytest.hookimpl(trylast=True, specname="pytest_collection_modifyitems")
+def pytest_select_census_ids(config, items):
+    """The exact-id selection runs LAST (after xdist rewrote the ids with its group suffix); a second hook of its own, never a shadow of the one above."""
+    ids_file = config.getoption("--census-ids")
+    if not ids_file:
+        return
+    import _census_selection
+
+    kept, missing = _census_selection.select(items, _census_selection.read_ids(ids_file), key=base_nodeid)
+    if missing:
+        raise pytest.UsageError(f"--census-ids: {len(missing)} requested node id(s) were not collected (a qualification run must not silently omit a test): {missing[:5]}")
+    config.hook.pytest_deselected(items=[item for item in items if item not in kept])
+    items[:] = kept
 
 
 _SKIPS = pytest.StashKey[list]()
@@ -674,6 +704,46 @@ def mcp_standin(monkeypatch):
     monkeypatch.setitem(containment._PRODUCTION_BACKEND_REGISTRY, STANDIN_BACKEND_NAME, lambda: backend)  # noqa: SLF001 - the test-only seam
     monkeypatch.setattr(_mcp_containment_standin, "CURRENT", backend)
     return backend
+
+
+@pytest.fixture(autouse=True)
+def _containment_census_seam(request, monkeypatch):
+    """S7: the closed migration census (tests/containment_census.py) decides what a test's harness provides, and fails a test that consults the canonical containment decision
+    without a classification (the tripwire: a new migration-sensitive consumer cannot arrive unclassified).
+    S: the shared mount-aware stand-in registered under the production name "oci" for THIS test only + the image-absent seam; F2: the image-absent seam only; N/H: nothing.
+    A real-OCI (docker-grouped) test never gets a seam."""
+    import containment_census
+
+    from kriya.tools import containment
+
+    entry = containment_census.classify(base_nodeid(request.node))
+    seam = entry[0] if entry else None
+    real_docker = _needs_real_docker(request.node)
+    consulted = []
+    original = containment._containment_is_mandatory
+
+    @functools.wraps(original)
+    def watching(autonomy, subject):
+        consulted.append(subject)
+        return original(autonomy, subject)
+
+    monkeypatch.setattr(containment, "_containment_is_mandatory", watching)
+    if not real_docker and seam in ("S", "F2"):
+        from kriya.tools import containment_oci
+
+        def image_absent(image):
+            return containment_oci.ImageInspection(image, containment_oci.ImageInspectStatus.IMAGE_NOT_FOUND)
+
+        monkeypatch.setattr(containment_oci, "local_image_inspection", image_absent)
+    if not real_docker and seam == "S":
+        from _containment_standin import MountAwareStandIn
+
+        standin = MountAwareStandIn()
+        monkeypatch.setitem(containment._PRODUCTION_BACKEND_REGISTRY, "oci", lambda: standin)  # noqa: SLF001 - the test-only seam
+    yield
+    if consulted and entry is None:
+        pytest.fail(f"{request.node.nodeid} consults the canonical containment decision ({sorted(set(consulted))}) but is not classified in tests/containment_census.py - "
+                    "add it (an exact id or its file rule) with its seam and class", pytrace=False)
 
 
 def pytest_sessionfinish(session):

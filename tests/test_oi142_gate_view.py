@@ -29,6 +29,7 @@ from kriya.tools.gate_view import (
     GateViewError,
     build_gate_view,
 )
+from kriya.tools.process import ProcessController
 from kriya.tools.validate import RUNTIME_VERIFICATION_GATE, PolymorphicValidator
 from kriya.workflow.file_integrity import VerificationGateCreatedFiles, VerificationTreeBinding, VerificationTreeMutated
 from kriya.workflow.worktree import repository_content_paths
@@ -773,19 +774,31 @@ def test_the_venv_a_view_gate_uses_is_the_origin_trees_not_the_views(tmp_path, m
 
     def fake_run(cmd, cwd, timeout=300, **_kwargs):
         if cmd[1:3] == ["-m", "venv"]:
-            (Path(cmd[3]) / "bin").mkdir(parents=True)
-            (Path(cmd[3]) / "bin" / "python").write_text("#!/bin/sh\n")
+            # S7: the contained command names the venv by its MOUNT-relative path; the mount of a gate view's `.kriya/venv` IS the origin's venv, so that is where it is created
+            assert not os.path.isabs(cmd[3]), cmd
+            (root / cmd[3] / "bin").mkdir(parents=True)
+            (root / cmd[3] / "bin" / "python").write_text("#!/bin/sh\n")
             created.append(cmd[3])
         return {"returncode": 0, "stdout": "", "stderr": "", "timeout": False}
 
     monkeypatch.setattr(validator, "_run_cmd_with_timeout", fake_run)
     from kriya.tools.validate import _verification_gate
 
-    pythons = []
+    pythons, mounts = [], []
+
+    def body(self):
+        pythons.append(self._resolve_python_interpreter()[0])
+        mounts.append(self._venv_mounts(self.workspace_path, writable=False))     # what the contained command would mount into the view
+        return {"success": True}
+
     for _ in range(2):  # two outermost gates of one validator
-        _verification_gate("tests")(lambda self: pythons.append(self._resolve_python_interpreter()[0]) or {"success": True})(validator)
-    assert pythons == [str(root / ".kriya" / "venv" / "bin" / "python")] * 2 and created == [str(root / ".kriya" / "venv")]
+        _verification_gate("tests")(body)(validator)
+    assert pythons == [os.path.join(".kriya", "venv", "bin", "python")] * 2 and created == [os.path.join(".kriya", "venv")]
     assert validator.venv_install_attempts == 1
+    # ...and the venv a view gate runs is the ORIGIN's: the mount source is the origin's `.kriya/venv`, read-only, at the mount-relative path
+    for mount in mounts:
+        [spec] = mount
+        assert spec.host_path == os.path.realpath(root / ".kriya" / "venv") and spec.writable is False
 
 
 def test_the_dependency_cache_key_is_the_origin_trees_in_and_out_of_a_view(tmp_path):
@@ -987,15 +1000,20 @@ def test_no_module_outside_the_validator_runs_a_gate_command_against_the_worktre
     assert outside == ["kriya/workflow/authority_bundle.py"]  # runs in a Kriya-made export (X5 residual), never the worktree
 
 
-def _recorded_cwds(monkeypatch):
+def _recorded_cwds(monkeypatch, real_environment=False):
+    """Every spawn's cwd, answered by a fake. ``real_environment``: S7 - every contained run first prepares the project environment (``python3 -m venv`` / pip) through
+    the contained command flow; those two steps run for real (still recorded) so the gated command itself is reached."""
     cwds = []
+    real_run = ProcessController.run
 
     class Done:
         def to_dict(self):
             return {"returncode": 0, "stdout": "", "stderr": "", "timeout": False}
 
-    def record(self, cmd, cwd=None, **_kwargs):
+    def record(self, cmd, cwd=None, **kwargs):
         cwds.append(cwd)
+        if real_environment and ("-m" in cmd and ("venv" in cmd or "pip" in cmd)):
+            return real_run(self, cmd, cwd=cwd, **kwargs)
         return Done()
 
     monkeypatch.setattr("kriya.tools.validate.ProcessController.run", record)
@@ -1004,7 +1022,7 @@ def _recorded_cwds(monkeypatch):
 
 def test_each_python_gate_entry_executes_in_a_view_and_never_in_the_worktree(tmp_path, monkeypatch):
     root = _repo(tmp_path, calc=CALC2)
-    cwds = _recorded_cwds(monkeypatch)
+    cwds = _recorded_cwds(monkeypatch, real_environment=True)
     validator = PolymorphicValidator(str(root), original_workspace_path=str(root))
     validator.tree_binding = VerificationTreeBinding(str(root), repository_content_paths(str(root)), ["calc.py"])
     entries = {

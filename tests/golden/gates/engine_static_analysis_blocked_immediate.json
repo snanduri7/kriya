@@ -46,7 +46,7 @@
   },
   {
    "attempt": 1,
-   "content": "sha256:5e67473172badc50",
+   "content": "sha256:ace6d38c550eefae",
    "kind": "mirror.gate_outcome",
    "payload": "sha256:ebadd8f3cf4ea0cc",
    "success": true,

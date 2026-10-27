@@ -2,12 +2,12 @@
 
 Subcommands print ONE JSON object on stdout and exit 0 only when every check inside passed:
 
-  runtime  --repo R --fixture F [--contained] [--cache-seed DIR]
+  runtime  --repo R --fixture F --contained [--cache-seed DIR]
       Runs the reference candidate's runtime command through Kriya's own runtime-verification path
       (PolymorphicValidator.run_app_sequence, with the verification tree bound, exactly as the workflow does)
       and checks the application-owned success line, the Ignite start and the exit code.
-      --contained uses the OCI backend (network DENIED); the Maven cache is pre-seeded from --cache-seed so no
-      network is needed (the workflow's own compile/test gates would normally have filled it).
+      --contained is REQUIRED (S7, packaged-default migration: there is no host verification mode any more): the OCI backend (network DENIED) runs the candidate; the Maven cache is
+      pre-seeded from --cache-seed so no network is needed (the workflow's own compile/test gates would normally have filled it).
       --witness additionally places ./cache-witness (offset 1000) in the project: the cache itself then stores a DIFFERENT Protocol (time + 1000, protocolVersion and softwareVersion + 1,
       one byte appended to the body), so the expected line changes in every field, and only a program that really used the whole value read back from the cache can print it.
       Limit (stated, not hidden): a program that reads ./cache-witness itself and fakes the shift defeats the runtime leg; the JUnit tests catch such a fake inside ProtocolCacheDemo, not inside Main alone.
@@ -67,6 +67,8 @@ def cmd_runtime(args: argparse.Namespace) -> Dict[str, Any]:
     from kriya.tools.validate import PolymorphicValidator
     from kriya.workflow.file_integrity import VerificationTreeBinding
 
+    if not args.contained:
+        raise SystemExit("qualify_spring_ignite: the host verification mode no longer exists - project-controlled execution is always contained (pass --contained; Docker and the pinned Maven image are required)")
     fixture = Path(args.fixture)
     files = sorted(str(p.relative_to(fixture)) for p in fixture.rglob("*") if p.is_file())
     witness = bool(getattr(args, "witness", False))
@@ -86,7 +88,7 @@ def cmd_runtime(args: argparse.Namespace) -> Dict[str, Any]:
             cache = os.path.join(tmp, "state", "dependency-cache", "maven", key)
             os.makedirs(os.path.dirname(cache), exist_ok=True)
             shutil.copytree(os.path.expanduser(args.cache_seed), cache)
-        cfg = AutonomyConfig(contained_execution_required=args.contained, containment_backend="oci" if args.contained else "none")
+        cfg = AutonomyConfig()    # the packaged defaults: contained, backend oci (an explicit opt-out is a typed config refusal)
         validator = PolymorphicValidator(workspace, autonomy_cfg=cfg)
         validator.tree_binding = VerificationTreeBinding(workspace, [], files)
         started = time.time()
@@ -170,7 +172,7 @@ def cmd_mutants(args: argparse.Namespace) -> Dict[str, Any]:
             shutil.copytree(project, pristine)
             junit = _mvn_test(project)
             tests_pass = junit["passes"]
-            witness = cmd_runtime(argparse.Namespace(repo=args.repo, fixture=pristine, contained=False, cache_seed="", witness=True))
+            witness = cmd_runtime(argparse.Namespace(repo=args.repo, fixture=pristine, contained=True, cache_seed=os.path.expanduser("~/.m2/repository"), witness=True))
             case = {"junit_passes": tests_pass, "witness_leg_ok": bool(witness.get("ok")), "compile_error": junit["compile_error"]}
             case["killed"] = not (tests_pass and case["witness_leg_ok"]) and not junit["compile_error"]
             case["killed_by"] = [label for label, alive in (("junit", not tests_pass), ("witness_leg", not case["witness_leg_ok"])) if alive]

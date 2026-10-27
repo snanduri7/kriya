@@ -239,6 +239,7 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
     when the config would ultimately be denied.
     """
     from kriya.config.authority import (
+        CONTAINMENT_MANDATE_FIELDS,
         ConfigSource,
         FieldClassification,
         FieldPath,
@@ -246,6 +247,7 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
         compute_violations,
         explicit_config_source,
         parse_autonomy_mode,
+        parse_containment_mandate,
         parse_egress_policy,
         path_field_classification,
         value_gated_field_classification,
@@ -629,6 +631,13 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
     # approve: an approval cannot make it valid.
     if isinstance(autonomy_section, dict) and "egress_policy" in autonomy_section:
         parse_egress_policy(autonomy_section["egress_policy"])
+    # S7 (packaged-default migration): the containment mandate has NO operator opt-out. An explicit false (any layer) is a typed ContainmentOptOutError for load_config,
+    # `kriya authority inspect|approve` and the desktop's configuration operations - never listed as a field to approve (an approval cannot make host execution valid),
+    # never coerced to true. An explicit true and the packaged default are accepted; the production profile writes true.
+    if isinstance(autonomy_section, dict):
+        for mandate_field in CONTAINMENT_MANDATE_FIELDS:
+            if mandate_field in autonomy_section:
+                parse_containment_mandate(mandate_field, autonomy_section[mandate_field])
 
     violations = compute_violations(provenance, classification_overrides)
     return ConfigResolutionState(config_dict=config_dict, workspace_root=workspace_root, violations=violations,

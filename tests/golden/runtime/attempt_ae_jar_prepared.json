@@ -29,18 +29,6 @@
       "target/app-1.0.jar"
      ],
      "exit_code": 0,
-     "resources": {
-      "address_space_enforcement": null,
-      "address_space_limit_mb": null,
-      "cpu_seconds": 240,
-      "jvm_options": [
-       "-Xmx2048m",
-       "-XX:MaxMetaspaceSize=512m",
-       "-XX:MaxDirectMemorySize=512m"
-      ],
-      "memory_budget_mb": 4096,
-      "strategy": "jvm_heap"
-     },
      "stderr": "",
      "stdout": "6\n",
      "timed_out": false
@@ -74,15 +62,24 @@
   {
    "argv": [
     "mvn",
+    "-B",
+    "-o",
+    "-Dmaven.repo.local=/kriya/cache/m2",
     "package",
     "-DskipTests"
    ],
-   "contained": false,
-   "cwd": "<wt:1>",
-   "env": true,
+   "contained": true,
+   "cwd": "<state_dir:1>/gate-views/<view>",
+   "env": false,
    "spawn": "maven",
    "stdin": null,
    "timeout": 300
+  },
+  {
+   "evidence": "gate.result",
+   "gate": "runtime_verification",
+   "stage": "validator",
+   "success": null
   },
   {
    "interpreter_grounding": [
@@ -99,9 +96,9 @@
     "-jar",
     "target/app-1.0.jar"
    ],
-   "contained": false,
-   "cwd": "<wt:1>",
-   "env": true,
+   "contained": true,
+   "cwd": "<state_dir:1>/gate-views/<view>",
+   "env": false,
    "spawn": "app",
    "stdin": null,
    "timeout": 37
@@ -152,18 +149,6 @@
        "target/app-1.0.jar"
       ],
       "exit_code": 0,
-      "resources": {
-       "address_space_enforcement": null,
-       "address_space_limit_mb": null,
-       "cpu_seconds": 240,
-       "jvm_options": [
-        "-Xmx2048m",
-        "-XX:MaxMetaspaceSize=512m",
-        "-XX:MaxDirectMemorySize=512m"
-       ],
-       "memory_budget_mb": 4096,
-       "strategy": "jvm_heap"
-      },
       "stderr": "",
       "stdout": "6\n",
       "timed_out": false
@@ -177,9 +162,7 @@
   }
  ],
  "worktree_changes": {
-  "added": [
-   "target/app-1.0.jar"
-  ],
+  "added": [],
   "changed": [],
   "removed": []
  }

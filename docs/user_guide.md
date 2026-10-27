@@ -427,7 +427,18 @@ subtask row reported. `<group>.milestone-plan` is a `kriya plan-milestones` resu
   - `kriya traces` and `kriya doctor --production` both point this out while an old database is present.
 
 ### 2.0c Contained verification toolchains (`autonomy.contained_execution_required`)
-With contained execution required, compile, test and runtime checks run in a prebuilt, versioned container
+**Always on, no host opt-out.** Containment is the packaged default and cannot be switched off: `autonomy.containment_backend`
+defaults to `oci`, and `autonomy.contained_execution_required` and `autonomy.mcp_contained_execution_required` default to
+`true`. Setting either to `false` (in the YAML, the environment-backed layers, or a program) is a configuration error
+(`ContainmentOptOutError`), never a silent `true`. Everything that runs project-controlled code (verification gates,
+managed services, the shell tool, MCP servers, static analysis) needs an isolating backend, which means Docker running,
+and is refused with a typed reason before any process starts when there is none. `containment_backend: none` still
+parses but provides no isolation, so it cannot run such work. Kriya's own fixed infrastructure commands (git, the docker
+CLI, a toolchain probe in an empty directory) are not project-controlled and need no backend. State recorded under the old
+host default (checkpoints, baselines, release records, static-analysis evidence, preflight fingerprints) is a different
+execution identity and reads as stale rather than as a match.
+
+Compile, test and runtime checks run in a prebuilt, versioned container
 image chosen from the project's declared toolchain. Kriya never installs a compiler or JDK during a run, and never
 falls back to the host's tools.
 
@@ -1069,7 +1080,7 @@ static_analysis:
     semgrep:
       version: "1.178.0"         # exact; "latest" and ranges are refused
       rule_packs: [/opt/company/semgrep-rules]   # local only; relative paths are resolved against this file's directory
-      # image: semgrep/semgrep@sha256:...        # required when autonomy.contained_execution_required
+      # image: semgrep/semgrep@sha256:...        # required (static analysis always runs contained)
 ```
 
 **What it checks.**
@@ -1359,7 +1370,7 @@ It binds the goal, the requirement set and each covered requirement's exact text
 project's language; every asset must match its digest; any mismatch is a typed refusal before any model call
 (`AUTHORITY_GOAL_MISMATCH`, `AUTHORITY_BASE_MISMATCH`, ...). The bundle is stored content-addressed under the state
 directory's `verification-authority/` and its digest joins the contract. It runs only under Kriya's containment
-(`autonomy.contained_execution_required`), never on the host: the candidate is copied to a Kriya-owned scratch,
+(always required; there is no host opt-out), never on the host: the candidate is copied to a Kriya-owned scratch,
 the assets are staged read-only beside it, `prepare` runs with registry-only network (the dependency-acquisition
 authority) and `verify` with network denied; exit 0 is PASS, exit 1 is FAIL, anything else (a timeout, a changed
 asset, a candidate changed during the run, an unavailable toolchain or containment: `AUTHORITY_EXECUTION_UNAVAILABLE`)

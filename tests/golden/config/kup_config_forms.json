@@ -527,7 +527,7 @@
     "directory": "<TMP>/plain",
     "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/plain/kriya.yaml",
-    "fingerprint": "1f9045e87e382c4b2e9cc625117799cbdb4092525819be2a77592ac8205dfeff",
+    "fingerprint": "33ac40c2d0710e52a3ec4b7c4c0b522c1a863507ac247f1ca5a217a9cac2efe4",
     "source": "auto_discovered_cwd",
     "status": "loaded"
    },
@@ -1449,7 +1449,7 @@
     "directory": "<TMP>/plain",
     "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/plain/kriya.yaml",
-    "fingerprint": "1f9045e87e382c4b2e9cc625117799cbdb4092525819be2a77592ac8205dfeff",
+    "fingerprint": "33ac40c2d0710e52a3ec4b7c4c0b522c1a863507ac247f1ca5a217a9cac2efe4",
     "source": "auto_discovered_cwd",
     "status": "loaded"
    },
@@ -1931,7 +1931,7 @@
     "directory": "<TMP>/plain",
     "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/plain/kriya.yaml",
-    "fingerprint": "1f9045e87e382c4b2e9cc625117799cbdb4092525819be2a77592ac8205dfeff",
+    "fingerprint": "33ac40c2d0710e52a3ec4b7c4c0b522c1a863507ac247f1ca5a217a9cac2efe4",
     "source": "auto_discovered_cwd",
     "status": "loaded"
    },
@@ -2427,7 +2427,7 @@
     "directory": "<TMP>/plain",
     "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/plain/kriya.yaml",
-    "fingerprint": "1f9045e87e382c4b2e9cc625117799cbdb4092525819be2a77592ac8205dfeff",
+    "fingerprint": "33ac40c2d0710e52a3ec4b7c4c0b522c1a863507ac247f1ca5a217a9cac2efe4",
     "source": "auto_discovered_cwd",
     "status": "loaded"
    },

@@ -31,14 +31,6 @@
       "-q"
      ],
      "exit_code": 0,
-     "resources": {
-      "address_space_enforcement": "advisory",
-      "address_space_limit_mb": 4096,
-      "cpu_seconds": 240,
-      "jvm_options": [],
-      "memory_budget_mb": 4096,
-      "strategy": "address_space"
-     },
      "stderr": "",
      "stdout": "1 passed\n",
      "timed_out": false
@@ -86,9 +78,9 @@
     "pytest",
     "-q"
    ],
-   "contained": false,
-   "cwd": "<wt:1>",
-   "env": true,
+   "contained": true,
+   "cwd": "<state_dir:1>/gate-views/<view>",
+   "env": false,
    "spawn": "pytest",
    "stdin": null,
    "timeout": 37
@@ -131,14 +123,6 @@
        "-q"
       ],
       "exit_code": 0,
-      "resources": {
-       "address_space_enforcement": "advisory",
-       "address_space_limit_mb": 4096,
-       "cpu_seconds": 240,
-       "jvm_options": [],
-       "memory_budget_mb": 4096,
-       "strategy": "address_space"
-      },
       "stderr": "",
       "stdout": "1 passed\n",
       "timed_out": false

@@ -249,7 +249,10 @@ async def test_the_retry_strategy_stops_the_run_on_the_environment_and_retries_a
     assert bool(state.environment_failure) is stops
 
 
-# ---- the real process path: a fake `mvn` on PATH, the real ProcessController / validator / gate (no stub of _run_maven_cmd's result) -------------------------------------------
+# ---- the real process path: a fake `mvn` the CONTAINED launcher resolves, the real ProcessController / validator / gate (no stub of _run_maven_cmd's result) --------------------
+# Under the default contained config `mvn` is resolved by the contained launch (the test stand-in's launcher here, the image's launch stage in a real container), never by a host
+# spawn. `executable-missing` / `not-executable` therefore exercise the backend's typed never-started fact (FINITE-LAUNCH-TARGET-START-001): the launcher's own failed exec, not an
+# exit code. The real-Docker equivalent, with a Maven image, is tests/test_finite_launch_target_start.py.
 def _fake_mvn(tmp_path, script, *, executable=True):
     bindir = tmp_path / "bin"
     bindir.mkdir()

@@ -332,7 +332,7 @@ def test_candidate_isolation_is_proven_with_the_real_mechanism_outside_the_works
 
 @pytest.mark.parametrize("weaken", [
     lambda cfg: setattr(cfg.autonomy, "containment_backend", "none"),
-    lambda cfg: setattr(cfg.autonomy, "contained_execution_required", False),
+    # S7: the second weakening (contained_execution_required False) cannot be built any more - it is a typed config refusal (tests/test_s7_secure_default_contract.py)
 ])
 def test_a_containment_posture_that_could_fall_back_to_the_host_blocks(tmp_path, weaken):
     cfg = _production_cfg(tmp_path)

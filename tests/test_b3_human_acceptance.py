@@ -6,13 +6,13 @@ never CLOSED_BY_EVIDENCE, never a proof.
 """
 import json
 import os
-import shutil
 import subprocess
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from _b2a_fixtures import CALC, CALC_ACCEPTANCE, calc_project
+from _real_oci import REAL_OCI_MAVEN
 from click.testing import CliRunner
 from test_b2a_acceptance_oracle import _ledger, _run
 
@@ -391,7 +391,8 @@ def test_supporting_examples_are_kept_beside_human_acceptance(tmp_path):
 
 # ---------------------------------------------------------------- 21: Maven B2-c with B3
 
-@pytest.mark.skipif(shutil.which("mvn") is None, reason="real Maven is not installed")
+# S7: a real Maven build belongs to the REAL-OCI tier (owner decision): it needs the canonical provider image and cache, which no stand-in simulates.
+@REAL_OCI_MAVEN
 @pytest.mark.parametrize("variant, outcome", [("correct", RequirementOutcome.HUMAN_ACCEPTED),
                                               ("wrong", RequirementOutcome.VIOLATED)])
 def test_21_maven_acceptance_with_a_human_approval(tmp_path, variant, outcome):

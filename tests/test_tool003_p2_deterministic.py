@@ -10,7 +10,7 @@ import os
 import pytest
 import yaml
 
-from kriya.config.authority import ConfigAuthorityError, FieldClassification, classify_field
+from kriya.config.authority import ConfigAuthorityError, ContainmentOptOutError, FieldClassification, classify_field
 from kriya.config.config import load_config
 from kriya.mcp.capability import compute_mcp_capability_profile_digest, resolve_mcp_capability_profile
 from kriya.mcp.containment_adapter import MCPContainmentUnsupportedError, map_capability_profile_to_containment
@@ -213,15 +213,12 @@ def test_repo_cannot_enable_mcp_contained_execution_required(tmp_path):
 
 
 def test_repo_cannot_disable_mcp_contained_execution_required_either(tmp_path):
-    """Widening AND narrowing both require authority - SEC-009 governs the
-    FIELD, not just one direction (mirrors contained_execution_required's
-    own doctrine: "flipping this to True... fails CLOSED" applies
-    symmetrically - a repo could otherwise silently turn OFF an
-    operator's own True setting by shipping an explicit False)."""
+    """A repo cannot silently turn OFF the operator's mandate by shipping an explicit False. Since S7 there is no opt-out at all, so the refusal is the config authority's
+    closed parser (ContainmentOptOutError, earlier than - and independent of - any authority approval: nothing exists to approve)."""
     ws = tmp_path / "ws"
     with _cwd(ws):
         _write_yaml(ws / "kriya.yaml", {"autonomy": {"mcp_contained_execution_required": False}})
-        with pytest.raises(ConfigAuthorityError, match="mcp_contained_execution_required"):
+        with pytest.raises(ContainmentOptOutError, match="mcp_contained_execution_required"):
             load_config()
 
 

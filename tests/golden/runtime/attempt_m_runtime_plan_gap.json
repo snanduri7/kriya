@@ -72,8 +72,11 @@
    ]
   },
   {
-   "contained": false,
-   "cwd": "<wt:1>",
+   "contained": {
+    "backend": "containment-test-standin",
+    "profile": "ContainmentProfile"
+   },
+   "cwd": "<state_dir:1>/gate-views/<view>",
    "start_managed": [
     "<python:1>",
     "main.py"

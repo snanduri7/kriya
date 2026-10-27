@@ -146,4 +146,5 @@ def test_milestone_identity_uses_the_same_function(tmp_path, local_images):
     local_images["maven:3.9-eclipse-temurin-17"] = DIGEST_1
     identity = current_toolchain_identity(str(tmp_path), _contained())
     assert identity == toolchain_fingerprint(str(tmp_path), _contained()).to_dict()
-    assert current_toolchain_identity(str(tmp_path), AutonomyConfig())["value"] == "UNAVAILABLE"
+    # S7: there is no host mode to be unavailable in; what cannot be attested is a run with no workspace.
+    assert current_toolchain_identity(None, AutonomyConfig())["value"] == "UNAVAILABLE"

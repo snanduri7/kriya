@@ -4681,7 +4681,8 @@ async def test_current_managed_service_judgment_reaches_execution_primitive_with
 
     mock_run_managed_service.assert_called_once()
     (spec,), _kwargs = mock_run_managed_service.call_args
-    assert spec.service_command == [sys.executable, "manage.py", "runserver", "0.0.0.0:8000"]
+    # S7: every run is contained, so "python" is grounded to the project environment's interpreter (spelled workspace-relative, as the contained commands are)
+    assert spec.service_command == [".kriya/venv/bin/python", "manage.py", "runserver", "0.0.0.0:8000"]
     assert not any("&&" in tok or "curl" in tok for tok in spec.service_command)
     assert spec.readiness.kind == "http" and spec.readiness.port == 8000
     assert spec.readiness.path == "/customers/health"
@@ -4780,11 +4781,13 @@ def test_managed_service_non_python_command_is_unchanged(tmp_path):
     assert spec.service_command == ["python", "manage.py", "runserver"]
 
 
-def test_managed_service_python_command_falls_back_to_kriyas_own_interpreter_without_a_manifest(tmp_path):
+def test_managed_service_python_command_is_grounded_to_the_project_environment_without_a_manifest(tmp_path):
     """(3) A real Python workspace (a bare .py file on disk, no requirements.txt/
-    pyproject.toml) retains the EXISTING fallback behavior _resolve_python_
-    interpreter() already documents: sys.executable, not a venv, and no
-    install_error - exercised through the real (unmocked) substitution path."""
+    pyproject.toml). S7: the fallback to Kriya's own interpreter was a host
+    behaviour; every run is contained now, so even a manifest-less workspace
+    gets its project environment and "python" is grounded to that
+    environment's interpreter, with no install_error - exercised through the
+    real (unmocked) substitution path."""
     (tmp_path / "app.py").write_text("print('hi')\n", encoding="utf-8")
     from kriya.tools.validate import PolymorphicValidator
 
@@ -4799,7 +4802,7 @@ def test_managed_service_python_command_falls_back_to_kriyas_own_interpreter_wit
     spec, invalid_reason = _validate_and_convert_managed_service_contract(managed_service, str(tmp_path), validator)
 
     assert invalid_reason is None
-    assert spec.service_command == [sys.executable, "manage.py", "runserver"]
+    assert spec.service_command == [".kriya/venv/bin/python", "manage.py", "runserver"]
 
 
 def test_managed_service_uses_the_identical_interpreter_the_finite_test_path_resolves(tmp_path):
@@ -5437,8 +5440,9 @@ async def test_prv17_managed_service_semantic_shape_never_constructs_compound_co
     (spec,), _kwargs = mock_run_managed_service.call_args
     # "python" is grounded to the resolved project interpreter (environment-
     # grounding fix, 2026-09-03) - this fixture's workspace has no
-    # requirements.txt/pyproject.toml, so that resolves to sys.executable.
-    assert spec.service_command == [sys.executable, "manage.py", "runserver"]
+    # requirements.txt/pyproject.toml; S7: it still resolves to the project
+    # environment's interpreter, as every run is contained.
+    assert spec.service_command == [".kriya/venv/bin/python", "manage.py", "runserver"]
     assert spec.probe.method == "GET"
     assert spec.probe.path == "/customers/health"
     assert spec.probe.expected_status == 200
@@ -9616,8 +9620,12 @@ async def test_workflow_surfaces_toolchain_warning_even_on_success(tmp_path):
     # mismatch is also something the goal cares about correcting - this
     # goal's text ("Create a Java pom") names no specific version, so that
     # third call returns None without needing anything beyond the mismatch
-    # flag already fetched.
-    assert mock_toolchain.call_count == 3
+    # flag already fetched. S7: every run is contained, so the terminal gate
+    # also binds the toolchain identity of the evidence it accepts
+    # (toolchain_fingerprint -> baseline_environment_identity), which asks
+    # _resolve_java_home_override() once more - a fourth call, still once per
+    # generation run.
+    assert mock_toolchain.call_count == 4
 
 
 @pytest.mark.asyncio
@@ -9686,8 +9694,10 @@ async def test_workflow_checks_toolchain_only_once_across_retries(tmp_path):
     # override()'s own check, added 2026-08-07 - this run has no mismatch at
     # all, so that third call returns None immediately), not once per retry
     # attempt - the "only once across retries" property this test is really
-    # guarding.
-    assert mock_toolchain.call_count == 3
+    # guarding. S7: plus the one call the terminal gate's toolchain identity
+    # binding makes (see test_workflow_surfaces_toolchain_warning_even_on_success):
+    # four, and the same four whatever the number of attempts.
+    assert mock_toolchain.call_count == 4
 
 
 @pytest.mark.asyncio
@@ -10614,6 +10624,9 @@ async def test_quiet_successful_maven_compile_uses_process_authority(tmp_path):
     with patch(
         "kriya.tools.validate.PolymorphicValidator.run_compile_check",
         return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_pom_validate",
+        return_value={"success": True, "output": ""},     # S7: `mvn validate` is a real Maven in the contained flow (real-OCI tier); not this test's subject
     ), patch(
         "kriya.tools.validate.PolymorphicValidator.run_tests",
         return_value={"success": True, "output": ""},
@@ -12508,8 +12521,12 @@ async def test_run_attempt_deterministically_corrects_exec_main_class_end_to_end
         architect_basename_to_path={"App.java": "App.java", "pom.xml": "pom.xml"},
     )
 
+    # S7: pom validation is `mvn validate` in the contained flow (a real Maven belongs to the real-OCI tier); this test's subject is the correction, not Maven
     with patch(
         "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_pom_validate",
         return_value={"success": True, "output": ""},
     ), patch(
         "kriya.tools.validate.PolymorphicValidator.run_tests",
@@ -13429,7 +13446,9 @@ async def test_run_attempt_diagnosis_mismatch_bypassed_for_pom_semantic_validati
         architect_basename_to_path={"pom.xml": "pom.xml"},
     )
 
-    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""}):
+    # S7: pom validation is `mvn validate` in the contained flow (a real Maven belongs to the real-OCI tier); this test's subject is the diagnosis-mismatch bypass
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""}), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", return_value={"success": True, "output": ""}):
         await run_attempt(state, ctx)  # must NOT raise QualityGateFailure
 
     with open(os.path.join(str(tmp_path), "pom.xml"), encoding="utf-8") as fh:

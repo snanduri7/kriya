@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 from contextlib import ExitStack
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -272,7 +273,8 @@ async def test_a_standalone_extraction_and_conflict_resolution_commit_before_the
 
 # ------------------------------------------------------------------------------------------ real enforce flow
 
-async def _run_enforce_with_site(tmp_path, site, extra_patches=(), terminal_fails=False, during_second_subtask=None, seen_out=None, explode=False):
+async def _run_enforce_with_site(tmp_path, site, extra_patches=(), terminal_fails=False, during_second_subtask=None, seen_out=None, explode=False,
+                                 goal="goal", repo_files=None, spec_compliance=False):
     """The real enforce route (WorkflowController -> EnforceLoop -> TerminalGateService), two subtasks, `paths.skills` inside the
     repository. Subtask 1's stand-in engine runs the production writer `site` the way its stage does (inside the run, after the
     plan's sandbox exists); the real terminal gate service is observed with the real S3 predicate over the plan's sandbox."""
@@ -284,13 +286,24 @@ async def _run_enforce_with_site(tmp_path, site, extra_patches=(), terminal_fail
     from kriya.workflow.workflow_controller import WorkflowController
 
     ws = _repo(tmp_path, {"widgetlib": ("", RULE + "\n"), "otherlib": ("", RULE + "\n")})
+    for rel, text in (repo_files or {}).items():
+        (ws / rel).parent.mkdir(parents=True, exist_ok=True)
+        (ws / rel).write_text(text)
+    if repo_files:
+        _git(ws, "add", "-A")
+        _git(ws, "commit", "-q", "-m", "project files")
     config = AppConfig()
+    config.autonomy.spec_compliance_enabled = spec_compliance
     config.paths.memory = str(tmp_path / "memory")
     config.paths.skills = str(ws / "skills")
     engine = SkillEngine(str(ws / "skills"), load_global=False, workspace_path=str(ws))
     engine.discover_and_load()
     we = _workflow_engine()
     we.kernel = strict_kernel(config)
+    if spec_compliance:
+        verdicts = [{"id": "REQ-1", "verdict": "satisfied", "evidence": "the candidate adds the feature"},
+                    {"id": "REQ-2", "verdict": "unverifiable", "evidence": "only the named test can say"}]
+        we.spec_compliance = SimpleNamespace(check=AsyncMock(return_value={"requirement_verdicts": verdicts}))   # REQ-2 stays UNVERIFIED, so the named-test closer runs
     seen = seen_out if seen_out is not None else {}
     seen.update({"sandbox": None, "subtask_binds": [], "terminal_bind": None, "head_at_sandbox": None, "ws_at_sandbox": None,
                  "ws_at_terminal": None, "later_sees": None, "engine": engine, "ws": ws})
@@ -359,7 +372,7 @@ async def _run_enforce_with_site(tmp_path, site, extra_patches=(), terminal_fail
                         *([patch.object(TerminalGateService, "run", observed_run)] if not terminal_fails else []),
                         patch.object(PolymorphicValidator, "__init__", spy_init)):
             stack.enter_context(context)
-        result = await WorkflowController(we).execute("goal", str(ws), migration_mode="enforce")
+        result = await WorkflowController(we).execute(goal, str(ws), migration_mode="enforce")
     seen["engine"], seen["ws"] = engine, ws
     return result, seen
 
@@ -403,6 +416,36 @@ async def test_an_enforce_run_keeps_the_candidate_repository_untouched_until_its
     assert _git(seen["sandbox"], "rev-parse", "HEAD") == seen["head_at_sandbox"]
     assert seen["subtask_binds"] == ["bound", "bound"] and seen["terminal_bind"] == "bound"
     assert seen["later_sees"] is True                                            # subtask 2 consumes what subtask 1 learned
+
+
+NAMED_TEST_GOAL = "Add widget support.\n- test_widget keeps passing\n"
+NAMED_TEST_FILES = {"tests/test_widget.py": "def test_widget():\n    assert True\n", "widget.py": "WIDGET = 1\n"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("site", ["create_skill_skeleton", "write_skill_extraction", "stage_skill_conflicts", "stage_facts"])
+async def test_a_contained_terminal_gate_verifies_the_identity_the_run_first_bound_while_the_learning_stays_visible(tmp_path, site, monkeypatch):
+    """GIT-MIDRUN-COMMITS-S3-001 integrated detector, under the S7 containment seam. The goal names an existing test, so the REAL terminal gate service builds
+    its REAL validators (the candidate's and the oracle's base copy, both with `original_workspace_path` = the workspace) and runs the named test THROUGH the
+    contained command flow (the census stand-in registered as "oci"). The S3 predicate must hold for every one of them, the repository must be unchanged between
+    the first bind and that terminal verification, and the learning written in between must still be visible to the next subtask."""
+    from kriya.tools import containment
+    standin = containment._PRODUCTION_BACKEND_REGISTRY["oci"]()          # noqa: SLF001 - the census seam's instance for this test
+    launches = []
+    real_prepare = standin.prepare
+    monkeypatch.setattr(standin, "prepare", lambda profile, command: (launches.append(profile.workspace_path), real_prepare(profile, command))[1])
+
+    result, seen = await _run_enforce_with_site(tmp_path, site, goal=NAMED_TEST_GOAL, repo_files=NAMED_TEST_FILES, spec_compliance=True)
+
+    assert result.legacy_result["status"] == "success"
+    assert launches, "the terminal gate launched no contained command: this run did not exercise the contained terminal gate"
+    binds = seen["validator_binds"]
+    assert len(binds) >= 2 and {state for state, *_ in binds} == {"bound"}                    # the candidate's validator AND the oracle base's, none STALE
+    assert {original for _state, _root, original in binds} == {str(seen["ws"].resolve())}      # every one is judged against the run's own workspace
+    assert seen["subtask_binds"] == ["bound", "bound"] and seen["terminal_bind"] == "bound"
+    assert seen["ws_at_terminal"] == seen["ws_at_sandbox"]                                      # zero HEAD drift, zero content drift from the first bind to the gate
+    assert _git(seen["sandbox"], "rev-parse", "HEAD") == seen["head_at_sandbox"]
+    assert seen["later_sees"] is True
 
 
 @pytest.mark.asyncio

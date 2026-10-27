@@ -13,11 +13,11 @@ current source, fresh build) and:
   B Kriya's command selects one -> verifier infrastructure, no Developer
   C declared + built, still not loaded -> infrastructure
   D declared, not built -> build diagnosis (infrastructure)"""
-import shutil
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from _real_oci import REAL_OCI_MAVEN
 from _strict_doubles import developer_double
 from test_workflow import _minimal_attempt_ctx, _runtime_verifier_ctx
 from test_workflow_controller_enforce import _patched, _workflow_engine
@@ -62,14 +62,15 @@ POM = """<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0<
 SOURCE = "src/main/java/demo/ExistingB.java"
 B = 'package demo;\npublic class ExistingB { public static void main(String[] a) { System.out.println("B_RAN"); } }\n'
 NOT_FOUND = "java.lang.ClassNotFoundException: {}\n[INFO] BUILD FAILURE"
-needs_maven = pytest.mark.skipif(shutil.which("mvn") is None, reason="real Maven is not installed")
+# S7: a real Maven build belongs to the REAL-OCI tier (owner decision): it needs the canonical provider image and cache, which no stand-in simulates.
+needs_maven = REAL_OCI_MAVEN
 
 
 def _project(path, config="", properties="", parent=""):
     (path / "src/main/java/demo").mkdir(parents=True, exist_ok=True)
     (path / "pom.xml").write_text(POM.format(config=config, properties=properties, parent=parent))
     (path / SOURCE).write_text(B)
-    return PolymorphicValidator(str(path), autonomy_cfg=AutonomyConfig(contained_execution_required=False))
+    return PolymorphicValidator(str(path), autonomy_cfg=AutonomyConfig())
 
 
 def _diagnosis(validator, cli_class="demo.ExistingB"):
@@ -146,6 +147,10 @@ def test_the_live_shape_is_a_candidate_defect_on_the_fresh_build(tmp_path):
     validator = _project(tmp_path, "<configuration><mainClass>demo.NonexistentA</mainClass></configuration>")
     (tmp_path / "target/classes/demo").mkdir(parents=True)  # stale output a reset could have left
     (tmp_path / "target/classes/demo/NonexistentA.class").write_bytes(b"stale")
+    # S7: a contained runtime step is OFFLINE against the canonical cache, and `exec:java` resolves the project's test-scope dependencies; the production order is
+    # compile -> TEST gate (which acquires them) -> runtime, so the test gate runs first. Measured: without it the step stops on an offline DependencyResolutionException
+    # (junit/hamcrest not in a fresh cache) and no launch failure exists to diagnose; with it the step reaches the real ClassNotFoundException.
+    assert validator.run_tests()["success"]
     result = validator.run_app_sequence([["mvn", "-e", "exec:java", "-Dexec.mainClass=demo.ExistingB"]])
     assert result["runtime_prerequisite"] == "mvn clean compile (current source): PASSED"  # D3: rebuilt, stale gone
     diagnosis = result["entrypoint_diagnosis"]

@@ -6,7 +6,6 @@ worktrees of the base workspace, exactly the shape a run's candidate has.
 import hashlib
 import json
 import os
-import shutil
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -25,6 +24,7 @@ from _b2c_fixtures import (
     candidate,
     maven_workspace,
 )
+from _real_oci import REAL_OCI_MAVEN
 from click.testing import CliRunner
 from test_b2a_acceptance_oracle import _ledger
 
@@ -47,7 +47,8 @@ from kriya.workflow.requirements import (
     requirement_outcomes,
 )
 
-pytestmark = pytest.mark.skipif(shutil.which("mvn") is None, reason="real Maven is not installed")
+# S7: real Maven builds belong to the REAL-OCI tier (owner decision): the contained Maven flow needs the canonical provider image and cache, which no stand-in simulates.
+pytestmark = REAL_OCI_MAVEN
 PRODUCTION = {"unknown_policy": "block", "unverified_policy": "block"}
 
 
@@ -58,6 +59,7 @@ def _artifact(tmp_path, source=ACCEPTANCE, goal=EXACT_GOAL, name="KriyaAcceptanc
 
 
 def _validator(workspace):
+    # the production factories build a plain validator; the CREATOR of the acceptance run's disposable, git-less execution tree (run_java_acceptance) declares it Kriya-owned
     return lambda root: PolymorphicValidator(root, original_workspace_path=str(workspace), autonomy_cfg=AutonomyConfig())
 
 

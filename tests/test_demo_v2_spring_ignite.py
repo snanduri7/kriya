@@ -22,6 +22,7 @@ from typing import Dict
 
 import pytest
 import yaml
+from _real_oci import REAL_OCI_MAVEN
 
 from kriya.config.config import AppConfig
 from kriya.skills.service import SkillService
@@ -98,7 +99,7 @@ def test_scenario_configuration_validates_and_keeps_every_approval_boundary(tmp_
     assert config.search.base_url == ""
     assert config.workflow_controller.enabled is True and config.workflow_controller.mode == "enforce"
     assert config.autonomy.generation_time_budget_seconds == 900  # not enlarged: no measurement justifies it
-    assert config.autonomy.contained_execution_required is False and config.runtime_profile is None  # the standard development-profile Demo V2 scenario, not a security downgrade
+    assert config.autonomy.contained_execution_required is True and config.runtime_profile is None  # the standard development-profile Demo V2 scenario (S7: containment is the packaged default for every profile), not a security downgrade
     assert config.llm.model == "qwen3-coder:30b"
     assert config.skills.load_global is False and config.skills.load_cwd is False
     assert config.paths.skills == str(tmp_path / "work" / "skills")
@@ -405,7 +406,8 @@ def test_post_check_rejects_missing_tests_and_a_leftover_ignite_directory(tmp_pa
 
 # ---- read-back is CAUSALLY proven: the reference's own mutants are killed (needs Maven + the offline repository; skipped where absent) ----
 
-@pytest.mark.skipif(not _HAS_OFFLINE_STACK, reason="needs mvn and the offline Maven repository (Ignite 2.18.0, JUnit 5.8.2)")
+@REAL_OCI_MAVEN      # S7: the mutants run CONTAINED (real OCI, network denied) from the offline cache seed; the seed's presence is checked below
+@pytest.mark.skipif(not _HAS_OFFLINE_STACK, reason="docker tier: needs the offline Maven repository seed (Ignite 2.18.0, JUnit 5.8.2) in ~/.m2")
 def test_every_cache_get_mutant_of_the_reference_is_killed_and_the_control_passes() -> None:
     result = subprocess.run([sys.executable, "-I", str(DEMO_V2 / "scripts" / "qualify_spring_ignite.py"), "mutants", "--repo", str(REPO), "--fixture", str(REFERENCE)],
                             capture_output=True, text=True, check=False, timeout=900)

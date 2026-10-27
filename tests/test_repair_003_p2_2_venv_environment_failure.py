@@ -71,6 +71,19 @@ class _VenvCreationFails:
         self.method = method
 
 
+class _RecordingRunner:
+    """The real runner with every argv recorded (nothing stubbed): the same shape as ``_VenvCreationFails`` for a run whose environment really is prepared."""
+
+    def __init__(self):
+        self.commands = []
+        real = PolymorphicValidator._run_cmd_with_timeout
+
+        def method(validator, cmd, cwd, **kwargs):
+            self.commands.append(list(cmd))
+            return real(validator, cmd, cwd, **kwargs)
+        self.method = method
+
+
 def _validator(root):
     return PolymorphicValidator(str(root), original_workspace_path=str(root), autonomy_cfg=AutonomyConfig())
 
@@ -131,12 +144,13 @@ async def test_p2_2_a_verification_only_unit_stops_typed_on_the_environment_with
 
 
 # ---------------------------------------------------------------- interpreter provenance (new contract; authorizes nothing)
-@pytest.mark.parametrize("shape", ["dependency_free_default", "project_venv_created"])
+@pytest.mark.parametrize("shape", ["dependency_free_project_venv", "project_venv_created"])
 def test_p2_2_every_python_test_result_carries_interpreter_provenance(tmp_path, shape):
-    if shape == "dependency_free_default":
+    if shape == "dependency_free_project_venv":
+        # S7: every run is contained, so even a dependency-free project gets (and is provenance-labelled with) its project environment
         root = _workspace(tmp_path, manifest=False)
         result = _validator(root).run_tests()
-        expected = {"requested": "default", "actual": "default", "path": sys.executable, "fallback": False}
+        expected = {"requested": "project_venv", "actual": "project_venv", "path": ".kriya/venv/bin/python", "fallback": False}
     else:
         root = _workspace(tmp_path)
         # a created venv whose interpreter happens to be Kriya's: the resolver is told creation succeeded
@@ -174,12 +188,14 @@ def test_p2_2_control_a_dependency_install_failure_keeps_its_repair_eligible_pat
     assert _ran_pytest(stub.commands) == []
 
 
-def test_p2_2_control_a_dependency_free_host_project_runs_on_the_default_interpreter_as_before(tmp_path):
+def test_p2_2_control_a_dependency_free_project_runs_on_its_project_environment_like_every_project(tmp_path):
+    """The contained counterpart of the host-only control (census class H, deleted in S8): a dependency-free project no longer runs on Kriya's own interpreter; its project
+    environment is created (here: the creation really runs) and the tests run under it, with no environment failure."""
     root = _workspace(tmp_path, manifest=False)
-    stub = _VenvCreationFails()
+    stub = _RecordingRunner()
     with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=stub.method):
         result = _validator(root).run_tests()
     assert result["success"] is True and "environment_reason_code" not in result
     [cmd] = _ran_pytest(stub.commands)
-    assert cmd[0] == sys.executable
-    assert not any(c[1:3] == ["-m", "venv"] for c in stub.commands)  # nothing was requested, nothing fell back
+    assert cmd[0] == ".kriya/venv/bin/python"
+    assert [c for c in stub.commands if c[1:3] == ["-m", "venv"]] == [["python3", "-m", "venv", ".kriya/venv"]]
