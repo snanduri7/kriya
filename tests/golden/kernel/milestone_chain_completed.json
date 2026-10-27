@@ -224,6 +224,7 @@
    "run_id": "<run:1>",
    "schema_version": 3,
    "terminal_status": "SUCCESS",
+   "tool_execution": null,
    "updated_at": "<time>",
    "verification_evidence_ids": [],
    "work_unit_states": {

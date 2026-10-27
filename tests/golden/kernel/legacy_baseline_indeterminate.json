@@ -819,6 +819,7 @@
    "run_id": "<run:1>",
    "schema_version": 3,
    "terminal_status": "FAILURE",
+   "tool_execution": null,
    "updated_at": "<time>",
    "verification_evidence_ids": [],
    "work_unit_states": {
