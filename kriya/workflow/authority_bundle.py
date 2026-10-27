@@ -494,6 +494,10 @@ def run_authority_bundle(
         if result.get("timeout"):
             run.reason_code, run.reason = AUTHORITY_TIMEOUT, f"verify exceeded {bundle.timeout_seconds}s"
             return run
+        if result.get("target_started") is False:
+            # FINITE-START-FACT-UNCONSUMED-001: a verifier that never started has no exit status of its own to read as PASS/FAIL, whatever number the launcher or the runtime answered.
+            run.reason_code, run.reason = AUTHORITY_EXECUTION_UNAVAILABLE, "the contained verify command did not start (an environment outcome, never a verdict)"
+            return run
         verdict_path = os.path.join(stage, VERDICT_FILE)
         if os.path.isfile(verdict_path):
             try:

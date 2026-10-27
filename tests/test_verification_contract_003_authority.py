@@ -432,3 +432,18 @@ def test_12_an_external_pass_on_one_claim_never_closes_a_compound_statement(tmp_
     api.close_api_preservation_requirements(ledger, reqs, contract_claims=contract.required_claims_by_requirement(),
                                             comparison=api.ApiComparison(True, None, (), (), ()), source="t", revision=1)
     assert requirement_outcomes(ledger, reqs)["REQ-1"] is RequirementOutcome.HUMAN_ACCEPTED
+
+
+def test_a_verify_that_never_started_is_never_a_verdict_whatever_status_it_answered(tmp_path):
+    """FINITE-START-FACT-UNCONSUMED-001: status 1 means FAIL only from a verifier that ran. The same status from a verify the backend reports as never started
+    (exit status 1 and 0 here, deliberately the two statuses the protocol reads as a verdict) is an environment outcome and closes nothing."""
+    ws, reqs, bundle = _loaded(tmp_path)
+    state = str(tmp_path / "state")
+    for status in (1, 0):
+        run = ab.run_authority_bundle(bundle, str(ws), state_root=state, validator_factory=lambda r, s=status: _Validator(
+            r, [_ok, lambda c, s=s: {"returncode": s, "stdout": "", "stderr": "never started", "timeout": False, "target_started": False}]))
+        assert run.verdict != ab.VERDICT_FAIL and run.verdict != ab.VERDICT_PASS, status
+        assert run.reason_code == ab.AUTHORITY_EXECUTION_UNAVAILABLE, status
+    # the control: the same status from a verifier that DID start keeps its protocol meaning
+    run = ab.run_authority_bundle(bundle, str(ws), state_root=state, validator_factory=lambda r: _Validator(r, [_ok, _fail]))
+    assert run.verdict == ab.VERDICT_FAIL

@@ -1560,6 +1560,7 @@ class PolymorphicValidator:
         from kriya.tools.dependency_execution import (
             GRADLE_ACQUISITION_INCOMPLETE_MARKER,
             GRADLE_DISTRIBUTION_UNAVAILABLE,
+            GRADLE_INVOCATION_FAILED,
             classify_gradle_offline_failure_text,
             gradle_wrapper_start_failed,
             seed_gradle_distribution_from_host,
@@ -1611,9 +1612,15 @@ class PolymorphicValidator:
             marked["stderr"] = f"{code}: {why}\n{result.get('stderr', '')}"
             return marked
 
+        def _never_started(result: Dict[str, Any]) -> Dict[str, Any]:
+            return _environment(result, GRADLE_INVOCATION_FAILED,
+                                f"the contained {gradle_cmd} did not start - the verification tool never ran, nothing about the candidate was observed")
+
         first = _offline_attempt()
         if first["returncode"] == 0:
             return first
+        if first.get("target_started") is False:  # a launcher that never started has nothing to acquire for and no verdict to give
+            return _never_started(first)
         first_output = first.get("stdout", "") + first.get("stderr", "")
         if classify_gradle_offline_failure_text(first_output) != OfflineFailureKind.MISSING_DEPENDENCY:
             return first
@@ -1638,6 +1645,8 @@ class PolymorphicValidator:
         if second["returncode"] == 0:
             logger.info(f"Acquisition (gradle, {desc!r}): authoritative offline retry followed and succeeded.")
             return second
+        if second.get("target_started") is False:
+            return _never_started(second)
         second_output = second.get("stdout", "") + second.get("stderr", "")
         if gradle_wrapper_start_failed(second_output):
             return _environment(

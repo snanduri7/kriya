@@ -579,3 +579,82 @@ def test_a_maven_that_never_started_triggers_no_dependency_acquisition(tmp_path)
     with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", fake), patch.object(PolymorphicValidator, "_maven_cache_dir", lambda self: str(tmp_path)):
         result = validator._run_maven_cmd(["validate"], cwd=str(tmp_path), timeout=5)  # pylint: disable=protected-access
     assert result["target_started"] is False and len(calls) == 1, calls
+
+
+# ----------------------------------------------------------------------------------------- part 3b: Gradle consumes the same fact (FINITE-START-FACT-UNCONSUMED-001)
+
+MISSING_DEPENDENCY_TEXT = ("> Could not resolve org.apache.commons:commons-lang3:3.14.0.\n   > No cached version of org.apache.commons:commons-lang3:3.14.0 available for offline mode.\n")
+
+
+def _gradle_validator(tmp_path):
+    from kriya.config.config import AutonomyConfig
+    from kriya.tools.validate import PolymorphicValidator
+    (tmp_path / "build.gradle").write_text("plugins { id 'java' }\n")
+    return PolymorphicValidator(str(tmp_path), autonomy_cfg=AutonomyConfig(**CONTAINED))
+
+
+def _gradle_runs(*answers):
+    """(patch, calls): `_run_cmd_with_timeout` answering these (returncode, stderr, target_started-or-None) in order, and the seed step stubbed out."""
+    from unittest.mock import patch
+
+    from kriya.tools import dependency_execution as dep
+    from kriya.tools.validate import PolymorphicValidator
+    calls = []
+    queue = [{"returncode": rc, "stdout": "", "stderr": err, "timeout": False, **({} if started is None else {"target_started": started})} for rc, err, started in answers]
+
+    def fake(self, cmd, cwd, *args, **kwargs):  # noqa: ARG001
+        calls.append((list(cmd), kwargs.get("network")))
+        return queue.pop(0)
+    from contextlib import ExitStack
+    stack = ExitStack()
+    stack.enter_context(patch.object(PolymorphicValidator, "_run_cmd_with_timeout", fake))
+    stack.enter_context(patch.object(dep, "seed_gradle_distribution_from_host", return_value={"status": "not_in_host_cache"}))
+    return stack, calls
+
+
+@pytest.mark.parametrize("stderr", ["kriya-launch: 4: exec: ./gradlew: Permission denied", MISSING_DEPENDENCY_TEXT], ids=["plain-text", "text-that-looks-like-a-missing-dependency"])
+def test_a_gradle_that_never_started_is_an_environment_outcome_and_acquires_nothing(tmp_path, stderr):
+    from kriya.capabilities.gradle import GradleBuildAdapter
+    from kriya.tools.dependency_execution import GRADLE_INVOCATION_FAILED
+    validator = _gradle_validator(tmp_path)
+    stack, calls = _gradle_runs((126, stderr, False), (126, stderr, False))
+    with stack:
+        compiled = GradleBuildAdapter().compile(validator, [], deadline=None)
+        tested = GradleBuildAdapter().run_tests(validator, None)
+    assert len(calls) == 2, "one offline attempt per gate, no acquisition (network DENIED each)"
+    assert all(network.name == "DENIED" for _, network in calls)
+    for verdict in (compiled, tested):
+        assert verdict["success"] is False and verdict["environment_reason_code"] == GRADLE_INVOCATION_FAILED, verdict
+        assert "Gradle compilation failed" not in verdict["output"]
+
+
+def test_the_same_status_and_text_from_a_gradle_that_started_is_still_an_ordinary_failure(tmp_path):
+    """The negative control: neither the exit status nor the message is the evidence - only the backend's never-started fact is."""
+    from kriya.capabilities.gradle import GradleBuildAdapter
+    validator = _gradle_validator(tmp_path)
+    stack, calls = _gradle_runs((126, "kriya-launch: 4: exec: ./gradlew: Permission denied", None))
+    with stack:
+        verdict = GradleBuildAdapter().compile(validator, [], deadline=None)
+    assert verdict["success"] is False and "environment_reason_code" not in verdict and verdict["output"].startswith("Gradle compilation failed")
+    assert len(calls) == 1
+
+
+def test_a_gradle_that_starts_offline_then_never_starts_after_acquisition_is_still_typed(tmp_path):
+    from kriya.tools.dependency_execution import GRADLE_INVOCATION_FAILED
+    validator = _gradle_validator(tmp_path)
+    stack, calls = _gradle_runs((1, MISSING_DEPENDENCY_TEXT, None), (0, "", None), (127, "gone", False))
+    with stack:
+        result = validator._run_gradle_cmd("./gradlew", ["compileJava"], cwd=str(tmp_path))  # pylint: disable=protected-access
+    assert len(calls) == 3 and result["environment_reason_code"] == GRADLE_INVOCATION_FAILED
+
+
+@REAL_DOCKER
+def test_real_docker_a_project_gradlew_without_the_exec_bit_is_gradle_invocation_failed(tmp_path):
+    """The ORIGINAL SYMPTOM (A2 review probe3, pre-fix: success=False, no environment_reason_code), through the production validator and default contained OCI backend."""
+    validator = _gradle_validator(tmp_path)
+    (tmp_path / "src" / "main" / "java").mkdir(parents=True)
+    (tmp_path / "src" / "main" / "java" / "A.java").write_text("public class A { }\n")
+    (tmp_path / "gradlew").write_text("#!/bin/sh\nexit 0\n")
+    (tmp_path / "gradlew").chmod(0o644)
+    result = validator.run_compile_check(["src/main/java/A.java"])
+    assert result["success"] is False and result.get("environment_reason_code") == "GRADLE_INVOCATION_FAILED", result

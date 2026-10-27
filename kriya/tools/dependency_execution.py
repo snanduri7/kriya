@@ -111,6 +111,8 @@ def classify_maven_offline_failure_text(combined_output: str) -> OfflineFailureK
 # (``environment_reason_code``): the verification tool could not start, so
 # nothing about the candidate was observed - never a code failure.
 GRADLE_DISTRIBUTION_UNAVAILABLE = "GRADLE_DISTRIBUTION_UNAVAILABLE"
+# FINITE-START-FACT-UNCONSUMED-001: the contained Gradle launcher itself (the project's `./gradlew`, or `gradle`) never started - the backend's typed never-started fact, never an exit status or text.
+GRADLE_INVOCATION_FAILED = "GRADLE_INVOCATION_FAILED"
 # VERIFICATION-UNIT-ENV-FALLBACK-001 (BACKEND-FINAL-CLOSURE-005): the Python
 # gate's twin - the project's required verification environment (its
 # .kriya/venv) could not be created, so no interpreter may produce an
