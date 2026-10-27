@@ -114,6 +114,8 @@ def _inner_session(tmp_path, body: str, *, real_home, cap_seconds: float = INNER
     (inner / "conftest.py").write_text(
         f"import sys\nsys.path.insert(0, {os.path.dirname(os.path.abspath(__file__))!r})\n"
         "from _authority_isolation import _authority_home_isolation  # noqa: F401\n"
+        "\n\ndef pytest_sessionstart(session):  # reaches the real stdout before any test capture starts: it is what the diagnostics' output tail shows of a stalled session\n"
+        "    print('INNER-SESSION-STARTED', flush=True)\n"
         "\n\ndef pytest_sessionfinish(session):  # after the session fixtures were torn down\n"
         "    import os\n    print('AUTHORITY_AT_FINISH=' + os.environ.get('KRIYA_AUTHORITY_HOME', '<unset>'))\n")
     (inner / "test_inner.py").write_text(body)
@@ -145,10 +147,13 @@ def test_a_stalled_inner_session_is_a_self_diagnosing_failure_and_leaves_no_proc
     message = str(caught.value)
     assert "INNER SESSION TIMED OUT after 8" in message and "host load average" in message
     assert "process group at the timeout" in message
+    assert "INNER-SESSION-STARTED" in message.split("partial stdout tail")[1], "the output tail of the stalled session is in the failure"
     assert "pytest" in message.split("process group at the timeout:")[1].split("partial stdout tail")[0], "the snapshot names the stalled pytest process"
     time.sleep(1)
     leftover = subprocess.run(["pgrep", "-f", grandchild], capture_output=True, text=True, check=False).stdout.split()
     assert leftover == [], "the whole inner group was killed, grandchildren included"
+    residue = subprocess.run(["pgrep", "-f", str(tmp_path / "inner")], capture_output=True, text=True, check=False).stdout.split()
+    assert residue == [], "no pytest process of the inner session remains"
 
 
 def test_the_session_guard_fails_the_session_when_the_real_home_changes_and_deletes_or_restores_nothing(tmp_path):
