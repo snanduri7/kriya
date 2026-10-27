@@ -703,18 +703,24 @@ def _write_pom(tmp_path) -> None:
     (tmp_path / "pom.xml").write_text("<project/>")
 
 
-def _write_mvnw(tmp_path, *, jar_relpath: str, exit_code: int = 0, create_jar: bool = True) -> None:
-    """A real, executable ./mvnw stand-in - no Maven/JVM dependency. When
-    invoked as `package -DskipTests` (matching _maven_package_command's own
-    real args exactly), optionally materializes the target jar before
-    exiting with `exit_code`."""
-    create_line = (
-        f'mkdir -p "$(dirname "{jar_relpath}")" && touch "{jar_relpath}"' if create_jar else ": # no-op, artifact not created"
-    )
-    _write_executable(tmp_path / "mvnw", f"""#!/bin/sh
-{create_line}
-exit {exit_code}
-""")
+class _ContainedBuild:
+    """The validator's contained Maven build (``PolymorphicValidator.contained_maven_build``) as a test double: the production seam ``contained_build(argv, timeout) -> result dict``. It receives the
+    Maven argv (``["mvn", "package", "-DskipTests"]``, never the project's wrapper), records it (and, when given, appends to a shared ordering log), optionally materializes the target jar,
+    and answers with ``exit_code`` - no Maven/JVM dependency, and no host process."""
+
+    def __init__(self, tmp_path, *, jar_relpath: str, exit_code: int = 0, create_jar: bool = True, order=None) -> None:
+        self._root, self._jar, self._exit, self._create, self._order = tmp_path, jar_relpath, exit_code, create_jar, order
+        self.calls = []
+
+    def __call__(self, argv, seconds):
+        self.calls.append((list(argv), seconds))
+        if self._order is not None:
+            self._order.append(("build", list(argv)))
+        if self._create:
+            jar = self._root / self._jar
+            jar.parent.mkdir(parents=True, exist_ok=True)
+            jar.touch()
+        return {"returncode": self._exit, "stdout": "", "stderr": "", "timeout": False}
 
 
 def _fake_java_dash_jar_script() -> str:
@@ -870,25 +876,21 @@ def test_artifact_is_current_false_for_stale_artifact_older_than_source(tmp_path
 # --- build-command selection ---------------------------------------------
 
 def test_maven_package_command_none_without_pom(tmp_path):
-    assert _maven_package_command(str(tmp_path)) is None
+    assert _maven_package_command(str(tmp_path), allow_project_wrapper=False) is None
 
 
-def test_maven_package_command_prefers_executable_wrapper(tmp_path):
+def test_maven_package_command_is_the_bare_mvn_even_when_the_project_ships_an_executable_wrapper(tmp_path):
+    """D2 S4: the project's ./mvnw is a project-supplied script that downloads a Maven distribution from a project-chosen URL; the contained build always uses the toolchain image's own `mvn`."""
     _write_pom(tmp_path)
-    _write_mvnw(tmp_path, jar_relpath="target/app.jar")
+    _write_executable(tmp_path / "mvnw", "#!/bin/sh\nexit 0\n")
+    assert _maven_package_command(str(tmp_path), allow_project_wrapper=False) == ["mvn", "package", "-DskipTests"]
 
-    assert _maven_package_command(str(tmp_path)) == ["./mvnw", "package", "-DskipTests"]
 
-
-def test_maven_package_command_falls_back_to_bare_mvn_without_wrapper(tmp_path):
+def test_maven_package_command_is_the_bare_mvn_without_a_wrapper_or_with_a_non_executable_one(tmp_path):
     _write_pom(tmp_path)
-    assert _maven_package_command(str(tmp_path)) == ["mvn", "package", "-DskipTests"]
-
-
-def test_maven_package_command_ignores_non_executable_wrapper(tmp_path):
-    _write_pom(tmp_path)
+    assert _maven_package_command(str(tmp_path), allow_project_wrapper=False) == ["mvn", "package", "-DskipTests"]
     (tmp_path / "mvnw").write_text("#!/bin/sh\necho hi\n")  # not chmod'd executable
-    assert _maven_package_command(str(tmp_path)) == ["mvn", "package", "-DskipTests"]
+    assert _maven_package_command(str(tmp_path), allow_project_wrapper=False) == ["mvn", "package", "-DskipTests"]
 
 
 # --- _prepare_required_artifact: the orchestration layer ------------------
@@ -925,17 +927,17 @@ def test_prepare_required_artifact_skips_build_when_artifact_already_current(tmp
 def test_prepare_required_artifact_runs_build_when_jar_missing_and_succeeds(tmp_path):
     """Maven JAR missing: preparation runs, produces the artifact."""
     _write_pom(tmp_path)
-    _write_mvnw(tmp_path, jar_relpath="target/app.jar")
+    build = _ContainedBuild(tmp_path, jar_relpath="target/app.jar")
     jar = tmp_path / "target" / "app.jar"
     assert not jar.exists()
 
     outcome = _prepare_required_artifact(
-        ["java", "-jar", "target/app.jar"], str(tmp_path), controller=ProcessController(),
+        ["java", "-jar", "target/app.jar"], str(tmp_path), controller=_AssertNoRunController(), contained_build=build,
     )
 
     assert outcome.outcome is None
     assert jar.is_file()
-    assert outcome.command == ["./mvnw", "package", "-DskipTests"]
+    assert outcome.command == ["mvn", "package", "-DskipTests"]
     assert outcome.returncode == 0
 
 
@@ -943,15 +945,15 @@ def test_prepare_required_artifact_build_failure_reported_as_preparation_failed(
     """A build command that fails - PREPARATION_FAILED, real command/
     output/exit code preserved, artifact never appears."""
     _write_pom(tmp_path)
-    _write_mvnw(tmp_path, jar_relpath="target/app.jar", exit_code=1, create_jar=False)
+    build = _ContainedBuild(tmp_path, jar_relpath="target/app.jar", exit_code=1, create_jar=False)
 
     outcome = _prepare_required_artifact(
-        ["java", "-jar", "target/app.jar"], str(tmp_path), controller=ProcessController(),
+        ["java", "-jar", "target/app.jar"], str(tmp_path), controller=_AssertNoRunController(), contained_build=build,
     )
 
     assert outcome.outcome == ServiceVerificationOutcomeKind.PREPARATION_FAILED
     assert outcome.returncode == 1
-    assert outcome.command == ["./mvnw", "package", "-DskipTests"]
+    assert outcome.command == ["mvn", "package", "-DskipTests"]
     assert not (tmp_path / "target" / "app.jar").exists()
 
 
@@ -960,10 +962,10 @@ def test_prepare_required_artifact_missing_after_successful_build_is_materializa
     still does not exist afterward - a deterministic ARTIFACT_
     MATERIALIZATION_FAILED, distinct from an ordinary build failure."""
     _write_pom(tmp_path)
-    _write_mvnw(tmp_path, jar_relpath="target/app.jar", exit_code=0, create_jar=False)
+    build = _ContainedBuild(tmp_path, jar_relpath="target/app.jar", exit_code=0, create_jar=False)
 
     outcome = _prepare_required_artifact(
-        ["java", "-jar", "target/app.jar"], str(tmp_path), controller=ProcessController(),
+        ["java", "-jar", "target/app.jar"], str(tmp_path), controller=_AssertNoRunController(), contained_build=build,
     )
 
     assert outcome.outcome == ServiceVerificationOutcomeKind.ARTIFACT_MATERIALIZATION_FAILED
@@ -980,45 +982,15 @@ def test_prepare_required_artifact_no_pom_reports_preparation_failed(tmp_path):
     assert outcome.outcome == ServiceVerificationOutcomeKind.PREPARATION_FAILED
 
 
-def test_prepare_required_artifact_threads_env_and_preexec_fn_to_build_command(tmp_path):
-    """finite_command generalization's own load-bearing plumbing: a caller-
-    supplied env/preexec_fn must reach the actual `mvn package` subprocess,
-    so it runs under the SAME JDK/sandbox policy the compile gate already
-    used - not a bare, unconstrained ProcessController() default."""
+def test_prepare_required_artifact_builds_only_through_the_callers_contained_build(tmp_path):
+    """The build runs through the caller's contained build and nowhere else: the controller is never asked to run anything (no host build), and the argv is the toolchain's `mvn`."""
     _write_pom(tmp_path)
-    _write_mvnw(tmp_path, jar_relpath="target/app.jar")
-
-    captured = {}
-
-    class _CapturingController(ProcessController):
-        def run(self, command, **kwargs):
-            captured.update(kwargs)
-            return super().run(command, **kwargs)
-
-    sentinel_env = dict(os.environ)
-    sentinel_env["JAVA_HOME"] = "/nonexistent/sentinel-jdk-marker"
-    sentinel_preexec = lambda: None  # noqa: E731 - identity check only, never actually invoked here
-
+    build = _ContainedBuild(tmp_path, jar_relpath="target/app.jar")
     outcome = _prepare_required_artifact(
-        ["java", "-jar", "target/app.jar"], str(tmp_path),
-        controller=_CapturingController(), env=sentinel_env, preexec_fn=sentinel_preexec,
+        ["java", "-jar", "target/app.jar"], str(tmp_path), controller=_AssertNoRunController(), contained_build=build,
     )
-    assert outcome.outcome is None
-    assert captured["env"] is sentinel_env
-    assert captured["preexec_fn"] is sentinel_preexec
-
-
-def test_prepare_required_artifact_omitted_env_preserves_managed_service_behavior(tmp_path):
-    """Regression guard: every EXISTING managed_service call site never
-    passes env/preexec_fn - both must keep defaulting to None and the
-    build must still succeed exactly as before this change."""
-    _write_pom(tmp_path)
-    _write_mvnw(tmp_path, jar_relpath="target/app.jar")
-    outcome = _prepare_required_artifact(
-        ["java", "-jar", "target/app.jar"], str(tmp_path), controller=ProcessController(),
-    )
-    assert outcome.outcome is None
-    assert (tmp_path / "target" / "app.jar").is_file()
+    assert outcome.outcome is None and (tmp_path / "target" / "app.jar").is_file()
+    assert [argv for argv, _ in build.calls] == [["mvn", "package", "-DskipTests"]]
 
 
 # --- end-to-end through run_managed_service_verification -------------------
@@ -1040,13 +1012,13 @@ def test_p6_reproduction_missing_jar_is_prepared_then_service_launches_and_probe
     `java -jar ...` started, and the readiness/probe flow completes
     successfully - the exact sequence P6 attempt 2 needed and did not have."""
     _write_pom(tmp_path)
-    _write_mvnw(tmp_path, jar_relpath="target/spring-petclinic-rest-4.0.2.jar")
+    build = _ContainedBuild(tmp_path, jar_relpath="target/spring-petclinic-rest-4.0.2.jar")
     jar = tmp_path / "target" / "spring-petclinic-rest-4.0.2.jar"
     assert not jar.exists()
     port = _free_port()
     controller = _TrackingController()
 
-    result = _run_contained(_p6_shaped_spec(tmp_path, port), controller=controller)
+    result = _run_contained(_p6_shaped_spec(tmp_path, port), controller=controller, contained_build=build)
 
     assert jar.is_file()
     assert result.outcome == ServiceVerificationOutcomeKind.PROBE_PASSED
@@ -1059,15 +1031,15 @@ def test_preparation_runs_before_service_start_and_before_readiness_polling(tmp_
     """Ordering: PREPARE strictly precedes SERVICE_START (and therefore
     readiness polling, which only begins once the service process exists)."""
     _write_pom(tmp_path)
-    _write_mvnw(tmp_path, jar_relpath="target/spring-petclinic-rest-4.0.2.jar")
     port = _free_port()
     controller = _OrderTrackingController()
+    build = _ContainedBuild(tmp_path, jar_relpath="target/spring-petclinic-rest-4.0.2.jar", order=controller.call_order)
 
-    _run_contained(_p6_shaped_spec(tmp_path, port), controller=controller)
+    _run_contained(_p6_shaped_spec(tmp_path, port), controller=controller, contained_build=build)
 
     assert len(controller.call_order) == 2
-    assert controller.call_order[0][0] == "run"  # the mvnw prepare step
-    assert controller.call_order[0][1][0] == "./mvnw"
+    assert controller.call_order[0][0] == "build"  # the contained prepare step, recorded by the build double
+    assert controller.call_order[0][1][0] == "mvn"
     assert controller.call_order[1][0] == "start_managed"  # the java -jar launch
     assert "-jar" in controller.call_order[1][1]
 
@@ -1075,11 +1047,11 @@ def test_preparation_runs_before_service_start_and_before_readiness_polling(tmp_
 def test_preparation_failure_prevents_service_launch(tmp_path):
     """Preparation fails: service is never launched at all."""
     _write_pom(tmp_path)
-    _write_mvnw(tmp_path, jar_relpath="target/spring-petclinic-rest-4.0.2.jar", exit_code=1, create_jar=False)
+    build = _ContainedBuild(tmp_path, jar_relpath="target/spring-petclinic-rest-4.0.2.jar", exit_code=1, create_jar=False)
     port = _free_port()
     controller = _TrackingController()
 
-    result = _run_contained(_p6_shaped_spec(tmp_path, port), controller=controller)
+    result = _run_contained(_p6_shaped_spec(tmp_path, port), controller=controller, contained_build=build)
 
     assert result.outcome == ServiceVerificationOutcomeKind.PREPARATION_FAILED
     assert result.passed is False
@@ -1090,11 +1062,11 @@ def test_artifact_still_missing_after_successful_build_fails_before_launch(tmp_p
     """Preparation command reports success but the artifact still does not
     exist - deterministic failure before launch, service never started."""
     _write_pom(tmp_path)
-    _write_mvnw(tmp_path, jar_relpath="target/spring-petclinic-rest-4.0.2.jar", exit_code=0, create_jar=False)
+    build = _ContainedBuild(tmp_path, jar_relpath="target/spring-petclinic-rest-4.0.2.jar", exit_code=0, create_jar=False)
     port = _free_port()
     controller = _TrackingController()
 
-    result = _run_contained(_p6_shaped_spec(tmp_path, port), controller=controller)
+    result = _run_contained(_p6_shaped_spec(tmp_path, port), controller=controller, contained_build=build)
 
     assert result.outcome == ServiceVerificationOutcomeKind.ARTIFACT_MATERIALIZATION_FAILED
     assert result.passed is False
