@@ -98,19 +98,21 @@ def test_a_removed_dependency_is_still_a_regression(tmp_path):
     assert "removed from pom.xml" in result["output"] and "gone" in result["output"] and "kept" not in result["output"]
 
 
-def test_an_mvn_start_failure_falls_through_exactly_as_before(tmp_path):
-    """A generic failure to start mvn is logged and left undecided (the
-    validator continues with Gradle / javac); a missing executable is a
-    decided failure; a containment setup failure propagates."""
+def test_an_mvn_start_failure_is_a_typed_no_verdict_never_undecided(tmp_path):
+    """F9 (owner decision D6; replaces the test that pinned the opposite): a Maven that cannot be started, or that raised, is NEVER "undecided" (None, which
+    let a downstream no-source javac success become the compile PASS). A missing/non-executable/unstartable mvn is the typed MAVEN_INVOCATION_FAILED, any other
+    exception the typed MAVEN_COMPILE_INDETERMINATE, both ``success`` False with an ``environment_reason_code``; a containment setup failure propagates."""
     from kriya.tools.containment import ContainmentSetupError
+    from kriya.tools.dependency_execution import MAVEN_COMPILE_INDETERMINATE, MAVEN_INVOCATION_FAILED
 
     _write(tmp_path, "pom.xml", POM.format(deps=""))
     v = _validator(tmp_path)
     with patch.object(PolymorphicValidator, "_run_maven_cmd", side_effect=RuntimeError("boom")):
-        assert MAVEN.compile(v, ["App.java"], deadline=None) is None
+        result = MAVEN.compile(v, ["App.java"], deadline=None)
+    assert result["success"] is False and result["environment_reason_code"] == MAVEN_COMPILE_INDETERMINATE and "RuntimeError: boom" in result["output"]
     with patch.object(PolymorphicValidator, "_run_maven_cmd", side_effect=FileNotFoundError("mvn")):
         assert MAVEN.compile(v, ["App.java"], deadline=None) == {
-            "success": False, "output": "Failed to invoke mvn compile: mvn"}
+            "success": False, "environment_reason_code": MAVEN_INVOCATION_FAILED, "output": "Failed to invoke mvn compile: mvn"}
     with patch.object(PolymorphicValidator, "_run_maven_cmd", side_effect=ContainmentSetupError("x")):
         with pytest.raises(ContainmentSetupError):
             MAVEN.compile(v, ["App.java"], deadline=None)
@@ -243,22 +245,25 @@ def test_a_gradle_compile_failure_is_decided_with_its_output(tmp_path):
     assert result["success"] is False and "Gradle compilation failed:\ne: App.java:3\nFAILED" in result["output"]
 
 
-def test_a_gradle_start_failure_behaves_exactly_as_before(tmp_path):
-    """A missing executable is a decided failure (never the misleading javac
-    fallback); a containment setup failure propagates; any other failure to
-    start is left undecided."""
+def test_a_gradle_start_failure_is_a_typed_no_verdict_never_undecided(tmp_path):
+    """F9 (owner decision D6; replaces the test that pinned an undecided None for any other failure): a Gradle that cannot be started, or that raised, is a
+    typed ``success`` False result (GRADLE_INVOCATION_FAILED / GRADLE_COMPILE_INDETERMINATE), never the misleading javac fallback and never a PASS; a
+    containment setup failure propagates; None stays ONLY "no build script, not applicable"."""
     from kriya.tools.containment import ContainmentSetupError
+    from kriya.tools.dependency_execution import GRADLE_COMPILE_INDETERMINATE, GRADLE_INVOCATION_FAILED
 
     _, patched = _gradle_runs(tmp_path, wrapper=True, side_effect=FileNotFoundError("gradlew"))
     with patched:
         assert GRADLE.compile(_validator(tmp_path), ["App.java"], deadline=None) == {
-            "success": False, "output": "Failed to invoke ./gradlew compileJava: gradlew"}
+            "success": False, "environment_reason_code": GRADLE_INVOCATION_FAILED,
+            "output": "Failed to invoke ./gradlew compileJava: gradlew"}
     _, patched = _gradle_runs(tmp_path, side_effect=ContainmentSetupError("x"))
     with patched, pytest.raises(ContainmentSetupError):
         GRADLE.compile(_validator(tmp_path), ["App.java"], deadline=None)
     _, patched = _gradle_runs(tmp_path, side_effect=RuntimeError("boom"))
     with patched:
-        assert GRADLE.compile(_validator(tmp_path), ["App.java"], deadline=None) is None
+        result = GRADLE.compile(_validator(tmp_path), ["App.java"], deadline=None)
+    assert result["success"] is False and result["environment_reason_code"] == GRADLE_COMPILE_INDETERMINATE and "RuntimeError: boom" in result["output"]
     assert GRADLE.compile(_validator(tmp_path / "empty"), ["App.java"], deadline=None) is None
 
 
@@ -487,10 +492,10 @@ def test_a_maven_or_gradle_workspace_never_reaches_javac(tmp_path, marker):
     assert JAVAC.detects(str(tmp_path)) is False
 
 
-def test_javac_runs_only_after_every_build_adapter_left_the_compile_undecided(tmp_path):
-    """Maven, then Gradle, then javac: an mvn start failure (undecided) falls
-    through to javac, exactly as before."""
-    _write(tmp_path, "pom.xml", POM.format(deps=""))
+def test_javac_runs_only_after_every_build_adapter_found_the_compile_not_applicable(tmp_path):
+    """Maven, then Gradle, then javac: javac is consulted only when each build adapter answered None, which (F9, owner decision D6) means ONLY "not
+    applicable" (no pom.xml / no build script). An applicable build system that failed to decide returns a typed no-verdict instead, and the chain stops
+    there: Gradle and javac are never consulted (the old test pinned the opposite: an mvn start failure fell through to a javac success)."""
     _write(tmp_path, "App.java", "class App {}")
     order = []
     seen, patched = _javac_runs()
@@ -498,8 +503,7 @@ def test_javac_runs_only_after_every_build_adapter_left_the_compile_undecided(tm
 
     def maven(*args, **kwargs):
         order.append("maven")
-        with patch.object(PolymorphicValidator, "_run_maven_cmd", side_effect=RuntimeError("boom")):
-            return real_maven(*args, **kwargs)
+        return real_maven(*args, **kwargs)
 
     def gradle(*args, **kwargs):
         order.append("gradle")
@@ -509,6 +513,17 @@ def test_javac_runs_only_after_every_build_adapter_left_the_compile_undecided(tm
         result = _validator(tmp_path).run_compile_check(["App.java"])
     assert order == ["maven", "gradle"] and [cmd[0] for cmd, _ in seen] == ["javac"]
     assert result["success"] is True
+
+    applicable = tmp_path / "applicable"
+    _write(applicable, "pom.xml", POM.format(deps=""))
+    _write(applicable, "App.java", "class App {}")
+    order.clear()
+    seen, patched = _javac_runs()
+    with patched, patch.object(MAVEN, "compile", new=maven), patch.object(GRADLE, "compile", new=gradle), \
+            patch.object(PolymorphicValidator, "_run_maven_cmd", side_effect=RuntimeError("boom")):
+        result = _validator(applicable).run_compile_check(["App.java"])
+    assert order == ["maven"] and seen == []
+    assert result["success"] is False and result["environment_reason_code"] == "MAVEN_COMPILE_INDETERMINATE"
 
 
 def test_javac_output_roots_are_exactly_its_destination(tmp_path):

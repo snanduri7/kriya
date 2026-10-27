@@ -36,10 +36,20 @@ class MavenBuildAdapter(BuildAdapter):
 
     def compile(self, v: Any, files: List[str], *, deadline: Optional[float]) -> Optional[Dict[str, Any]]:
         """The dependency-regression check, then ``mvn clean compile`` when the
-        workspace has a pom.xml. None: Maven did not decide (no pom.xml, or
-        mvn failed to start for a reason other than a missing executable or a
-        containment setup failure) - the caller falls through to Gradle /
-        javac exactly as before."""
+        workspace has a pom.xml. None means ONLY "not applicable" (no pom.xml):
+        the caller continues with Gradle / javac. Once a pom.xml exists Maven
+        always decides: PASS only from a ``mvn`` that ran and exited 0; FAIL
+        from one that ran and rejected the code; and when no trustworthy
+        verdict exists (``mvn`` could not be started, an exception, an
+        uninterpretable result) a typed ``environment_reason_code`` result
+        (F9, owner decision D6) - never a PASS, and never a fall-through to a
+        downstream no-source javac success. A containment setup failure
+        propagates."""
+        from kriya.tools.dependency_execution import (
+            MAVEN_COMPILE_INDETERMINATE,
+            MAVEN_INVOCATION_FAILED,
+            compile_environment_result,
+        )
         from kriya.tools.validate import get_pom_reactor_modules
 
         # 1. Check for dependency regression if original pom.xml exists
@@ -82,6 +92,16 @@ class MavenBuildAdapter(BuildAdapter):
                     ],
                     cwd=v.workspace_path, timeout=300, deadline=deadline,
                 )
+                if not isinstance(res, dict) or not isinstance(res.get("returncode"), int):
+                    return compile_environment_result(
+                        MAVEN_COMPILE_INDETERMINATE,
+                        f"Maven compilation returned no trustworthy verdict: its result carried no integer return code ({type(res).__name__}); "
+                        "nothing about the candidate was observed.")
+                if res.get("target_started") is False:
+                    # The containment backend's typed never-started fact (not an exit status, not text): `mvn` itself did not start, so nothing was compiled.
+                    return compile_environment_result(
+                        MAVEN_INVOCATION_FAILED,
+                        f"Failed to invoke mvn compile: the contained mvn did not start:\n{res.get('stderr', '')}".rstrip())
                 if res["returncode"] == 0:
                     # Found live, 2026-08-22 (ignite_qpid_protocol): a
                     # returncode of 0 here is a false positive whenever
@@ -170,16 +190,12 @@ class MavenBuildAdapter(BuildAdapter):
                 except Exception as ree:
                     logger.warning(f"Resolver failed to run: {ree}")
                 return v._validation_result(False, error_output, res)
-            except FileNotFoundError as e:
-                # 'mvn' itself isn't on PATH - a toolchain problem, not a code
-                # defect. Must be returned, not just logged: previously this
-                # was silently swallowed to a debug-level warning and fell
-                # through to the raw javac fallback below, which - for any
-                # project with real Maven dependencies (e.g. Ignite/Qpid) -
-                # produces a misleading "cannot find symbol" error that looks
-                # exactly like a code/import bug, sending the retry loop
-                # hunting for something that was never there.
-                return {"success": False, "output": f"Failed to invoke mvn compile: {e}"}
+            except OSError as e:
+                # 'mvn' itself isn't on PATH (FileNotFoundError), isn't executable (PermissionError, ENOEXEC) or the process could not be started - a toolchain
+                # problem, not a code defect. Returned with the same typed `environment_reason_code` as the POM-validation gate (F7), so the gate stops as a
+                # verification_infrastructure_failure and the Developer is never asked to repair code that was not judged; never swallowed into a fall-through
+                # to the raw javac fallback, which - with no changed .java - reports success:True.
+                return compile_environment_result(MAVEN_INVOCATION_FAILED, f"Failed to invoke mvn compile: {e}")
             except ContainmentSetupError:
                 # SEC-002 (2026-09-12): a containment/resource setup
                 # failure must never be swallowed into the generic
@@ -191,8 +207,13 @@ class MavenBuildAdapter(BuildAdapter):
                 # significant setup failure as gate PASS.
                 raise
             except Exception as e:
-                logger.warning(f"Failed to invoke mvn compile: {e}")
-        return None
+                # F9 (owner decision D6): an unexpected exception is NOT "Maven did not decide". It is logged WITH its traceback (a coding error must stay visible)
+                # and returned as a typed no-verdict result; it can never become a PASS through the downstream no-source javac success.
+                logger.error("mvn compile produced no trustworthy verdict", exc_info=True)
+                return compile_environment_result(
+                    MAVEN_COMPILE_INDETERMINATE,
+                    f"Maven compilation returned no trustworthy verdict ({type(e).__name__}: {e}); nothing about the candidate was observed.")
+        return None  # not applicable: the workspace has no pom.xml
 
     def run_tests(self, v: Any, test_class: Optional[str], *, module: Optional[str] = None) -> Dict[str, Any]:
         """``module`` (a declared reactor module directory) selects that module (``-pl``) with the modules it depends on

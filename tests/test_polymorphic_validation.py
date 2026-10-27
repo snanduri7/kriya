@@ -1451,13 +1451,20 @@ def test_java_dependency_regression(tmp_path):
 </project>"""
     (new_dir / "pom.xml").write_text(new_pom_preserved)
 
-    with patch("subprocess.Popen") as mock_popen:
-        mock_process = MagicMock()
-        mock_process.returncode = 0
-        mock_process.communicate.return_value = ("", "")
-        mock_popen.return_value = mock_process
+    # F9: this half used to patch ``subprocess.Popen`` (a host-era seam: Maven runs contained now). The mock made the Maven step raise inside the contained
+    # launch, the broad ``except`` swallowed it into "Maven did not decide", and the javac no-source success ("No Java files to compile.") made the assertion pass
+    # WITHOUT Maven ever having compiled anything - it passed on the very defect F9 closed. Now Maven answers through its documented seam and only a Maven that
+    # ran and exited 0 is a pass.
+    seen = []
+
+    def maven_ran_and_passed(_validator, goals, cwd, **_kwargs):
+        seen.append(list(goals))
+        return {"returncode": 0, "stdout": "BUILD SUCCESS", "stderr": ""}
+
+    with patch.object(PolymorphicValidator, "_run_maven_cmd", new=maven_ran_and_passed):
         res_ok = validator.run_compile_check(["pom.xml"])
-        assert res_ok["success"] is True
+    assert res_ok["success"] is True and res_ok["output"] == "Maven compilation succeeded."
+    assert seen and seen[0][:2] == ["clean", "compile"], "Maven itself must have been asked to compile"
 
 
 def test_run_app_sequence_multi_package_test_file_target_hits_module_not_found(tmp_path):

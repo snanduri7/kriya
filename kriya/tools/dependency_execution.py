@@ -127,9 +127,19 @@ MAVEN_VALIDATE_TERMINATED = "MAVEN_VALIDATE_TERMINATED"                    # kil
 MAVEN_VALIDATE_RESOLUTION_UNVERIFIED = "MAVEN_VALIDATE_RESOLUTION_UNVERIFIED"  # parent / plugin / dependency resolution or transfer failed: no trustworthy POM verdict
 MAVEN_VALIDATE_NO_DIAGNOSTICS = "MAVEN_VALIDATE_NO_DIAGNOSTICS"            # non-zero exit with no interpretable POM-model diagnostics
 MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID = "MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID"  # Maven refused its OWN configuration (settings / toolchains) before it read the POM
-# The codes of a Maven that DID start (the gate words them "returned no trustworthy verdict" instead of "could not start").
+# F9 (Wave-2; owner decision D6): the compile gate's twins of the same invariant - no compile path returns PASS unless a trustworthy compiler established it. A compile
+# adapter that met an exception or an uninterpretable result observed nothing about the candidate: an environment outcome, never a PASS and never a candidate conviction.
+MAVEN_COMPILE_INDETERMINATE = "MAVEN_COMPILE_INDETERMINATE"                # the Maven compile step raised, or its result could not be interpreted
+GRADLE_COMPILE_INDETERMINATE = "GRADLE_COMPILE_INDETERMINATE"              # the Gradle compile step raised, or its result could not be interpreted
+# The codes of a build tool that DID start or produced no interpretable verdict (the gate words them "returned no trustworthy verdict" instead of "could not start").
 MAVEN_VALIDATE_NO_VERDICT_CODES = frozenset({MAVEN_VALIDATE_TIMED_OUT, MAVEN_VALIDATE_TERMINATED, MAVEN_VALIDATE_RESOLUTION_UNVERIFIED, MAVEN_VALIDATE_NO_DIAGNOSTICS,
-                                             MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID})
+                                             MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID, MAVEN_COMPILE_INDETERMINATE, GRADLE_COMPILE_INDETERMINATE})
+
+
+def compile_environment_result(code: str, output: str) -> Dict[str, Any]:
+    """The compile gate's typed "no trustworthy verdict" result (F9): ``success`` False plus the ``environment_reason_code`` the gates already consume
+    (``_stop_on_environment_gate_result`` raises it as ``verification_infrastructure_failure``). Never a PASS, never a candidate conviction."""
+    return {"success": False, "environment_reason_code": code, "output": output}
 
 # Resolution / transport diagnostics, as real Maven 3.9 prints them (recorded: tests/fixtures/maven_validate and the live logs they cite). Any of them makes the POM verdict untrustworthy,
 # because a model problem reported next to an unresolved parent / BOM / plugin is usually a cascade of the failed resolution (the recorded env-T2 output shows exactly that).

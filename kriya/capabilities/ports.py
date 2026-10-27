@@ -51,8 +51,17 @@ class BuildAdapter(ABC):
 
     @abstractmethod
     def compile(self, validator: Any, files: List[str], *, deadline: Optional[float]) -> Optional[Dict[str, Any]]:
-        """The compile gate result, or None when this build system did not
-        decide it (the caller continues with its next option)."""
+        """The compile gate result, in one of four shapes (F9, owner decision D6: no
+        compile path returns PASS unless a trustworthy compiler established it):
+
+        * ``success`` True - the build system's compiler ran and passed;
+        * ``success`` False, no ``environment_reason_code`` - it ran and rejected the code (a candidate failure);
+        * ``success`` False with an ``environment_reason_code`` - NO trustworthy verdict (the tool could not be
+          started, raised, or returned something uninterpretable); the gates stop it as a
+          ``verification_infrastructure_failure``, it is neither a PASS nor a candidate conviction;
+        * None - ONLY "not applicable": the build system's marker is absent, so the caller continues with its next
+          option. None is never an answer for a build system that applies and failed to decide; a fall-through
+          would let a downstream no-source success wash the failure away."""
 
     @abstractmethod
     def run_tests(self, validator: Any, test_class: Optional[Any]) -> Dict[str, Any]:
