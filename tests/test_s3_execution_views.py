@@ -124,14 +124,6 @@ def test_a_tree_with_its_own_git_is_not_touched_by_the_target_preparation(tmp_pa
     assert profile.git_metadata is not None and _snapshot(origin / ".git") == before
 
 
-def test_the_non_contained_validator_builds_no_profile_and_prepares_nothing(tmp_path):
-    origin = _repo(tmp_path)
-    copy = _copy_without_git(tmp_path, origin)
-    validator = PolymorphicValidator(str(copy), original_workspace_path=str(origin), autonomy_cfg=AutonomyConfig())
-    validator.declare_execution_copy(str(copy))
-    assert validator.build_containment_profile_and_backend() == (None, None) and not (copy / ".git").exists()
-
-
 def test_the_tooling_directory_is_owned_only_while_the_call_that_made_it_runs(tmp_path):
     origin = _repo(tmp_path)
     validator = PolymorphicValidator(str(origin), original_workspace_path=str(origin), autonomy_cfg=_contained())

@@ -37,9 +37,6 @@ from kriya.tools.process import ProcessController
 TESTS = Path(__file__).resolve().parent
 ROOT = TESTS.parent
 
-# B. the closed list S8 deletes (owner decision 2026-10-25: replacement controls now, deletion in S8). Adding to it needs the same review as removing a test.
-S8_DELETION_COUNT = 54
-
 
 # ------------------------------------------------------------------ A. the registry is well formed
 
@@ -96,14 +93,20 @@ def test_an_unregistered_test_has_no_classification_and_a_registered_one_has_exa
     assert not (set(cc.EXCEPTIONS) & {f"{f}::" for f in cc.FILE_RULES})     # an id is an exception OR covered by its file rule; resolution is exact-then-file
 
 
-# ------------------------------------------------------------------ B. the legacy-host list is closed
+# ------------------------------------------------------------------ B. the legacy-host list is gone (S8)
 
-def test_the_legacy_host_list_s8_deletes_is_closed_and_its_tests_are_skipped_not_run():
-    ids = cc.legacy_host_ids()
-    assert len(ids) == S8_DELETION_COUNT and len(set(ids)) == len(ids)
-    assert all(cc.classify(i) == ("H", "H") for i in ids)
-    conftest_source = (TESTS / "conftest.py").read_text(encoding="utf-8")
-    assert 'entry[0] == "H"' in conftest_source and "deleted in S8" in conftest_source
+def test_no_test_is_classified_legacy_host_and_a_new_one_is_a_collection_error(monkeypatch):
+    """S8 deleted the 54 exact-id legacy host-execution tests (owner decision 2026-10-25: replacement controls, then deletion in S8). None remains, and tests/conftest.py turns a
+    new test classified H into a collection error (a UsageError) - BEHAVIOURALLY: the real collection hook is driven with a planted H item, so a tripwire that is still in the
+    source but can no longer fire (the mutant that put a skip and a `continue` in front of it) fails here."""
+    assert cc.legacy_host_ids() == ()
+    assert all(klass != "H" and seam != "H" for seam, klass in cc.EXCEPTIONS.values())
+    planted = "tests/test_planted_legacy_host.py::test_planted"
+    monkeypatch.setitem(cc.EXCEPTIONS, planted, ("H", "H"))
+    assert cc.legacy_host_ids() == (planted,)
+    item = SimpleNamespace(nodeid=planted, path=Path(planted), get_closest_marker=lambda _name: None, add_marker=lambda *_args: None)
+    with pytest.raises(pytest.UsageError, match="S8 deleted every legacy host-execution test"):
+        sys.modules["conftest"].pytest_collection_modifyitems(config=None, items=[item])
 
 
 # ------------------------------------------------------------------ C. the stand-in is test-only and claims nothing

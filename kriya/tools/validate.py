@@ -23,7 +23,7 @@ from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy, extract_install_package_target
 from kriya.policy.filesystem import is_within_scope, make_workspace_scope
 from kriya.policy.model import ActionRequest, ActionType
-from kriya.tools import test_execution, venv_integrity
+from kriya.tools import test_execution
 from kriya.tools.containment import (
     ContainmentBackend,
     ContainmentProfile,
@@ -767,11 +767,7 @@ class PolymorphicValidator:
         observed outcome, verbatim - not re-derived or reinterpreted)."""
         signature = self._venv_install_signature(install_args)
         if signature in self._venv_install_cache:
-            venv_python = self._venv_install_cache[signature][0]
-            if venv_python is None or self.external_execution().contained or not os.path.isabs(venv_python) \
-                    or not venv_integrity.mismatches(os.path.dirname(os.path.dirname(venv_python))):
-                return self._venv_install_cache[signature]
-            del self._venv_install_cache[signature]  # OI-142 / O4: changed since it was sealed - rebuilt below, not reused
+            return self._venv_install_cache[signature]
         result = self._ensure_project_venv_impl(install_args)
         self._venv_install_cache[signature] = result
         return result
@@ -832,14 +828,13 @@ class PolymorphicValidator:
         # the host, the OCI backend's own fixed container workdir when
         # contained - exactly the same mechanism `cwd=self.workspace_path`
         # already relies on for every other command this class runs).
-        contained = self.external_execution().contained
         venv_dir_host = os.path.join(self._origin_root(), ".kriya", "venv")  # OI-142: an environment input of the origin tree, outside any gate view
         venv_python_host = os.path.join(venv_dir_host, "bin", "python")
         venv_relative = os.path.join(".kriya", "venv")
         venv_python_relative = os.path.join(venv_relative, "bin", "python")
-        create_interpreter = "python3" if contained else sys.executable
-        create_target = venv_relative if contained else venv_dir_host
-        venv_python = venv_python_relative if contained else venv_python_host
+        create_interpreter = "python3"
+        create_target = venv_relative
+        venv_python = venv_python_relative
         # LINUX-OCI-VENV-INTERPRETER-001: a venv created INSIDE a container
         # links bin/python to the container's interpreter (e.g.
         # /usr/local/bin/python3), which need not exist on the host - only
@@ -848,7 +843,7 @@ class PolymorphicValidator:
         # install /usr/local/bin/python3, and on a Linux host every contained
         # venv was judged "failed" and silently replaced by an interpreter
         # without the project's dependencies.
-        venv_present = os.path.lexists if contained else os.path.exists
+        venv_present = os.path.lexists
 
         # VENV-ADDITIVE-REUSE-001 (BACKEND-READINESS-004, CONFIRMED by a real pip
         # measurement): the venv persists across attempts and `pip install`
@@ -859,13 +854,7 @@ class PolymorphicValidator:
         # new declaration drops any of them the venv is recreated from nothing.
         declared = _declared_specifiers(self.workspace_path, install_args)
         previous = _installed_specifiers(venv_dir_host)
-        if venv_present(venv_python_host) and not contained and (unexpected := venv_integrity.mismatches(venv_dir_host)):
-            # OI-142 / owner O4: a venv is reused only as sealed. A gate ran candidate code with the operator's rights and changed
-            # it (or it was never sealed): it is not trusted - recreated from nothing, never reused.
-            logger.info("Project venv recreated: its content is not the sealed content (%s)", unexpected[:5])
-            shutil.rmtree(venv_dir_host, ignore_errors=True)
-            self.venv_recreations += 1
-        elif venv_present(venv_python_host) and (previous is None or not set(previous) <= set(declared)):
+        if venv_present(venv_python_host) and (previous is None or not set(previous) <= set(declared)):
             # Review F5: a venv whose installed set is unknown (no marker: created
             # before this mechanism, or its marker could not be written) is never
             # trusted - it may already hold a removed package - and is rebuilt once.
@@ -878,7 +867,7 @@ class PolymorphicValidator:
             self.venv_recreations += 1
 
         if not venv_present(venv_python_host):
-            if contained and self._gate_view is not None:
+            if self._gate_view is not None:
                 os.makedirs(venv_dir_host, exist_ok=True)  # the mount target of the origin venv (see _venv_mounts); Kriya-owned, inside the origin's .kriya
             try:
                 create_res = self._run_cmd_with_timeout(
@@ -930,8 +919,6 @@ class PolymorphicValidator:
                 f"'pip install {' '.join(install_args)}' failed:\n{install_res['stdout']}\n{install_res['stderr']}"
             )
         _record_installed_specifiers(venv_dir_host, declared)
-        if not contained:
-            venv_integrity.seal(venv_dir_host)
         return venv_python, None
 
     def _resolve_python_interpreter(self) -> Tuple[str, Optional[str]]:
@@ -999,8 +986,7 @@ class PolymorphicValidator:
         # unchanged: sys.executable has pytest. The resolver is shared with
         # run_app_sequence()/run_app(), so runtime verification gets the
         # same venv.
-        contained = self.external_execution().contained
-        default_interpreter = "python3" if contained else sys.executable
+        default_interpreter = "python3"
         from kriya.tools.dependency_execution import PYTHON_ENVIRONMENT_UNAVAILABLE
 
         def _resolved(requested: str, actual: str, path: str) -> Tuple[str, Optional[str]]:
@@ -1037,18 +1023,15 @@ class PolymorphicValidator:
             # contained; host mode keeps passing the exact absolute path
             # unchanged (existing test coverage pins this exact argv shape,
             # and there is no reason to touch behavior that already works).
-            pip_requirements_arg = "requirements.txt" if contained else requirements_path
-            return _venv_outcome(*self._ensure_project_venv(["-r", pip_requirements_arg]))
+            return _venv_outcome(*self._ensure_project_venv(["-r", "requirements.txt"]))
         pyproject_path = os.path.join(self.workspace_path, "pyproject.toml")
         if os.path.exists(pyproject_path):
             dependencies = _pyproject_dependencies(pyproject_path)
             if dependencies:
                 return _venv_outcome(*self._ensure_project_venv(dependencies))
-        if contained:
-            # No dependency declaration at all (CONTAINED-PYTHON-TEST-GATE-001):
-            # a venv with pytest only, through the same acquisition path - required all the same.
-            return _venv_outcome(*self._ensure_project_venv([]))
-        return _resolved("default", "default", default_interpreter)
+        # No dependency declaration at all (CONTAINED-PYTHON-TEST-GATE-001):
+        # a venv with pytest only, through the same acquisition path - required all the same.
+        return _venv_outcome(*self._ensure_project_venv([]))
 
     def _detect_stack(self) -> str:
         """Determines if the workspace uses Python, Java, or Ruby - or "unknown"
@@ -1241,13 +1224,10 @@ class PolymorphicValidator:
         decision plus the selected JDK. Runs before any subprocess can start
         and raises (a ContainmentSetupError) for unsupported/conflicting
         requirements - never a host-tool fallback."""
-        self.toolchain_identity = (
-            resolve_toolchain_selection(
-                self.workspace_path, self.stack, baseline_path=self.original_workspace_path,
-                java_home_override=self._java_home_override,
-                declaration_mutable=self._toolchain_declaration_mutable,
-            )
-            if self.external_execution().contained else None
+        self.toolchain_identity = resolve_toolchain_selection(
+            self.workspace_path, self.stack, baseline_path=self.original_workspace_path,
+            java_home_override=self._java_home_override,
+            declaration_mutable=self._toolchain_declaration_mutable,
         )
 
     def declare_execution_copy(self, created_path: str) -> None:
@@ -1328,8 +1308,6 @@ class PolymorphicValidator:
         introduced (Invariant: do not duplicate containment execution
         code)."""
         decision = self.external_execution()
-        if not decision.contained:
-            return None, None
         backend = decision.backend()  # D2 S2: typed refusal first when containment is mandatory and the backend provides no isolation
         if acquisition:
             cpu_seconds = self.autonomy_cfg.acquisition_cpu_seconds
@@ -1587,9 +1565,6 @@ class PolymorphicValidator:
             seed_gradle_distribution_from_host,
         )
 
-        if not self.external_execution().contained:
-            return self._run_cmd_with_timeout([gradle_cmd] + tasks, cwd=cwd, timeout=timeout)
-
         cache_dir = self._dependency_cache_dir("gradle")
         provenance = seed_gradle_distribution_from_host(self.workspace_path, cache_dir)
         logger.info("Gradle distribution seed (%s): %s", provenance.get("status"), provenance.get("url", "-"))
@@ -1739,11 +1714,6 @@ class PolymorphicValidator:
         Compile and test keep the goal-derived acquisition above: those goals
         build and test candidate code by design, and their dependency set is
         not knowable without the project's own build."""
-        if not self.external_execution().contained:
-            # Byte-for-byte pass-through (stdin only when a runtime step has one).
-            stdin = {"stdin_payload": stdin_payload} if stdin_payload is not None else {}
-            return self._run_cmd_with_timeout(["mvn"] + goals, cwd=cwd, timeout=timeout, **stdin)
-
         cache_dir = self._maven_cache_dir()
 
         def _bounded(seconds: int) -> int:
@@ -2002,54 +1972,13 @@ class PolymorphicValidator:
         # pom_validate gate. Now it propagates: _verification_gate records it and the attempt handler classifies it, never a pass.
 
     def resolve_maven_classpath(self) -> Optional[str]:
-        """Resolves the REAL, full Maven classpath (including transitive
-        dependencies - pom.xml's own <dependency> entries only ever list
-        DIRECT ones, which is not enough to reliably locate a class that
-        arrives transitively, e.g. through ignite-core's own dependency
-        graph) via `mvn dependency:build-classpath`, writing the result to a
-        temp file rather than parsing stdout - build-classpath's own stdout
-        is full of noisy [INFO] lines around the actual classpath string,
-        while `-Dmdep.outputFile=...` is the standard, parse-free way this
-        goal is meant to be consumed programmatically. Ground truth for
-        inspect_external_class() below - deliberately a separate method
-        (not folded into it) since a future caller may want the raw
-        classpath string for something other than a single javap lookup.
-        Returns None on any failure (no pom.xml, mvn not on PATH,
-        unresolvable dependencies, timeout) - never raises, since this is
-        used from an optional recovery tool call, not a Quality Gate."""
-        if self.stack != "java" or not os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
-            return None
-        if self.external_execution().contained:
-            # SEC-001-P6 Stage 2: NOT wired onto the contained path this
-            # pass - `-Dmdep.outputFile` needs a path OUTSIDE the workspace
-            # mount (tempfile.mkstemp's own system temp dir), which a
-            # container cannot see or write to; this method's own contract
-            # ("never raises, returns None on any failure") already covers
-            # this cleanly - an optional recovery-tool lookup returning
-            # nothing is a correct, honest degrade, not a silent bypass of
-            # anything security-relevant (this reads dependency classpath
-            # info, it doesn't execute untrusted code any differently).
-            return None
-        fd, cp_file = tempfile.mkstemp(suffix=".kriya-classpath.txt")
-        os.close(fd)
-        try:
-            res = self._run_cmd_with_timeout(
-                ["mvn", "-q", "dependency:build-classpath", f"-Dmdep.outputFile={cp_file}"],
-                cwd=self.workspace_path, timeout=120,
-            )
-            if res["returncode"] != 0:
-                return None
-            with open(cp_file, "r", encoding="utf-8", errors="replace") as fh:
-                classpath = fh.read().strip()
-            return classpath or None
-        except Exception as e:
-            logger.debug(f"Failed to resolve Maven classpath: {e}")
-            return None
-        finally:
-            try:
-                os.unlink(cp_file)
-            except OSError:
-                pass
+        """The full Maven classpath (including transitive dependencies) for inspect_external_class() below, or None.
+
+        S8: always None. The lookup ran ``mvn dependency:build-classpath -Dmdep.outputFile=<temp file>`` on the HOST, which is project-controlled
+        execution; contained, ``-Dmdep.outputFile`` needs a path OUTSIDE the workspace mount (a system temp file a container cannot see or write),
+        so it was never wired onto the contained path (SEC-001-P6 Stage 2) and the contained default has returned None since S7. Contract kept: an
+        optional recovery-tool lookup that returns nothing is an honest degrade, never a gate and never a bypass of anything security-relevant."""
+        return None
 
     @_verification_gate("classpath_inspection")
     def inspect_external_class(self, fully_qualified_class_name: str) -> Optional[str]:

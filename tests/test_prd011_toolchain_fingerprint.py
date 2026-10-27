@@ -51,14 +51,6 @@ def local_images(monkeypatch):
     return present
 
 
-def test_host_mode_toolchain_stays_unavailable(tmp_path, local_images):
-    (tmp_path / "pom.xml").write_text(_pom(17))
-    fingerprint = toolchain_fingerprint(str(tmp_path), AutonomyConfig())
-    assert not fingerprint.available
-    assert "containment not required" in fingerprint.basis
-    assert local_images["inspected"] == []  # host mode never touches Docker
-
-
 def test_contained_toolchain_binds_profile_and_image_digest(tmp_path, local_images):
     (tmp_path / "pom.xml").write_text(_pom(17))
     local_images["maven:3.9-eclipse-temurin-17"] = DIGEST_1
@@ -130,15 +122,6 @@ def test_direct_resume_detects_a_toolchain_image_change(tmp_path, local_images):
     by_name = {c.name: c for c in compare_resume_fingerprints(stored, changed, ["candidate_gate_outcomes"])}
     assert by_name["toolchain"].status is FingerprintStatus.CHANGED
     assert by_name["toolchain"].invalidates
-
-
-def test_direct_resume_in_host_mode_stays_unverified(tmp_path, local_images):
-    (tmp_path / "pom.xml").write_text(_pom(17))
-    cfg = AppConfig()
-    stored = fingerprint_block(generation_resume_fingerprints(cfg, str(tmp_path), goal="g"))
-    current = generation_resume_fingerprints(cfg, str(tmp_path), goal="g")
-    by_name = {c.name: c for c in compare_resume_fingerprints(stored, current, ["candidate_gate_outcomes"])}
-    assert by_name["toolchain"].status is FingerprintStatus.UNVERIFIED
 
 
 def test_milestone_identity_uses_the_same_function(tmp_path, local_images):

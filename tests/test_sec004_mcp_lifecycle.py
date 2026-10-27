@@ -68,8 +68,8 @@ def _pid_alive(pid: int) -> bool:
 
 
 def _client(name, mode, extra_env=None, lifecycle=FAST, contained=True):
-    """D2 S5: the lifecycle semantics run through the contained branch (the test-only stand-in); ``contained=False`` is the legacy host spawn, kept only
-    by the tests marked ``legacy_host_mcp`` (host rlimits, the real CLI) until the secure-default migration removes that contract."""
+    """D2 S5: the lifecycle semantics run through the contained branch (the test-only stand-in); ``contained=False`` is the legacy host spawn; S8 deleted the
+    tests that used it (host rlimits), so no test passes it any more."""
     env = {"ADVERSARIAL_MODE": mode}
     if extra_env:
         env.update(extra_env)
@@ -356,81 +356,6 @@ async def test_stderr_log_line_cap_enforced(caplog):
 
 
 # --- RESOURCES -------------------------------------------------------------
-
-@pytest.mark.legacy_host_mcp
-@pytest.mark.asyncio
-async def test_cpu_over_limit_process_killed_by_os():
-    """RLIMIT_CPU is a CUMULATIVE LIFETIME budget (SEC-001's existing
-    primitive, reused as-is) - reliable on both Linux and macOS per
-    kriya/tools/sandbox.py's own docstring, so this assertion holds on
-    both platforms, unlike the memory case below."""
-    cfg = MCPLifecycleConfig(
-        startup_timeout_seconds=5, request_timeout_seconds=5,
-        shutdown_grace_seconds=1, force_kill_reap_seconds=2, cpu_seconds=1,
-    )
-    c = _client("cpuspin", "spin_cpu", lifecycle=cfg, contained=False)
-    await c.start()
-    pid = c._process.pid
-    with contextlib.suppress(Exception):
-        await c._send_notification("notifications/initialized", {})
-    killed = False
-    for _ in range(60):
-        if not _pid_alive(pid):
-            killed = True
-            break
-        await asyncio.sleep(0.1)
-    assert killed, "a CPU-spinning MCP process must not receive unlimited host CPU authority"
-    await c.stop()
-
-
-@pytest.mark.legacy_host_mcp
-@pytest.mark.asyncio
-async def test_memory_over_limit_outcome_platform_honest():
-    """RLIMIT_AS is deterministic/fail-closed on Linux, ADVISORY-ONLY on
-    macOS (an already-accepted SEC-001 platform limitation, not
-    re-litigated here) - this test records the real outcome per platform
-    rather than asserting a single cross-platform expectation, per this
-    risk's own explicit instruction not to pretend macOS evidence proves
-    Linux behavior."""
-    cfg = MCPLifecycleConfig(
-        startup_timeout_seconds=5, request_timeout_seconds=5,
-        shutdown_grace_seconds=1, force_kill_reap_seconds=2, memory_mb=64,
-    )
-    c = _client("memhog", "allocate_memory", lifecycle=cfg, contained=False)
-    await c.start()
-    pid = c._process.pid
-    with contextlib.suppress(Exception):
-        await c._send_notification("notifications/initialized", {})
-    await asyncio.sleep(3)
-    alive = _pid_alive(pid)
-    if sys.platform == "linux":
-        assert not alive, "RLIMIT_AS must be enforced (deterministic) on Linux"
-    else:
-        # macOS: RLIMIT_AS is advisory only - the process surviving is the
-        # documented, accepted outcome, not a SEC-004 regression.
-        pass
-    await c.stop()
-    await asyncio.sleep(0.2)
-    assert not _pid_alive(pid), "stop() must clean up regardless of whether the resource limit itself fired"
-
-
-@pytest.mark.legacy_host_mcp
-@pytest.mark.asyncio
-async def test_resource_setup_failure_fails_closed(monkeypatch):
-    """If the resource-limit preexec_fn cannot be established, MCPClient
-    must NOT fall back to an uncontrolled spawn - it must fail closed."""
-    from kriya.tools.containment import ContainmentSetupError
-
-    def _broken_preexec(cpu_seconds, memory_mb):
-        def _fn():
-            raise RuntimeError("simulated setrlimit failure")
-        return _fn
-
-    monkeypatch.setattr("kriya.mcp.lifecycle.posix_resource_limits_preexec_fn", _broken_preexec)
-    c = _client("brokenlimit", "normal", contained=False)
-    with pytest.raises(ContainmentSetupError):
-        await c.start()
-    assert c._process is None or not _pid_alive(c._process.pid)
 
 
 # --- MANAGER ---------------------------------------------------------------

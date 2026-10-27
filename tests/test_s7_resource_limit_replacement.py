@@ -1,5 +1,5 @@
 """S7 -> S8: the contained replacement for the host resource-limit characterizations S8 deletes (tests/test_sec004_mcp_lifecycle.py: ``test_cpu_over_limit_process_killed_by_os``,
-``test_memory_over_limit_outcome_platform_honest``, ``test_resource_setup_failure_fails_closed``, still marked ``legacy_host_mcp``).
+``test_memory_over_limit_outcome_platform_honest``, ``test_resource_setup_failure_fails_closed``; S8 deleted them, they were marked ``legacy_host_mcp``).
 
 Those three characterize host RLIMIT_CPU / RLIMIT_AS on an MCP child started WITHOUT a backend - a path the secure default removes. What replaces them is the container's own bound:
 ``profile.memory_mb`` becomes a cgroup-enforced ``--memory`` / ``--memory-swap`` hard limit (really enforced: tests/test_containment_oci.py::test_memory_limit_is_enforced) and

@@ -39,12 +39,10 @@ class ScanRequest:
 class ExecutionContext:
     """What the service tells a provider about where it must run.
 
-    ``contained`` is True when autonomy.contained_execution_required: the
-    provider must run through ``containment_backend`` with no network, and
+    Execution is always contained (S8: there is no host mode): the provider must run through ``containment_backend`` with no network, and
     must refuse (never fall back to the host) if it cannot.
     """
 
-    contained: bool
     containment_backend: Optional[object]
     workspace_root: str
 

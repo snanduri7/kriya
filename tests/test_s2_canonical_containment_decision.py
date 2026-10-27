@@ -119,7 +119,8 @@ def test_the_packaged_defaults_are_the_secure_contract_and_no_consumer_is_host_p
     profile, backend = PolymorphicValidator(str(tmp_path), autonomy_cfg=cfg.autonomy).build_containment_profile_and_backend()
     assert profile is not None and backend is not None
     context = execution_context(cfg, str(tmp_path))
-    assert context.contained is True and context.containment_backend is not None
+    # S8: the context carries no host/contained flag any more (contained is the only mode); the owner's decision is the fact
+    assert containment.decide_external_execution(cfg.autonomy, subject="static_analysis").contained is True and context.containment_backend is not None
     verification = next(d for d in describe_run_egress(cfg) if d.channel == "verification_execution")
     assert verification.allowed is False and verification.containment == {"required": True, "backend": "oci"}
     assert "containment not required" not in toolchain_fingerprint(str(tmp_path), cfg.autonomy).basis
@@ -168,7 +169,7 @@ def test_the_pip_capability_takes_its_contained_path_by_default(tmp_path):
 
 def test_static_analysis_is_contained_by_default(tmp_path):
     context = execution_context(_config(), str(tmp_path))
-    assert context.contained is True and context.containment_backend.name == "oci"
+    assert containment.decide_external_execution(_config().autonomy, subject="static_analysis").contained is True and context.containment_backend.name == "oci"
 
 
 # ------------------------------------------------------------------ D. mandatory containment that cannot isolate: typed refusal / a reason
@@ -205,7 +206,7 @@ async def test_shell_tool_refuses_a_mandatory_command_instead_of_running_it_on_t
 def test_static_analysis_degrades_with_a_reason_it_does_not_raise(tmp_path):
     """The provider refuses (never falls back to the host) on its own terms; the context carries the backend the owner resolved."""
     context = execution_context(_config("none"), str(tmp_path))
-    assert context.contained is True and not backend_provides_isolation(context.containment_backend)
+    assert containment.decide_external_execution(_config("none").autonomy, subject="static_analysis").contained is True and not backend_provides_isolation(context.containment_backend)
 
 
 # ------------------------------------------------------------------ E. identity digests keep their bytes

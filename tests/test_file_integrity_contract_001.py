@@ -897,9 +897,8 @@ _AUDITED_WRITE_SITES = {
     # dependency is dropped - both under the sandbox's own .kriya/, never tracked content.
     # OI-142: the gate view (kriya/tools/gate_view.py) copies the bound tree into a fresh directory under the Kriya state root
     # (never into a source tree) and removes it; validate.py copies Kriya's staged acceptance directory into that view and the
-    # runner's declared outputs back, and removes a venv whose sealed content changed; venv_integrity.py removes interpreter
-    # bytecode inside the Kriya-owned venv.
-    "kriya/tools/gate_view.py": 3, "kriya/tools/venv_integrity.py": 1,
+    # runner's declared outputs back (S8: the host venv seal and its integrity module are gone).
+    "kriya/tools/gate_view.py": 3,
     "kriya/tools/validate.py": 8, "kriya/workflow/checkpoint.py": 1, "kriya/workflow/context_certification.py": 3,
     "kriya/workflow/deterministic_failure_diagnostic.py": 2, "kriya/workflow/edit_safety.py": 0,
     "kriya/workflow/milestone_completion.py": 1, "kriya/workflow/proposal_store.py": 3,

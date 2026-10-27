@@ -11,7 +11,6 @@ asserting the EXACT extracted dependency list reaches it unmodified - the
 "extraction -> install" path this risk names, isolated from the real
 venv-creation/pip-install cost.
 """
-import os
 from unittest.mock import patch
 
 from kriya.tools.validate import PolymorphicValidator, _pyproject_dependencies
@@ -91,22 +90,6 @@ def test_pyproject_dependencies_reach_ensure_project_venv_unmodified(tmp_path):
     assert error is None
     assert interpreter == "/fake/venv/bin/python"
     mock_ensure.assert_called_once_with(["django>=4.0", "psycopg2-binary"])
-
-
-def test_pyproject_with_no_dependencies_never_calls_ensure_project_venv(tmp_path):
-    """An empty/absent [project.dependencies] array must not trigger a
-    pointless venv-creation attempt - falls through to the bare default
-    interpreter, matching _has_real_requirements' own 'not worth the cost'
-    posture for the requirements.txt sibling case."""
-    _write(tmp_path, "pyproject.toml", "[project]\nname = \"x\"\n")
-    v = PolymorphicValidator(str(tmp_path))
-
-    with patch.object(v, "_ensure_project_venv") as mock_ensure:
-        interpreter, error = v._resolve_python_interpreter()
-
-    mock_ensure.assert_not_called()
-    assert error is None
-    assert interpreter in (os.sys.executable, "python3")
 
 
 def test_requirements_txt_takes_priority_over_pyproject_toml(tmp_path):

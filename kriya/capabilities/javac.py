@@ -62,12 +62,9 @@ class JavacBuildAdapter(BuildAdapter):
         if not present:
             return {"success": True, "output": "No Java files to compile."}
 
-        # D2 S4 (R4): a host path means nothing inside the container, whose workspace is mounted elsewhere; contained, javac gets workspace-RELATIVE
-        # paths (the command's cwd is the workspace, and the venv and every other contained command already work that way). Host mode: unchanged.
-        if v.external_execution().contained:
-            java_files, destination = [os.path.relpath(os.path.join(v.workspace_path, f), v.workspace_path) for f in present], OUTPUT_DIR
-        else:
-            java_files, destination = [os.path.join(v.workspace_path, f) for f in present], os.path.join(v.workspace_path, OUTPUT_DIR)
+        # D2 S4 (R4): a host path means nothing inside the container, whose workspace is mounted elsewhere; javac gets workspace-RELATIVE paths
+        # (the command's cwd is the workspace, and the venv and every other contained command already work that way). S8: contained is the only mode.
+        java_files, destination = [os.path.relpath(os.path.join(v.workspace_path, f), v.workspace_path) for f in present], OUTPUT_DIR
 
         cmd = ["javac", "-proc:none", "-d", destination]
         cmd.extend(java_files)

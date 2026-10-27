@@ -1,10 +1,10 @@
-"""S7 -> S8: the S8 list is FROZEN and exact (tests/containment_s8_list.py, tests/containment_census.py).
+"""S8 (done): the guards of the S8 record (tests/containment_s8_list.py, tests/containment_census.py, tests/containment_h_ledger.py).
 
-S8 deletes ONLY unreachable project-controlled host-execution code and tests. This file makes the list a closed, reviewed set:
-- every production function that reads the containment decision's ``contained`` flag is either on the S8 list or explicitly retained as a record / identity / report reader;
-- the named extra sites exist; trusted host infrastructure never appears on the list;
-- the test half is exactly the census H list, each with its replacement evidence (tests/test_s7_h_replacement_ledger.py);
-- the whole list is digest-pinned, so adding or removing an entry is a reviewed change, not a drift."""
+S8 deleted ONLY unreachable project-controlled host-execution code and tests. After it:
+- the ONLY production readers of the decision's ``contained`` flag are the retained record / identity / report readers, so a new host branch cannot appear unnoticed;
+- every recorded S8 site is either DELETED (it no longer reads the flag) or HELD with a written reason; trusted host infrastructure never appears on the record;
+- the test half is gone: no test is classified H, no test carries ``legacy_host_mcp``, and none of the recorded ids is collected any more;
+- the whole record is digest-pinned, so changing it is a reviewed change."""
 import ast
 import hashlib
 from pathlib import Path
@@ -15,8 +15,8 @@ import containment_s8_list as s8
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Update ONLY with an owner-reviewed change to the S8 scope (the digest of the sorted code sites + test ids)
-S8_LIST_DIGEST = "d0163381a442a35b8059e0f32582263e4a8a46bdf43d01851ba0490ab2d35d76"
+# Update ONLY with an owner-reviewed change to the S8 record (the digest of the sorted code sites with their outcomes + the recorded deleted test ids)
+S8_LIST_DIGEST = "08db9e0f0f84bbb9468ffd29a802b0fc4bccda0d6d8075ce733a86634d875f39"
 
 
 def _qualnames(tree):
@@ -60,42 +60,53 @@ def _defines(site: str) -> bool:
                for node in ast.walk(tree))
 
 
-def test_every_reader_of_the_contained_flag_is_on_the_s8_list_or_explicitly_retained():
+def test_only_the_retained_record_readers_read_the_contained_flag():
     scan = set(_scan())
-    listed = {site for site, entry in s8.S8_CODE.items() if entry.kind == "scan"} | set(s8.RETAINED)
-    assert scan == listed, (f"unlisted readers (classify them as S8_CODE or RETAINED): {sorted(scan - listed)}; "
-                            f"listed but no longer reading the flag (the branch is gone or moved): {sorted(listed - scan)}")
+    assert scan == set(s8.RETAINED), (f"a production function reads the contained flag again (a host branch is back, or a new record reader must be classified RETAINED): "
+                                      f"{sorted(scan - set(s8.RETAINED))}; retained but no longer reading it: {sorted(set(s8.RETAINED) - scan)}")
 
 
-def test_the_s8_code_and_retained_sets_are_disjoint_and_every_named_site_exists():
+def test_every_recorded_site_is_deleted_or_held_with_a_reason_and_the_retained_set_is_disjoint():
     assert not set(s8.S8_CODE) & set(s8.RETAINED)
-    for site in (*s8.S8_CODE, *s8.RETAINED):
+    scan = set(_scan())
+    for site, entry in s8.S8_CODE.items():
+        assert entry.outcome in ("DELETED", "HELD"), site
+        assert site not in scan, f"{site}: a DELETED/HELD S8 site reads the contained flag again"
+        if entry.outcome == "HELD":
+            assert len(s8.HELD_NOTES.get(site, "")) >= 80 and _defines(site), f"{site}: a held site needs a written reason and must still exist"
+    assert set(s8.HELD_NOTES) == {site for site, entry in s8.S8_CODE.items() if entry.outcome == "HELD"}
+    for site in s8.RETAINED:
         assert _defines(site), f"{site}: no such function"
+    for orphan in s8.ORPHANS:
+        assert _defines(orphan) or "::" in orphan and (ROOT / orphan.partition("::")[0]).is_file(), f"{orphan}: orphan record is stale"
 
 
-def test_trusted_and_hardened_host_infrastructure_is_never_on_the_s8_list():
+def test_trusted_and_hardened_host_infrastructure_is_never_on_the_s8_record():
     for site in (*s8.S8_CODE, *s8.RETAINED):
         function = site.partition("::")[2]
         assert not any(name in function.split(".") for name in s8.NEVER_S8), f"{site} is trusted host infrastructure, not S8 scope"
 
 
-def test_the_s8_test_half_is_exactly_the_census_h_list_with_a_ledger_entry_each():
-    assert set(ledger.LEDGER) == set(cc.legacy_host_ids())
-    assert all(cc.classify(test_id) == ("H", "H") for test_id in cc.legacy_host_ids())
+def test_the_test_half_is_gone_no_test_is_legacy_host_and_the_recorded_plain_ids_are_not_collected_any_more():
+    assert cc.legacy_host_ids() == ()
+    assert not any(cc.classify(test_id) == ("H", "H") for test_id in cc.EXCEPTIONS)
+    assert len(ledger.LEDGER) == 54 and len(ledger.MARKED_LEDGER) == 3        # the record of what S8 deleted
+    for test_id in (*ledger.LEDGER, *ledger.MARKED_LEDGER):
+        path, _, name = test_id.partition("::")
+        if "[" in name:
+            continue                  # a parameter set: the function may legitimately remain with its other parameters
+        tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
+        assert name not in {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}, f"{test_id}: a deleted legacy-host test is back"
 
 
-def test_the_still_marked_legacy_host_mcp_tests_are_exactly_the_marked_ledger():
-    """The legacy_host_mcp tests that are not census H ids (they never consult the owner) are the second half of the S8 test list."""
-    marked = set()
+def test_no_test_carries_the_retired_legacy_host_mcp_marker():
     for path in sorted((ROOT / "tests").glob("test_*.py")):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any("legacy_host_mcp" in ast.dump(decorator) for decorator in node.decorator_list):
-                marked.add(f"tests/{path.name}::{node.name}")
-    assert marked - set(cc.legacy_host_ids()) == set(ledger.MARKED_LEDGER)
-    assert not set(ledger.MARKED_LEDGER) & set(cc.legacy_host_ids())
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                assert not any("legacy_host_mcp" in ast.dump(decorator) for decorator in node.decorator_list), f"{path.name}::{node.name}"
 
 
-def test_the_whole_s8_list_is_digest_pinned():
-    material = "\n".join([*(f"code {site}" for site in sorted(s8.S8_CODE)), *(f"test {test_id}" for test_id in sorted(cc.legacy_host_ids())),
+def test_the_whole_s8_record_is_digest_pinned():
+    material = "\n".join([*(f"code {site} {entry.outcome}" for site, entry in sorted(s8.S8_CODE.items())), *(f"test {test_id}" for test_id in sorted(ledger.LEDGER)),
                           *(f"marked {test_id}" for test_id in sorted(ledger.MARKED_LEDGER))])
     assert hashlib.sha256(material.encode("utf-8")).hexdigest() == S8_LIST_DIGEST

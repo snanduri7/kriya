@@ -42,12 +42,3 @@ def test_a_contained_venv_linking_to_the_container_interpreter_is_used(tmp_path)
     assert validator._ensure_project_venv(["-r", "requirements.txt"])[0] == ".kriya/venv/bin/python"
     assert [cmd[1:3] for cmd in calls] == [["-m", "pip"]]
 
-
-def test_a_host_venv_with_a_dangling_interpreter_is_still_a_failed_venv(tmp_path):
-    """Host mode keeps following the link: a host venv whose interpreter
-    does not exist cannot run anything."""
-    validator = _validator(tmp_path, contained=False)
-    calls = []
-    _fake_commands(validator, calls, CONTAINER_ONLY_INTERPRETER)
-    assert validator._ensure_project_venv(["-r", "requirements.txt"]) == (None, None)
-    assert [cmd[1:3] for cmd in calls] == [["-m", "venv"]]

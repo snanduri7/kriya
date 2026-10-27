@@ -1,8 +1,9 @@
-"""S7 -> S8: the H replacement-control ledger is enforced (tests/containment_h_ledger.py).
+"""S8 (done): the H replacement-control ledger is enforced (tests/containment_h_ledger.py).
 
-The closed list S8 deletes is the exact-id H list of tests/containment_census.py. This file makes "deletable in S8" mean something: every id on that list has a recorded
+S8 deleted the exact-id H list of tests/containment_census.py (and the three ``legacy_host_mcp`` tests). The ledger is the RECORD of those deletions: every deleted id has a recorded
 premise, at least one proof that project-controlled host execution is refused or unreachable for that surface, and either contained / typed replacement coverage or a reasoned
-"nothing contained is left to cover". A replacement that does not exist (a typo, a later rename or deletion) fails here, so S8 can never delete a test whose control vanished."""
+"nothing contained is left to cover". This file keeps that record honest after the deletion: a replacement control that no longer exists (a later rename or deletion) fails here,
+so the evidence that justified a deletion can never silently vanish."""
 import ast
 from functools import lru_cache
 from pathlib import Path
@@ -35,9 +36,9 @@ def _resolves(node_id: str) -> bool:
     return name.split("[", 1)[0] in _functions(relpath)
 
 
-def test_the_ledger_covers_exactly_the_legacy_host_list_s8_deletes():
-    assert set(ledger.LEDGER) == set(cc.legacy_host_ids())
-    assert len(ledger.LEDGER) == len(cc.legacy_host_ids())
+def test_the_ledger_records_exactly_the_54_plus_3_tests_s8_deleted_and_none_is_classified_legacy_host_any_more():
+    assert len(ledger.LEDGER) == 54 and len(ledger.MARKED_LEDGER) == 3
+    assert cc.legacy_host_ids() == ()
 
 
 ALL = {**ledger.LEDGER, **ledger.MARKED_LEDGER}
@@ -56,10 +57,10 @@ def test_every_deletion_has_a_premise_an_unreachability_proof_and_a_replacement_
 @pytest.mark.parametrize("test_id", sorted(ALL))
 def test_every_referenced_control_is_a_real_test_that_is_not_itself_legacy_host(test_id):
     entry = ALL[test_id]
-    legacy = set(cc.legacy_host_ids()) | set(ledger.MARKED_LEDGER)
+    legacy = set(ledger.LEDGER) | set(ledger.MARKED_LEDGER)
     for control in (*entry.unreachable_by, *entry.semantic):
         assert _resolves(control), f"{control}: no such test function"
-        assert control not in legacy and cc.classify(control) != ("H", "H"), f"{control} is itself a legacy-host test (skipped now, deleted in S8)"
+        assert control not in legacy and cc.classify(control) != ("H", "H"), f"{control} is itself a deleted legacy-host test"
         assert control != test_id
 
 
@@ -69,7 +70,7 @@ def test_the_incidentally_passing_set_is_exactly_the_measured_one():
 
 
 def test_no_legacy_host_test_is_a_whole_file_and_each_named_file_still_holds_other_tests():
-    """Deleting the H tests in S8 must not delete a file that still carries live coverage by accident: every file with an H id also keeps (or is judged on) other tests."""
+    """S8's deletions must not delete a file that still carries live coverage by accident: every file with a recorded id still exists."""
     files = {test_id.partition("::")[0] for test_id in ledger.LEDGER}
     for relpath in files:
         assert (ROOT / relpath).is_file()

@@ -516,15 +516,6 @@ def test_scenario_f_mcp_approved_contained_malicious_action_hidden_effects_block
 # (SEC-005) inherited unchanged through the autonomous path.
 # =====================================================================
 
-@pytest.mark.asyncio
-async def test_scenario_g_shelltool_ordinary_command_unaffected_when_uncontained():
-    """S18 re-home: the operator path runs an ordinary command unchanged; the planned path is refused."""
-    ShellTool = load_core_tools_module().ShellTool
-
-    output = await ShellTool().execute(command="echo hi")  # default AppConfig().autonomy
-    assert output["exit_code"] == 0 and output["stdout"].strip() == "hi"
-    await _assert_planned_shell_refused(ShellTool(), "echo hi")
-
 
 @pytest.mark.asyncio
 async def test_scenario_g_shelltool_maven_registry_scoped_when_contained():

@@ -426,7 +426,6 @@ class _Engine:
         return [row for row in self.trace if row.get("spawn") == label]
 
 
-
 @pytest.fixture
 def git_identity(monkeypatch):
     for key, value in kg.GIT_ENV.items():
@@ -1092,13 +1091,6 @@ DIRECT_CASES: Dict[str, Any] = {
                                   _directly, "a failing test command: process_exit FAIL, gate type 'test'"),
     "d_entrypoint_missing": (_direct(scripted={"app": (_app, [_crash("ModuleNotFoundError: No module named 'calcx'\n")])}),
                              _directly, "the command cannot load its entrypoint: verification infrastructure"),
-    "d_toolchain_java_mismatch": (dict(JVM_DIRECT, candidate={}, written=(), prepare=_toolchain(True)),
-                                  _directly_with_toolchain,
-                                  "a java unit: the toolchain preflight once (mismatch warned, JAVA_HOME resolved "
-                                  "from the goal), the validator runs under it"),
-    "d_toolchain_already_checked": (dict(JVM_DIRECT, candidate={}, written=(), prepare=_toolchain(False, checked=True)),
-                                    _directly_with_toolchain,
-                                    "the preflight already ran this run: not probed again, the run's override applied"),
 }
 
 
@@ -1258,24 +1250,6 @@ def _maven_gates(run: "_Engine") -> Any:
 def _no_toolchain_mismatch(_run: "_Engine") -> Any:
     return patch("kriya.tools.validate.check_java_toolchain", return_value={
         "java_found": True, "java_version": "17", "mvn_found": True, "mvn_java_version": "17", "mismatch": False})
-
-
-def test_engine_jvm_finite_command_artifact_preparation(tmp_path, git_identity):
-    """A Maven project whose runtime command is ``java -jar target/app-1.0.jar``: no gate ever runs ``package``, so
-    Kriya prepares the jar (``mvn package -DskipTests`` with the validator's environment, BELOW the decorator) before
-    the reviewed command runs - after the compile and test gates, before the run, its evidence after the run."""
-    run = _Engine(tmp_path, autonomous=True, goal="Add a static method mul(a, b) returning a * b to App.java.",
-                  files={"pom.xml": POM, ".gitignore": "target/\n", APP_JAVA: APP_BASE, APP_TEST: APP_TEST_SOURCE},
-                  target=APP_JAVA, developer=(APP_GOOD,), judgments=(JAR_JUDGE,),
-                  scripted={"maven": (_maven, [_package()]), "app": (_java, [_ok()])},
-                  patches=(_maven_gates, _no_toolchain_mismatch)).run()
-    assert run.legacy()["quality_gates_passed"] is True
-    order = [row.get("spawn") or ("maven:" + row["maven"][0] if "maven" in row else None) for row in run.trace]
-    order = [step for step in order if step]
-    assert order.index("maven") < order.index("app")          # the jar is packaged before the command runs
-    _compare("engine_jvm_finite_command_artifact", {
-        "terminal_path": "java -jar of a jar no gate builds: mvn package (validator environment), then the run",
-        **run.form()})
 
 
 # ---- the runtime step's Maven boundary (D2B) and the D4 entrypoint owner, through the approve-and-execute path

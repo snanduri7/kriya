@@ -102,26 +102,6 @@ def _capturing_tool(monkeypatch, **autonomy_overrides):
 
 
 @pytest.mark.asyncio
-async def test_ordinary_command_network_unaffected_when_containment_not_required(monkeypatch):
-    tool, backend = _capturing_tool(monkeypatch, contained_execution_required=False)
-    await tool.execute(command="echo hi")
-    profile = backend.prepared_profiles[-1]
-    assert profile.network == NetworkAuthority.UNRESTRICTED
-    assert profile.network_destinations == ()
-
-
-@pytest.mark.asyncio
-async def test_maven_command_network_unaffected_when_containment_not_required():
-    """Task 5 / Task 4: 'preserve current documented behavior' when
-    containment is intentionally disabled (the packaged default) - this
-    package must not silently narrow every deployment's ShellTool
-    behavior, only the opt-in-contained one."""
-    tool = ShellTool()  # default AppConfig().autonomy: contained_execution_required=False
-    res = await tool.execute(command="mvn --version || true")
-    assert isinstance(res["exit_code"], int)  # ran uncontained/unrestricted, unchanged
-
-
-@pytest.mark.asyncio
 async def test_maven_command_gets_registry_scoped_network_when_contained(monkeypatch):
     tool, backend = _capturing_tool(
         monkeypatch, contained_execution_required=True,

@@ -552,8 +552,9 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         entry = containment_census.classify(base_nodeid(item))
         if entry is not None and entry[0] == "H":
-            item.add_marker(pytest.mark.skip(reason="S7 census class H (legacy project-controlled host mechanics): unreachable under the final containment contract, "
-                                                    "replaced by the secure-default controls (tests/test_s7_secure_default_contract.py); deleted in S8"))
+            # S8 deleted every legacy project-controlled host-mechanics test (their replacement controls are recorded in tests/containment_h_ledger.py); a new one
+            # may not be added - there is no host execution left for it to characterize.
+            raise pytest.UsageError(f"{item.nodeid} is classified H in tests/containment_census.py: S8 deleted every legacy host-execution test and no new one is allowed")
     for item in items:
         if item.path.name in STATE_MACHINE_TIER_FILES:
             item.add_marker(pytest.mark.state_machine)

@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from kriya.config.config import AutonomyConfig
-from kriya.tools import gate_view, venv_integrity
+from kriya.tools import gate_view
 from kriya.tools.gate_view import (
     GATE_VIEW_IDENTITY_MISMATCH,
     GATE_VIEW_PATH_CONFUSION,
@@ -700,69 +700,6 @@ def test_only_a_kriya_staging_directory_may_be_imported_into_a_view(tmp_path):
 
 
 # --- execution-environment inputs: the venv (owner O4) -------------------------------------------------------------------------------
-
-def _fake_venv(tmp_path):
-    venv = tmp_path / "venv"
-    (venv / "bin").mkdir(parents=True)
-    (venv / "lib" / "site-packages" / "pkg").mkdir(parents=True)
-    (venv / "bin" / "python").write_text("#!/bin/sh\n")
-    (venv / "lib" / "site-packages" / "pkg" / "__init__.py").write_text("X = 1\n")
-    (venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
-    return venv
-
-
-def test_a_sealed_venv_verifies_clean_and_any_change_to_it_is_an_unexpected_mutation(tmp_path):
-    venv = _fake_venv(tmp_path)
-    assert venv_integrity.mismatches(str(venv)) == ["<unsealed>"]  # never sealed: no content to trust
-    venv_integrity.seal(str(venv))
-    assert venv_integrity.mismatches(str(venv)) == []
-    module = venv / "lib" / "site-packages" / "pkg" / "__init__.py"
-    module.write_text("X = 2\n")
-    assert venv_integrity.mismatches(str(venv)) == ["lib/site-packages/pkg/__init__.py"]
-    module.write_text("X = 1\n")
-    assert venv_integrity.mismatches(str(venv)) == []
-    (venv / "lib" / "site-packages" / "evil.pth").write_text("import os\n")   # runs at every interpreter start
-    assert venv_integrity.mismatches(str(venv)) == ["lib/site-packages/evil.pth"]
-    (venv / "lib" / "site-packages" / "evil.pth").unlink()
-    (venv / "pyvenv.cfg").unlink()
-    assert venv_integrity.mismatches(str(venv)) == ["pyvenv.cfg"]
-
-
-def test_bytecode_in_the_venv_is_deleted_before_every_reuse_so_a_planted_pyc_never_loads(tmp_path):
-    venv = _fake_venv(tmp_path)
-    venv_integrity.seal(str(venv))
-    planted = venv / "lib" / "site-packages" / "pkg" / "__pycache__" / "__init__.cpython-314.pyc"
-    planted.parent.mkdir()
-    planted.write_bytes(b"forged bytecode")
-    assert venv_integrity.mismatches(str(venv)) == []   # bytecode is a disposable cache, not sealed content
-    assert not planted.parent.exists()                  # ...and it is gone before the venv is used
-
-
-def test_a_changed_venv_is_recreated_not_reused(tmp_path, monkeypatch):
-    """Through the validator: `_ensure_project_venv` re-verifies a memoized venv before handing it out and rebuilds a changed one."""
-    root = _repo(tmp_path, extra={"requirements.txt": "left-pad-nonexistent==1\n"})
-    validator = PolymorphicValidator(str(root), original_workspace_path=str(root))
-    venv_dir = root / ".kriya" / "venv"
-    created = []
-
-    def fake_run(cmd, cwd, timeout=300, **_kwargs):
-        if cmd[1:3] == ["-m", "venv"]:
-            venv = Path(cmd[3])
-            (venv / "bin").mkdir(parents=True)
-            (venv / "bin" / "python").write_text("#!/bin/sh\n")
-            created.append(1)
-        return {"returncode": 0, "stdout": "", "stderr": "", "timeout": False}
-
-    monkeypatch.setattr(validator, "_run_cmd_with_timeout", fake_run)
-    python, error = validator._ensure_project_venv(["-r", str(root / "requirements.txt")])
-    assert error is None and python == str(venv_dir / "bin" / "python") and created == [1]
-    assert venv_integrity.mismatches(str(venv_dir)) == []          # sealed after the install
-    again, _ = validator._ensure_project_venv(["-r", str(root / "requirements.txt")])
-    assert again == python and created == [1] and validator.venv_install_attempts == 1   # reused as sealed: no second install
-    (venv_dir / "bin" / "sitecustomize.py").write_text("print('planted by a gate')\n")
-    rebuilt, _ = validator._ensure_project_venv(["-r", str(root / "requirements.txt")])
-    assert created == [1, 1] and validator.venv_recreations == 1 and not (venv_dir / "bin" / "sitecustomize.py").exists()
-    assert rebuilt == python
 
 
 def test_the_venv_a_view_gate_uses_is_the_origin_trees_not_the_views(tmp_path, monkeypatch):

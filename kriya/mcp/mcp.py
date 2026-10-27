@@ -1004,7 +1004,6 @@ class MCPManager:
                 # nor whether a backend isolates. Mandatory containment with a non-isolating, unknown or unavailable backend is the typed
                 # ExternalExecutionRefused HERE, before any client or process exists; host execution is permitted only when the decision says so.
                 decision = decide_external_execution(autonomy_cfg, subject=mcp_subject(server_name))
-                containment_required = decision.contained
                 containment_backend = decision.backend()
 
                 client = MCPClient(
@@ -1015,7 +1014,7 @@ class MCPManager:
                     lifecycle_config=lifecycle_cfg,
                     on_closed=self._on_client_closed,
                     capability_profile=capability_profile,
-                    containment_required=containment_required,
+                    containment_required=True,  # S8: contained is the only mode (the decision above is the typed refusal when no isolating backend exists)
                     containment_backend=containment_backend,
                 )
                 await client.start()

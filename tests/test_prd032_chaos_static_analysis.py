@@ -4,11 +4,10 @@ Every case runs the real direct pipeline with the gate enabled and required.
 The deterministic cases use the test fake provider (tests/_fake_static_analysis.py:
 a line containing BAD_HIGH is a high-severity finding). The attack is
 injected between the gate and the commit guard, or planted in the trusted
-waiver store. E08 runs the real pinned Semgrep 1.178.0 (live_static_analysis).
-A missing scanner is a FAILURE there, never a skip.
+waiver store. E08 runs the real pinned Semgrep 1.178.0 contained in its digest-pinned image
+(live_static_analysis). A missing Docker daemon or image is a FAILURE there, never a skip.
 """
 import json
-import os
 import shutil
 import subprocess
 from datetime import datetime, timedelta, timezone
@@ -233,38 +232,37 @@ def test_an_oversized_required_target_is_unknown_and_blocks(chaos_case, tmp_path
     chaos_case.observe("static_analysis_unknown", reason=sa_model.TARGET_OVERSIZED, **audit.evidence())
 
 
-# --- E08: real pinned Semgrep --------------------------------------------------------
+# --- E08: real pinned Semgrep, contained in its digest-pinned image (S8: there is no host provider) -------------------
 
 PINNED_SEMGREP = "1.178.0"
+PINNED_IMAGE = "semgrep/semgrep@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b"
 RULES = Path(__file__).parent / "fixtures" / "static_analysis" / "semgrep" / PINNED_SEMGREP / "rules"
 
 
-def _require_pinned_semgrep():
-    executable = shutil.which("semgrep")
-    if executable is None:
-        pytest.fail(f"UNAVAILABLE: semgrep {PINNED_SEMGREP} is not on PATH (required by this tier, never skipped)")
-    out = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=120,
-                         env={"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", ""),
-                              "SEMGREP_SEND_METRICS": "off", "SEMGREP_ENABLE_VERSION_CHECK": "0"})
-    version = (out.stdout.strip().splitlines() or ["<none>"])[-1].strip()
-    if version != PINNED_SEMGREP:
-        pytest.fail(f"UNAVAILABLE: semgrep is {version}; this tier is pinned to {PINNED_SEMGREP} exactly")
+def _require_pinned_image():
+    docker = shutil.which("docker")
+    if docker is None:
+        pytest.fail("UNAVAILABLE: docker is not on PATH (required by this tier, never skipped)")
+    for argv, what in (([docker, "info", "--format", "{{.ServerVersion}}"], "the docker daemon is not reachable"),
+                       ([docker, "image", "inspect", PINNED_IMAGE], f"the pinned image {PINNED_IMAGE} is not present locally (docker pull it first)")):
+        if subprocess.run(argv, capture_output=True, timeout=120, check=False).returncode != 0:
+            pytest.fail(f"UNAVAILABLE: {what} (required by this tier, never skipped)")
 
 
 @chaos("E08")
-def test_a_nosemgrep_suppression_in_the_candidate_never_hides_a_finding(chaos_case, tmp_path):
-    _require_pinned_semgrep()
+def test_a_nosemgrep_suppression_in_the_candidate_never_hides_a_finding_contained(chaos_case, tmp_path):
+    _require_pinned_image()
     workspace = git_workspace(tmp_path, {"calc.py": CALC})
     suppressed = CALC_WITH_SUB + "\n\ndef run(code):\n    return eval(code)  # nosemgrep\n"
     runtime = ChaosRuntime(lambda role, request: suppressed if role == "developer" else benign_roles(role, request))
     cfg = chaos_config(sections={"static_analysis": {
         "enabled": True, "provider": "semgrep", "requirement": "required",
-        "providers": {"semgrep": {"version": PINNED_SEMGREP, "rule_packs": [str(RULES)]}},
+        "providers": {"semgrep": {"version": PINNED_SEMGREP, "rule_packs": [str(RULES)], "image": PINNED_IMAGE}},
         # The fixture's python-eval rule is WARNING (medium); the operator's
         # policy blocks new medium findings, so a suppressed one must block.
         "policy": {"introduced": {"medium": "block"}},
     }})
-    chaos_case.identity["static_analysis"] = f"semgrep {PINNED_SEMGREP} (host)"
+    chaos_case.identity["static_analysis"] = f"semgrep {PINNED_SEMGREP} (contained, {PINNED_IMAGE.rsplit('@', 1)[1][:19]})"
     chaos_case.arm()
     with RuntimeRegistration(runtime):
         result = run_direct(chaos_engine(cfg), GOAL, workspace)

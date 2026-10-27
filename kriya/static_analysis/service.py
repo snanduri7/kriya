@@ -303,9 +303,9 @@ def execution_context(cfg: Any, workspace_path: str) -> ExecutionContext:
     decision = decide_external_execution(cfg.autonomy, subject="static_analysis")
     # soft on purpose: a provider that is handed a backend without isolation refuses with a reason (it never runs on the host); the typed
     # refusal itself stays available as ``decision.refusal()``
-    backend = decision.configured_backend() if decision.contained else None
+    backend = decision.configured_backend()
     return ExecutionContext(
-        contained=decision.contained, containment_backend=backend,
+        containment_backend=backend,
         workspace_root=os.path.realpath(workspace_path),
     )
 

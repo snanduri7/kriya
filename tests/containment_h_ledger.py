@@ -154,7 +154,7 @@ LEDGER: Dict[str, Entry] = {
         "the direct runtime case against a host JVM toolchain mismatch", [VALIDATOR, MANDATE], [PREFLIGHT, HOST_JDK_REUSED]),
     "tests/test_runtime_verification.py::test_engine_jvm_finite_command_artifact_preparation": _e(
         "Kriya prepares the jar with a host mvn package before a finite java -jar command", [VALIDATOR, MANDATE],
-        [S4RT + "test_contained_maven_build_runs_the_validators_own_maven_path_and_only_mvn", S4RT + "test_the_finite_command_preparation_follows_the_validators_decision"]),
+        [S4RT + "test_contained_maven_build_runs_the_validators_own_maven_path_and_only_mvn", S4RT + "test_the_finite_command_preparation_always_takes_the_validators_contained_build"]),
     "tests/test_s3_execution_views.py::test_the_non_contained_validator_builds_no_profile_and_prepares_nothing": _e(
         "the non-contained validator builds no profile and prepares nothing", [VALIDATOR, MANDATE],
         ["tests/test_s3_execution_views.py::test_a_contained_gate_runs_in_the_view_and_only_the_view_gets_the_git_target"]),
@@ -196,7 +196,8 @@ LEDGER: Dict[str, Entry] = {
     # the static-analysis host provider: the pinned HOST semgrep scanning a candidate. Static analysis always runs contained in a digest-pinned image; the host provider branch is unreachable.
     "tests/test_prd032_chaos_static_analysis.py::test_a_nosemgrep_suppression_in_the_candidate_never_hides_a_finding": _e(
         "the pinned HOST semgrep scans a candidate carrying `// nosemgrep` and the suppressed finding still blocks (chaos E08)", [MANDATE, SA_NO_HOST],
-        [SA_LIVE + "test_service_candidate_nosemgrep_still_blocks[contained]", SA_ADAPTER + "test_contained_scan_profile_and_argv"],
+        [SA_LIVE + "test_service_candidate_nosemgrep_still_blocks[contained]", SA_ADAPTER + "test_contained_scan_profile_and_argv",
+         "tests/test_prd032_chaos_static_analysis.py::test_a_nosemgrep_suppression_in_the_candidate_never_hides_a_finding_contained"],
         why="the contained live tier (python -m pytest -m live_static_analysis tests/test_prd031a_semgrep_live.py, real Docker and the pinned image) runs the same suppression scenario "
             "contained; MEASURED 2026-10-26: it passes"),
     SA_LIVE + "test_service_introduced_finding_at_exit_zero_blocks[host]": _e(

@@ -169,14 +169,6 @@ def test_clearing_the_override_restores_the_repository_identity(tmp_path):
     assert validator.toolchain_identity.runtime_version == "21"
 
 
-def test_uncontained_validator_never_resolves_a_toolchain_on_assignment(tmp_path):
-    (tmp_path / "pom.xml").write_text(_pom(17))
-    validator = PolymorphicValidator(str(tmp_path))
-    validator.java_home_override = _jdk_home(tmp_path, "jdk21", "21")  # host mode: no containment identity
-    assert validator.toolchain_identity is None
-    assert validator.java_home_override.endswith("jdk21")
-
-
 # --- PRD-011 reopen: profile coverage and exact attestation.
 
 @pytest.mark.parametrize("version", [8, 11, 17, 21])

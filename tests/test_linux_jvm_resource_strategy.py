@@ -9,12 +9,10 @@ recorded as execution evidence.
 import os
 import resource
 import shutil
-import sys
 import time
 
 import pytest
 
-from kriya.config.config import AutonomyConfig
 from kriya.tools.containment import (
     ContainmentProfile,
     NetworkAuthority,
@@ -31,7 +29,6 @@ from kriya.tools.sandbox import (
     UNBOUNDED,
     resource_plan,
 )
-from kriya.tools.validate import PolymorphicValidator, execution_evidence
 
 
 def _applied_limits(plan, monkeypatch):
@@ -171,16 +168,3 @@ def test_the_timeout_still_kills_the_jvm_process_tree(tmp_path):
     else:
         pytest.fail(f"the JVM's child {child} survived the timeout")
 
-
-def test_the_validator_records_the_strategy_with_the_gate_evidence(tmp_path):
-    (tmp_path / "pom.xml").write_text("<project/>")
-    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=AutonomyConfig(sandbox_memory_mb=2048))
-    assert validator.stack == "java"
-    result = validator._run_cmd_with_timeout([sys.executable, "-c", "print('ok')"], cwd=str(tmp_path))
-    assert result["returncode"] == 0
-    assert result["resources"]["strategy"] == JVM_HEAP and result["resources"]["memory_budget_mb"] == 2048
-    assert execution_evidence(result)["resources"] == result["resources"]
-    python_validator = PolymorphicValidator(str(tmp_path / "py"), autonomy_cfg=AutonomyConfig())
-    assert python_validator.host_resource_plan(["python3"]).strategy == ADDRESS_SPACE
-    off = PolymorphicValidator(str(tmp_path), autonomy_cfg=AutonomyConfig(sandbox_execution=False))
-    assert off.host_resource_plan(["mvn"]) is None and off.build_subprocess_env_and_preexec(["mvn"]) == (None, None)

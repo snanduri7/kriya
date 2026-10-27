@@ -12,13 +12,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kriya.tools import lsp
 from kriya.tools.lsp import (
     JdtlsClient,
     find_jdtls,
     format_diagnostics_for_prompt,
 )
-from kriya.workflow.lsp_integration import _get_or_start_jdtls_client
 
 
 def _frame(message: Dict[str, Any]) -> bytes:
@@ -149,66 +147,6 @@ async def test_check_file_returns_empty_on_timeout_without_raising(tmp_path):
     result = await client.check_file(str(tmp_path / "project" / "App.java"), "class App {}", timeout=0.3)
     assert result == []
 
-@pytest.mark.asyncio
-async def test_start_and_check_file_end_to_end_via_fake_process(tmp_path, temp_root):
-    """Full round trip through the real read loop: initialize's response
-    unblocks start(), then a publishDiagnostics notification pushed AFTER
-    check_file() sends its didOpen (matching how a real server behaves -
-    diagnostics arrive asynchronously in response to the edit, not before
-    it) is what check_file() actually returns - not a mocked shortcut, the
-    real _read_loop()/_read_message() parsing path."""
-    diagnostics_payload = [{
-        "range": {"start": {"line": 4, "character": 0}, "end": {"line": 4, "character": 10}},
-        "severity": 1,
-        "message": "The import org.apache.ignite.cache.IgniteCache cannot be resolved",
-    }]
-    init_response = {"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {}}}
-    project = tmp_path / "project"
-    project.mkdir()
-    client = _make_client([init_response], project)
-    source = str(project / "IntegrationApp.java")
-
-    async def push_diagnostics_after_delay():
-        await asyncio.sleep(0.1)
-        client.process.stdout.append({
-            "jsonrpc": "2.0",
-            "method": "textDocument/publishDiagnostics",
-            # JDTLS publishes the (canonical) URI of the file it analyzed: the mirror's.
-            "params": {"uri": "file://" + client._mirror_path(source), "diagnostics": diagnostics_payload},
-        })
-
-    with patch("kriya.tools.lsp.spawn_subprocess_exec_fail_closed", new=AsyncMock(return_value=client.process)):
-        await client.start()
-        push_task = asyncio.create_task(push_diagnostics_after_delay())
-        result = await client.check_file(source, "class IntegrationApp {}", timeout=2)
-        await push_task
-        client.process.stdout.close()
-        client._reader_task.cancel()  # skip the real shutdown handshake - not what this test covers
-
-    assert result == diagnostics_payload
-
-@pytest.mark.asyncio
-async def test_start_does_not_inherit_java_home_from_parent_process():
-    """Regression test for a real bug found live, not theoretical: jdtls's own
-    launcher refuses to start ("Exception: jdtls requires at least Java 21")
-    if a JAVA_HOME inherited from the parent process resolves to anything
-    older - and Kriya's own Maven-oriented workflows routinely export a
-    JAVA_HOME pinned to an older JDK for the TARGET project's own reasons
-    (e.g. Java 17 for the Qpid Security Manager requirement), unrelated to
-    what jdtls itself needs to run. Confirmed live: with JAVA_HOME set to a
-    real Temurin 17 install, `jdtls -data ...` crashed immediately with that
-    exact exception; with JAVA_HOME unset, it started and ran normally.
-    Exercises the real start() method, not a hand-copied duplicate of it."""
-    init_response = {"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {}}}
-    client = _make_client([init_response])
-    with patch.dict("os.environ", {"JAVA_HOME": "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home", "PATH": "/usr/bin"}), \
-         patch("kriya.tools.lsp.spawn_subprocess_exec_fail_closed", new=AsyncMock(return_value=client.process)) as mock_exec, \
-         patch("tempfile.mkdtemp", return_value="/tmp/fake-jdtls-data"):
-        await client.start()
-
-    launch_kwargs = mock_exec.call_args.kwargs
-    assert "JAVA_HOME" not in launch_kwargs["env"]
-    assert launch_kwargs["env"]["PATH"] == "/usr/bin"  # everything else still passed through
 
 @pytest.mark.asyncio
 async def test_shutdown_kills_the_whole_process_tree_and_reaps_the_leader():
@@ -325,54 +263,3 @@ def temp_root(tmp_path, monkeypatch):
     monkeypatch.setattr(tempfile, "tempdir", str(root))
     return root
 
-
-@pytest.mark.asyncio
-async def test_initialize_timeout_releases_data_dir_process_and_reader(tmp_path, temp_root, monkeypatch):
-    monkeypatch.setattr(lsp, "JDTLS_INIT_TIMEOUT_SECONDS", 1.0)
-    monkeypatch.setattr(lsp, "find_jdtls", lambda: _silent_jdtls(tmp_path))
-    # The pid of the process Kriya spawned, not one the child writes itself: under load
-    # the child could still be starting when the 1 s timeout kills it.
-    spawned = []
-    real_spawn = lsp.spawn_subprocess_exec_fail_closed  # PLAT-LSP-TREE-KILL-001: the port spawn
-
-    async def recording_spawn(*args, **kwargs):
-        process = await real_spawn(*args, **kwargs)
-        spawned.append(process.pid)
-        return process
-
-    monkeypatch.setattr(lsp, "spawn_subprocess_exec_fail_closed", recording_spawn)
-
-    client = await _get_or_start_jdtls_client(None, str(tmp_path))
-
-    assert client is None  # degraded to no LSP grounding, as before
-    assert _jdtls_data_dirs(temp_root) == []
-    assert len(spawned) == 1
-    pid = spawned[0]
-    with pytest.raises(ProcessLookupError):
-        os.kill(pid, 0)  # terminated and reaped, not left running
-    assert not [t for t in asyncio.all_tasks() if "_read_loop" in repr(t.get_coro())]
-
-
-@pytest.mark.asyncio
-async def test_launch_failure_releases_the_data_dir(tmp_path, temp_root):
-    client = JdtlsClient(str(tmp_path), str(tmp_path / "missing-jdtls"))
-
-    with pytest.raises(FileNotFoundError):
-        await client.start()
-
-    assert _jdtls_data_dirs(temp_root) == []
-
-
-@pytest.mark.asyncio
-async def test_successful_start_keeps_the_data_dir_until_shutdown(temp_root):
-    client = _make_client([{"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {}}}])
-    with patch("kriya.tools.lsp.spawn_subprocess_exec_fail_closed", new=AsyncMock(return_value=client.process)):
-        await client.start()
-    assert len(_jdtls_data_dirs(temp_root)) == 1
-
-    client._request = AsyncMock(side_effect=RuntimeError("simulated: no shutdown response"))
-    client.process.terminate = MagicMock()
-    client.process.wait = AsyncMock(return_value=None)
-    await client.shutdown()
-
-    assert _jdtls_data_dirs(temp_root) == []

@@ -109,7 +109,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (A, '_require_qualified_retry_identity'): P(1, A, ((A, 1),), ()),
     # E8 (guard): 2 -> 2: the toolchain preflight's load moved (GateDeps, one load in attempt._gate_deps); the other stays.
     # E9 characterization: +1 site (tests/test_runtime_verification.py: the direct path's preflight through this name).
-    (A, '_resolve_java_home_override'): P(5, 'kriya.workflow.toolchain', ((A, 2),), ()),
+    (A, '_resolve_java_home_override'): P(4, 'kriya.workflow.toolchain', ((A, 2),), ()),
     # E7: the body moved to repair_orchestrator; attempt.py keeps a forwarder (owner A). 3 -> 3 lookups: the retry
     # preparation's load reads RepairDeps (one load in attempt._repair_deps), generation_service's and
     # run_attempt's are unchanged.
@@ -441,7 +441,7 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # generate command renders)
     # P-B skill-verification deferral (tests/test_skill_verification_deferral.py): +1 W site (final_review: the stage-5 closer seeded
     # with a held verification on a failed run) and +1 C site (commit_verified_candidate: the enforce terminal commit it defers behind)
-    assert totals == {A: 114, W: 98, C: 384}  # D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C
+    assert totals == {A: 113, W: 98, C: 384}  # D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override)
     assert len(PATCH_POINTS) == 133  # P-B: +1 row (W.final_review)
 
 

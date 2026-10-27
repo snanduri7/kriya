@@ -39,7 +39,6 @@ SITES: Dict[Tuple[str, str], str] = {
     ("kriya/tools/containment_oci.py", "authority_state_mask_args"): NOT_A_VALIDATOR_TREE,
     ("kriya/tools/dependency_execution.py", "seed_gradle_distribution_from_host"): NOT_A_VALIDATOR_TREE,
     ("kriya/tools/git_metadata.py", "export_git_metadata"): NOT_A_VALIDATOR_TREE,
-    ("kriya/tools/lsp.py", "_start"): NOT_A_VALIDATOR_TREE,
     ("kriya/skills/run_shadow.py", "create"): NOT_A_VALIDATOR_TREE,        # the run-local copy of the skills text under the state directory; nothing runs in it
     ("kriya/workflow/context_certification.py", "run_certification"): NOT_A_VALIDATOR_TREE,
     ("kriya/workflow/resume_fingerprints.py", "toolchain_fingerprint"): NOT_A_VALIDATOR_TREE,        # a validator is built only to read its stack; nothing runs

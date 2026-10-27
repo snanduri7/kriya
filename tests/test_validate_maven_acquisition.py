@@ -35,21 +35,6 @@ def _contained_validator(tmp_path) -> PolymorphicValidator:
     )
 
 
-def test_run_maven_cmd_host_mode_is_exact_passthrough(tmp_path):
-    """contained_execution_required=False: byte-for-byte unchanged - no
-    -o/-Dmaven.repo.local flags added, exactly one call, exact original
-    goals."""
-    (tmp_path / "pom.xml").write_text("<project></project>")
-    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=AutonomyConfig())
-    with patch.object(
-        validator, "_run_cmd_with_timeout", return_value={"returncode": 0, "stdout": "", "stderr": ""},
-    ) as mock_run:
-        result = validator._run_maven_cmd(["validate"], cwd=str(tmp_path), timeout=120)
-
-    assert result["returncode"] == 0
-    mock_run.assert_called_once_with(["mvn", "validate"], cwd=str(tmp_path), timeout=120)
-
-
 def test_run_maven_cmd_offline_success_never_acquires(tmp_path):
     """A cache that's already warm (or a goal needing nothing new) must
     succeed on the first offline attempt with NO acquisition call at

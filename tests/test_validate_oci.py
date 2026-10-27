@@ -93,21 +93,6 @@ def test_contained_python_validation_without_manifest_runs_tests_from_a_pytest_v
     assert interpreter != sys.executable
 
 
-def test_host_mode_python_validation_unchanged_uses_absolute_paths(tmp_path):
-    """Compatibility check: contained_execution_required=False (the
-    packaged default) must be byte-for-byte unchanged - sys.executable/
-    absolute venv paths, exactly as before this stage's changes. Doesn't
-    itself need Docker, but lives under this module's own docker-required
-    skip guard for simplicity (host-mode behavior is already covered
-    extensively elsewhere in the suite regardless)."""
-    import sys
-
-    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=AutonomyConfig())
-    interpreter, install_error = validator._resolve_python_interpreter()
-    assert install_error is None
-    assert interpreter == sys.executable
-
-
 # --- Maven two-phase (Stage 2), through the real validate.py entry points ---
 
 _POM_WITH_A_REAL_DEPENDENCY = """<?xml version="1.0" encoding="UTF-8"?>

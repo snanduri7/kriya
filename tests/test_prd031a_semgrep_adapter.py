@@ -20,9 +20,6 @@ from pydantic import ValidationError
 from kriya.static_analysis import registry
 from kriya.static_analysis.adapters import semgrep
 from kriya.static_analysis.adapters.semgrep import (
-    LIMITATION_HOST_NETWORK,
-    LIMITATION_SILENT_SYNTAX_RECOVERY,
-    SEVERITY_MAP_VERSION,
     EngineNotLocatedError,
     SemgrepAdapter,
     SemgrepSettings,
@@ -43,7 +40,6 @@ from kriya.static_analysis.model import (
     SCAN_INCOMPLETE,
     SCAN_OUTPUT_MALFORMED,
     SCAN_TIMEOUT,
-    ScanScope,
     ScanStatus,
     Severity,
     canonical_digest,
@@ -150,14 +146,15 @@ def settings(**overrides) -> SemgrepSettings:
     return SemgrepSettings.model_validate(data)
 
 
-def host_adapter(executable: Path, workspace: Path, process: FakeProcess, **overrides) -> SemgrepAdapter:
-    ctx = ExecutionContext(contained=False, containment_backend=None, workspace_root=str(workspace))
-    return SemgrepAdapter(settings(executable=str(executable), **overrides), ctx, process_controller=process)
+def make_adapter(workspace: Path, process: FakeProcess, **overrides) -> SemgrepAdapter:
+    """S8: the only execution mode is the pinned image through an isolating backend; generic adapter behaviour (rule packs, output
+    interpretation, timeouts) is exercised through it with a scripted process controller."""
+    return contained_adapter(workspace, process, backend=DummyContainmentBackend(), **overrides)
 
 
 def contained_adapter(workspace: Path, process: FakeProcess, backend=None, image: Optional[str] = IMAGE,
                       **overrides) -> SemgrepAdapter:
-    ctx = ExecutionContext(contained=True, containment_backend=backend, workspace_root=str(workspace))
+    ctx = ExecutionContext(containment_backend=backend, workspace_root=str(workspace))
     return SemgrepAdapter(settings(image=image, **overrides), ctx, process_controller=process)
 
 
@@ -230,93 +227,46 @@ def test_registered_under_its_name_with_its_settings_model(workspace):
     registration = registry.registration("semgrep")
     assert registration.settings_model is SemgrepSettings
     normalized = registry.validate_provider_settings("semgrep", {"version": "1.178.0", "rule_packs": [RULES]})
-    ctx = ExecutionContext(contained=False, containment_backend=None, workspace_root=str(workspace))
-    adapter = registry.create_provider("semgrep", normalized, ctx)
-    assert isinstance(adapter, SemgrepAdapter) and adapter.name == "semgrep"
+    ctx = ExecutionContext(containment_backend=None, workspace_root=str(workspace))
+    created = registry.create_provider("semgrep", normalized, ctx)
+    assert isinstance(created, SemgrepAdapter) and created.name == "semgrep"
     with pytest.raises(ValidationError):
         registry.validate_provider_settings("semgrep", {"version": "latest", "rule_packs": [RULES]})
 
 
 # --- probe: host -------------------------------------------------------------
 
-def test_host_probe_identity_and_capability(executable, workspace, monkeypatch):
-    monkeypatch.setenv("SEMGREP_RULES", "p/evil")
+
+
+def test_probe_is_cached_per_instance(workspace):
     process = FakeProcess(VERSION_OK)
-    probe = host_adapter(executable, workspace, process).probe()
-
-    assert probe.reason_code is None, probe.detail
-    identity, capability = probe.identity, probe.capability
-    assert identity.provider == "semgrep" and identity.version == "1.178.0" and identity.edition == "community"
-    # The entry script AND the packaged engine it loads.
-    assert identity.executable_digest == host_digest(executable)
-    assert identity.execution_location == "local_process" and identity.network_enforced is False
-    assert identity.severity_map_version == SEVERITY_MAP_VERSION == 2
-    (pack,) = identity.rule_packs
-    assert pack.ref == RULES and pack.digest == MANIFEST["rule_pack_digests"]["rules"]
-    assert pack.rule_count == 4 and pack.languages == ("java", "python")
-
-    assert set(capability.languages) == CE_LANGUAGES and "csharp" not in capability.languages
-    assert all(s.maturity == "ga" for s in capability.languages.values())
-    assert capability.languages["java"].rules_available == 2
-    assert capability.languages["python"].rules_available == 2  # "python" and the "py" alias
-    assert capability.languages["go"].rules_available == 0
-    assert capability.analysis_scope == "file_local" and capability.minimum_scope is ScanScope.CHANGED_FILES
-    assert capability.supported_scopes == {ScanScope.CHANGED_FILES, ScanScope.MODULE, ScanScope.REPOSITORY}
-    assert capability.network_requirement == "none" and capability.source_upload is False
-    assert dict(capability.prerequisites) == {}
-    assert set(capability.control_files) >= {".semgrepignore", ".gitignore", ".semgrep", ".semgrep.yml"}
-    assert LIMITATION_SILENT_SYNTAX_RECOVERY in capability.limitations
-    assert "syntax error silently" in LIMITATION_SILENT_SYNTAX_RECOVERY
-    assert LIMITATION_HOST_NETWORK in capability.limitations
-    assert not any("entry-point" in text for text in capability.limitations)
-
-    ((command, kwargs),) = process.calls
-    assert command == [os.path.realpath(executable), "--version"]
-    assert set(kwargs["env"]) == {"PATH", "HOME", "TMPDIR", "SEMGREP_SEND_METRICS", "SEMGREP_ENABLE_VERSION_CHECK"}
-    assert "containment_profile" not in kwargs
-
-
-def test_probe_is_cached_per_instance(executable, workspace):
-    process = FakeProcess(VERSION_OK)
-    adapter = host_adapter(executable, workspace, process)
+    adapter = make_adapter(workspace, process)
     assert adapter.probe() is adapter.probe()
     assert len(process.calls) == 1
-
-
-def test_host_probe_missing_executable_never_runs(tmp_path, workspace):
-    process = FakeProcess()
-    probe = host_adapter(tmp_path / "no-such-semgrep", workspace, process).probe()
-    assert (probe.identity, probe.reason_code) == (None, PROVIDER_PROBE_FAILED)
-    assert process.calls == []
-
-
-def test_host_probe_spawn_failure_is_probe_failed(executable, workspace):
-    probe = host_adapter(executable, workspace, FakeProcess(PermissionError("denied"))).probe()
-    assert probe.reason_code == PROVIDER_PROBE_FAILED and "denied" in probe.detail
 
 
 @pytest.mark.parametrize("result", [
     ProcessResult(returncode=2, stdout="", stderr="boom", timeout=False),
     ProcessResult(returncode=-1, stdout="", stderr="", timeout=True),
 ])
-def test_host_probe_failed_version_command(executable, workspace, result):
-    probe = host_adapter(executable, workspace, FakeProcess(result)).probe()
+def test_probe_failed_version_command(workspace, result):
+    probe = make_adapter(workspace, FakeProcess(result)).probe()
     assert (probe.identity, probe.reason_code) == (None, PROVIDER_PROBE_FAILED)
 
 
-def test_version_mismatch_is_unavailable_and_names_both(executable, workspace):
-    probe = host_adapter(executable, workspace, FakeProcess(ok("1.177.0\n"))).probe()
+def test_version_mismatch_is_unavailable_and_names_both(workspace):
+    probe = make_adapter(workspace, FakeProcess(ok("1.177.0\n"))).probe()
     assert probe.reason_code == PROVIDER_VERSION_MISMATCH
     assert "1.178.0" in probe.detail and "1.177.0" in probe.detail
 
 
-def test_version_is_the_last_nonempty_line(executable, workspace):
-    probe = host_adapter(executable, workspace, FakeProcess(ok("A new version is available\n\n1.178.0\n\n"))).probe()
+def test_version_is_the_last_nonempty_line(workspace):
+    probe = make_adapter(workspace, FakeProcess(ok("A new version is available\n\n1.178.0\n\n"))).probe()
     assert probe.identity.version == "1.178.0"
 
 
-def test_unknown_version_is_capability_unknown(executable, workspace):
-    probe = host_adapter(executable, workspace, FakeProcess(ok("1.179.0\n")), version="1.179.0").probe()
+def test_unknown_version_is_capability_unknown(workspace):
+    probe = make_adapter(workspace, FakeProcess(ok("1.179.0\n")), version="1.179.0").probe()
     assert (probe.identity, probe.capability, probe.reason_code) == (None, None, CAPABILITY_UNKNOWN)
 
 
@@ -329,43 +279,43 @@ def write_rule(path: Path, rule_id: str, languages=("java",)) -> None:
                     f"    message: m\n    pattern: foo()\n")
 
 
-def probe_packs(executable, workspace, packs):
-    return host_adapter(executable, workspace, FakeProcess(VERSION_OK), rule_packs=packs).probe()
+def probe_packs(workspace, packs):
+    return make_adapter(workspace, FakeProcess(VERSION_OK), rule_packs=packs).probe()
 
 
-def test_duplicate_rule_id_across_packs_is_invalid(executable, workspace, tmp_path):
+def test_duplicate_rule_id_across_packs_is_invalid(workspace, tmp_path):
     write_rule(tmp_path / "other" / "dup.yml", "java-runtime-exec")
-    probe = probe_packs(executable, workspace, [RULES, str(tmp_path / "other")])
+    probe = probe_packs(workspace, [RULES, str(tmp_path / "other")])
     assert probe.reason_code == RULE_PACK_INVALID and "java-runtime-exec" in probe.detail
 
 
 @pytest.mark.parametrize("content", ["rules: [\n", "not_rules: []\n", "- a\n- b\n", "rules:\n  - languages: [java]\n"])
-def test_unparseable_or_ruleless_pack_is_invalid(executable, workspace, tmp_path, content):
+def test_unparseable_or_ruleless_pack_is_invalid(workspace, tmp_path, content):
     pack = tmp_path / "pack.yml"
     pack.write_text(content)
-    assert probe_packs(executable, workspace, [str(pack)]).reason_code == RULE_PACK_INVALID
+    assert probe_packs(workspace, [str(pack)]).reason_code == RULE_PACK_INVALID
 
 
-def test_recorded_invalid_yaml_pack_is_invalid_at_probe(executable, workspace):
-    probe = probe_packs(executable, workspace, [str(BAD / "invalid_yaml.yml")])
+def test_recorded_invalid_yaml_pack_is_invalid_at_probe(workspace):
+    probe = probe_packs(workspace, [str(BAD / "invalid_yaml.yml")])
     assert probe.reason_code == RULE_PACK_INVALID
 
 
-def test_directory_without_rule_files_is_invalid(executable, workspace, tmp_path):
+def test_directory_without_rule_files_is_invalid(workspace, tmp_path):
     (tmp_path / "empty").mkdir()
     (tmp_path / "empty" / "notes.txt").write_text("x")
-    assert probe_packs(executable, workspace, [str(tmp_path / "empty")]).reason_code == RULE_PACK_INVALID
+    assert probe_packs(workspace, [str(tmp_path / "empty")]).reason_code == RULE_PACK_INVALID
 
 
-def test_directory_symlink_inside_pack_is_invalid(executable, workspace, tmp_path):
+def test_directory_symlink_inside_pack_is_invalid(workspace, tmp_path):
     write_rule(tmp_path / "pack" / "a.yml", "a")
     write_rule(tmp_path / "elsewhere" / "b.yml", "b")
     os.symlink(tmp_path / "elsewhere", tmp_path / "pack" / "linked")
-    probe = probe_packs(executable, workspace, [str(tmp_path / "pack")])
+    probe = probe_packs(workspace, [str(tmp_path / "pack")])
     assert probe.reason_code == RULE_PACK_INVALID and "symlink" in probe.detail
 
 
-def test_directory_pack_enumerates_like_semgrep(executable, workspace, tmp_path):
+def test_directory_pack_enumerates_like_semgrep(workspace, tmp_path):
     # Observed with 1.178.0: hidden dirs and dotfiles load; *.test.yml does not.
     pack = tmp_path / "pack"
     write_rule(pack / "a.yml", "r-a")
@@ -373,44 +323,44 @@ def test_directory_pack_enumerates_like_semgrep(executable, workspace, tmp_path)
     write_rule(pack / ".hidden" / "c.yml", "r-c")
     write_rule(pack / "e.test.yml", "r-a")  # a test fixture: never a (duplicate) rule
     (pack / "README.md").write_text("docs")
-    probe = probe_packs(executable, workspace, [str(pack)])
+    probe = probe_packs(workspace, [str(pack)])
     assert probe.reason_code is None, probe.detail
     (identity,) = probe.identity.rule_packs
     assert identity.rule_count == 3 and identity.languages == ("java", "python")
     before = identity.digest
     (pack / "e.test.yml").write_text("changed")  # still covered by the digest
-    assert probe_packs(executable, workspace, [str(pack)]).identity.rule_packs[0].digest != before
+    assert probe_packs(workspace, [str(pack)]).identity.rule_packs[0].digest != before
 
 
-def test_in_workspace_pack_requires_a_pin(executable, workspace):
+def test_in_workspace_pack_requires_a_pin(workspace):
     write_rule(workspace / "rules" / "a.yml", "ws-rule")
-    probe = probe_packs(executable, workspace, [str(workspace / "rules")])
+    probe = probe_packs(workspace, [str(workspace / "rules")])
     assert probe.reason_code == RULE_PACK_UNPINNED
 
 
-def test_in_workspace_pinned_pack_is_accepted_and_mismatch_refused(executable, workspace):
+def test_in_workspace_pinned_pack_is_accepted_and_mismatch_refused(workspace):
     write_rule(workspace / "rules" / "a.yml", "ws-rule")
     digest = semgrep._pack_digest(semgrep._read_pack(semgrep._PackSpec("r", str(workspace / "rules"), None)))
-    good = probe_packs(executable, workspace, [{"path": str(workspace / "rules"), "sha256": digest}])
+    good = probe_packs(workspace, [{"path": str(workspace / "rules"), "sha256": digest}])
     assert good.reason_code is None and good.identity.rule_packs[0].digest == digest
-    bad = probe_packs(executable, workspace, [{"path": str(workspace / "rules"), "sha256": "0" * 64}])
+    bad = probe_packs(workspace, [{"path": str(workspace / "rules"), "sha256": "0" * 64}])
     assert bad.reason_code == RULE_PACK_DIGEST_MISMATCH
 
 
-def test_pinned_pack_outside_workspace_is_verified_too(executable, workspace):
-    probe = probe_packs(executable, workspace, [{"path": RULES, "sha256": "f" * 64}])
+def test_pinned_pack_outside_workspace_is_verified_too(workspace):
+    probe = probe_packs(workspace, [{"path": RULES, "sha256": "f" * 64}])
     assert probe.reason_code == RULE_PACK_DIGEST_MISMATCH
-    ok_probe = probe_packs(executable, workspace, [{"path": RULES, "sha256": MANIFEST["rule_pack_digests"]["rules"]}])
+    ok_probe = probe_packs(workspace, [{"path": RULES, "sha256": MANIFEST["rule_pack_digests"]["rules"]}])
     assert ok_probe.reason_code is None
 
 
-def test_identity_changes_when_one_rule_byte_changes(executable, workspace, tmp_path):
+def test_identity_changes_when_one_rule_byte_changes(workspace, tmp_path):
     pack = tmp_path / "pack"
     shutil.copytree(RULES, pack)
-    first = probe_packs(executable, workspace, [str(pack)]).identity
+    first = probe_packs(workspace, [str(pack)]).identity
     text = (pack / "java.yml").read_text()
     (pack / "java.yml").write_text(text.replace("Weak hash", "Weak  hash"))
-    second = probe_packs(executable, workspace, [str(pack)]).identity
+    second = probe_packs(workspace, [str(pack)]).identity
     assert first.rule_packs[0].digest != second.rule_packs[0].digest
     assert first.identity_digest != second.identity_digest
 
@@ -454,25 +404,6 @@ def test_contained_probe_identity_and_profile(workspace):
 
 # --- scan: invocation (§5.2 flags and environment, §8.4) ----------------------
 
-def test_host_scan_exact_argv_and_environment(executable, workspace, snapshot, tmp_path, monkeypatch):
-    for leaked in ("SEMGREP_RULES", "SEMGREP_BASELINE_COMMIT", "SEMGREP_APP_TOKEN", "AWS_SECRET_ACCESS_KEY"):
-        monkeypatch.setenv(leaked, "attacker")
-    targets = case_targets("findings_exit0")
-    process = FakeProcess(ok(output("findings_exit0")))
-    req = request(snapshot, tmp_path, targets, timeout=77)
-    host_adapter(executable, workspace, process).scan(req)
-
-    ((command, kwargs),) = process.calls
-    assert command == [os.path.realpath(executable), *FIXED_FLAGS, "--config", os.path.realpath(RULES), "--", *targets]
-    home, tmpdir = os.path.join(req.scratch_dir, "home"), os.path.join(req.scratch_dir, "tmp")
-    assert kwargs == {"cwd": str(snapshot), "timeout": 77, "env": {
-        "PATH": os.environ["PATH"], "HOME": home, "TMPDIR": tmpdir, "SEMGREP_SEND_METRICS": "off",
-        "SEMGREP_ENABLE_VERSION_CHECK": "0",
-    }}
-    assert os.path.isdir(home) and os.path.isdir(tmpdir)
-    for forbidden in ("--x-ignore-semgrepignore-files", "--exclude", "--scan-unknown-extensions", "--error",
-                      "--strict", "--pro", "ci", "--config=auto"):
-        assert forbidden not in command
 
 
 def test_contained_scan_profile_and_argv(workspace, snapshot, tmp_path):
@@ -525,50 +456,50 @@ def test_contained_scan_setup_failure_is_unavailable(workspace, snapshot, tmp_pa
     assert (result.status, result.reason_code) == (ScanStatus.FAILED, CONTAINMENT_UNAVAILABLE)
 
 
-def test_missing_target_is_failed_without_running(executable, workspace, snapshot, tmp_path):
+def test_missing_target_is_failed_without_running(workspace, snapshot, tmp_path):
     process = FakeProcess()
-    result = host_adapter(executable, workspace, process).scan(
+    result = make_adapter(workspace, process).scan(
         request(snapshot, tmp_path, case_targets("missing_target")))
     assert (result.status, result.reason_code) == (ScanStatus.FAILED, SCAN_FAILED)
     assert process.calls == []
 
 
 @pytest.mark.parametrize("target", ["../outside.java", "/etc/passwd", "src"])
-def test_escaping_or_non_file_target_is_failed_without_running(executable, workspace, snapshot, tmp_path, target):
+def test_escaping_or_non_file_target_is_failed_without_running(workspace, snapshot, tmp_path, target):
     (snapshot.parent / "outside.java").write_text("class A {}")
     process = FakeProcess()
-    result = host_adapter(executable, workspace, process).scan(request(snapshot, tmp_path, [target]))
+    result = make_adapter(workspace, process).scan(request(snapshot, tmp_path, [target]))
     assert result.status is ScanStatus.FAILED and process.calls == []
 
 
-def test_invalid_pack_at_scan_time_is_config_error_without_running(executable, workspace, snapshot, tmp_path):
+def test_invalid_pack_at_scan_time_is_config_error_without_running(workspace, snapshot, tmp_path):
     process = FakeProcess()
-    result = host_adapter(executable, workspace, process, rule_packs=[str(BAD / "invalid_yaml.yml")]).scan(
+    result = make_adapter(workspace, process, rule_packs=[str(BAD / "invalid_yaml.yml")]).scan(
         request(snapshot, tmp_path, case_targets("invalid_yaml")))
     assert (result.status, result.reason_code) == (ScanStatus.CONFIG_ERROR, RULE_PACK_INVALID)
     assert process.calls == []
 
 
-def test_spawn_failure_is_scan_failed(executable, workspace, snapshot, tmp_path):
-    result = host_adapter(executable, workspace, FakeProcess(FileNotFoundError("gone"))).scan(
+def test_spawn_failure_is_scan_failed(workspace, snapshot, tmp_path):
+    result = make_adapter(workspace, FakeProcess(FileNotFoundError("gone"))).scan(
         request(snapshot, tmp_path, case_targets("findings_exit0")))
     assert (result.status, result.reason_code) == (ScanStatus.FAILED, SCAN_FAILED) and "gone" in result.detail
 
 
 # --- scan: result mapping from recorded 1.178.0 output (§5.3, §5.5) ------------
 
-def scan_case(executable, workspace, snapshot, tmp_path, case, *, returncode=None, stdout=None, packs=None,
+def scan_case(workspace, snapshot, tmp_path, case, *, returncode=None, stdout=None, packs=None,
               targets=None):
     packs = packs or [str(FIXTURES / p) for p in MANIFEST["cases"][case]["rule_packs"]]
     code = MANIFEST["cases"][case]["exit_code"] if returncode is None else returncode
     process = FakeProcess(ok(output(case) if stdout is None else stdout, code))
-    adapter = host_adapter(executable, workspace, process, rule_packs=packs)
+    adapter = make_adapter(workspace, process, rule_packs=packs)
     return adapter.scan(request(snapshot, tmp_path, targets or case_targets(case)))
 
 
-def test_findings_at_exit_zero_complete(executable, workspace, snapshot, tmp_path):
+def test_findings_at_exit_zero_complete(workspace, snapshot, tmp_path):
     stdout = output("findings_exit0")
-    result = scan_case(executable, workspace, snapshot, tmp_path, "findings_exit0")
+    result = scan_case(workspace, snapshot, tmp_path, "findings_exit0")
     assert (result.status, result.reason_code) == (ScanStatus.COMPLETE, None)
     assert result.analyzed == frozenset(case_targets("findings_exit0"))
     assert result.reported_version == "1.178.0"
@@ -590,23 +521,23 @@ def test_findings_at_exit_zero_complete(executable, workspace, snapshot, tmp_pat
     assert (first.start_col, first.end_col) == (9, 39)
 
 
-def test_findings_are_kept_whatever_the_exit_code(executable, workspace, snapshot, tmp_path):
-    result = scan_case(executable, workspace, snapshot, tmp_path, "findings_exit0", returncode=2)
+def test_findings_are_kept_whatever_the_exit_code(workspace, snapshot, tmp_path):
+    result = scan_case(workspace, snapshot, tmp_path, "findings_exit0", returncode=2)
     assert (result.status, result.reason_code) == (ScanStatus.FAILED, SCAN_FAILED)
     assert len(result.findings) == 6
 
 
-def test_unconfirmed_target_is_incomplete(executable, workspace, snapshot, tmp_path):
+def test_unconfirmed_target_is_incomplete(workspace, snapshot, tmp_path):
     # An existing target Semgrep silently did not report as scanned (V13).
     (snapshot / "src" / "Extra.java").write_text("class Extra {}")
     targets = case_targets("findings_exit0") + ["src/Extra.java"]
-    result = scan_case(executable, workspace, snapshot, tmp_path, "findings_exit0", targets=targets)
+    result = scan_case(workspace, snapshot, tmp_path, "findings_exit0", targets=targets)
     assert (result.status, result.reason_code) == (ScanStatus.INCOMPLETE, SCAN_INCOMPLETE)
     assert "src/Extra.java" not in result.analyzed and "src/Extra.java" in result.detail
 
 
-def test_partial_parse_is_incomplete_with_findings(executable, workspace, snapshot, tmp_path):
-    result = scan_case(executable, workspace, snapshot, tmp_path, "partial_parse")
+def test_partial_parse_is_incomplete_with_findings(workspace, snapshot, tmp_path):
+    result = scan_case(workspace, snapshot, tmp_path, "partial_parse")
     assert (result.status, result.reason_code) == (ScanStatus.INCOMPLETE, SCAN_INCOMPLETE)
     # scanned - skipped - errored (V10): Partial.java is in all three; Broken.java has a
     # scalar "Syntax error"; syntax_err.py was silently recovered (V11) and counts.
@@ -622,8 +553,8 @@ def test_partial_parse_is_incomplete_with_findings(executable, workspace, snapsh
         (f.rule_id, f.path, f.start_line) for f in result.findings}
 
 
-def test_invalid_pattern_exit_two_is_config_error_with_evidence(executable, workspace, snapshot, tmp_path):
-    result = scan_case(executable, workspace, snapshot, tmp_path, "invalid_pattern")
+def test_invalid_pattern_exit_two_is_config_error_with_evidence(workspace, snapshot, tmp_path):
+    result = scan_case(workspace, snapshot, tmp_path, "invalid_pattern")
     assert (result.status, result.reason_code) == (ScanStatus.CONFIG_ERROR, RULE_PACK_INVALID)
     assert [f.rule_id for f in result.findings] == ["semgrep:good-rule"]
     assert [e.kind for e in result.errors] == ["config"]
@@ -632,8 +563,8 @@ def test_invalid_pattern_exit_two_is_config_error_with_evidence(executable, work
 @pytest.mark.parametrize("case,reason", [
     ("invalid_schema", RULE_PACK_INVALID), ("unknown_language", CAPABILITY_UNKNOWN),
 ])
-def test_rule_errors_are_config_errors(executable, workspace, snapshot, tmp_path, case, reason):
-    result = scan_case(executable, workspace, snapshot, tmp_path, case)
+def test_rule_errors_are_config_errors(workspace, snapshot, tmp_path, case, reason):
+    result = scan_case(workspace, snapshot, tmp_path, case)
     assert (result.status, result.reason_code) == (ScanStatus.CONFIG_ERROR, reason)
     assert result.findings == () and all(e.kind == "config" for e in result.errors)
 
@@ -712,18 +643,18 @@ def test_clean_exit_zero_with_no_findings_is_complete_only_when_confirmed():
     assert skipped.status is ScanStatus.INCOMPLETE and skipped.skipped == {"a.java": "too_big"}
 
 
-def test_timeout(executable, workspace, snapshot, tmp_path):
+def test_timeout(workspace, snapshot, tmp_path):
     process = FakeProcess(ProcessResult(returncode=-1, stdout='{"partial', stderr="", timeout=True))
-    result = host_adapter(executable, workspace, process).scan(
+    result = make_adapter(workspace, process).scan(
         request(snapshot, tmp_path, case_targets("findings_exit0"), timeout=9))
     assert (result.status, result.reason_code) == (ScanStatus.TIMEOUT, SCAN_TIMEOUT)
     assert result.findings == () and result.raw_output == '{"partial'
 
 
-def test_truncated_capture_is_malformed(executable, workspace, snapshot, tmp_path):
+def test_truncated_capture_is_malformed(workspace, snapshot, tmp_path):
     process = FakeProcess(ProcessResult(returncode=0, stdout=output("findings_exit0"), stderr="", timeout=False,
                                         stdout_truncated=True))
-    result = host_adapter(executable, workspace, process).scan(
+    result = make_adapter(workspace, process).scan(
         request(snapshot, tmp_path, case_targets("findings_exit0")))
     assert (result.status, result.reason_code) == (ScanStatus.MALFORMED_OUTPUT, SCAN_OUTPUT_MALFORMED)
 
@@ -808,38 +739,36 @@ def test_absolute_finding_path_is_made_root_relative():
     assert interpret_output(doc, 0, ["src/a.java"], frozenset({"r"}), "/snap").findings[0].path == "src/a.java"
 
 
-def test_prerequisites_and_build_graph_are_empty(executable, workspace):
-    adapter = host_adapter(executable, workspace, FakeProcess(VERSION_OK))
+def test_prerequisites_and_build_graph_are_empty(workspace):
+    adapter = make_adapter(workspace, FakeProcess(VERSION_OK))
     assert tuple(adapter.check_prerequisites(adapter.probe().capability, ["java"], str(workspace))) == ()
     assert tuple(adapter.build_graph_roots(str(workspace), ["a.java"])) == ()
 
 
 # --- identity: effective options and runtime fingerprint (§10.4, §16 test 36) ---
 
-def test_effective_options_digest_tracks_settings_and_location(executable, workspace):
-    base = host_adapter(executable, workspace, FakeProcess(VERSION_OK)).probe().identity
-    same = host_adapter(executable, workspace, FakeProcess(VERSION_OK)).probe().identity
-    slower = host_adapter(executable, workspace, FakeProcess(VERSION_OK), per_file_timeout_seconds=6).probe().identity
-    contained = contained_adapter(workspace, FakeProcess(VERSION_OK), backend=DummyContainmentBackend()).probe()
+def test_effective_options_digest_tracks_settings(workspace):
+    base = make_adapter(workspace, FakeProcess(VERSION_OK)).probe().identity
+    same = make_adapter(workspace, FakeProcess(VERSION_OK)).probe().identity
+    slower = make_adapter(workspace, FakeProcess(VERSION_OK), per_file_timeout_seconds=6).probe().identity
     assert base.effective_options_digest == same.effective_options_digest
     assert base.identity_digest == same.identity_digest
     assert slower.effective_options_digest != base.effective_options_digest
-    assert contained.identity.effective_options_digest != base.effective_options_digest
 
 
-def test_runtime_fingerprint_is_stable_and_never_runs_semgrep(executable, workspace):
+def test_runtime_fingerprint_is_stable_and_never_runs_semgrep(workspace):
     first, second = FakeProcess(), FakeProcess()
-    assert host_adapter(executable, workspace, first).runtime_fingerprint() == \
-        host_adapter(executable, workspace, second).runtime_fingerprint()
+    assert make_adapter(workspace, first).runtime_fingerprint() == \
+        make_adapter(workspace, second).runtime_fingerprint()
     assert first.calls == second.calls == []
 
 
-def test_runtime_fingerprint_changes_with_each_input(executable, workspace, tmp_path):
+def test_runtime_fingerprint_changes_with_each_input(workspace, tmp_path):
     pack = tmp_path / "pack"
     shutil.copytree(RULES, pack)
 
     def fingerprint(**overrides):
-        return host_adapter(executable, workspace, FakeProcess(), rule_packs=[str(pack)], **overrides) \
+        return make_adapter(workspace, FakeProcess(), rule_packs=[str(pack)], **overrides) \
             .runtime_fingerprint()
 
     base = fingerprint()
@@ -848,12 +777,6 @@ def test_runtime_fingerprint_changes_with_each_input(executable, workspace, tmp_
     (pack / "python.yml").write_bytes((pack / "python.yml").read_bytes() + b"\n")
     after_rule = fingerprint()
     assert after_rule != base
-    executable.write_text(executable.read_text() + "# changed\n")
-    after_entry = fingerprint()
-    assert after_entry != after_rule
-    engine = engine_path(executable)
-    engine.write_bytes(engine.read_bytes() + b"\x00")  # a swapped engine, same entry point
-    assert fingerprint() != after_entry
 
 
 def test_runtime_fingerprint_contained_binds_the_image(workspace):
@@ -864,39 +787,20 @@ def test_runtime_fingerprint_contained_binds_the_image(workspace):
     assert base != other
 
 
-def test_runtime_fingerprint_raises_on_missing_pack_or_executable(executable, workspace, tmp_path):
+def test_runtime_fingerprint_raises_on_a_missing_pack_or_a_missing_image(workspace, tmp_path):
     pack = tmp_path / "pack"
     shutil.copytree(RULES, pack)
-    adapter = host_adapter(executable, workspace, FakeProcess(), rule_packs=[str(pack)])
+    adapter = make_adapter(workspace, FakeProcess(), rule_packs=[str(pack)])
     adapter.runtime_fingerprint()
     shutil.rmtree(pack)
     with pytest.raises((OSError, ValueError)):
         adapter.runtime_fingerprint()
-    missing_exe = host_adapter(tmp_path / "gone", workspace, FakeProcess())
-    with pytest.raises(OSError):
-        missing_exe.runtime_fingerprint()
+    with pytest.raises(ValueError):       # contained execution without a pinned image has no runtime to fingerprint
+        contained_adapter(workspace, FakeProcess(), backend=DummyContainmentBackend(), image=None).runtime_fingerprint()
 
 
 # --- host engine identity (semgrep-core) ----------------------------------------
 
-def test_missing_engine_fails_the_probe_and_the_fingerprint(executable, workspace):
-    engine_path(executable).unlink()
-    process = FakeProcess()
-    adapter = host_adapter(executable, workspace, process)
-    probe = adapter.probe()
-    assert (probe.identity, probe.reason_code) == (None, PROVIDER_PROBE_FAILED)
-    assert "semgrep-core" in probe.detail and process.calls == []
-    with pytest.raises(EngineNotLocatedError):
-        adapter.runtime_fingerprint()
-
-
-def test_swapped_engine_changes_the_probed_identity(executable, workspace):
-    first = host_adapter(executable, workspace, FakeProcess(VERSION_OK)).probe().identity
-    engine = engine_path(executable)
-    engine.write_bytes(b"\x7fELF another engine")
-    second = host_adapter(executable, workspace, FakeProcess(VERSION_OK)).probe().identity
-    assert first.executable_digest != second.executable_digest
-    assert first.identity_digest != second.identity_digest
 
 
 @pytest.mark.parametrize("entry", [

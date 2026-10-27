@@ -915,7 +915,6 @@ async def test_prv08_shaped_recovery_regression(tmp_path):
     assert (tmp_path / service_owner).read_text() == changed_service
 
 
-
 def test_required_verification_evidence_preserves_identity_and_only_resolves_builtin_gates():
     requirements = [
         {"type": "tool", "tool_name": "quality_gates", "description": "compile and test"},
@@ -19946,56 +19945,6 @@ async def test_workflow_java_goal_prompt_includes_java_toolchain_fact_when_tools
     assert "Environment Fact" in first_call_kwargs["existing_code_context"]
     assert "JDK 17" in first_call_kwargs["existing_code_context"]
 
-@pytest.mark.asyncio
-async def test_workflow_applies_java_home_override_to_maven_subprocess(tmp_path):
-    """End-to-end regression test for the real, live-diagnosed gap:
-    maven.compiler.source/target controls the Java LANGUAGE version javac
-    targets, not which JDK 'mvn' itself runs under - a goal explicitly
-    stating "targeting Java 17" had no way to make Maven actually honor
-    that when 'mvn' defaults to a different JDK. Confirms
-    _resolve_java_home_override()'s result actually reaches the real Maven
-    subprocess call (via PolymorphicValidator.java_home_override), not just
-    the decision logic in isolation - the wiring gap that would make the
-    whole feature a no-op even with correct decision logic."""
-    _init_git_repo(tmp_path)
-    cfg = AppConfig()
-    cfg.autonomy.mode = "guardrails"
-    cfg.autonomy.run_verification_enabled = False
-    kernel = Kernel(config=cfg)
-    llm = LLMClient(cfg)
-    llm.complete = AsyncMock(side_effect=[
-        "Step 1: Write code",
-        "Design: Write pom.xml",
-        "Review: Approved",
-    ])
-    we = WorkflowEngine(kernel, llm)
-    we.developer.run_generation = AsyncMock(return_value=[
-        {"filepath": "pom.xml", "content": "<project></project>"}
-    ])
-    with patch(
-        "kriya.workflow.attempt._resolve_java_home_override", return_value="/opt/jdk-17",
-    ), patch("kriya.tools.validate.ProcessController.run") as mock_run:
-        mock_result = MagicMock()
-        mock_result.to_dict.return_value = {
-            "returncode": 0, "stdout": "BUILD SUCCESS", "stderr": "",
-            "timed_out": False,
-        }
-        mock_run.return_value = mock_result
-        res = await we.run_generation_workflow(
-            goal="Create a Java app using Maven, targeting Java 17", workspace_path=str(tmp_path)
-        )
-
-    assert res["quality_gates_passed"] is True
-    # Capture the validator's command-controller boundary, not process-wide
-    # Popen (which would also intercept Git and asyncio child management).
-    # Filter to the real compile invocation rather than the earlier validate.
-    mvn_calls = [
-        c for c in mock_run.call_args_list
-        if c.args and c.args[0] and c.args[0][0] == "mvn" and "compile" in c.args[0]
-    ]
-    assert mvn_calls, mock_run.call_args_list
-    _, kwargs = mvn_calls[0]
-    assert kwargs["env"]["JAVA_HOME"] == "/opt/jdk-17"
 
 @pytest.mark.asyncio
 async def test_approve_web_lookup_true_when_auto_approve_set():
@@ -26064,7 +26013,6 @@ async def test_source_cache_does_not_interfere_with_member_rename_fallback(tmp_p
         entry["member_id"] == "Owner.new_name" for entry in events[-1].details["tiers"]
     )
     assert not any(entry["member_id"] == "Owner.old_name" for entry in events[-1].details["tiers"])
-
 
 
 @pytest.mark.asyncio

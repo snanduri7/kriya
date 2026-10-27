@@ -7,15 +7,17 @@ finite_command counterpart to Managed Runtime Verification's own P6 fix
 gate (`mvn clean compile`) nor the test gate (`mvn test`) ever reaches
 Maven's `package` phase.
 
-Real subprocess execution via a fake executable `./mvnw` script (same
+Real subprocess execution via a fake executable build script (same
 pattern as tests/test_service_runtime.py) - no LLM, no network, no real
-Maven/JDK dependency.
+Maven/JDK dependency. S8: the build always goes through the validator's
+CONTAINED Maven path (``validator.contained_maven_build``); the script is the
+stand-in for that contained build, never a project ``./mvnw`` on the host.
 """
 import os
-from types import SimpleNamespace
 
 import pytest
 
+from kriya.tools.process import ProcessController
 from kriya.workflow.attempt import _prepare_finite_command_runtime_artifacts
 from kriya.workflow.failure import QualityGateFailure
 from kriya.workflow.failure_grounding import classify_environment_failure
@@ -33,7 +35,7 @@ def _write_executable(path, content: str) -> None:
 def _write_mvnw(
     tmp_path, *, jar_relpath: str, exit_code: int = 0, create_jar: bool = True, stderr: str = "",
 ) -> None:
-    """A real, executable ./mvnw stand-in - no Maven/JVM dependency, matching
+    """A real, executable build stand-in (run by ``_stub_build`` as the contained Maven build) - no Maven/JVM dependency, matching
     tests/test_service_runtime.py's own established pattern."""
     create_line = (
         f'mkdir -p "$(dirname "{jar_relpath}")" && touch "{jar_relpath}"'
@@ -64,25 +66,30 @@ class _FakeCtx:
         self.established_files = []
 
 
-class _FakeValidator:
-    """Duck-typed stand-in for PolymorphicValidator - the function under
-    test only ever calls external_execution() (D2 S4: the canonical decision;
-    host here), build_subprocess_env_and_preexec() and, when contained,
-    contained_maven_build() on it."""
+def _stub_build(tmp_path):
+    """The validator's contained Maven build, stood in by the scripted build run in the workspace (a trusted test fixture). It returns the
+    validator's result-dict shape, and it refuses to be asked for anything but the plain ``mvn`` (S8: never the project's ``./mvnw``)."""
+    def build(argv, timeout):
+        assert argv[0] == "mvn", f"the contained build is never the project's wrapper: {argv!r}"
+        return ProcessController().run([str(tmp_path / "mvnw")], cwd=str(tmp_path), timeout=timeout).to_dict()
+    return build
 
-    def __init__(self, env=None, preexec_fn=None, workspace_path=None, contained=False, contained_build=None):
-        self._env = env
-        self._preexec_fn = preexec_fn
-        self._contained = contained
+
+def _forbidden_build(argv, timeout):
+    raise AssertionError(f"the build must not run here: {argv!r}")
+
+
+def _cannot_invoke_build(argv, timeout):
+    raise FileNotFoundError(f"{argv[0]}: not found")
+
+
+class _FakeValidator:
+    """Duck-typed stand-in for PolymorphicValidator - the function under test only ever reads ``workspace_path`` and calls
+    ``contained_maven_build`` (S8: the contained Maven path is the only build)."""
+
+    def __init__(self, workspace_path=None, contained_build=_forbidden_build):
         self.contained_maven_build = contained_build
         self.workspace_path = str(workspace_path) if workspace_path is not None else None  # the root the build runs in (a gate view in production)
-
-    def build_subprocess_env_and_preexec(self):
-        assert not self._contained, "a contained validator never asks for the host env/preexec policy"
-        return self._env, self._preexec_fn
-
-    def external_execution(self):
-        return SimpleNamespace(contained=self._contained)
 
 
 # --- E: no artifact required - unchanged, fast no-op ------------------------
@@ -120,7 +127,7 @@ def test_artifact_already_current_skips_preparation(tmp_path):
 
     state = _FakeState()
     ctx = _FakeCtx(tmp_path)
-    validator = _FakeValidator(env={"PATH": str(tmp_path)}, workspace_path=tmp_path)
+    validator = _FakeValidator(workspace_path=tmp_path)
     _prepare_finite_command_runtime_artifacts(
         [["java", "-jar", "target/app.jar"]], validator, ctx, state,
     )
@@ -137,7 +144,7 @@ def test_missing_artifact_is_prepared_successfully(tmp_path):
 
     state = _FakeState()
     ctx = _FakeCtx(tmp_path)
-    validator = _FakeValidator(workspace_path=tmp_path)
+    validator = _FakeValidator(workspace_path=tmp_path, contained_build=_stub_build(tmp_path))
     _prepare_finite_command_runtime_artifacts(
         [["java", "-jar", "target/app.jar"]], validator, ctx, state,
     )
@@ -155,7 +162,7 @@ def test_missing_artifact_via_classpath_flag_is_prepared(tmp_path):
 
     state = _FakeState()
     ctx = _FakeCtx(tmp_path)
-    validator = _FakeValidator(workspace_path=tmp_path)
+    validator = _FakeValidator(workspace_path=tmp_path, contained_build=_stub_build(tmp_path))
     _prepare_finite_command_runtime_artifacts(
         [["java", "-cp", "target/app.jar", "com.example.Main"]], validator, ctx, state,
     )
@@ -176,7 +183,7 @@ def test_build_failure_is_reported_as_compile_failure_not_environment(tmp_path):
     )
     state = _FakeState()
     ctx = _FakeCtx(tmp_path)
-    validator = _FakeValidator(workspace_path=tmp_path)
+    validator = _FakeValidator(workspace_path=tmp_path, contained_build=_stub_build(tmp_path))
     with pytest.raises(QualityGateFailure) as exc_info:
         _prepare_finite_command_runtime_artifacts(
             [["java", "-jar", "target/app.jar"]], validator, ctx, state,
@@ -202,7 +209,7 @@ def test_artifact_materialization_failure_is_not_environment_or_doctor_eligible(
     _write_mvnw(tmp_path, jar_relpath="target/app.jar", exit_code=0, create_jar=False)
     state = _FakeState()
     ctx = _FakeCtx(tmp_path)
-    validator = _FakeValidator(workspace_path=tmp_path)
+    validator = _FakeValidator(workspace_path=tmp_path, contained_build=_stub_build(tmp_path))
     with pytest.raises(QualityGateFailure) as exc_info:
         _prepare_finite_command_runtime_artifacts(
             [["java", "-jar", "target/app.jar"]], validator, ctx, state,
@@ -223,7 +230,7 @@ def test_missing_mvn_binary_remains_verification_infrastructure_failure(tmp_path
     _write_pom(tmp_path)
     state = _FakeState()
     ctx = _FakeCtx(tmp_path)
-    validator = _FakeValidator(env={"PATH": str(tmp_path)}, workspace_path=tmp_path)  # no mvn anywhere on this PATH
+    validator = _FakeValidator(workspace_path=tmp_path, contained_build=_cannot_invoke_build)  # the build cannot even be invoked
     with pytest.raises(QualityGateFailure) as exc_info:
         _prepare_finite_command_runtime_artifacts(
             [["java", "-jar", "target/app.jar"]], validator, ctx, state,

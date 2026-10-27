@@ -55,7 +55,6 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 from kriya.tools.containment import (
     ContainmentSetupError,
     NetworkAuthority,
-    decide_external_execution,
     declare_execution_copy,
 )
 from kriya.workflow.contract_compilation import (
@@ -458,12 +457,6 @@ def run_authority_bundle(
             declare_execution_copy(validator, export)   # D2 S3 (creator provenance): THIS function made the git-less copy, so it, not the factory, declares it
         except ContainmentSetupError as error:
             run.reason_code, run.reason = AUTHORITY_EXECUTION_UNAVAILABLE, f"containment refused: {error}"
-            return run
-        autonomy = getattr(validator, "autonomy_cfg", None)
-        if not decide_external_execution(autonomy, subject="authority_bundle").contained:
-            run.reason_code = AUTHORITY_EXECUTION_UNAVAILABLE
-            run.reason = ("an external acceptance command runs only under Kriya's containment "
-                          "(autonomy.contained_execution_required); never on the host")
             return run
         stage = _stage_assets(bundle, export)
         cache = _cache_for(validator, bundle.build_tool)

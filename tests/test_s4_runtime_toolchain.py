@@ -195,25 +195,22 @@ class _Validator:
         return {"HOST": "policy"}, "preexec"
 
 
-@pytest.mark.parametrize("contained", [True, False])
-def test_the_finite_command_preparation_follows_the_validators_decision(tmp_path, contained):
+def test_the_finite_command_preparation_always_takes_the_validators_contained_build(tmp_path):
+    """S8: contained is the only mode - the preparation is handed the validator's contained Maven build and no host env/preexec policy."""
     received = []
 
     def spy(command, cwd, **kwargs):
         received.append((command, cwd, kwargs))
         return types.SimpleNamespace(outcome=None)
 
-    validator = _Validator(tmp_path, contained=contained)
+    validator = _Validator(tmp_path, contained=True)
     deps = types.SimpleNamespace(_prepare_required_artifact=spy)
     ctx = types.SimpleNamespace(established_files=[])
     state = types.SimpleNamespace(all_files_written=[])
     rv._prepare_finite_command_runtime_artifacts(deps, [["java", "-jar", "target/app.jar"]], validator, ctx, state)
     (_command, cwd, kwargs), = received
     assert cwd == str(tmp_path)
-    if contained:
-        assert (kwargs["env"], kwargs["preexec_fn"]) == (None, None) and kwargs["contained_build"] is validator.contained_maven_build
-    else:
-        assert (kwargs["env"], kwargs["preexec_fn"]) == ({"HOST": "policy"}, "preexec") and kwargs["contained_build"] is None
+    assert (kwargs["env"], kwargs["preexec_fn"]) == (None, None) and kwargs["contained_build"] is validator.contained_maven_build
 
 
 def _calls_in(path, function, callee):
@@ -283,13 +280,6 @@ def test_contained_javac_gets_workspace_relative_paths(tmp_path, monkeypatch):
     seen = _javac_commands(validator, ["src/App.java", "src/Missing.java", str(tmp_path / "src/Util.java")], monkeypatch)
     assert [cmd for cmd, _cwd in seen if cmd[0] == "javac"] == [["javac", "-proc:none", "-d", "build", "src/App.java", "src/Util.java"]], seen
     assert os.path.isdir(tmp_path / "build")
-
-
-def test_host_javac_keeps_its_absolute_paths_byte_for_byte(tmp_path, monkeypatch):
-    _write(tmp_path, "src/App.java", "class App {}")
-    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=AutonomyConfig())
-    seen = _javac_commands(validator, ["src/App.java"], monkeypatch)
-    assert seen == [(["javac", "-proc:none", "-d", os.path.join(str(tmp_path), "build"), os.path.join(str(tmp_path), "src/App.java")], str(tmp_path))]
 
 
 @pytest.mark.skipif(shutil.which("javac") is None, reason="a JDK is required")

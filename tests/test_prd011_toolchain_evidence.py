@@ -124,30 +124,6 @@ async def test_contained_compile_gate_persists_image_digest_in_the_trace(tmp_pat
     assert os.path.exists(trace_db_path(cfg))
 
 
-@pytest.mark.asyncio
-async def test_host_mode_gate_outcomes_never_claim_a_toolchain_identity(tmp_path):
-    cfg = AppConfig()
-    cfg.autonomy.mode = "guardrails"
-    cfg.autonomy.run_verification_enabled = False
-    kernel = Kernel(config=cfg)
-    llm = LLMClient(cfg)
-    llm.complete = AsyncMock(side_effect=[
-        "Step 1: Write code",
-        "Design: Write app.py",
-        '[{"filepath": "app.py", "content": "print(1)"}]',
-    ])
-    we = WorkflowEngine(kernel, llm)
-    we.reviewer.run = AsyncMock(return_value="Review: Approved")
-
-    res = await we.run_generation_workflow(goal="Create app", workspace_path=str(tmp_path))
-
-    assert res["quality_gates_passed"] is True
-    outcomes = _latest_gate_outcomes(cfg)
-    assert any(o.get("type") == "compile" for o in outcomes)
-    assert all("toolchain_identity" not in o for o in outcomes)
-
-
-
 # The goal-stated-JDK conflict stop moved to test_prd011_toolchain_migration.py
 # (final review semantics): an unrestricted direct run may change pom.xml, so
 # there it is an authorized migration; the typed stop needs a scope without

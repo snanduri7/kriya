@@ -20,7 +20,6 @@ import json
 import os
 import posixpath
 import re
-import shutil
 import tempfile
 import time
 from dataclasses import dataclass, replace
@@ -68,7 +67,6 @@ from kriya.tools.containment import (
     backend_provides_isolation,
 )
 from kriya.tools.process import ProcessController, ProcessResult
-from kriya.tools.sandbox import build_restricted_env
 
 PROVIDER = "semgrep"
 EDITION = "community"
@@ -127,9 +125,6 @@ LIMITATION_SILENT_SYNTAX_RECOVERY = (
 )
 LIMITATION_FILE_LOCAL = (
     "Semgrep CE (--oss-only) analyzes within one file; cross-file analysis needs the Pro engine and is not claimed."
-)
-LIMITATION_HOST_NETWORK = (
-    "Host mode: network is not enforced by the OS; network discipline comes from the fixed flags and environment."
 )
 
 # Semgrep CE language maturity, keyed on the exact pinned version
@@ -652,7 +647,7 @@ def _tail(text: str, limit: int = 500) -> str:
 
 
 class SemgrepAdapter:
-    """StaticAnalysisPort for Semgrep CE (host process or pinned OCI image)."""
+    """StaticAnalysisPort for Semgrep CE (the pinned OCI image; S8: there is no host provider)."""
 
     name = PROVIDER
 
@@ -666,13 +661,8 @@ class SemgrepAdapter:
         self._specs = _pack_specs(settings)
         self._probe: Optional[ProviderProbe] = None
         self._packs: Optional[_LoadedPacks] = None
-        self._executable: Optional[str] = None
 
     # -- fixed invocation ---------------------------------------------------
-
-    @property
-    def _contained(self) -> bool:
-        return bool(self._context.contained)
 
     def _flags(self, max_target_bytes: Union[int, str]) -> List[str]:
         return [
@@ -682,20 +672,6 @@ class SemgrepAdapter:
             "--timeout-threshold", str(self._settings.timeout_threshold),
             "--max-target-bytes", str(max_target_bytes),
         ]
-
-    @staticmethod
-    def _host_env(home: str, tmpdir: str) -> Dict[str, str]:
-        env = build_restricted_env([])
-        env.update({"HOME": home, "TMPDIR": tmpdir, **_FIXED_ENV})
-        return env
-
-    @staticmethod
-    def _host_scratch(base: str) -> Tuple[str, str]:
-        """Create the per-invocation HOME and TMPDIR under a Kriya-owned directory."""
-        home, tmpdir = os.path.join(base, "home"), os.path.join(base, "tmp")
-        os.makedirs(home, exist_ok=True)
-        os.makedirs(tmpdir, exist_ok=True)
-        return home, tmpdir
 
     @staticmethod
     def _container_env() -> Dict[str, str]:
@@ -731,15 +707,14 @@ class SemgrepAdapter:
         """The adapter-owned invocation minus targets and rule-pack paths."""
         options: Dict[str, Any] = {
             "argv": self._flags("<max_target_bytes>") + ["--config", "<rule pack>", "--", "<targets>"],
-            "env_keys": sorted(self._container_env() if self._contained else self._host_env("<home>", "<tmp>")),
+            "env_keys": sorted(self._container_env()),
             "per_file_timeout_seconds": self._settings.per_file_timeout_seconds,
             "timeout_threshold": self._settings.timeout_threshold,
         }
-        if self._contained:
-            options["container"] = {
-                "network": NetworkAuthority.DENIED.value, "workspace": "ro", "rules": "ro",
-                "user": f"{_CONTAINER_UID}:{_CONTAINER_GID}",
-            }
+        options["container"] = {
+            "network": NetworkAuthority.DENIED.value, "workspace": "ro", "rules": "ro",
+            "user": f"{_CONTAINER_UID}:{_CONTAINER_GID}",
+        }
         return canonical_digest(options)
 
     def _containment_ready(self) -> Optional[str]:
@@ -751,10 +726,6 @@ class SemgrepAdapter:
             return "containment is required but no containment backend is configured (no host fallback)"
         return None
 
-    def _resolve_executable(self) -> Optional[str]:
-        found = shutil.which(self._settings.executable, path=build_restricted_env([])["PATH"])
-        return os.path.realpath(found) if found else None
-
     # -- port ---------------------------------------------------------------
 
     def runtime_fingerprint(self) -> str:
@@ -762,15 +733,9 @@ class SemgrepAdapter:
 
         Raises OSError/ValueError on an unreadable executable or rule pack:
         the commit guard treats a raise as stale evidence."""
-        if self._contained:
-            if self._settings.image is None:
-                raise ValueError("contained execution without a pinned image")
-            location, executable = "container", self._settings.image
-        else:
-            resolved = self._resolve_executable()
-            if resolved is None:
-                raise FileNotFoundError(f"executable {self._settings.executable!r} not found on PATH")
-            location, executable = "local_process", host_executable_digest(resolved)
+        if self._settings.image is None:
+            raise ValueError("contained execution without a pinned image")
+        location, executable = "container", self._settings.image
         return canonical_digest({
             "execution_location": location,
             "executable": executable,
@@ -788,44 +753,24 @@ class SemgrepAdapter:
 
     def _run_probe(self) -> ProviderProbe:
         with tempfile.TemporaryDirectory(prefix="kriya-semgrep-probe-") as scratch:
-            if self._contained:
-                refusal = self._containment_ready()
-                if refusal is not None:
-                    return self._unavailable(CONTAINMENT_UNAVAILABLE, refusal)
-                digest_match = _PINNED_IMAGE_RE.fullmatch(self._settings.image or "")
-                executable_digest = digest_match.group(1) if digest_match else ""
-                # The empty scratch directory is mounted read-only as the
-                # workspace: without a workspace mount the OCI backend makes
-                # the /kriya/tmp tmpfs the working directory, which leaves it
-                # root-owned 0755 and HOME unwritable for uid 65534 (observed).
-                try:
-                    result = self._process.run(
-                        [_CONTAINER_EXECUTABLE, "--version"], cwd=scratch, timeout=_PROBE_TIMEOUT_SECONDS,
-                        containment_profile=self._profile(scratch, ()),
-                        containment_backend=self._context.containment_backend,
-                    )
-                except ContainmentSetupError as exc:
-                    return self._unavailable(CONTAINMENT_UNAVAILABLE, f"containment could not be prepared: {exc}")
-                location, network_enforced = "container", True
-            else:
-                executable = self._resolve_executable()
-                if executable is None:
-                    return self._unavailable(
-                        PROVIDER_PROBE_FAILED, f"executable {self._settings.executable!r} not found on PATH",
-                    )
-                try:
-                    executable_digest = host_executable_digest(executable)
-                except (OSError, EngineNotLocatedError) as exc:
-                    return self._unavailable(PROVIDER_PROBE_FAILED, f"executable identity unavailable: {exc}")
-                try:
-                    result = self._process.run(
-                        [executable, "--version"], cwd=scratch, timeout=_PROBE_TIMEOUT_SECONDS,
-                        env=self._host_env(*self._host_scratch(scratch)),
-                    )
-                except OSError as exc:
-                    return self._unavailable(PROVIDER_PROBE_FAILED, f"executable {executable!r} failed to run: {exc}")
-                self._executable = executable
-                location, network_enforced = "local_process", False
+            refusal = self._containment_ready()
+            if refusal is not None:
+                return self._unavailable(CONTAINMENT_UNAVAILABLE, refusal)
+            digest_match = _PINNED_IMAGE_RE.fullmatch(self._settings.image or "")
+            executable_digest = digest_match.group(1) if digest_match else ""
+            # The empty scratch directory is mounted read-only as the
+            # workspace: without a workspace mount the OCI backend makes
+            # the /kriya/tmp tmpfs the working directory, which leaves it
+            # root-owned 0755 and HOME unwritable for uid 65534 (observed).
+            try:
+                result = self._process.run(
+                    [_CONTAINER_EXECUTABLE, "--version"], cwd=scratch, timeout=_PROBE_TIMEOUT_SECONDS,
+                    containment_profile=self._profile(scratch, ()),
+                    containment_backend=self._context.containment_backend,
+                )
+            except ContainmentSetupError as exc:
+                return self._unavailable(CONTAINMENT_UNAVAILABLE, f"containment could not be prepared: {exc}")
+            location, network_enforced = "container", True
         return self._probe_from_version(result, executable_digest, location, network_enforced)
 
     def _probe_from_version(
@@ -851,8 +796,6 @@ class SemgrepAdapter:
         except RulePackError as exc:
             return self._unavailable(exc.reason_code, exc.detail)
         limitations = [LIMITATION_SILENT_SYNTAX_RECOVERY, LIMITATION_FILE_LOCAL]
-        if not self._contained:
-            limitations.append(LIMITATION_HOST_NETWORK)
         capability = ProviderCapability(
             languages={lang: LanguageSupport(maturity=maturity, rules_available=packs.rules_per_language.get(lang, 0))
                        for lang, maturity in table.items()},
@@ -900,7 +843,7 @@ class SemgrepAdapter:
                 # One missing target aborts the whole Semgrep run (V15).
                 return ScanResult(status=ScanStatus.FAILED, reason_code=SCAN_FAILED, duration_ms=elapsed(),
                                   detail=f"target {target!r} is not a file under the snapshot root; not scanned")
-        refusal = self._containment_ready() if self._contained else None
+        refusal = self._containment_ready()
         if refusal is not None:
             return ScanResult(status=ScanStatus.FAILED, reason_code=CONTAINMENT_UNAVAILABLE, detail=refusal,
                               duration_ms=elapsed())
@@ -910,29 +853,16 @@ class SemgrepAdapter:
             return ScanResult(status=ScanStatus.CONFIG_ERROR, reason_code=exc.reason_code, detail=exc.detail,
                               duration_ms=elapsed())
         try:
-            if self._contained:
-                mounts, configs = self._rule_mounts()
-                command = [_CONTAINER_EXECUTABLE, *self._flags(request.max_target_bytes)]
-                for config in configs:
-                    command += ["--config", config]
-                command += ["--", *request.targets]
-                result = self._process.run(
-                    command, cwd=request.root, timeout=request.timeout_seconds,
-                    containment_profile=self._profile(request.root, mounts),
-                    containment_backend=self._context.containment_backend,
-                )
-            else:
-                executable = self._executable or self._resolve_executable()
-                if executable is None:
-                    return ScanResult(status=ScanStatus.FAILED, reason_code=SCAN_FAILED, duration_ms=elapsed(),
-                                      detail=f"executable {self._settings.executable!r} not found on PATH")
-                home, tmpdir = self._host_scratch(request.scratch_dir)
-                command = [executable, *self._flags(request.max_target_bytes)]
-                for spec in self._specs:
-                    command += ["--config", spec.path]
-                command += ["--", *request.targets]
-                result = self._process.run(command, cwd=request.root, timeout=request.timeout_seconds,
-                                           env=self._host_env(home, tmpdir))
+            mounts, configs = self._rule_mounts()
+            command = [_CONTAINER_EXECUTABLE, *self._flags(request.max_target_bytes)]
+            for config in configs:
+                command += ["--config", config]
+            command += ["--", *request.targets]
+            result = self._process.run(
+                command, cwd=request.root, timeout=request.timeout_seconds,
+                containment_profile=self._profile(request.root, mounts),
+                containment_backend=self._context.containment_backend,
+            )
         except ContainmentSetupError as exc:
             return ScanResult(status=ScanStatus.FAILED, reason_code=CONTAINMENT_UNAVAILABLE, duration_ms=elapsed(),
                               detail=f"containment could not be prepared (no host fallback): {exc}")

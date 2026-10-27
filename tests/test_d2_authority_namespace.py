@@ -208,22 +208,6 @@ def test_the_null_backend_creates_nothing_in_the_workspace(tmp_path):
     assert os.listdir(tmp_path) == []
 
 
-def test_the_default_validator_builds_no_profile_and_creates_nothing(tmp_path):
-    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=AutonomyConfig())
-    assert validator.build_containment_profile_and_backend() == (None, None)
-    assert os.listdir(tmp_path) == []
-
-
-@pytest.mark.asyncio
-async def test_the_default_shell_tool_creates_no_kriya_directory_in_its_cwd(tmp_path, monkeypatch):
-    """The default (sandbox_execution True, backend none, containment not required) builds a profile but runs on the host: the operator's cwd must stay
-    exactly as it was. A caller-side precreate would have written ``.kriya`` into it on every command."""
-    monkeypatch.chdir(tmp_path)
-    result = await ShellTool(autonomy_cfg=AppConfig().autonomy).execute(command="echo hello")
-    assert "hello" in result["stdout"]
-    assert os.listdir(tmp_path) == []
-
-
 # ------------------------------------------------------------------ D. the real OCI runtime
 
 

@@ -1,29 +1,30 @@
-"""S7 -> S8: the FROZEN S8 list (owner decision 2026-10-26).
+"""S8: the RECORD of what S8 did to the frozen S8 list (owner decision 2026-10-26; S8 executed 2026-10-27).
 
-S8 scope is ONLY the unreachable PROJECT-CONTROLLED host-execution code and tests that remain after the secure-default migration. This module is the exact list, so that "dead host
+S8 scope was ONLY the unreachable PROJECT-CONTROLLED host-execution code and tests that remained after the secure-default migration. This module is the exact record, so that "dead host
 branch" is a reviewed set and not a grep result:
 
-  S8_CODE      production branches that start (or decide to start) a PROJECT-CONTROLLED process on the host, or characterize doing so. Each is unreachable because the canonical owner
-               (``kriya.tools.containment.decide_external_execution``) answers ``contained=True`` for every subject, whatever object it is handed
+  S8_CODE      the production branches that started (or decided to start) a PROJECT-CONTROLLED process on the host, or characterized doing so. Each was unreachable because the canonical
+               owner (``kriya.tools.containment.decide_external_execution``) answers ``contained=True`` for every subject, whatever object it is handed
                (tests/test_s7_secure_default_contract.py::test_a_forged_or_legacy_object_is_still_mandatory_for_every_subject), and a mandatory decision with no isolating backend
-               is a typed refusal before any process starts (the per-surface refusal tests named in tests/containment_h_ledger.py). Deleting them in S8 needs the replacement
-               evidence recorded there; S7 deletes none of them.
+               is a typed refusal before any process starts (the per-surface refusal tests named in tests/containment_h_ledger.py). ``outcome`` is DELETED (the host branch is gone) or
+               HELD (a host-capable remainder stays, named in HELD_NOTES, for an owner decision - production never reaches it).
   RETAINED     sites that read the decision but are NOT project-controlled host execution: record / identity / report readers (their field names and values are an identity and
-               change by design) and explicitly classified trusted Kriya infrastructure. S8 does not touch them.
+               change by design) and explicitly classified trusted Kriya infrastructure. S8 did not touch them, and they are now the ONLY readers of the flag.
   NEVER_S8     the trusted / hardened host infrastructure the owner excluded by name: git, the docker CLI, neutral-cwd toolchain probes, image inspection and attestation.
+  ORPHANS      dead host code that is NOT on the frozen list (nothing reads the flag there; it is keyed on a parameter or is a pure helper): left untouched, listed for the owner.
 
-``scan`` sites are found by tests/test_s7_s8_list.py walking kriya/ and plugins/ for reads of ``.contained`` / ``._contained``; the scan must equal S8_CODE (scan kind) plus RETAINED
-exactly, so a new host branch cannot appear unlisted. ``extra`` sites do not read the flag (they sit behind ``refuse_unsupported`` or a ``None`` backend) and are named explicitly.
-The tests are the exact-id H list of tests/containment_census.py PLUS the three ``legacy_host_mcp`` host-rlimit tests that never consult the owner (replacement controls for both:
-tests/containment_h_ledger.py ``LEDGER`` and ``MARKED_LEDGER``)."""
+tests/test_s7_s8_list.py walks kriya/ and plugins/ for reads of ``.contained`` / ``._contained``: after S8 the scan must equal RETAINED exactly, so a new host branch cannot appear.
+The tests S8 deleted are the exact-id H list of tests/containment_census.py (54) PLUS the three ``legacy_host_mcp`` host-rlimit tests that never consulted the owner (the replacement
+controls for both are recorded in tests/containment_h_ledger.py ``LEDGER`` and ``MARKED_LEDGER``, and those controls are still pinned to exist)."""
 from __future__ import annotations
 
 from typing import Dict, NamedTuple
 
 
 class Site(NamedTuple):
-    kind: str          # "scan" (reads the contained flag) or "extra" (named explicitly)
+    kind: str          # "scan" (read the contained flag) or "extra" (named explicitly)
     why: str
+    outcome: str = "DELETED"      # DELETED (the host branch is gone) or HELD (named in HELD_NOTES)
 
 
 S8_CODE: Dict[str, Site] = {
@@ -49,7 +50,7 @@ S8_CODE: Dict[str, Site] = {
     "kriya/workflow/runtime_verification.py::_prepare_finite_command_runtime_artifacts": Site("scan", "host `mvn package` artifact preparation"),
     "plugins/core_tools/__init__.py::ShellTool._run": Site("scan", "host sh execution of the operator shell command"),
     "kriya/tools/lsp.py::JdtlsClient.start": Site("extra", "starting jdtls on the host (it has no contained mode and is refused while containment is mandatory)"),
-    "kriya/tools/service_runtime.py::run_managed_service_verification": Site("extra", "host managed-service launch and the project-wrapper build (`allow_project_wrapper=not contained`)"),
+    "kriya/tools/service_runtime.py::run_managed_service_verification": Site("extra", "host managed-service launch and the project-wrapper build (`allow_project_wrapper=not contained`)", "HELD"),
     "kriya/tools/venv_integrity.py::seal": Site("extra", "host venv seal (the contained venv is mounted read-only into every gate instead)"),
 }
 
@@ -66,3 +67,22 @@ NEVER_S8 = (
     "GitTool", "check_java_toolchain", "inspect_local_image", "_confirm_absence_with_listing", "_inspect_once", "_attest_toolchain_image", "_observed_version", "_ensure_image",
     "probe_oci_containment", "_check_net_admin_available", "OCIContainmentBackend",
 )
+
+
+# What S8 did NOT delete, and why (owner decision needed; production never reaches any of it - every production caller passes a containment profile and the validator's contained build).
+HELD_NOTES: Dict[str, str] = {
+    "kriya/tools/service_runtime.py::run_managed_service_verification": (
+        "The host-capable remainder of the managed-service / artifact-preparation layer stays: Optional containment arguments, `_maven_package_command(allow_project_wrapper=...)` and "
+        "`_prepare_required_artifact`'s env/preexec parameters. About 46 tests (tests/test_service_runtime.py lifecycle and artifact-preparation tests, which use real host fixture processes "
+        "and a fake ./mvnw as their harness) run on it, and the contained managed-service coverage is a handful of Docker tests: removing it is a test-harness migration, not a mechanical "
+        "deletion, so it needs an owner decision. S8 did make the production call unconditional (`contained_build=validator.contained_maven_build`)."),
+}
+
+# Dead host code that is NOT on the frozen list (no read of the flag: it is keyed on a parameter, or it is a pure helper). Left in place; candidates for an owner-approved follow-up.
+ORPHANS: Dict[str, str] = {
+    "kriya/mcp/mcp.py::MCPClient._start_sequence": "the `containment_required=False` raw host spawn (MCPManager.start_all now always passes True)",
+    "kriya/tools/validate.py::PolymorphicValidator.build_subprocess_env_and_preexec": "the host env/preexec policy (no production caller outside _run_cmd_with_timeout's None-profile path)",
+    "kriya/tools/lsp.py::JdtlsClient": "everything after the typed refusal in start(): the reader loop, requests and mirror are unreachable (no process can exist)",
+    "kriya/static_analysis/adapters/semgrep.py::host_executable_digest": "host Semgrep engine identity (pure helper; locate_engine / EngineNotLocatedError and their direct tests remain)",
+}
+

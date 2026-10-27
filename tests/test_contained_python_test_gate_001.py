@@ -11,7 +11,6 @@ authority), and the roots are resolved inside the child relative to its cwd."""
 import ast
 import os
 import re
-import sys
 
 import pytest
 
@@ -62,14 +61,6 @@ def test_a_dependency_free_contained_project_gets_a_venv_with_pytest(tmp_path, m
     # (runtime verification) reuses the venv, creating nothing twice.
     assert validator._resolve_python_interpreter() == (".kriya/venv/bin/python", None)
     assert len(calls) == 2
-
-
-def test_host_mode_dependency_free_project_still_uses_kriya_interpreter_without_any_command(tmp_path):
-    validator = _validator(tmp_path, contained=False)
-    calls = []
-    _fake_commands(validator, calls)
-    assert validator._resolve_python_interpreter() == (sys.executable, None)
-    assert calls == []
 
 
 def test_a_failed_pytest_install_fails_the_gate_with_pips_output_never_the_bare_interpreter(tmp_path):
@@ -123,29 +114,3 @@ def test_contained_pytest_bootstrap_carries_no_host_path_and_resolves_roots_in_t
     assert str(tmp_path) not in bootstrap, bootstrap
     assert _bootstrap_roots(calls[0]) == [".", "src", "src/main/python", "src/main"]
 
-
-def test_host_mode_roots_are_realpath_equal_to_the_former_absolute_roots(tmp_path):
-    (tmp_path / "src").mkdir()
-    validator = _validator(tmp_path, contained=False)
-    calls = []
-    _pytest_argv(validator, calls)
-    validator._resolve_python_interpreter = lambda: ("py-under-test", None)
-    validator.run_tests(None)
-    roots = _bootstrap_roots(calls[0])
-    former = [str(tmp_path), os.path.join(str(tmp_path), "src")]
-    resolved = [os.path.realpath(os.path.join(str(tmp_path), r)) for r in roots]
-    assert resolved == [os.path.realpath(p) for p in former]
-
-
-def test_host_mode_src_layout_imports_through_the_in_child_resolution(tmp_path):
-    """A real pytest child on the host: a src-layout package with no manifest
-    and a test under tests/ importing it - the resolved root makes the import
-    work exactly as the absolute root did."""
-    (tmp_path / "src" / "pkg").mkdir(parents=True)
-    (tmp_path / "src" / "pkg" / "__init__.py").write_text("def answer():\n    return 42\n")
-    (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "test_pkg.py").write_text("from pkg import answer\n\ndef test_answer():\n    assert answer() == 42\n")
-    validator = _validator(tmp_path, contained=False)
-    result = validator.run_tests(["tests/test_pkg.py"])
-    assert result["success"] is True, result["output"]
-    assert result["test_execution"]["status_counts"] == {"passed": 1}

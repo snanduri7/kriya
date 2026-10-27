@@ -15,7 +15,6 @@ import json
 import os
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import List
 
@@ -24,14 +23,9 @@ from _strict_doubles import strict_config
 
 from kriya.static_analysis.adapters.semgrep import SemgrepAdapter, SemgrepSettings
 from kriya.static_analysis.model import (
-    CAPABILITY_UNKNOWN,
     CONTAINMENT_UNAVAILABLE,
     NEW_FINDING_BLOCKED,
     PROVIDER_PROBE_FAILED,
-    RULE_PACK_INVALID,
-    SCAN_INCOMPLETE,
-    SCAN_OUTPUT_MALFORMED,
-    SCAN_TIMEOUT,
     STATIC_ANALYSIS_EVIDENCE_STALE,
     TARGET_OVERSIZED,
     Outcome,
@@ -60,23 +54,7 @@ PARTIAL_TARGETS = list(MANIFEST["cases"]["partial_parse"]["targets"])
 
 
 @pytest.fixture(scope="module")
-def pinned_semgrep() -> str:
-    executable = shutil.which("semgrep")
-    if executable is None:
-        pytest.skip("semgrep is not on PATH; the live static-analysis tier needs Semgrep 1.178.0 exactly")
-    with tempfile.TemporaryDirectory() as home:
-        env = {"PATH": os.environ.get("PATH", ""), "HOME": home, "SEMGREP_SEND_METRICS": "off",
-               "SEMGREP_ENABLE_VERSION_CHECK": "0"}
-        out = subprocess.run([executable, "--version"], env=env, capture_output=True, text=True, timeout=60)
-    lines = [line.strip() for line in out.stdout.splitlines() if line.strip()]
-    version = lines[-1] if lines else "<none>"
-    if version != PINNED_VERSION:
-        pytest.skip(f"installed semgrep is {version}, the live tier is pinned to {PINNED_VERSION} exactly")
-    return executable
-
-
-@pytest.fixture(scope="module")
-def pinned_image(pinned_semgrep) -> str:
+def pinned_image() -> str:
     docker = shutil.which("docker")
     if docker is None:
         pytest.skip("docker is not available; the OCI case needs Docker and the pinned Semgrep image")
@@ -104,12 +82,6 @@ def workspace(tmp_path: Path) -> Path:
     return ws
 
 
-def host(workspace: Path, packs: List = None, **overrides) -> SemgrepAdapter:
-    settings = SemgrepSettings.model_validate({"version": PINNED_VERSION, "rule_packs": packs or [RULES], **overrides})
-    return SemgrepAdapter(settings, ExecutionContext(contained=False, containment_backend=None,
-                                                     workspace_root=str(workspace)))
-
-
 def scan(adapter: SemgrepAdapter, root: Path, targets: List[str], tmp_path: Path, timeout: int = 120,
          max_target_bytes: int = 1_000_000):
     scratch = tmp_path / f"scratch-{len(list(tmp_path.glob('scratch-*')))}"
@@ -130,104 +102,6 @@ EXPECTED_FINDINGS = sorted([
     ("semgrep:python-print-info", "tests/test_x.py", 2, Severity.LOW),
     ("semgrep:python-eval", "tests/test_x.py", 2, Severity.MEDIUM),
 ])
-
-
-def test_findings_at_exit_zero_are_reported_and_nosem_does_not_suppress(pinned_semgrep, workspace, tmp_path):
-    adapter = host(workspace)
-    assert adapter.probe().reason_code is None, adapter.probe().detail
-    result = scan(adapter, build_snapshot(tmp_path / "snap"), FINDINGS_TARGETS, tmp_path)
-    # COMPLETE means exit 0 (any nonzero exit maps to FAILED): findings at exit 0 (V3).
-    assert (result.status, result.reason_code) == (ScanStatus.COMPLETE, None), result.detail
-    assert rows(result) == EXPECTED_FINDINGS
-    # The `// nosemgrep` line 12 finding is reported: --disable-nosem (V4, §8.4.1, test 19).
-    assert ("semgrep:java-runtime-exec", "src/main/java/app/App.java", 12, Severity.HIGH) in rows(result)
-    assert result.reported_version == PINNED_VERSION
-    assert result.raw_sha256 == hashlib.sha256(result.raw_output.encode()).hexdigest()
-
-
-def test_explicit_targets_under_default_ignored_dirs_are_analyzed(pinned_semgrep, workspace, tmp_path):
-    # Test 20 / V5-V6: with NO .semgrepignore, explicitly passed targets under
-    # src/test/ and tests/ (Semgrep's default-ignore list for directory scans)
-    # ARE scanned by 1.178.0 and confirmed analyzed. Observed, not relied on:
-    # coverage still comes from paths.scanned.
-    snapshot = build_snapshot(tmp_path / "snap")
-    assert not (snapshot / ".semgrepignore").exists()
-    result = scan(host(workspace), snapshot, FINDINGS_TARGETS, tmp_path)
-    assert result.analyzed == frozenset(FINDINGS_TARGETS)
-    assert {"src/test/java/app/AppTest.java", "tests/test_x.py"} <= result.analyzed
-    assert result.skipped == {}
-    # A .semgrepignore naming them does not skip explicit targets either (V6);
-    # the service never copies it into a snapshot (§8.4.2), this only records
-    # the scanner's behaviour.
-    ignored = build_snapshot(tmp_path / "snap-ignored", {".semgrepignore": "src/test/\ntests/\n"})
-    again = scan(host(workspace), ignored, FINDINGS_TARGETS, tmp_path)
-    assert again.status is ScanStatus.COMPLETE and again.analyzed == frozenset(FINDINGS_TARGETS)
-
-
-def test_partial_parse_is_not_analyzed_but_its_finding_is_reported(pinned_semgrep, workspace, tmp_path):
-    result = scan(host(workspace), build_snapshot(tmp_path / "snap"), PARTIAL_TARGETS, tmp_path)
-    assert (result.status, result.reason_code) == (ScanStatus.INCOMPLETE, SCAN_INCOMPLETE)
-    # V10: Partial.java is in scanned, skipped and errors[] (list-typed PartialParsing).
-    assert "src/main/java/app/Partial.java" not in result.analyzed
-    assert "src/main/java/app/Broken.java" not in result.analyzed
-    assert ("semgrep:java-runtime-exec", "src/main/java/app/Partial.java", 5) in {
-        (f.rule_id, f.path, f.start_line) for f in result.findings}
-    assert {e.path for e in result.errors if e.kind == "target"} == {
-        "src/main/java/app/Partial.java", "src/main/java/app/Broken.java"}
-    # V11: the Python syntax error is silently recovered - Semgrep's report is the authority.
-    assert "tests/syntax_err.py" in result.analyzed
-
-
-@pytest.mark.parametrize("pack,reason", [
-    ("invalid_pattern.yml", RULE_PACK_INVALID),
-    ("invalid_schema.yml", RULE_PACK_INVALID),
-    ("unknown_language.yml", CAPABILITY_UNKNOWN),
-])
-def test_malformed_rules_are_config_errors_not_findings(pinned_semgrep, workspace, tmp_path, pack, reason):
-    result = scan(host(workspace, [str(BAD / pack)]), build_snapshot(tmp_path / "snap"),
-                  ["src/main/java/app/App.java"], tmp_path)
-    assert (result.status, result.reason_code) == (ScanStatus.CONFIG_ERROR, reason), result.detail
-    assert any(e.kind == "config" for e in result.errors)
-    if pack == "invalid_pattern.yml":
-        # V14: exit 2 with the valid rule's finding - kept as evidence only.
-        assert [f.rule_id for f in result.findings] == ["semgrep:good-rule"]
-
-
-def test_invalid_yaml_pack_is_rule_pack_invalid(pinned_semgrep, workspace, tmp_path):
-    adapter = host(workspace, [str(BAD / "invalid_yaml.yml")])
-    assert adapter.probe().reason_code == RULE_PACK_INVALID
-    result = scan(adapter, build_snapshot(tmp_path / "snap"), ["src/main/java/app/App.java"], tmp_path)
-    assert (result.status, result.reason_code) == (ScanStatus.CONFIG_ERROR, RULE_PACK_INVALID)
-    assert result.findings == ()
-
-
-def test_invalid_invocation_and_timeout_are_never_clean(pinned_semgrep, workspace, tmp_path):
-    snapshot = build_snapshot(tmp_path / "snap")
-    # An option value the pinned CLI rejects: usage text on stdout, exit 2 -> malformed (test 14).
-    crash = scan(host(workspace), snapshot, FINDINGS_TARGETS, tmp_path, max_target_bytes=-5)
-    assert (crash.status, crash.reason_code) == (ScanStatus.MALFORMED_OUTPUT, SCAN_OUTPUT_MALFORMED)
-    timed_out = scan(host(workspace), snapshot, FINDINGS_TARGETS, tmp_path, timeout=0)
-    assert (timed_out.status, timed_out.reason_code) == (ScanStatus.TIMEOUT, SCAN_TIMEOUT)
-
-
-def test_identity_is_exact_and_rule_edits_change_it(pinned_semgrep, workspace, tmp_path):
-    pack = tmp_path / "pack"
-    shutil.copytree(RULES, pack)
-    first_adapter = host(workspace, [str(pack)])
-    first = first_adapter.probe().identity
-    assert first.version == PINNED_VERSION and first.edition == "community"
-    assert first.executable_digest == independent_host_digest(pinned_semgrep)
-    assert first.rule_packs[0].digest == MANIFEST["rule_pack_digests"]["rules"]
-    fingerprint = first_adapter.runtime_fingerprint()
-    assert host(workspace, [str(pack)]).runtime_fingerprint() == fingerprint
-
-    text = (pack / "java.yml").read_text()
-    (pack / "java.yml").write_text(text.replace("Runtime.exec with", "Runtime.exec() with"))
-    second_adapter = host(workspace, [str(pack)])
-    second = second_adapter.probe().identity
-    assert second.rule_packs[0].digest != first.rule_packs[0].digest
-    assert second.identity_digest != first.identity_digest
-    assert second_adapter.runtime_fingerprint() != fingerprint
 
 
 def independent_host_digest(executable: str) -> str:
@@ -256,8 +130,7 @@ class RecordingBackend:
 
 def contained(workspace: Path, backend, image: str) -> SemgrepAdapter:
     settings = SemgrepSettings.model_validate({"version": PINNED_VERSION, "rule_packs": [RULES], "image": image})
-    return SemgrepAdapter(settings, ExecutionContext(contained=True, containment_backend=backend,
-                                                     workspace_root=str(workspace)))
+    return SemgrepAdapter(settings, ExecutionContext(containment_backend=backend, workspace_root=str(workspace)))
 
 
 def test_oci_contained_scan_matches_host_with_no_network(pinned_image, workspace, tmp_path):
@@ -309,7 +182,7 @@ def test_oci_missing_image_is_unavailable_with_no_pull_and_no_host_fallback(pinn
     assert subprocess.run(["docker", "image", "inspect", absent], capture_output=True).returncode != 0
 
 
-def test_oci_without_backend_refuses(pinned_semgrep, workspace, tmp_path):
+def test_oci_without_backend_refuses(workspace, tmp_path):
     adapter = contained(workspace, None, IMAGE)
     assert adapter.probe().reason_code == CONTAINMENT_UNAVAILABLE
     result = scan(adapter, build_snapshot(tmp_path / "snap"), FINDINGS_TARGETS, tmp_path)
@@ -320,8 +193,8 @@ def test_oci_without_backend_refuses(pinned_semgrep, workspace, tmp_path):
 #
 # StaticAnalysisService + the registered Semgrep adapter + the real process
 # layer (and, contained, the real OCI backend), on a small Java workspace.
-# Each case runs in host mode and, when Docker and the pinned image are
-# present, in contained mode.
+# Each case runs in contained mode when Docker and the pinned image are
+# present (S8: there is no host mode).
 
 SVC = "src/main/java/app/Svc.java"
 EXEC_SOURCE = """package app;
@@ -351,9 +224,9 @@ def _waiver_home_outside_workspace(tmp_path, monkeypatch):
     monkeypatch.setenv("KRIYA_STATIC_ANALYSIS_HOME", str(tmp_path / "static-analysis-home"))
 
 
-@pytest.fixture(params=["host", "contained"])
+@pytest.fixture(params=["contained"])
 def mode(request) -> str:
-    request.getfixturevalue("pinned_image" if request.param == "contained" else "pinned_semgrep")
+    request.getfixturevalue("pinned_image")
     return request.param
 
 
@@ -401,9 +274,9 @@ def submitted(monkeypatch) -> List[ScanRequest]:
 def service_config(mode: str, rules: Path, **static):
     provider = {"version": PINNED_VERSION, "rule_packs": [str(rules)]}
     autonomy = {"egress_policy": "local_only"}
-    if mode == "contained":
-        provider["image"] = IMAGE
-        autonomy.update({"contained_execution_required": True, "containment_backend": "oci"})
+    assert mode == "contained"
+    provider["image"] = IMAGE
+    autonomy.update({"contained_execution_required": True, "containment_backend": "oci"})
     return strict_config(
         static_analysis={"enabled": True, "provider": "semgrep", "requirement": "required",
                          "providers": {"semgrep": provider}, **static},
@@ -437,9 +310,7 @@ def evaluate(cfg, ws: Path, writes, tmp_path: Path):
 
 
 def assert_contained_without_network(mode: str, argv: List[List[str]]) -> None:
-    if mode != "contained":
-        assert argv == []  # host mode never touches the OCI backend
-        return
+    assert mode == "contained"
     assert argv, "contained mode prepared no container"
     for prefix in argv:
         assert prefix[prefix.index("--network") + 1] == "none"

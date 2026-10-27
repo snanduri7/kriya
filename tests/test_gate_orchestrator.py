@@ -403,23 +403,6 @@ def _jvm_run(tmp_path: Path, *, autonomous: bool, target: str = APP) -> Dict[str
 
 
 @pytest.mark.parametrize("autonomous", [True, False], ids=["immediate", "deferred"])
-def test_engine_jvm_toolchain_preflight(tmp_path, monkeypatch, autonomous):
-    """OI-28 (JVM-toolchain half): the toolchain preflight runs ONCE per run (``toolchain_checked``), its mismatch
-    warning reaches the result, and the goal-stated JDK's JAVA_HOME override is applied to every validator the
-    candidate gates build (both attempts), never re-resolved on the second attempt."""
-    for key, value in kg.GIT_ENV.items():
-        monkeypatch.setenv(key, value)
-    run = _jvm_run(tmp_path, autonomous=autonomous)
-    outcome = run["outcome"]
-    legacy = getattr(outcome.result, "legacy_result", None) or {}
-    assert legacy["quality_gates_passed"] is True and run["developer_calls"] == 2
-    assert "JDK 17" in legacy["toolchain_warning"] and "JDK 26" in legacy["toolchain_warning"]
-    assert [call["java_home_override"] for call in run["maven"]] == [JDK17] * len(run["maven"])
-    _compare(f"engine_jvm_toolchain_{'immediate' if autonomous else 'deferred'}",
-             _engine_form(outcome, tmp_path, maven=run["maven"], probes=run["probes"], homes=run["homes"]))
-
-
-@pytest.mark.parametrize("autonomous", [True, False], ids=["immediate", "deferred"])
 def test_engine_a_written_pom_is_validated_before_it_is_built(tmp_path, monkeypatch, autonomous):
     """The POM validation gate runs on a candidate that wrote pom.xml (``mvn validate`` before the compile gate): inside
     run_attempt on the immediate path, after the approval (first of the held gates) on the deferred one."""

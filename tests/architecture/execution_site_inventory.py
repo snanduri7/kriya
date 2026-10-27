@@ -149,15 +149,12 @@ INVENTORY: Dict[Tuple[str, str], Site] = {
         "check_java_toolchain", "TRUSTED_HOST_INFRASTRUCTURE", ("S4",),
         "MEASURED 2026-10-24/25: mvn -version in a directory with .mvn/jvm.config applies the project's JVM options (a project -javaagent ran as host code); S4 runs both probes "
         "in an empty directory (tests/test_s4_runtime_toolchain.py: canary agent absent, premise control present)"),
-    ("kriya/tools/lsp.py", "JdtlsClient._start"): Site(
-        WORKLOAD, "jdtls (project import runs Maven / Gradle)", "yes", "a mirror directory that skips .kriya", HOST_ALL, "none (host spawn)",
-        "UNTRUSTED_EXECUTION", ("S2",), "a host spawn that imports the project build: a policy decision (S2)"),
     ("kriya/static_analysis/adapters/semgrep.py", "SemgrepAdapter._run_probe"): Site(
-        WORKLOAD, "semgrep --version (host) or in the image", "no (--version)", "a Kriya-owned scratch directory", "the scratch directory only",
+        WORKLOAD, "semgrep --version in the pinned image (S8: there is no host provider)", "no (--version)", "a Kriya-owned scratch directory", "the scratch directory only",
         "SemgrepAdapter._containment_ready", "UNTRUSTED_EXECUTION", ("S2",), "the adapter's own containment gate becomes the canonical policy in S2"),
     ("kriya/static_analysis/adapters/semgrep.py", "SemgrepAdapter.scan"): Site(
         WORKLOAD, "semgrep over the workspace", "config", "the workspace root (read-only mount when contained)",
-        "contained: the workspace read-only (readable, not writable); host mode: " + HOST_ALL, "SemgrepAdapter._containment_ready",
+        "contained: the workspace read-only (readable, not writable) (S8: contained is the only mode)", "SemgrepAdapter._containment_ready",
         "UNTRUSTED_EXECUTION", ("S2",), "the adapter's own containment gate becomes the canonical policy in S2"),
     ("kriya/tools/dependency_execution.py", "maven_acquire_dependencies"): Site(
         WORKLOAD, "mvn dependency acquisition", "yes", "the caller's workspace", "contained, workspace writable", "its own profile builders",

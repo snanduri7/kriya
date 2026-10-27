@@ -34,13 +34,6 @@ def _autonomy(**fields):
     return strict_config(autonomy=fields).autonomy
 
 
-def test_an_uncontained_run_still_replays_the_command_on_the_host_control(tmp_path):
-    """Control: this scenario really executes the persisted command (so the contained case below is not passing vacuously)."""
-    workspace, sentinel, state = _scenario(tmp_path)
-    replay_prior_milestone_verifications(workspace, state, autonomy_cfg=_autonomy(contained_execution_required=False))
-    assert sentinel.exists()
-
-
 def test_a_run_that_requires_containment_never_replays_on_the_host(tmp_path):
     workspace, sentinel, state = _scenario(tmp_path)
     try:
@@ -73,14 +66,6 @@ def test_the_milestone_driver_passes_the_engines_autonomy_into_the_replay(tmp_pa
     except Exception:  # no containment backend on this platform: refusing is the contract; the sentinel below is the proof
         pass
     assert not sentinel.exists()
-
-
-def test_the_milestone_driver_with_an_uncontained_config_replays_normally(tmp_path):
-    """Normal output (rule 4): the driver path still runs the command and reports no failure for a passing replay."""
-    workspace, sentinel, state = _scenario(tmp_path)
-    driver = _driver(workspace, state, strict_config(autonomy={"contained_execution_required": False}))
-    assert asyncio.run(driver.run_phase(TerminalPhase.REPLAY_PRIOR_VERIFICATIONS)) is None
-    assert sentinel.exists()
 
 
 def test_the_driver_without_an_engine_config_does_not_fall_back_to_a_default_autonomy(tmp_path):

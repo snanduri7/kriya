@@ -376,13 +376,8 @@ def _prepare_finite_command_runtime_artifacts(
     itself could not be invoked (e.g. 'mvn' missing from PATH) - remains
     "verification_infrastructure_failure", the existing, correct
     environment/toolchain-eligible classification."""
-    # D2 S4: the validator's own canonical decision. Contained, the build runs through the validator's contained Maven path (never the host, never the
-    # project's ./mvnw); otherwise it keeps the host env/preexec policy of every other host gate, byte for byte.
-    if validator.external_execution().contained:
-        env, preexec_fn, contained_build = None, None, validator.contained_maven_build
-    else:
-        env, preexec_fn = validator.build_subprocess_env_and_preexec()
-        contained_build = None
+    # D2 S4 / S8: the build runs through the validator's contained Maven path (never the host, never the project's ./mvnw); contained is the only mode.
+    env, preexec_fn, contained_build = None, None, validator.contained_maven_build
     controller = ProcessController()
     known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
     for command in resolved_run_commands:
@@ -1201,7 +1196,7 @@ async def _execute_managed_service_verification(
         result = deps.run_managed_service_verification(
             dataclasses.replace(spec, cwd=validator.workspace_path),
             containment_profile=containment_profile, containment_backend=containment_backend,
-            contained_build=validator.contained_maven_build if containment_profile is not None else None,
+            contained_build=validator.contained_maven_build,
         )
     # R1 Deliverable 5 - observational only, coarse phase only: prepare/
     # launch/readiness/probe/shutdown are not separately timed here because

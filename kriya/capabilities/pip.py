@@ -17,7 +17,6 @@ import os
 from typing import Any, Dict, List, Optional
 
 from kriya.capabilities.ports import BuildAdapter
-from kriya.tools.containment import decide_external_execution
 
 MARKERS = ("requirements.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile")
 
@@ -63,40 +62,24 @@ class PipBuildAdapter(BuildAdapter):
         return roots
 
     def compile(self, v: Any, files: List[str], *, deadline: Optional[float]) -> Optional[Dict[str, Any]]:
-        """A syntax check of the changed ``.py`` files: ``python3 -m
-        py_compile`` inside containment, else an in-process ``compile()``.
-        Always decides (``deadline`` is unused: nothing here is long-running)."""
+        """A syntax check of the changed ``.py`` files: ``python3 -m py_compile`` inside containment (S8: the only mode - the in-process
+        ``compile()`` of project source on the host is gone). Always decides (``deadline`` is unused: nothing here is long-running)."""
         del deadline
-        if decide_external_execution(v.autonomy_cfg, subject="PolymorphicValidator").contained:
-            python_files = [
-                os.path.relpath(os.path.join(v.workspace_path, f), v.workspace_path)
-                for f in files
-                if f.endswith(".py") and os.path.isfile(os.path.join(v.workspace_path, f))
-            ]
-            if not python_files:
-                return {"success": True, "output": "No Python files to compile."}
-            res = v._run_cmd_with_timeout(
-                ["python3", "-m", "py_compile", *python_files], cwd=v.workspace_path,
-            )
-            return v._validation_result(
-                res["returncode"] == 0,
-                "Python files compiled successfully." if res["returncode"] == 0 else res["stdout"] + "\n" + res["stderr"],
-                res,
-            )
-        errors = []
-        for f in files:
-            if f.endswith(".py"):
-                full = os.path.join(v.workspace_path, f)
-                if os.path.exists(full):
-                    try:
-                        with open(full, "r", encoding="utf-8", errors="replace") as fh:
-                            source = fh.read()
-                        compile(source, f, "exec")
-                    except SyntaxError as se:
-                        errors.append(f"Syntax error in {f} line {se.lineno}: {se.text.strip() if se.text else ''} ({se.msg})")
-        if errors:
-            return {"success": False, "output": "\n".join(errors)}
-        return {"success": True, "output": "Python files compiled successfully."}
+        python_files = [
+            os.path.relpath(os.path.join(v.workspace_path, f), v.workspace_path)
+            for f in files
+            if f.endswith(".py") and os.path.isfile(os.path.join(v.workspace_path, f))
+        ]
+        if not python_files:
+            return {"success": True, "output": "No Python files to compile."}
+        res = v._run_cmd_with_timeout(
+            ["python3", "-m", "py_compile", *python_files], cwd=v.workspace_path,
+        )
+        return v._validation_result(
+            res["returncode"] == 0,
+            "Python files compiled successfully." if res["returncode"] == 0 else res["stdout"] + "\n" + res["stderr"],
+            res,
+        )
 
     def run_tests(self, v: Any, targets: Optional[List[str]]) -> Dict[str, Any]:
         """pytest through the resolved interpreter; ``targets`` each become

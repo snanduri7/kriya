@@ -385,30 +385,24 @@ class ShellTool(BaseTool):
         network = NetworkAuthority.DENIED if shell_denied else NetworkAuthority.UNRESTRICTED
         network_destinations: Tuple[str, ...] = ()
         decision = decide_external_execution(self.autonomy_cfg, subject="ShellTool")  # D2 S2: the one canonical question
-        if decision.contained:
-            acquisition_kind = classify_shell_acquisition_command(parsed_command) if parsed_command else None
-            if acquisition_kind == "registry_scoped":
-                network = NetworkAuthority.DEPENDENCY_REGISTRY_ONLY
-                network_destinations = tuple(sorted(set(self.autonomy_cfg.acquisition_registry_hosts)))
-            elif acquisition_kind == "unmapped":
-                network = NetworkAuthority.DENIED
-        profile = None
-        backend = None
-        # Required containment is never skipped because sandbox_execution is
-        # off: that combination used to run the command on the host.
-        if self.autonomy_cfg.sandbox_execution or decision.contained or shell_denied:
-            # mandatory containment: the isolating backend, or the owner's typed refusal; otherwise the configured sandbox backend, if any
-            backend = resolve_containment_backend(decision.backend_name)  # this module's own seam (patched by its tests); the OWNER judges the result
-            decision.require_isolating(backend)
-            profile = ContainmentProfile(
-                trust_class=TrustClass.UNTRUSTED_EXECUTION,
-                workspace_path=os.getcwd(),
-                network=network,
-                network_destinations=network_destinations,
-                env_allowlist=self.autonomy_cfg.sandbox_env_allowlist,
-                cpu_seconds=self.autonomy_cfg.sandbox_cpu_seconds,
-                memory_mb=self.autonomy_cfg.sandbox_memory_mb,
-            )
+        acquisition_kind = classify_shell_acquisition_command(parsed_command) if parsed_command else None
+        if acquisition_kind == "registry_scoped":
+            network = NetworkAuthority.DEPENDENCY_REGISTRY_ONLY
+            network_destinations = tuple(sorted(set(self.autonomy_cfg.acquisition_registry_hosts)))
+        elif acquisition_kind == "unmapped":
+            network = NetworkAuthority.DENIED
+        # S8: containment is the only mode - the isolating backend, or the owner's typed refusal; there is no host run of this command.
+        backend = resolve_containment_backend(decision.backend_name)  # this module's own seam (patched by its tests); the OWNER judges the result
+        decision.require_isolating(backend)
+        profile = ContainmentProfile(
+            trust_class=TrustClass.UNTRUSTED_EXECUTION,
+            workspace_path=os.getcwd(),
+            network=network,
+            network_destinations=network_destinations,
+            env_allowlist=self.autonomy_cfg.sandbox_env_allowlist,
+            cpu_seconds=self.autonomy_cfg.sandbox_cpu_seconds,
+            memory_mb=self.autonomy_cfg.sandbox_memory_mb,
+        )
         controller = ProcessController()
         try:
             result = await controller.run_async(

@@ -244,19 +244,6 @@ def test_with_containment_mandatory_and_no_isolating_backend_the_run_is_refused_
     assert spawned == []
 
 
-def test_legacy_host_permitted_behavior_is_recorded_as_superseded_the_host_service_inherits_the_environment(tmp_path, monkeypatch):
-    """CLASSIFICATION (owner S4.1, host environment finding): under the legacy defaults (HOST_EXECUTION_PERMITTED) the host service inherits Kriya's
-    whole environment. That state is the legacy one the packaged-default migration supersedes: its acceptance must show this path unreachable under
-    the supported secure policy (the test above pins that for every MANDATORY value). This test is the marker that fails when the legacy state is
-    removed and must then be deleted with it, not weakened."""
-    monkeypatch.setenv("KRIYA_FAKE_SECRET", "from-kriya-env")
-    dump = tmp_path / "env.txt"
-    script = f"import os,sys,http.server,socket\nopen({str(dump)!r},'w').write(os.environ.get('KRIYA_FAKE_SECRET','<absent>'))\n" + HONEST.split("\n", 1)[1]
-    run = _host_run(tmp_path, {"server.py": script})
-    run.go()
-    assert dump.read_text() == "from-kriya-env"
-
-
 # ----------------------------------------------------------------- the fresh-cache defect and the contained service, through the REAL OCI runtime
 
 _JAVA_POM = ('<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion><groupId>d</groupId><artifactId>app</artifactId>'

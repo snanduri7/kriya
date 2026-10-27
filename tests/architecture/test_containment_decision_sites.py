@@ -109,14 +109,15 @@ ROUTED: Dict[SITE, Tuple[SITE, str]] = {
     ("kriya/tools/validate.py", "PolymorphicValidator._run_cmd_with_timeout"): (
         ("kriya/tools/validate.py", "PolymorphicValidator.build_containment_profile_and_backend"), "external_execution"),
     ("plugins/core_tools/__init__.py", "ShellTool._run"): (("plugins/core_tools/__init__.py", "ShellTool._run"), "decide_external_execution"),
-    ("kriya/tools/lsp.py", "JdtlsClient._start"): (("kriya/tools/lsp.py", "JdtlsClient._start"), "decide_external_execution"),
     ("kriya/static_analysis/adapters/semgrep.py", "SemgrepAdapter._run_probe"): (
         ("kriya/static_analysis/service.py", "execution_context"), "decide_external_execution"),
     ("kriya/static_analysis/adapters/semgrep.py", "SemgrepAdapter.scan"): (
         ("kriya/static_analysis/service.py", "execution_context"), "decide_external_execution"),
     # S4: these two are launched by callers that ask the validator's owner decision; the callers themselves are pinned in tests/test_s4_runtime_toolchain.py
+    # S8: the finite-command preparation hands `_prepare_required_artifact` the validator's contained Maven build and nothing else; the owner is asked down that chain
+    # (contained_maven_build -> _run_maven_cmd -> _run_cmd_with_timeout -> build_containment_profile_and_backend -> external_execution, each pinned by its own entry here)
     ("kriya/tools/service_runtime.py", "_prepare_required_artifact"): (
-        ("kriya/workflow/runtime_verification.py", "_prepare_finite_command_runtime_artifacts"), "external_execution"),
+        ("kriya/tools/validate.py", "PolymorphicValidator.contained_maven_build"), "_run_maven_cmd"),
     ("kriya/tools/service_runtime.py", "run_managed_service_verification"): (
         ("kriya/workflow/runtime_verification.py", "_execute_managed_service_verification"), "build_containment_profile_and_backend"),
     # S5: the MCP launcher is reached only through MCPClient._start_sequence, which applies the owner's isolating-backend fact to the backend it holds

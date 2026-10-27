@@ -27,12 +27,10 @@ import json
 import logging
 import os
 import shutil
-import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
-from kriya.config.environment import child_environment
 from kriya.tools.containment import decide_external_execution
-from kriya.tools.process import spawn_subprocess_exec_fail_closed, terminate_process_tree
+from kriya.tools.process import terminate_process_tree
 
 logger = logging.getLogger(__name__)
 
@@ -110,42 +108,11 @@ class JdtlsClient:
             raise
 
     async def _start(self) -> None:
-        # D2 S2: jdtls imports the project's own Maven/Gradle build and has no contained mode, so while containment is mandatory it is not started
-        # at all (typed refusal; the caller degrades to no LSP grounding) - before any directory exists. A host spawn is never the fallback.
+        # D2 S2 / S8: jdtls imports the project's own Maven/Gradle build and has no contained mode, so it is not started at all: a typed refusal (the
+        # caller degrades to no LSP grounding) before any directory exists. S8 deleted the host spawn that used to follow - a host spawn is never the
+        # fallback, and with containment mandatory for every subject there is no path on which it could run.
         decide_external_execution(self._autonomy, subject="JdtlsClient").refuse_unsupported(
             "jdtls imports the project's build on the host and has no contained mode; it is not started while containment is mandatory")
-        self._data_dir = tempfile.mkdtemp(prefix="kriya-jdtls-data-")
-        self._mirror = os.path.realpath(tempfile.mkdtemp(prefix="kriya-jdtls-mirror-"))
-        self._sync_mirror()
-        # Confirmed live, not theoretical: jdtls's own launcher REFUSES to start
-        # ("Exception: jdtls requires at least Java 21") if a JAVA_HOME inherited
-        # from the parent process resolves to anything older - and Kriya's own
-        # Maven-oriented workflows routinely export a JAVA_HOME pinned to an
-        # older JDK for the TARGET project's own reasons (e.g. Java 17 for the
-        # Qpid Security Manager requirement, see _java_toolchain_fact()) that has
-        # nothing to do with what jdtls itself needs to run. Launching without
-        # inheriting JAVA_HOME lets jdtls's own wrapper script fall back to its
-        # sensible built-in default, confirmed live to work.
-        jdtls_env = {k: v for k, v in child_environment().items() if k != "JAVA_HOME"}
-        # PLAT-LSP-TREE-KILL-001: spawned as the root of a process tree the
-        # platform's ProcessControlPort owns (its own session on POSIX), so
-        # _release can kill the launcher AND the JVM it starts, not only the
-        # direct PID; a host without tree ownership refuses before spawning.
-        self.process = await spawn_subprocess_exec_fail_closed(
-            self.jdtls_path, "-data", self._data_dir,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            env=jdtls_env,
-        )
-        self._reader_task = asyncio.create_task(self._read_loop())
-        root_uri = "file://" + self._mirror
-        await self._request(
-            "initialize",
-            {"processId": os.getpid(), "rootUri": root_uri, "capabilities": {}},
-            timeout=JDTLS_INIT_TIMEOUT_SECONDS,
-        )
-        self._notify("initialized", {})
 
     async def check_file(
         self, file_path: str, content: str, timeout: float = JDTLS_DIAGNOSTICS_TIMEOUT_SECONDS

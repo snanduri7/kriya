@@ -176,12 +176,6 @@ def test_05_wrapper_start_and_offline_misses_are_missing_dependency_shapes_every
 
 
 # ---------------------------------------------------------------- the validator's two-phase state machine
-def test_06_host_mode_is_a_byte_exact_pass_through(tmp_path):
-    write_wrapper(tmp_path)
-    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=AutonomyConfig())
-    with _runs((0, "")) as run:
-        validator._run_gradle_cmd("./gradlew", ["compileJava"], cwd=str(tmp_path), timeout=120)
-    run.assert_called_once_with(["./gradlew", "compileJava"], cwd=str(tmp_path), timeout=120)
 
 
 def test_07_contained_offline_success_never_acquires_and_mounts_the_kriya_managed_home(tmp_path, monkeypatch):

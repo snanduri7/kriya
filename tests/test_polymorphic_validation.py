@@ -9,7 +9,6 @@ import pytest
 from _validator_runner import ScriptedRunner, fail, ok
 
 from kriya.config import AppConfig
-from kriya.tools import venv_integrity
 from kriya.tools.validate import (
     PolymorphicValidator,
     _record_installed_specifiers,
@@ -501,7 +500,6 @@ def test_run_app_sequence_uses_isolated_venv_interpreter_for_python(tmp_path, mo
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n")
     _record_installed_specifiers(str(venv_python.parent.parent), [])  # a venv Kriya built carries its marker (review F5)
-    venv_integrity.seal(str(venv_python.parent.parent))  # ...and its seal (OI-142 / O4: a venv is reused only as sealed)
 
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "python"
@@ -523,7 +521,6 @@ def test_run_app_sequence_reports_pip_install_failure_without_running_commands(t
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n")
     _record_installed_specifiers(str(venv_python.parent.parent), [])  # a venv Kriya built carries its marker (review F5)
-    venv_integrity.seal(str(venv_python.parent.parent))  # ...and its seal (OI-142 / O4: a venv is reused only as sealed)
 
     validator = PolymorphicValidator(str(tmp_path))
 
@@ -536,25 +533,6 @@ def test_run_app_sequence_reports_pip_install_failure_without_running_commands(t
     # must never execute against a dependency environment known to be broken.
     assert runner.roles() == ["pip"], runner.commands
 
-def test_run_app_sequence_without_requirements_txt_uses_sys_executable(tmp_path):
-    # No requirements.txt (e.g. a stdlib-only Python goal) - must behave
-    # exactly as before this fix, sys.executable, no venv machinery invoked.
-    (tmp_path / "app.py").write_text("print('ok')\n")
-
-    validator = PolymorphicValidator(str(tmp_path))
-
-    with patch("subprocess.Popen") as mock_popen:
-        process = MagicMock()
-        process.returncode = 0
-        process.communicate.return_value = ("ok", "")
-        mock_popen.return_value = process
-
-        res = validator.run_app_sequence([["python", "app.py"]])
-
-    assert res["success"] is True, res["output"]
-    assert mock_popen.call_count == 1
-    run_cmd = mock_popen.call_args_list[0].args[0]
-    assert run_cmd[0] == sys.executable
 
 def test_python_run_tests_resolves_src_layout_imports(tmp_path):
     # Reproduces a real generation failure: a src/ layout project where the
@@ -630,7 +608,6 @@ def test_python_run_tests_installs_requirements_into_isolated_venv_before_pytest
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n")  # simulates an already-created venv
     _record_installed_specifiers(str(venv_python.parent.parent), [])  # a venv Kriya built carries its marker (review F5)
-    venv_integrity.seal(str(venv_python.parent.parent))  # ...and its seal (OI-142 / O4: a venv is reused only as sealed)
 
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "python"
@@ -655,7 +632,6 @@ def test_python_run_tests_reports_pip_install_failure_without_running_pytest(tmp
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n")
     _record_installed_specifiers(str(venv_python.parent.parent), [])  # a venv Kriya built carries its marker (review F5)
-    venv_integrity.seal(str(venv_python.parent.parent))  # ...and its seal (OI-142 / O4: a venv is reused only as sealed)
 
     validator = PolymorphicValidator(str(tmp_path))
 
@@ -669,48 +645,6 @@ def test_python_run_tests_reports_pip_install_failure_without_running_pytest(tmp
     # run against a dependency environment known to be broken.
     assert runner.roles() == ["pip"], runner.commands
 
-def test_python_run_tests_skips_venv_without_requirements_txt(tmp_path):
-    # No requirements.txt at all (e.g. python_task_tracker/python_greeter,
-    # stdlib-only goals) - must reproduce the exact pre-existing behavior,
-    # sys.executable, no venv/pip machinery invoked at all.
-    (tmp_path / "app.py").write_text("pass\n")
-    (tmp_path / "test_app.py").write_text("def test_ok():\n    assert True\n")
-
-    validator = PolymorphicValidator(str(tmp_path))
-
-    with patch("subprocess.Popen") as mock_popen:
-        process = MagicMock()
-        process.returncode = 0
-        process.communicate.return_value = ("1 passed", "")
-        mock_popen.return_value = process
-
-        res = validator.run_tests()
-
-    assert res["success"] is True, res["output"]
-    assert mock_popen.call_count == 1
-    cmd = mock_popen.call_args_list[0].args[0]
-    assert cmd[0] == sys.executable
-
-def test_python_run_tests_skips_venv_for_comments_only_requirements_txt(tmp_path):
-    # A requirements.txt with no real entries isn't worth a venv+pip round
-    # trip over - must behave exactly like having no requirements.txt at all.
-    (tmp_path / "requirements.txt").write_text("# no external deps needed\n\n")
-    (tmp_path / "app.py").write_text("pass\n")
-
-    validator = PolymorphicValidator(str(tmp_path))
-
-    with patch("subprocess.Popen") as mock_popen:
-        process = MagicMock()
-        process.returncode = 0
-        process.communicate.return_value = ("1 passed", "")
-        mock_popen.return_value = process
-
-        res = validator.run_tests()
-
-    assert res["success"] is True, res["output"]
-    assert mock_popen.call_count == 1
-    cmd = mock_popen.call_args_list[0].args[0]
-    assert cmd[0] == sys.executable
 
 def test_python_run_tests_creates_venv_from_scratch_when_not_already_present(tmp_path, monkeypatch):
     (tmp_path / "requirements.txt").write_text("requests==2.31.0\n")
@@ -995,27 +929,6 @@ def test_ruby_run_tests_skips_bundle_install_without_a_gemfile(tmp_path, monkeyp
     assert res["success"] is True, res["output"]
     assert len(runner.commands) == 1
     assert runner.commands[0][:3] == ["bundle", "exec", "rspec"]
-
-
-def test_resolve_maven_classpath_writes_and_reads_the_output_file(tmp_path):
-    """resolve_maven_classpath() must consume dependency:build-classpath via
-    -Dmdep.outputFile, not stdout (which is full of noisy [INFO] lines around
-    the actual classpath string) - simulates the real subprocess side effect
-    (writing to the output file) since subprocess.Popen itself is mocked."""
-    (tmp_path / "pom.xml").write_text("<project></project>")
-    validator = PolymorphicValidator(str(tmp_path))
-
-    def fake_run(cmd, cwd, timeout=300):
-        output_flag = next(a for a in cmd if a.startswith("-Dmdep.outputFile="))
-        output_file = output_flag.split("=", 1)[1]
-        with open(output_file, "w") as fh:
-            fh.write("/home/user/.m2/repository/org/apache/ignite/ignite-core/2.18.0/ignite-core-2.18.0.jar\n")
-        return {"returncode": 0, "stdout": "", "stderr": ""}
-
-    with patch.object(validator, "_run_cmd_with_timeout", side_effect=fake_run):
-        classpath = validator.resolve_maven_classpath()
-
-    assert classpath == "/home/user/.m2/repository/org/apache/ignite/ignite-core/2.18.0/ignite-core-2.18.0.jar"
 
 
 def test_resolve_maven_classpath_runs_nothing_and_degrades_to_none_under_the_mandatory_containment(tmp_path, monkeypatch):
@@ -1545,99 +1458,6 @@ def test_java_dependency_regression(tmp_path):
         mock_popen.return_value = mock_process
         res_ok = validator.run_compile_check(["pom.xml"])
         assert res_ok["success"] is True
-
-def test_sandbox_execution_restricts_subprocess_env_by_default(tmp_path, monkeypatch):
-    monkeypatch.setenv("KRIYA_TEST_SECRET", "super-secret-value")
-    (tmp_path / "pom.xml").write_text("<project></project>")
-    (tmp_path / "UserService.java").write_text("class UserService {}")
-
-    validator = PolymorphicValidator(str(tmp_path))
-
-    with patch("subprocess.Popen") as mock_popen:
-        mock_process = MagicMock()
-        mock_process.returncode = 0
-        mock_process.communicate.return_value = ("", "")
-        mock_popen.return_value = mock_process
-        validator.run_compile_check(["UserService.java"])
-
-        assert mock_popen.called
-        _, kwargs = mock_popen.call_args
-        assert "KRIYA_TEST_SECRET" not in kwargs["env"]
-        assert kwargs["preexec_fn"] is not None
-
-def test_sandbox_execution_disabled_uses_full_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("KRIYA_TEST_SECRET", "super-secret-value")
-    (tmp_path / "pom.xml").write_text("<project></project>")
-    (tmp_path / "UserService.java").write_text("class UserService {}")
-
-    cfg = AppConfig()
-    cfg.autonomy.sandbox_execution = False
-    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=cfg.autonomy)
-
-    with patch("subprocess.Popen") as mock_popen:
-        mock_process = MagicMock()
-        mock_process.returncode = 0
-        mock_process.communicate.return_value = ("", "")
-        mock_popen.return_value = mock_process
-        validator.run_compile_check(["UserService.java"])
-
-        _, kwargs = mock_popen.call_args
-        assert kwargs["env"] is None
-        assert kwargs["preexec_fn"] is None
-
-def test_java_home_override_forces_subprocess_to_the_specified_jdk(tmp_path, monkeypatch):
-    """Regression test for a real, live-diagnosed gap: pom.xml's
-    maven.compiler.source/target controls what Java LANGUAGE version javac
-    targets, not which JDK 'mvn' itself actually runs under - a goal saying
-    "targeting Java 17" has no way to make Maven honor that if 'mvn'
-    defaults to a different, genuinely incompatible JDK on this machine
-    (confirmed live: JDK 26 broke a Qpid Broker-J API call with no
-    connection to anything the generated code controls). java_home_override
-    must force every subprocess this validator launches onto the specified
-    JDK via JAVA_HOME (the same mechanism Maven's own launcher script uses)
-    and PATH, on top of whatever env would otherwise apply."""
-    monkeypatch.setenv("KRIYA_TEST_MARKER", "still-here")
-    (tmp_path / "pom.xml").write_text("<project></project>")
-    (tmp_path / "UserService.java").write_text("class UserService {}")
-
-    cfg = AppConfig()
-    cfg.autonomy.sandbox_execution = False
-    validator = PolymorphicValidator(
-        str(tmp_path), autonomy_cfg=cfg.autonomy,
-        java_home_override="/opt/jdk-17",
-    )
-
-    with patch("subprocess.Popen") as mock_popen:
-        mock_process = MagicMock()
-        mock_process.returncode = 0
-        mock_process.communicate.return_value = ("", "")
-        mock_popen.return_value = mock_process
-        validator.run_compile_check(["UserService.java"])
-
-        _, kwargs = mock_popen.call_args
-        assert kwargs["env"]["JAVA_HOME"] == "/opt/jdk-17"
-        assert kwargs["env"]["PATH"].startswith("/opt/jdk-17/bin" + os.pathsep)
-        # The rest of the inherited environment must survive untouched.
-        assert kwargs["env"]["KRIYA_TEST_MARKER"] == "still-here"
-
-def test_java_home_override_also_applies_under_sandbox_execution(tmp_path):
-    # Must layer on top of (not bypass) the sandbox-restricted env, same as
-    # the unsandboxed case above.
-    (tmp_path / "pom.xml").write_text("<project></project>")
-    (tmp_path / "UserService.java").write_text("class UserService {}")
-
-    validator = PolymorphicValidator(str(tmp_path), java_home_override="/opt/jdk-17")
-
-    with patch("subprocess.Popen") as mock_popen:
-        mock_process = MagicMock()
-        mock_process.returncode = 0
-        mock_process.communicate.return_value = ("", "")
-        mock_popen.return_value = mock_process
-        validator.run_compile_check(["UserService.java"])
-
-        _, kwargs = mock_popen.call_args
-        assert kwargs["env"]["JAVA_HOME"] == "/opt/jdk-17"
-        assert kwargs["preexec_fn"] is not None  # sandboxing still applied too
 
 
 def test_run_app_sequence_multi_package_test_file_target_hits_module_not_found(tmp_path):

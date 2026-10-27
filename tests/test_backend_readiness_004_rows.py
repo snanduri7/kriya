@@ -410,10 +410,12 @@ async def test_releasing_an_already_exited_jdtls_is_not_an_error(tmp_path):
     await client._release()
 
 
-def test_jdtls_is_spawned_through_the_process_tree_port_only():
+def test_jdtls_has_no_subprocess_spawn_of_its_own_and_is_released_through_the_process_tree_port():
+    """S8 removed the host spawn (jdtls is refused while containment is mandatory): lsp.py spawns nothing, directly or through the port, and what it holds is still torn down
+    through the process-tree port."""
     source = open(lsp_module.__file__, encoding="utf-8").read()
-    assert "asyncio.create_subprocess_exec(" not in source
-    assert "spawn_subprocess_exec_fail_closed(" in source and "terminate_process_tree(" in source
+    assert "asyncio.create_subprocess_exec(" not in source and "spawn_subprocess_exec_fail_closed(" not in source
+    assert "terminate_process_tree(" in source
 
 
 # ------------------------------------------------- TRACE-ENFORCE-SUBTASK-LINKAGE-001

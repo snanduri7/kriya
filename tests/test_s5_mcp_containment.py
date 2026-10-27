@@ -170,18 +170,6 @@ def test_a_failed_startup_after_a_contained_preparation_leaves_no_active_evidenc
 
 # ----------------------------------------------------------------- evidence truth
 
-@pytest.mark.legacy_host_mcp
-def test_legacy_host_execution_reports_containment_not_required_and_not_active(spawns):
-    async def run():
-        manager = await _started(_config(required=False, backend="none"), {"srv": _server()})
-        try:
-            client = manager.clients["srv"]
-            return client.containment_required, client.containment_active, client.containment_backend_name
-        finally:
-            await manager.shutdown_all()
-    assert asyncio.run(run()) == (False, False, None)
-    assert spawns[0]["prefix"] is None, "the legacy host state launches bare; a marker for the migration to delete"
-
 
 def test_a_contained_server_is_launched_through_the_prepared_prefix_and_only_then_reports_active(spawns, mcp_standin):
     async def run():
@@ -376,14 +364,14 @@ def test_every_test_module_that_starts_an_mcp_server_runs_the_contained_branch_o
 
 
 # The owner's closed accounting of the ten ``legacy_host_mcp`` tests (S7, 2026-10-25): where each one went when the packaged default made host MCP unreachable by policy.
-#   STILL_MARKED  the characterization of the LEGACY host state itself; skipped (census class H) or direct-MCPClient host mechanics; S8 deletes them with the host branch;
-#                 the replacement controls are tests/test_s7_secure_default_contract.py and the contained-MCP tier (tests/test_s5_mcp_real_oci.py).
+#   DELETED_IN_S8 the characterization of the LEGACY host state itself (host rlimits, the legacy host label); S8 deleted them with the host branch and retired the marker;
+#                 the replacement controls are tests/test_s7_secure_default_contract.py, tests/test_s7_resource_limit_replacement.py and the contained-MCP tier (tests/test_s5_mcp_real_oci.py).
 #   CONVERTED     the intent is independent of host execution, so the test now runs the fixture server CONTAINED in the real OCI backend (marker removed).
 LEGACY_HOST_ACCOUNTING = {
-    ("test_s5_mcp_containment.py", "test_legacy_host_execution_reports_containment_not_required_and_not_active"): "STILL_MARKED",
-    ("test_sec004_mcp_lifecycle.py", "test_cpu_over_limit_process_killed_by_os"): "STILL_MARKED",
-    ("test_sec004_mcp_lifecycle.py", "test_memory_over_limit_outcome_platform_honest"): "STILL_MARKED",
-    ("test_sec004_mcp_lifecycle.py", "test_resource_setup_failure_fails_closed"): "STILL_MARKED",
+    ("test_s5_mcp_containment.py", "test_legacy_host_execution_reports_containment_not_required_and_not_active"): "DELETED_IN_S8",
+    ("test_sec004_mcp_lifecycle.py", "test_cpu_over_limit_process_killed_by_os"): "DELETED_IN_S8",
+    ("test_sec004_mcp_lifecycle.py", "test_memory_over_limit_outcome_platform_honest"): "DELETED_IN_S8",
+    ("test_sec004_mcp_lifecycle.py", "test_resource_setup_failure_fails_closed"): "DELETED_IN_S8",
     ("test_sec003_mcp_env_isolation.py", "test_cli_mcp_tool_call_ambient_absent_then_explicit_present_via_durable_approval"): "CONVERTED",
     ("test_sec004_mcp_lifecycle.py", "test_cli_startup_hang_bounded_end_to_end"): "CONVERTED",
     ("test_tool002_p2_real_cli.py", "test_real_cli_full_lifecycle_a_through_f"): "CONVERTED",
@@ -391,12 +379,12 @@ LEGACY_HOST_ACCOUNTING = {
     ("test_tool002_p2_real_cli.py", "test_real_cli_capability_profile_drift_invalidates_approval"): "CONVERTED",
     ("test_tool002_p2_real_cli.py", "test_real_cli_host_mode_explicitly_labeled_non_contained"): "CONVERTED",   # now test_real_cli_inspect_labels_a_running_contained_server_as_required_and_active
 }
-LEGACY_HOST_TESTS = {key for key, fate in LEGACY_HOST_ACCOUNTING.items() if fate == "STILL_MARKED"}
+LEGACY_HOST_TESTS: set = set()      # S8: no test keeps the legacy_host_mcp marker (the marker is retired)
 
 
-def test_the_legacy_host_characterization_tests_are_exactly_the_closed_list_s8_deletes():
-    """Per the final production contract there is no host MCP execution. Exactly the STILL_MARKED tests keep the ``legacy_host_mcp`` marker; every other one of the ten was
-    converted (its marker is gone, and the converted test exists under its new real-OCI form)."""
+def test_the_legacy_host_characterization_tests_are_gone_and_the_converted_ones_remain():
+    """Per the final production contract there is no host MCP execution. No test keeps the ``legacy_host_mcp`` marker (S8 deleted the four characterizations and retired the
+    marker); every converted one of the ten still exists under its real-OCI form."""
     assert len(LEGACY_HOST_ACCOUNTING) == 10
     marked, defined = set(), set()
     for path in sorted(TESTS_DIR.glob("test_*.py")):
@@ -406,6 +394,8 @@ def test_the_legacy_host_characterization_tests_are_exactly_the_closed_list_s8_d
                 if any("legacy_host_mcp" in ast.dump(decorator) for decorator in node.decorator_list):
                     marked.add((path.name, node.name))
     assert marked == LEGACY_HOST_TESTS, (sorted(marked - LEGACY_HOST_TESTS), sorted(LEGACY_HOST_TESTS - marked))
+    deleted = {key for key, fate in LEGACY_HOST_ACCOUNTING.items() if fate == "DELETED_IN_S8"}
+    assert len(deleted) == 4 and not (deleted & defined), "a test S8 deleted has come back"
     converted = {key for key, fate in LEGACY_HOST_ACCOUNTING.items() if fate == "CONVERTED"}
     renamed = ("test_tool002_p2_real_cli.py", "test_real_cli_host_mode_explicitly_labeled_non_contained")
     assert all(key in defined for key in converted - {renamed}), "a converted legacy test must still exist"
