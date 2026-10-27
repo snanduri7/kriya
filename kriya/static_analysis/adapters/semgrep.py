@@ -15,7 +15,6 @@ never by documented exit codes, which 1.178.0 does not follow (§5.5 V14).
 from __future__ import annotations
 
 import glob
-import hashlib
 import json
 import os
 import posixpath
@@ -595,14 +594,6 @@ def interpret_output(
 
 # --- Adapter ----------------------------------------------------------------
 
-def _file_sha256(path: str) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 class EngineNotLocatedError(ValueError):
     """The semgrep-core engine of a host installation cannot be located
     deterministically; its identity is never reduced to the entry point."""
@@ -631,15 +622,6 @@ def locate_engine(entry_point: str) -> str:
             f"{os.path.dirname(os.path.dirname(words[0]))!r}",
         )
     return matches[0]
-
-
-def host_executable_digest(entry_point: str) -> str:
-    """Identity of a host installation: the entry point AND its engine.
-
-    Raises OSError or EngineNotLocatedError (a ValueError)."""
-    return canonical_digest({
-        "entry_point": _file_sha256(entry_point), "semgrep_core": _file_sha256(locate_engine(entry_point)),
-    })
 
 
 def _tail(text: str, limit: int = 500) -> str:

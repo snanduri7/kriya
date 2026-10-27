@@ -134,3 +134,21 @@ def test_the_mcp_manager_and_the_finite_command_preparation_hand_over_containmen
 def test_the_authority_bundle_has_no_not_contained_refusal_left_to_fall_past():
     node = _function("kriya/workflow/authority_bundle.py", "run_authority_bundle")
     assert "decide_external_execution" not in _calls(node)
+
+
+# ----------------------------------------------------------------------------------------- S8-ORPHAN-HOST-CODE-001: the orphan host code, per family
+
+def _defined_names(relpath: str) -> set:
+    return {n.name for n in ast.walk(ast.parse((ROOT / relpath).read_text(encoding="utf-8"))) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+
+
+def _production_sources():
+    return [path for base in ("kriya", "plugins") for path in (ROOT / base).rglob("*.py")]
+
+
+def test_the_host_semgrep_engine_identity_helper_and_its_only_consumer_are_gone():
+    """Family A. `host_executable_digest` had no caller anywhere; `_file_sha256` of the adapter existed only for it. No source references either name again."""
+    defined = _defined_names("kriya/static_analysis/adapters/semgrep.py")
+    assert not {"host_executable_digest", "_file_sha256"} & defined
+    offenders = [str(path.relative_to(ROOT)) for path in _production_sources() if "host_executable_digest" in path.read_text(encoding="utf-8")]
+    assert offenders == [], f"host_executable_digest is referenced again: {offenders}"
