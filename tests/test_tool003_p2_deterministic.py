@@ -18,6 +18,7 @@ from kriya.mcp.mcp import MCPClient
 from kriya.tools.containment import (
     BackendUnavailableError,
     ContainmentProfile,
+    ContainmentSetupError,
     MountSpec,
     NetworkAuthority,
     NullContainmentBackend,
@@ -186,10 +187,23 @@ def test_client_binds_containment_required_and_profile_before_start():
     assert client.capability_profile is profile
 
 
-def test_client_default_containment_required_false_preserves_host_mode():
+def test_client_is_contained_by_default_and_a_client_that_does_not_require_containment_cannot_be_built():
+    """S8-ORPHAN-HOST-CODE-001: there is no host mode any more (this test used to pin `containment_required=False` as the host-preserving default)."""
     client = MCPClient(name="probe", command="python3", args=["-c", "pass"])
-    assert client.containment_required is False
-    assert client.containment_active is False
+    assert client.containment_required is True
+    assert client.containment_active is False  # nothing is active until a server was launched through an isolating backend
+    with pytest.raises(ContainmentSetupError, match="no host mode"):
+        MCPClient(name="probe", command="python3", args=["-c", "pass"], containment_required=False)
+
+
+def test_a_client_started_without_an_isolating_backend_is_refused_before_any_spawn():
+    from unittest.mock import patch
+
+    from kriya.tools.containment import ExternalExecutionRefused
+    client = MCPClient(name="probe", command="python3", args=["-c", "pass"])  # no backend handed to it
+    with patch("kriya.mcp.mcp.spawn_mcp_process") as spawn, pytest.raises(ExternalExecutionRefused):
+        asyncio.run(client.start())
+    assert spawn.call_count == 0, "a server was spawned without an isolating backend"
 
 
 # =====================================================================

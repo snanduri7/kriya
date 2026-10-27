@@ -179,3 +179,18 @@ def test_a_validator_without_a_profile_or_backend_refuses_and_spawns_nothing(tmp
                 patch("kriya.tools.validate.ProcessController.run") as run, pytest.raises(ContainmentSetupError, match="no host mode"):
             validator._run_cmd_with_timeout(["echo", "x"], cwd=str(tmp_path))  # pylint: disable=protected-access
         assert run.call_count == 0, f"{pair}: a process was started"
+
+
+def test_the_mcp_launcher_has_no_host_spawn_branch_left():
+    """Family C. `MCPClient._start_sequence` is the live launcher; only its `containment_required=False` raw host spawn was the orphan. It no longer reads the flag, always asks the owner for an
+    isolating backend, and always spawns through the prepared prefix; the constructor refuses a client that does not require containment."""
+    node = _function("kriya/mcp/mcp.py", "MCPClient._start_sequence")
+    assert "_containment_required" not in _names(node), "the launcher branches on the containment flag again"
+    assert "require_isolating_backend" in _calls(node)
+    spawn = next(call for call in ast.walk(node) if isinstance(call, ast.Call) and getattr(call.func, "id", None) == "spawn_mcp_process")
+    prefix = next(kw.value for kw in spawn.keywords if kw.arg == "command_prefix")
+    assert isinstance(prefix, ast.Name) and prefix.id == "command_prefix"
+    assigned = [stmt for stmt in ast.walk(node) if isinstance(stmt, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "command_prefix" for t in stmt.targets)]
+    assert all(not (isinstance(stmt.value, ast.Constant) and stmt.value.value is None) for stmt in assigned), "command_prefix can be None (a host spawn) again"
+    constructor = _function("kriya/mcp/mcp.py", "MCPClient.__init__")
+    assert "ContainmentSetupError" in _calls(constructor) | _names(constructor)

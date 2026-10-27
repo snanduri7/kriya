@@ -175,8 +175,12 @@ class MCPClient:
         self, name: str, command: str, args: List[str], env: Optional[Dict[str, str]] = None,
         lifecycle_config: Optional[Any] = None, on_closed: Optional[Callable[[str, BaseException], None]] = None,
         capability_profile: Optional[MCPCapabilityProfile] = None,
-        containment_required: bool = False, containment_backend: Optional[Any] = None,
+        containment_required: bool = True, containment_backend: Optional[Any] = None,
     ) -> None:
+        if not containment_required:
+            # S8-ORPHAN-HOST-CODE-001: the raw host spawn this flag used to select is gone; contained is the only mode, so a client that does not require containment cannot be built.
+            raise ContainmentSetupError(
+                f"MCP server '{name}': containment_required=False is not supported - an MCP server has no host mode and is only ever started through an isolating containment backend.")
         self.name = name
         self.command = command
         self.args = args
@@ -189,16 +193,9 @@ class MCPClient:
         # this does not (yet) change what start()/spawn_mcp_process() does
         # in any way; see kriya/mcp/capability.py's own security statement.
         self.capability_profile = capability_profile or resolve_mcp_capability_profile({}, workspace_root=os.getcwd())
-        # TOOL-003 P2: whether this server MUST run inside real OCI
-        # containment (autonomy.mcp_contained_execution_required, default
-        # False - see that field's own docstring for the explicit,
-        # deliberate default-flip decision). False (default) preserves
-        # 100% of pre-TOOL-003-P2 behavior: host-side execution, no
-        # containment backend ever consulted. `containment_backend` is the
-        # resolved kriya.tools.containment.ContainmentBackend instance to
-        # use when True - injected by MCPManager.start_all(), never
-        # resolved by this class itself (keeps MCPClient constructible/
-        # testable with no config/autonomy dependency at all when unset).
+        # TOOL-003 P2 / S8: an MCP server ALWAYS runs inside real OCI containment - there is no host mode. `containment_required` stays in the signature (and as a property, for the
+        # telemetry and `kriya mcp` readers) but only `True` is accepted; `containment_backend` is the resolved kriya.tools.containment.ContainmentBackend instance injected by
+        # MCPManager.start_all(), never resolved by this class itself, and a client that was handed none is refused, typed, at start().
         self._containment_required = containment_required
         self._containment_backend = containment_backend
         self._containment_cleanup: Optional[Callable[[], None]] = None
@@ -299,57 +296,58 @@ class MCPClient:
         # see build_mcp_subprocess_env()'s own docstring for the invariant.
         full_env = build_mcp_subprocess_env(self.env)
 
-        command_prefix: Optional[List[str]] = None
-        spawn_env: Optional[Dict[str, str]] = full_env
-        if self._containment_required:
-            # TOOL-003 P2: "no raw-host fallback" (2026-09-13 user
-            # instruction, policed as the single hardest requirement in
-            # this package) - every step below either produces a real,
-            # prepared container or raises a ContainmentSetupError (or
-            # subclass) that propagates UNCAUGHT out of this method, out
-            # of start(), and out of MCPManager.start_all(), which is
-            # already SEC-004-atomic (rolls back any earlier server in the
-            # same start_all() call). There is no except-and-continue
-            # anywhere on this path.
-            # D2 S5: whether a held backend isolates is the canonical owner's fact, not this class's: a missing backend, or one that provides no
-            # isolation (the Null backend accepts an unrestricted-network profile and would run the server on the host), is the typed refusal here,
-            # before anything is prepared or started.
-            self._containment_backend = require_isolating_backend(mcp_subject(self.name), self._containment_backend)
-            profile_digest = compute_mcp_capability_profile_digest(self.capability_profile)
-            loop = asyncio.get_running_loop()
-            # OCIContainmentBackend.prepare() does real, synchronous
-            # subprocess I/O (docker daemon probe, image ensure) -
-            # off the event loop via run_in_executor, exactly like the
-            # cleanup call in _close() below.
+        # S8-ORPHAN-HOST-CODE-001: there is no host mode. A server is launched only through an isolating backend's prepared prefix; every step below either produces a real, prepared
+        # container or raises a ContainmentSetupError that propagates out of start() (the constructor already refused a client that does not require containment).
+        command_prefix: Optional[List[str]]
+        spawn_env: Optional[Dict[str, str]]
+        # TOOL-003 P2: "no raw-host fallback" (2026-09-13 user
+        # instruction, policed as the single hardest requirement in
+        # this package) - every step below either produces a real,
+        # prepared container or raises a ContainmentSetupError (or
+        # subclass) that propagates UNCAUGHT out of this method, out
+        # of start(), and out of MCPManager.start_all(), which is
+        # already SEC-004-atomic (rolls back any earlier server in the
+        # same start_all() call). There is no except-and-continue
+        # anywhere on this path.
+        # D2 S5: whether a held backend isolates is the canonical owner's fact, not this class's: a missing backend, or one that provides no
+        # isolation (the Null backend accepts an unrestricted-network profile and would run the server on the host), is the typed refusal here,
+        # before anything is prepared or started.
+        self._containment_backend = require_isolating_backend(mcp_subject(self.name), self._containment_backend)
+        profile_digest = compute_mcp_capability_profile_digest(self.capability_profile)
+        loop = asyncio.get_running_loop()
+        # OCIContainmentBackend.prepare() does real, synchronous
+        # subprocess I/O (docker daemon probe, image ensure) -
+        # off the event loop via run_in_executor, exactly like the
+        # cleanup call in _close() below.
 
-            def _prepare():
-                containment_profile = map_capability_profile_to_containment(
-                    self.capability_profile, workspace_root=os.path.realpath(os.getcwd()),
-                    resolved_env=full_env, profile_digest=profile_digest,
-                    cpu_seconds=self._lifecycle.cpu_seconds, memory_mb=self._lifecycle.memory_mb,
-                )
-                return self._containment_backend.prepare(containment_profile, [self.command] + self.args)
+        def _prepare():
+            containment_profile = map_capability_profile_to_containment(
+                self.capability_profile, workspace_root=os.path.realpath(os.getcwd()),
+                resolved_env=full_env, profile_digest=profile_digest,
+                cpu_seconds=self._lifecycle.cpu_seconds, memory_mb=self._lifecycle.memory_mb,
+            )
+            return self._containment_backend.prepare(containment_profile, [self.command] + self.args)
 
-            prepared = await loop.run_in_executor(None, _prepare)
-            command_prefix = prepared.command_prefix
-            if not command_prefix:
-                # Evidence truth: a prepared containment launches the server THROUGH its prefix (`docker run -i ...`). A backend that prepared nothing to
-                # launch through has contained nothing, so the server is not started and never reported as contained.
-                if prepared.cleanup is not None:
-                    prepared.cleanup()
-                raise ContainmentSetupError(
-                    f"MCP server '{self.name}': containment backend {self._containment_backend.name!r} prepared no launch prefix - "
-                    "refusing to start the server uncontained."
-                )
-            self._containment_cleanup = prepared.cleanup
-            # The `docker` CLI itself is TRUSTED_KRIYA_INFRASTRUCTURE - it
-            # needs its own normal host environment (PATH to find the
-            # `docker` binary, etc.), never the SEC-003-restricted MCP
-            # environment, which is instead baked into command_prefix as
-            # `-e KEY=VALUE` flags (ContainmentProfile.resolved_env, set
-            # to `full_env` above). `env=None` means "inherit the current
-            # process's environment" - correct for trusted host tooling.
-            spawn_env = None
+        prepared = await loop.run_in_executor(None, _prepare)
+        command_prefix = prepared.command_prefix
+        if not command_prefix:
+            # Evidence truth: a prepared containment launches the server THROUGH its prefix (`docker run -i ...`). A backend that prepared nothing to
+            # launch through has contained nothing, so the server is not started and never reported as contained.
+            if prepared.cleanup is not None:
+                prepared.cleanup()
+            raise ContainmentSetupError(
+                f"MCP server '{self.name}': containment backend {self._containment_backend.name!r} prepared no launch prefix - "
+                "refusing to start the server uncontained."
+            )
+        self._containment_cleanup = prepared.cleanup
+        # The `docker` CLI itself is TRUSTED_KRIYA_INFRASTRUCTURE - it
+        # needs its own normal host environment (PATH to find the
+        # `docker` binary, etc.), never the SEC-003-restricted MCP
+        # environment, which is instead baked into command_prefix as
+        # `-e KEY=VALUE` flags (ContainmentProfile.resolved_env, set
+        # to `full_env` above). `env=None` means "inherit the current
+        # process's environment" - correct for trusted host tooling.
+        spawn_env = None
 
         # SEC-004: fail-closed spawn - process-group isolation and the
         # hard stdout-line ceiling are established HERE, before the
