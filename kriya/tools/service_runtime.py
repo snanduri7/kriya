@@ -581,27 +581,21 @@ def _artifact_is_current(artifact_path: str, cwd: str) -> bool:
     return True
 
 
-def _maven_package_command(cwd: str, *, allow_project_wrapper: bool = True) -> Optional[List[str]]:
+def _maven_package_command(cwd: str) -> Optional[List[str]]:
     """The deterministic command to (re)build a Maven project's packaged
     artifact - the project's own `package` lifecycle phase (never a
     hand-constructed jar), `-DskipTests` because Kriya's own compile/test
     quality gates already ran `mvn test` earlier in this same pipeline
     (kriya/tools/validate.py) - re-running the full test suite here would
-    only duplicate already-passed evidence, not add any. Prefers the
-    project's own wrapper (`./mvnw`) when present and executable - the same
-    command a human working in this exact repository would run - falling
-    back to a bare `mvn` on PATH otherwise. D2 S4: ``allow_project_wrapper``
-    is False for a build run through the validator's contained path - the wrapper is a
-    project-supplied script that downloads a Maven distribution from a
-    project-chosen URL, which the toolchain image's own `mvn` (the one every
-    compile and test gate already uses) replaces. Returns None when `cwd` has no
+    only duplicate already-passed evidence, not add any. Always the toolchain's own `mvn` (the
+    one every compile and test gate already uses), never the project's `./mvnw`: the wrapper is a
+    project-supplied script that downloads a Maven distribution from a project-chosen URL, and there is no
+    host build any more (S8-HELD-SERVICE-RUNTIME-HOST-HARNESS-001), so the command is only ever run
+    through a contained build. Returns None when `cwd` has no
     `pom.xml` at all: not a Maven project, so this function has no known
     way to prepare anything here and must not guess."""
     if not os.path.isfile(os.path.join(cwd, "pom.xml")):
         return None
-    wrapper = os.path.join(cwd, "mvnw")
-    if allow_project_wrapper and os.path.isfile(wrapper) and os.access(wrapper, os.X_OK):
-        return ["./mvnw"] + _MAVEN_PACKAGE_ARGS
     return ["mvn"] + _MAVEN_PACKAGE_ARGS
 
 
@@ -630,7 +624,6 @@ def _process_result(result: Dict[str, object]) -> ProcessResult:
 
 def _prepare_required_artifact(
     service_command: List[str], cwd: str, *, controller: ProcessController,
-    env: Optional[Dict[str, str]] = None, preexec_fn: Optional[Callable[[], None]] = None,
     containment_profile: Optional[ContainmentProfile] = None,
     containment_backend: Optional[ContainmentBackend] = None,
     contained_build: Optional[Callable[[List[str], int], Dict[str, object]]] = None,
@@ -646,23 +639,9 @@ def _prepare_required_artifact(
     derived entirely from the existing service_command plus detected build
     system, never a new plan-facing field.
 
-    env/preexec_fn (finite_command generalization, 2026-09-11): optional,
-    default None for both, so every EXISTING managed_service caller (which
-    never passed these) is byte-for-byte unchanged. A caller that already
-    enforces a specific JDK/sandbox policy for its OTHER subprocess calls
-    (kriya/tools/validate.py's PolymorphicValidator, forcing JAVA_HOME to
-    match whatever the compile gate already resolved) passes the SAME
-    env/preexec_fn here, so `mvn package` never silently builds under a
-    different JDK than the one that just validated compilation - a real,
-    confusing mismatch class this parameter exists to prevent, not a
-    hypothetical one.
-
     containment_profile/containment_backend (SEC-001-P6, 2026-09-11):
-    mutually exclusive with env/preexec_fn (ProcessController.run()'s own
-    rule) - a caller with `autonomy_cfg.contained_execution_required=True`
-    passes these instead, so the `mvn package` build this function runs
-    gets the exact same real containment PolymorphicValidator's own
-    compile/test commands get. The launched service and its readiness/probe
+    the `mvn package` build this function runs through `controller` gets the exact same real containment PolymorphicValidator's own
+    compile/test commands get (used when no `contained_build` is given). The launched service and its readiness/probe
     checks use that same profile; readiness/probe route through docker exec
     inside the container network namespace, with no host port publication.
 
@@ -672,9 +651,9 @@ def _prepare_required_artifact(
     the validator's own contained Maven path (``PolymorphicValidator.
     contained_maven_build``: the same registry-scoped acquisition and offline
     execution every compile and test gate gets). Given, the build never runs on
-    the host and never as the project's `./mvnw`. Mutually exclusive with
-    env/preexec_fn. (The managed-service caller keeps passing a containment
-    profile instead; that path was already contained.)
+    the host and never as the project's `./mvnw`. (A caller may pass a containment
+    profile and backend instead; that path is contained too.) A build with neither is refused
+    (ContainmentSetupError): there is no host build.
 
     Distinguishes exactly three failure shapes, matching the two dedicated
     outcome kinds above:
@@ -704,21 +683,21 @@ def _prepare_required_artifact(
         return _PreparationOutcome(
             None, f"{artifact} already exists and is current relative to pom.xml/src/main - no preparation needed",
         )
-    contained = contained_build is not None
-    build_command = _maven_package_command(cwd, allow_project_wrapper=not contained)
+    build_command = _maven_package_command(cwd)
     if build_command is None:
         return _PreparationOutcome(
             ServiceVerificationOutcomeKind.PREPARATION_FAILED,
             f"{artifact} does not exist and {cwd} has no known build system (no pom.xml) to prepare it",
         )
-    if contained_build is not None and (env is not None or preexec_fn is not None):
-        raise ValueError("Pass either (env, preexec_fn) or contained_build, never both.")
+    if contained_build is None and (containment_profile is None or containment_backend is None):
+        raise ContainmentSetupError(
+            f"cannot build {artifact}: no contained build and no containment profile/backend were supplied - project-controlled execution has no host mode and is refused")
     try:
         if contained_build is not None:
             result = _process_result(contained_build(build_command, _MAVEN_PACKAGE_TIMEOUT_SECONDS))
         else:
             result = controller.run(
-                build_command, cwd=cwd, timeout=_MAVEN_PACKAGE_TIMEOUT_SECONDS, env=env, preexec_fn=preexec_fn,
+                build_command, cwd=cwd, timeout=_MAVEN_PACKAGE_TIMEOUT_SECONDS,
                 containment_profile=containment_profile, containment_backend=containment_backend,
             )
     except ContainmentSetupError:
@@ -770,6 +749,11 @@ def run_managed_service_verification(
     being gone. terminate()/cleanup runs exactly once, unconditionally,
     after the lifecycle is fully decided (success or failure), never
     skipped by an early return."""
+    if containment_profile is None or containment_backend is None:
+        # S8-HELD-SERVICE-RUNTIME-HOST-HARNESS-001: the service (and its build) always run in a container; a missing containment context is the typed refusal, before anything is prepared
+        # or started - never a host launch.
+        raise ContainmentSetupError(
+            "managed service verification has no host mode: a containment profile and backend are required (project-controlled execution is refused, never run uncontained)")
     controller = controller or ProcessController()
 
     preparation = _prepare_required_artifact(

@@ -876,21 +876,21 @@ def test_artifact_is_current_false_for_stale_artifact_older_than_source(tmp_path
 # --- build-command selection ---------------------------------------------
 
 def test_maven_package_command_none_without_pom(tmp_path):
-    assert _maven_package_command(str(tmp_path), allow_project_wrapper=False) is None
+    assert _maven_package_command(str(tmp_path)) is None
 
 
 def test_maven_package_command_is_the_bare_mvn_even_when_the_project_ships_an_executable_wrapper(tmp_path):
     """D2 S4: the project's ./mvnw is a project-supplied script that downloads a Maven distribution from a project-chosen URL; the contained build always uses the toolchain image's own `mvn`."""
     _write_pom(tmp_path)
     _write_executable(tmp_path / "mvnw", "#!/bin/sh\nexit 0\n")
-    assert _maven_package_command(str(tmp_path), allow_project_wrapper=False) == ["mvn", "package", "-DskipTests"]
+    assert _maven_package_command(str(tmp_path)) == ["mvn", "package", "-DskipTests"]
 
 
 def test_maven_package_command_is_the_bare_mvn_without_a_wrapper_or_with_a_non_executable_one(tmp_path):
     _write_pom(tmp_path)
-    assert _maven_package_command(str(tmp_path), allow_project_wrapper=False) == ["mvn", "package", "-DskipTests"]
+    assert _maven_package_command(str(tmp_path)) == ["mvn", "package", "-DskipTests"]
     (tmp_path / "mvnw").write_text("#!/bin/sh\necho hi\n")  # not chmod'd executable
-    assert _maven_package_command(str(tmp_path), allow_project_wrapper=False) == ["mvn", "package", "-DskipTests"]
+    assert _maven_package_command(str(tmp_path)) == ["mvn", "package", "-DskipTests"]
 
 
 # --- _prepare_required_artifact: the orchestration layer ------------------

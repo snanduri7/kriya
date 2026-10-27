@@ -214,3 +214,69 @@ def test_jdtls_has_no_process_machinery_and_cannot_be_started():
     client = JdtlsClient("/project", "/opt/jdtls", AutonomyConfig())
     assert not hasattr(client, "process"), "a process attribute exists on a client that can never start"
     # the refusal itself is pinned by tests/test_s7_secure_default_contract.py::test_jdtls_is_never_started_on_the_host (a test that consults the decision is census-classified there)
+
+
+# ----------------------------------------------------------------------------------------- S8-HELD-SERVICE-RUNTIME-HOST-HARNESS-001: the managed-service layer has no host mode
+
+def test_service_runtime_has_no_host_launch_or_host_build_left():
+    """The host-capable remainder (Optional containment arguments that launched the service bare, the host `controller.run` build with env/preexec_fn, and the project's ./mvnw wrapper) is gone; the
+    ~45 lifecycle/artifact tests that borrowed it as a harness run through the test-owned containment stand-in and the production `contained_build` seam instead."""
+    import inspect
+
+    from kriya.tools import service_runtime
+    for name in ("_prepare_required_artifact", "run_managed_service_verification"):
+        assert not {"env", "preexec_fn"} & set(inspect.signature(getattr(service_runtime, name)).parameters), f"{name} accepts a host environment again"
+    assert list(inspect.signature(service_runtime._maven_package_command).parameters) == ["cwd"], "the project-wrapper switch is back"  # pylint: disable=protected-access
+    node = _function("kriya/tools/service_runtime.py", "_maven_package_command")
+    assert "mvnw" not in {c.value for c in ast.walk(node) if isinstance(c, ast.Constant) and isinstance(c.value, str)}, "the project's wrapper is considered again"
+    for qualname in ("_prepare_required_artifact", "run_managed_service_verification"):
+        assert "ContainmentSetupError" in _names(_function("kriya/tools/service_runtime.py", qualname)), f"{qualname} no longer refuses a missing containment context"
+    prepare = _function("kriya/tools/service_runtime.py", "_prepare_required_artifact")
+    for call in ast.walk(prepare):
+        if isinstance(call, ast.Call) and getattr(call.func, "attr", None) == "run":
+            assert {"containment_profile", "containment_backend"} <= {kw.arg for kw in call.keywords}
+            assert not {"env", "preexec_fn"} & {kw.arg for kw in call.keywords}
+
+
+def test_a_managed_service_run_or_build_without_containment_is_refused_and_starts_nothing(tmp_path):
+    """Behavioural: project-controlled host execution cannot reach service_runtime. No profile/backend -> typed refusal, and the controller is never asked to run or start anything."""
+    import sys
+
+    from kriya.tools.containment import ContainmentSetupError
+    from kriya.tools.process import ProcessController
+    from kriya.tools.service_runtime import (
+        ManagedServiceVerificationSpec,
+        ProbeSpec,
+        ReadinessSpec,
+        _prepare_required_artifact,
+        run_managed_service_verification,
+    )
+
+    class _Watching(ProcessController):
+        def __init__(self):
+            super().__init__()
+            self.started = []
+
+        def run(self, command, **kwargs):
+            self.started.append(("run", list(command)))
+            raise AssertionError("a process was run")
+
+        def start_managed(self, command, **kwargs):
+            self.started.append(("start_managed", list(command)))
+            raise AssertionError("a process was started")
+
+    spec = ManagedServiceVerificationSpec(service_command=[sys.executable, "-c", "pass"], cwd=str(tmp_path),
+                                          readiness=ReadinessSpec(kind="tcp", port=1), probe=ProbeSpec(port=1))
+    for kwargs in ({}, {"containment_profile": object()}, {"containment_backend": object()}):
+        controller = _Watching()
+        with pytest.raises(ContainmentSetupError, match="no host mode"):
+            run_managed_service_verification(spec, controller=controller, **kwargs)
+        assert controller.started == [], f"{kwargs}: a process was started"
+    # the build step: an artifact is required, a pom exists, and no contained build or containment context is given
+    (tmp_path / "pom.xml").write_text("<project/>")
+    controller = _Watching()
+    with pytest.raises(ContainmentSetupError, match="no host mode"):
+        _prepare_required_artifact(["java", "-jar", "target/app.jar"], str(tmp_path), controller=controller)
+    assert controller.started == []
+    with pytest.raises(TypeError):
+        _prepare_required_artifact(["java", "-jar", "target/app.jar"], str(tmp_path), controller=controller, env={"A": "b"})  # pylint: disable=unexpected-keyword-arg

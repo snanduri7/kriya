@@ -377,12 +377,12 @@ def _prepare_finite_command_runtime_artifacts(
     "verification_infrastructure_failure", the existing, correct
     environment/toolchain-eligible classification."""
     # D2 S4 / S8: the build runs through the validator's contained Maven path (never the host, never the project's ./mvnw); contained is the only mode.
-    env, preexec_fn, contained_build = None, None, validator.contained_maven_build
+    contained_build = validator.contained_maven_build
     controller = ProcessController()
     known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
     for command in resolved_run_commands:
         outcome = deps._prepare_required_artifact(
-            command, validator.workspace_path, controller=controller, env=env, preexec_fn=preexec_fn,  # OI-142: in the session's view, where the run consumes it
+            command, validator.workspace_path, controller=controller,  # OI-142: in the session's view, where the run consumes it
             contained_build=contained_build,
         )
         if outcome.outcome is None:

@@ -172,11 +172,8 @@ def test_a_contained_build_maps_its_result_to_the_same_outcomes_as_the_host_buil
     assert outcome.returncode == returncode and outcome.stdout == "out" and outcome.stderr == "err"
 
 
-def test_a_contained_build_with_a_host_env_is_a_programming_error_not_a_preparation_failure(tmp_path):
-    project = _maven_project(tmp_path, executable_wrapper=False)
-    build, _calls = _builder(project)
-    with pytest.raises(ValueError):
-        _prepare_required_artifact(["java", "-jar", "target/app.jar"], str(project), controller=_Controller(), env={"A": "b"}, contained_build=build)
+# S8-HELD-SERVICE-RUNTIME-HOST-HARNESS-001: the env/preexec_fn parameters of _prepare_required_artifact are gone, so the 'contained build with a host env' misuse cannot be written any more (pinned in
+# tests/test_s8_host_branches_are_gone.py::test_service_runtime_has_no_host_launch_or_host_build_left).
 
 
 # ----------------------------------------------------------------- the callers decide by the validator's canonical decision
@@ -206,7 +203,8 @@ def test_the_finite_command_preparation_always_takes_the_validators_contained_bu
     rv._prepare_finite_command_runtime_artifacts(deps, [["java", "-jar", "target/app.jar"]], validator, ctx, state)
     (_command, cwd, kwargs), = received
     assert cwd == str(tmp_path)
-    assert (kwargs["env"], kwargs["preexec_fn"]) == (None, None) and kwargs["contained_build"] is validator.contained_maven_build
+    assert "env" not in kwargs and "preexec_fn" not in kwargs, "the host environment parameters are not passed (they no longer exist)"
+    assert kwargs["contained_build"] is validator.contained_maven_build
 
 
 def _calls_in(path, function, callee):

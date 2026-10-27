@@ -16,7 +16,7 @@ import containment_s8_list as s8
 ROOT = Path(__file__).resolve().parent.parent
 
 # Update ONLY with an owner-reviewed change to the S8 record (the digest of the sorted code sites with their outcomes + the recorded deleted test ids)
-S8_LIST_DIGEST = "08db9e0f0f84bbb9468ffd29a802b0fc4bccda0d6d8075ce733a86634d875f39"
+S8_LIST_DIGEST = "bc134e70041ae58adef321a1f55cd0515abc43f49ea1279274933b650df3a9ab"
 
 
 def _qualnames(tree):

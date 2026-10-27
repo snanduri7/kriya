@@ -25,13 +25,14 @@ import types
 from pathlib import Path
 
 import pytest
+from _containment_standin import MountAwareStandIn
 from test_oi142_gate_view import _git, _views
 from test_runtime_verification import JUDGE_SERVICE
 from test_s3_execution_views import _contained, _docker_reachable
 
 from kriya.config.config import AutonomyConfig
 from kriya.tools import service_runtime
-from kriya.tools.containment import ExternalExecutionRefused
+from kriya.tools.containment import ContainmentProfile, ExternalExecutionRefused, NetworkAuthority, TrustClass
 from kriya.tools.process import ProcessController
 from kriya.tools.service_runtime import ServiceVerificationOutcomeKind, run_managed_service_verification
 from kriya.tools.validate import PolymorphicValidator
@@ -173,8 +174,11 @@ def test_negative_control_run_in_place_the_second_run_does_see_the_first_ones_st
         service_command=[sys.executable, "server.py", str(port)], cwd=str(root),
         readiness=service_runtime.ReadinessSpec(kind="tcp", host="127.0.0.1", port=port),
         probe=service_runtime.ProbeSpec(port=port, path="/", expected_status=200), startup_timeout_seconds=10)
-    assert run_managed_service_verification(spec).outcome is ServiceVerificationOutcomeKind.PROBE_PASSED
-    assert run_managed_service_verification(spec).outcome is ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY
+    # the service layer alone, on the worktree itself (no view), through the test-owned containment stand-in - there is no host launch to use any more
+    standin = {"containment_profile": ContainmentProfile(trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path=str(root), network=NetworkAuthority.DENIED),
+               "containment_backend": MountAwareStandIn()}
+    assert run_managed_service_verification(spec, **standin).outcome is ServiceVerificationOutcomeKind.PROBE_PASSED
+    assert run_managed_service_verification(spec, **standin).outcome is ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY
 
 
 def test_the_service_runs_in_the_view_and_the_view_is_gone_when_the_run_returns(tmp_path):

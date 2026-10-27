@@ -50,7 +50,7 @@ S8_CODE: Dict[str, Site] = {
     "kriya/workflow/runtime_verification.py::_prepare_finite_command_runtime_artifacts": Site("scan", "host `mvn package` artifact preparation"),
     "plugins/core_tools/__init__.py::ShellTool._run": Site("scan", "host sh execution of the operator shell command"),
     "kriya/tools/lsp.py::JdtlsClient.start": Site("extra", "starting jdtls on the host (it has no contained mode and is refused while containment is mandatory)"),
-    "kriya/tools/service_runtime.py::run_managed_service_verification": Site("extra", "host managed-service launch and the project-wrapper build (`allow_project_wrapper=not contained`)", "HELD"),
+    "kriya/tools/service_runtime.py::run_managed_service_verification": Site("extra", "host managed-service launch, the host build with env/preexec_fn and the project-wrapper build (`allow_project_wrapper`) - deleted in containment qualification, S8-HELD-SERVICE-RUNTIME-HOST-HARNESS-001"),
     "kriya/tools/venv_integrity.py::seal": Site("extra", "host venv seal (the contained venv is mounted read-only into every gate instead)"),
 }
 
@@ -69,14 +69,9 @@ NEVER_S8 = (
 )
 
 
-# What S8 did NOT delete, and why (owner decision needed; production never reaches any of it - every production caller passes a containment profile and the validator's contained build).
-HELD_NOTES: Dict[str, str] = {
-    "kriya/tools/service_runtime.py::run_managed_service_verification": (
-        "The host-capable remainder of the managed-service / artifact-preparation layer stays: Optional containment arguments, `_maven_package_command(allow_project_wrapper=...)` and "
-        "`_prepare_required_artifact`'s env/preexec parameters. About 46 tests (tests/test_service_runtime.py lifecycle and artifact-preparation tests, which use real host fixture processes "
-        "and a fake ./mvnw as their harness) run on it, and the contained managed-service coverage is a handful of Docker tests: removing it is a test-harness migration, not a mechanical "
-        "deletion, so it needs an owner decision. S8 did make the production call unconditional (`contained_build=validator.contained_maven_build`)."),
-}
+# What S8 did NOT delete: nothing is held any more. The one held site (the host-capable remainder of kriya/tools/service_runtime.py) was deleted in containment qualification
+# (S8-HELD-SERVICE-RUNTIME-HOST-HARNESS-001) after its ~45 harness tests were migrated to the test-owned containment stand-in and the production contained_build seam.
+HELD_NOTES: Dict[str, str] = {}
 
 # Dead host code that is NOT on the frozen list (no read of the flag: it is keyed on a parameter, or it is a pure helper). Left in place; candidates for an owner-approved follow-up.
 ORPHANS: Dict[str, str] = {}   # S8-ORPHAN-HOST-CODE-001 is closed: every orphan recorded after S8 was deleted (ORPHANS_DELETED), so none is left to list
