@@ -312,6 +312,16 @@ def test_real_docker_a_runtime_refusal_before_any_container_exists_is_not_starte
 
 
 @REAL_DOCKER
+def test_real_docker_a_no_shebang_executable_is_started_by_the_launchers_shell_the_documented_contract(tmp_path):
+    """FINITE-LAUNCH-ENOEXEC-001 (intentional contract, MEASURED in the A2 review): an executable with the exec bit but no shebang is run by dash's ENOEXEC fallback, so a process DID start
+    and the fact is true. Native runc would answer a bare rc=1 `exec format error`, indistinguishable from a started program exiting 1 - the ambiguity the stage removes. Same container, mounts, env."""
+    (tmp_path / "noshebang.sh").write_text("echo ran-in-the-same-container; id -u\n")
+    (tmp_path / "noshebang.sh").chmod(0o755)
+    result = _contained(tmp_path, ["/kriya/workspace/noshebang.sh"])
+    assert result.target_started is True and result.returncode == 0 and "ran-in-the-same-container" in result.stdout, result
+
+
+@REAL_DOCKER
 def test_real_docker_a_blank_executable_is_a_real_target_that_cannot_start(tmp_path):
     """`['']` is not 'no target': the launcher answers it truthfully as NOT_STARTED (MEASURED rc=126; the control that the empty-argv refusal is not a blanket refusal)."""
     result = _contained(tmp_path, [""])
