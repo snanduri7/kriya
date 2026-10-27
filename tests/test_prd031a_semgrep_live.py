@@ -10,7 +10,6 @@ Every case goes through the real adapter and the real ProcessController
 directories built in tmp_path from the recorded fixture sources.
 """
 
-import hashlib
 import json
 import os
 import shutil
@@ -31,7 +30,6 @@ from kriya.static_analysis.model import (
     Outcome,
     ScanStatus,
     Severity,
-    canonical_digest,
 )
 from kriya.static_analysis.port import ExecutionContext, ScanRequest
 from kriya.static_analysis.service import StaticAnalysisRequest, StaticAnalysisService, commit_guard
@@ -102,16 +100,6 @@ EXPECTED_FINDINGS = sorted([
     ("semgrep:python-print-info", "tests/test_x.py", 2, Severity.LOW),
     ("semgrep:python-eval", "tests/test_x.py", 2, Severity.MEDIUM),
 ])
-
-
-def independent_host_digest(executable: str) -> str:
-    """The expected host identity, derived without the adapter's locator:
-    the entry point plus the one semgrep-core packaged in its venv."""
-    entry = Path(os.path.realpath(executable))
-    engines = list((entry.parent.parent / "lib").glob("python3*/site-packages/semgrep/bin/semgrep-core"))
-    assert len(engines) == 1, engines
-    return canonical_digest({"entry_point": hashlib.sha256(entry.read_bytes()).hexdigest(),
-                             "semgrep_core": hashlib.sha256(engines[0].read_bytes()).hexdigest()})
 
 
 class RecordingBackend:
@@ -358,12 +346,8 @@ def test_service_resolved_finding_passes_with_recorded_identity(mode, rule_copy,
     assert provider["rule_packs"][0]["digest"] == MANIFEST["rule_pack_digests"]["rules"]
     assert provider["effective_options_digest"] and provider["identity_digest"]
     assert result.evidence["runtime_fingerprint"]
-    if mode == "contained":
-        assert provider["execution_location"] == "container" and provider["network_enforced"] is True
-        assert provider["executable_digest"] == IMAGE.rsplit(":", 1)[1]
-    else:
-        assert provider["execution_location"] == "local_process" and provider["network_enforced"] is False
-        assert provider["executable_digest"] == independent_host_digest(shutil.which("semgrep"))
+    assert provider["execution_location"] == "container" and provider["network_enforced"] is True  # S8: there is no host mode (service_config asserts it)
+    assert provider["executable_digest"] == IMAGE.rsplit(":", 1)[1]
     egress = result.evidence["egress"]
     assert egress["policy"] == "local_only" and egress["admitted"] is True
     assert egress["provider_network_requirement"] == "none"

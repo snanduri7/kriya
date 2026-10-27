@@ -118,7 +118,7 @@ def test_the_whole_s8_record_is_digest_pinned():
 def test_every_deleted_orphan_has_a_negative_proof_that_exists():
     """S8-ORPHAN-HOST-CODE-001: the orphans are recorded as deleted, each with the test that pins its absence; the list of live orphans is empty."""
     assert s8.ORPHANS == {}
-    assert len(s8.ORPHANS_DELETED) == 4
+    assert len(s8.ORPHANS_DELETED) == 5
     for site, (why, proof) in s8.ORPHANS_DELETED.items():
         assert len(why) >= 40, site
         path, _, name = proof.partition("::")

@@ -20,11 +20,9 @@ from pydantic import ValidationError
 from kriya.static_analysis import registry
 from kriya.static_analysis.adapters import semgrep
 from kriya.static_analysis.adapters.semgrep import (
-    EngineNotLocatedError,
     SemgrepAdapter,
     SemgrepSettings,
     interpret_output,
-    locate_engine,
     map_severity,
     normalize_rule_id,
 )
@@ -42,7 +40,6 @@ from kriya.static_analysis.model import (
     SCAN_TIMEOUT,
     ScanStatus,
     Severity,
-    canonical_digest,
 )
 from kriya.static_analysis.port import ExecutionContext, ScanRequest
 from kriya.tools.containment import (
@@ -104,30 +101,6 @@ def workspace(tmp_path: Path) -> Path:
     ws = tmp_path / "workspace"
     ws.mkdir()
     return ws
-
-
-@pytest.fixture
-def executable(tmp_path: Path) -> Path:
-    """A pipx-shaped installation: an entry script whose shebang names the
-    venv interpreter, and the packaged engine under that venv's prefix."""
-    venv = tmp_path / "venv"
-    exe = venv / "bin" / "semgrep"
-    exe.parent.mkdir(parents=True)
-    exe.write_text(f"#!{venv}/bin/python\nimport sys\n")
-    exe.chmod(0o755)
-    engine = engine_path(exe)
-    engine.parent.mkdir(parents=True)
-    engine.write_bytes(b"\x7fELF fake semgrep-core engine")
-    return exe
-
-
-def engine_path(exe: Path, packages: str = "site-packages", python: str = "python3.14") -> Path:
-    return exe.parent.parent / "lib" / python / packages / "semgrep" / "bin" / "semgrep-core"
-
-
-def host_digest(exe: Path) -> str:
-    return canonical_digest({"entry_point": hashlib.sha256(exe.read_bytes()).hexdigest(),
-                             "semgrep_core": hashlib.sha256(engine_path(exe).read_bytes()).hexdigest()})
 
 
 @pytest.fixture
@@ -797,63 +770,3 @@ def test_runtime_fingerprint_raises_on_a_missing_pack_or_a_missing_image(workspa
         adapter.runtime_fingerprint()
     with pytest.raises(ValueError):       # contained execution without a pinned image has no runtime to fingerprint
         contained_adapter(workspace, FakeProcess(), backend=DummyContainmentBackend(), image=None).runtime_fingerprint()
-
-
-# --- host engine identity (semgrep-core) ----------------------------------------
-
-
-
-@pytest.mark.parametrize("entry", [
-    "#!/usr/bin/env python3\n",       # interpreter not pinned
-    "#!python\n",                     # relative interpreter
-    "\x7fELF native binary\n",        # no shebang at all
-    "",
-])
-def test_engine_not_located_without_an_absolute_interpreter(executable, entry):
-    executable.write_text(entry)
-    with pytest.raises(EngineNotLocatedError):
-        locate_engine(str(executable))
-
-
-def test_env_shebang_is_refused_even_when_its_prefix_holds_an_engine(tmp_path):
-    # /usr/bin/env resolves the interpreter through PATH: never deterministic.
-    prefix = tmp_path / "usr"
-    entry = prefix / "bin" / "semgrep"
-    entry.parent.mkdir(parents=True)
-    entry.write_text(f"#!{prefix}/bin/env python3\n")
-    engine = engine_path(entry)
-    engine.parent.mkdir(parents=True)
-    engine.write_bytes(b"core")
-    with pytest.raises(EngineNotLocatedError):
-        locate_engine(str(entry))
-
-
-def test_relative_interpreter_is_refused_even_when_the_cwd_holds_an_engine(tmp_path, monkeypatch):
-    # A relative shebang would resolve against the process CWD: never deterministic.
-    entry = tmp_path / "bin" / "semgrep"
-    entry.parent.mkdir()
-    entry.write_text("#!bin/python\n")
-    engine = engine_path(entry)
-    engine.parent.mkdir(parents=True)
-    engine.write_bytes(b"core")
-    monkeypatch.chdir(tmp_path)
-    with pytest.raises(EngineNotLocatedError):
-        locate_engine(str(entry))
-
-
-def test_engine_location_is_unique_and_under_the_interpreter_prefix(executable, tmp_path):
-    assert locate_engine(str(executable)) == os.path.realpath(engine_path(executable))
-    second = engine_path(executable, python="python3.12")
-    second.parent.mkdir(parents=True)
-    second.write_bytes(b"other")
-    with pytest.raises(EngineNotLocatedError, match="2 packaged engine"):
-        locate_engine(str(executable))
-    # A system (Debian) layout: dist-packages under the interpreter prefix.
-    system = tmp_path / "usr"
-    entry = system / "bin" / "semgrep"
-    entry.parent.mkdir(parents=True)
-    entry.write_text(f"#!{system}/bin/python3 -E\n")
-    engine = engine_path(entry, packages="dist-packages", python="python3")
-    engine.parent.mkdir(parents=True)
-    engine.write_bytes(b"core")
-    assert locate_engine(str(entry)) == os.path.realpath(engine)

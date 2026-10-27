@@ -14,7 +14,6 @@ never by documented exit codes, which 1.178.0 does not follow (§5.5 V14).
 
 from __future__ import annotations
 
-import glob
 import json
 import os
 import posixpath
@@ -104,16 +103,6 @@ _FIXED_ENV = {"SEMGREP_SEND_METRICS": "off", "SEMGREP_ENABLE_VERSION_CHECK": "0"
 # Semgrep writes temporary rule files under TMPDIR (observed under /tmp when
 # unset): a Kriya-owned directory on the host, the container's tmpfs inside.
 _CONTAINER_TMPDIR = "/kriya/tmp"
-
-# Where Semgrep finds its engine first: the binary packaged in the
-# ``semgrep.bin`` package of the interpreter its entry point runs
-# (semgrep/semgrep_core.py compute_executable_path, 1.178.0), relative to
-# that interpreter's prefix. Semgrep would fall back to PATH; Kriya never
-# does - an engine it cannot locate here is a probe failure.
-_ENGINE_GLOBS = (
-    "lib/python3*/site-packages/semgrep/bin/semgrep-core",
-    "lib/python3*/dist-packages/semgrep/bin/semgrep-core",
-)
 
 # Semgrep's own control files: never copied into a Kriya snapshot (§8.4).
 CONTROL_FILES = (".semgrepignore", ".gitignore", ".semgrep", ".semgrep.yml", ".semgrep.yaml", ".semgrepconfig")
@@ -593,36 +582,6 @@ def interpret_output(
 
 
 # --- Adapter ----------------------------------------------------------------
-
-class EngineNotLocatedError(ValueError):
-    """The semgrep-core engine of a host installation cannot be located
-    deterministically; its identity is never reduced to the entry point."""
-
-
-def locate_engine(entry_point: str) -> str:
-    """The semgrep-core binary the resolved entry point loads.
-
-    The entry point must be a script whose shebang names an absolute
-    interpreter; the engine is the single packaged binary under that
-    interpreter's prefix. Anything else (``/usr/bin/env`` shebang, a native
-    binary, no or several candidates) raises EngineNotLocatedError."""
-    with open(entry_point, "rb") as handle:
-        first = handle.readline(4096)
-    words = first[2:].decode("utf-8", "replace").split() if first.startswith(b"#!") else []
-    if not words or not os.path.isabs(words[0]) or os.path.basename(words[0]) == "env":
-        raise EngineNotLocatedError(
-            f"cannot locate semgrep-core for {entry_point!r}: no absolute interpreter in its shebang",
-        )
-    prefix = glob.escape(os.path.dirname(os.path.dirname(words[0])))
-    matches = sorted({os.path.realpath(path) for pattern in _ENGINE_GLOBS
-                      for path in glob.glob(os.path.join(prefix, pattern))})
-    if len(matches) != 1 or not os.path.isfile(matches[0]):
-        raise EngineNotLocatedError(
-            f"cannot locate semgrep-core for {entry_point!r}: {len(matches)} packaged engine(s) under "
-            f"{os.path.dirname(os.path.dirname(words[0]))!r}",
-        )
-    return matches[0]
-
 
 def _tail(text: str, limit: int = 500) -> str:
     return _bounded_text(text[-limit:])

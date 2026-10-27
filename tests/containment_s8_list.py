@@ -89,6 +89,9 @@ ORPHANS_DELETED: Dict[str, Tuple[str, str]] = {
     "kriya/mcp/mcp.py::MCPClient._start_sequence": (
         "the containment_required=False raw host spawn branch (the method itself is the live launcher); the constructor refuses a client that does not require containment",
         _PROOFS + "test_the_mcp_launcher_has_no_host_spawn_branch_left"),
+    "kriya/static_analysis/adapters/semgrep.py::locate_engine": (
+        "host Semgrep engine location (locate_engine, EngineNotLocatedError, _ENGINE_GLOBS): zero production references and no public contract after host_executable_digest went; its dedicated tests and fixtures went with it",
+        _PROOFS + "test_the_host_semgrep_engine_locator_and_its_error_type_are_gone_and_nothing_references_them"),
     "kriya/tools/lsp.py::JdtlsClient": (
         "the process machinery after the typed refusal in start(): framing, reader loop, requests, private mirror, tree-kill shutdown",
         _PROOFS + "test_jdtls_has_no_process_machinery_and_cannot_be_started"),

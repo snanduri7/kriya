@@ -320,3 +320,17 @@ def test_spawn_mcp_process_refuses_a_missing_or_empty_prefix_and_spawns_nothing_
         assert spawn.call_count == 0, "a process was spawned without a containment prefix"
         asyncio.run(lifecycle.spawn_mcp_process("srv", ["--x"], None, max_stdout_line_bytes=10, command_prefix=["docker", "run", "-i", "img"]))
         assert spawn.call_args.args == ("docker", "run", "-i", "img", "srv", "--x"), "the prefix is composed ahead of the server command, verbatim"
+
+
+# ----------------------------------------------------------------------------------------- SEMGREP-LOCATE-ENGINE-UNREFERENCED-001: no host Semgrep engine location
+
+def test_the_host_semgrep_engine_locator_and_its_error_type_are_gone_and_nothing_references_them():
+    """Owner decision B (2026-10-27). A bounded reachability/public-contract check found no package export, entry point, CLI/plugin/registry use, dynamic reference or documented API: only the definition and its
+    own dedicated tests, which were deleted with it. No host Semgrep provider exists to locate an engine for."""
+    gone = ("locate_engine", "EngineNotLocatedError", "_ENGINE_GLOBS")
+    defined = _defined_names("kriya/static_analysis/adapters/semgrep.py")
+    assigned = {t.id for n in ast.walk(ast.parse((ROOT / "kriya/static_analysis/adapters/semgrep.py").read_text(encoding="utf-8")))
+                if isinstance(n, ast.Assign) for t in n.targets if isinstance(t, ast.Name)}
+    assert not (set(gone) & (defined | assigned)), "the host engine locator is defined again"
+    offenders = [(str(path.relative_to(ROOT)), name) for path in _production_sources() for name in gone if name in path.read_text(encoding="utf-8")]
+    assert offenders == [], f"referenced again: {offenders}"
