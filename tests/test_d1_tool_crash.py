@@ -9,6 +9,7 @@ import pytest
 from test_d1_tool_lifecycle import _plan, _state, _tool_results
 from test_e12_enforce_characterization import C, _enforce, _enforce_engine
 
+from kriya.control import commit_state
 from kriya.control.persistence import control_state_path
 from kriya.control.state import SUBTASK_STATE_TOOL_STARTED
 from kriya.workflow.resume_support import TOOL_EXECUTION_UNRESOLVED
@@ -43,10 +44,54 @@ async def test_a_crash_in_any_window_resumes_as_needs_review_and_the_effect_is_n
     with patch(f"{C}.subtask_executor.execute", new=effect), patch(f"{C}.subtask_executor.revalidate_tool_subtask_authority", new=revalidation):
         result, calls = await _enforce(_enforce_engine(tmp_path), tmp_path, _plan(), resume=True)   # a NEW engine and controller: state comes from disk only
     effect.assert_not_awaited()                                       # not retried, whichever window it died in
-    assert result.legacy_result["status"] == "needs_review" and result.legacy_result["quality_gates_passed"] is False
-    assert TOOL_EXECUTION_UNRESOLVED in _tool_results(result)["t1"]["reason_codes"] and calls == []
-    assert _state(tmp_path).subtask_states["t1"] == SUBTASK_STATE_TOOL_STARTED, "the unresolved record was overwritten or erased"
-    assert before and os.path.isfile(control_state_path(str(tmp_path)))
+    legacy = result.legacy_result
+    assert legacy["status"] == "needs_review" and legacy["quality_gates_passed"] is False and calls == []
+    assert commit_state.REASON_UNRESOLVED_TOOL_EXECUTION in legacy["reason_codes"], legacy   # the ONE gate refused before anything started
+    assert legacy["unresolved_tool_executions"][0]["subtask_ids"] == ["t1"]
+    assert open(control_state_path(str(tmp_path)), "rb").read() == before, "the unresolved record was overwritten or erased"
+    assert _state(tmp_path).subtask_states["t1"] == SUBTASK_STATE_TOOL_STARTED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("window", ["before_effect", "during_effect"])
+async def test_a_FRESH_run_after_a_crash_cannot_overwrite_the_unresolved_record_or_run_the_effect(tmp_path, window):
+    """What could erase the only evidence? The ControlState is ONE document per workspace: a fresh (non-resume) run would replace it. The gate refuses instead."""
+    _crash(tmp_path, window)
+    before = open(control_state_path(str(tmp_path)), "rb").read()
+    effect = AsyncMock(return_value=SubtaskResult(subtask_id="t1", status=SubtaskStatus.COMPLETED, execution_method="tool"))
+    with patch(f"{C}.subtask_executor.execute", new=effect):
+        result, calls = await _enforce(_enforce_engine(tmp_path), tmp_path, _plan())          # NOT resume
+    effect.assert_not_awaited()
+    assert result.legacy_result["status"] == "needs_review" and calls == []
+    assert commit_state.REASON_UNRESOLVED_TOOL_EXECUTION in result.legacy_result["reason_codes"]
+    assert open(control_state_path(str(tmp_path)), "rb").read() == before
+
+
+@pytest.mark.asyncio
+async def test_a_DIFFERENT_plan_cannot_complete_or_govern_another_executions_unresolved_record(tmp_path):
+    """Identity: the unresolved record belongs to run/plan A. A run of plan B (different plan, same subtask ids) neither inherits it nor overwrites it."""
+    _crash(tmp_path, "during_effect")
+    before = open(control_state_path(str(tmp_path)), "rb").read()
+    from test_e12_enforce_characterization import _plan_of, _unit
+    other = _plan_of(_unit("t1", "z.py"), _unit("s2", "b.py", depends_on=["t1"]))
+    result, calls = await _enforce(_enforce_engine(tmp_path), tmp_path, other, resume=True)
+    assert result.legacy_result["status"] == "needs_review" and calls == [], "another plan ran over an unresolved TOOL record"
+    assert open(control_state_path(str(tmp_path)), "rb").read() == before
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_in_progress_record_of_a_TOOL_subtask_is_classified_needs_review_by_the_loop_never_retried(tmp_path):
+    """A pre-D1 crash left plain "in_progress" (no marker, so the plan-blind gate cannot see it): the resume classification - the one owner - catches it inside the loop."""
+    _crash(tmp_path, "during_effect")
+    from kriya.control.persistence import load_control_state, save_control_state
+    state = load_control_state(str(tmp_path))
+    save_control_state(str(tmp_path), state.with_updates(subtask_states={**state.subtask_states, "t1": "in_progress"}))
+    effect = AsyncMock(return_value=SubtaskResult(subtask_id="t1", status=SubtaskStatus.COMPLETED, execution_method="tool"))
+    with patch(f"{C}.subtask_executor.execute", new=effect):
+        result, calls = await _enforce(_enforce_engine(tmp_path), tmp_path, _plan(), resume=True)
+    effect.assert_not_awaited()
+    assert result.legacy_result["status"] == "needs_review" and calls == []
+    assert TOOL_EXECUTION_UNRESOLVED in _tool_results(result)["t1"]["reason_codes"]
 
 
 @pytest.mark.asyncio

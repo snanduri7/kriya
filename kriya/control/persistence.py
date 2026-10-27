@@ -441,15 +441,19 @@ def _read_control_state_strict(workspace_path: str) -> Optional[ControlState]:
         raise ControlStateUnreadableError(path, f"{type(error).__name__}: {error}") from error
 
 
+def inspect_control_state(workspace_path: str) -> Tuple[Optional[ControlState], Optional[Tuple[str, str]]]:
+    """Read-only: (the readable ControlState or None, (path, reason) of an existing control state that cannot be read or None). Never raises for those two outcomes."""
+    try:
+        return _read_control_state_strict(workspace_path), None
+    except ControlStateUnreadableError as error:
+        return None, (error.path, error.reason)
+    except WorkspaceOwnershipError:
+        return None, None  # the ownership gates own that refusal
+
+
 def control_state_unreadable(workspace_path: str) -> Optional[Tuple[str, str]]:
     """(path, reason) of an existing control state that cannot be read, else None. Read-only."""
-    try:
-        _read_control_state_strict(workspace_path)
-    except ControlStateUnreadableError as error:
-        return error.path, error.reason
-    except WorkspaceOwnershipError:
-        return None  # the ownership gates own that refusal
-    return None
+    return inspect_control_state(workspace_path)[1]
 
 
 def save_control_state(workspace_path: str, state: ControlState, *, durable: bool = False) -> None:

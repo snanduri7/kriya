@@ -12,13 +12,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from test_e12_enforce_characterization import C, _enforce, _enforce_engine, _plan_of, _unit
 
+from kriya.control import commit_state
 from kriya.control.persistence import load_control_state
 from kriya.control.state import SUBTASK_STATE_TOOL_STARTED
 from kriya.repository import atomic_write
 from kriya.workflow.plan_schema import ExecutionMethod, Subtask
 from kriya.workflow.resume_support import (
     TOOL_COMPLETED_NOT_DURABLE,
-    TOOL_EXECUTION_UNRESOLVED,
     TOOL_STARTED_NOT_DURABLE,
 )
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus
@@ -124,4 +124,5 @@ async def test_a_completed_persistence_failure_is_needs_review_never_success_and
         monkeypatch.undo()
         resumed, calls = await _enforce(_enforce_engine(tmp_path), tmp_path, _plan(), resume=True)
     assert effect.await_count == 1, "the unresolved TOOL execution was retried"
-    assert resumed.legacy_result["status"] == "needs_review" and TOOL_EXECUTION_UNRESOLVED in _tool_results(resumed)["t1"]["reason_codes"] and calls == []
+    assert resumed.legacy_result["status"] == "needs_review" and calls == []
+    assert commit_state.REASON_UNRESOLVED_TOOL_EXECUTION in resumed.legacy_result["reason_codes"]
