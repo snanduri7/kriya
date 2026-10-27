@@ -1,10 +1,13 @@
 """D2 prerequisite: no test touches the real ~/.kriya/authority. tests/conftest.py gives every test its own authority home through
 KRIYA_AUTHORITY_HOME; a CLI/waiter subprocess a test starts inherits it through the environment."""
 import os
+import signal
 import subprocess
 import sys
+import time
 
 import _authority_isolation as isolation
+import pytest
 
 from kriya.config import authority_approval
 from kriya.config.environment import authority_home, kriya_home
@@ -97,8 +100,15 @@ def test_the_snapshot_guard_distinguishes_a_missing_home_from_a_created_one(tmp_
     assert isolation.changes(isolation.snapshot(str(home)), None) == ("the home was removed",)
 
 
-def _inner_session(tmp_path, body: str, *, real_home):
-    """A real pytest session (a child process) that registers the SAME session fixture; its 'operator-configured' authority home is ``real_home``."""
+INNER_SESSION_CAP_SECONDS = 120
+
+
+def _inner_session(tmp_path, body: str, *, real_home, cap_seconds: float = INNER_SESSION_CAP_SECONDS):
+    """A real pytest session (a child process) that registers the SAME session fixture; its 'operator-configured' authority home is ``real_home``.
+
+    TEST-HOME-ISOLATION-INNER-TIMEOUT-001: the inner session runs in its own process group, and a session that outlives ``cap_seconds`` is a self-diagnosing failure - what the group was doing
+    (process states, CPU, elapsed), the host load, and both output tails - and its whole group is killed, so a recurrence of the one unexplained stall (MEASURED once in a full suite, mechanism
+    unproven) carries its own evidence instead of a bare TimeoutExpired."""
     inner = tmp_path / "inner"
     inner.mkdir()
     (inner / "conftest.py").write_text(
@@ -108,8 +118,37 @@ def _inner_session(tmp_path, body: str, *, real_home):
         "    import os\n    print('AUTHORITY_AT_FINISH=' + os.environ.get('KRIYA_AUTHORITY_HOME', '<unset>'))\n")
     (inner / "test_inner.py").write_text(body)
     env = {**os.environ, "KRIYA_AUTHORITY_HOME": str(real_home), "INNER_TARGET": str(real_home)}
-    return subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "no:xdist", "-c", "/dev/null", str(inner)],
-                          cwd=inner, env=env, capture_output=True, text=True, timeout=120)
+    process = subprocess.Popen([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "no:xdist", "-c", "/dev/null", str(inner)],
+                               cwd=inner, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        stdout, stderr = process.communicate(timeout=cap_seconds)
+    except subprocess.TimeoutExpired as expired:
+        snapshot = subprocess.run(["ps", "-g", str(process.pid), "-o", "pid,ppid,stat,%cpu,etime,command"], capture_output=True, text=True, timeout=20, check=False).stdout
+        load = os.getloadavg()
+        os.killpg(process.pid, signal.SIGKILL)
+        stdout, stderr = process.communicate(timeout=30)
+        pytest.fail(f"INNER SESSION TIMED OUT after {cap_seconds}s (host load average {load}).\nprocess group at the timeout:\n{snapshot}\n"
+                    f"partial stdout tail: {(expired.stdout or stdout or '')[-1500:]!r}\npartial stderr tail: {(expired.stderr or stderr or '')[-1500:]!r}", pytrace=False)
+    return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+
+
+def test_a_stalled_inner_session_is_a_self_diagnosing_failure_and_leaves_no_process_behind(tmp_path):
+    """The failure path of the harness itself: a session that does not finish in its cap fails with the process snapshot and the partial output, and its group is gone."""
+    real = tmp_path / "pretend-real-home"
+    real.mkdir()
+    grandchild = f"kriya-inner-grandchild-{tmp_path.name}"
+    body = ("import subprocess, sys, time\n\n\ndef test_stalls():\n    print('INNER-STARTED', flush=True)\n"
+            f"    subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)', {grandchild!r}])  # a grandchild that outlives a kill of only the inner pytest, its argv names it\n"
+            "    time.sleep(120)\n")
+    with pytest.raises(pytest.fail.Exception) as caught:
+        _inner_session(tmp_path, body, real_home=real, cap_seconds=8)
+    message = str(caught.value)
+    assert "INNER SESSION TIMED OUT after 8" in message and "host load average" in message
+    assert "process group at the timeout" in message
+    assert "pytest" in message.split("process group at the timeout:")[1].split("partial stdout tail")[0], "the snapshot names the stalled pytest process"
+    time.sleep(1)
+    leftover = subprocess.run(["pgrep", "-f", grandchild], capture_output=True, text=True, check=False).stdout.split()
+    assert leftover == [], "the whole inner group was killed, grandchildren included"
 
 
 def test_the_session_guard_fails_the_session_when_the_real_home_changes_and_deletes_or_restores_nothing(tmp_path):
