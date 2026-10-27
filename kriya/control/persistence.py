@@ -414,6 +414,44 @@ def _load_json_document(path: str, workspace_path: Optional[str] = None) -> Opti
         return None
 
 
+class ControlStateUnreadableError(RuntimeError):
+    """D1: the persisted ControlState exists but cannot be read. Unresolved execution truth (a TOOL STARTED record) may live in it, so it is NEVER read as
+    "absent": nothing resumes from it, nothing starts fresh over it, and the bytes are left exactly as they are."""
+
+    def __init__(self, path: str, reason: str) -> None:
+        super().__init__(f"the persisted control state {path!r} cannot be read ({reason}); it was left untouched. Kriya will neither resume from it nor "
+                         "start fresh over it: inspect it, then move it aside yourself.")
+        self.path = path
+        self.reason = reason
+
+
+def _read_control_state_strict(workspace_path: str) -> Optional[ControlState]:
+    """None only when the file has NEVER been saved; an existing file that cannot be parsed or reconstructed raises ControlStateUnreadableError."""
+    path = control_state_path(workspace_path)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        validate_ownership(workspace_path, data, path)
+        return ControlState.from_dict(data)
+    except WorkspaceOwnershipError:
+        raise
+    except Exception as error:  # pylint: disable=broad-except
+        raise ControlStateUnreadableError(path, f"{type(error).__name__}: {error}") from error
+
+
+def control_state_unreadable(workspace_path: str) -> Optional[Tuple[str, str]]:
+    """(path, reason) of an existing control state that cannot be read, else None. Read-only."""
+    try:
+        _read_control_state_strict(workspace_path)
+    except ControlStateUnreadableError as error:
+        return error.path, error.reason
+    except WorkspaceOwnershipError:
+        return None  # the ownership gates own that refusal
+    return None
+
+
 def save_control_state(workspace_path: str, state: ControlState, *, durable: bool = False) -> None:
     # Pure save - persists exactly the ControlState it is given, never
     # silently mutates a field first (a real caller-visible round-trip
@@ -426,19 +464,14 @@ def save_control_state(workspace_path: str, state: ControlState, *, durable: boo
     # where real content changes between saves within the SAME run) -
     # deliberately NOT centralized here, where it would silently diverge
     # what every OTHER caller persists from what it explicitly passed in.
+    _read_control_state_strict(workspace_path)  # D1: an existing UNREADABLE state is never overwritten (raises ControlStateUnreadableError); its bytes are the evidence
     # durable=True (D1): an authoritative TOOL lifecycle transition - fsync-grade, every step required (kriya/repository/atomic_write.py).
     _save_json_document(workspace_path, control_state_path(workspace_path), state.to_dict(), durable=durable)
 
 
 def load_control_state(workspace_path: str) -> Optional[ControlState]:
-    data = _load_json_document(control_state_path(workspace_path), workspace_path)
-    if data is None:
-        return None
-    try:
-        return ControlState.from_dict(data)
-    except Exception:
-        logger.warning("Failed to reconstruct ControlState from %s - treating as absent", control_state_path(workspace_path), exc_info=True)
-        return None
+    """None only when no control state was ever saved. D1: an existing but unreadable state raises ControlStateUnreadableError - it is never "absent"."""
+    return _read_control_state_strict(workspace_path)
 
 
 def load_control_state_run_reference(workspace_path: str) -> Optional[str]:

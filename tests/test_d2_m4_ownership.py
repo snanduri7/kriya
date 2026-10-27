@@ -194,12 +194,15 @@ def test_a_save_never_overwrites_an_unstamped_or_foreign_document_so_it_never_st
             assert Path(path).read_bytes() == before, f"{name}: a refused save must not touch the file"
 
 
-def test_a_save_still_replaces_a_corrupt_document_as_before(ws):
+def test_a_save_no_longer_replaces_a_corrupt_control_state_d1(ws):
+    """D1 (owner sign-off): this test used to pin that a save REPLACES a corrupt control state "as before". A corrupt control state may hold an unresolved TOOL STARTED record, so
+    it is now preserved exactly and the save is refused with the typed error; the ownership stamping of a save over a READABLE document is unchanged (every other test here)."""
     path = Path(P.control_state_path(str(ws)))
     path.parent.mkdir(parents=True)
     path.write_text("{not json")
-    P.save_control_state(str(ws), ControlState(schema_version=1, run_id="r", subtask_states={}))
-    assert json.loads(path.read_text())["_workspace"]["workspace_id"] == workspace_identity(str(ws))
+    with pytest.raises(P.ControlStateUnreadableError):
+        P.save_control_state(str(ws), ControlState(schema_version=1, run_id="r", subtask_states={}))
+    assert path.read_text() == "{not json"
 
 
 def test_the_decision_ledger_refuses_to_append_to_or_load_an_unstamped_or_foreign_line(ws):

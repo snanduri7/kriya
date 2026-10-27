@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from kriya.context.workspace_identity import OWNERSHIP_REMEDIATION
-from kriya.control.persistence import nested_control_state, scan_run_records
+from kriya.control.persistence import control_state_unreadable, nested_control_state, scan_run_records
 from kriya.repository.commit import find_uncertain_commit_evidence
 
 RECOVERY_COMMAND = "kriya runs recover"
@@ -32,6 +32,8 @@ REASON_UNCERTAIN_COMMIT = "UNCERTAIN_COMMIT_STATE"
 REASON_RESULT_CONTRADICTS_RUN_RECORD = "RESULT_CONTRADICTS_RUN_RECORD"
 # D-001: unsettled control state exists under a sub-directory of the repository (written when that directory was its own workspace).
 REASON_NESTED_WORKSPACE_STATE = "NESTED_WORKSPACE_CONTROL_STATE"
+# D1: the persisted ControlState exists but cannot be read - never treated as absent (it may hold an unresolved TOOL STARTED record).
+REASON_CONTROL_STATE_UNREADABLE = "CONTROL_STATE_UNREADABLE"
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,8 @@ class WorkspaceCommitAssessment:
     # "unreadable" nor "uncertain" in the recoverable sense: `kriya runs recover` cannot settle them.
     run_record_ownership_refusals: Tuple[Tuple[str, str], ...] = ()
     commit_evidence_ownership_code: Optional[str] = None
+    # D1: (path, reason) of an existing control state that cannot be read. Not settleable by `kriya runs recover` (nothing durable to settle from): a person inspects it.
+    unreadable_control_state: Optional[Tuple[str, str]] = None
 
     @property
     def safe(self) -> bool:
@@ -84,6 +88,8 @@ class WorkspaceCommitAssessment:
         codes.extend(self.ownership_reason_codes)
         if self.nested_workspace_state:
             codes.append(REASON_NESTED_WORKSPACE_STATE)
+        if self.unreadable_control_state:
+            codes.append(REASON_CONTROL_STATE_UNREADABLE)
         return codes
 
     def describe(self) -> str:
@@ -103,6 +109,11 @@ class WorkspaceCommitAssessment:
         if self.nested_workspace_state:
             parts.append("unsettled state left under a sub-directory of this repository by an earlier Kriya that treated that directory as its own workspace: "
                          + "; ".join(f"{directory} ({reason})" for directory, reason in self.nested_workspace_state))
+        if self.unreadable_control_state:
+            parts.append(f"control state unreadable and left untouched: {self.unreadable_control_state[0]} ({self.unreadable_control_state[1]})")
+            if not self.recoverable and not self.ownership_reason_codes:
+                return ("The workspace's Kriya control state cannot be read and was left untouched (" + "; ".join(parts) + "). Kriya will neither resume from it nor "
+                        "start fresh over it: inspect it, then move it aside yourself.")
         if not self.recoverable:
             # Every item already carries the ownership remediation (workspace_identity.OWNERSHIP_REMEDIATION); recovery is not advice here.
             return "The workspace's Kriya control state is not provably this workspace's (" + "; ".join(parts) + ")."
@@ -129,6 +140,8 @@ class WorkspaceCommitAssessment:
             "recovery_command": RECOVERY_COMMAND if self.recoverable else None,
             "run_id": run_id,
         }
+        if self.unreadable_control_state:  # additive (D1)
+            payload["unreadable_control_state"] = {"path": self.unreadable_control_state[0], "reason": self.unreadable_control_state[1]}
         if self.run_record_ownership_refusals:  # additive: a refusal without ownership findings keeps its exact earlier shape
             payload["ownership_findings"] = [{"path": path, "reason_code": code} for path, code in self.run_record_ownership_refusals]
         return payload
@@ -166,6 +179,7 @@ def assess_workspace_commit_state(
         commit_ids = tuple(item.transaction_id for item in evidence)
         evidence_error = None
     nested, nested_complete = nested_control_state(workspace_path)
+    unreadable_state = control_state_unreadable(workspace_path)
     return WorkspaceCommitAssessment(
         uncertain_run_ids=uncertain_runs,
         unreadable_run_records=unreadable,
@@ -175,4 +189,5 @@ def assess_workspace_commit_state(
         nested_scan_complete=nested_complete,
         run_record_ownership_refusals=run_record_ownership,
         commit_evidence_ownership_code=evidence_ownership_code,
+        unreadable_control_state=unreadable_state,
     )

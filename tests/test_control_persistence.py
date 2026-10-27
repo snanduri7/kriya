@@ -11,6 +11,7 @@ import pytest
 
 from kriya.context.workspace_identity import canonical_workspace
 from kriya.control.persistence import (
+    ControlStateUnreadableError,
     approved_plan_path,
     control_state_path,
     load_approved_plan,
@@ -63,7 +64,10 @@ def test_load_control_state_fails_closed_on_corrupt_json(workspace):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         f.write("{not valid json")
-    assert load_control_state(workspace) is None
+    # D1: an existing but unreadable state is NEVER "absent" (it was asserted None here before): typed refusal, bytes untouched.
+    with pytest.raises(ControlStateUnreadableError):
+        load_control_state(workspace)
+    assert open(path).read() == "{not valid json"
 
 
 def test_save_goes_through_the_control_store_writer_and_denies_outside_kriya(workspace, monkeypatch):
