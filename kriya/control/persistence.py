@@ -319,7 +319,7 @@ def list_run_records(workspace_path: str) -> List[RunRecord]:
 
 
 def save_run_record(
-    workspace_path: str, record: RunRecord, *, expected_revision: Optional[int]
+    workspace_path: str, record: RunRecord, *, expected_revision: Optional[int], durable: bool = False
 ) -> None:
     """Atomically persist a record after an optimistic revision check.
 
@@ -345,7 +345,7 @@ def save_run_record(
     _save_json_document(
         workspace_path, run_record_path(workspace_path, record.run_id),
         record.to_dict(), derived_from_active_run=False,
-        expected_file_revision=file_revision if file_revision is not None else content_revision(""),
+        expected_file_revision=file_revision if file_revision is not None else content_revision(""), durable=durable,
     )
 
 

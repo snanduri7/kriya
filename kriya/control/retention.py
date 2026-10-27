@@ -91,7 +91,7 @@ def prune_run_state(
     protected: Set[str] = set(protect_run_ids) | workspace_run_references(workspace_path)
     terminal = []
     for record in scan.records:
-        if not record.terminal or record.commit_state_unknown:
+        if not record.terminal or record.commit_state_unknown or record.unresolved_tool_execution:  # D1: an unresolved direct tool execution is evidence, whatever the lifecycle says
             protected.add(record.run_id)
         elif record.run_id not in protected:
             terminal.append(record)

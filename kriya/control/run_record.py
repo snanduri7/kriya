@@ -192,6 +192,10 @@ class RunRecord:
     work_unit_states: Optional[Dict[str, Any]] = None
     # Schema 3: provenance of an explicit `kriya runs recover` settlement.
     recovery: Optional[Dict[str, Any]] = None
+    # D1: the lifecycle of the ONE externally side-effecting direct tool execution this run owns (`kriya tools execute`): {"tool": name, "state": "started" | "completed" | "failed"}.
+    # "started" is written durably BEFORE the effect and replaced only by a durable terminal state; a record that still says "started" (whatever its lifecycle) is an unresolved
+    # execution: the effect may or may not have happened. Optional, like resume_decision (earlier records load unchanged).
+    tool_execution: Optional[Dict[str, Any]] = None
     commits: List[Dict[str, Any]] = field(default_factory=list)
     # The CURRENT commit cycle (reset by each begin_commit); run-level
     # commit_result is the summary over ``commits`` once terminal.
@@ -222,6 +226,14 @@ class RunRecord:
         return self.lifecycle_state in TERMINAL_LIFECYCLES
 
     @property
+    def unresolved_tool_execution(self) -> Optional[str]:
+        """D1: the tool name of a direct tool execution that was durably STARTED and never durably finished, else None."""
+        execution = self.tool_execution
+        if isinstance(execution, dict) and execution.get("state") == "started":
+            return str(execution.get("tool") or "")
+        return None
+
+    @property
     def unsettled_commits(self) -> Tuple[Dict[str, Any], ...]:
         return tuple(cycle for cycle in self.commits if cycle.get("result") is None)
 
@@ -250,7 +262,7 @@ class RunRecord:
         """A stage marker or terminal transition (commits use begin/settle)."""
         if self.terminal:
             raise self._refuse(state, "record is terminal")
-        unknown = set(updates) - _ANNOTATABLE_FIELDS - {"commit_result", "terminal_status"}
+        unknown = set(updates) - _ANNOTATABLE_FIELDS - {"commit_result", "terminal_status", "tool_execution"}
         if unknown:
             raise IllegalRunTransitionError(f"transition cannot set {sorted(unknown)}")
         if state in (RunLifecycle.COMMIT_ELIGIBLE, RunLifecycle.COMMITTED):

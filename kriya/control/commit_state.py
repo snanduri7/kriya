@@ -195,9 +195,12 @@ def assess_workspace_commit_state(
         evidence_error = None
     nested, nested_complete = nested_control_state(workspace_path)
     control_state, unreadable_state = inspect_control_state(workspace_path)
-    unresolved_tools = ()
+    unresolved_tools = []
     if control_state is not None and control_state.run_id not in excluded and control_state.unresolved_tool_subtask_ids:
-        unresolved_tools = ((control_state.run_id, control_state.unresolved_tool_subtask_ids),)
+        unresolved_tools.append((control_state.run_id, control_state.unresolved_tool_subtask_ids))
+    # D1: a direct `kriya tools execute` whose RunRecord says "started" and never durably finished (whatever the record's lifecycle now says).
+    unresolved_tools.extend((record.run_id, (record.unresolved_tool_execution,)) for record in scan.records
+                            if record.run_id not in excluded and record.unresolved_tool_execution)
     return WorkspaceCommitAssessment(
         uncertain_run_ids=uncertain_runs,
         unreadable_run_records=unreadable,
@@ -208,5 +211,5 @@ def assess_workspace_commit_state(
         run_record_ownership_refusals=run_record_ownership,
         commit_evidence_ownership_code=evidence_ownership_code,
         unreadable_control_state=unreadable_state,
-        unresolved_tool_executions=unresolved_tools,
+        unresolved_tool_executions=tuple(unresolved_tools),
     )

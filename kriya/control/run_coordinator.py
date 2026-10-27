@@ -35,6 +35,9 @@ from kriya.control.run_record import IllegalRunTransitionError, RunLifecycle, Ru
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.logging_setup import run_log
 from kriya.platform import git_argv
+from kriya.repository.atomic_write import (
+    DurableWriteError as DurableWriteError,  # re-exported: what a durable transition raises (kriya.cli handles it without importing the repository layer)
+)
 from kriya.repository.carried_state import refuse_repository_carried_control_state
 from kriya.repository.git import refuse_repository_content_filters
 
@@ -108,18 +111,26 @@ def _git_revision(workspace_path: str, revision: str) -> Optional[str]:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def transition_mutating_run(context: RunContext, state: RunLifecycle, **updates: Any) -> RunRecord:
-    """Persist one validated lifecycle transition for the active capability."""
-    return _persist(context, lambda record: record.transition(state, **updates))
+def transition_mutating_run(context: RunContext, state: RunLifecycle, *, durable: bool = False, **updates: Any) -> RunRecord:
+    """Persist one validated lifecycle transition for the active capability. ``durable=True`` (D1): an authoritative TOOL lifecycle transition - temp write, file fsync, atomic
+    replace, parent-directory fsync, every step required (a failure raises kriya.repository.atomic_write.DurableWriteError and the record is not advanced)."""
+    return _persist(context, lambda record: record.transition(state, **updates), durable=durable)
 
 
-def _persist(context: RunContext, change: Callable[[RunRecord], RunRecord]) -> RunRecord:
+def _persist(context: RunContext, change: Callable[[RunRecord], RunRecord], *, durable: bool = False) -> RunRecord:
     require_mutating_run(context.workspace_path, context)
     current = context._lease.record or load_run_record(context.workspace_path, context.run_id)
     if current is None:
         raise InvalidRunContextError("active RunContext has no durable RunRecord")
     updated = change(current)
-    save_run_record(context.workspace_path, updated, expected_revision=current.revision)
+    try:
+        save_run_record(context.workspace_path, updated, expected_revision=current.revision, **({"durable": True} if durable else {}))
+    except DurableWriteError as error:
+        if error.step == "directory_fsync":
+            # The replace HAPPENED: the new record is visible on disk and only its durability is unknown, so this run's view of its own record must follow the file (the caller
+            # still treats the transition as failed) - otherwise the run's terminal handling would write against a stale revision.
+            context._lease.record = updated
+        raise
     context._lease.record = updated
     return updated
 

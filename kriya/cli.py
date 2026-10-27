@@ -48,7 +48,7 @@ from kriya.cli_commands.static_analysis import static_analysis_waivers as static
 from kriya.cli_output import GenerateOutput, no_progress_stop_message
 from kriya.config import AppConfig, load_config
 from kriya.control.commit_state import UncertainWorkspaceStateError
-from kriya.control.run_coordinator import begin_mutating_run, transition_mutating_run
+from kriya.control.run_coordinator import DurableWriteError, begin_mutating_run, transition_mutating_run
 from kriya.control.run_ownership import WorkspaceLockHeldError
 from kriya.control.run_record import RunLifecycle
 from kriya.core import LLMClient
@@ -798,13 +798,17 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
                     )
                     with ownership as run_context:
                         if run_context is not None:
-                            transition_mutating_run(run_context, RunLifecycle.RUNNING)
+                            # D1: STARTED is durable (temp write, file fsync, atomic replace, parent-directory fsync) BEFORE the effect. If it cannot be, the tool is NOT run.
+                            try:
+                                transition_mutating_run(
+                                    run_context, RunLifecycle.RUNNING, durable=True,
+                                    tool_execution={"tool": tool_name, "state": "started"},
+                                )
+                            except DurableWriteError as error:
+                                click.secho(f"\n[TOOL NOT STARTED] The start of '{tool_name}' could not be recorded durably ({error}); nothing was run.", bold=True, fg="red")
+                                sys.exit(1)
                         try:
                             result = await tool.execute(**args)
-                            if isinstance(result, (dict, list)):
-                                click.echo(json.dumps(result, indent=2))
-                            else:
-                                click.echo(result)
                         except Exception as ex:
                             click.secho(f"Execution failed: {ex}", fg="red")
                             if run_context is not None:
@@ -813,13 +817,27 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
                                 transition_mutating_run(
                                     run_context, RunLifecycle.FAILURE,
                                     commit_result="DIRECT_TOOL_EXECUTION",
+                                    tool_execution={"tool": tool_name, "state": "failed"},
                                 )
                         else:
                             if run_context is not None:
-                                transition_mutating_run(
-                                    run_context, RunLifecycle.SUCCESS,
-                                    commit_result="DIRECT_TOOL_EXECUTION",
-                                )
+                                # D1: COMPLETED is durable BEFORE success is authoritative - the result is not printed, and nothing is reported as success, until it is. If it cannot be,
+                                # the record still says "started": needs review, never retried automatically.
+                                try:
+                                    transition_mutating_run(
+                                        run_context, RunLifecycle.SUCCESS, durable=True,
+                                        commit_result="DIRECT_TOOL_EXECUTION",
+                                        tool_execution={"tool": tool_name, "state": "completed"},
+                                    )
+                                except DurableWriteError as error:
+                                    click.secho(
+                                        f"\n[NEEDS REVIEW] '{tool_name}' ran, but its completion could not be recorded durably ({error}). It is NOT reported as success and Kriya "
+                                        "will not retry it or start another run over it: inspect what it did first.", bold=True, fg="red")
+                                    sys.exit(1)
+                            if isinstance(result, (dict, list)):
+                                click.echo(json.dumps(result, indent=2))
+                            else:
+                                click.echo(result)
                 except UncertainWorkspaceStateError as e:
                     click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red")
                     sys.exit(1)
