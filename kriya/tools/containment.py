@@ -284,6 +284,10 @@ class FiniteLaunchStage:
     reached: str
 
     def wrap(self, command: List[str]) -> List[str]:
+        # FINITE-LAUNCH-EMPTY-ARGV-001: the launcher's `exec "$@"` with no operands is a successful no-op, not a target, so an empty argv must never reach it (it would be a false NOT_STARTED with
+        # status 0). `['']` is a real target that cannot start, which the launcher reports truthfully.
+        if not command:
+            raise ValueError("a finite contained command needs a target: the argv is empty")
         return [*self.prefix, *command]
 
     def read(self, stderr: str) -> Tuple[str, bool]:

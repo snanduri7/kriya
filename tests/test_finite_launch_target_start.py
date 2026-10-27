@@ -209,6 +209,17 @@ class _RefusingBackend(_ScriptedBackend):
         return PreparedContainment(env=None, preexec_fn=None, backend_name=self.name, finite_launch=launch)
 
 
+def test_an_empty_argv_is_refused_before_any_spawn_in_both_entry_points(tmp_path):
+    """FINITE-LAUNCH-EMPTY-ARGV-001 (own defect of the A2 stage): `[]` used to come back rc=0, target_started=False."""
+    backend = _ScriptedBackend()
+    with pytest.raises(ValueError, match="argv is empty"):
+        _run(tmp_path, [], backend)
+    with pytest.raises(ValueError, match="argv is empty"):
+        asyncio.run(ProcessController().run_async([], cwd=str(tmp_path), timeout=30, containment_profile=_profile(tmp_path), containment_backend=backend))
+    with pytest.raises(ValueError, match="argv is empty"):
+        _stage().wrap([])
+
+
 def test_a_runtime_refusal_before_any_container_is_not_started_and_keeps_its_message(tmp_path):
     result = _run(tmp_path, ["true"], _RefusingBackend())
     assert result.target_started is False and result.returncode == 125
@@ -298,6 +309,13 @@ def test_real_docker_a_runtime_refusal_before_any_container_exists_is_not_starte
     result = ProcessController().run(["/bin/true"], cwd=str(tmp_path), timeout=120, containment_profile=profile, containment_backend=OCIContainmentBackend())
     assert result.returncode == 125 and result.target_started is False, result
     assert "Minimum memory limit" in result.stderr
+
+
+@REAL_DOCKER
+def test_real_docker_a_blank_executable_is_a_real_target_that_cannot_start(tmp_path):
+    """`['']` is not 'no target': the launcher answers it truthfully as NOT_STARTED (MEASURED rc=126; the control that the empty-argv refusal is not a blanket refusal)."""
+    result = _contained(tmp_path, [""])
+    assert result.target_started is False and result.returncode == 126
 
 
 @REAL_DOCKER
