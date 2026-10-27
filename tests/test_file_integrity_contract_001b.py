@@ -271,7 +271,8 @@ def _gate_run(validator, gate, cmd, effect):
             self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
         return {"success": True}
 
-    with patch.object(PolymorphicValidator, "build_containment_profile_and_backend", return_value=(None, None)):
+    # ProcessController.run is stubbed above, so the profile and backend are never used: any stand-in pair satisfies the validator's "contained or refused" contract (there is no host (None, None))
+    with patch.object(PolymorphicValidator, "build_containment_profile_and_backend", return_value=(object(), object())):
         return _verification_gate(gate)(body)(validator)
 
 

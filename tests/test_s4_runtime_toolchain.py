@@ -190,10 +190,6 @@ class _Validator:
     def external_execution(self):
         return types.SimpleNamespace(contained=self._contained)
 
-    def build_subprocess_env_and_preexec(self):
-        assert not self._contained
-        return {"HOST": "policy"}, "preexec"
-
 
 def test_the_finite_command_preparation_always_takes_the_validators_contained_build(tmp_path):
     """S8: contained is the only mode - the preparation is handed the validator's contained Maven build and no host env/preexec policy."""

@@ -152,3 +152,30 @@ def test_the_host_semgrep_engine_identity_helper_and_its_only_consumer_are_gone(
     assert not {"host_executable_digest", "_file_sha256"} & defined
     offenders = [str(path.relative_to(ROOT)) for path in _production_sources() if "host_executable_digest" in path.read_text(encoding="utf-8")]
     assert offenders == [], f"host_executable_digest is referenced again: {offenders}"
+
+
+def test_the_validator_has_no_host_env_and_preexec_policy_and_its_one_spawn_is_contained():
+    """Family B. `build_subprocess_env_and_preexec` / `host_resource_plan` fed only the host tail of `_run_cmd_with_timeout`, reachable only through a (None, None) profile the builder never returns."""
+    defined = _defined_names("kriya/tools/validate.py")
+    assert not {"build_subprocess_env_and_preexec", "host_resource_plan"} & defined
+    node = _function("kriya/tools/validate.py", "PolymorphicValidator._run_cmd_with_timeout")
+    runs = [call for call in ast.walk(node) if isinstance(call, ast.Call) and getattr(call.func, "attr", None) == "run"]
+    assert len(runs) == 1, "exactly one spawn in the validator's command runner"
+    assert {"containment_profile", "containment_backend"} <= {kw.arg for kw in runs[0].keywords}
+    assert not {"env", "preexec_fn"} & {kw.arg for kw in runs[0].keywords}, "a host environment is passed again"
+    assert "ContainmentSetupError" in _names(node), "a missing profile/backend is the typed refusal"
+
+
+def test_a_validator_without_a_profile_or_backend_refuses_and_spawns_nothing(tmp_path):
+    """Family B negative control, behavioural: the (None, None) the builder used to be able to return is a typed refusal now, and no process is started."""
+    from unittest.mock import patch
+
+    from kriya.config.config import AutonomyConfig
+    from kriya.tools.containment import ContainmentSetupError
+    from kriya.tools.validate import PolymorphicValidator
+    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=AutonomyConfig())
+    for pair in ((None, None), (object(), None), (None, object())):
+        with patch.object(PolymorphicValidator, "build_containment_profile_and_backend", return_value=pair), \
+                patch("kriya.tools.validate.ProcessController.run") as run, pytest.raises(ContainmentSetupError, match="no host mode"):
+            validator._run_cmd_with_timeout(["echo", "x"], cwd=str(tmp_path))  # pylint: disable=protected-access
+        assert run.call_count == 0, f"{pair}: a process was started"

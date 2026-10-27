@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 
 from kriya.capabilities import BUILD_ADAPTERS, GRADLE, JAVA, JAVAC, PIP, PYTHON, build_adapter_for_tool
 from kriya.config.config import AutonomyConfig
-from kriya.config.environment import KRIYA_DIRECTORY_NAME, child_environment, expand_user
+from kriya.config.environment import KRIYA_DIRECTORY_NAME, expand_user
 from kriya.config.environment import state_dir as environment_state_dir
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.enforcement import enforce_hard_invariants
@@ -56,7 +56,6 @@ from kriya.tools.gate_view import (
     is_git_work_tree,
 )
 from kriya.tools.process import ProcessController
-from kriya.tools.sandbox import ResourcePlan, build_restricted_env, resource_plan
 from kriya.tools.toolchain_identity import resolve_toolchain_selection
 
 logger = logging.getLogger(__name__)
@@ -1146,55 +1145,6 @@ class PolymorphicValidator:
         except Exception as e:
             logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
 
-    def host_resource_plan(self, command: Optional[List[str]] = None) -> Optional[ResourcePlan]:
-        """LINUX-JVM-RLIMIT-AS-001: how the sandbox's CPU/memory budget is
-        enforced for a host process of this validator (None when
-        sandbox_execution is off). A Java stack's commands are JVM-backed:
-        explicit JVM memory bounds instead of RLIMIT_AS, which a JVM's
-        address-space reservation exceeds on Linux."""
-        if not self.autonomy_cfg.sandbox_execution:
-            return None
-        language = self.toolchain_identity.language if self.toolchain_identity is not None else self.stack
-        return resource_plan(
-            command, self.autonomy_cfg.sandbox_cpu_seconds, self.autonomy_cfg.sandbox_memory_mb, language=language,
-        )
-
-    def build_subprocess_env_and_preexec(
-        self, command: Optional[List[str]] = None,
-    ) -> Tuple[Optional[Dict[str, str]], Optional[Callable[[], None]]]:
-        """Shared sandbox-env + JAVA_HOME-override construction for every
-        subprocess this validator launches - factored out of
-        _run_cmd_with_timeout (2026-09-11) so a second caller (finite_command
-        runtime-artifact preparation, kriya/workflow/attempt.py, reusing
-        kriya/tools/service_runtime.py's _prepare_required_artifact for its
-        own `mvn package` call) gets the IDENTICAL policy instead of
-        reimplementing it - an `mvn package` that silently ran under a
-        different JDK than the one the compile gate just validated against
-        would be a real, confusing mismatch, not a hypothetical one. Pure
-        extraction: _run_cmd_with_timeout's own behavior is unchanged by
-        this refactor - no leading underscore, since it's now a shared
-        cross-module policy accessor, not a validator-internal detail."""
-        env = None
-        preexec_fn = None
-        plan = self.host_resource_plan(command)
-        if plan is not None:
-            env = plan.apply_env(build_restricted_env(self.autonomy_cfg.sandbox_env_allowlist))
-            preexec_fn = plan.preexec_fn()
-        if self.java_home_override:
-            # env is None here means "inherit the parent process's environment
-            # unchanged" (subprocess.Popen's own default) - that's no longer
-            # correct once we need to ADD one override on top of it, so make
-            # the inheritance explicit before overriding just the two JDK-
-            # selection variables. Setting both JAVA_HOME (what mvn's own
-            # launcher script checks first) and PATH (so a plain 'java'/'javac'
-            # invocation resolves the same way, in case anything downstream
-            # doesn't consult JAVA_HOME) covers both real mechanisms a JDK
-            # gets selected by.
-            env = dict(env) if env is not None else child_environment()
-            env["JAVA_HOME"] = self.java_home_override
-            env["PATH"] = os.path.join(self.java_home_override, "bin") + os.pathsep + env.get("PATH", "")
-        return env, preexec_fn
-
     @property
     def java_home_override(self) -> Optional[str]:
         return self._java_home_override
@@ -1430,27 +1380,23 @@ class PolymorphicValidator:
             dependency_cache_writable=dependency_cache_writable, acquisition=acquisition,
             workspace_path=workspace_path, venv_writable=venv_writable,
         )
-        if profile is not None:
-            result = ProcessController().run(
-                cmd, cwd=cwd, timeout=timeout, stdin_payload=stdin_payload,
-                containment_profile=profile, containment_backend=backend,
-            )
-            if network is NetworkAuthority.DEPENDENCY_REGISTRY_ONLY:
-                # SEC-006: raises RegistryAcquisitionSetupError (a
-                # ContainmentSetupError) rather than returning if the
-                # acquisition container's own trusted setup script
-                # (firewall/IPv6/privilege-drop) failed - never let that
-                # failure be misread as an ordinary mvn/pip result.
-                finalize_registry_acquisition_result(result)
-            return result.to_dict()
-        env, preexec_fn = self.build_subprocess_env_and_preexec(cmd)
+        if profile is None or backend is None:
+            # S8 orphan removal (S8-ORPHAN-HOST-CODE-001): the validator's profile builder never returns a host (None, None) (tests/test_s8_host_branches_are_gone.py), so no project-controlled
+            # command is ever spawned on the host from here; a missing profile or backend is the typed refusal, never a bare spawn.
+            raise ContainmentSetupError(
+                f"no containment profile/backend for {cmd[:1]!r}: project-controlled execution has no host mode and is refused, never run uncontained")
         result = ProcessController().run(
-            cmd, cwd=cwd, timeout=timeout, env=env, preexec_fn=preexec_fn, stdin_payload=stdin_payload,
-        ).to_dict()
-        plan = self.host_resource_plan(cmd)
-        if plan is not None:
-            result["resources"] = plan.evidence()
-        return result
+            cmd, cwd=cwd, timeout=timeout, stdin_payload=stdin_payload,
+            containment_profile=profile, containment_backend=backend,
+        )
+        if network is NetworkAuthority.DEPENDENCY_REGISTRY_ONLY:
+            # SEC-006: raises RegistryAcquisitionSetupError (a
+            # ContainmentSetupError) rather than returning if the
+            # acquisition container's own trusted setup script
+            # (firewall/IPv6/privilege-drop) failed - never let that
+            # failure be misread as an ordinary mvn/pip result.
+            finalize_registry_acquisition_result(result)
+        return result.to_dict()
 
     def _register_gate_output(self, cmd: List[str], cwd: str) -> None:
         """FILE-INTEGRITY-CONTRACT-001B: the verification gate now running
