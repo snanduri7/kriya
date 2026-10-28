@@ -117,7 +117,7 @@
   },
   {
    "attempt": 1,
-   "content": "sha256:1036a2172fe34fc8",
+   "content": "sha256:0eecdebe4906f31a",
    "event": "generation.completed",
    "source": "developer"
   },

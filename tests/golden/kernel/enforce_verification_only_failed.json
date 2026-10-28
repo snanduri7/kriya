@@ -417,7 +417,7 @@
     {
      "attempt": 1,
      "kind": "model.result",
-     "payload": "sha256:b930d636983688d5",
+     "payload": "sha256:0378a8ce9c456a39",
      "payload_keys": [
       "backend_error",
       "backend_status",
@@ -436,6 +436,7 @@
       "reasoning_chars",
       "reasoning_present",
       "reasoning_source",
+      "requested_model",
       "runtime_fingerprint",
       "runtime_fingerprint_exact",
       "status",
@@ -495,7 +496,7 @@
     {
      "attempt": 1,
      "content": {
-      "event": "sha256:217eed3ecb16bf75"
+      "event": "sha256:725fd0722b0ce190"
      },
      "event": "generation.completed",
      "kind": "mirror.event",
@@ -741,7 +742,7 @@
     {
      "attempt": null,
      "kind": "model.result",
-     "payload": "sha256:4150cee1630032ca",
+     "payload": "sha256:f64a585cb23d4986",
      "payload_keys": [
       "backend_error",
       "backend_status",
@@ -760,6 +761,7 @@
       "reasoning_chars",
       "reasoning_present",
       "reasoning_source",
+      "requested_model",
       "runtime_fingerprint",
       "runtime_fingerprint_exact",
       "status",
@@ -1625,7 +1627,7 @@
     {
      "attempt": 1,
      "kind": "model.result",
-     "payload": "sha256:8bedc03e7044e085",
+     "payload": "sha256:b32673613da770eb",
      "payload_keys": [
       "backend_error",
       "backend_status",
@@ -1644,6 +1646,7 @@
       "reasoning_chars",
       "reasoning_present",
       "reasoning_source",
+      "requested_model",
       "runtime_fingerprint",
       "runtime_fingerprint_exact",
       "status",
@@ -1703,7 +1706,7 @@
     {
      "attempt": 1,
      "content": {
-      "event": "sha256:dc517b8dad95f212"
+      "event": "sha256:0c79c18ad0be6634"
      },
      "event": "generation.completed",
      "kind": "mirror.event",
@@ -3004,7 +3007,7 @@
     {
      "attempt": 1,
      "authority": "advisory",
-     "details": "sha256:83b9f91c8735b4fb",
+     "details": "sha256:2549f513508837ff",
      "kind": "generation.completed",
      "source": "developer"
     },
@@ -3219,7 +3222,7 @@
     {
      "attempt": 1,
      "authority": "advisory",
-     "details": "sha256:5f1e66f64fc47480",
+     "details": "sha256:3ff09b999ff14582",
      "kind": "generation.completed",
      "source": "developer"
     },

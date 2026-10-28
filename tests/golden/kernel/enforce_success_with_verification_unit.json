@@ -417,7 +417,7 @@
     {
      "attempt": 1,
      "kind": "model.result",
-     "payload": "sha256:946e73b36e3fd6c6",
+     "payload": "sha256:a44c7e139fb40da6",
      "payload_keys": [
       "backend_error",
       "backend_status",
@@ -436,6 +436,7 @@
       "reasoning_chars",
       "reasoning_present",
       "reasoning_source",
+      "requested_model",
       "runtime_fingerprint",
       "runtime_fingerprint_exact",
       "status",
@@ -495,7 +496,7 @@
     {
      "attempt": 1,
      "content": {
-      "event": "sha256:1036a2172fe34fc8"
+      "event": "sha256:0eecdebe4906f31a"
      },
      "event": "generation.completed",
      "kind": "mirror.event",
@@ -609,7 +610,7 @@
     {
      "attempt": 1,
      "kind": "model.result",
-     "payload": "sha256:5ebfb912d8fb3844",
+     "payload": "sha256:4c5bb98b683ca3b6",
      "payload_keys": [
       "backend_error",
       "backend_status",
@@ -628,6 +629,7 @@
       "reasoning_chars",
       "reasoning_present",
       "reasoning_source",
+      "requested_model",
       "runtime_fingerprint",
       "runtime_fingerprint_exact",
       "status",
@@ -2182,7 +2184,7 @@
     {
      "attempt": 1,
      "authority": "advisory",
-     "details": "sha256:ef3929ed138765b3",
+     "details": "sha256:d97b944d8d320124",
      "kind": "generation.completed",
      "source": "developer"
     },
