@@ -48,6 +48,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya import __version__
+from kriya.control.commit_state import REASON_UNRESOLVED_TOOL_EXECUTION
 from kriya.control.persistence import (
     TRANSITION_NEEDS_REVIEW,
     complete_contract_transition,
@@ -181,6 +182,9 @@ class RecordFinding:
     proposed_commit_result: Optional[str] = None
     proposed_terminal_status: Optional[str] = None
     record: Optional[RunRecord] = field(default=None, compare=False, repr=False)
+    # W2-02: typed reasons this record needs an OPERATOR (not `recover`): UNRESOLVED_TOOL_EXECUTION = a direct `kriya tools execute` durably STARTED and never resolved. Read from
+    # the same RunRecord property the mutating-run gate reads, so status and the gate cannot disagree.
+    reason_codes: Tuple[str, ...] = ()
 
     @property
     def recoverable(self) -> bool:
@@ -193,7 +197,7 @@ class RecordFinding:
         return {txid: str(result) for txid, result in self.cycle_results.items()}
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "run_id": self.run_id, "lifecycle_state": self.lifecycle_state,
             "commit_result": self.commit_result, "cycle_results": dict(self.cycle_results),
             "blocked_reasons": list(self.blocked_reasons),
@@ -202,6 +206,9 @@ class RecordFinding:
             "proposed_commit_result": self.proposed_commit_result,
             "proposed_terminal_status": self.proposed_terminal_status,
         }
+        if self.reason_codes:  # additive (W2-02)
+            payload["reason_codes"] = list(self.reason_codes)
+        return payload
 
 
 @dataclass(frozen=True)
@@ -216,6 +223,18 @@ class RecoveryAssessment:
     # treated that directory as its own workspace). Not in this workspace's stores, so recovery cannot settle it: it needs a person.
     nested_workspace_state: Tuple[Tuple[str, str], ...] = ()
     nested_scan_complete: bool = True
+
+    @property
+    def unresolved_tool_run_ids(self) -> Tuple[str, ...]:
+        """W2-02: the direct tool executions awaiting an OPERATOR (`kriya runs tool-inspect|tool-abandon --run`); recovery never settles them."""
+        return tuple(item.run_id for item in self.records if REASON_UNRESOLVED_TOOL_EXECUTION in item.reason_codes)
+
+    @property
+    def manual_beyond_unresolved_tools(self) -> bool:
+        """True when something OTHER than an unresolved direct tool execution also needs manual action (so the generic advice still applies)."""
+        return bool(self.unreadable_records or self.evidence_error or self.nested_workspace_state or any(
+            item.outcome == OUTCOME_MANUAL or (item.outcome == OUTCOME_PARTIAL and item.roll_forward_refusal is not None) for item in self.evidence
+        ) or any(len(item.blocked_reasons) > (1 if REASON_UNRESOLVED_TOOL_EXECUTION in item.reason_codes else 0) for item in self.records))
 
     @property
     def status(self) -> str:
@@ -520,6 +539,14 @@ def _record_finding(
             blocked.append(f"{transaction_id}: workspace files match neither the recorded "
                            "before nor after state")
         results[transaction_id] = result
+    reason_codes: List[str] = []
+    unresolved_tool = record.unresolved_tool_execution
+    if unresolved_tool is not None:
+        # W2-02: a direct tool execution that may have had its effect is NOT settled by recovery (recover would label it FAILURE and report the workspace CLEAN while the
+        # mutating-run gate still refuses). It needs an operator disposition; the record is left exactly as it is.
+        reason_codes.append(REASON_UNRESOLVED_TOOL_EXECUTION)
+        blocked.append(f"{REASON_UNRESOLVED_TOOL_EXECUTION}: direct tool execution '{unresolved_tool}' was STARTED and never durably resolved; its side effect may or may not have happened. "
+                       f"`kriya runs recover` does not settle it: inspect it with `kriya runs tool-inspect --run {record.run_id}`, then `kriya runs tool-abandon --run {record.run_id} --confirm`")
     proposed_result = proposed_status = None
     if not blocked and not completable:
         preview = record.recover({txid: str(result) for txid, result in results.items()}, {})
@@ -529,7 +556,7 @@ def _record_finding(
         commit_result=record.commit_result, cycle_results=results,
         blocked_reasons=tuple(blocked), completable_transactions=tuple(completable),
         proposed_commit_result=proposed_result, proposed_terminal_status=proposed_status,
-        record=record,
+        record=record, reason_codes=tuple(reason_codes),
     )
 
 
@@ -540,7 +567,7 @@ def _assess_locked(workspace: str) -> RecoveryAssessment:
     evidence, evidence_error, by_id = _evidence_findings(workspace, scan.records)
     records = tuple(
         _record_finding(record, by_id, evidence_error)
-        for record in scan.records if record.needs_recovery
+        for record in scan.records if record.needs_recovery or record.unresolved_tool_execution is not None  # W2-02: a terminal record can be unresolved too
     )
     nested, nested_complete = nested_control_state(workspace)
     return RecoveryAssessment(

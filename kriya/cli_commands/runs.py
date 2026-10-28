@@ -21,13 +21,15 @@ from kriya.control.run_ownership import WorkspaceLockHeldError
 # depend on loading repository-controlled configuration.
 _RUNS_EXIT_ACTION_REQUIRED = 1
 _RUNS_EXIT_RUN_ACTIVE = 3
+_RUNS_EXIT_PERSISTENCE_FAILED = 4   # W2-02: an expected durable-write failure while recording a disposition (typed; never a traceback)
 
 
 @click.group(name="runs")
 def runs_group() -> None:
     """Inspect, recover and prune this workspace's run records and commit
     evidence. Exit codes: 0 = nothing needs attention, 1 = action required
-    (see the output), 3 = a live Kriya run holds the workspace lock."""
+    (see the output), 3 = a live Kriya run holds the workspace lock, 4 = a
+    durable write failed while recording a disposition."""
     pass
 
 
@@ -117,6 +119,14 @@ def _print_recovery_assessment(assessment) -> None:
             "`kriya runs status` again. `kriya runs recover` still settles everything else."
         ),
     }.get(assessment.status)
+    tool_runs = assessment.unresolved_tool_run_ids
+    if tool_runs:
+        # W2-02: an unresolved direct tool execution is an OPERATOR matter: `recover` does not settle it and the status is never CLEAN while the mutating-run gate refuses.
+        click.secho("\nA direct `kriya tools execute` run was STARTED and never durably resolved (its side effect may or may not have happened): "
+                    + ", ".join(tool_runs) + ". `kriya runs recover` does not settle it. Inspect it with `kriya runs tool-inspect --run RUN_ID`, then "
+                    "`kriya runs tool-abandon --run RUN_ID --confirm`.", fg="red")
+        if not assessment.manual_beyond_unresolved_tools:
+            advice = None
     if advice:
         click.echo(f"\n{advice}")
 
@@ -261,50 +271,107 @@ def _print_tool_entry(entry) -> None:
 
 @runs_group.command(name="tool-inspect")
 @_runs_workspace_option
+@click.option("--run", "run_id", default=None, help="Inspect ONE direct `kriya tools execute` run by its run id (read from its run record) instead of the plan TOOL subtasks.")
 @click.option("--json", "as_json", is_flag=True, help="Print the report as JSON.")
-def runs_tool_inspect(workspace: str, as_json: bool) -> None:
-    """Read-only: list the TOOL subtasks awaiting an operator, with their attempt and the kept evidence. Exit codes: 0 = none awaiting, 1 = action required, 3 = a live run holds the workspace."""
+def runs_tool_inspect(workspace: str, run_id: Optional[str], as_json: bool) -> None:
+    """Read-only. Without --run: the plan TOOL subtasks awaiting an operator (attempt and kept evidence), and a pointer to any direct tool run that is also awaiting one.
+    With --run RUN_ID: that direct tool run's authoritative run record. It never infers whether an unresolved side effect happened. Exit codes: 0 = none awaiting, 1 = action
+    required, 3 = a live run holds the workspace."""
     from kriya.context.workspace_identity import WorkspaceOwnershipError
-    from kriya.control.tool_disposition import inspect_tool_dispositions
+    from kriya.control.tool_disposition import inspect_direct_run, inspect_tool_dispositions, unresolved_direct_runs
 
     try:
+        if run_id is not None:
+            direct_report = inspect_direct_run(workspace, run_id)
+            if as_json:
+                click.echo(json.dumps(direct_report.to_dict(), indent=2, sort_keys=True))
+            elif direct_report.entry is None:
+                click.secho(f"Refused ({direct_report.reason_code}): {direct_report.message}", fg="red", err=True)
+            else:
+                click.echo(f"Workspace: {direct_report.workspace}")
+                _print_direct_entry(direct_report.entry)
+            if direct_report.entry is None or direct_report.entry.unresolved:
+                sys.exit(_RUNS_EXIT_ACTION_REQUIRED)
+            return
         report = inspect_tool_dispositions(workspace)
+        direct_awaiting = unresolved_direct_runs(workspace)
     except WorkspaceOwnershipError as error:
         click.secho(f"Refused: {error}", fg="red", err=True)
         sys.exit(_RUNS_EXIT_ACTION_REQUIRED)
     if as_json:
-        click.echo(json.dumps(report.to_dict(), indent=2, sort_keys=True))
+        data = report.to_dict()
+        if direct_awaiting:
+            data["direct_runs_awaiting_operator"] = [entry.to_dict() for entry in direct_awaiting]
+        click.echo(json.dumps(data, indent=2, sort_keys=True))
     else:
         click.echo(f"Workspace: {report.workspace}")
         if report.unreadable_control_state:
             click.secho(f"The control state cannot be read ({report.unreadable_control_state[1]}); nothing can be disposed until it is inspected.", fg="red")
         for entry in report.entries:
             _print_tool_entry(entry)
-        if not report.entries and not report.unreadable_control_state:
+        for direct in direct_awaiting:
+            click.secho(f"Direct tool run {direct.run_id} ({direct.tool}) is awaiting an operator: inspect it with `kriya runs tool-inspect --run {direct.run_id}`.", fg="yellow")
+        if not report.entries and not report.unreadable_control_state and not direct_awaiting:
             click.echo("No TOOL subtask is awaiting an operator.")
-    if report.entries or report.unreadable_control_state:
+    if report.entries or report.unreadable_control_state or direct_awaiting:
         sys.exit(_RUNS_EXIT_ACTION_REQUIRED)
 
 
-def _runs_tool_disposition_options(function):
-    for option in reversed((
-        click.argument("subtask_id"),
-        _runs_workspace_option,
-        click.option("--attempt", "attempt", type=click.IntRange(min=1), default=None, help="The attempt number shown by `inspect` (required unless --legacy)."),
-        click.option("--legacy", "legacy", is_flag=True, help="The subtask is listed as legacy/unversioned (no attempt number)."),
-        click.option("--confirm", "confirmed", is_flag=True, help="Explicit confirmation. There is no default: without it nothing changes."),
-        click.option("--operator", "operator", default=None, help="Recorded in the audit trail (default: the OS user)."),
-        click.option("--json", "as_json", is_flag=True, help="Print the result as JSON."),
-    )):
-        function = option(function)
-    return function
+def _print_direct_entry(entry) -> None:
+    click.secho(f"Direct tool run {entry.run_id}: {entry.classification}", bold=True)
+    click.echo(f"  tool: {entry.tool}")
+    click.echo(f"  lifecycle: {entry.lifecycle_state} (commit_result={entry.commit_result}, terminal_status={entry.terminal_status})")
+    click.echo(f"  tool execution state: {entry.execution_state}")
+    click.echo(f"  run record revision: {entry.revision}; created {entry.created_at}; last updated {entry.updated_at}")
+    click.echo(f"  allowed: {', '.join(entry.allowed_actions) or 'none'}")
+    if entry.disposition:
+        click.echo("  disposition: " + ", ".join(f"{key}={value}" for key, value in entry.disposition.items()))
+    for row in entry.history:
+        click.echo("  audit: " + ", ".join(f"{key}={value}" for key, value in row.items() if key in ("type", "action", "operator", "disposition_id", "prior_revision", "new_state")))
+
+
+def _runs_tool_disposition_options(direct: bool = False):
+    """The shared options of tool-abandon / tool-retry. ``direct=True`` (tool-abandon ONLY) adds --run and makes SUBTASK_ID optional; tool-retry never takes --run: a new direct
+    execution is a new `kriya tools execute` with its own run id and fresh authority, so there is no direct-run retry."""
+    def decorate(function):
+        options = [click.argument("subtask_id", required=not direct), _runs_workspace_option,
+                   click.option("--attempt", "attempt", type=click.IntRange(min=1), default=None, help="The attempt number shown by `inspect` (required unless --legacy)."),
+                   click.option("--legacy", "legacy", is_flag=True, help="The subtask is listed as legacy/unversioned (no attempt number).")]
+        if direct:
+            options.append(click.option("--run", "run_id", default=None, help="Abandon an unresolved direct `kriya tools execute` run by its run id (instead of SUBTASK_ID)."))
+        options += [click.option("--confirm", "confirmed", is_flag=True, help="Explicit confirmation. There is no default: without it nothing changes."),
+                    click.option("--operator", "operator", default=None, help="Recorded in the audit trail (default: the OS user)."),
+                    click.option("--json", "as_json", is_flag=True, help="Print the result as JSON.")]
+        for option in reversed(options):
+            function = option(function)
+        return function
+    return decorate
+
+
+def _runs_durable_write_failed(error, as_json: bool) -> None:
+    """The ONE translation of an expected persistence failure while recording a disposition: typed message and exit code, never a traceback. Nothing was executed. Whether the new
+    bytes are already visible depends on the failed step (a failure at ``directory_fsync`` happens after the atomic replace), so the message does not promise 'unchanged': re-running
+    the same command converges, and `tool-inspect` shows the state."""
+    step = getattr(error, "step", "unknown")
+    message = (f"The disposition could not be recorded durably (write step '{step}': {error}). Nothing was executed. Re-run the same command to converge, "
+               "or inspect the current state with `kriya runs tool-inspect`.")
+    if as_json:
+        click.echo(json.dumps({"status": "error", "reason_code": "DISPOSITION_DURABLE_WRITE_FAILED", "step": step, "message": message}, indent=2, sort_keys=True))
+    else:
+        click.secho(f"NOT RECORDED (DISPOSITION_DURABLE_WRITE_FAILED): {message}", fg="red", err=True)
+    sys.exit(_RUNS_EXIT_PERSISTENCE_FAILED)
 
 
 def _runs_tool_dispose(action: str, subtask_id: str, workspace: str, attempt: Optional[int], legacy: bool, confirmed: bool, operator: Optional[str], as_json: bool) -> None:
     import getpass
 
     from kriya.context.workspace_identity import WorkspaceOwnershipError
-    from kriya.control.tool_disposition import ToolDispositionEntry, apply_disposition, inspect_tool_dispositions
+    from kriya.control.tool_disposition import (
+        DurableWriteError,
+        ToolDispositionEntry,
+        apply_disposition,
+        inspect_tool_dispositions,
+    )
 
     if (attempt is None) == (not legacy):
         raise click.UsageError("give exactly one of --attempt N (as shown by `inspect`) or --legacy.")
@@ -322,6 +389,40 @@ def _runs_tool_dispose(action: str, subtask_id: str, workspace: str, attempt: Op
     except WorkspaceOwnershipError as error:
         click.secho(f"Refused: {error}", fg="red", err=True)
         sys.exit(_RUNS_EXIT_ACTION_REQUIRED)
+    except DurableWriteError as error:
+        _runs_durable_write_failed(error, as_json)
+    if as_json:
+        click.echo(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    elif result.ok:
+        click.secho(f"{result.status}: {result.message}", fg="green")
+    else:
+        click.secho(f"Refused ({result.reason_code}): {result.message}", fg="red", err=True)
+    if not result.ok:
+        sys.exit(_RUNS_EXIT_ACTION_REQUIRED)
+
+
+def _runs_tool_abandon_direct(run_id: str, workspace: str, confirmed: bool, operator: Optional[str], as_json: bool) -> None:
+    import getpass
+
+    from kriya.context.workspace_identity import WorkspaceOwnershipError
+    from kriya.control.tool_disposition import DurableWriteError, apply_direct_abandon, inspect_direct_run
+
+    try:
+        if not as_json:
+            report = inspect_direct_run(workspace, run_id)
+            if report.entry is not None:
+                _print_direct_entry(report.entry)
+                if report.entry.unresolved:
+                    click.secho("Its side effect MAY ALREADY HAVE HAPPENED; abandoning does not undo it and does not mean it failed or never started.", fg="yellow")
+        result = apply_direct_abandon(workspace, run_id, operator=operator or getpass.getuser(), confirmed=confirmed)
+    except WorkspaceLockHeldError as error:
+        click.secho(f"RUN_ACTIVE: {error}", fg="red", err=True)
+        sys.exit(_RUNS_EXIT_RUN_ACTIVE)
+    except WorkspaceOwnershipError as error:
+        click.secho(f"Refused: {error}", fg="red", err=True)
+        sys.exit(_RUNS_EXIT_ACTION_REQUIRED)
+    except DurableWriteError as error:
+        _runs_durable_write_failed(error, as_json)
     if as_json:
         click.echo(json.dumps(result.to_dict(), indent=2, sort_keys=True))
     elif result.ok:
@@ -333,14 +434,23 @@ def _runs_tool_dispose(action: str, subtask_id: str, workspace: str, attempt: Op
 
 
 @runs_group.command(name="tool-abandon")
-@_runs_tool_disposition_options
-def runs_tool_abandon(subtask_id, workspace, attempt, legacy, confirmed, operator, as_json) -> None:
-    """Abandon a TOOL subtask: it is never executed again and the plan cannot complete past it. Abandoning is not completing, and does not undo the effect."""
+@_runs_tool_disposition_options(direct=True)
+def runs_tool_abandon(subtask_id, workspace, attempt, legacy, run_id, confirmed, operator, as_json) -> None:
+    """Abandon an unresolved TOOL execution: give a plan SUBTASK_ID (never executed again; the plan cannot complete past it) OR --run RUN_ID (a direct `kriya tools execute` run:
+    the operator intentionally stops recovery of it). The two selectors are mutually exclusive. Abandoning is not completing, and does not undo the effect or say whether it happened."""
+    if run_id is not None:
+        if subtask_id is not None or attempt is not None or legacy:
+            raise click.UsageError("--run cannot be combined with SUBTASK_ID, --attempt or --legacy.")
+        _runs_tool_abandon_direct(run_id, workspace, confirmed, operator, as_json)
+        return
+    if subtask_id is None:
+        raise click.UsageError("give a plan SUBTASK_ID or --run RUN_ID.")
     _runs_tool_dispose("abandon", subtask_id, workspace, attempt, legacy, confirmed, operator, as_json)
 
 
 @runs_group.command(name="tool-retry")
-@_runs_tool_disposition_options
+@_runs_tool_disposition_options()
 def runs_tool_retry(subtask_id, workspace, attempt, legacy, confirmed, operator, as_json) -> None:
-    """Re-arm a TOOL subtask as a NEW attempt (N+1). Nothing is executed now: the next resume runs it through the normal policy/approval path with the authority current then."""
+    """Re-arm a plan TOOL subtask as a NEW attempt (N+1). Nothing is executed now: the next resume runs it through the normal policy/approval path with the authority current then.
+    There is no retry for a direct tool run: run `kriya tools execute` again (a new run id, fresh confirmation and authority)."""
     _runs_tool_dispose("retry", subtask_id, workspace, attempt, legacy, confirmed, operator, as_json)

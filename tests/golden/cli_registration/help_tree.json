@@ -5109,7 +5109,7 @@
     "tool-abandon": {
      "deprecated": false,
      "epilog": null,
-     "help": "Abandon a TOOL subtask: it is never executed again and the plan cannot complete past it. Abandoning is not completing, and does not undo the effect.",
+     "help": "Abandon an unresolved TOOL execution: give a plan SUBTASK_ID (never executed again; the plan cannot complete past it) OR --run RUN_ID (a direct `kriya tools execute` run:\nthe operator intentionally stops recovery of it). The two selectors are mutually exclusive. Abandoning is not completing, and does not undo the effect or say whether it happened.",
      "hidden": false,
      "name": "tool-abandon",
      "params": [
@@ -5123,7 +5123,7 @@
         "subtask_id"
        ],
        "param_type_name": "argument",
-       "required": true,
+       "required": false,
        "secondary_opts": [],
        "type": {
         "name": "text",
@@ -5208,6 +5208,29 @@
        "type": {
         "name": "boolean",
         "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Abandon an unresolved direct `kriya tools execute` run by its run id (instead of SUBTASK_ID).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "run_id",
+       "nargs": 1,
+       "opts": [
+        "--run"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
        }
       },
       {
@@ -5308,7 +5331,7 @@
     "tool-inspect": {
      "deprecated": false,
      "epilog": null,
-     "help": "Read-only: list the TOOL subtasks awaiting an operator, with their attempt and the kept evidence. Exit codes: 0 = none awaiting, 1 = action required, 3 = a live run holds the workspace.",
+     "help": "Read-only. Without --run: the plan TOOL subtasks awaiting an operator (attempt and kept evidence), and a pointer to any direct tool run that is also awaiting one.\nWith --run RUN_ID: that direct tool run's authoritative run record. It never infers whether an unresolved side effect happened. Exit codes: 0 = none awaiting, 1 = action\nrequired, 3 = a live run holds the workspace.",
      "hidden": false,
      "name": "tool-inspect",
      "params": [
@@ -5339,6 +5362,29 @@
         "param_type": "Path",
         "readable": true,
         "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Inspect ONE direct `kriya tools execute` run by its run id (read from its run record) instead of the plan TOOL subtasks.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "run_id",
+       "nargs": 1,
+       "opts": [
+        "--run"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
        }
       },
       {
@@ -5393,7 +5439,7 @@
     "tool-retry": {
      "deprecated": false,
      "epilog": null,
-     "help": "Re-arm a TOOL subtask as a NEW attempt (N+1). Nothing is executed now: the next resume runs it through the normal policy/approval path with the authority current then.",
+     "help": "Re-arm a plan TOOL subtask as a NEW attempt (N+1). Nothing is executed now: the next resume runs it through the normal policy/approval path with the authority current then.\nThere is no retry for a direct tool run: run `kriya tools execute` again (a new run id, fresh confirmation and authority).",
      "hidden": false,
      "name": "tool-retry",
      "params": [
@@ -5592,7 +5638,7 @@
    },
    "deprecated": false,
    "epilog": null,
-   "help": "Inspect, recover and prune this workspace's run records and commit\nevidence. Exit codes: 0 = nothing needs attention, 1 = action required\n(see the output), 3 = a live Kriya run holds the workspace lock.",
+   "help": "Inspect, recover and prune this workspace's run records and commit\nevidence. Exit codes: 0 = nothing needs attention, 1 = action required\n(see the output), 3 = a live Kriya run holds the workspace lock, 4 = a\ndurable write failed while recording a disposition.",
    "hidden": false,
    "name": "runs",
    "params": [

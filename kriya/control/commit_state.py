@@ -57,6 +57,9 @@ class WorkspaceCommitAssessment:
     # D1: ((run_id, (subtask_id, ...)),) of TOOL executions durably STARTED and never durably COMPLETED, read from the persisted ControlState. The ControlState is ONE document per
     # workspace, so a fresh run would silently overwrite this evidence: the gate refuses instead. `kriya runs recover` cannot settle it (nothing durable to settle from).
     unresolved_tool_executions: Tuple[Tuple[str, Tuple[str, ...]], ...] = ()
+    # W2-02: the run ids among ``unresolved_tool_executions`` that are DIRECT `kriya tools execute` runs (evidence: their RunRecord, not the ControlState), so the message names the
+    # command that can see each kind. Not part of the payload.
+    direct_tool_run_ids: Tuple[str, ...] = ()
 
     @property
     def safe(self) -> bool:
@@ -117,11 +120,21 @@ class WorkspaceCommitAssessment:
             parts.append("unsettled state left under a sub-directory of this repository by an earlier Kriya that treated that directory as its own workspace: "
                          + "; ".join(f"{directory} ({reason})" for directory, reason in self.nested_workspace_state))
         if self.unresolved_tool_executions:
-            parts.append("TOOL execution(s) STARTED and never durably COMPLETED, or failed after their effect may have begun (their side effect may or may not have happened): "
-                         + "; ".join(f"run {run_id}: {', '.join(ids)}" for run_id, ids in self.unresolved_tool_executions))
+            plan_entries = [(run_id, ids) for run_id, ids in self.unresolved_tool_executions if run_id not in self.direct_tool_run_ids]
+            direct_entries = [(run_id, ids) for run_id, ids in self.unresolved_tool_executions if run_id in self.direct_tool_run_ids]
+            guidance = []
+            if plan_entries:
+                parts.append("plan TOOL execution(s) STARTED and never durably COMPLETED, or failed after their effect may have begun (their side effect may or may not have happened): "
+                             + "; ".join(f"run {run_id}: {', '.join(ids)}" for run_id, ids in plan_entries))
+                guidance.append("for a plan TOOL subtask, inspect what it did with `kriya runs tool-inspect`, then abandon it or re-arm it as a new attempt with `kriya runs tool-abandon` / "
+                                "`kriya runs tool-retry` (the control state is the only evidence; do not delete it)")
+            if direct_entries:
+                parts.append("direct `kriya tools execute` run(s) STARTED and never durably resolved (their side effect may or may not have happened): "
+                             + "; ".join(f"run {run_id}: {', '.join(ids)}" for run_id, ids in direct_entries))
+                guidance.append("for a direct tool run, inspect it with `kriya runs tool-inspect --run RUN_ID`, then `kriya runs tool-abandon --run RUN_ID --confirm` "
+                                "(its run record is the evidence; `kriya runs recover` does not settle it; do not delete it)")
             if not self.recoverable and not self.ownership_reason_codes and not self.unreadable_control_state:
-                return ("The workspace holds an unresolved TOOL execution (" + "; ".join(parts) + "). Kriya will not retry it and will not start over it: inspect what it did with `kriya runs tool-inspect`, "
-                        "then abandon it or re-arm it as a new attempt with `kriya runs tool-abandon` / `kriya runs tool-retry` (the control state is the only evidence; do not delete it).")
+                return ("The workspace holds an unresolved TOOL execution (" + "; ".join(parts) + "). Kriya will not retry it and will not start over it: " + "; ".join(guidance) + ".")
         if self.unreadable_control_state:
             parts.append(f"control state unreadable and left untouched: {self.unreadable_control_state[0]} ({self.unreadable_control_state[1]})")
             if not self.recoverable and not self.ownership_reason_codes:
@@ -199,8 +212,9 @@ def assess_workspace_commit_state(
     if control_state is not None and control_state.run_id not in excluded and control_state.undisposed_tool_subtask_ids:
         unresolved_tools.append((control_state.run_id, control_state.undisposed_tool_subtask_ids))  # Wave 2 Slice A: STARTED-never-COMPLETED and failed-after-effect-may-have-begun
     # D1: a direct `kriya tools execute` whose RunRecord says "started" and never durably finished (whatever the record's lifecycle now says).
-    unresolved_tools.extend((record.run_id, (record.unresolved_tool_execution,)) for record in scan.records
-                            if record.run_id not in excluded and record.unresolved_tool_execution)
+    direct_unresolved = [(record.run_id, (record.unresolved_tool_execution,)) for record in scan.records
+                         if record.run_id not in excluded and record.unresolved_tool_execution]
+    unresolved_tools.extend(direct_unresolved)
     return WorkspaceCommitAssessment(
         uncertain_run_ids=uncertain_runs,
         unreadable_run_records=unreadable,
@@ -212,4 +226,5 @@ def assess_workspace_commit_state(
         commit_evidence_ownership_code=evidence_ownership_code,
         unreadable_control_state=unreadable_state,
         unresolved_tool_executions=tuple(unresolved_tools),
+        direct_tool_run_ids=tuple(run_id for run_id, _ in direct_unresolved),
     )

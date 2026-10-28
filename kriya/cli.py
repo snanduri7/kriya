@@ -29,11 +29,15 @@ from kriya.cli_commands.metrics import metrics_adjudications as metrics_adjudica
 from kriya.cli_commands.metrics import metrics_group as metrics_group
 from kriya.cli_commands.metrics import metrics_report as metrics_report
 from kriya.cli_commands.runs import _RUNS_EXIT_ACTION_REQUIRED as _RUNS_EXIT_ACTION_REQUIRED
+from kriya.cli_commands.runs import _RUNS_EXIT_PERSISTENCE_FAILED as _RUNS_EXIT_PERSISTENCE_FAILED
 from kriya.cli_commands.runs import _RUNS_EXIT_RUN_ACTIVE as _RUNS_EXIT_RUN_ACTIVE
+from kriya.cli_commands.runs import _print_direct_entry as _print_direct_entry
 from kriya.cli_commands.runs import _print_recovery_assessment as _print_recovery_assessment
 from kriya.cli_commands.runs import _print_tool_entry as _print_tool_entry
+from kriya.cli_commands.runs import _runs_durable_write_failed as _runs_durable_write_failed
 from kriya.cli_commands.runs import _runs_short as _runs_short
 from kriya.cli_commands.runs import _runs_state as _runs_state
+from kriya.cli_commands.runs import _runs_tool_abandon_direct as _runs_tool_abandon_direct
 from kriya.cli_commands.runs import _runs_tool_dispose as _runs_tool_dispose
 from kriya.cli_commands.runs import _runs_tool_disposition_options as _runs_tool_disposition_options
 from kriya.cli_commands.runs import _runs_workspace_option as _runs_workspace_option
@@ -752,6 +756,27 @@ def tools_list(ctx: click.Context) -> None:
         click.secho(f"Error: {e}", fg="red")
         sys.exit(1)
 
+# W2-02 (result truth): the exit code of `kriya tools execute` agrees with the authoritative outcome. 0 = the tool ran and succeeded; 1 = the tool reported a failure (or another
+# expected failure already reported with its own message: confirmation declined, workspace locked or unresolved, the start/completion not durably recorded); 2 = the tool's
+# arguments failed validation; 4 = the tool's own authority/policy refused the call. Classified from the TYPED cause BaseTool.execute chains, never from a message.
+_TOOLS_EXIT_TOOL_FAILED = 1
+_TOOLS_EXIT_INVALID_ARGUMENTS = 2
+_TOOLS_EXIT_REFUSED = 4
+
+
+def _tools_execute_failure_exit_code(error: BaseException) -> int:
+    from pydantic import ValidationError
+
+    from kriya.policy.errors import PolicyDeniedError
+
+    cause = error.__cause__
+    if isinstance(cause, PolicyDeniedError):
+        return _TOOLS_EXIT_REFUSED
+    if isinstance(cause, ValidationError):
+        return _TOOLS_EXIT_INVALID_ARGUMENTS
+    return _TOOLS_EXIT_TOOL_FAILED
+
+
 @tools_group.command(name="execute")
 @click.argument('tool_name')
 @click.argument('arguments_json', required=False)
@@ -797,6 +822,7 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
                 # PRD-006: a possibly-mutating direct tool call owns the
                 # workspace through the same gateway as generate/fix, so it
                 # can never run concurrently with a mutating Kriya run.
+                outcome_exit = 0  # W2-02: set by a tool failure; applied only AFTER the run record's terminal transition is persisted
                 try:
                     ownership = (
                         begin_mutating_run(os.getcwd())
@@ -817,6 +843,7 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
                             result = await tool.execute(**args)
                         except Exception as ex:
                             click.secho(f"Execution failed: {ex}", fg="red")
+                            outcome_exit = _tools_execute_failure_exit_code(ex)
                             if run_context is not None:
                                 # A failed tool may still have written: its
                                 # mutation is direct, never a commit transaction.
@@ -850,6 +877,8 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
                 except WorkspaceLockHeldError as e:
                     click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
                     sys.exit(1)
+                if outcome_exit:
+                    sys.exit(outcome_exit)
             finally:
                 # try/finally so a bad --yes-less invalid-JSON arguments_json,
                 # or any other exception before reaching the end of the happy

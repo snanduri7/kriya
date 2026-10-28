@@ -56,6 +56,15 @@ TERMINAL_LIFECYCLES = frozenset({
 # its commit state unknown. SUCCESS/FAILURE are already settled.
 _RECOVERABLE_TERMINALS = frozenset({RunLifecycle.UNCERTAIN})
 TERMINAL_STATUS_NEEDS_REVIEW = "NEEDS_REVIEW"
+
+# W2-02: the lifecycle of a direct `kriya tools execute` execution as RunRecord.tool_execution["state"]. A CLOSED set: only the states in TOOL_EXECUTION_RESOLVED
+# resolve an execution; "started" and anything else (an unknown or malformed value) is UNRESOLVED and blocks, never a silent pass.
+TOOL_EXECUTION_STARTED = "started"
+TOOL_EXECUTION_COMPLETED = "completed"
+TOOL_EXECUTION_FAILED = "failed"
+TOOL_EXECUTION_ABANDONED = "abandoned"
+TOOL_EXECUTION_RESOLVED = frozenset({TOOL_EXECUTION_COMPLETED, TOOL_EXECUTION_FAILED, TOOL_EXECUTION_ABANDONED})
+UNNAMED_TOOL = "<unnamed tool>"
 # Same word an ordinary failed run records (its lifecycle value).
 TERMINAL_STATUS_FAILURE = RunLifecycle.FAILURE.value
 
@@ -227,11 +236,32 @@ class RunRecord:
 
     @property
     def unresolved_tool_execution(self) -> Optional[str]:
-        """D1: the tool name of a direct tool execution that was durably STARTED and never durably finished, else None."""
+        """D1 / W2-02: the tool name (never empty) of a direct tool execution that was durably STARTED and never durably resolved, else None. The set of resolving states is
+        closed (TOOL_EXECUTION_RESOLVED): an unknown or malformed ``tool_execution`` is unresolved too, so it blocks rather than passing."""
         execution = self.tool_execution
-        if isinstance(execution, dict) and execution.get("state") == "started":
-            return str(execution.get("tool") or "")
-        return None
+        if execution is None:
+            return None
+        if not isinstance(execution, dict):
+            return UNNAMED_TOOL
+        if execution.get("state") in TOOL_EXECUTION_RESOLVED:
+            return None
+        return str(execution.get("tool") or UNNAMED_TOOL)
+
+    def abandon_tool_execution(self, disposition: Dict[str, Any]) -> "RunRecord":
+        """W2-02: the operator intentionally stops recovery of an UNRESOLVED direct tool execution (``state == "started"``, whatever the lifecycle). It does NOT mean the effect
+        never started, failed or completed. The lifecycle is left exactly as it is (no edge to SUCCESS, nothing is settled or retried); ``tool_execution`` becomes ``abandoned``
+        and keeps the original STARTED evidence and the prior lifecycle/outcome/revision. An unknown or malformed state is not abandonable (a person inspects it)."""
+        execution = self.tool_execution
+        if not (isinstance(execution, dict) and execution.get("state") == TOOL_EXECUTION_STARTED):
+            raise IllegalRunTransitionError(f"record {self.run_id!r} has no STARTED direct tool execution to abandon")
+        if self.lifecycle_state == RunLifecycle.SUCCESS:
+            raise IllegalRunTransitionError(f"record {self.run_id!r} is SUCCESS yet its tool execution is STARTED: contradictory evidence, not disposed here")
+        abandoned = {
+            "tool": execution.get("tool"), "state": TOOL_EXECUTION_ABANDONED, "started_evidence": dict(execution),
+            "prior_lifecycle_state": self.lifecycle_state.value, "prior_commit_result": self.commit_result, "prior_terminal_status": self.terminal_status,
+            "prior_revision": self.revision, "prior_updated_at": self.updated_at, "run_created_at": self.created_at, "disposition": dict(disposition),
+        }
+        return self._advance(self.lifecycle_state, tool_execution=abandoned)
 
     @property
     def unsettled_commits(self) -> Tuple[Dict[str, Any], ...]:
@@ -424,7 +454,7 @@ class RunRecord:
         # UNCERTAIN for a reason no commit cycle accounts for: a human looks.
         needs_review = any(cycle.get("result") == COMMIT_COMMITTED for cycle in commits) or (
             self.lifecycle_state == RunLifecycle.UNCERTAIN and not open_ids
-        )
+        ) or (isinstance(self.tool_execution, dict) and self.tool_execution.get("state") == TOOL_EXECUTION_ABANDONED)  # W2-02: an abandoned effect is never labelled FAILURE
         recovery = {
             **dict(provenance),
             "prior_lifecycle_state": self.lifecycle_state.value,

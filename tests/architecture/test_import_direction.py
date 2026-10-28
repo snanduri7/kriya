@@ -149,6 +149,7 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.cli", "kriya.workflow.requirement_disposition"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.cli", "kriya.workflow.review_context"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.cli", "kriya.policy.approval"): ("O2", _O2 + " (moved count-neutral in C3 from cli -> workflow.runtime_command_approval, now a facade: the CLI imports the owner; ADAPTER-CLI may import only the composition modules from L2-L3)"),  # direction ADAPTER-CLI -> AUTHORITY
+    ("kriya.cli", "kriya.policy.errors"): ("O2", _O2 + " (W2-02: the TYPED cause of a failed `kriya tools execute` - a tool's own PolicyDeniedError - decides the typed exit code; moves with the command body)"),
     ("kriya.cli", "kriya.workflow.untrusted_context"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.cli", "kriya.workflow.workflow_controller"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     # E14: the runs group's control.recovery edge MOVED (kriya.cli no longer imports it); two edges SPLIT (sites
