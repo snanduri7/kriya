@@ -32,6 +32,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_authority_invariants.py': ('S', 'M'),
  'tests/test_auto_skills.py': ('S', 'M'),
  'tests/test_autonomy.py': ('S', 'M'),
+ 'tests/test_b002_registry_non_utf8.py': ('S', 'M'),
  'tests/test_b2a_acceptance_oracle.py': ('S', 'M'),
  'tests/test_b2c_jvm_acceptance.py': ('N', 'M'),
  'tests/test_b2cov_claim_strength.py': ('S', 'M'),

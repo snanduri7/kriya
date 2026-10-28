@@ -544,6 +544,10 @@ def load_contract_registry(workspace_path: str) -> ContractRegistry:
             text = handle.read()
     except OSError as error:
         raise ContractRegistryCorruptError(path, f"unreadable: {error}") from error
+    except UnicodeDecodeError as error:
+        # RDCG B-002: bytes that are not UTF-8 are as unreadable as bytes that are not JSON - the same typed refusal, never a raw decode error
+        # that the callers' broad catches turn into a retried attempt or an unresumable checkpoint.
+        raise ContractRegistryCorruptError(path, f"unreadable: not valid UTF-8 ({error})") from error
     return _registry_from_text(path, text, workspace_path)
 
 
