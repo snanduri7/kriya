@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.mcp.invocation_approval import (
+    REASON_STORE_UNREADABLE,
     MCPApprovalArtifactError,
     MCPTrustPathInsideWorkspaceError,
     default_local_approval_path,
@@ -37,7 +38,6 @@ STATE_UNKNOWN = "UNKNOWN"
 STATE_NOT_APPLICABLE = "NOT_APPLICABLE"
 REASON_NO_RECORDS = "NO_RECORDS_FOR_SERVER"
 REASON_NEEDS_LIVE_IDENTITY = "RECORDS_NEED_LIVE_TOOL_IDENTITY"
-REASON_STORE_UNREADABLE = "APPROVAL_STORE_UNREADABLE_OR_INVALID"
 REASON_STORE_PATH_REFUSED = "APPROVAL_STORE_PATH_REFUSED"
 REASON_NOT_AN_MCP_SERVER = "NOT_AN_MCP_SERVER"
 REASON_NOT_FOUND = "TOOL_NOT_FOUND"

@@ -1811,6 +1811,22 @@ def _mcp_local_approval_path(workspace_root: str) -> str:
         _authority_fail(error)
 
 
+def _mcp_load_store_or_refuse(path: str, action: str):
+    """RDCG B-003(b) part 2: the local invocation-approval store as ``kriya mcp approve|revoke`` must see it - None only when it was never written. A store that exists but cannot be read
+    (corrupt, not UTF-8, an unknown schema, an unreadable file) is a typed operator refusal (exit 1, the canonical APPROVAL_STORE_UNREADABLE_OR_INVALID code): it is never treated as absent,
+    never overwritten and never merged into, so no earlier approval evidence is discarded and no approval is written over uncertain authority state. Kriya offers no automatic repair here:
+    the person inspects the file and moves it aside themself."""
+    from kriya.mcp.invocation_approval import REASON_STORE_UNREADABLE, MCPApprovalArtifactError, load_approval_artifact
+    try:
+        return load_approval_artifact(path)
+    except (MCPApprovalArtifactError, OSError) as error:
+        click.secho(
+            f"Cannot {action}: [{REASON_STORE_UNREADABLE}] the local invocation-approval store at {path} exists but cannot be read ({error}). It was left untouched and no approval "
+            "was changed; inspect it, then move it aside yourself if it is not evidence you need.", fg="red", err=True,
+        )
+        sys.exit(1)
+
+
 async def _discover_mcp_tools(cfg: AppConfig):
     """Starts a real Kernel - spawning every configured MCP server exactly
     like `tools list`/`tools execute` do - and returns (kernel, pairs)
@@ -1937,12 +1953,12 @@ def mcp_approve(ctx: click.Context, tool_name: str, confirm: bool) -> None:
     from kriya.mcp.invocation_approval import (
         add_approval,
         empty_artifact,
-        load_approval_artifact,
         save_approval_artifact,
     )
 
     workspace_root = _mcp_workspace_root()
     store_path = _mcp_local_approval_path(workspace_root)
+    _mcp_load_store_or_refuse(store_path, "approve")  # refused before any MCP server is started
 
     async def run() -> None:
         kernel, pairs = await _discover_mcp_tools(cfg)
@@ -1973,10 +1989,7 @@ def mcp_approve(ctx: click.Context, tool_name: str, confirm: bool) -> None:
                     sys.exit(1)
 
             path = store_path
-            try:
-                existing = load_approval_artifact(path)
-            except Exception:
-                existing = None
+            existing = _mcp_load_store_or_refuse(path, "approve")  # again at the write: a store that became unreadable since the check is still never overwritten
             base = existing if existing is not None else empty_artifact(workspace_identity(workspace_root))
             updated = add_approval(base, match.identity, match.capability_profile_identity.profile_digest)
             save_approval_artifact(path, updated)
@@ -2009,13 +2022,13 @@ def mcp_revoke(ctx: click.Context, tool_name: str) -> None:
         return
 
     from kriya.mcp.invocation_approval import (
-        load_approval_artifact,
         remove_approvals_for_identity,
         save_approval_artifact,
     )
 
     workspace_root = _mcp_workspace_root()
     store_path = _mcp_local_approval_path(workspace_root)
+    _mcp_load_store_or_refuse(store_path, "revoke")  # refused before any MCP server is started
 
     async def run() -> None:
         kernel, pairs = await _discover_mcp_tools(cfg)
@@ -2030,14 +2043,7 @@ def mcp_revoke(ctx: click.Context, tool_name: str) -> None:
                 sys.exit(1)
 
             path = store_path
-            try:
-                artifact = load_approval_artifact(path)
-            except Exception as e:
-                click.secho(
-                    f"Local invocation-approval store at {path} is present but invalid "
-                    f"({e}) - nothing to revoke.", fg="yellow",
-                )
-                return
+            artifact = _mcp_load_store_or_refuse(path, "revoke")  # an unreadable store is not "nothing to revoke": it may hold the approval being revoked
             if artifact is None:
                 click.echo(f"No local invocation-approval store at {path} - nothing to revoke.")
                 return

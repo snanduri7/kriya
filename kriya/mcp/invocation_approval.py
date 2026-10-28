@@ -52,6 +52,8 @@ from kriya.policy.model import MCPCapabilityProfileIdentity, MCPToolIdentity
 
 SCHEMA_VERSION = 1
 ENV_HOME_OVERRIDE = "KRIYA_MCP_APPROVAL_HOME"
+# The canonical code for "the approval store exists but cannot be read or is invalid" (the tool catalogue reports it as an UNKNOWN approval state, `kriya mcp approve|revoke` refuse with it).
+REASON_STORE_UNREADABLE = "APPROVAL_STORE_UNREADABLE_OR_INVALID"
 
 
 class MCPApprovalArtifactError(ValueError):
