@@ -891,6 +891,9 @@ _AUDITED_WRITE_SITES = {
     # GRADLE-WRAPPER-CONTAINMENT-001: the host-cache seed copies a verified Gradle distribution into the
     # Kriya-managed dependency cache under the state root (never a source tree) and writes its completion marker.
     "kriya/tools/dependency_execution.py": 3,
+    # R3: kriya/tools/dependency_cache.py owns the ephemeral dependency layers under the Kriya state root (the unit directory's marker file and the
+    # removal of a scope's layer and of a crashed process's) - Kriya's scratch, never tracked content.
+    "kriya/tools/dependency_cache.py": 2,
     "kriya/workflow/acceptance_jvm.py": 3, "kriya/workflow/acceptance_approval.py": 2,
     "kriya/workflow/requirement_contract.py": 2,
     # VENV-ADDITIVE-REUSE-001: the install marker beside the project venv and the venv's removal when a declared

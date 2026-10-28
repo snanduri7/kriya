@@ -12,6 +12,7 @@ import os
 from unittest.mock import patch
 
 import pytest
+from _dependency_scope import hold_dependency_scope
 
 from kriya.capabilities import (
     BUILD_ADAPTERS,
@@ -253,17 +254,18 @@ def test_a_gradle_start_failure_is_a_typed_no_verdict_never_undecided(tmp_path):
     from kriya.tools.containment import ContainmentSetupError
     from kriya.tools.dependency_execution import GRADLE_COMPILE_INDETERMINATE, GRADLE_INVOCATION_FAILED
 
+    # R3: the Gradle runner asks for its dependency directory, which exists only inside a verification scope; this test drives the adapter directly, so it holds one.
     _, patched = _gradle_runs(tmp_path, wrapper=True, side_effect=FileNotFoundError("gradlew"))
     with patched:
-        assert GRADLE.compile(_validator(tmp_path), ["App.java"], deadline=None) == {
+        assert GRADLE.compile(hold_dependency_scope(_validator(tmp_path)), ["App.java"], deadline=None) == {
             "success": False, "environment_reason_code": GRADLE_INVOCATION_FAILED,
             "output": "Failed to invoke ./gradlew compileJava: gradlew"}
     _, patched = _gradle_runs(tmp_path, side_effect=ContainmentSetupError("x"))
     with patched, pytest.raises(ContainmentSetupError):
-        GRADLE.compile(_validator(tmp_path), ["App.java"], deadline=None)
+        GRADLE.compile(hold_dependency_scope(_validator(tmp_path)), ["App.java"], deadline=None)
     _, patched = _gradle_runs(tmp_path, side_effect=RuntimeError("boom"))
     with patched:
-        result = GRADLE.compile(_validator(tmp_path), ["App.java"], deadline=None)
+        result = GRADLE.compile(hold_dependency_scope(_validator(tmp_path)), ["App.java"], deadline=None)
     assert result["success"] is False and result["environment_reason_code"] == GRADLE_COMPILE_INDETERMINATE and "RuntimeError: boom" in result["output"]
     assert GRADLE.compile(_validator(tmp_path / "empty"), ["App.java"], deadline=None) is None
 

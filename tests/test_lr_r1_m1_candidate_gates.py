@@ -9,6 +9,7 @@ invocation is recorded after it ran; every attempt closes with the ledger
 snapshot. The terminal gates are recorded from the report the commit
 decision reads.
 """
+import contextlib
 import os
 import subprocess
 
@@ -143,6 +144,10 @@ def _store(tmp_path, monkeypatch, run_id):
 class _NoGateRoot:
     """A stand-in validator that has no execution root to view (it never runs a command): the OI-142 scope hooks `_verification_gate` calls are
     no-ops, so these tests keep exercising the recorder (`gate.result`) alone."""
+
+    @contextlib.contextmanager
+    def dependency_cache_scope(self):  # R3: every gate opens a dependency scope; a validator that runs nothing has no layers to create
+        yield
 
     def _enter_gate_scope(self, _name):
         return None
