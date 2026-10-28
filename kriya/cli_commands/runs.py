@@ -94,7 +94,7 @@ def _print_recovery_assessment(assessment) -> None:
             click.echo(f"  {len(finding.leftover_staged_files)} staged temp file(s) to remove")
     for path, reason in assessment.unreadable_records:
         click.secho(f"\nUnreadable run record {path}: {reason}", fg="red")
-        if reason.startswith(recovery.DURABILITY_UNCONFIRMED):
+        if path in assessment.durability_unconfirmed_records:
             click.echo("  Kriya never edits or deletes it. Its durability could not be confirmed (a storage condition, not corruption): it keeps blocking; "
                        "retry once the storage recovers and do not move it.")
             continue

@@ -209,6 +209,11 @@ class UnreadableRunRecordError(RuntimeError):
         # refusal can say so instead of a generic "unreadable".
         self.reason_code = reason_code
 
+    @property
+    def durability_unconfirmed(self) -> bool:
+        """The structured fact (never the reason text): the record is visible but its durability could not be confirmed - a storage condition, not corruption."""
+        return self.durable_write_error is not None
+
 
 @dataclass(frozen=True)
 class RunRecordScan:
@@ -451,6 +456,11 @@ class ControlStateUnreadableError(RuntimeError):
         # DURABILITY_UNCONFIRMED only (see UnreadableRunRecordError.durable_write_error).
         self.durable_write_error = durable_write_error
 
+    @property
+    def durability_unconfirmed(self) -> bool:
+        """The structured fact (never the reason text): the state is visible but its durability could not be confirmed - a storage condition, not corruption."""
+        return self.durable_write_error is not None
+
 
 def _read_control_state_strict(workspace_path: str, *, confirm_durability: bool = True) -> Optional[ControlState]:
     """None only when the file has NEVER been saved; an existing file that cannot be parsed or reconstructed raises ControlStateUnreadableError. A state that carries a gate-clearing D1
@@ -474,14 +484,21 @@ def _read_control_state_strict(workspace_path: str, *, confirm_durability: bool 
     return state
 
 
-def inspect_control_state(workspace_path: str) -> Tuple[Optional[ControlState], Optional[Tuple[str, str]]]:
-    """Read-only: (the readable ControlState or None, (path, reason) of an existing control state that cannot be read or None). Never raises for those two outcomes."""
+def inspect_control_state_error(workspace_path: str) -> Tuple[Optional[ControlState], Optional[ControlStateUnreadableError]]:
+    """Read-only: (the readable ControlState or None, the typed error of an existing control state that cannot be read or None). Never raises for those two outcomes. The error keeps
+    ``durability_unconfirmed`` (a storage condition) distinct from corruption, which the (path, reason) form of ``inspect_control_state`` cannot."""
     try:
         return _read_control_state_strict(workspace_path), None
     except ControlStateUnreadableError as error:
-        return None, (error.path, error.reason)
+        return None, error
     except WorkspaceOwnershipError:
         return None, None  # the ownership gates own that refusal
+
+
+def inspect_control_state(workspace_path: str) -> Tuple[Optional[ControlState], Optional[Tuple[str, str]]]:
+    """Read-only: (the readable ControlState or None, (path, reason) of an existing control state that cannot be read or None). Never raises for those two outcomes."""
+    state, error = inspect_control_state_error(workspace_path)
+    return state, ((error.path, error.reason) if error is not None else None)
 
 
 def control_state_unreadable(workspace_path: str) -> Optional[Tuple[str, str]]:

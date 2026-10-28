@@ -50,9 +50,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from kriya import __version__
 from kriya.control.commit_state import REASON_UNRESOLVED_TOOL_EXECUTION
 from kriya.control.persistence import (
-    DURABILITY_UNCONFIRMED as DURABILITY_UNCONFIRMED,  # re-exported: the reason prefix `kriya runs` keys its operator advice on
-)
-from kriya.control.persistence import (
     TRANSITION_NEEDS_REVIEW,
     complete_contract_transition,
     nested_control_state,
@@ -221,6 +218,8 @@ class RecoveryAssessment:
     records: Tuple[RecordFinding, ...] = ()
     evidence: Tuple[EvidenceFinding, ...] = ()
     unreadable_records: Tuple[Tuple[str, str], ...] = ()
+    # DURABILITY-UNCONFIRMED-REASON-CODE-001: the paths among ``unreadable_records`` that are visible-but-unconfirmed-durable (a storage condition, not corruption), from the readers' typed errors.
+    durability_unconfirmed_records: Tuple[str, ...] = ()
     evidence_error: Optional[str] = None
     # D-001: ((directory, reason), ...) of unsettled/unreadable control state an earlier build left under a directory BELOW the repository root (it
     # treated that directory as its own workspace). Not in this workspace's stores, so recovery cannot settle it: it needs a person.
@@ -262,7 +261,7 @@ class RecoveryAssessment:
             "records": [item.to_dict() for item in self.records],
             "evidence": [item.to_dict() for item in self.evidence],
             "unreadable_records": [
-                {"path": path, "reason": reason} for path, reason in self.unreadable_records
+                {"path": path, "reason": reason, "durability_unconfirmed": path in self.durability_unconfirmed_records} for path, reason in self.unreadable_records
             ],
             "evidence_error": self.evidence_error,
             "nested_workspace_state": [{"directory": directory, "reason": reason} for directory, reason in self.nested_workspace_state],
@@ -576,6 +575,7 @@ def _assess_locked(workspace: str) -> RecoveryAssessment:
     return RecoveryAssessment(
         workspace_path=workspace, records=records, evidence=evidence,
         unreadable_records=tuple((item.path, item.reason) for item in scan.unreadable),
+        durability_unconfirmed_records=tuple(item.path for item in scan.unreadable if item.durability_unconfirmed),
         evidence_error=evidence_error, nested_workspace_state=nested, nested_scan_complete=nested_complete,
     )
 

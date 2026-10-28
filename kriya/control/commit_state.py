@@ -22,7 +22,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from kriya.context.workspace_identity import OWNERSHIP_REMEDIATION
 from kriya.control.persistence import (
     DURABILITY_UNCONFIRMED,
-    inspect_control_state,
+    inspect_control_state_error,
     nested_control_state,
     scan_run_records,
 )
@@ -41,6 +41,10 @@ REASON_NESTED_WORKSPACE_STATE = "NESTED_WORKSPACE_CONTROL_STATE"
 REASON_CONTROL_STATE_UNREADABLE = "CONTROL_STATE_UNREADABLE"
 # D1: a TOOL subtask was durably STARTED and never durably COMPLETED - its external effect may or may not have happened. A person reviews it; Kriya neither retries it nor starts over it.
 REASON_UNRESOLVED_TOOL_EXECUTION = "UNRESOLVED_TOOL_EXECUTION"
+# DURABILITY-UNCONFIRMED-REASON-CODE-001: a D1 TOOL disposition (RunRecord or ControlState) is VISIBLE but its durability could not be confirmed - a storage condition, not corruption. It blocks exactly
+# like the unreadable codes above (same coarse needs_review refusal) but is a different fact with different advice (retry once the storage recovers; moving the file would be wrong), so it has its own code and
+# is NOT also reported as RUN_RECORD_UNREADABLE / CONTROL_STATE_UNREADABLE. The fact comes from the readers' typed errors (durable_write_error), never from the reason text.
+REASON_DURABILITY_UNCONFIRMED = DURABILITY_UNCONFIRMED
 
 
 @dataclass(frozen=True)
@@ -65,6 +69,10 @@ class WorkspaceCommitAssessment:
     # W2-02: the run ids among ``unresolved_tool_executions`` that are DIRECT `kriya tools execute` runs (evidence: their RunRecord, not the ControlState), so the message names the
     # command that can see each kind. Not part of the payload.
     direct_tool_run_ids: Tuple[str, ...] = ()
+    # DURABILITY-UNCONFIRMED-REASON-CODE-001: the STRUCTURED subset of ``unreadable_run_records`` (paths) / ``unreadable_control_state`` that is a durability-unconfirmed state, not corruption. Those entries keep their
+    # (path, reason) detail but carry REASON_DURABILITY_UNCONFIRMED instead of the unreadable codes, and are not settleable by `kriya runs recover` (a later read confirms them, or nothing does).
+    durability_unconfirmed_run_records: Tuple[str, ...] = ()
+    control_state_durability_unconfirmed: bool = False
 
     @property
     def safe(self) -> bool:
@@ -78,8 +86,13 @@ class WorkspaceCommitAssessment:
         return sorted(codes)
 
     def _unreadable_for_other_reasons(self) -> Tuple[Tuple[str, str], ...]:
-        owned_out = {path for path, _code in self.run_record_ownership_refusals}
+        """The run records that are literally unreadable (corrupt, unknown schema, ...): neither refused for their ownership stamp nor visible-but-unconfirmed-durable."""
+        owned_out = {path for path, _code in self.run_record_ownership_refusals} | set(self.durability_unconfirmed_run_records)
         return tuple(item for item in self.unreadable_run_records if item[0] not in owned_out)
+
+    @property
+    def durability_unconfirmed(self) -> bool:
+        return bool(self.durability_unconfirmed_run_records or self.control_state_durability_unconfirmed)
 
     @property
     def recoverable(self) -> bool:
@@ -101,8 +114,10 @@ class WorkspaceCommitAssessment:
         codes.extend(self.ownership_reason_codes)
         if self.nested_workspace_state:
             codes.append(REASON_NESTED_WORKSPACE_STATE)
-        if self.unreadable_control_state:
+        if self.unreadable_control_state and not self.control_state_durability_unconfirmed:
             codes.append(REASON_CONTROL_STATE_UNREADABLE)
+        if self.durability_unconfirmed:
+            codes.append(REASON_DURABILITY_UNCONFIRMED)
         if self.unresolved_tool_executions:
             codes.append(REASON_UNRESOLVED_TOOL_EXECUTION)
         return codes
@@ -114,6 +129,8 @@ class WorkspaceCommitAssessment:
         other_unreadable = self._unreadable_for_other_reasons()
         if other_unreadable:
             parts.append(f"unreadable run records: {', '.join(p for p, _ in other_unreadable)}")
+        if self.durability_unconfirmed_run_records:
+            parts.append(f"run records whose durability could not be confirmed: {', '.join(self.durability_unconfirmed_run_records)}")
         for code in sorted({code for _path, code in self.run_record_ownership_refusals}):
             paths = ", ".join(path for path, item_code in self.run_record_ownership_refusals if item_code == code)
             parts.append(f"run records refused for their ownership stamp ({code}): {paths}. {OWNERSHIP_REMEDIATION}")
@@ -138,16 +155,19 @@ class WorkspaceCommitAssessment:
                              + "; ".join(f"run {run_id}: {', '.join(ids)}" for run_id, ids in direct_entries))
                 guidance.append("for a direct tool run, inspect it with `kriya runs tool-inspect --run RUN_ID`, then `kriya runs tool-abandon --run RUN_ID --confirm` "
                                 "(its run record is the evidence; `kriya runs recover` does not settle it; do not delete it)")
-            if not self.recoverable and not self.ownership_reason_codes and not self.unreadable_control_state:
+            if not self.recoverable and not self.ownership_reason_codes and not self.unreadable_control_state and not self.durability_unconfirmed:
                 return ("The workspace holds an unresolved TOOL execution (" + "; ".join(parts) + "). Kriya will not retry it and will not start over it: " + "; ".join(guidance) + ".")
         if self.unreadable_control_state:
-            parts.append(f"control state unreadable and left untouched: {self.unreadable_control_state[0]} ({self.unreadable_control_state[1]})")
-            if not self.recoverable and not self.ownership_reason_codes and self.unreadable_control_state[1].startswith(DURABILITY_UNCONFIRMED):
-                return ("The workspace's Kriya control state holds a TOOL disposition whose durability could not be confirmed (" + "; ".join(parts) + "). It keeps blocking and was left "
-                        "untouched: retry once the storage recovers; do not move or delete it.")
-            if not self.recoverable and not self.ownership_reason_codes:
-                return ("The workspace's Kriya control state cannot be read and was left untouched (" + "; ".join(parts) + "). Kriya will neither resume from it nor "
-                        "start fresh over it: inspect it, then move it aside yourself.")
+            if self.control_state_durability_unconfirmed:
+                parts.append(f"control state whose durability could not be confirmed and left untouched: {self.unreadable_control_state[0]} ({self.unreadable_control_state[1]})")
+            else:
+                parts.append(f"control state unreadable and left untouched: {self.unreadable_control_state[0]} ({self.unreadable_control_state[1]})")
+                if not self.recoverable and not self.ownership_reason_codes:
+                    return ("The workspace's Kriya control state cannot be read and was left untouched (" + "; ".join(parts) + "). Kriya will neither resume from it nor "
+                            "start fresh over it: inspect it, then move it aside yourself.")
+        if self.durability_unconfirmed and not self.recoverable and not self.ownership_reason_codes:
+            return ("The workspace holds a TOOL disposition whose durability could not be confirmed (" + "; ".join(parts) + "). It keeps blocking and was left "
+                    "untouched: retry once the storage recovers; do not move or delete it.")
         if not self.recoverable:
             # Every item already carries the ownership remediation (workspace_identity.OWNERSHIP_REMEDIATION); recovery is not advice here.
             return "The workspace's Kriya control state is not provably this workspace's (" + "; ".join(parts) + ")."
@@ -165,7 +185,7 @@ class WorkspaceCommitAssessment:
             "reason_codes": self.reason_codes,
             "uncertain_run_ids": list(self.uncertain_run_ids),
             "unreadable_run_records": [
-                {"path": path, "reason": reason} for path, reason in self.unreadable_run_records
+                {"path": path, "reason": reason, "durability_unconfirmed": path in self.durability_unconfirmed_run_records} for path, reason in self.unreadable_run_records
             ],
             "uncertain_commit_ids": list(self.uncertain_commit_ids),
             "nested_workspace_state": [{"directory": directory, "reason": reason} for directory, reason in self.nested_workspace_state],
@@ -177,7 +197,8 @@ class WorkspaceCommitAssessment:
         if self.unresolved_tool_executions:  # additive (D1)
             payload["unresolved_tool_executions"] = [{"run_id": run_id, "subtask_ids": list(ids)} for run_id, ids in self.unresolved_tool_executions]
         if self.unreadable_control_state:  # additive (D1)
-            payload["unreadable_control_state"] = {"path": self.unreadable_control_state[0], "reason": self.unreadable_control_state[1]}
+            payload["unreadable_control_state"] = {"path": self.unreadable_control_state[0], "reason": self.unreadable_control_state[1],
+                                                   "durability_unconfirmed": self.control_state_durability_unconfirmed}
         if self.run_record_ownership_refusals:  # additive: a refusal without ownership findings keeps its exact earlier shape
             payload["ownership_findings"] = [{"path": path, "reason_code": code} for path, code in self.run_record_ownership_refusals]
         return payload
@@ -215,7 +236,8 @@ def assess_workspace_commit_state(
         commit_ids = tuple(item.transaction_id for item in evidence)
         evidence_error = None
     nested, nested_complete = nested_control_state(workspace_path)
-    control_state, unreadable_state = inspect_control_state(workspace_path)
+    control_state, control_state_error = inspect_control_state_error(workspace_path)
+    unreadable_state = (control_state_error.path, control_state_error.reason) if control_state_error is not None else None
     unresolved_tools = []
     if control_state is not None and control_state.run_id not in excluded and control_state.undisposed_tool_subtask_ids:
         unresolved_tools.append((control_state.run_id, control_state.undisposed_tool_subtask_ids))  # Wave 2 Slice A: STARTED-never-COMPLETED and failed-after-effect-may-have-begun
@@ -235,4 +257,6 @@ def assess_workspace_commit_state(
         unreadable_control_state=unreadable_state,
         unresolved_tool_executions=tuple(unresolved_tools),
         direct_tool_run_ids=tuple(run_id for run_id, _ in direct_unresolved),
+        durability_unconfirmed_run_records=tuple(item.path for item in scan.unreadable if item.durability_unconfirmed),
+        control_state_durability_unconfirmed=bool(control_state_error is not None and control_state_error.durability_unconfirmed),
     )
