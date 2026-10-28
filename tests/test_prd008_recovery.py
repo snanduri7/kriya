@@ -444,7 +444,9 @@ def test_interrupt_with_a_failed_rollback_keeps_the_candidate_for_complete_parti
     monkeypatch.undo()
     assert _evidence(workspace).state is CommitState.UNCERTAIN
     assert _only_record(workspace).lifecycle_state is RunLifecycle.UNCERTAIN
-    assert len(_staged(workspace)) == 1  # kept: the only copy of pkg/new.py's bytes
+    # RDCG B-006: BOTH candidate copies are kept - pkg/new.py's never-applied one and a.py's re-created one (a.py was applied, its staged copy consumed, and its rollback restore failed) -
+    # each the exact candidate bytes, so recovery never has to take the candidate from the workspace
+    assert sorted(Path(path).read_bytes() for path in _staged(workspace)) == sorted([A_AFTER, NEW_AFTER])
     [finding] = assess_recovery(workspace).evidence
     assert finding.outcome == OUTCOME_PARTIAL and finding.roll_forward_refusal is None
 

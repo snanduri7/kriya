@@ -412,7 +412,9 @@ def _candidate_mode(item: StagedFileWrite) -> int:
         return 0o666 & ~current_umask
 
 
-def _stage_content(item: StagedFileWrite, transaction_id: str, index: int) -> str:
+def _stage_content(item: StagedFileWrite, transaction_id: str, index: int, *, mode: Optional[int] = None) -> str:
+    """Stage ``item``'s candidate bytes as a fully fsynced temp file beside its target. ``mode`` is the evidence's recorded candidate mode when a consumed copy is re-staged, so the
+    re-created copy never takes its mode from the (by then mutated) target."""
     parent = _existing_parent(item.target_path)
     fd, path = tempfile.mkstemp(
         prefix=f"{stage_file_prefix(transaction_id)}{index}-", dir=parent,
@@ -425,7 +427,7 @@ def _stage_content(item: StagedFileWrite, transaction_id: str, index: int) -> st
             )
             handle.flush()
             os.fsync(handle.fileno())
-        os.chmod(path, _candidate_mode(item))
+        os.chmod(path, _candidate_mode(item) if mode is None else mode)
         return path
     except Exception:
         try:
@@ -437,6 +439,44 @@ def _stage_content(item: StagedFileWrite, transaction_id: str, index: int) -> st
 
 def _candidate_bytes(item: StagedFileWrite) -> bytes:
     return item.content_bytes if item.content_bytes is not None else item.content.encode("utf-8")
+
+
+def _restage_consumed_candidates(
+    staged: List[StagedFileWrite], operations: Tuple[Dict[str, Any], ...], staged_paths: Dict[str, str],
+    targets: Iterable[str], transaction_id: str, created: Optional[Dict[str, str]] = None,
+) -> Dict[str, BaseException]:
+    """RDCG B-006: apply CONSUMES a target's staged copy (``os.replace``), so a target that was applied and is then restored by the in-process rollback has no candidate
+    bytes left anywhere durable, and ``kriya runs recover --complete-partial`` (which needs exactly one digest-bound staged copy per not-applied write) cannot finish an UNCERTAIN
+    commit. Re-create, through the one canonical mechanism (``_stage_content``: same prefix, same operation index, the evidence's recorded candidate mode), a staged copy of the exact
+    in-memory candidate bytes for every non-delete ``targets`` entry whose copy is gone, and register it in ``staged_paths`` so the existing settle rule keeps it while the
+    evidence is IN_PROGRESS/UNCERTAIN and removes it once it is settled. Never read from the workspace. Returns {target: error} for the copies that could not be re-created
+    (disk full, I/O error): the caller reports them and the commit stays UNCERTAIN - nothing is fabricated and recovery fails closed on the missing copy. ``created`` (when given)
+    receives {target: path} of the copies this call made, so a fully successful rollback can drop exactly those."""
+    wanted = set(targets)
+    failures: Dict[str, BaseException] = {}
+    for index, item in enumerate(staged):
+        if item.delete or item.target_path not in wanted:
+            continue
+        existing = staged_paths.get(item.target_path)
+        if existing is not None and os.path.exists(existing):
+            continue
+        try:
+            staged_paths[item.target_path] = _stage_content(item, transaction_id, index, mode=operations[index]["after"]["mode"])
+            if created is not None:
+                created[item.target_path] = staged_paths[item.target_path]
+        except Exception as error:  # a storage fault on the failure path is reported, not hidden and not fatal to the rollback
+            failures[item.target_path] = error
+    return failures
+
+
+def _unpreserved_note(failures: Dict[str, BaseException], workspace_path: Optional[str]) -> str:
+    """Diagnostic detail for UncertainCommitError: which targets could not have their candidate bytes preserved."""
+    if not failures:
+        return ""
+    shown = "; ".join(
+        f"{os.path.relpath(path, workspace_path) if workspace_path is not None else path}: {error}" for path, error in sorted(failures.items())
+    )
+    return f" Candidate bytes could not be preserved for recovery of: {shown}."
 
 
 def _file_state(data: Optional[bytes], mode: Optional[int]) -> Dict[str, Any]:
@@ -661,6 +701,11 @@ def commit_revision_grounded_batch(
     except BaseException as commit_error:
         # BaseException: a KeyboardInterrupt/SystemExit mid-apply must still
         # restore the workspace (PRD-005), then propagate unchanged below.
+        # RDCG B-006: before the rollback can leave an applied write without its candidate bytes, re-create the staged copies apply consumed.
+        restaged: Dict[str, str] = {}
+        preservation_failures = (
+            _restage_consumed_candidates(staged, operations, staged_paths, applied, transaction_id, restaged) if workspace_path is not None else {}
+        )
         rollback_errors = []
         for target_path in reversed(applied):
             try:
@@ -677,6 +722,16 @@ def commit_revision_grounded_batch(
                 _fsync_directory(os.path.dirname(target_path))
             except Exception as rollback_error:
                 rollback_errors.append(f"{target_path}: {rollback_error}")
+        if not rollback_errors:
+            # The rollback restored every applied path, so the re-created copies are not needed (the transaction settles ROLLED_BACK): drop exactly those now, before the
+            # created directories are removed - a copy beside a created file would otherwise keep its directory alive. With a failed rollback they stay (UNCERTAIN).
+            for target_path, restaged_path in restaged.items():
+                try:
+                    os.unlink(restaged_path)
+                except FileNotFoundError:
+                    pass
+                if staged_paths.get(target_path) == restaged_path:
+                    staged_paths.pop(target_path)
         for directory in reversed(created_directories):
             try:
                 os.rmdir(directory)
@@ -699,7 +754,7 @@ def commit_revision_grounded_batch(
         if rollback_errors:
             raise UncertainCommitError(
                 f"Candidate commit failed ({commit_error}); rollback also failed for: "
-                + "; ".join(rollback_errors)
+                + "; ".join(rollback_errors) + _unpreserved_note(preservation_failures, workspace_path)
             ) from commit_error
         if evidence_error is not None:
             # Source paths are restored, but the durable record still says
@@ -733,7 +788,11 @@ def commit_revision_grounded_batch(
         try:
             _persist_commit_evidence(workspace_path, committed_evidence)
         except Exception as error:
+            # RDCG B-006: every write was applied and its staged copy consumed; keep exact candidate copies so recovery never has to take the candidate from the workspace.
+            preservation_failures = _restage_consumed_candidates(
+                staged, operations, staged_paths, [item.target_path for item in staged], transaction_id,
+            )
             raise UncertainCommitError(
-                f"Source changes were applied but committed evidence could not be persisted: {error}"
+                f"Source changes were applied but committed evidence could not be persisted: {error}" + _unpreserved_note(preservation_failures, workspace_path)
             ) from error
     return BatchCommitResult(revisions, committed_evidence)

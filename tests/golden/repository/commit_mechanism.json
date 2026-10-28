@@ -463,6 +463,56 @@
     "<root>/ws/crlf.txt"
    ],
    [
+    "mkstemp",
+    ".kriya-stage-tx-mixed-0-",
+    null,
+    "<root>/ws/nested/dir"
+   ],
+   [
+    "os.open",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5",
+    "excl-create"
+   ],
+   [
+    "fdopen",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5",
+    "wb"
+   ],
+   [
+    "fsync",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5"
+   ],
+   [
+    "chmod",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5",
+    "0o644"
+   ],
+   [
+    "mkstemp",
+    ".kriya-stage-tx-mixed-1-",
+    null,
+    "<root>/ws"
+   ],
+   [
+    "os.open",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6",
+    "excl-create"
+   ],
+   [
+    "fdopen",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6",
+    "wb"
+   ],
+   [
+    "fsync",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6"
+   ],
+   [
+    "chmod",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6",
+    "0o754"
+   ],
+   [
     "open",
     "<root>/ws/crlf.txt.kriya-rollback-<pid>",
     "wb"
@@ -576,6 +626,14 @@
     "<root>/ws/nested/dir"
    ],
    [
+    "unlink",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5"
+   ],
+   [
+    "unlink",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6"
+   ],
+   [
     "rmdir",
     "<root>/ws/nested/dir"
    ],
@@ -608,21 +666,21 @@
    ],
    [
     "os.open",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp",
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp",
     "excl-create"
    ],
    [
     "fdopen",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp",
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp",
     "w"
    ],
    [
     "fsync",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp"
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp"
    ],
    [
     "replace",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp",
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp",
     "<root>/ws/.kriya/control/commits/tx-mixed.json"
    ],
    [
@@ -640,7 +698,7 @@
    ],
    [
     "unlink",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp"
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp"
    ],
    [
     "unlink",
@@ -996,6 +1054,31 @@
     "rb"
    ],
    [
+    "mkstemp",
+    ".kriya-stage-tx-mixed-0-",
+    null,
+    "<root>/ws/nested/dir"
+   ],
+   [
+    "os.open",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5",
+    "excl-create"
+   ],
+   [
+    "fdopen",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5",
+    "wb"
+   ],
+   [
+    "fsync",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5"
+   ],
+   [
+    "chmod",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5",
+    "0o644"
+   ],
+   [
     "unlink",
     "<root>/ws/nested/dir/created.txt"
    ],
@@ -1011,6 +1094,10 @@
    [
     "close",
     "<root>/ws/nested/dir"
+   ],
+   [
+    "unlink",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5"
    ],
    [
     "rmdir",
@@ -1045,21 +1132,21 @@
    ],
    [
     "os.open",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp",
+    "<root>/ws/.kriya/control/commits/.commit-#6.tmp",
     "excl-create"
    ],
    [
     "fdopen",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp",
+    "<root>/ws/.kriya/control/commits/.commit-#6.tmp",
     "w"
    ],
    [
     "fsync",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp"
+    "<root>/ws/.kriya/control/commits/.commit-#6.tmp"
    ],
    [
     "replace",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp",
+    "<root>/ws/.kriya/control/commits/.commit-#6.tmp",
     "<root>/ws/.kriya/control/commits/tx-mixed.json"
    ],
    [
@@ -1077,7 +1164,7 @@
    ],
    [
     "unlink",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp"
+    "<root>/ws/.kriya/control/commits/.commit-#6.tmp"
    ],
    [
     "unlink",
@@ -1568,6 +1655,81 @@
    [
     "unlink",
     "<root>/ws/.kriya/control/commits/.commit-#5.tmp"
+   ],
+   [
+    "mkstemp",
+    ".kriya-stage-tx-mixed-0-",
+    null,
+    "<root>/ws/nested/dir"
+   ],
+   [
+    "os.open",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#6",
+    "excl-create"
+   ],
+   [
+    "fdopen",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#6",
+    "wb"
+   ],
+   [
+    "fsync",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#6"
+   ],
+   [
+    "chmod",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#6",
+    "0o644"
+   ],
+   [
+    "mkstemp",
+    ".kriya-stage-tx-mixed-1-",
+    null,
+    "<root>/ws"
+   ],
+   [
+    "os.open",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#7",
+    "excl-create"
+   ],
+   [
+    "fdopen",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#7",
+    "wb"
+   ],
+   [
+    "fsync",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#7"
+   ],
+   [
+    "chmod",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#7",
+    "0o754"
+   ],
+   [
+    "mkstemp",
+    ".kriya-stage-tx-mixed-3-",
+    null,
+    "<root>/ws"
+   ],
+   [
+    "os.open",
+    "<root>/ws/.kriya-stage-tx-mixed-3-#8",
+    "excl-create"
+   ],
+   [
+    "fdopen",
+    "<root>/ws/.kriya-stage-tx-mixed-3-#8",
+    "wb"
+   ],
+   [
+    "fsync",
+    "<root>/ws/.kriya-stage-tx-mixed-3-#8"
+   ],
+   [
+    "chmod",
+    "<root>/ws/.kriya-stage-tx-mixed-3-#8",
+    "0o755"
    ]
   ],
   "error": {
@@ -1596,6 +1758,20 @@
     "dir",
     "0o755",
     null,
+    null
+   ],
+   [
+    "ws/.kriya-stage-tx-mixed-1-#7",
+    "file",
+    "0o754",
+    "33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b",
+    null
+   ],
+   [
+    "ws/.kriya-stage-tx-mixed-3-#8",
+    "file",
+    "0o755",
+    "6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4",
     null
    ],
    [
@@ -1645,6 +1821,13 @@
     "dir",
     "0o755",
     null,
+    null
+   ],
+   [
+    "ws/nested/dir/.kriya-stage-tx-mixed-0-#6",
+    "file",
+    "0o644",
+    "9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a",
     null
    ],
    [
@@ -3226,6 +3409,56 @@
     "<root>/ws/crlf.txt"
    ],
    [
+    "mkstemp",
+    ".kriya-stage-tx-mixed-0-",
+    null,
+    "<root>/ws/nested/dir"
+   ],
+   [
+    "os.open",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5",
+    "excl-create"
+   ],
+   [
+    "fdopen",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5",
+    "wb"
+   ],
+   [
+    "fsync",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5"
+   ],
+   [
+    "chmod",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5",
+    "0o644"
+   ],
+   [
+    "mkstemp",
+    ".kriya-stage-tx-mixed-1-",
+    null,
+    "<root>/ws"
+   ],
+   [
+    "os.open",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6",
+    "excl-create"
+   ],
+   [
+    "fdopen",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6",
+    "wb"
+   ],
+   [
+    "fsync",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6"
+   ],
+   [
+    "chmod",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6",
+    "0o754"
+   ],
+   [
     "open",
     "<root>/ws/crlf.txt.kriya-rollback-<pid>",
     "wb"
@@ -3339,6 +3572,14 @@
     "<root>/ws/nested/dir"
    ],
    [
+    "unlink",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5"
+   ],
+   [
+    "unlink",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6"
+   ],
+   [
     "rmdir",
     "<root>/ws/nested/dir"
    ],
@@ -3371,21 +3612,21 @@
    ],
    [
     "os.open",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp",
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp",
     "excl-create"
    ],
    [
     "fdopen",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp",
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp",
     "w"
    ],
    [
     "fsync",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp"
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp"
    ],
    [
     "replace",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp",
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp",
     "<root>/ws/.kriya/control/commits/tx-mixed.json"
    ],
    [
@@ -3403,7 +3644,7 @@
    ],
    [
     "unlink",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp"
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp"
    ],
    [
     "unlink",
@@ -4639,6 +4880,56 @@
     "<root>/ws/crlf.txt"
    ],
    [
+    "mkstemp",
+    ".kriya-stage-tx-mixed-0-",
+    null,
+    "<root>/ws/nested/dir"
+   ],
+   [
+    "os.open",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5",
+    "excl-create"
+   ],
+   [
+    "fdopen",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5",
+    "wb"
+   ],
+   [
+    "fsync",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5"
+   ],
+   [
+    "chmod",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5",
+    "0o644"
+   ],
+   [
+    "mkstemp",
+    ".kriya-stage-tx-mixed-1-",
+    null,
+    "<root>/ws"
+   ],
+   [
+    "os.open",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6",
+    "excl-create"
+   ],
+   [
+    "fdopen",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6",
+    "wb"
+   ],
+   [
+    "fsync",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6"
+   ],
+   [
+    "chmod",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6",
+    "0o754"
+   ],
+   [
     "open",
     "<root>/ws/crlf.txt.kriya-rollback-<pid>",
     "wb"
@@ -4776,21 +5067,21 @@
    ],
    [
     "os.open",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp",
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp",
     "excl-create"
    ],
    [
     "fdopen",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp",
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp",
     "w"
    ],
    [
     "fsync",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp"
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp"
    ],
    [
     "replace",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp",
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp",
     "<root>/ws/.kriya/control/commits/tx-mixed.json"
    ],
    [
@@ -4808,7 +5099,7 @@
    ],
    [
     "unlink",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp"
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp"
    ]
   ],
   "error": {
@@ -4840,6 +5131,13 @@
     null
    ],
    [
+    "ws/.kriya-stage-tx-mixed-1-#6",
+    "file",
+    "0o754",
+    "33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b",
+    null
+   ],
+   [
     "ws/.kriya-stage-tx-mixed-3-#4",
     "file",
     "0o755",
@@ -4868,6 +5166,13 @@
     null
    ],
    [
+    "ws/nested",
+    "dir",
+    "0o755",
+    null,
+    null
+   ],
+   [
     "ws/.kriya/control",
     "dir",
     "0o755",
@@ -4887,6 +5192,20 @@
     "0o600",
     "normalized:c4178c8dfbebd81675543fc5fd23219803c9c7f3cdca8a9cfee5b8465549ec8c",
     "{\"_workspace\":{\"version\":\"2\",\"workspace_id\":\"<workspace-id>\"},\"candidate_hash\":\"d47a94fb931abd4e49c8ec8558da6cb91e4d4609fa85452796999e9c3daa5949\",\"failure\":\"OSError: injected fault\",\"operations\":[{\"after\":{\"exists\":true,\"mode\":420,\"sha256\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\"},\"base_path\":\"nested/dir/created.txt\",\"before\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"candidate_revision\":\"9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a\",\"expected_base_exists\":false,\"expected_base_revision\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"CREATE\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"nested/dir/created.txt\"},{\"after\":{\"exists\":true,\"mode\":492,\"sha256\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\"},\"base_path\":\"modified.txt\",\"before\":{\"exists\":true,\"mode\":492,\"sha256\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\"},\"candidate_revision\":\"33af9965d66538f702a835925f134dfdae7de8764039886e1980c7517874500b\",\"expected_base_exists\":true,\"expected_base_revision\":\"8de7db8e9c971d82a4cae047a13b96adf440faaf07d42a90f38d386c2354ed6b\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"modified.txt\"},{\"after\":{\"exists\":false,\"mode\":null,\"sha256\":null},\"base_path\":\"deleted.txt\",\"before\":{\"exists\":true,\"mode\":416,\"sha256\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\"},\"candidate_revision\":null,\"expected_base_exists\":true,\"expected_base_revision\":\"729cabb7552dec28f655631c0d65e238e0b7c889492cccb78761a1fa7bf2e747\",\"kind\":\"DELETE\",\"operation\":\"delete\",\"stage_prefix\":null,\"target_path\":\"deleted.txt\"},{\"after\":{\"exists\":true,\"mode\":493,\"sha256\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\"},\"base_path\":\"crlf.txt\",\"before\":{\"exists\":true,\"mode\":420,\"sha256\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\"},\"candidate_revision\":\"6adc129c2038f41c45d1a27f913c4e7b7d97c46efa2f1d18f170478c15f9cbf4\",\"expected_base_exists\":true,\"expected_base_revision\":\"58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab\",\"kind\":\"MODIFY\",\"operation\":\"write\",\"stage_prefix\":\".kriya-stage-tx-mixed-\",\"target_path\":\"crlf.txt\"}],\"recovery\":null,\"result_revisions\":{},\"schema_version\":3,\"started_at_unix\":1000001.0,\"state\":\"uncertain\",\"transaction_id\":\"tx-mixed\",\"updated_at_unix\":1000003.0}\n"
+   ],
+   [
+    "ws/nested/dir",
+    "dir",
+    "0o755",
+    null,
+    null
+   ],
+   [
+    "ws/nested/dir/.kriya-stage-tx-mixed-0-#5",
+    "file",
+    "0o644",
+    "9727cdaecdd0afa3fdd4e446012e39f42bff164515e426207cda209b597a834a",
+    null
    ]
   ]
  },
@@ -5242,6 +5561,56 @@
     "<root>/ws/crlf.txt"
    ],
    [
+    "mkstemp",
+    ".kriya-stage-tx-mixed-0-",
+    null,
+    "<root>/ws/nested/dir"
+   ],
+   [
+    "os.open",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5",
+    "excl-create"
+   ],
+   [
+    "fdopen",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5",
+    "wb"
+   ],
+   [
+    "fsync",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5"
+   ],
+   [
+    "chmod",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5",
+    "0o644"
+   ],
+   [
+    "mkstemp",
+    ".kriya-stage-tx-mixed-1-",
+    null,
+    "<root>/ws"
+   ],
+   [
+    "os.open",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6",
+    "excl-create"
+   ],
+   [
+    "fdopen",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6",
+    "wb"
+   ],
+   [
+    "fsync",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6"
+   ],
+   [
+    "chmod",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6",
+    "0o754"
+   ],
+   [
     "open",
     "<root>/ws/crlf.txt.kriya-rollback-<pid>",
     "wb"
@@ -5355,6 +5724,14 @@
     "<root>/ws/nested/dir"
    ],
    [
+    "unlink",
+    "<root>/ws/nested/dir/.kriya-stage-tx-mixed-0-#5"
+   ],
+   [
+    "unlink",
+    "<root>/ws/.kriya-stage-tx-mixed-1-#6"
+   ],
+   [
     "rmdir",
     "<root>/ws/nested/dir"
    ],
@@ -5387,32 +5764,32 @@
    ],
    [
     "os.open",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp",
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp",
     "excl-create"
    ],
    [
     "fdopen",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp",
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp",
     "w"
    ],
    [
     "fsync",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp"
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp"
    ],
    [
     "replace",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp",
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp",
     "<root>/ws/.kriya/control/commits/tx-mixed.json"
    ],
    [
     "FAULT",
     "replace",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp",
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp",
     "<root>/ws/.kriya/control/commits/tx-mixed.json"
    ],
    [
     "unlink",
-    "<root>/ws/.kriya/control/commits/.commit-#5.tmp"
+    "<root>/ws/.kriya/control/commits/.commit-#7.tmp"
    ]
   ],
   "error": {
