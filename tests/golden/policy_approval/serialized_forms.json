@@ -9,7 +9,7 @@
  "build_pending_runtime.unreviewable": "null",
  "candidate_digest": "sha256:2287d212a1ffb0c456abc74383fdb7d1de2889cdab7534456777c6002051b360",
  "class_names": "[\"RuntimeCommandSubject\", \"RuntimeCommandDecision\", \"TypedApprovalCallback\", \"ApprovalRefused\"]",
- "constants": "[\"runtime_command\", 2, 20, 4000, \"change_approval\", \"runtime_command\", [\"change_approval\", \"runtime_command\"], \"ISOLATED_WORKTREE\", \"=== Automated Code Review ===\", [\"INVALID_REQUEST\", \"LAUNCH_NOT_FOUND\", \"LAUNCH_RECORD_UNREADABLE\", \"WRONG_WORKSPACE\", \"LAUNCH_ENDED\", \"LAUNCH_NOT_ACTIVE\", \"NOT_PENDING\", \"STALE_REVIEW\", \"ALREADY_DECIDED\", \"REVIEW_EXPIRED\", \"DECISION_NOT_RECORDED\", \"WRONG_REVIEW_KIND\"]]",
+ "constants": "[\"runtime_command\", 2, 20, 4000, \"change_approval\", \"runtime_command\", [\"change_approval\", \"runtime_command\"], \"ISOLATED_WORKTREE\", \"=== Automated Code Review ===\", [\"INVALID_REQUEST\", \"LAUNCH_NOT_FOUND\", \"LAUNCH_RECORD_UNREADABLE\", \"WRONG_WORKSPACE\", \"LAUNCH_ENDED\", \"LAUNCH_NOT_ACTIVE\", \"NOT_PENDING\", \"STALE_REVIEW\", \"ALREADY_DECIDED\", \"REVIEW_EXPIRED\", \"DECISION_NOT_RECORDED\", \"WRONG_REVIEW_KIND\", \"CAPABILITY_MISMATCH\"]]",
  "decision.repr": "[\"RuntimeCommandDecision(approved_fingerprint='sha256:f')\", \"RuntimeCommandDecision(approved_fingerprint=None)\"]",
  "fingerprint_of": "sha256:3a1108031bf741c67432f8eaace60063b58842d0ad32786ef354752a7986358b",
  "fingerprint_of.stdin": "sha256:0f7f99ab6434949fe2da595839e1b7790680b0544acc58140f7d5fa45b79e987",
