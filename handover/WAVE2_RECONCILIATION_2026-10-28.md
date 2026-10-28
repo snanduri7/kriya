@@ -371,3 +371,15 @@ Evidence outside the repo: `~/kriya-fixforward-2026-10-22/closure/exec_layer/d2_
 **W2-03 umbrella CLOSED.** Every item has its disposition and no authority item remains open: R2 / milestone step runner - removed from W2-03 (OI-142 trusted infrastructure); W2-04 - FIXED+VERIFIED (this section, R-A); W2-05 `TOOL-SUBTASK-DESKTOP-REVIEW-001` - INTENTIONAL AUTHORITY CONTRACT, CLOSED; W2-06 `GUI-RUNTIME-COMMAND-APPROVAL-001` - FIXED+VERIFIED, CLOSED; W2-07(a) `DIFF-APPLIED-BYTES-BINDING-001` - FIXED+VERIFIED, CLOSED; W2-07(b) `CANDIDATE-MODE-DRIFT-FROM-CHECKOUT-001` - FIXED+VERIFIED, CLOSED (non-UTF-8 not reachable; mode display not reachable under the current contract); row 302 `D1-CORE-TOOL-POLICY-NOT-REVALIDATED-ON-RESUME-001` - INTENTIONAL CONTRACT, CLOSED.
 
 **Open after this section (not W2-03).** `DURABILITY-UNCONFIRMED-REASON-CODE-001` (P3 OPEN; resolve whether to add the distinct machine-readable code before Wave-2 closes - it did not preempt A or B); `TEST-SLICE-A-OCI-STALE-NESTED-COMMAND-STRING-001` (P3 OPEN); close "TOOL Execution Disposition" now that W2-01/02/03 all have dispositions (owner's call to sequence). Not started: malformed durable state (B-002, B-005, SEC-009 half of B-003), B-006, D-002, JVM / result-truth Slice F (W2-26 awaits the owner's confirmation of the F7 extension). REG-R1 stays UNKNOWN. Nothing pushed, nothing tagged, `refs/kriya/verified` unmoved.
+
+## 15. TOOL Execution Disposition - bookkeeping disposition (2026-10-28, evidence-only)
+
+W2-01, W2-02 and W2-03 all have explicit dispositions (8.1, 9, 10/11). The substantive TOOL execution-disposition work is dispositioned; remaining residuals are tracked independently.
+
+* **Scoped wording only.** "TOOL Execution Disposition" is a ledger group (Group A), not a registry row. No umbrella registry row exists, none was created, and nothing is claimed FIXED+VERIFIED at umbrella level. Each slice keeps its own row and its own verified scope (W2-01 is CLOSED for the verified plan-TOOL semantics, 8.1).
+* **Residuals (each tracked by its own registry row, neither blocks this disposition):** `DURABILITY-UNCONFIRMED-REASON-CODE-001` (P3 OPEN); `TEST-SLICE-A-OCI-STALE-NESTED-COMMAND-STRING-001` (P3 OPEN, test hygiene).
+* **Not a residual.** `DURABLE-DISPOSITION-DIRECTORY-FSYNC-VISIBLE-BEFORE-DURABLE-001` is CLOSED (section 10). The "two rows stay OPEN" wording in section 9 predates that closure.
+* **No slice reopened.** No new measured evidence was introduced.
+* **Registry.** `handover/BACKLOG_REGISTRY.csv` is not modified by this entry (every row it concerns already carries its own status), so the byte-exact CSV script was not needed.
+* **Verification scope.** This entry changes no code. The gates quoted in sections 8-14 stay scoped to what they ran (state_machine 1770, tests/contracts 26, ruff/pylint 0 at `b77c7c1`); the full suite has not been run (owner batch boundary).
+* **Next (owner order).** Read-only characterization of the malformed durable state (B-002, B-005, B-003(a)/(b)) and `DURABILITY-UNCONFIRMED-REASON-CODE-001`; B-004 stays out (decision-pending).
