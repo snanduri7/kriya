@@ -1819,7 +1819,7 @@ def _mcp_load_store_or_refuse(path: str, action: str):
     from kriya.mcp.invocation_approval import REASON_STORE_UNREADABLE, MCPApprovalArtifactError, load_approval_artifact
     try:
         return load_approval_artifact(path)
-    except (MCPApprovalArtifactError, OSError) as error:
+    except MCPApprovalArtifactError as error:  # the loader types every read failure (open errors included) as this; a survivor mutant proved an OSError branch here unreachable
         click.secho(
             f"Cannot {action}: [{REASON_STORE_UNREADABLE}] the local invocation-approval store at {path} exists but cannot be read ({error}). It was left untouched and no approval "
             "was changed; inspect it, then move it aside yourself if it is not evidence you need.", fg="red", err=True,
