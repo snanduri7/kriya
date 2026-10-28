@@ -441,6 +441,14 @@ def _candidate_bytes(item: StagedFileWrite) -> bytes:
     return item.content_bytes if item.content_bytes is not None else item.content.encode("utf-8")
 
 
+def _discard_staged(path: str) -> None:
+    """Remove one staged temp copy (the single place a settled or no-longer-needed copy is deleted)."""
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+
+
 def _restage_consumed_candidates(
     staged: List[StagedFileWrite], operations: Tuple[Dict[str, Any], ...], staged_paths: Dict[str, str],
     targets: Iterable[str], transaction_id: str, created: Optional[Dict[str, str]] = None,
@@ -726,10 +734,7 @@ def commit_revision_grounded_batch(
             # The rollback restored every applied path, so the re-created copies are not needed (the transaction settles ROLLED_BACK): drop exactly those now, before the
             # created directories are removed - a copy beside a created file would otherwise keep its directory alive. With a failed rollback they stay (UNCERTAIN).
             for target_path, restaged_path in restaged.items():
-                try:
-                    os.unlink(restaged_path)
-                except FileNotFoundError:
-                    pass
+                _discard_staged(restaged_path)
                 if staged_paths.get(target_path) == restaged_path:
                     staged_paths.pop(target_path)
         for directory in reversed(created_directories):
@@ -771,10 +776,7 @@ def commit_revision_grounded_batch(
     finally:
         if evidence_settled or not mutation_started:
             for path in staged_paths.values():
-                try:
-                    os.unlink(path)
-                except FileNotFoundError:
-                    pass
+                _discard_staged(path)
 
     revisions = {
         item.target_path: raw_digest(b"" if item.delete else _candidate_bytes(item))
