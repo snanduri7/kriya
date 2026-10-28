@@ -468,14 +468,16 @@ def test_a_javac_failure_is_decided_with_the_enriched_compiler_output(tmp_path):
         "Java compilation failed:\nApp.java:1: error: reached end"
 
 
-def test_javac_start_failures_behave_exactly_as_before(tmp_path):
+def test_javac_start_failures_are_typed_and_a_containment_setup_failure_still_propagates(tmp_path):
+    """COMPILE-GATE-RAW-JAVAC-CONVICTION-WITHOUT-VERDICT-001: a javac that could not start observed nothing about the candidate, so it is the typed
+    JAVAC_INVOCATION_FAILED environment result (it was an uncoded failure the Developer was asked to repair); the containment-setup propagation is unchanged."""
     from kriya.tools.containment import ContainmentSetupError
 
     _write(tmp_path, "App.java", "class App {}")
     _, patched = _javac_runs(side_effect=FileNotFoundError("javac"))
     with patched:
         assert _validator(tmp_path).run_compile_check(["App.java"]) == {
-            "success": False, "output": "Javac compilation tool invocation failed: javac"}
+            "success": False, "environment_reason_code": "JAVAC_INVOCATION_FAILED", "output": "Failed to invoke javac: javac"}
     _, patched = _javac_runs(side_effect=ContainmentSetupError("no backend"))
     with patched, pytest.raises(ContainmentSetupError):
         _validator(tmp_path).run_compile_check(["App.java"])
@@ -551,7 +553,7 @@ def test_javac_resolver_lookup_needs_both_open_egress_and_web_lookup(tmp_path, e
     autonomy = AppConfig().autonomy.model_copy(update={"egress_policy": egress, "web_lookup_enabled": web_lookup})
     v = PolymorphicValidator(str(tmp_path), autonomy_cfg=autonomy)
     seen = []
-    _, patched = _javac_runs({"returncode": 1, "stdout": "", "stderr": "App.java:1: error"})
+    _, patched = _javac_runs({"returncode": 1, "stdout": "", "stderr": "App.java:1: error: reached end of file while parsing"})
     with patched, patch("kriya.tools.resolver.enrich_java_compiler_errors",
                         side_effect=lambda text, allow_external_lookup: seen.append(allow_external_lookup) or text):
         v.run_compile_check(["App.java"])

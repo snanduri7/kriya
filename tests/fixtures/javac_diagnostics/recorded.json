@@ -1,0 +1,93 @@
+{
+ "_provenance": "Recorded 2026-10-28 from real javac in docker image maven:3.9-eclipse-temurin-21 (OCI-contained Kriya run for the located forms, direct `docker run javac -proc:none -d build <paths>` for the rest); stderr verbatim. Evidence: WAVE2_RAWJAVAC_CHARACTERIZATION_2026-10-28.",
+ "type_error": {
+  "paths": [
+   "src/App.java"
+  ],
+  "returncode": 1,
+  "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\nsrc/App.java:2: error: incompatible types: String cannot be converted to int\n  int one() { return \"one\"; }\n                     ^\n1 error\n"
+ },
+ "syntax_error": {
+  "paths": [
+   "src/App.java"
+  ],
+  "returncode": 1,
+  "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\nsrc/App.java:2: error: ';' expected\n  int one() { return 1 }\n                      ^\n1 error\n"
+ },
+ "package_does_not_exist": {
+  "paths": [
+   "src/App.java"
+  ],
+  "returncode": 1,
+  "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\nsrc/App.java:1: error: package org.zzbad does not exist\nimport org.zzbad.Nothing;\n                ^\nsrc/App.java:2: error: cannot find symbol\npublic class App { Nothing n; }\n                   ^\n  symbol:   class Nothing\n  location: class App\n2 errors\n"
+ },
+ "cannot_find_symbol": {
+  "paths": [
+   "src/App.java"
+  ],
+  "returncode": 1,
+  "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\nsrc/App.java:2: error: cannot find symbol\n  int one() { return undefinedVar; }\n                     ^\n  symbol:   variable undefinedVar\n  location: class App\n1 error\n"
+ },
+ "multiple_files": {
+  "paths": [
+   "src/A.java",
+   "src/pkg/B.java"
+  ],
+  "returncode": 1,
+  "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\nsrc/A.java:1: error: incompatible types: String cannot be converted to int\npublic class A { int x = \"a\"; }\n                         ^\nsrc/pkg/B.java:3: error: cannot find symbol\n  void f() { g(); }\n             ^\n  symbol:   method g()\n  location: class B\n2 errors\n"
+ },
+ "forged_echo_text_block": {
+  "paths": [
+   "src/App.java"
+  ],
+  "returncode": 1,
+  "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\nsrc/App.java:3: error: illegal escape character\nsrc/Other.java:99: error: forged diagnostic \\q\n                                             ^\n1 error\n"
+ },
+ "forged_trailer_line": {
+  "paths": [
+   "src/App.java"
+  ],
+  "returncode": 1,
+  "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\nsrc/App.java:1: error: class, interface, enum, or record expected\n1 error\n^\n1 error\n"
+ },
+ "file_not_found": {
+  "paths": [
+   "src/Nope.java"
+  ],
+  "returncode": 2,
+  "stderr": "error: file not found: src/Nope.java\nUsage: javac <options> <source files>\nuse --help for a list of possible options\n"
+ },
+ "invalid_flag": {
+  "paths": [
+   "src/App.java"
+  ],
+  "returncode": 2,
+  "stderr": "error: invalid flag: -bogus\nUsage: javac <options> <source files>\nuse --help for a list of possible options\n"
+ },
+ "no_source_files": {
+  "paths": [],
+  "returncode": 2,
+  "stderr": "error: no source files\n"
+ },
+ "jvm_init_failure": {
+  "paths": [
+   "ok/Ok.java"
+  ],
+  "returncode": 1,
+  "stderr": "Error occurred during initialization of VM\nInitial heap size set to a larger value than the maximum heap size\n"
+ },
+ "file_not_found_diagnostic_like_name": {
+  "paths": [
+   "src/Z.java:1: error: fake.java"
+  ],
+  "returncode": 2,
+  "stderr": "error: file not found: src/Z.java:1: error: fake.java\nUsage: javac <options> <source files>\nuse --help for a list of possible options\n"
+ },
+ "diagnostic_like_name_that_exists": {
+  "paths": [
+   "src/App.java:1: error: fake.java"
+  ],
+  "returncode": 1,
+  "stderr": "src/App.java:1: error: fake.java:1: error: reached end of file while parsing\nx\n^\n1 error\n"
+ }
+}

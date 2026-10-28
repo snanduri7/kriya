@@ -143,12 +143,21 @@ MAVEN_COMPILE_RESOLUTION_UNVERIFIED = "MAVEN_COMPILE_RESOLUTION_UNVERIFIED"     
 GRADLE_COMPILE_RESOLUTION_UNVERIFIED = "GRADLE_COMPILE_RESOLUTION_UNVERIFIED"
 MAVEN_COMPILE_NO_DIAGNOSTICS = "MAVEN_COMPILE_NO_DIAGNOSTICS"              # non-zero exit with no located source diagnostic (empty output, a bare summary, unrelated text)
 GRADLE_COMPILE_NO_DIAGNOSTICS = "GRADLE_COMPILE_NO_DIAGNOSTICS"
+# COMPILE-GATE-RAW-JAVAC-CONVICTION-WITHOUT-VERDICT-001 (owner decision 2026-10-28): the raw-javac fallback's twins of the same invariant. javac has no resolution phase; its only
+# source evidence is a diagnostic located at one of the exact source paths it was given (see classify_javac_failure). Compile-specific names: no Maven / Gradle code is reused.
+JAVAC_INVOCATION_FAILED = "JAVAC_INVOCATION_FAILED"                        # `javac` could not be started (the backend's never-started fact, or a spawn OSError)
+JAVAC_COMPILE_INDETERMINATE = "JAVAC_COMPILE_INDETERMINATE"                # the process result could not be interpreted (no integer return code, no stderr text)
+JAVAC_COMPILE_TIMED_OUT = "JAVAC_COMPILE_TIMED_OUT"                        # started, did not finish within its bound, and printed no located diagnostic
+JAVAC_COMPILE_TERMINATED = "JAVAC_COMPILE_TERMINATED"                      # killed by a signal (host: no exit status; contained: a 128+signal exit such as 137) with no located diagnostic
+JAVAC_COMPILE_NO_DIAGNOSTICS = "JAVAC_COMPILE_NO_DIAGNOSTICS"              # non-zero exit with no located diagnostic (empty output, a usage error, a JVM that did not start)
 COMPILE_NO_VERDICT_CODES = frozenset({
     MAVEN_COMPILE_TIMED_OUT, GRADLE_COMPILE_TIMED_OUT, MAVEN_COMPILE_TERMINATED, GRADLE_COMPILE_TERMINATED, MAVEN_COMPILE_OPERATOR_CONFIG_INVALID,
-    MAVEN_COMPILE_RESOLUTION_UNVERIFIED, GRADLE_COMPILE_RESOLUTION_UNVERIFIED, MAVEN_COMPILE_NO_DIAGNOSTICS, GRADLE_COMPILE_NO_DIAGNOSTICS})
+    MAVEN_COMPILE_RESOLUTION_UNVERIFIED, GRADLE_COMPILE_RESOLUTION_UNVERIFIED, MAVEN_COMPILE_NO_DIAGNOSTICS, GRADLE_COMPILE_NO_DIAGNOSTICS,
+    JAVAC_COMPILE_TIMED_OUT, JAVAC_COMPILE_TERMINATED, JAVAC_COMPILE_NO_DIAGNOSTICS})
 # The codes of a build tool that DID start or produced no interpretable verdict (the gate words them "returned no trustworthy verdict" instead of "could not start").
 MAVEN_VALIDATE_NO_VERDICT_CODES = frozenset({MAVEN_VALIDATE_TIMED_OUT, MAVEN_VALIDATE_TERMINATED, MAVEN_VALIDATE_RESOLUTION_UNVERIFIED, MAVEN_VALIDATE_NO_DIAGNOSTICS,
-                                             MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID, MAVEN_COMPILE_INDETERMINATE, GRADLE_COMPILE_INDETERMINATE}) | COMPILE_NO_VERDICT_CODES
+                                             MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID, MAVEN_COMPILE_INDETERMINATE, GRADLE_COMPILE_INDETERMINATE,
+                                             JAVAC_COMPILE_INDETERMINATE}) | COMPILE_NO_VERDICT_CODES
 
 
 def compile_environment_result(code: str, output: str) -> Dict[str, Any]:
@@ -264,6 +273,26 @@ def classify_compile_failure(build_system: str, returncode: int, timed_out: bool
     if returncode in _POSIX_SIGNAL_EXIT_CODE_RANGE:
         return GRADLE_COMPILE_TERMINATED if gradle else MAVEN_COMPILE_TERMINATED
     return GRADLE_COMPILE_NO_DIAGNOSTICS if gradle else MAVEN_COMPILE_NO_DIAGNOSTICS
+
+
+def classify_javac_failure(returncode: int, timed_out: bool, stderr: str, source_paths: Sequence[str]) -> Optional[str]:
+    """Why a failed (non-zero) raw ``javac`` compile may NOT convict the candidate's source: the environment reason code, or None when javac positively judged the source.
+
+    Only a diagnostic LOCATED AT ONE OF THE EXACT SOURCE PATHS this invocation was given convicts: a ``stderr`` line that begins with ``<path>:<line>: error:``. javac prints each
+    path as it was passed, and echoes an offending source line verbatim, so the anchor is the line start plus exact membership in ``source_paths`` (measured: a forged
+    ``Other.java:99: error:`` echoed from a text block, a forged ``N error`` trailer and a file named like a diagnostic never pose as a judgement of a passed path; the
+    ``error: file not found: <name>`` form starts with ``error:``). Neither the exit status (a JVM that did not start also exits 1) nor the ``N error(s)`` trailer (forgeable, and absent
+    from a killed run) is evidence.
+
+    Order: a located diagnostic convicts first - what javac judged is not erased by a later timeout or signal; then a timeout; then a signal kill (host: no exit status; contained: 128+signal);
+    then any other non-zero exit is NO verdict. The caller has already ruled out a never-started javac and an uninterpretable result."""
+    if source_paths and re.search(r"^(?:" + "|".join(re.escape(path) for path in source_paths) + r"):\d+: error:", stderr, re.MULTILINE):
+        return None
+    if timed_out:
+        return JAVAC_COMPILE_TIMED_OUT
+    if returncode < 0 or returncode in _POSIX_SIGNAL_EXIT_CODE_RANGE:
+        return JAVAC_COMPILE_TERMINATED
+    return JAVAC_COMPILE_NO_DIAGNOSTICS
 
 
 # The offline run still misses a dependency/plugin after one bounded,

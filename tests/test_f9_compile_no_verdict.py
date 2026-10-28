@@ -52,7 +52,7 @@ class _JavacSentinel:
 
     def __init__(self, result=None):
         self.calls = []
-        self._result = result or {"returncode": 1, "stdout": "", "stderr": "App.java:1: error: incompatible types"}
+        self._result = result or {"returncode": 1, "stdout": "", "stderr": "src/main/java/App.java:1: error: incompatible types"}   # javac prints the path as passed (the located anchor)
 
         def seam(_validator, cmd, cwd=None, **_kwargs):
             self.calls.append(list(cmd))

@@ -51,7 +51,8 @@ class JavacBuildAdapter(BuildAdapter):
         """A syntax/type check of the changed ``.java`` files that physically
         exist in the sandbox: ``javac -proc:none -d <workspace>/build``. Always
         decides (``deadline`` is unused, as before). A containment setup
-        failure propagates; any other start failure is a decided failure."""
+        failure propagates; a javac that could not start or gave no trustworthy
+        verdict is a typed ``environment_reason_code`` result."""
         del deadline
         # `files` can include controller-provided established-file context
         # used to inform planning and runtime judgment. Only pass sources
@@ -70,23 +71,18 @@ class JavacBuildAdapter(BuildAdapter):
         cmd.extend(java_files)
         os.makedirs(os.path.join(v.workspace_path, OUTPUT_DIR), exist_ok=True)
 
+        # COMPILE-GATE-RAW-JAVAC-CONVICTION-WITHOUT-VERDICT-001 (owner decision 2026-10-28): the source is convicted ONLY from a diagnostic javac located at one of the exact
+        # paths it was given. Everything else is a typed no-verdict (``environment_reason_code``): never a PASS and never a candidate conviction.
+        from kriya.tools.dependency_execution import (
+            JAVAC_COMPILE_INDETERMINATE,
+            JAVAC_INVOCATION_FAILED,
+            classify_javac_failure,
+            compile_environment_result,
+            compile_no_verdict_result,
+        )
+
         try:
             res = v._run_cmd_with_timeout(cmd, cwd=v.workspace_path)
-            if res["returncode"] != 0:
-                error_output = f"Java compilation failed:\n{res['stderr']}"
-                try:
-                    from kriya.tools.resolver import enrich_java_compiler_errors
-                    error_output = enrich_java_compiler_errors(
-                        error_output,
-                        allow_external_lookup=(
-                            v.autonomy_cfg.egress_policy != "local_only"
-                            and v.autonomy_cfg.web_lookup_enabled
-                        ),
-                    )
-                except Exception as ree:
-                    logger.warning(f"Resolver failed to run: {ree}")
-                return v._validation_result(False, error_output, res)
-            return v._validation_result(True, "Java classes compiled successfully.", res)
         except ContainmentSetupError:
             # SEC-002 (2026-09-12): must propagate as the distinct
             # containment-setup failure it is, not be reported as an
@@ -95,8 +91,40 @@ class JavacBuildAdapter(BuildAdapter):
             # handle_attempt_failure's containment_setup_failed
             # classification.
             raise
-        except Exception as e:
-            return {"success": False, "output": f"Javac compilation tool invocation failed: {e}"}
+        except OSError as e:
+            # javac itself could not be started (missing, not executable, ENOEXEC): nothing about the candidate was observed. Any other exception is a coding
+            # error or a policy refusal and propagates; it is never relabelled a source failure.
+            return compile_environment_result(JAVAC_INVOCATION_FAILED, f"Failed to invoke javac: {e}")
+        if isinstance(res, dict) and res.get("target_started") is False:
+            # The containment backend's typed never-started fact (not an exit status, not text): javac did not start, so nothing was compiled.
+            return compile_environment_result(
+                JAVAC_INVOCATION_FAILED, f"Failed to invoke javac: the contained javac did not start:\n{res.get('stderr', '')}".rstrip())
+        returncode = res.get("returncode") if isinstance(res, dict) else None
+        if isinstance(returncode, bool) or not isinstance(returncode, int) or (returncode != 0 and not isinstance(res.get("stderr"), str)):
+            return compile_environment_result(
+                JAVAC_COMPILE_INDETERMINATE,
+                f"javac returned no trustworthy verdict: its result carried no integer return code and stderr text ({type(res).__name__}); nothing about the candidate was observed.")
+        if returncode == 0:
+            return v._validation_result(True, "Java classes compiled successfully.", res)
+        stderr = res["stderr"]
+        no_verdict = classify_javac_failure(returncode, bool(res.get("timeout")), stderr, java_files)
+        if no_verdict is not None:
+            return compile_no_verdict_result(v._validation_result(
+                False, f"javac returned no trustworthy compilation verdict ({no_verdict}); nothing about the candidate source was judged:\n{stderr}",
+                {**res, "environment_reason_code": no_verdict}), res)
+        error_output = f"Java compilation failed:\n{stderr}"
+        try:
+            from kriya.tools.resolver import enrich_java_compiler_errors
+            error_output = enrich_java_compiler_errors(
+                error_output,
+                allow_external_lookup=(
+                    v.autonomy_cfg.egress_policy != "local_only"
+                    and v.autonomy_cfg.web_lookup_enabled
+                ),
+            )
+        except Exception as ree:
+            logger.warning(f"Resolver failed to run: {ree}")
+        return v._validation_result(False, error_output, res)
 
     def run_tests(self, v: Any, test_class: Optional[Any]) -> Dict[str, Any]:
         """Raw javac has no test runner: the test gate is skipped, saying so."""
