@@ -403,7 +403,7 @@ def load_approval_artifact(path: str) -> Optional[ApprovalArtifact]:
     try:
         with open(path, "r", encoding="utf-8") as fh:
             raw = json.load(fh)
-    except (OSError, json.JSONDecodeError) as e:
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:  # RDCG B-003(a): bytes that are not UTF-8 are as unparseable as bytes that are not JSON
         raise ApprovalArtifactError(f"could not parse approval artifact at {path!r}: {e}") from e
     if not isinstance(raw, dict):
         raise ApprovalArtifactError(f"approval artifact at {path!r} is not a JSON object")
