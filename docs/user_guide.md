@@ -1402,6 +1402,8 @@ A value Kriya cannot determine counts as changed. The toolchain identity is know
 ```
 See [Inspecting and recovering runs](#342-inspecting-and-recovering-runs-kriya-runs) below.
 
+**A direct tool run that may have had its effect also blocks.** If `kriya tools execute` was killed after it durably recorded that it had started, the workspace refuses every mutating command until you decide what to do: `kriya runs status` reports `MANUAL_ACTION_REQUIRED` (`UNRESOLVED_TOOL_EXECUTION`) and `kriya runs recover` does not touch it. Inspect it with `kriya runs tool-inspect --run <run id>`, then `kriya runs tool-abandon --run <run id> --confirm`. Abandoning means you stopped recovery of it; it does not undo the effect and does not say whether it happened. To run the tool again, run `kriya tools execute` again (a new run with its own confirmation). `kriya tools execute` exits **0** on success, **1** when the tool fails, **2** for invalid arguments, **4** when the tool's own policy refuses the call.
+
 #### 3.4.1 Milestone-Based Goal Decomposition (`plan-milestones` + `generate --from-milestones`)
 A single `generate` call has a fixed token budget the whole response has to fit inside - for a goal combining several real subsystems (e.g. a cache plus a message broker plus the wiring between them), that budget forces reasoning and content to compete, and the highest-risk code (the integration/wiring logic, usually written last) is the first thing cut off when the budget runs out. Milestone decomposition splits a goal like that into an ordered sequence of small, independently executable and verifiable slices before any code is generated.
 
