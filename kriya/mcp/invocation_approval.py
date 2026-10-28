@@ -270,7 +270,7 @@ def load_approval_artifact(path: str) -> Optional[MCPInvocationApprovalArtifact]
     try:
         with open(path, "r", encoding="utf-8") as fh:
             raw = json.load(fh)
-    except (OSError, json.JSONDecodeError) as e:
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:  # RDCG B-003(b): bytes that are not UTF-8 are as unparseable as bytes that are not JSON
         raise MCPApprovalArtifactError(f"could not parse MCP invocation approval store at {path!r}: {e}") from e
     if not isinstance(raw, dict):
         raise MCPApprovalArtifactError(f"MCP invocation approval store at {path!r} is not a JSON object")
