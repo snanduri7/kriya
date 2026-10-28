@@ -244,8 +244,8 @@ def test_concurrent_writer_between_check_and_write_is_a_conflict_not_a_lost_upda
     newer = json.dumps({**initial.annotate(goal_hash="concurrent").to_dict(),
                         "_workspace": ownership_metadata(workspace)})
 
-    def read_then_concurrent_write(workspace_path, run_id):
-        observed = real_read(workspace_path, run_id)
+    def read_then_concurrent_write(workspace_path, run_id, **options):  # 7a5c108: the writer's pre-read passes confirm_durability=False
+        observed = real_read(workspace_path, run_id, **options)
         Path(run_record_path(workspace_path, run_id)).write_text(newer)
         return observed
 
