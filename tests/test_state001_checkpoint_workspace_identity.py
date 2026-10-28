@@ -458,7 +458,9 @@ def test_run_structured_enforce_uses_persist_control_state_closure_everywhere():
     # the owner's real written set before the verification rerun (review F8).
     # D1: 11 -> 13: the TOOL subtask's DURABLE STARTED save (before the dispatch) and its DURABLE COMPLETED save (after the result) go through the same closure (durable=True);
     # raw save_control_state stays exactly 1 (inside the closure).
-    assert persist_calls == 13, persist_calls
+    # Wave 2 Slice A (ff7a458): 13 -> 14: a TOOL subtask's terminal failure record is saved durably (durable=True) through the same closure, so a failed attempt is never retried unseen;
+    # the count was not updated with that commit (found by the W2-04 adjacent gate, 2026-10-28).
+    assert persist_calls == 14, persist_calls
 
 
 # ---------------------------------------------------------------------------
