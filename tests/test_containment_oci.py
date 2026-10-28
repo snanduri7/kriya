@@ -14,6 +14,7 @@ import subprocess
 import time
 
 import pytest
+from _dependency_scope import ephemeral_cache
 
 from kriya.tools.containment import (
     BackendUnavailableError,
@@ -494,6 +495,10 @@ def test_missing_workspace_directory_blocks_execution(tmp_path):
 
 # --- SEC-008: acquisition adapts to host ownership, never mutates host permissions ---
 
+def _ephemeral_cache(tmp_path):
+    return __import__("pathlib").Path(ephemeral_cache(tmp_path))
+
+
 def _snapshot(root):
     import os as _os
     out = {}
@@ -545,8 +550,7 @@ def test_registry_scoped_never_mutates_preexisting_host_permissions_on_success(t
     secret = private / "secret.txt"
     secret.write_text("s3cr3t")
     secret.chmod(0o600)
-    cache = tmp_path / "cache"
-    cache.mkdir()
+    cache = _ephemeral_cache(tmp_path)  # R3: a writable cache is an ephemeral one (the backend refuses any other)
     cache.chmod(0o700)
 
     before = _snapshot(str(tmp_path))

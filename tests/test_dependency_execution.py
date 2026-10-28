@@ -7,6 +7,7 @@ import shutil
 import subprocess
 
 import pytest
+from _dependency_scope import ephemeral_cache_path
 
 from kriya.tools.containment_oci import OCIContainmentBackend
 from kriya.tools.dependency_execution import (
@@ -71,8 +72,7 @@ if not _docker_reachable():
 def test_python_two_phase_acquire_then_offline_execute(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    cache = tmp_path / "pip_cache"
-    cache.mkdir()
+    cache = ephemeral_cache_path(tmp_path, "pip")  # R3: a writable cache is an ephemeral one
 
     requirements = workspace / "requirements.txt"
     requirements.write_text("six==1.16.0\n")
@@ -100,8 +100,7 @@ def test_python_two_phase_acquire_then_offline_execute(tmp_path):
 def test_python_offline_execute_without_acquisition_reports_missing_dependency(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    empty_cache = tmp_path / "empty_cache"
-    empty_cache.mkdir()
+    empty_cache = ephemeral_cache_path(tmp_path, "pip")
     requirements = workspace / "requirements.txt"
     requirements.write_text("six==1.16.0\n")
 
@@ -119,8 +118,7 @@ def test_python_offline_execute_without_acquisition_reports_missing_dependency(t
 def test_maven_two_phase_acquire_then_offline_execute(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    cache = tmp_path / "m2_cache"
-    cache.mkdir()
+    cache = ephemeral_cache_path(tmp_path, "maven")
     (workspace / "pom.xml").write_text(
         """<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0">
@@ -153,8 +151,7 @@ def test_maven_two_phase_acquire_then_offline_execute(tmp_path):
 def test_maven_offline_execute_with_uncached_dependency_reports_missing_dependency(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    empty_cache = tmp_path / "empty_m2_cache"
-    empty_cache.mkdir()
+    empty_cache = ephemeral_cache_path(tmp_path, "maven")
     (workspace / "pom.xml").write_text(
         """<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0">

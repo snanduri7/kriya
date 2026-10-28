@@ -31,8 +31,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -56,8 +56,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -81,8 +81,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -106,8 +106,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -131,8 +131,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -156,8 +156,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -181,8 +181,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -209,8 +209,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -237,8 +237,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -262,8 +262,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -287,8 +287,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -312,8 +312,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -337,8 +337,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -362,8 +362,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -387,8 +387,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -420,8 +420,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -445,8 +445,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -470,8 +470,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -495,8 +495,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -520,8 +520,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -545,8 +545,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -570,8 +570,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -595,8 +595,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -620,8 +620,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -645,8 +645,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -678,8 +678,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -703,8 +703,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -728,8 +728,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -753,8 +753,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -778,8 +778,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -803,8 +803,8 @@
    "env"
   ],
   "trace_db_path": "<TMP>/outside/override/traces.db",
-  "validator_dependency_cache": "<TMP>/outside/override/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/outside/override/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/outside/override/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/outside/override/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -828,8 +828,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -856,8 +856,8 @@
    "error": "StateDirectoryError",
    "message": "KRIYA_STATE_DIR must be an absolute path here (got 'rel/override'); Kriya never resolves a state directory against the current working directory."
   },
-  "validator_dependency_cache": "<TMP>/ws/rel/override/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/ws/rel/override/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/ws/rel/override/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/ws/rel/override/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -881,8 +881,8 @@
    "env"
   ],
   "trace_db_path": "<TMP>/home/override/traces.db",
-  "validator_dependency_cache": "<TMP>/home/override/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/override/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/override/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/override/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -906,8 +906,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -931,8 +931,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/outside/override/<WS>_ID.json"
  },
@@ -956,8 +956,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -981,8 +981,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": {
    "error": "TrustPathInsideWorkspaceError",
@@ -1009,8 +1009,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": {
    "error": "TrustPathInsideWorkspaceError",
@@ -1037,8 +1037,8 @@
    "default"
   ],
   "trace_db_path": "<TMP>/home/.kriya/state/traces.db",
-  "validator_dependency_cache": "<TMP>/home/.kriya/state/dependency-cache/gradle/<WS>_KEY",
-  "validator_maven_cache": "<TMP>/home/.kriya/state/dependency-cache/maven/<WS>_KEY",
+  "validator_ephemeral_cache_root_gradle": "<TMP>/home/.kriya/state/gate-caches",
+  "validator_ephemeral_cache_root_maven": "<TMP>/home/.kriya/state/gate-caches",
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },

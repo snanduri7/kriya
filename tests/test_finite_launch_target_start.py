@@ -557,8 +557,8 @@ def test_real_docker_the_registry_scoped_acquisition_path_reports_the_same_fact(
     from kriya.tools.dependency_execution import _acquisition_profile
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    cache = tmp_path / "cache"
-    cache.mkdir()
+    from _dependency_scope import ephemeral_cache
+    cache = ephemeral_cache(tmp_path)  # R3: the registry-scoped profile mounts its cache writable, so it must be an ephemeral one
     (workspace / "exit127.sh").write_text("#!/bin/sh\nexit 127\n")
     (workspace / "exit127.sh").chmod(0o755)
     profile = _acquisition_profile(str(workspace), str(cache), [], registry_hosts=["repo.maven.apache.org"])
@@ -598,10 +598,12 @@ MISSING_DEPENDENCY_TEXT = ("> Could not resolve org.apache.commons:commons-lang3
 
 
 def _gradle_validator(tmp_path):
+    from _dependency_scope import hold_dependency_scope
+
     from kriya.config.config import AutonomyConfig
     from kriya.tools.validate import PolymorphicValidator
     (tmp_path / "build.gradle").write_text("plugins { id 'java' }\n")
-    return PolymorphicValidator(str(tmp_path), autonomy_cfg=AutonomyConfig(**CONTAINED))
+    return hold_dependency_scope(PolymorphicValidator(str(tmp_path), autonomy_cfg=AutonomyConfig(**CONTAINED)))
 
 
 def _gradle_runs(*answers):

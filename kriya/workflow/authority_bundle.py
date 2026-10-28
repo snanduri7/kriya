@@ -43,6 +43,7 @@ closes nothing. The bundle's bytes are never in a prompt; its visibility is
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -448,6 +449,7 @@ def run_authority_bundle(
     scratch = os.path.join(state_root, AUTHORITY_RUNS_DIR, uuid.uuid4().hex)
     export = os.path.join(scratch, "workspace")
     run.scratch = scratch
+    scopes = contextlib.ExitStack()  # R3: the run's ephemeral dependency layer, shared by its prepare and verify phases and removed with the scratch
     try:
         os.makedirs(scratch)
         shutil.copytree(candidate_root, export, symlinks=True, ignore=shutil.ignore_patterns(*_COPY_IGNORE))
@@ -459,6 +461,7 @@ def run_authority_bundle(
             run.reason_code, run.reason = AUTHORITY_EXECUTION_UNAVAILABLE, f"containment refused: {error}"
             return run
         stage = _stage_assets(bundle, export)
+        scopes.enter_context(validator.dependency_cache_scope())
         cache = _cache_for(validator, bundle.build_tool)
         try:
             if bundle.prepare is not None:
@@ -518,6 +521,7 @@ def run_authority_bundle(
         run.reason = f"verify exited {code}"
         return run
     finally:
+        scopes.close()
         shutil.rmtree(scratch, ignore_errors=True)
 
 

@@ -22,6 +22,7 @@ import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from _dependency_scope import hold_dependency_scope
 
 from kriya.config import AppConfig
 from kriya.config.config import AutonomyConfig
@@ -53,7 +54,8 @@ class _Maven:
     def __call__(self, cmd, cwd, timeout=300, network=NetworkAuthority.DENIED, acquisition=False, **kwargs):
         mount = kwargs.get("workspace_path")
         self.calls.append({"cmd": cmd, "network": network, "acquisition": acquisition, "timeout": timeout,
-                           "cwd": cwd, "mount": mount, "mount_listing": os.listdir(mount) if mount else None})
+                           "cwd": cwd, "mount": mount, "mount_listing": os.listdir(mount) if mount else None,
+                           "cache": kwargs.get("dependency_cache_path"), "writable": kwargs.get("dependency_cache_writable")})
         if acquisition:
             time.sleep(self.acquisition_sleep)
             return {"returncode": self.acquisition_rc, "stdout": "", "stderr": "", "timeout": False}
@@ -68,7 +70,7 @@ class _Maven:
 def _validator(tmp_path, maven, budget=None, pom="<project/>"):
     (tmp_path / "pom.xml").write_text(pom)
     autonomy = AutonomyConfig(contained_execution_required=True, generation_time_budget_seconds=budget)
-    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=autonomy)
+    validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path), autonomy_cfg=autonomy))
     patcher = patch.object(validator, "_run_cmd_with_timeout", side_effect=maven)
     patcher.start()
     # These tests are about the runtime command's own acquisition: the D3
@@ -96,7 +98,7 @@ def test_a_cached_plugin_needs_no_acquisition(tmp_path):
     assert maven.calls[0]["network"] is NetworkAuthority.DENIED
 
 
-def test_a_missing_plugin_gets_exactly_one_tooling_only_acquisition_then_the_exact_offline_retry(tmp_path):
+def test_a_missing_plugin_gets_one_runtime_acquisition_of_the_plugin_then_the_projects_dependencies_then_the_exact_offline_retry(tmp_path):
     maven = _Maven((1, NO_PLUGIN), (0, ""))
     validator, patcher = _validator(tmp_path, maven)
     pom_before = (tmp_path / "pom.xml").read_bytes()
@@ -105,8 +107,10 @@ def test_a_missing_plugin_gets_exactly_one_tooling_only_acquisition_then_the_exa
     finally:
         patcher.stop()
     assert result["returncode"] == 0
-    assert [c["acquisition"] for c in maven.calls] == [False, True, False]  # offline, ONE acquisition, offline
-    acquisition = maven.acquisitions[0]
+    # offline, ONE acquisition operation (R3 Option A: its two registry-scoped phases - the named plugin, then the project's own dependencies into the
+    # same session layer), offline
+    assert [c["acquisition"] for c in maven.calls] == [False, True, True, False]
+    acquisition, dependencies = maven.acquisitions
     assert acquisition["network"] is NetworkAuthority.DEPENDENCY_REGISTRY_ONLY  # registry hosts only (SEC-006)
     # Tooling only: the plugin's inert help goal - never a candidate goal - in
     # an empty Kriya-owned directory mounted instead of the candidate.
@@ -120,6 +124,15 @@ def test_a_missing_plugin_gets_exactly_one_tooling_only_acquisition_then_the_exa
     assert (tmp_path / "pom.xml").read_bytes() == pom_before  # never edited to make Kriya tooling available
     # GRADLE-ACQUISITION-EVIDENCE-001: the tooling acquisition's record travels with the offline result
     assert result["acquisition_evidence"]["invoked"] is True and result["acquisition_evidence"]["argv"][-1] == "exec:help"
+    # R3 Option A: the dependency phase resolves the PROJECT (its POM is the one thing mounted), registry-scoped, and runs no runtime/candidate goal
+    assert dependencies["network"] is NetworkAuthority.DEPENDENCY_REGISTRY_ONLY and dependencies["cmd"][-1] == "dependency:resolve"
+    assert not set(RUNTIME[1:]) & set(dependencies["cmd"]) and dependencies["cwd"] == str(tmp_path) and dependencies["mount"] is None
+    assert result["acquisition_evidence"]["dependency_resolution"]["argv"][-1] == "dependency:resolve"
+    # ... into the SAME session layer the plugin phase and both offline runs use (one layer, writable only for the acquisition phases' own use), with a bound
+    # that outlasts a runtime step's own 90 s (a cold resolution does) - and none of the phases' cmd names the candidate's run
+    layers = {c["cache"] for c in maven.calls}
+    assert len(layers) == 1 and None not in layers and dependencies["writable"] is True and acquisition["writable"] is True
+    assert dependencies["timeout"] >= 300 and "dependency:resolve" not in offline[0]["cmd"]
 
 
 def test_a_plugin_the_pom_declares_is_acquired_at_exactly_that_coordinate(tmp_path):
@@ -180,7 +193,7 @@ def test_a_plugin_still_missing_after_acquisition_is_a_typed_verification_depend
         result = validator.run_app_sequence([RUNTIME])
     finally:
         patcher.stop()
-    assert len(maven.acquisitions) == 1  # never a second acquisition
+    assert [c["cmd"][-1] for c in maven.acquisitions] == ["exec:help", "dependency:resolve"]  # never a second acquisition OPERATION (two phases)
     reason = runtime_verification_infrastructure_reason(result)
     assert reason.startswith(RUNTIME_VERIFICATION_DEPENDENCY_UNAVAILABLE)
 
@@ -305,10 +318,13 @@ def test_the_candidate_never_runs_with_registry_authority_real_containers(tmp_pa
     validator = PolymorphicValidator(str(ws), autonomy_cfg=AutonomyConfig(
         contained_execution_required=True, containment_backend="oci"))
     assert validator.run_compile_check(["src/main/java/demo/App.java"])["success"]
-    cache = validator._maven_cache_dir()  # pylint: disable=protected-access
-    assert not os.path.exists(os.path.join(cache, "org/codehaus/mojo/exec-maven-plugin"))
-    assert not os.path.commonpath([cache, str(ws)]) == str(ws)  # outside the tree the project's build walks
-    result = validator._run_runtime_step(["mvn", "-q", "exec:java", "-Dexec.mainClass=demo.App"], 120)  # pylint: disable=protected-access
+    # R3: the compile gate's dependency layer is gone with the gate; the runtime step is its own verification scope with a fresh one (the exec plugin
+    # genuinely missing, so the tooling-only acquisition runs), and the candidate still runs exactly once, offline.
+    with validator.dependency_cache_scope():
+        cache = validator._maven_cache_dir()  # pylint: disable=protected-access
+        assert not os.path.exists(os.path.join(cache, "org/codehaus/mojo/exec-maven-plugin"))
+        assert not os.path.commonpath([cache, str(ws)]) == str(ws)  # outside the tree the project's build walks
+        result = validator._run_runtime_step(["mvn", "-q", "exec:java", "-Dexec.mainClass=demo.App"], 120)  # pylint: disable=protected-access
     assert result["returncode"] == 0, result["stdout"] + result["stderr"]
     assert (ws / "ran.log").read_text().splitlines() == ["proxy=null registry=no network"]
     assert (ws / "pom.xml").read_text() == pom

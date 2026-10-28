@@ -81,9 +81,11 @@ from kriya.policy.authority_namespace import AuthorityNamespaceUnsafeError, crea
 from kriya.policy.protected_authority_paths import WORKSPACE_ANCHOR_RELPATH, WORKSPACE_AUTHORITY_RELPATHS
 from kriya.tools.containment import (
     LAUNCHER_REACHED_MARKER,
+    PERSISTENT_DEPENDENCY_CACHE_WRITABLE,
     TARGET_NOT_STARTED_MARKER,
     BackendUnavailableError,
     ContainmentProfile,
+    DependencyCacheError,
     FiniteLaunchStage,
     HostWriterIdentityRefused,
     NetworkAuthority,
@@ -91,6 +93,7 @@ from kriya.tools.containment import (
     build_restricted_env,
     host_writer_identity,
 )
+from kriya.tools.dependency_cache import is_ephemeral_cache
 from kriya.tools.git_metadata import CONTAINER_GIT_METADATA
 from kriya.tools.process import ProcessResult
 from kriya.tools.toolchain_identity import ToolchainIdentity, ToolchainMismatchError
@@ -178,6 +181,19 @@ _NON_ROOT_HOME = _CONTAINER_TEMP
 def _non_root_home_env(env: Dict[str, str]) -> Dict[str, str]:
     java_options = " ".join(filter(None, (env.get("JAVA_TOOL_OPTIONS", "").strip(), f"-Duser.home={_NON_ROOT_HOME}")))
     return {"HOME": _NON_ROOT_HOME, "MAVEN_CONFIG": f"{_NON_ROOT_HOME}/.m2", "JAVA_TOOL_OPTIONS": java_options}
+
+
+def _require_ephemeral_writable_caches(profile: ContainmentProfile) -> None:
+    """R3, the invariant at the one place mounts are decided: a dependency cache mounted WRITABLE into a container is a verification scope's ephemeral
+    one (kriya/tools/dependency_cache.py), never a persistent directory. Refused before any docker resource exists."""
+    if not profile.dependency_cache_writable:
+        return
+    for path in profile.dependency_cache_paths:
+        if not is_ephemeral_cache(os.path.abspath(path)):
+            raise DependencyCacheError(
+                PERSISTENT_DEPENDENCY_CACHE_WRITABLE,
+                f"{path!r} is not an ephemeral dependency cache of a verification scope; a persistent dependency directory is never mounted writable "
+                "into candidate-controlled execution")
 
 
 def bind_mount_args(host_path: str, container_path: str, *, writable: bool) -> List[str]:
@@ -1272,6 +1288,8 @@ class OCIContainmentBackend:
         return resolve_host_writer_identity(existing, purpose="Contained execution writing a host mount")
 
     def prepare(self, profile: ContainmentProfile, command: List[str]) -> PreparedContainment:
+        # R3: before any docker resource (network, proxy, container) exists, a writable dependency cache must be a verification scope's ephemeral one.
+        _require_ephemeral_writable_caches(profile)
         docker_path = self._require_docker()
 
         if profile.network is NetworkAuthority.DEPENDENCY_REGISTRY_ONLY:

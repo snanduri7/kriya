@@ -11,6 +11,7 @@ import subprocess
 from types import SimpleNamespace
 
 import pytest
+from _dependency_scope import null_dependency_scope
 
 from kriya.config.config import AutonomyConfig
 from kriya.tools.containment import NetworkAuthority
@@ -224,6 +225,8 @@ class _Recorder:
         self.autonomy_cfg = AutonomyConfig(contained_execution_required=True)
         self.tree_binding = None
         self.calls = []
+
+    dependency_cache_scope = null_dependency_scope
 
     def _dependency_cache_dir(self, tool):
         return f"/cache/{tool}"

@@ -18,6 +18,7 @@ import subprocess
 from unittest.mock import patch
 
 import pytest
+from _dependency_scope import hold_dependency_scope
 from test_workflow import _minimal_attempt_ctx
 
 from kriya.capabilities.gradle import GradleBuildAdapter
@@ -89,8 +90,8 @@ def host_cache(home, *, marker=True, extracted=True, zip_bytes=None, dist_hash=T
 
 def _contained_validator(tmp_path):
     write_wrapper(tmp_path)
-    return PolymorphicValidator(
-        str(tmp_path), autonomy_cfg=AutonomyConfig(contained_execution_required=True, containment_backend="oci"))
+    return hold_dependency_scope(PolymorphicValidator(
+        str(tmp_path), autonomy_cfg=AutonomyConfig(contained_execution_required=True, containment_backend="oci")))
 
 
 def _runs(*results):
@@ -189,7 +190,7 @@ def test_07_contained_offline_success_never_acquires_and_mounts_the_kriya_manage
     assert call.args[0] == ["./gradlew", "--offline", "--no-daemon", "--console=plain", "compileJava"]
     assert call.kwargs["network"] is NetworkAuthority.DENIED and "acquisition" not in call.kwargs
     cache = call.kwargs["dependency_cache_path"]
-    assert cache.startswith(os.path.realpath(str(tmp_path / "state"))) and "/dependency-cache/gradle/" in cache
+    assert cache.startswith(os.path.realpath(str(tmp_path / "state"))) and "/gate-caches/" in cache and cache.endswith("/gradle")  # R3: the scope's layer
     assert os.path.isdir(cache) and call.kwargs["dependency_cache_writable"] is True
     assert seed.call_args.args == (str(tmp_path), cache)  # the seed lands in the mounted home, before any run
     assert result["gradle_user_home"] == GRADLE_CACHE_MOUNT and result["gradle_distribution"] == {"status": "no_wrapper"}
@@ -344,12 +345,15 @@ def test_15_a_gradle_project_with_a_registry_dependency_compiles_offline_after_o
         contained_execution_required=True, containment_backend="oci", sandbox_cpu_seconds=600, sandbox_memory_mb=2048,
         acquisition_cpu_seconds=600, acquisition_memory_mb=2048))
     assert validator.stack == "java" and validator.toolchain_identity.containment_image == "gradle:8-jdk17"
-    calls = []
+    calls, homes = [], []
     real = PolymorphicValidator._run_cmd_with_timeout
 
     def spy(self, cmd, cwd, **kwargs):
         calls.append((list(cmd), kwargs.get("network"), kwargs.get("acquisition")))
-        return real(self, cmd, cwd, **kwargs)
+        result = real(self, cmd, cwd, **kwargs)
+        home = kwargs.get("dependency_cache_path")
+        homes.append((home, any("commons-lang3" in root for root, _dirs, _files in os.walk(os.path.join(home, "caches")))))
+        return result
 
     with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=spy):
         verdict = validator.run_compile_check(["src/main/java/demo/Demo.java"])
@@ -358,8 +362,9 @@ def test_15_a_gradle_project_with_a_registry_dependency_compiles_offline_after_o
     assert networks == [(NetworkAuthority.DENIED, None), (NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, True),
                         (NetworkAuthority.DENIED, None)], calls
     assert all(cmd[0] == "gradle" and "--no-daemon" in cmd for cmd, _n, _a in calls)
-    home = validator._dependency_cache_dir("gradle")
-    assert any("commons-lang3" in root for root, _dirs, _files in os.walk(os.path.join(home, "caches")))
+    # R3: ONE ephemeral Gradle home serves the three phases of this gate (the acquisition fills it, the offline retry compiles against it) and is gone with it.
+    assert [present for _home, present in homes] == [False, True, True] and len({home for home, _present in homes}) == 1
+    assert "/gate-caches/" in homes[0][0] and not os.path.exists(homes[0][0])
 
 
 # ---------------------------------------------------------------- review reconciliation (2026-10-08)

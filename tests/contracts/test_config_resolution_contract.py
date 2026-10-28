@@ -355,9 +355,17 @@ def _homes(world: World) -> Dict[str, Any]:
         "resolve_log_directory": _call(world, lambda: logging_setup.resolve_log_directory(AppConfig())),
         "model_runtime_fingerprint_store": _call(world, lambda: model_runtime.fingerprint_store_dir(None)),
         "acceptance_jvm_state_root": _call(world, acceptance_jvm._state_root),
-        "validator_maven_cache": _call(world, lambda: _validator(world)._maven_cache_dir()),
-        "validator_dependency_cache": _call(world, lambda: _validator(world)._dependency_cache_dir("gradle")),
+        "validator_ephemeral_cache_root_maven": _call(world, lambda: _ephemeral_cache_root(world, "maven")),
+        "validator_ephemeral_cache_root_gradle": _call(world, lambda: _ephemeral_cache_root(world, "gradle")),
     }
+
+
+def _ephemeral_cache_root(world: World, tool: str) -> str:
+    """R3: the validator's dependency layer is ephemeral (``<state>/gate-caches/cache-<pid>-<random>/<tool>``); what the state-home resolution decides is
+    its root, ``<state>/gate-caches``. (Before R3 this pinned ``<state>/dependency-cache/<tool>/<workspace key>``.)"""
+    validator = _validator(world)
+    with validator.dependency_cache_scope():
+        return os.path.dirname(os.path.dirname(validator._dependency_cache_dir(tool)))  # pylint: disable=protected-access
 
 
 def _validator(world: World):

@@ -14,6 +14,7 @@ import os
 import subprocess
 
 import pytest
+from _dependency_scope import null_dependency_scope
 
 from kriya.config.config import AutonomyConfig
 from kriya.tools.containment import ContainmentSetupError, NetworkAuthority
@@ -170,6 +171,8 @@ class _Validator:
         self.script = list(script)
         self.raise_setup = raise_setup
         self.tree_binding = None
+
+    dependency_cache_scope = null_dependency_scope
 
     def _dependency_cache_dir(self, tool):
         return f"/cache/{tool}"

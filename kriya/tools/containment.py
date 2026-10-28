@@ -85,6 +85,22 @@ class BackendUnavailableError(ContainmentSetupError):
     requires."""
 
 
+PERSISTENT_DEPENDENCY_CACHE_WRITABLE = "PERSISTENT_DEPENDENCY_CACHE_WRITABLE"
+DEPENDENCY_CACHE_SCOPE_REQUIRED = "DEPENDENCY_CACHE_SCOPE_REQUIRED"
+DEPENDENCY_CACHE_REASON_CODES = frozenset({PERSISTENT_DEPENDENCY_CACHE_WRITABLE, DEPENDENCY_CACHE_SCOPE_REQUIRED})
+
+
+class DependencyCacheError(ContainmentSetupError):
+    """R3 (kriya/tools/dependency_cache.py): a dependency cache could not be given to candidate-controlled execution on the terms R3 requires - a
+    writable cache that is not a verification scope's ephemeral one (PERSISTENT_DEPENDENCY_CACHE_WRITABLE), or a cache asked for outside a scope
+    (DEPENDENCY_CACHE_SCOPE_REQUIRED). The command is not run, never run with a persistent cache instead. ``reason_code`` is one of
+    DEPENDENCY_CACHE_REASON_CODES."""
+
+    def __init__(self, reason_code: str, detail: str) -> None:
+        super().__init__(f"{reason_code}: {detail}")
+        self.reason_code = reason_code
+
+
 class HostWriterIdentityRefused(Exception):
     """Why SEC-008's writer-identity rule refused; each caller raises its
     own typed error (and message) from it."""

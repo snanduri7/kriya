@@ -738,15 +738,27 @@ def test_the_venv_a_view_gate_uses_is_the_origin_trees_not_the_views(tmp_path, m
         assert spec.host_path == os.path.realpath(root / ".kriya" / "venv") and spec.writable is False
 
 
-def test_the_dependency_cache_key_is_the_origin_trees_in_and_out_of_a_view(tmp_path):
+def test_the_dependency_layer_of_a_viewed_gate_is_outside_the_view_and_outside_the_origin(tmp_path):
+    """R3 (it pinned the pre-R3 persistent per-origin cache key): the dependency layer belongs to the verification SCOPE, not to the view or the
+    tree - a fresh one per outermost gate, never inside the view the candidate executes in (which would put Kriya's artifacts where the project's own
+    build walks), never inside the origin, and gone with the gate."""
     root = _repo(tmp_path)
     validator = PolymorphicValidator(str(root))
     from kriya.tools.validate import _verification_gate
 
-    outside = validator._dependency_cache_dir("maven")
     inside = []
-    _verification_gate("tests")(lambda self: inside.append(self._dependency_cache_dir("maven")) or {"success": True})(validator)
-    assert inside == [outside]  # a view-keyed cache would be a cold cache (network acquisition) on every gate
+
+    def gate(self):
+        inside.append((self._dependency_cache_dir("maven"), self.workspace_path))
+        return {"success": True}
+
+    _verification_gate("tests")(gate)(validator)
+    _verification_gate("tests")(gate)(validator)
+    (first, view), (second, _) = inside
+    assert first != second and view != str(root)  # the gate really ran in a view
+    for cache in (first, second):
+        assert not cache.startswith(os.path.realpath(view) + os.sep) and not cache.startswith(os.path.realpath(str(root)) + os.sep)
+        assert not os.path.exists(cache)
 
 
 # --- the same checks hold for the managed Python runtime step (a runtime gate in a session) -----------------------------------------------

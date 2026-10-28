@@ -9,6 +9,8 @@ precisely without a real Maven Central round-trip for every case.
 No Docker required - `_run_cmd_with_timeout` is mocked directly."""
 from unittest.mock import patch
 
+from _dependency_scope import hold_dependency_scope
+
 from kriya.config.config import AutonomyConfig
 from kriya.tools.containment import NetworkAuthority
 from kriya.tools.validate import PolymorphicValidator
@@ -30,9 +32,9 @@ _ORDINARY_FAILURE_STDERR = "[ERROR] COMPILATION ERROR :\n[ERROR] cannot find sym
 
 def _contained_validator(tmp_path) -> PolymorphicValidator:
     (tmp_path / "pom.xml").write_text("<project></project>")
-    return PolymorphicValidator(
+    return hold_dependency_scope(PolymorphicValidator(
         str(tmp_path), autonomy_cfg=AutonomyConfig(contained_execution_required=True, containment_backend="oci"),
-    )
+    ))
 
 
 def test_run_maven_cmd_offline_success_never_acquires(tmp_path):

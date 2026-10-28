@@ -185,7 +185,7 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         "kriya.static_analysis.operator_scan": (1, "P2", _P2),
         "kriya.static_analysis.scope": (1, "P2", _P2),
         "kriya.tools.test_execution": (1, "P2", _P2),
-        "kriya.tools.validate": (5, "P2", _P2),
+        "kriya.tools.validate": (4, "P2", _P2),
         "kriya.workflow.acceptance_jvm": (1, "P2", _P2),
         "kriya.workflow.acceptance_oracle": (2, "P2", _P2),
         # E14: one of attempt.py's 2 sites moved with find_ungrounded_java_child_process_tests (the default grounded

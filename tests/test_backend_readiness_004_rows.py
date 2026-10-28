@@ -501,11 +501,13 @@ def test_a_list_whose_every_entry_escapes_is_a_typed_plan_refusal_before_any_dev
 
 # ------------------------------------------------- MAVEN-ACQUISITION-CACHE-001 (TRACED: superseded by 5acf242)
 
-def test_the_maven_dependency_cache_lives_under_the_state_root_and_survives_a_worktree_reset(tmp_path, monkeypatch):
+def test_the_maven_dependency_layer_lives_under_the_state_root_so_a_worktree_reset_cannot_touch_it(tmp_path, monkeypatch):
     """The row inferred that a per-work-unit `git clean -fd` deleted the cache
     at <worktree>/.kriya/m2_cache. Since 5acf242 the cache is outside every
-    source tree (<state>/dependency-cache/maven/<workspace key>): the reset
-    cannot touch it, and a legacy in-tree cache migrates out on first use."""
+    source tree; since R3 (Wave-2 final closure) it is an EPHEMERAL per-scope layer
+    (<state>/gate-caches/...), so no reset has anything persistent to delete, and an
+    in-tree legacy cache is neither migrated nor read (the old migration is
+    retired: what an earlier Kriya left there was written by candidate code)."""
     from kriya.core.state_paths import ENV_STATE_DIR
     from kriya.tools.validate import PolymorphicValidator
 
@@ -515,14 +517,15 @@ def test_the_maven_dependency_cache_lives_under_the_state_root_and_survives_a_wo
     legacy.mkdir(parents=True)
     (legacy / "seed.jar").write_bytes(b"jar")
     validator = PolymorphicValidator(str(ws))
-    cache_dir = validator._maven_cache_dir()
-    assert os.path.realpath(cache_dir).startswith(os.path.realpath(str(tmp_path / "state")) + os.sep)
-    assert not os.path.realpath(cache_dir).startswith(os.path.realpath(str(ws)) + os.sep)
-    assert not legacy.exists() and os.path.isfile(os.path.join(cache_dir, "seed.jar"))  # migrated out of the tree
-    worktree = create_git_worktree(str(ws))
-    subprocess.run(["git", "clean", "-fdx"], cwd=worktree, check=True, capture_output=True)
-    assert os.path.isfile(os.path.join(cache_dir, "seed.jar"))
-    assert validator._maven_cache_dir() == cache_dir  # stable per workspace across work units
+    with validator.dependency_cache_scope():
+        cache_dir = validator._maven_cache_dir()
+        assert os.path.realpath(cache_dir).startswith(os.path.realpath(str(tmp_path / "state")) + os.sep)
+        assert not os.path.realpath(cache_dir).startswith(os.path.realpath(str(ws)) + os.sep)
+        assert os.listdir(cache_dir) == []  # the legacy in-tree cache is not migrated into the layer
+        worktree = create_git_worktree(str(ws))
+        subprocess.run(["git", "clean", "-fdx"], cwd=worktree, check=True, capture_output=True)
+        assert os.path.isdir(cache_dir)  # the reset has no effect on the layer
+    assert (legacy / "seed.jar").read_bytes() == b"jar"  # and the legacy bytes are left exactly where they were
 
 
 # ------------------------------------------------- independent review reconciliation (reviews/INDEPENDENT_REVIEW.md)

@@ -149,12 +149,12 @@ def test_contained_maven_compile_succeeds_via_transparent_two_phase_acquisition(
     result = validator.run_compile_check([str(src_dir / "Greeter.java")])
     assert result["success"] is True, result["output"]
 
-    # The persistent cache this run warmed must actually exist on the host
-    # (proves it isn't ephemeral container-local state that vanished).
-    cache_dir = validator._maven_cache_dir()
+    # R3: the dependency layer this gate filled was EPHEMERAL: it is gone with the gate, and nothing persistent was warmed (the pre-R3 persistent
+    # per-workspace cache let a candidate rewrite what later gates trusted).
     import os
-    assert os.path.isdir(cache_dir)
-    assert any(os.scandir(cache_dir)), "Maven cache directory is empty after a successful contained compile"
+    state = os.path.realpath(os.environ["KRIYA_STATE_DIR"])
+    assert not os.path.isdir(os.path.join(state, "dependency-cache"))
+    assert not os.path.isdir(os.path.join(state, "gate-caches")) or os.listdir(os.path.join(state, "gate-caches")) == []
 
 
 def test_contained_maven_offline_missing_dependency_triggers_bounded_reacquisition(tmp_path):
@@ -169,8 +169,7 @@ def test_contained_maven_offline_missing_dependency_triggers_bounded_reacquisiti
     (tmp_path / "pom.xml").write_text(_POM_WITH_A_REAL_DEPENDENCY)
     (src_dir / "Greeter.java").write_text(_JAVA_SOURCE_USING_DEPENDENCY)
 
-    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=_contained_cfg())
-    validator._maven_cache_dir()  # creates the (still-empty) cache dir
+    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=_contained_cfg())  # R3: every gate's dependency layer starts empty (cold)
 
     result = validator.run_compile_check([str(src_dir / "Greeter.java")])
     assert result["success"] is True, result["output"]
@@ -252,7 +251,7 @@ def test_contained_maven_test_lifecycle_plugins_available_offline_after_acquisit
 
     validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=_contained_cfg())
     assert validator.stack == "java"
-    validator._maven_cache_dir()  # confirms/creates a genuinely fresh, empty cache
+    # R3: the gate's dependency layer is created empty by the gate itself - genuinely fresh, nothing can be warm
 
     result = validator.run_tests()
     assert result["success"] is True, result["output"]

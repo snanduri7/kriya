@@ -25,9 +25,11 @@ from kriya.policy.filesystem import is_within_scope, make_workspace_scope
 from kriya.policy.model import ActionRequest, ActionType
 from kriya.tools import test_execution
 from kriya.tools.containment import (
+    DEPENDENCY_CACHE_SCOPE_REQUIRED,
     ContainmentBackend,
     ContainmentProfile,
     ContainmentSetupError,
+    DependencyCacheError,
     ExternalExecutionDecision,
     MountSpec,
     NetworkAuthority,
@@ -35,6 +37,7 @@ from kriya.tools.containment import (
     decide_external_execution,
 )
 from kriya.tools.containment_oci import MAVEN_CACHE_MOUNT, VENV_CONTAINER_PATH, finalize_registry_acquisition_result
+from kriya.tools.dependency_cache import create_ephemeral_cache, remove_ephemeral_cache
 from kriya.tools.dependency_execution import (
     MAVEN_INVOCATION_FAILED,
     OfflineFailureKind,
@@ -426,25 +429,26 @@ def _verification_gate(name: str):
     def decorate(method):
         @functools.wraps(method)
         def wrapper(self, *args, **kwargs):
-            scope = self._enter_gate_scope(name)
-            previous, self._gate = self._gate, name
-            started = time.monotonic()
-            try:
+            with self.dependency_cache_scope():  # R3: the outermost gate's ephemeral dependency layer; removed after the view is closed
+                scope = self._enter_gate_scope(name)
+                previous, self._gate = self._gate, name
+                started = time.monotonic()
                 try:
-                    result = method(self, *args, **kwargs)
-                except BaseException as error:
-                    _record_gate_result(name, None, started, error=error)
-                    self._leave_gate_scope(name, ephemeral)
-                    raise
+                    try:
+                        result = method(self, *args, **kwargs)
+                    except BaseException as error:
+                        _record_gate_result(name, None, started, error=error)
+                        self._leave_gate_scope(name, ephemeral)
+                        raise
+                    finally:
+                        self._gate = previous
+                    artifacts = self._leave_gate_scope(name, ephemeral)
+                    if ephemeral and artifacts is not None and isinstance(result, dict):
+                        result["runtime_artifacts"] = artifacts
+                    _record_gate_result(name, result, started)
+                    return result
                 finally:
-                    self._gate = previous
-                artifacts = self._leave_gate_scope(name, ephemeral)
-                if ephemeral and artifacts is not None and isinstance(result, dict):
-                    result["runtime_artifacts"] = artifacts
-                _record_gate_result(name, result, started)
-                return result
-            finally:
-                self._close_gate_scope(scope)
+                    self._close_gate_scope(scope)
         return wrapper
     return decorate
 
@@ -456,6 +460,9 @@ class PolymorphicValidator:
     _gate_view: Optional[GateView] = None
     _gate_view_binding: Any = None
     last_gate_view_changes: Tuple[str, ...] = ()
+    # R3: the ephemeral dependency layers of the outermost verification scope now open (None: no scope is open, so no cache may be asked for).
+    _cache_scope_depth: int = 0
+    _gate_caches: Optional[Dict[str, str]] = None
 
     def __init__(
         self,
@@ -638,16 +645,35 @@ class PolymorphicValidator:
         """One view for a sequence of steps that is a single verification: Kriya's own build preparation of a finite command and the
         run that consumes its product (OI-142 O1: the product exists only in that view, never as residue in the worktree). Gates
         called inside share the view; the same checks as a gate close it."""
-        scope = self._enter_gate_scope(name)
-        try:
+        with self.dependency_cache_scope():
+            scope = self._enter_gate_scope(name)
             try:
-                yield
-            except BaseException:
+                try:
+                    yield
+                except BaseException:
+                    self._leave_gate_scope(name, name == RUNTIME_VERIFICATION_GATE)
+                    raise
                 self._leave_gate_scope(name, name == RUNTIME_VERIFICATION_GATE)
-                raise
-            self._leave_gate_scope(name, name == RUNTIME_VERIFICATION_GATE)
+            finally:
+                self._close_gate_scope(scope)
+
+    @contextlib.contextmanager
+    def dependency_cache_scope(self):
+        """R3: the lifetime of the dependency layers of one verification scope (see kriya/tools/dependency_cache.py). The OUTERMOST entry opens an empty
+        set; nested gates and sessions share it; leaving the outermost removes every layer it created, also after an error. A component that runs
+        candidate-controlled commands outside a gate (the authority-bundle run) enters it itself."""
+        outermost = self._cache_scope_depth == 0
+        if outermost:
+            self._gate_caches = {}
+        self._cache_scope_depth += 1
+        try:
+            yield
         finally:
-            self._close_gate_scope(scope)
+            self._cache_scope_depth -= 1
+            if outermost:
+                caches, self._gate_caches = self._gate_caches or {}, None
+                for path in caches.values():
+                    remove_ephemeral_cache(path)
 
     _DECLARED_OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024
 
@@ -1418,53 +1444,26 @@ class PolymorphicValidator:
             binding.authorize_gate_output(gate, os.path.relpath(root, binding.root))
 
     def _dependency_cache_dir(self, tool: str) -> str:
-        """A persistent, per-workspace dependency cache for ``tool``
-        (``maven``: the local repository; ``gradle``: the Gradle user home -
-        GRADLE-WRAPPER-CONTAINMENT-001), OUTSIDE every source tree, under the
-        Kriya state root at ``dependency-cache/<tool>/<workspace key>``,
-        keyed by the validator's original workspace (see _maven_cache_dir)."""
-        from kriya.core.state_paths import default_state_directory
-
-        root = os.path.realpath(expand_user(environment_state_dir() or default_state_directory()))
-        workspace = os.path.realpath(self.original_workspace_path or self._origin_root())
-        key = hashlib.sha256(workspace.encode("utf-8")).hexdigest()[:16]
-        cache_dir = os.path.join(root, "dependency-cache", tool, key)
-        os.makedirs(cache_dir, exist_ok=True)
-        return cache_dir
+        """R3: the EPHEMERAL dependency directory of ``tool`` (``maven``: the local repository; ``gradle``: the Gradle user home -
+        GRADLE-WRAPPER-CONTAINMENT-001) for the verification scope now open: empty when first asked for, shared by that scope's offline execution
+        and registry-scoped acquisition, removed with the scope (kriya/tools/dependency_cache.py). There is no persistent per-workspace cache: a
+        persistent writable one let a candidate rewrite the bytes a later gate trusts. Outside a scope there is none to give: a typed refusal."""
+        if self._gate_caches is None:
+            raise DependencyCacheError(
+                DEPENDENCY_CACHE_SCOPE_REQUIRED,
+                f"a {tool} dependency directory was asked for outside a verification scope (a gate, a verification session or an authority run)")
+        if tool not in self._gate_caches:
+            try:
+                self._gate_caches[tool] = create_ephemeral_cache(self._state_root(), tool)
+            except OSError as error:
+                raise DependencyCacheError(DEPENDENCY_CACHE_SCOPE_REQUIRED, f"no ephemeral {tool} dependency directory could be created: {error}") from error
+        return self._gate_caches[tool]
 
     def _maven_cache_dir(self) -> str:
-        """A persistent, per-workspace Maven local-repository cache
-        (SEC-001-P6 Stage 2), OUTSIDE every source tree: under the Kriya state
-        root (``KRIYA_STATE_DIR``, else ``~/.kriya/state``) at
-        ``dependency-cache/maven/<workspace key>``, keyed by the validator's
-        original workspace (the run's reused ``.kriya/worktree`` for gates, a
-        fixed path per workspace), so later runs reuse what the
-        registry-scoped acquisition fetched. It used to live in the
-        worktree's ``.kriya/m2_cache``, inside the tree the project's own
-        build walks: Apache RAT failed commons-lang's compile on the 567
-        cached artifact files it found there. Created on demand -
-        ``OCIContainmentBackend`` refuses to mount a ``dependency_cache_paths``
-        entry that does not already exist as a real directory."""
-        from kriya.core.state_paths import default_state_directory
-
-        root = os.path.realpath(expand_user(environment_state_dir() or default_state_directory()))
-        workspace = os.path.realpath(self.original_workspace_path or self._origin_root())
-        key = hashlib.sha256(workspace.encode("utf-8")).hexdigest()[:16]
-        cache_dir = os.path.join(root, "dependency-cache", "maven", key)
-        # The cache Kriya kept in the tree before must not stay where the
-        # build walks it (a reused worktree keeps untracked .kriya/ content):
-        # it becomes the new cache when there is none yet, else it is dropped.
-        legacy = os.path.join(self._origin_root(), ".kriya", "m2_cache")
-        if os.path.isdir(legacy) and not os.path.islink(legacy):
-            if not os.path.isdir(cache_dir) or not os.listdir(cache_dir):
-                os.makedirs(os.path.dirname(cache_dir), exist_ok=True)
-                if os.path.isdir(cache_dir):
-                    os.rmdir(cache_dir)
-                shutil.move(legacy, cache_dir)
-            else:
-                shutil.rmtree(legacy)
-        os.makedirs(cache_dir, exist_ok=True)
-        return cache_dir
+        """R3: the Maven local repository of the verification scope now open (SEC-001-P6 Stage 2: outside every source tree, under the Kriya state
+        root, so a project build that walks the tree - Apache RAT, NoHttp checkstyle - never meets cached artifacts). It is ephemeral, see
+        ``_dependency_cache_dir``; an in-tree ``.kriya/m2_cache`` an earlier Kriya left is not read and not moved."""
+        return self._dependency_cache_dir("maven")
 
     @staticmethod
     def _validation_result(success: bool, output: str, command_result: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -1693,7 +1692,13 @@ class PolymorphicValidator:
 
         def _acquire_for_this_goal() -> Dict[str, Any]:
             if tooling_only:
-                return self._acquire_maven_tooling(goals, cache_dir, _bounded(timeout))
+                # R3 / owner decision (Option A): the runtime session's layer is fresh and ephemeral, so the project's own dependencies are resolved into IT
+                # here (never inherited from a compile/test gate or a persistent cache): the named plugins first, then ``dependency:resolve`` of the project.
+                tooling = self._acquire_maven_tooling(goals, cache_dir, _bounded(timeout))
+                if _deadline_exhausted():  # the run's budget is gone: no second phase (the caller then reports the acquisition incomplete)
+                    return tooling
+                resolved = self._acquire_maven_project_dependencies(cwd, cache_dir, _bounded(max(timeout, self._RUNTIME_DEPENDENCY_ACQUISITION_SECONDS)))
+                return {**tooling, "dependency_resolution": resolved}
             argv = ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}"] + goals
             # PREPARATION/ACQUISITION ONLY - network=DEPENDENCY_REGISTRY_ONLY
             # (SEC-006: registry-scoped, not unrestricted), same goals as
@@ -1837,6 +1842,33 @@ class PolymorphicValidator:
                 return acquisition_evidence(argv, None, reason=f"failed to invoke: {type(e).__name__}: {e}")
             finally:
                 self._owned_trees.discard(empty)
+        log_acquisition_outcome("maven", desc, returncode=result["returncode"], timed_out=result.get("timeout", False))
+        return acquisition_evidence(argv, result)
+
+    # The floor of the bound on the dependency-resolution phase of a runtime acquisition (a cold resolution of a real project's dependencies outlasts a
+    # runtime step's own 90 s); the run's root deadline still caps it.
+    _RUNTIME_DEPENDENCY_ACQUISITION_SECONDS = 300
+
+    def _acquire_maven_project_dependencies(self, cwd: str, cache_dir: str, timeout: int) -> Dict[str, Any]:
+        """R3 (owner decision, Option A): the runtime-local dependency acquisition. A runtime command such as ``mvn exec:java`` needs the project's
+        dependencies (``exec:java`` resolves TEST scope) and, since the dependency layer is per verification scope and ephemeral, nothing an earlier
+        gate fetched is there: ``mvn dependency:resolve`` of the project resolves them into THIS scope's layer, registry-scoped (the one acquisition
+        authority, ``NetworkAuthority.DEPENDENCY_REGISTRY_ONLY``). It resolves and downloads; it compiles nothing and runs neither the candidate
+        application nor its tests (so a defect in the candidate's sources is never an acquisition failure), and its outcome is never a verdict: the
+        exact offline run that follows decides, and a dependency that is still missing is the ``MAVEN_ACQUISITION_INCOMPLETE:`` no-verdict. ``-fae``:
+        in a reactor every module's own dependencies are fetched even when a reactor-internal one cannot be resolved without a build."""
+        argv = ["mvn", "-B", "-fae", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}", "dependency:resolve"]
+        desc = "mvn dependency:resolve (runtime dependencies)"
+        try:
+            result = self._run_cmd_with_timeout(
+                argv, cwd=cwd, timeout=timeout, network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
+                dependency_cache_path=cache_dir, dependency_cache_writable=True,
+            )
+        except ContainmentSetupError:
+            raise  # SEC-006: a setup failure is never an ordinary acquisition outcome
+        except Exception as e:
+            logger.warning(f"Maven runtime dependency acquisition ({desc}) failed to invoke: {e}")
+            return acquisition_evidence(argv, None, reason=f"failed to invoke: {type(e).__name__}: {e}")
         log_acquisition_outcome("maven", desc, returncode=result["returncode"], timed_out=result.get("timeout", False))
         return acquisition_evidence(argv, result)
 

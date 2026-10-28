@@ -49,7 +49,7 @@ def _ownership_error(reason_code: str, source: str, *, expected: str = "", actua
 
 # Directories Kriya itself owns: nothing beneath one is a user's workspace, so a repository search never ascends THROUGH one (a scoped snapshot,
 # a candidate sandbox under ``<root>/.kriya/``, a gate view under the state root must not take the identity of the repository around them).
-_KRIYA_OWNED_DIRECTORIES = frozenset({".kriya", "gate-views"})
+_KRIYA_OWNED_DIRECTORIES = frozenset({".kriya", "gate-views", "gate-caches"})
 
 
 def find_repository_root(directory: str) -> Optional[str]:
