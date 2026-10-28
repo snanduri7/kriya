@@ -383,3 +383,49 @@ W2-01, W2-02 and W2-03 all have explicit dispositions (8.1, 9, 10/11). The subst
 * **Registry.** `handover/BACKLOG_REGISTRY.csv` is not modified by this entry (every row it concerns already carries its own status), so the byte-exact CSV script was not needed.
 * **Verification scope.** This entry changes no code. The gates quoted in sections 8-14 stay scoped to what they ran (state_machine 1770, tests/contracts 26, ruff/pylint 0 at `b77c7c1`); the full suite has not been run (owner batch boundary).
 * **Next (owner order).** Read-only characterization of the malformed durable state (B-002, B-005, B-003(a)/(b)) and `DURABILITY-UNCONFIRMED-REASON-CODE-001`; B-004 stays out (decision-pending).
+
+## 16. Malformed durable state campaign (2026-10-28)
+
+Owner sign-off 2026-10-28 on the characterization (section 15 and `~/kriya-fixforward-2026-10-22/closure/exec_layer/d2_rebuild/WAVE2_MALFORMED_STATE_CHARACTERIZATION_2026-10-28/`). Order: B-002, B-005, B-003(a), B-003(b) loader,
+B-003(b) operator commands, the durability reason code, then the bounded `_load_json_document` characterization. Executable commits (each fingerprint is the executable-tree formula of 8.1, reproduced from `git archive <commit>`; manifests
+and the mutation campaign are in `.../WAVE2_MALFORMED_STATE_CAMPAIGN_2026-10-28/`). Nothing pushed, nothing tagged, `refs/kriya/verified` unmoved.
+
+| item | commit | fingerprint | new tests | mutants (disposable copy of `git archive HEAD`) |
+|---|---|---|---|---|
+| W2-09 B-002 contract registry | `c58320e` | `dfa316cd71aa6c74` | `tests/test_b002_registry_non_utf8.py` 18 | 7/7 killed (run 1 used `-x` and stopped before the end-to-end reproducer; rerun without it, both kept) |
+| W2-12 B-005 proposal store | `e95e636` | `1c7426be8dd0e91d` | `tests/test_b005_proposal_non_utf8.py` 40 | 6/6 |
+| W2-11 B-003(a) SEC-009 store | `006d550` | `325003d64c8c89cc` | `tests/test_b003a_authority_non_utf8.py` 31 | 6/6 |
+| W2-11 B-003(b) MCP store loader | `479287d` | `cba9c62b68e26b35` | `tests/test_b003b_mcp_store_non_utf8.py` 21 | 7/7 |
+| W2-11 B-003(b) MCP operator commands | `9a430c8`, `9f7e430` | `8a2ec12770b60efa`, `2991f010f51ede37` | `tests/test_b003b_mcp_operator_unreadable_store.py` 23 | 9/9 (run 1: M07 survived, an `OSError` branch the loader makes unreachable; removed in `9f7e430`, survivor evidence kept) |
+| DURABILITY-UNCONFIRMED-REASON-CODE-001 | `f01468e`, `f62ff6a` | `b0ac617f24004d58`, `55aba1b13095e95d` | `tests/test_durability_reason_code.py` 13 | 16/16 (run 1: M08 survived, test strengthened in `f62ff6a`, survivor evidence kept) |
+| `_load_json_document` caller 2 (retention) | `75272dc` | `98ee990c7b9b1256` | `tests/test_retention_unreadable_control_state.py` 9 | 5/5 |
+
+**What each fix is.** B-002: `load_contract_registry` maps `UnicodeDecodeError` to the existing `ContractRegistryCorruptError`; MEASURED pre-fix (preserved): invalid UTF-8 entered the Developer repair loop to `quality_gates_exhausted` and dropped every
+checkpoint's resume fingerprints (`workflow.py:2900`), ASCII garbage stopped as `contract_registry_blocked`; post-fix the invalid-UTF-8 run is equal to its ASCII control (same `failure_category`, same attempts, run record, untouched workspace) and the
+fingerprint is the typed UNAVAILABLE. The scripted Developer-call count is not an invariant. B-005: `load_proposal` maps it to `PROPOSAL_PARSE_INVALID` (absent stays `PROPOSAL_NOT_FOUND`, malformed JSON unchanged); `proposal show|approve|reject|execute`
+no longer end in a traceback. B-003(a): `load_approval_artifact` raises the existing `ApprovalArtifactError`, so `load_config()` is the typed `ConfigAuthorityError` denial for a local store and a trust file, and `application/configuration.py` reports
+`store_unreadable`; approval policy is unchanged. B-003(b) loader: `MCPApprovalArtifactError`; the call is the same typed `REQUIRE_APPROVAL / MCP_TOOL_REQUIRES_APPROVAL` as for malformed JSON (previously `DENY / MCP_POLICY_EVALUATION_FAILED`), zero `tools/call`.
+B-003(b) operator: `kriya mcp approve|revoke` refuse (exit 1, `APPROVAL_STORE_UNREADABLE_OR_INVALID`, now defined in `kriya/mcp/invocation_approval.py`, imported by `tools/service.py`) before any MCP server starts and again at the write; the store is never
+treated as absent, overwritten or merged into; no preserve-then-replace and no automatic repair. Durability: `DURABILITY_UNCONFIRMED` is a distinct code in `commit_state.reason_codes`, derived from the typed errors' `durable_write_error` (never the message
+text); a durability-only condition no longer also emits `RUN_RECORD_UNREADABLE` / `CONTROL_STATE_UNREADABLE`; both prefix-policy sites (`commit_state.describe`, `cli_commands/runs.py`) now use the structured fact and a structural test forbids parsing the
+prefix again; payloads gain additive `durability_unconfirmed` flags; `needs_review` and the path/reason detail are unchanged; no KUP/UI surface keys on these codes.
+
+**Decisions and deviations, stated.** (1) The resolver returns a bool and `ExecutionPolicy` has no third state, so an unreadable MCP store cannot be told from "no approval" at the policy layer without changing the policy; the distinction lives in the operator
+commands and the tool catalogue (`APPROVAL_STORE_UNREADABLE_OR_INVALID`). (2) A durability-only state is no longer offered `kriya runs recover` (`recovery_command` is None): recovery cannot settle it, only a later read can. (3) `metrics/derive.py` still counts
+durability-unconfirmed records in its `unreadable_run_records` count (a count, not a decision). (4) `read_pending_contract_registry` was NOT changed under B-002: it sits inside the commit and recovery transactions, whose handling of a raw error was not
+characterized (row `CONTRACT-REGISTRY-PENDING-NON-UTF8-RAW-001`). (5) `mcp list|inspect` still print their read-only "present but invalid ... treating as no approvals (fail closed)" warning; unchanged.
+
+**`_load_json_document` dispositions (MEASURED, `measure_load_json_document.py`).** The loader reads any parse failure as absent. Callers: (1) `load_artifact_registry` - a malformed or non-UTF-8 `artifacts.json` loads as an EMPTY registry, `ARTIFACT_DRIFT` detection
+is silently off (valid control reports `[True]`, malformed `[]`) and the next save replaces the bytes with only the new records; derived, re-derivable metadata, not an authority gate: `ARTIFACT-REGISTRY-MALFORMED-READ-AS-EMPTY-001` P2 OPEN (own slice, per-caller
+policy needed for the post-commit save). (2) `load_control_state_run_reference` - retention treated a malformed or non-UTF-8 ControlState as "references nothing" and would have pruned the run record it references: this was control evidence turned into a
+destructive default, so it was fixed first (`75272dc`, `RETENTION-UNREADABLE-CONTROL-STATE-001` CLOSED). The enforce-resume use is not affected (it runs only after the strict reader returned a readable state). (3) `load_approved_plan` - no production caller (tests only):
+`APPROVED-PLAN-MALFORMED-READ-AS-ABSENT-001` P3 OPEN. No caller turned malformed AUTHORITY evidence into a permissive state, so the transition to B-006 is not blocked.
+
+**Registry.** `DURABILITY-UNCONFIRMED-REASON-CODE-001` CLOSED; `RETENTION-UNREADABLE-CONTROL-STATE-001` added CLOSED; `ARTIFACT-REGISTRY-MALFORMED-READ-AS-EMPTY-001` (P2), `APPROVED-PLAN-MALFORMED-READ-AS-ABSENT-001` (P3) and
+`CONTRACT-REGISTRY-PENDING-NON-UTF8-RAW-001` (P3) added OPEN with `target_scope`. B-002/B-005/B-003 had no registry rows (ledger W2-09/W2-12/W2-11 only). B-004 (W2-10) stays DECISION-PENDING and untouched.
+
+**Gates actually run (on `75272dc`, the last executable commit; the evidence commit changes no code).** `pylint kriya plugins/core_tools tests` rc 0 and `ruff check .` clean at every commit. state_machine tier (-m state_machine, -n 8): 1770 passed in 8m46s (log gates_state_machine_75272dc.log). tests/architecture + tests/contracts + test_backlog_registry + test_strict_doubles: 232 passed (log gates_architecture_contracts_75272dc.log).
+Adjacent files run during the work (254 passed: durability, unreadable control state, commit-state gate, run lifecycle, recovery, ownership recovery, tool disposition CLI/direct, handback, metrics, the new files; and the three retention/commit-gate files, 58
+passed). NOT run: the full suite (owner batch boundary), the 87-file milestone/approval adjacent set, Docker-backed tiers, live-model tiers.
+
+**Not started.** B-006, D-002, JVM / result-truth Slice F (W2-26 awaits the owner's F7 confirmation), REG-R1 (UNKNOWN), B-004, `TEST-SLICE-A-OCI-STALE-NESTED-COMMAND-STRING-001`. **Next (owner order):** B-006.
