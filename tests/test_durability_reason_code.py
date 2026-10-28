@@ -168,6 +168,12 @@ def test_the_structured_fact_alone_makes_a_durability_condition_whatever_the_det
     assert control_state.reason_codes == ["DURABILITY_UNCONFIRMED"] and "retry once the storage recovers" in control_state.describe()
 
 
+def test_the_durability_advice_needs_the_durability_fact_it_is_not_the_fallback_for_a_state_with_no_other_explanation():
+    """Mutation M08 (run 1 survivor): the durability remediation must not be what an assessment says merely because nothing else matched."""
+    text = WorkspaceCommitAssessment().describe()
+    assert "durability" not in text and "retry once the storage recovers" not in text
+
+
 def test_no_policy_in_the_source_parses_the_durability_prefix_out_of_message_text():
     offenders = []
     for path in KRIYA_SOURCE.rglob("*.py"):
