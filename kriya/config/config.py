@@ -9,6 +9,7 @@ from kriya.config.environment import Environment, expand_user
 from kriya.config.environment import trust_file as environment_trust_file
 
 # D3: the resolution names below moved to kriya/config/resolution.py; re-exported here (PARTIAL_FACADES). Removed in P1.
+from kriya.config.request_fields import reserved_extra_body_keys, reserved_extra_body_message
 from kriya.config.resolution import PRODUCTION_FIXED_RUNTIME_GUARANTEES as PRODUCTION_FIXED_RUNTIME_GUARANTEES
 from kriya.config.resolution import (
     PRODUCTION_GENERATION_TIME_BUDGET_SECONDS as PRODUCTION_GENERATION_TIME_BUDGET_SECONDS,
@@ -85,6 +86,16 @@ class LLMTransportConfig(BaseModel):
     pool_timeout_seconds: float = Field(default=10.0, gt=0)
 
 
+def _refuse_reserved_extra_body(value: Dict[str, Any]) -> Dict[str, Any]:
+    """MODEL-IDENTITY-EXTRA-BODY-OVERRIDE-001: an early, typed-at-the-source
+    config error. The request boundary (ChatRequest, LLMClient) enforces the
+    same set for requests built from any other source."""
+    keys = reserved_extra_body_keys(value)
+    if keys:
+        raise ValueError(reserved_extra_body_message(keys))
+    return value
+
+
 class LLMConfig(BaseModel):
     provider: str = Field(default="openai")
     model: str = Field(default="llama3")
@@ -97,6 +108,9 @@ class LLMConfig(BaseModel):
     # enough for dependency-rich authoritative plans without truncation.
     planner_max_tokens: int = Field(default=8192, ge=256)
     extra_body: Dict[str, Any] = Field(default_factory=dict)
+
+    _extra_body_owns_no_request_field = field_validator("extra_body")(_refuse_reserved_extra_body)
+
     reasoning: bool = Field(default=False)
     context_window: int = Field(default=32768)
     # INF-001: the inference runtime adapter serving this binding
@@ -952,6 +966,9 @@ class FallbackModelConfig(BaseModel):
     # regardless of which model was actually being called - harmless when the
     # fallback ignores unknown fields, but silently wrong whenever it doesn't.
     extra_body: Dict[str, Any] = Field(default_factory=dict)
+
+    _extra_body_owns_no_request_field = field_validator("extra_body")(_refuse_reserved_extra_body)
+
     context_window: int = Field(default=32768)
     # INF-001: the inference runtime adapter serving this binding
     # (kriya/core/inference_runtime.py). None is the packaged default; an

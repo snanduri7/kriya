@@ -67,7 +67,8 @@ MODULES: Dict[str, Module] = {
     "CONFIG": Module(
         owner_paths=("kriya/config/", "kriya/core/logging_setup.py"),
         public=("kriya.config", "kriya.config.service", "kriya.config.environment", "kriya.config.config",
-                "kriya.config.resolution"),  # D3: resolution split from the schema (the paths.state rule STATE re-exports)
+                "kriya.config.resolution",  # D3: resolution split from the schema (the paths.state rule STATE re-exports)
+                "kriya.config.request_fields"),  # D-002: the Kriya-owned request fields, shared by config validation and the request boundary
         layer=1),
     "AUTHORITY": Module(
         owner_paths=("kriya/policy/", "kriya/config/authority.py", "kriya/config/authority_approval.py",

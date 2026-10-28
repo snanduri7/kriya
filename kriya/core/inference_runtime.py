@@ -93,6 +93,17 @@ class ChatRequest:
     # (None: the client's own, itself Kriya-configured).
     timeout: Any = None
 
+    def __post_init__(self) -> None:
+        # MODEL-IDENTITY-EXTRA-BODY-OVERRIDE-001: the request boundary every
+        # runtime and every caller (completion, tool turn, qualification probe,
+        # doctor) constructs through. ``model`` is the one model this request
+        # names; an extra_body that sets it (or another Kriya-owned field)
+        # would be sent instead of it, so the request is refused here, before
+        # any adapter or SDK sees it.
+        from kriya.core.provider_contract import refuse_extra_body_request_fields
+
+        refuse_extra_body_request_fields(self.extra_body, model=self.model)
+
 
 @dataclass(frozen=True)
 class RawToolCall:

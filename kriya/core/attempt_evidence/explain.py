@@ -148,8 +148,8 @@ def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
         return _answer_tool_attempt(next_records)
     # No model call is a fact Kriya recorded (the attempt ran and called
     # nothing), so it is NOT_APPLICABLE - never missing evidence.
-    answers["Q1"] = _recorded([_with_authority(_brief(r, "model", "dispatched", "wire_reason", "refusal_type",
-                                                      "temperature"), r, records)
+    answers["Q1"] = _recorded([_with_authority(_brief(r, "model", "requested_model", "dispatched", "wire_reason",
+                                                      "refusal_type", "temperature"), r, records)
                                for r in requests]) if requests else _absent(
         NOT_APPLICABLE, "no_model_call: no model request was made in this attempt")
     snapshots = _of(records, "authority.snapshot")

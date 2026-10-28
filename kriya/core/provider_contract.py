@@ -59,11 +59,16 @@ QUALIFICATION_IDENTITY_UNVERIFIED = "QUALIFICATION_IDENTITY_UNVERIFIED"
 # PROVIDER-CONTRACT-001A: production on an exact runtime that can report its
 # served window, and the window could not be observed after the call.
 SERVED_CONTEXT_UNOBSERVABLE = "SERVED_CONTEXT_UNOBSERVABLE"
+# MODEL-IDENTITY-EXTRA-BODY-OVERRIDE-001: extra_body names a request field
+# Kriya owns (model, messages, tools, ...), which the SDK would send instead of
+# Kriya's own value.
+PROVIDER_REQUEST_FIELD_CONFLICT = "PROVIDER_REQUEST_FIELD_CONFLICT"
 
 PROVIDER_CONTRACT_REASON_CODES = frozenset({
     PROVIDER_SETTING_UNSUPPORTED, PROVIDER_SETTING_NOT_EFFECTIVE, PROVIDER_SETTING_UNKNOWN,
     PROVIDER_SETTING_CONFLICT, SERVED_CONTEXT_BELOW_REQUESTED, RUNTIME_CONTEXT_IDENTITY_MISMATCH,
     PROVIDER_PROMPT_TRUNCATED, QUALIFICATION_IDENTITY_UNVERIFIED, SERVED_CONTEXT_UNOBSERVABLE,
+    PROVIDER_REQUEST_FIELD_CONFLICT,
 })
 
 
@@ -75,6 +80,18 @@ class ProviderContractError(ValueError):
         super().__init__(f"{reason_code}: {message}")
         self.reason_code = reason_code
         self.details = dict(details or {})
+
+
+def refuse_extra_body_request_fields(extra_body: Optional[Mapping[str, Any]], *, model: Optional[str] = None) -> None:
+    """Refuse (typed, before any provider contact) an ``extra_body`` that sets
+    a request field Kriya owns. Never strips the key: a request that asked for
+    another model is refused, not quietly rewritten into one that did not."""
+    from kriya.config.request_fields import reserved_extra_body_keys, reserved_extra_body_message
+
+    keys = reserved_extra_body_keys(extra_body)
+    if keys:
+        raise ProviderContractError(PROVIDER_REQUEST_FIELD_CONFLICT, reserved_extra_body_message(keys),
+                                    {"fields": list(keys), "requested_model": model})
 
 
 @dataclass(frozen=True)
@@ -296,11 +313,11 @@ def check_prompt_consumption(*, dispatched_bytes: int, reported_prompt_tokens: O
 
 __all__ = [
     "ContextWindowState", "DEFAULT_BYTES_PER_TOKEN_CEILING", "PROVIDER_CONTRACT_REASON_CODES",
-    "PROVIDER_FEATURES", "PROVIDER_PROMPT_TRUNCATED", "PROVIDER_SETTING_CONFLICT",
+    "PROVIDER_FEATURES", "PROVIDER_PROMPT_TRUNCATED", "PROVIDER_REQUEST_FIELD_CONFLICT", "PROVIDER_SETTING_CONFLICT",
     "PROVIDER_SETTING_NOT_EFFECTIVE", "PROVIDER_SETTING_UNKNOWN", "PROVIDER_SETTING_UNSUPPORTED",
     "Provenance", "ProviderCapabilities", "ProviderContractError", "ProviderRequestPlan",
     "QUALIFICATION_IDENTITY_UNVERIFIED", "RUNTIME_CONTEXT_IDENTITY_MISMATCH", "SEMANTIC_SETTINGS",
     "SERVED_CONTEXT_BELOW_REQUESTED", "SERVED_CONTEXT_UNOBSERVABLE", "SettingState", "Support", "budget_window", "check_prompt_consumption",
     "consumption_bytes",
-    "context_window_state", "identity_digest",
+    "context_window_state", "identity_digest", "refuse_extra_body_request_fields",
 ]

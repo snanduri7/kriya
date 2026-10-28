@@ -97,14 +97,26 @@ class CompletionResult:
         return self.status is CompletionStatus.OK
 
     @property
+    def reported_model(self) -> Optional[str]:
+        """The model identity the provider's response named, when it named
+        one (MODEL-IDENTITY-EXTRA-BODY-OVERRIDE-001). ``model`` is what Kriya
+        requested; this is only what the provider reported, never filled in
+        from it, and an alias or tag may legitimately differ."""
+        reported = self.provider_metadata.get("model")
+        return reported if isinstance(reported, str) and reported else None
+
+    @property
     def truncated(self) -> bool:
         return self.status is CompletionStatus.OUTPUT_TRUNCATED
 
     def to_telemetry(self) -> Dict[str, Any]:
         """Persistable, secret-free protocol outcome for model-use telemetry."""
+        reported = self.reported_model
         return {
             "status": self.status.value,
             "model": self.model,
+            "requested_model": self.model,
+            **({"reported_model": reported} if reported else {}),
             "runtime_fingerprint": self.runtime_fingerprint,
             "runtime_fingerprint_exact": self.runtime_fingerprint_exact,
             "inference_settings_digest": self.inference_settings_digest,

@@ -502,7 +502,9 @@ def record_wire_request(runtime: Any, request: Any) -> None:
         timeout = getattr(request, "timeout", None)
         payload = {
             "dispatched": True, "wire_reason": reason, "adapter": getattr(runtime, "name", None),
-            "model": request.model, "stream": stream, "response_format": response_format.get("type"),
+            "model": request.model,
+            # D-002: the model Kriya asked the provider for, read from the request at the invocation boundary.
+            "requested_model": request.model, "stream": stream, "response_format": response_format.get("type"),
             "temperature": request.temperature, "max_tokens": request.max_tokens,
             "tools": len(request.tools) if request.tools else 0,
             "timeout_seconds": timeout if isinstance(timeout, (int, float)) else None,
@@ -538,6 +540,10 @@ def record_wire_response(response: Any) -> None:
             "reasoning_field": _reasoning_summary(reasoning), "provider_metadata": dict(response.provider_metadata),
             "tool_calls": len(tool_calls), "raw_content_recorded": raw is not None,
         }
+        # D-002: only what the provider's response named; absent when it named none (never the requested model).
+        reported = payload["provider_metadata"].get("model")
+        if isinstance(reported, str) and reported:
+            payload["reported_model"] = reported
         content = {"content": raw if raw is not None else response.content, "tool_calls": tool_calls or None,
                    "reasoning": reasoning if capture_reasoning() else None}
     except Exception as error:  # observational: never alters the run
@@ -586,6 +592,9 @@ def record_call_result(result: Any) -> None:
         for key in ("status", "parser_status"):
             value = getattr(result, key, None)
             payload[key] = getattr(value, "value", value)
+        payload["requested_model"] = getattr(result, "model", None)
+        if getattr(result, "reported_model", None):
+            payload["reported_model"] = result.reported_model
         payload["tool_calls"] = len(getattr(result, "tool_calls", None) or [])
     except Exception as error:  # observational: never alters the run
         logger.warning("Attempt evidence: model.result not built (%s: %s)", type(error).__name__, error)

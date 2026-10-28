@@ -349,6 +349,17 @@ class LLMClient:
         fields and a served window other than the requested one are refused."""
         return getattr(self.config, "runtime_profile", None) == "production"
 
+    @staticmethod
+    def _refuse_owned_request_fields(model: str, extra_body: Optional[Dict[str, Any]]) -> None:
+        """MODEL-IDENTITY-EXTRA-BODY-OVERRIDE-001: the resolved extra_body (the
+        binding's, or a caller's override) names no request field Kriya owns.
+        Checked before the runtime fingerprint, the served-context observation
+        and every other provider contact, so a refused request makes none;
+        ChatRequest enforces the same set for anything built elsewhere."""
+        from kriya.core.provider_contract import refuse_extra_body_request_fields
+
+        refuse_extra_body_request_fields(extra_body, model=model)
+
     def _provider_plan(self, runtime: InferenceRuntimePort, *, extra_body: Optional[Dict[str, Any]],
                        temperature: Optional[float], is_reasoning: bool, declared_window: Optional[int],
                        fingerprint: Any) -> Any:
@@ -890,6 +901,7 @@ class LLMClient:
         # budget below plans against (the binding's declared context_window,
         # unless extra_body sets the provider option itself).
         extra_body = request_extra_body(extra_body, own["context_window"], self._runtime(model))
+        self._refuse_owned_request_fields(model, extra_body)
         # Reasoning models are NOT excluded from response_format here - Ollama (at
         # least) keeps a reasoning model's <think>-equivalent output in a separate
         # "reasoning" field and json_object-constrains only the "content" field, so
@@ -1220,6 +1232,7 @@ class LLMClient:
         # budget below plans against (the binding's declared context_window,
         # unless extra_body sets the provider option itself).
         extra_body = request_extra_body(extra_body, own["context_window"], self._runtime(model))
+        self._refuse_owned_request_fields(model, extra_body)
 
         self.last_call_metrics = None
         self.last_completion = None
