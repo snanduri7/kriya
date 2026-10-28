@@ -31,6 +31,7 @@ Callers map the returned TerminalCommitOutcome into their own result shape.
 from __future__ import annotations
 
 import os
+import stat
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -126,13 +127,33 @@ class CandidateFile:
     delete: bool = False
 
 
+def _base_mode(target_path: str, expected_base_exists: Optional[bool]) -> Optional[int]:
+    """The permission bits of the EXISTING workspace file a candidate edit is based on, or None when there is no such file to preserve (CANDIDATE-MODE-
+    DRIFT-FROM-CHECKOUT-001). The base file's mode is authoritative: the candidate sandbox's checkout mode is a git/umask artifact (git records only 644/755,
+    and ``core.fileMode=false`` drops the executable bit), never user intent. A target that is missing, though declared to exist, or is not a regular file
+    returns None here and is refused by the commit (existence conflict / link or directory refusal); an unreadable one fails closed."""
+    if expected_base_exists is False:
+        return None
+    try:
+        info = os.lstat(target_path)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise CandidateMaterializationError(
+            f"Cannot read the base file's mode for {target_path!r}: {error}"
+        ) from error
+    return stat.S_IMODE(info.st_mode) if stat.S_ISREG(info.st_mode) else None
+
+
 def materialize_candidate(
     candidate_root: str, workspace_root: str, files: Iterable[CandidateFile],
 ) -> List[StagedFileWrite]:
-    """Read the candidate's exact bytes and mode into a guarded batch.
+    """Read the candidate's exact bytes into a guarded batch. An existing file keeps its BASE file's mode (read from the workspace); only a new file
+    takes the candidate's mode.
 
-    Reads only the candidate; the real workspace is touched later, by the
-    revision-grounded commit, which checks each recorded base revision."""
+    Reads only the candidate and the base file's mode; the real workspace is
+    written later, by the revision-grounded commit, which checks each recorded
+    base revision and the base mode."""
     writes: List[StagedFileWrite] = []
     identities = ControlObjectIdentities((workspace_root,))  # OI-164: one control-object index for this commit
     for item in files:
@@ -168,11 +189,13 @@ def materialize_candidate(
             raise CandidateMaterializationError(
                 f"Verified candidate is missing approved file {item.relpath!r}: {error}"
             ) from error
+        base_mode = _base_mode(target_path, item.expected_base_exists)
         writes.append(StagedFileWrite(
             target_path=target_path, content=display_text(candidate_bytes), base_path=target_path,
             expected_base_revision=item.expected_base_revision,
             expected_base_exists=item.expected_base_exists,
-            content_bytes=candidate_bytes, mode=candidate_mode,
+            content_bytes=candidate_bytes, mode=candidate_mode if base_mode is None else base_mode,
+            expected_base_mode=base_mode,
         ))
     return writes
 

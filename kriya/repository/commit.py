@@ -126,6 +126,34 @@ class StagedFileWrite:
     # ``mvnw`` created by the candidate). None keeps an existing target's
     # mode, or the umask default for a new file.
     mode: Optional[int] = None
+    # CANDIDATE-MODE-DRIFT-FROM-CHECKOUT-001: the permission bits the EXISTING target had when the candidate was materialized (None for a new file, a
+    # deletion, or a legacy caller). The base file's mode is authoritative for a content-only edit; the candidate sandbox's checkout mode is never intent.
+    # When set the commit refuses a target whose mode changed since (a concurrent chmod is never overwritten) and a ``mode`` that differs from it.
+    expected_base_mode: Optional[int] = None
+
+
+def _check_base_mode(item: StagedFileWrite) -> None:
+    """Refuse a write whose bound base mode is no longer the target's mode, or is not the mode it would apply. Fail closed: an unreadable mode refuses."""
+    if item.expected_base_mode is None or item.delete:
+        return
+    if item.mode is not None and item.mode & 0o7777 != item.expected_base_mode:
+        raise BatchCommitError(
+            f"Refusing batch operation for {item.target_path!r}: the staged mode {item.mode & 0o7777:o} is not the base file's mode "
+            f"{item.expected_base_mode:o}; Kriya does not change an existing file's mode."
+        )
+    try:
+        current = os.lstat(item.target_path).st_mode & 0o7777
+    except FileNotFoundError as error:
+        raise FileRevisionConflict(
+            f"Refusing batch operation for {item.target_path!r}: the target no longer exists (expected mode {item.expected_base_mode:o})."
+        ) from error
+    except OSError as error:
+        raise BatchCommitError(f"Cannot read the mode of {item.target_path!r} to revalidate the base mode: {error}") from error
+    if current != item.expected_base_mode:
+        raise FileRevisionConflict(
+            f"Refusing stale batch write to '{item.target_path}': its mode changed from {item.expected_base_mode:o} to {current:o} "
+            "after the candidate was bound."
+        )
 
 
 def content_revision(content: str) -> str:
@@ -476,6 +504,7 @@ def _preflight_batch(
                 f"'{item.base_path}' expected revision "
                 f"{item.expected_base_revision[:12]}, found {actual[:12]}."
             )
+        _check_base_mode(item)
 
 
 def commit_revision_grounded_batch(
@@ -606,6 +635,7 @@ def commit_revision_grounded_batch(
                     f"Refusing stale batch write to '{item.target_path}': base "
                     f"changed during commit."
                 )
+            _check_base_mode(item)
             parent = os.path.dirname(item.target_path)
             missing = []
             cursor = parent
