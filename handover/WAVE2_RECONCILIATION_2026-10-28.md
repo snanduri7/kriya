@@ -429,3 +429,35 @@ Adjacent files run during the work (254 passed: durability, unreadable control s
 passed). NOT run: the full suite (owner batch boundary), the 87-file milestone/approval adjacent set, Docker-backed tiers, live-model tiers.
 
 **Not started.** B-006, D-002, JVM / result-truth Slice F (W2-26 awaits the owner's F7 confirmation), REG-R1 (UNKNOWN), B-004, `TEST-SLICE-A-OCI-STALE-NESTED-COMMAND-STRING-001`. **Next (owner order):** B-006.
+
+## 17. B-006 uncertain-commit candidate preservation (2026-10-28)
+
+Owner sign-off 2026-10-28 on the characterization (`~/kriya-fixforward-2026-10-22/closure/exec_layer/d2_rebuild/WAVE2_B006_CHARACTERIZATION_2026-10-28/`), decision A + B. **Correction of section 3's W2-13 provisional owner:** the first wrong owner is
+`kriya/repository/commit.py`, not `recovery_coordinator._capture_final_contents_and_remove_sandbox` (that removal is on the path, but recovery never reads the sandbox; its only candidate material is the digest-bound staged copies).
+
+**Executable commits `87ef2f9` (fingerprint `a2737621893baefa`) and `ae2506d` (the final executable tree, fingerprint `d1bea43363eed041`)** (1694 files; `git archive`, manifests in `.../WAVE2_B006_CAMPAIGN_2026-10-28/`). Nothing pushed, nothing tagged, `refs/kriya/verified` unmoved.
+
+* **Defect (MEASURED at `7d1b0d9`, then fixed).** Apply consumes a write's staged copy (`os.replace`); the in-process rollback restores base bytes from memory; so a write applied then restored had no candidate bytes durable. With the rollback failing for another
+  write the commit was UNCERTAIN and `--complete-partial` refused (`calc.py: expected exactly one staged candidate file, found 0`). The same loss existed when all writes applied but the COMMITTED evidence write failed.
+* **Fix.** `_restage_consumed_candidates` re-creates, through `_stage_content` (same prefix and operation index, the evidence's recorded mode, never a workspace read), a copy of the exact in-memory candidate bytes for every applied non-delete write whose copy
+  is gone: before the rollback loop, and on the COMMITTED-evidence-write failure. The existing settle rule keeps them while IN_PROGRESS/UNCERTAIN and removes them once settled. Deletes get no copy. A fully successful rollback drops exactly the re-created
+  copies before the created directories are removed. A re-staging failure is listed in the `UncertainCommitError` detail ("Candidate bytes could not be preserved for recovery of: ...") and the commit stays UNCERTAIN (never ROLLED_BACK/COMMITTED); recovery is unchanged
+  and fails closed when a required copy is absent. Sandbox lifecycle, `failure_category = workspace_commit_failed`, and the journal states are unchanged.
+* **Original symptom re-measured.** The historical three-file fault (ENOSPC at the third apply, EIO restoring the second): before, `calc.py` had no copy anywhere and recovery refused (MANUAL_ACTION_REQUIRED); after, every operation has a staged copy,
+  `recover --complete-partial` finishes the commit (all three files at the candidate, status CLEAN). Pre-fix and post-fix outputs preserved.
+* **Tests** `tests/test_b006_uncertain_candidate_preservation.py` (16): normal success; clean failed commit (re-stages, settles ROLLED_BACK, cleans); rollback uncertainty (exact copy per non-delete operation, bound to the evidence digest and mode; the per-operation states);
+  fresh recovery completes the partial commit with no checkpoint or sandbox present and the resolution removes the copies; a genuinely fresh process does the same; a workspace mutation after uncertainty is refused and never changes the retained candidate; a tampered
+  re-created copy is never rolled forward; no new commit starts and nothing retries while uncertain; the copy comes from memory not the workspace (a foreign edit before the failure) and its mode from the evidence (a foreign chmod); the COMMITTED-evidence-write mechanism
+  (stays uncertain, copies kept, workspace may change without changing them, recovery proves COMMITTED and settles); three preservation-failure cases. **Mutants 16/16 killed** (early deletion, workspace-sourced bytes, skip on either path, UNCERTAIN as ROLLED_BACK,
+  preflight bypass, deletion before settlement, wrong-digest acceptance, invented delete copy, hidden preservation failure on either path, aborted rollback, target-derived mode, copies kept/dropped wrongly, failed re-staging as clean rollback).
+* **Reconciled, not weakened.** `tests/golden/repository/commit_mechanism.json` now records the failure scenario's re-staging operations (mkstemp, write, fsync, chmod, and the unlink on a clean rollback) and the renumbered temp ordinals (reviewed: 26 changed lines are
+  only `.commit-#N` ordinals); `tests/test_prd008_recovery.py::test_interrupt_with_a_failed_rollback_keeps_the_candidate_for_complete_partial` expected one kept copy and now expects both candidate copies (a.py's applied-then-unrestorable one and pkg/new.py's), each exact.
+  One regression of my own was caught by `test_commit_mechanism` before the commit (a re-created copy inside a created directory kept it alive after a clean rollback) and fixed in the code, not the test.
+* **Decision stated.** In the COMMITTED-evidence-write case the journal stays IN_PROGRESS (the existing intent whose terminal write failed); the commit gate and the RunRecord already treat it as UNCERTAIN, and no new lifecycle state was added.
+
+**Own defect found by a gate (stated per the quality bar).** The first adjacent run on `87ef2f9` failed one test, `tests/test_file_integrity_contract_001.py::test_the_writer_modules_hold_exactly_their_counted_sites`: my early drop added an eleventh filesystem write site to `commit.py`. Fixed in its own commit `ae2506d` (`_discard_staged`, one helper for the existing settled cleanup and the early drop; the audited count of 10 is unchanged, behaviour unchanged), and every mutant and gate below was re-run on the final tree; the first-run logs are kept in `run1_on_87ef2f9/`.
+
+**Gates (on the final tree `ae2506d`).** ruff and pylint clean. state_machine tier (-m state_machine, -n 8): 1770 passed in 8m41s; tests/architecture + tests/contracts + test_backlog_registry + test_strict_doubles: 232 passed; the commit/recovery/chaos adjacent set (29 files incl. test_prd005/008/032, test_commit_mechanism, test_file_integrity_contract_001, test_workflow_controller_enforce, test_workflow): 1912 passed in 11m03s (logs gates_*_final.log). NOT run: the full suite (owner batch boundary), Docker tiers, live-model tiers.
+
+**Registry.** `UNCERTAIN-COMMIT-CANDIDATE-BYTES-LOST-001` added CLOSED (B-006 had no registry row). Still OPEN and untouched: `ARTIFACT-REGISTRY-MALFORMED-READ-AS-EMPTY-001` (P2), `APPROVED-PLAN-MALFORMED-READ-AS-ABSENT-001`, `CONTRACT-REGISTRY-PENDING-NON-UTF8-RAW-001`,
+`TEST-SLICE-A-OCI-STALE-NESTED-COMMAND-STRING-001` (P3). B-004 DECISION-PENDING; REG-R1 UNKNOWN. **Next (owner order):** D-002, then JVM / result-truth Slice F (W2-26 awaits the owner's F7 confirmation), then the remaining Wave-2 closure rows.
