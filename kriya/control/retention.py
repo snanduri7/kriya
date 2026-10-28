@@ -24,8 +24,10 @@ Protected commit evidence:
   * the newest ``keep_unreferenced_evidence`` terminal files no record
     references (commits made outside a run).
 
-Nothing is pruned while any run record is unreadable: its references are
-unknown. The caller must hold the workspace run lock.
+Nothing is pruned while any run record is unreadable, or while the persisted
+ControlState is (it is a reference source, and an unreadable one must never
+read as "references nothing"): the references are unknown. The caller must
+hold the workspace run lock.
 """
 
 from __future__ import annotations
@@ -40,6 +42,7 @@ from kriya.context.workspace_identity import authority_root
 from kriya.control.checkpoint import list_checkpoint_run_references
 from kriya.control.control_store import MILESTONE_SIDECAR_RELATIVE_DIR
 from kriya.control.persistence import (
+    control_state_unreadable,
     load_control_state_run_reference,
     run_record_path,
     scan_run_records,
@@ -85,6 +88,12 @@ def prune_run_state(
         report.skipped_reason = (
             "unreadable run records exist; their evidence references are unknown: "
             + ", ".join(item.path for item in scan.unreadable)
+        )
+        return report
+    unreadable_control_state = control_state_unreadable(workspace_path)
+    if unreadable_control_state is not None:  # RDCG _load_json_document: an unreadable ControlState is not an absent one; the run record it references must not be unprotected
+        report.skipped_reason = (
+            "the persisted control state is unreadable; the run record it references is unknown: " + unreadable_control_state[0]
         )
         return report
 

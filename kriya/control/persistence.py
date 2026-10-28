@@ -531,7 +531,10 @@ def load_control_state(workspace_path: str) -> Optional[ControlState]:
 def load_control_state_run_reference(workspace_path: str) -> Optional[str]:
     """The run id whose RunRecord the persisted ControlState was derived
     under (``_run_record``), or None when there is none. PRD-008: enforce
-    resume checks that record, and retention protects it."""
+    resume checks that record, and retention protects it. None also covers a
+    ControlState that cannot be read (``_load_json_document`` reads any parse
+    failure as absent): a caller that DECIDES something destructive from None
+    must first check ``control_state_unreadable`` (retention does)."""
     try:
         data = _load_json_document(control_state_path(workspace_path), workspace_path)
     except WorkspaceOwnershipError:
