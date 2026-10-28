@@ -42,6 +42,7 @@ from kriya.control.human_decision_store import human_decision_path, write_docume
 from kriya.control.run_record import RunRecord
 from kriya.control.state import ControlState
 from kriya.foundation.ids import CONTROL_ID_CHARS, is_control_id
+from kriya.repository.atomic_write import DurableWriteError, confirm_visible_state_durable
 from kriya.repository.commit import content_revision, read_file_revision
 from kriya.repository.snapshot import raw_digest
 
@@ -180,15 +181,30 @@ def load_launch_record(workspace_path: str, launch_id: str) -> Optional[Dict[str
     return payload
 
 
+# DURABLE-DISPOSITION-DIRECTORY-FSYNC-VISIBLE-BEFORE-DURABLE-001: the reason prefix of a document whose gate-clearing D1 TOOL state is visible but whose durability a reader could not
+# confirm. It travels on the readers' existing fail-closed "unreadable" channel (same blocking, same reason codes), distinguished by this prefix and by ``durable_write_error``.
+DURABILITY_UNCONFIRMED = "DURABILITY_UNCONFIRMED"
+
+
+def _confirm_gate_clearing_state(path: str, unconfirmed: Any) -> None:
+    """Confirm the durability of the visible document at ``path`` (kriya.repository.atomic_write.confirm_visible_state_durable); raise ``unconfirmed(cause)`` when it cannot be."""
+    try:
+        confirm_visible_state_durable(path)
+    except DurableWriteError as error:
+        raise unconfirmed(error) from error
+
+
 class UnreadableRunRecordError(RuntimeError):
     """A run record exists but cannot be trusted (corrupt, unknown schema,
     or owned by another workspace). Never treated as absent: a record that
     cannot be read may be the only evidence of an interrupted commit."""
 
-    def __init__(self, path: str, reason: str, *, reason_code: Optional[str] = None) -> None:
+    def __init__(self, path: str, reason: str, *, reason_code: Optional[str] = None, durable_write_error: Optional[DurableWriteError] = None) -> None:
         super().__init__(f"unreadable RunRecord {path}: {reason}")
         self.path = path
         self.reason = reason
+        # DURABILITY_UNCONFIRMED only: the DurableWriteError that stopped the confirmation (the operator commands re-raise it as the durable-write failure it is).
+        self.durable_write_error = durable_write_error
         # D2 M4: set only when the record was refused for its ownership stamp (WORKSPACE_OWNERSHIP_MISSING / _MISMATCH), so the public
         # refusal can say so instead of a generic "unreadable".
         self.reason_code = reason_code
@@ -200,7 +216,7 @@ class RunRecordScan:
     unreadable: List[UnreadableRunRecordError]
 
 
-def _read_run_record(workspace_path: str, run_id: str) -> Tuple[Optional[RunRecord], Optional[str]]:
+def _read_run_record(workspace_path: str, run_id: str, *, confirm_durability: bool = True) -> Tuple[Optional[RunRecord], Optional[str]]:
     """(record, content revision) from ONE read; (None, None) when absent."""
     path = run_record_path(workspace_path, run_id)
     try:
@@ -225,6 +241,10 @@ def _read_run_record(workspace_path: str, run_id: str) -> Tuple[Optional[RunReco
         ) from error
     if record.run_id != run_id:
         raise UnreadableRunRecordError(path, f"file names run {run_id!r} but holds {record.run_id!r}")
+    if confirm_durability and record.tool_execution_clears_gate:
+        _confirm_gate_clearing_state(path, lambda cause: UnreadableRunRecordError(
+            path, f"{DURABILITY_UNCONFIRMED}: the record's RESOLVED direct tool execution is visible but its durability could not be confirmed ({cause}); it is left untouched and "
+                  "keeps blocking until a later read can confirm it. Retry; do not move or delete it.", durable_write_error=cause))
     return record, raw_digest(data)
 
 
@@ -329,7 +349,7 @@ def save_run_record(
     FileRevisionConflict. The revision-grounded write itself re-reads and
     then replaces, so the cross-process guarantee rests on the workspace run
     lock (only the owning run writes its record), not on this check alone."""
-    current, file_revision = _read_run_record(workspace_path, record.run_id)
+    current, file_revision = _read_run_record(workspace_path, record.run_id, confirm_durability=False)  # a write replaces the bytes: it needs their revision, not their durability
     actual_revision = current.revision if current is not None else None
     if actual_revision != expected_revision:
         raise StaleRunRecordError(
@@ -418,15 +438,24 @@ class ControlStateUnreadableError(RuntimeError):
     """D1: the persisted ControlState exists but cannot be read. Unresolved execution truth (a TOOL STARTED record) may live in it, so it is NEVER read as
     "absent": nothing resumes from it, nothing starts fresh over it, and the bytes are left exactly as they are."""
 
-    def __init__(self, path: str, reason: str) -> None:
-        super().__init__(f"the persisted control state {path!r} cannot be read ({reason}); it was left untouched. Kriya will neither resume from it nor "
-                         "start fresh over it: inspect it, then move it aside yourself.")
+    def __init__(self, path: str, reason: str, *, durable_write_error: Optional[DurableWriteError] = None) -> None:
+        if durable_write_error is not None:
+            # a transient storage condition, not corruption: never advise moving the evidence away
+            super().__init__(f"the persisted control state {path!r} is visible but its durability could not be confirmed ({reason}); it was left untouched and keeps blocking. "
+                             "Retry once the storage recovers; do not move or delete it.")
+        else:
+            super().__init__(f"the persisted control state {path!r} cannot be read ({reason}); it was left untouched. Kriya will neither resume from it nor "
+                             "start fresh over it: inspect it, then move it aside yourself.")
         self.path = path
         self.reason = reason
+        # DURABILITY_UNCONFIRMED only (see UnreadableRunRecordError.durable_write_error).
+        self.durable_write_error = durable_write_error
 
 
-def _read_control_state_strict(workspace_path: str) -> Optional[ControlState]:
-    """None only when the file has NEVER been saved; an existing file that cannot be parsed or reconstructed raises ControlStateUnreadableError."""
+def _read_control_state_strict(workspace_path: str, *, confirm_durability: bool = True) -> Optional[ControlState]:
+    """None only when the file has NEVER been saved; an existing file that cannot be parsed or reconstructed raises ControlStateUnreadableError. A state that carries a gate-clearing D1
+    TOOL state (completed / abandoned / re-armed) is returned only after its durability is confirmed; when it cannot be, ControlStateUnreadableError (DURABILITY_UNCONFIRMED) keeps the
+    gate blocking. A blocking or legacy state is never confirmed. A writer's own pre-read passes ``confirm_durability=False``."""
     path = control_state_path(workspace_path)
     if not os.path.isfile(path):
         return None
@@ -434,11 +463,15 @@ def _read_control_state_strict(workspace_path: str) -> Optional[ControlState]:
         with open(path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
         validate_ownership(workspace_path, data, path)
-        return ControlState.from_dict(data)
+        state = ControlState.from_dict(data)
     except WorkspaceOwnershipError:
         raise
     except Exception as error:  # pylint: disable=broad-except
         raise ControlStateUnreadableError(path, f"{type(error).__name__}: {error}") from error
+    if confirm_durability and state.gate_clearing_tool_subtask_ids:
+        _confirm_gate_clearing_state(path, lambda cause: ControlStateUnreadableError(
+            path, f"{DURABILITY_UNCONFIRMED}: {cause}", durable_write_error=cause))
+    return state
 
 
 def inspect_control_state(workspace_path: str) -> Tuple[Optional[ControlState], Optional[Tuple[str, str]]]:
@@ -468,7 +501,7 @@ def save_control_state(workspace_path: str, state: ControlState, *, durable: boo
     # where real content changes between saves within the SAME run) -
     # deliberately NOT centralized here, where it would silently diverge
     # what every OTHER caller persists from what it explicitly passed in.
-    _read_control_state_strict(workspace_path)  # D1: an existing UNREADABLE state is never overwritten (raises ControlStateUnreadableError); its bytes are the evidence
+    _read_control_state_strict(workspace_path, confirm_durability=False)  # D1: an existing UNREADABLE state is never overwritten (raises ControlStateUnreadableError); its bytes are the evidence
     # durable=True (D1): an authoritative TOOL lifecycle transition - fsync-grade, every step required (kriya/repository/atomic_write.py).
     _save_json_document(workspace_path, control_state_path(workspace_path), state.to_dict(), durable=durable)
 

@@ -56,7 +56,8 @@ def test_a_completed_persistence_failure_reports_no_success_and_blocks_a_retry(t
     monkeypatch.undo()
     if step == "directory_fsync":
         # The replace happened, so the record that is visible says "completed" - which is TRUE (the effect did complete) - and only its durability is unknown. Nothing was reported as
-        # success and nothing ran again; the visible record is not a lie, so an operator-driven later run is not blocked by it.
+        # success and nothing ran again. The fault is undone here, so a later reader's durability confirmation succeeds and the visible record is authoritative; while the outage lasts
+        # that reader stays blocking (tests/test_d1_durability_consumption.py).
         assert lines(effects).count("EFFECT_BEGIN") == 1
         return
     assert any(state and state.get("state") == "started" for state in _tool_executions(workspace)), "the record must stay unresolved"

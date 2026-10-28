@@ -195,6 +195,14 @@ class ControlState:
         """Every TOOL subtask whose effect may or may not have happened and that awaits an operator: STARTED-never-COMPLETED plus terminal-failed-after-STARTED."""
         return tuple(sorted(set(self.unresolved_tool_subtask_ids) | set(self.terminal_failed_tool_subtask_ids)))
 
+    @property
+    def gate_clearing_tool_subtask_ids(self) -> Tuple[str, ...]:
+        """The TOOL subtasks with an attempt identity (``tool_attempts``) whose persisted state is NOT one that blocks (STARTED / terminal-failed): completed, abandoned or re-armed. These are
+        the states that let the mutating-run gate pass and a resume go on, so a reader must confirm the state's durability before relying on it (kriya.control.persistence,
+        DURABLE-DISPOSITION-DIRECTORY-FSYNC-VISIBLE-BEFORE-DURABLE-001). A legacy state with no attempt identity is not listed: it predates the D1 durable writes and nothing new clears on it."""
+        blocking = {SUBTASK_STATE_TOOL_STARTED, SUBTASK_STATE_TOOL_FAILED}
+        return tuple(sorted(subtask_id for subtask_id in self.tool_attempts if self.subtask_states.get(subtask_id) not in blocking))
+
     def with_updates(self, **changes: Any) -> "ControlState":
         """Returns a NEW ControlState with the given fields replaced and
         updated_at refreshed to now - never mutates self. created_at,

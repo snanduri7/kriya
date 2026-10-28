@@ -155,6 +155,27 @@ def durable_atomic_write_bytes(full_path: str, data: bytes, *, mode: Optional[in
         raise DurableWriteError("directory_fsync", full_path, error) from error
 
 
+def confirm_visible_state_durable(full_path: str) -> None:
+    """The READ side of the durable-transition contract (DURABLE-DISPOSITION-DIRECTORY-FSYNC-VISIBLE-BEFORE-DURABLE-001): establish that the bytes now visible at ``full_path``
+    and their parent-directory entry are durable, so a reader may treat them as authoritative.
+
+    A writer whose transition failed at ``directory_fsync`` leaves the new bytes VISIBLE but not known to be durable; visibility is not durability. A reader about to let such a state
+    CLEAR a gate calls this first: success means the visible state is the durable one (nothing is rewritten, so it is idempotent); failure raises DurableWriteError (step
+    ``file_fsync`` or ``directory_fsync``) and the reader must stay blocking. Same OS contract as durable_atomic_write_bytes (fsync + directory fsync, no F_FULLFSYNC), and strict:
+    it may never swallow an error."""
+    step = "file_fsync"
+    try:
+        descriptor = os.open(full_path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        step = "directory_fsync"
+        _fsync_directory(os.path.dirname(os.path.abspath(full_path)), strict=True)
+    except OSError as error:
+        raise DurableWriteError(step, full_path, error) from error
+
+
 def _atomic_write_bytes(full_path: str, content: bytes) -> None:
     tmp_path = f"{full_path}.kriya-rollback-{os.getpid()}"
     try:

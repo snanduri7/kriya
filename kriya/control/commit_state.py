@@ -20,7 +20,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from kriya.context.workspace_identity import OWNERSHIP_REMEDIATION
-from kriya.control.persistence import inspect_control_state, nested_control_state, scan_run_records
+from kriya.control.persistence import (
+    DURABILITY_UNCONFIRMED,
+    inspect_control_state,
+    nested_control_state,
+    scan_run_records,
+)
 from kriya.repository.commit import find_uncertain_commit_evidence
 
 RECOVERY_COMMAND = "kriya runs recover"
@@ -137,6 +142,9 @@ class WorkspaceCommitAssessment:
                 return ("The workspace holds an unresolved TOOL execution (" + "; ".join(parts) + "). Kriya will not retry it and will not start over it: " + "; ".join(guidance) + ".")
         if self.unreadable_control_state:
             parts.append(f"control state unreadable and left untouched: {self.unreadable_control_state[0]} ({self.unreadable_control_state[1]})")
+            if not self.recoverable and not self.ownership_reason_codes and self.unreadable_control_state[1].startswith(DURABILITY_UNCONFIRMED):
+                return ("The workspace's Kriya control state holds a TOOL disposition whose durability could not be confirmed (" + "; ".join(parts) + "). It keeps blocking and was left "
+                        "untouched: retry once the storage recovers; do not move or delete it.")
             if not self.recoverable and not self.ownership_reason_codes:
                 return ("The workspace's Kriya control state cannot be read and was left untouched (" + "; ".join(parts) + "). Kriya will neither resume from it nor "
                         "start fresh over it: inspect it, then move it aside yourself.")

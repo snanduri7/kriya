@@ -344,8 +344,9 @@ def test_a_run_record_write_failure_after_the_audit_is_surfaced_and_the_same_aba
     assert raised.value.step == step and len(_direct_audit(workspace)) == 1
     state = load_run_record(str(workspace), run_id).tool_execution["state"]
     if step == "directory_fsync":
-        # MEASURED, not hidden: DurableWriteError documents that after the atomic replace the new bytes are already visible and only their durability is unconfirmed. The command
-        # was told it FAILED, yet the file shows `abandoned`, so the gate reads it as resolved until a crash could revert it.
+        # DurableWriteError documents that after the atomic replace the new bytes are already visible and only their durability is unconfirmed. The command was told it FAILED and the
+        # file shows `abandoned`. The fault is undone here, so the reader's own durability confirmation now succeeds and the visible state is authoritative; while the outage lasts the
+        # gate keeps blocking (tests/test_d1_durability_consumption.py, DURABLE-DISPOSITION-DIRECTORY-FSYNC-VISIBLE-BEFORE-DURABLE-001).
         assert state == "abandoned" and not _gate_blocks(workspace)
     else:
         assert state == "started" and _gate_blocks(workspace), "a failed RunRecord write cleared the gate"

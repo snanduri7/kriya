@@ -50,6 +50,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from kriya import __version__
 from kriya.control.commit_state import REASON_UNRESOLVED_TOOL_EXECUTION
 from kriya.control.persistence import (
+    DURABILITY_UNCONFIRMED as DURABILITY_UNCONFIRMED,  # re-exported: the reason prefix `kriya runs` keys its operator advice on
+)
+from kriya.control.persistence import (
     TRANSITION_NEEDS_REVIEW,
     complete_contract_transition,
     nested_control_state,

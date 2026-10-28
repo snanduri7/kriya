@@ -247,6 +247,13 @@ class RunRecord:
             return None
         return str(execution.get("tool") or UNNAMED_TOOL)
 
+    @property
+    def tool_execution_clears_gate(self) -> bool:
+        """True when ``tool_execution`` is in a RESOLVING state (completed / failed / abandoned), i.e. this record lets the mutating-run gate pass. A reader that is about to rely on it
+        must first confirm the record's durability (kriya.control.persistence, DURABLE-DISPOSITION-DIRECTORY-FSYNC-VISIBLE-BEFORE-DURABLE-001). The exact complement of
+        ``unresolved_tool_execution`` for a record that has a tool_execution at all; a STARTED, unknown or malformed one is False (it blocks and needs no confirmation)."""
+        return isinstance(self.tool_execution, dict) and self.tool_execution.get("state") in TOOL_EXECUTION_RESOLVED
+
     def abandon_tool_execution(self, disposition: Dict[str, Any]) -> "RunRecord":
         """W2-02: the operator intentionally stops recovery of an UNRESOLVED direct tool execution (``state == "started"``, whatever the lifecycle). It does NOT mean the effect
         never started, failed or completed. The lifecycle is left exactly as it is (no edge to SUCCESS, nothing is settled or retried); ``tool_execution`` becomes ``abandoned``

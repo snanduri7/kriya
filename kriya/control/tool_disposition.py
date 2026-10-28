@@ -211,6 +211,8 @@ def apply_disposition(workspace_path: str, action: str, subtask_id: str, *, expe
         try:
             state = load_control_state(canonical)                                              # 2 (strict: an unreadable state is never "absent")
         except ControlStateUnreadableError as error:
+            if error.durable_write_error is not None:      # visible but not confirmed durable: the durable-write failure it is (exit 4), not a corrupt-state refusal
+                raise error.durable_write_error from error
             return _refused(action, subtask_id, CONTROL_STATE_UNREADABLE, str(error))
         if state is None:
             return _refused(action, subtask_id, NO_CONTROL_STATE, "this workspace has no control state; there is nothing to dispose of.")
@@ -373,6 +375,8 @@ def apply_direct_abandon(workspace_path: str, run_id: str, *, operator: str, con
         except ValueError as error:
             return _direct_refused(run_id, RUN_NOT_FOUND, str(error))
         except UnreadableRunRecordError as error:
+            if error.durable_write_error is not None:      # see apply_disposition
+                raise error.durable_write_error from error
             return _direct_refused(run_id, RUN_RECORD_UNREADABLE, str(error))
         if record is None:
             return _direct_refused(run_id, RUN_NOT_FOUND, f"no run record {run_id!r} exists in this workspace.")
