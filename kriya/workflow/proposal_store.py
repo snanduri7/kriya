@@ -326,7 +326,7 @@ def load_proposal(proposal_id: str, workspace_root: str) -> PersistedProposal:
     try:
         with open(path, "r", encoding="utf-8") as fh:
             raw = json.load(fh)
-    except (OSError, json.JSONDecodeError) as e:
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:  # RDCG B-005: bytes that are not UTF-8 are as unparseable as bytes that are not JSON
         raise ProposalStoreError(REASON_PROPOSAL_PARSE_INVALID, f"could not parse persisted proposal {proposal_id!r}: {e}") from e
 
     if not isinstance(raw, dict):
