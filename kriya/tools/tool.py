@@ -12,9 +12,25 @@ from kriya.config.authority import is_human_in_the_loop, parse_autonomy_mode
 logger = logging.getLogger(__name__)
 
 
+class ToolEffectBoundary(str, Enum):
+    """Whether a TOOL call's external effect may have begun when it failed (Wave 2, Slice A). The ONLY owner of this fact is ``execute_model_authored``'s phase structure:
+    everything raised BEFORE ``_run_model_authored`` is invoked (the authority phase) is PROVEN_PRE_EFFECT; anything raised from that call onward, and anything nobody
+    classified, is MAY_HAVE_EFFECTED. Never derived from an exception's class, message, status or reason code: the same class can arise on both sides of the boundary."""
+
+    PROVEN_PRE_EFFECT = "proven_pre_effect"
+    MAY_HAVE_EFFECTED = "may_have_effected"
+
+
 class ToolExecutionError(Exception):
-    """Base class for exceptions raised during tool execution."""
-    pass
+    """Base class for exceptions raised during tool execution. ``effect_boundary`` is the fail-closed class default; the owner attaches PROVEN_PRE_EFFECT on an instance."""
+
+    effect_boundary: ToolEffectBoundary = ToolEffectBoundary.MAY_HAVE_EFFECTED
+
+
+def effect_boundary_of(error: BaseException) -> ToolEffectBoundary:
+    """The single reader of the owner-attached fact; anything that carries none is MAY_HAVE_EFFECTED (fail closed)."""
+    boundary = getattr(error, "effect_boundary", None)
+    return boundary if isinstance(boundary, ToolEffectBoundary) else ToolEffectBoundary.MAY_HAVE_EFFECTED
 
 class BaseTool(ABC):
     """Base class that all Kriya tools must implement to fit into the framework."""
@@ -321,24 +337,36 @@ def authorize_model_authored(tool: Any, arguments: Mapping[str, Any], invocation
         raise ToolExecutionError(f"Tool call refused: {e}") from e
 
 
-def revalidate_model_authored(tool: Any, arguments: Mapping[str, Any], invocation: ModelToolInvocation) -> None:
-    """D1: ALL the authority of a model-authored call, with no effect: the declaration (``authorize_model_authored``) and the tool's call-time authority
-    (``BaseTool.revalidate_authority``). A refusal is raised exactly as the execute path raises it (ModelInvocationRefused / ToolExecutionError whose ``__cause__`` is the
-    PolicyDeniedError); ``_run_model_authored`` is never reached from here."""
-    authorized = authorize_model_authored(tool, arguments, invocation)
+def _authority_phase(tool: Any, arguments: Mapping[str, Any], invocation: ModelToolInvocation) -> Any:
+    """ALL the authority of a model-authored call, with no effect: the declaration (``authorize_model_authored``) and the tool's call-time authority
+    (``BaseTool.revalidate_authority``; for MCP the TOOL-002/003 decision, a fresh read-only evaluation). Returns the validated, authorized arguments. Anything it raises
+    was raised before ``_run_model_authored`` could be invoked, so it is attached PROVEN_PRE_EFFECT here - the one place that fact is established. A refusal is raised exactly
+    as the execute path raises it (ModelInvocationRefused / ToolExecutionError whose ``__cause__`` is the PolicyDeniedError)."""
     try:
-        tool.revalidate_authority(authorized, invocation)
-    except Exception as e:  # wrapped exactly as the effect path wraps a denial raised inside ``_run``
-        logger.error(f"Revalidation of tool '{tool.name}' refused: {e}")
-        raise ToolExecutionError(f"Tool execution failed: {e}") from e
+        authorized = authorize_model_authored(tool, arguments, invocation)
+        try:
+            tool.revalidate_authority(authorized, invocation)
+        except Exception as e:  # wrapped exactly as the effect path wraps a denial raised inside ``_run``
+            logger.error(f"Revalidation of tool '{tool.name}' refused: {e}")
+            raise ToolExecutionError(f"Tool execution failed: {e}") from e
+    except Exception as refusal:
+        refusal.effect_boundary = ToolEffectBoundary.PROVEN_PRE_EFFECT  # type: ignore[attr-defined]
+        raise
+    return authorized
+
+
+def revalidate_model_authored(tool: Any, arguments: Mapping[str, Any], invocation: ModelToolInvocation) -> None:
+    """D1: the authority phase with NO effect (``_run_model_authored`` is never reached from here). A resume uses it to REVALIDATE authority for an already-COMPLETED TOOL
+    execution without running its side effect again."""
+    _authority_phase(tool, arguments, invocation)
 
 
 async def execute_model_authored(tool: Any, arguments: Mapping[str, Any], invocation: ModelToolInvocation) -> Any:
-    """The one entry point for a MODEL-AUTHORED tool call: validate, authorize (the tool's own declaration, every mode),
-    then run. Raises ModelInvocationRefused (TOOLBOX refusal), or ToolExecutionError whose ``__cause__`` is the reused
-    authority's PolicyDeniedError, before anything runs; failures while running are wrapped exactly as
-    ``BaseTool.execute`` wraps them."""
-    authorized = authorize_model_authored(tool, arguments, invocation)
+    """The one entry point for a MODEL-AUTHORED tool call: the authority phase (validate, authorize with the tool's own declaration in every mode, revalidate the tool's
+    call-time authority), then run. Raises ModelInvocationRefused (TOOLBOX refusal), or ToolExecutionError whose ``__cause__`` is the reused authority's PolicyDeniedError,
+    with ``effect_boundary`` PROVEN_PRE_EFFECT, before anything runs; failures while running are wrapped exactly as ``BaseTool.execute`` wraps them and are
+    MAY_HAVE_EFFECTED (the same exception classes can arise there: the phase, not the class, is the evidence)."""
+    authorized = _authority_phase(tool, arguments, invocation)
     try:
         logger.info(f"Executing tool '{tool.name}' (model-authored) with arguments: {authorized.model_dump()}")
         return await tool._run_model_authored(authorized, invocation)

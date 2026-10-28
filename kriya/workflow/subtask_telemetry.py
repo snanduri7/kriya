@@ -37,19 +37,22 @@ def record_plan_created(ledger: DecisionLedger, plan: EngineeringPlan) -> Decisi
 
 
 def record_subtask_attempt(
-    ledger: DecisionLedger, plan: EngineeringPlan, result: SubtaskResult, attempt: int
+    ledger: DecisionLedger, plan: EngineeringPlan, result: SubtaskResult, attempt: int,
+    effect_boundary: Optional[str] = None,
 ) -> Decision:
     """One record per SubtaskExecutor.execute() call (MA6.5) - `attempt`
     is the caller's own retry counter (this module has no opinion on retry
     policy, only reports what happened)."""
     subtask = plan.subtask_by_id(result.subtask_id)
     planned_files = [pf.path for pf in subtask.planned_files] if subtask else []
+    # Wave 2 Slice A: a TOOL attempt's effect boundary (kriya.tools.tool.ToolEffectBoundary value) is part of its history; absent for a MODEL attempt, so MODEL records are unchanged.
+    extra = {"effect_boundary": effect_boundary} if effect_boundary is not None else {}
     return ledger.record(
         "subtask_attempt", plan_id=plan.plan_id, plan_hash=plan.content_hash(),
         subtask_id=result.subtask_id, attempt=attempt, execution_method=result.execution_method,
         status=result.status.value, planned_file_count=len(planned_files),
         actual_file_count=len(result.files) if result.files else (1 if result.tool_output is not None else 0),
-        undeclared_file_count=len(result.undeclared_files), error=result.error,
+        undeclared_file_count=len(result.undeclared_files), error=result.error, **extra,
     )
 
 

@@ -21,6 +21,7 @@ from _strict_doubles import strict_config, strict_engine, strict_kernel
 from kriya.core import role_metrics as rm
 from kriya.core.llm import InferenceDeadlineError
 from kriya.core.state_paths import trace_db_path
+from kriya.tools.tool import ToolEffectBoundary
 from kriya.workflow.plan_schema import (
     AcceptanceCriterion,
     EngineeringPlan,
@@ -921,7 +922,9 @@ def _tool(sid="t1"):
 async def test_a_tool_subtask_that_did_not_complete_stops_the_run(tmp_path, status, lifecycle):
     """EL05 (needs_review recorded as failed) / EL06 (the run continues) / EL07 (the tool unit's evidence lacks its
     result) / EL08 (the status persisted as completed)."""
-    outcome = SubtaskResult(subtask_id="t1", status=status, execution_method="tool", error="denied")
+    # Wave 2 Slice A: this pins the PROVEN-pre-effect refusal contract (re-armable, persisted as its status); an UNCLASSIFIED failure is terminal
+    # (tests/test_slice_a_terminal_failure.py)
+    outcome = SubtaskResult(subtask_id="t1", status=status, execution_method="tool", error="denied", effect_boundary=ToolEffectBoundary.PROVEN_PRE_EFFECT)
     units = []
 
     @contextlib.contextmanager

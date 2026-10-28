@@ -65,7 +65,9 @@ from kriya.policy.errors import PolicyDeniedError
 from kriya.tools.tool import (
     ModelInvocationRefused,
     ModelToolInvocation,
+    ToolEffectBoundary,
     ToolExecutionError,
+    effect_boundary_of,
     execute_model_authored,
     resolve_planned_tool_governance,
     revalidate_model_authored,
@@ -241,13 +243,14 @@ def reads_candidate_view(subtask: Subtask, plan: EngineeringPlan,
     return False
 
 
-def _tool_error_result(subtask: Subtask, error: Exception) -> SubtaskResult:
-    """The typed result of a TOOL refusal or failure, shared by the execute path and the revalidate-only path (so authority never diverges between them)."""
+def _tool_error_result(subtask: Subtask, error: Exception, effect_boundary: ToolEffectBoundary) -> SubtaskResult:
+    """The typed result of a TOOL refusal or failure, shared by the execute path and the revalidate-only path (so authority never diverges between them). ``effect_boundary`` is
+    the fact the execution owner attached (or, for a refusal raised here before the owner was reached, the caller's position); it is transported, never inferred from ``error``."""
     if isinstance(error, (AutonomyModeError, ModelInvocationRefused)):  # S18 / OI-135 malformed mode; S1 TOOLBOX refusal: typed NEEDS_REVIEW, never a permissive reading
         logger.warning(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} refused: {error}")
         return SubtaskResult(
             subtask_id=subtask.id, status=SubtaskStatus.NEEDS_REVIEW, execution_method=ExecutionMethod.TOOL.value,
-            error=str(error), reason_codes=(error.reason_code,),
+            error=str(error), reason_codes=(error.reason_code,), effect_boundary=effect_boundary,
         )
     logger.info(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} failed: {error}")
     # TOOL-001 (2026-09-13): BaseTool.execute() always wraps the REAL underlying exception into ToolExecutionError via `raise ... from e` (kriya/tools/tool.py) - when
@@ -259,7 +262,7 @@ def _tool_error_result(subtask: Subtask, error: Exception) -> SubtaskResult:
     return SubtaskResult(
         subtask_id=subtask.id, status=SubtaskStatus.FAILED,
         execution_method=ExecutionMethod.TOOL.value, error=str(error),
-        reason_codes=reason_codes,
+        reason_codes=reason_codes, effect_boundary=effect_boundary,
     )
 
 
@@ -277,14 +280,14 @@ def _tool_preflight(subtask: Subtask, kernel: Any, tool_roots: Sequence[str], pl
         return None, None, SubtaskResult(
             subtask_id=subtask.id, status=SubtaskStatus.NEEDS_REVIEW,
             execution_method=ExecutionMethod.TOOL.value,
-            error=f"tool_name {subtask.tool_name!r} not registered",
+            error=f"tool_name {subtask.tool_name!r} not registered", effect_boundary=ToolEffectBoundary.PROVEN_PRE_EFFECT,  # nothing was invoked: the owner is not reached
         )
 
     # OI-135 (S18): a malformed mode is a typed stop before anything else, never a permissive reading.
     try:
         _autonomy_mode(kernel)
     except AutonomyModeError as e:
-        return None, None, _tool_error_result(subtask, e)
+        return None, None, _tool_error_result(subtask, e, ToolEffectBoundary.PROVEN_PRE_EFFECT)  # before the owner is reached
 
     # Review of the runtime-approval stack (2026-10-15), B3: a tool that asks to be confirmed when an operator runs it (`kriya tools execute` honours `requires_confirmation`) must not run unconfirmed
     # from a planner-emitted subtask. Human-in-the-loop has no per-run review subject here, so it stops BEFORE the call (nothing executed) with a typed reason; every other mode is unchanged.
@@ -293,7 +296,7 @@ def _tool_preflight(subtask: Subtask, kernel: Any, tool_roots: Sequence[str], pl
         return None, None, SubtaskResult(
             subtask_id=subtask.id, status=SubtaskStatus.NEEDS_REVIEW, execution_method=ExecutionMethod.TOOL.value,
             error=f"{TOOL_CONFIRMATION_UNSUPPORTED}: tool {subtask.tool_name!r} requires your confirmation to run and this version cannot ask you from a planned step. Nothing was run.",
-            reason_codes=(TOOL_CONFIRMATION_UNSUPPORTED,),
+            reason_codes=(TOOL_CONFIRMATION_UNSUPPORTED,), effect_boundary=ToolEffectBoundary.PROVEN_PRE_EFFECT,  # nothing was invoked: the owner is not reached
         )
 
     # S1: the model-authored entry point - authorized by the tool's own declaration over these roots before anything runs.
@@ -312,7 +315,7 @@ def revalidate_tool_subtask_authority(subtask: Subtask, kernel: Any, tool_roots:
     try:
         revalidate_model_authored(tool, subtask.tool_arguments, invocation)
     except (AutonomyModeError, ModelInvocationRefused, ToolExecutionError) as e:
-        return _tool_error_result(subtask, e)
+        return _tool_error_result(subtask, e, effect_boundary_of(e))
     return None
 
 
@@ -324,7 +327,7 @@ async def _execute_tool_subtask(subtask: Subtask, kernel: Any, tool_roots: Seque
     try:
         output = await execute_model_authored(tool, subtask.tool_arguments, invocation)
     except (AutonomyModeError, ModelInvocationRefused, ToolExecutionError) as e:
-        return _tool_error_result(subtask, e)
+        return _tool_error_result(subtask, e, effect_boundary_of(e))
 
     return SubtaskResult(
         subtask_id=subtask.id, status=SubtaskStatus.COMPLETED,

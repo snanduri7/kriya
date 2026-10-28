@@ -56,6 +56,23 @@ def _now_iso() -> str:
 # D1: the persisted value of a TOOL subtask whose side effect is about to run / is running: durably written BEFORE the effect and replaced by "completed" only by a
 # durable COMPLETED transition. Every other consumer compares against "completed" only, so a different marker is never mistaken for a completion or a retryable state.
 SUBTASK_STATE_TOOL_STARTED = "tool_started"
+# Wave 2 Slice A: the persisted value of a TOOL subtask whose attempt FAILED after its external effect may have begun (ToolEffectBoundary.MAY_HAVE_EFFECTED). Terminal for that attempt: a
+# resume never executes it again; only an explicit operator disposition (abandon, or retry-as-new-attempt) moves it. A failure PROVEN to be before the effect keeps "failed" /
+# "needs_review" (re-armable through the ordinary resume and authority path).
+SUBTASK_STATE_TOOL_FAILED = "tool_failed"
+# The operator's terminal disposition of a TOOL subtask: never executed again, never "completed"; it keeps the plan from completing.
+SUBTASK_STATE_TOOL_ABANDONED = "tool_abandoned"
+
+def _validated_tool_attempts(raw: Any) -> Dict[str, int]:
+    """A persisted attempt counter is exactly {non-empty str: int >= 1}; anything else is a malformed state and raises (ControlState.from_dict's callers turn that into the
+    typed ControlStateUnreadableError - the bytes are never read as "no attempts")."""
+    if not isinstance(raw, dict):
+        raise ValueError(f"tool_attempts must be an object, got {type(raw).__name__}")
+    for key, value in raw.items():
+        if not isinstance(key, str) or not key or isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError(f"tool_attempts[{key!r}] must be an integer >= 1, got {value!r}")
+    return dict(raw)
+
 
 @dataclass(frozen=True)
 class ControlState:
@@ -153,6 +170,12 @@ class ControlState:
     # earlier states' hashes unchanged.
     verification_contract_digest: Optional[str] = None
 
+    # Wave 2 Slice A (TOOL EXECUTION DISPOSITION): subtask_id -> the CURRENT attempt number of that plan TOOL subtask (>= 1). A counter, not the audit history (the decision
+    # ledger's subtask_attempt records are the history). Written in the SAME durable write as the subtask's tool_started; an operator retry increments it. A persisted TOOL lifecycle
+    # state with NO entry here predates attempt identity: legacy/unversioned, never silently attempt 1. Omitted from to_dict (and so from content_hash) while empty - an explicit
+    # compatibility contract: a state that never held an attempt serializes and hashes exactly as before the field existed.
+    tool_attempts: Dict[str, int] = field(default_factory=dict)
+
     created_at: str = field(default_factory=_now_iso)
     updated_at: str = field(default_factory=_now_iso)
 
@@ -161,6 +184,16 @@ class ControlState:
         """D1: the subtasks whose TOOL execution is durably STARTED (SUBTASK_STATE_TOOL_STARTED) and never durably COMPLETED. Reports the persisted fact only; whether a
         resume may retry them is decided by exactly one owner (kriya/workflow/resume_support.py::classify_tool_resume) and the answer is never "yes"."""
         return tuple(sorted(subtask_id for subtask_id, state in self.subtask_states.items() if state == SUBTASK_STATE_TOOL_STARTED))
+
+    @property
+    def terminal_failed_tool_subtask_ids(self) -> Tuple[str, ...]:
+        """Wave 2 Slice A: the TOOL subtasks whose attempt failed after its effect may have begun and that no operator has disposed of yet."""
+        return tuple(sorted(subtask_id for subtask_id, state in self.subtask_states.items() if state == SUBTASK_STATE_TOOL_FAILED))
+
+    @property
+    def undisposed_tool_subtask_ids(self) -> Tuple[str, ...]:
+        """Every TOOL subtask whose effect may or may not have happened and that awaits an operator: STARTED-never-COMPLETED plus terminal-failed-after-STARTED."""
+        return tuple(sorted(set(self.unresolved_tool_subtask_ids) | set(self.terminal_failed_tool_subtask_ids)))
 
     def with_updates(self, **changes: Any) -> "ControlState":
         """Returns a NEW ControlState with the given fields replaced and
@@ -181,7 +214,7 @@ class ControlState:
         return replace(self, **changes, updated_at=_now_iso())
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "run_id": self.run_id,
             "engineering_route": self.engineering_route.to_dict() if self.engineering_route else None,
@@ -206,6 +239,9 @@ class ControlState:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+        if self.tool_attempts:  # compatibility contract: omitted while empty (see the field)
+            payload["tool_attempts"] = {k: self.tool_attempts[k] for k in sorted(self.tool_attempts)}
+        return payload
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ControlState":
@@ -238,6 +274,7 @@ class ControlState:
             acceptance_approval_digest=data.get("acceptance_approval_digest"),
             requirement_contract_digest=data.get("requirement_contract_digest"),
             verification_contract_digest=data.get("verification_contract_digest"),
+            tool_attempts=_validated_tool_attempts(data.get("tool_attempts", {})),
             created_at=data.get("created_at", _now_iso()),
             updated_at=data.get("updated_at", _now_iso()),
         )

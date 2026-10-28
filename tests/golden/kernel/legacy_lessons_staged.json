@@ -4712,6 +4712,7 @@
    "subtask_completion_scope": null,
    "subtask_states": {},
    "subtask_written_files": {},
+   "tool_attempts": {},
    "tree_hash": null,
    "updated_at": "<time>",
    "verification_contract_digest": null,

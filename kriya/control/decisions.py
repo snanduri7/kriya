@@ -110,12 +110,13 @@ class DecisionLedger:
     def filter_by_type(self, decision_type: str) -> Tuple[Decision, ...]:
         return tuple(d for d in self._decisions if d.type == decision_type)
 
-    def append_to_file(self, workspace_path: str, decision: Decision) -> None:
+    def append_to_file(self, workspace_path: str, decision: Decision, *, durable: bool = False) -> None:
         """Persists ONE decision by rewriting the full decisions.jsonl with
         it appended - see class docstring for why this isn't a true
         streaming append. Loads the existing file's raw lines first (not
         via load_decision_ledger, which reconstructs Decision objects
-        losslessly but this only needs the raw text lines to append to)."""
+        losslessly but this only needs the raw text lines to append to). ``durable=True`` (Wave 2 Slice A: a TOOL attempt's outcome and an operator's disposition)
+        makes the write fsync-grade through the same control-store writer; the default is the unchanged atomic-only write."""
 
         path = decision_ledger_path(workspace_path)
         existing_lines: List[str] = []
@@ -139,7 +140,7 @@ class DecisionLedger:
 
         os.makedirs(os.path.dirname(path), exist_ok=True)
         expected_revision = read_file_revision(path)
-        write_control_file(workspace_path, path, content, expected_revision=expected_revision)
+        write_control_file(workspace_path, path, content, expected_revision=expected_revision, durable=durable)
 
     def record_and_persist(self, workspace_path: str, decision_type: str, **fields: Any) -> Decision:
         decision = self.record(decision_type, **fields)

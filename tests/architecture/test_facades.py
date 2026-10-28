@@ -219,8 +219,9 @@ PARTIAL_FACADES: Dict[str, Union[PartialFacade, Tuple[PartialFacade, ...]]] = {
             "moved name re-exported (the same object; the MCP approval path that stays in kriya/cli.py calls _authority_fail)"),
         PartialFacade(
             "kriya.cli_commands.runs",
-            ("_RUNS_EXIT_ACTION_REQUIRED", "_RUNS_EXIT_RUN_ACTIVE", "_print_recovery_assessment", "_runs_short", "_runs_state",
-             "_runs_workspace_option", "runs_group", "runs_prune", "runs_recover", "runs_status"), "P1",
+            ("_RUNS_EXIT_ACTION_REQUIRED", "_RUNS_EXIT_RUN_ACTIVE", "_print_recovery_assessment", "_print_tool_entry", "_runs_short", "_runs_state",
+             "_runs_tool_disposition_options", "_runs_tool_dispose", "_runs_workspace_option", "runs_group", "runs_prune", "runs_recover", "runs_status",
+             "runs_tool_abandon", "runs_tool_inspect", "runs_tool_retry"), "P1",
             "E14: the `kriya runs` group owned by cli_commands.runs, registered on main by kriya/cli.py; every moved name "
             "re-exported (the same object)"),
     ),

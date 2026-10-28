@@ -5105,6 +5105,489 @@
       }
      ],
      "short_help": null
+    },
+    "tool-abandon": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Abandon a TOOL subtask: it is never executed again and the plan cannot complete past it. Abandoning is not completing, and does not undo the effect.",
+     "hidden": false,
+     "name": "tool-abandon",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "subtask_id",
+       "nargs": 1,
+       "opts": [
+        "subtask_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": ".",
+       "envvar": null,
+       "flag_value": null,
+       "help": "Workspace whose runs to inspect.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "workspace",
+       "nargs": 1,
+       "opts": [
+        "--workspace"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": true,
+        "exists": true,
+        "file_okay": false,
+        "name": "directory",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "The attempt number shown by `inspect` (required unless --legacy).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "attempt",
+       "nargs": 1,
+       "opts": [
+        "--attempt"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "clamp": false,
+        "max": null,
+        "max_open": false,
+        "min": 1,
+        "min_open": false,
+        "name": "integer range",
+        "param_type": "IntRange"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "The subtask is listed as legacy/unversioned (no attempt number).",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "legacy",
+       "nargs": 1,
+       "opts": [
+        "--legacy"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Explicit confirmation. There is no default: without it nothing changes.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "confirmed",
+       "nargs": 1,
+       "opts": [
+        "--confirm"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Recorded in the audit trail (default: the OS user).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "operator",
+       "nargs": 1,
+       "opts": [
+        "--operator"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Print the result as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "as_json",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "tool-inspect": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Read-only: list the TOOL subtasks awaiting an operator, with their attempt and the kept evidence. Exit codes: 0 = none awaiting, 1 = action required, 3 = a live run holds the workspace.",
+     "hidden": false,
+     "name": "tool-inspect",
+     "params": [
+      {
+       "count": false,
+       "default": ".",
+       "envvar": null,
+       "flag_value": null,
+       "help": "Workspace whose runs to inspect.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "workspace",
+       "nargs": 1,
+       "opts": [
+        "--workspace"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": true,
+        "exists": true,
+        "file_okay": false,
+        "name": "directory",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Print the report as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "as_json",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
+    },
+    "tool-retry": {
+     "deprecated": false,
+     "epilog": null,
+     "help": "Re-arm a TOOL subtask as a NEW attempt (N+1). Nothing is executed now: the next resume runs it through the normal policy/approval path with the authority current then.",
+     "hidden": false,
+     "name": "tool-retry",
+     "params": [
+      {
+       "default": null,
+       "envvar": null,
+       "multiple": false,
+       "name": "subtask_id",
+       "nargs": 1,
+       "opts": [
+        "subtask_id"
+       ],
+       "param_type_name": "argument",
+       "required": true,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": ".",
+       "envvar": null,
+       "flag_value": null,
+       "help": "Workspace whose runs to inspect.",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "workspace",
+       "nargs": 1,
+       "opts": [
+        "--workspace"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "allow_dash": false,
+        "dir_okay": true,
+        "exists": true,
+        "file_okay": false,
+        "name": "directory",
+        "param_type": "Path",
+        "readable": true,
+        "writable": false
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "The attempt number shown by `inspect` (required unless --legacy).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "attempt",
+       "nargs": 1,
+       "opts": [
+        "--attempt"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "clamp": false,
+        "max": null,
+        "max_open": false,
+        "min": 1,
+        "min_open": false,
+        "name": "integer range",
+        "param_type": "IntRange"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "The subtask is listed as legacy/unversioned (no attempt number).",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "legacy",
+       "nargs": 1,
+       "opts": [
+        "--legacy"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Explicit confirmation. There is no default: without it nothing changes.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "confirmed",
+       "nargs": 1,
+       "opts": [
+        "--confirm"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": null,
+       "envvar": null,
+       "flag_value": null,
+       "help": "Recorded in the audit trail (default: the OS user).",
+       "hidden": false,
+       "is_flag": false,
+       "multiple": false,
+       "name": "operator",
+       "nargs": 1,
+       "opts": [
+        "--operator"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "text",
+        "param_type": "String"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Print the result as JSON.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "as_json",
+       "nargs": 1,
+       "opts": [
+        "--json"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      },
+      {
+       "count": false,
+       "default": false,
+       "envvar": null,
+       "flag_value": true,
+       "help": "Show this message and exit.",
+       "hidden": false,
+       "is_flag": true,
+       "multiple": false,
+       "name": "help",
+       "nargs": 1,
+       "opts": [
+        "--help"
+       ],
+       "param_type_name": "option",
+       "prompt": null,
+       "required": false,
+       "secondary_opts": [],
+       "type": {
+        "name": "boolean",
+        "param_type": "Bool"
+       }
+      }
+     ],
+     "short_help": null
     }
    },
    "deprecated": false,

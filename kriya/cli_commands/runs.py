@@ -244,3 +244,103 @@ def runs_prune(workspace: str, keep: Optional[int], dry_run: bool, as_json: bool
             click.secho(f"Skipped: {report.skipped_reason}", fg="red")
     if report.skipped_reason:
         sys.exit(_RUNS_EXIT_ACTION_REQUIRED)
+
+
+# Wave 2 Slice A (TOOL EXECUTION DISPOSITION): `kriya runs tool-inspect|tool-abandon|tool-retry` - the operator's disposition of a plan TOOL subtask whose side effect may or may not have happened. A thin
+# adapter over kriya/control/tool_disposition.py: it prints that owner's evidence and passes the operator's explicit decision; it never edits state itself, derives lifecycle
+# truth, or executes anything. Like the rest of `kriya runs` it needs no configuration (main() skips load_config() for it).
+def _print_tool_entry(entry) -> None:
+    attempt = "legacy/unversioned (persisted before attempt identity existed)" if entry.legacy_unversioned else str(entry.attempt)
+    click.secho(f"Subtask {entry.subtask_id}: {entry.classification}", bold=True)
+    click.echo(f"  attempt: {attempt}")
+    click.echo(f"  allowed: {', '.join(entry.allowed_actions) or 'none'}")
+    for row in entry.history:
+        click.echo("  history: " + ", ".join(f"{key}={value}" for key, value in row.items() if key in
+                                            ("type", "attempt", "status", "effect_boundary", "action", "operator", "to_attempt", "error")))
+
+
+@runs_group.command(name="tool-inspect")
+@_runs_workspace_option
+@click.option("--json", "as_json", is_flag=True, help="Print the report as JSON.")
+def runs_tool_inspect(workspace: str, as_json: bool) -> None:
+    """Read-only: list the TOOL subtasks awaiting an operator, with their attempt and the kept evidence. Exit codes: 0 = none awaiting, 1 = action required, 3 = a live run holds the workspace."""
+    from kriya.context.workspace_identity import WorkspaceOwnershipError
+    from kriya.control.tool_disposition import inspect_tool_dispositions
+
+    try:
+        report = inspect_tool_dispositions(workspace)
+    except WorkspaceOwnershipError as error:
+        click.secho(f"Refused: {error}", fg="red", err=True)
+        sys.exit(_RUNS_EXIT_ACTION_REQUIRED)
+    if as_json:
+        click.echo(json.dumps(report.to_dict(), indent=2, sort_keys=True))
+    else:
+        click.echo(f"Workspace: {report.workspace}")
+        if report.unreadable_control_state:
+            click.secho(f"The control state cannot be read ({report.unreadable_control_state[1]}); nothing can be disposed until it is inspected.", fg="red")
+        for entry in report.entries:
+            _print_tool_entry(entry)
+        if not report.entries and not report.unreadable_control_state:
+            click.echo("No TOOL subtask is awaiting an operator.")
+    if report.entries or report.unreadable_control_state:
+        sys.exit(_RUNS_EXIT_ACTION_REQUIRED)
+
+
+def _runs_tool_disposition_options(function):
+    for option in reversed((
+        click.argument("subtask_id"),
+        _runs_workspace_option,
+        click.option("--attempt", "attempt", type=click.IntRange(min=1), default=None, help="The attempt number shown by `inspect` (required unless --legacy)."),
+        click.option("--legacy", "legacy", is_flag=True, help="The subtask is listed as legacy/unversioned (no attempt number)."),
+        click.option("--confirm", "confirmed", is_flag=True, help="Explicit confirmation. There is no default: without it nothing changes."),
+        click.option("--operator", "operator", default=None, help="Recorded in the audit trail (default: the OS user)."),
+        click.option("--json", "as_json", is_flag=True, help="Print the result as JSON."),
+    )):
+        function = option(function)
+    return function
+
+
+def _runs_tool_dispose(action: str, subtask_id: str, workspace: str, attempt: Optional[int], legacy: bool, confirmed: bool, operator: Optional[str], as_json: bool) -> None:
+    import getpass
+
+    from kriya.context.workspace_identity import WorkspaceOwnershipError
+    from kriya.control.tool_disposition import ToolDispositionEntry, apply_disposition, inspect_tool_dispositions
+
+    if (attempt is None) == (not legacy):
+        raise click.UsageError("give exactly one of --attempt N (as shown by `inspect`) or --legacy.")
+    try:
+        entry: Optional[ToolDispositionEntry] = next((e for e in inspect_tool_dispositions(workspace).entries if e.subtask_id == subtask_id), None)
+        if entry is not None and not as_json:
+            _print_tool_entry(entry)
+            if entry.state in ("tool_started", "tool_failed"):
+                click.secho("Its side effect MAY ALREADY HAVE HAPPENED"
+                            + ("; a retry can DUPLICATE it." if action == "retry" else "; abandoning does not undo it."), fg="yellow")
+        result = apply_disposition(workspace, action, subtask_id, expected_attempt=attempt, operator=operator or getpass.getuser(), confirmed=confirmed)
+    except WorkspaceLockHeldError as error:
+        click.secho(f"RUN_ACTIVE: {error}", fg="red", err=True)
+        sys.exit(_RUNS_EXIT_RUN_ACTIVE)
+    except WorkspaceOwnershipError as error:
+        click.secho(f"Refused: {error}", fg="red", err=True)
+        sys.exit(_RUNS_EXIT_ACTION_REQUIRED)
+    if as_json:
+        click.echo(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    elif result.ok:
+        click.secho(f"{result.status}: {result.message}", fg="green")
+    else:
+        click.secho(f"Refused ({result.reason_code}): {result.message}", fg="red", err=True)
+    if not result.ok:
+        sys.exit(_RUNS_EXIT_ACTION_REQUIRED)
+
+
+@runs_group.command(name="tool-abandon")
+@_runs_tool_disposition_options
+def runs_tool_abandon(subtask_id, workspace, attempt, legacy, confirmed, operator, as_json) -> None:
+    """Abandon a TOOL subtask: it is never executed again and the plan cannot complete past it. Abandoning is not completing, and does not undo the effect."""
+    _runs_tool_dispose("abandon", subtask_id, workspace, attempt, legacy, confirmed, operator, as_json)
+
+
+@runs_group.command(name="tool-retry")
+@_runs_tool_disposition_options
+def runs_tool_retry(subtask_id, workspace, attempt, legacy, confirmed, operator, as_json) -> None:
+    """Re-arm a TOOL subtask as a NEW attempt (N+1). Nothing is executed now: the next resume runs it through the normal policy/approval path with the authority current then."""
+    _runs_tool_dispose("retry", subtask_id, workspace, attempt, legacy, confirmed, operator, as_json)

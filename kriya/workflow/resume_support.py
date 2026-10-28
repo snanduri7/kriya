@@ -38,11 +38,17 @@ class ResumeDeps:
     logger: Any
     # D1: the persisted marker of a durably STARTED TOOL subtask (kriya.control.state.SUBTASK_STATE_TOOL_STARTED), resolved by the controller (this module never imports kriya.control.state)
     tool_started_state: str
+    # Wave 2 Slice A: the persisted markers of a TOOL attempt that failed after its effect may have begun (terminal for the attempt) and of an operator-abandoned one
+    # (kriya.control.state.SUBTASK_STATE_TOOL_FAILED / SUBTASK_STATE_TOOL_ABANDONED), resolved by the controller like tool_started_state
+    tool_failed_state: str
+    tool_abandoned_state: str
 
 
 TOOL_EXECUTION_UNRESOLVED = "TOOL_EXECUTION_UNRESOLVED"
 TOOL_STARTED_NOT_DURABLE = "TOOL_STARTED_NOT_DURABLE"
 TOOL_COMPLETED_NOT_DURABLE = "TOOL_COMPLETED_NOT_DURABLE"
+TOOL_ATTEMPT_FAILED_TERMINAL = "TOOL_ATTEMPT_FAILED_TERMINAL"
+TOOL_ATTEMPT_ABANDONED = "TOOL_ATTEMPT_ABANDONED"
 
 
 @dataclass(frozen=True)
@@ -53,11 +59,16 @@ class ToolResumeDecision:
                 (subtask_executor.revalidate_tool_subtask_authority) because TOOL-002/003 authority state can drift independently of the workspace.
     unresolved: TOOL executions durably STARTED (the TOOL_STARTED marker, or a legacy "in_progress" record of a TOOL subtask) with no durable COMPLETED. The effect may or
                 may not have happened: the classification is ``needs_review`` and it is never retried automatically.
-    states:     the resumed states, unchanged (MODEL "in_progress"/"failed"/... keep their existing retryable semantics)."""
+    states:     the resumed states, unchanged (MODEL "in_progress"/"failed"/... keep their existing retryable semantics).
+    failed_terminal: TOOL attempts that FAILED after their effect may have begun (Wave 2 Slice A): terminal for that attempt, never executed again by a resume; only an operator
+                moves them.
+    abandoned:  TOOL subtasks an operator abandoned: never executed again; the plan cannot complete past them."""
 
     completed: Tuple[str, ...]
     unresolved: Tuple[str, ...]
     states: Dict[str, str]
+    failed_terminal: Tuple[str, ...] = ()
+    abandoned: Tuple[str, ...] = ()
 
 
 def classify_tool_resume(deps: ResumeDeps, plan: EngineeringPlan, resumed_subtask_states: Dict[str, str]) -> ToolResumeDecision:
@@ -69,7 +80,9 @@ def classify_tool_resume(deps: ResumeDeps, plan: EngineeringPlan, resumed_subtas
     * "completed" (durably written AFTER the effect succeeded)      -> ``completed``: never executed again for this execution identity;
     * the TOOL_STARTED marker (``deps.tool_started_state``) / legacy "in_progress" for a TOOL  -> ``unresolved``: needs_review, never auto-retried (it covers a crash before the effect began AND a
                                                                          crash after the effect but before COMPLETED - conservative uncertainty is correct, duplicates are not);
-    * anything else (failed / needs_review from a typed pre-effect refusal / pending) keeps its existing semantics.
+    * the failed-terminal marker (``deps.tool_failed_state``, written only for a failure NOT proven to be before the effect) -> ``failed_terminal``: never executed again;
+    * the abandoned marker (``deps.tool_abandoned_state``)       -> ``abandoned``: never executed again;
+    * anything else (failed / needs_review from a failure PROVEN pre-effect / pending) keeps its existing semantics: re-armable through the ordinary resume and authority path.
 
     Pure and total over (plan, states); it only ever reads. Ids that are not TOOL subtasks of the CURRENT plan are left to the caller exactly as passed."""
     tool_subtask_ids = {st.id for st in plan.subtasks if st.execution_method == ExecutionMethod.TOOL}
@@ -77,7 +90,9 @@ def classify_tool_resume(deps: ResumeDeps, plan: EngineeringPlan, resumed_subtas
     unresolved = tuple(sorted(
         i for i, state in resumed_subtask_states.items()
         if i in tool_subtask_ids and state in (deps.tool_started_state, "in_progress")))
-    return ToolResumeDecision(completed=completed, unresolved=unresolved, states=dict(resumed_subtask_states))
+    failed_terminal = tuple(sorted(i for i, state in resumed_subtask_states.items() if i in tool_subtask_ids and state == deps.tool_failed_state))
+    abandoned = tuple(sorted(i for i, state in resumed_subtask_states.items() if i in tool_subtask_ids and state == deps.tool_abandoned_state))
+    return ToolResumeDecision(completed=completed, unresolved=unresolved, states=dict(resumed_subtask_states), failed_terminal=failed_terminal, abandoned=abandoned)
 
 
 def all_subtasks_completed(

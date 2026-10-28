@@ -921,6 +921,7 @@
     "s1": "failed"
    },
    "subtask_written_files": {},
+   "tool_attempts": {},
    "tree_hash": "58afe713a64fc71c931ecc8118b8a5a04e632b98",
    "updated_at": "<time>",
    "verification_contract_digest": "4a7e2b5f2056a18fb1fe7dada34fb11a5fbd80e3dc617e5e7ea3b387c7f81e0c",
@@ -1250,6 +1251,7 @@
   "run_id": "<run:1>",
   "subtask_results": [
    {
+    "effect_boundary": null,
     "error": {
      "chars": 48,
      "text": "sha256:cf68e55e15bccc93"

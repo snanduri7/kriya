@@ -41,9 +41,12 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from kriya.core.state_paths import resolve_state_directory
 from kriya.repository.atomic_write import DurableWriteError
 from kriya.repository.git import RepositoryContentFilterRefused
+from kriya.tools.tool import ToolEffectBoundary
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.plan_schema import EngineeringPlan, Subtask, VerificationMethodType
 from kriya.workflow.resume_support import (
+    TOOL_ATTEMPT_ABANDONED,
+    TOOL_ATTEMPT_FAILED_TERMINAL,
     TOOL_COMPLETED_NOT_DURABLE,
     TOOL_EXECUTION_UNRESOLVED,
     TOOL_STARTED_NOT_DURABLE,
@@ -100,6 +103,9 @@ class EnforceDeps:
     classify_tool_resume: Callable[..., Any]
     # D1: the persisted marker of a durably STARTED TOOL subtask (kriya.control.state.SUBTASK_STATE_TOOL_STARTED)
     SUBTASK_STATE_TOOL_STARTED: str
+    # Wave 2 Slice A: the persisted markers of a TOOL attempt that failed after its effect may have begun, and of an operator-abandoned one
+    SUBTASK_STATE_TOOL_FAILED: str
+    SUBTASK_STATE_TOOL_ABANDONED: str
     find_missing_grounded_production_artifacts: Callable[..., Any]
     logger: Any
     nearest_mutating_upstream_owner: Callable[..., Any]
@@ -1289,6 +1295,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         resumed_subtask_states: Dict[str, str] = {}
         resumed_tool_completed: set = set()   # D1: TOOL executions durably COMPLETED in the resumed run: their effect is never run again
         resumed_tool_unresolved: set = set()  # D1: TOOL executions durably STARTED without a durable COMPLETED: needs_review, never retried
+        resumed_tool_failed_terminal: set = set()  # Wave 2 Slice A: TOOL attempts that failed after their effect may have begun: terminal, never executed again by a resume
+        resumed_tool_abandoned: set = set()        # Wave 2 Slice A: TOOL subtasks an operator abandoned: never executed again, the plan cannot complete past them
         # PRD-008: the structured record of what this resume reused (logged,
         # annotated on the RunRecord and returned), one per resume request.
         enforce_resume_decision: Optional[Dict[str, Any]] = None
@@ -1393,6 +1401,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     tool_resume = deps.classify_tool_resume(plan, dict(prior_control_state.subtask_states))
                     resumed_subtask_states = tool_resume.states
                     resumed_tool_completed, resumed_tool_unresolved = set(tool_resume.completed), set(tool_resume.unresolved)
+                    resumed_tool_failed_terminal, resumed_tool_abandoned = set(tool_resume.failed_terminal), set(tool_resume.abandoned)
+                    if resumed_tool_failed_terminal or resumed_tool_abandoned:
+                        deps.logger.warning(
+                            f"WorkflowController enforce run {run_id!r}: TOOL subtask(s) {sorted(resumed_tool_failed_terminal)!r} failed after their effect may have begun and "
+                            f"{sorted(resumed_tool_abandoned)!r} were abandoned by an operator: they are NOT executed again; the run stops at them."
+                        )
                     if resumed_tool_completed:
                         deps.logger.info(
                             f"WorkflowController enforce run {run_id!r}: TOOL subtask(s) {sorted(resumed_tool_completed)!r} were durably COMPLETED by an earlier run: "
@@ -1476,6 +1490,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             requirement_contract_digest=getattr(deps.bound_requirement_contract(deps.workflow_engine), "digest", None),
             verification_contract_digest=verification_contract.digest,
             current_plan_hash=current_plan_hash, subtask_states=dict(resumed_subtask_states),
+            # Wave 2 Slice A: the attempt counters belong to the persisted state this resume adopted; a fresh/refused-resume run starts none
+            tool_attempts=dict(prior_control_state.tool_attempts) if prior_control_state is not None and resumed_subtask_states else {},
             base_commit=deps.compute_base_commit(workspace_path), tree_hash=deps.compute_tree_hash(workspace_path),
             workspace_content_hash=deps.compute_workspace_content_hash(workspace_path),
         )
@@ -1491,7 +1507,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # D1: the run's own first save must NOT overwrite an unresolved TOOL record (it is the only evidence that an effect may have happened): the marker is carried through.
         control_state = control_state.with_updates(subtask_states={
             **approved_stage_states, **{i: deps.SUBTASK_STATE_TOOL_STARTED for i in resumed_tool_unresolved if i in approved_stage_states},
+            **{i: deps.SUBTASK_STATE_TOOL_FAILED for i in resumed_tool_failed_terminal if i in approved_stage_states},
+            **{i: deps.SUBTASK_STATE_TOOL_ABANDONED for i in resumed_tool_abandoned if i in approved_stage_states},
         })
+        tool_dispositions = frozenset({deps.SUBTASK_STATE_TOOL_STARTED, deps.SUBTASK_STATE_TOOL_FAILED, deps.SUBTASK_STATE_TOOL_ABANDONED})
+
+        def _record_tool_attempt(tool_result: Any, attempt: int) -> None:
+            """Wave 2 Slice A: a TOOL attempt's outcome (attempt number, status, error, effect boundary) is HISTORY, so it is appended to the decision ledger fsync-grade (the existing
+            store and writer). The ControlState stays the authority for what a resume may do; a ledger write that fails is logged loudly and never changes that decision."""
+            decision = deps.record_subtask_attempt(ledger, plan, tool_result, attempt=attempt, effect_boundary=tool_result.resolved_effect_boundary.value)
+            try:
+                ledger.append_to_file(workspace_path, decision, durable=True)
+            except Exception as error:  # pylint: disable=broad-except
+                deps.logger.error(f"WorkflowController enforce run {run_id!r}: the attempt record of TOOL subtask {tool_result.subtask_id!r} could not be persisted ({error}); "
+                                  "the control state still decides what a resume may do.")
         # Persist the complete validated plan before any implementation can
         # begin. ControlState remains the compact resume index; this owned
         # document is the durable source for what was approved and how each
@@ -1798,7 +1827,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     reason_codes=(TOOL_EXECUTION_UNRESOLVED,),
                 )
                 subtask_results.append(result)
-                deps.record_subtask_attempt(ledger, plan, result, attempt=1)
+                _record_tool_attempt(result, control_state.tool_attempts.get(subtask.id, 1))
                 approved_stage_states[subtask.id] = "needs_review"
                 deps.save_approved_plan(
                     workspace_path, plan.plan_id,
@@ -1810,6 +1839,31 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 deps.logger.warning(f"WorkflowController enforce run {run_id!r}: stopped at subtask {subtask_id!r} ({position}/{total}) - {TOOL_EXECUTION_UNRESOLVED}; nothing was run.")
                 break
 
+            if subtask.execution_method == deps.ExecutionMethod.TOOL and (subtask_id in resumed_tool_failed_terminal or subtask_id in resumed_tool_abandoned):
+                # Wave 2 Slice A: this attempt FAILED after its effect may have begun (or an operator abandoned it). A resume never executes it again; only an explicit
+                # operator disposition (kriya runs) moves it. The persisted marker survives for the person who reviews it, and the plan cannot complete past it.
+                abandoned = subtask_id in resumed_tool_abandoned
+                code = TOOL_ATTEMPT_ABANDONED if abandoned else TOOL_ATTEMPT_FAILED_TERMINAL
+                result = deps.SubtaskResult(
+                    subtask_id=subtask.id, status=deps.SubtaskStatus.FAILED, execution_method=deps.ExecutionMethod.TOOL.value,
+                    error=(f"{code}: TOOL subtask {subtask.id!r} ({subtask.tool_name}) "
+                           + ("was abandoned by an operator and is not executed again." if abandoned else
+                              "failed after its side effect may have begun; that attempt is terminal and was NOT executed again. An operator decides (abandon, or retry as a new attempt).")),
+                    reason_codes=(code,),
+                )
+                subtask_results.append(result)
+                _record_tool_attempt(result, control_state.tool_attempts.get(subtask.id, 1))
+                approved_stage_states[subtask.id] = "failed"
+                deps.save_approved_plan(
+                    workspace_path, plan.plan_id,
+                    deps.build_approved_plan_document(
+                        plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                        stage_states=approved_stage_states, lifecycle_state="failed",
+                    ),
+                )
+                deps.logger.warning(f"WorkflowController enforce run {run_id!r}: stopped at subtask {subtask_id!r} ({position}/{total}) - {code}; nothing was run.")
+                break
+
             if subtask.execution_method == deps.ExecutionMethod.TOOL and subtask_id in resumed_tool_completed:
                 # D1: durably COMPLETED: the effect is terminal for this execution and is NEVER run again. TOOL-001's authority requirement is kept separately: authority is
                 # revalidated through the effect-free seam; a refusal stops the run (the effect already happened - it is reported, not undone).
@@ -1818,7 +1872,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 )
                 if refusal is not None:
                     subtask_results.append(refusal)
-                    deps.record_subtask_attempt(ledger, plan, refusal, attempt=1)
+                    _record_tool_attempt(refusal, control_state.tool_attempts.get(subtask.id, 1))
                     approved_stage_states[subtask.id] = refusal.status.value
                     deps.save_approved_plan(
                         workspace_path, plan.plan_id,
@@ -1867,8 +1921,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             approved_stage_states[subtask_id] = "in_progress"
             state_before_start = control_state
             # D1: a TOOL subtask's STARTED is its own persisted marker (a MODEL subtask keeps "in_progress" and its retryable semantics).
+            # Wave 2 Slice A: the attempt number is written in the SAME durable write as tool_started (an operator retry has already raised it; the first attempt is 1), so a STARTED
+            # record is never without its attempt identity.
+            tool_attempt_no = control_state.tool_attempts.get(subtask_id, 1)
             control_state = control_state.with_updates(
                 subtask_states={**control_state.subtask_states, subtask_id: deps.SUBTASK_STATE_TOOL_STARTED if is_tool_subtask else "in_progress"},
+                tool_attempts={**control_state.tool_attempts, subtask_id: tool_attempt_no} if is_tool_subtask else control_state.tool_attempts,
             )
             deps.save_approved_plan(
                 workspace_path, plan.plan_id,
@@ -1886,10 +1944,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     result = deps.SubtaskResult(
                         subtask_id=subtask.id, status=deps.SubtaskStatus.FAILED, execution_method=deps.ExecutionMethod.TOOL.value,
                         error=f"{TOOL_STARTED_NOT_DURABLE}: the STARTED record of TOOL subtask {subtask.id!r} could not be made durable ({error}); nothing was run.",
-                        reason_codes=(TOOL_STARTED_NOT_DURABLE,),
+                        reason_codes=(TOOL_STARTED_NOT_DURABLE,), effect_boundary=ToolEffectBoundary.PROVEN_PRE_EFFECT,   # nothing was run
                     )
                     subtask_results.append(result)
-                    deps.record_subtask_attempt(ledger, plan, result, attempt=1)
+                    _record_tool_attempt(result, tool_attempt_no)
                     deps.logger.error(f"WorkflowController enforce run {run_id!r}: stopped before subtask {subtask_id!r} ({position}/{total}) - {TOOL_STARTED_NOT_DURABLE}; nothing was run.")
                     break
             else:
@@ -1964,10 +2022,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         )
                         deps.logger.error(f"WorkflowController enforce run {run_id!r}: subtask {subtask_id!r} - {TOOL_COMPLETED_NOT_DURABLE}.")
                 subtask_results.append(result)
-                deps.record_subtask_attempt(ledger, plan, result, attempt=1)
+                _record_tool_attempt(result, tool_attempt_no)
+                # Wave 2 Slice A: a failure NOT proven to be before the effect (anything the execution owner did not classify PROVEN_PRE_EFFECT) is terminal for this attempt.
+                terminal_failure = (result.status != deps.SubtaskStatus.COMPLETED and not completed_not_durable
+                                    and result.resolved_effect_boundary != ToolEffectBoundary.PROVEN_PRE_EFFECT)
                 if result.status != deps.SubtaskStatus.COMPLETED and not completed_not_durable:
                     control_state = control_state.with_updates(
-                        subtask_states={**control_state.subtask_states, subtask.id: result.status.value},
+                        subtask_states={**control_state.subtask_states,
+                                        subtask.id: deps.SUBTASK_STATE_TOOL_FAILED if terminal_failure else result.status.value},
                     )
                 approved_stage_states[subtask.id] = result.status.value
                 tool_lifecycle_state = (
@@ -1982,7 +2044,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         stage_states=approved_stage_states, lifecycle_state=tool_lifecycle_state,
                     ),
                 )
-                if result.status != deps.SubtaskStatus.COMPLETED and not completed_not_durable:
+                if terminal_failure:
+                    try:
+                        control_state = _persist_control_state(control_state, durable=True)
+                    except DurableWriteError as error:
+                        # the terminal record is not durable: the on-disk lifecycle stays STARTED (needs_review, never retried) - the same conservative reading
+                        deps.logger.error(f"WorkflowController enforce run {run_id!r}: subtask {subtask_id!r} - the terminal failure record could not be made durable ({error}); "
+                                          "the STARTED record stays and is reviewed, never retried.")
+                elif result.status != deps.SubtaskStatus.COMPLETED and not completed_not_durable:
                     control_state = _persist_control_state(control_state)
                 if result.status != deps.SubtaskStatus.COMPLETED:
                     deps.logger.warning(
@@ -2404,7 +2473,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     approved_stage_states[subtask.id] = "in_progress"
                     control_state = control_state.with_updates(
                         current_plan_hash=current_plan_hash,
-                        subtask_states=dict(approved_stage_states),
+                        subtask_states={**approved_stage_states,
+                                        **{i: st for i, st in control_state.subtask_states.items() if st in tool_dispositions}},  # a TOOL record awaiting an operator is evidence
                     )
                     deps.save_approved_plan(
                         workspace_path, plan.plan_id,

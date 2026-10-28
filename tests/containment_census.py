@@ -275,6 +275,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_service_runtime.py': ('S', 'M'),
  'tests/test_skill_commit_failure_truth.py': ('S', 'M'),
  'tests/test_skill_verification_deferral.py': ('S', 'M'),
+ 'tests/test_slice_a_real_oci_boundary.py': ('N', 'C'),
  'tests/test_suite_preservation_typed_refusal.py': ('S', 'M'),
  'tests/test_tool001_autonomous_tool_execution.py': ('N', 'C'),
  'tests/test_tool002_mcp_invocation_authority.py': ('N', 'C'),

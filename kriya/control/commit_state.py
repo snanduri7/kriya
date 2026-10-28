@@ -117,11 +117,11 @@ class WorkspaceCommitAssessment:
             parts.append("unsettled state left under a sub-directory of this repository by an earlier Kriya that treated that directory as its own workspace: "
                          + "; ".join(f"{directory} ({reason})" for directory, reason in self.nested_workspace_state))
         if self.unresolved_tool_executions:
-            parts.append("TOOL execution(s) STARTED and never durably COMPLETED (their side effect may or may not have happened): "
+            parts.append("TOOL execution(s) STARTED and never durably COMPLETED, or failed after their effect may have begun (their side effect may or may not have happened): "
                          + "; ".join(f"run {run_id}: {', '.join(ids)}" for run_id, ids in self.unresolved_tool_executions))
             if not self.recoverable and not self.ownership_reason_codes and not self.unreadable_control_state:
-                return ("The workspace holds an unresolved TOOL execution (" + "; ".join(parts) + "). Kriya will not retry it and will not start over it: inspect what it did, then "
-                        "archive the control state (.kriya/control/state.json - it is the only evidence) yourself.")
+                return ("The workspace holds an unresolved TOOL execution (" + "; ".join(parts) + "). Kriya will not retry it and will not start over it: inspect what it did with `kriya runs tool-inspect`, "
+                        "then abandon it or re-arm it as a new attempt with `kriya runs tool-abandon` / `kriya runs tool-retry` (the control state is the only evidence; do not delete it).")
         if self.unreadable_control_state:
             parts.append(f"control state unreadable and left untouched: {self.unreadable_control_state[0]} ({self.unreadable_control_state[1]})")
             if not self.recoverable and not self.ownership_reason_codes:
@@ -196,8 +196,8 @@ def assess_workspace_commit_state(
     nested, nested_complete = nested_control_state(workspace_path)
     control_state, unreadable_state = inspect_control_state(workspace_path)
     unresolved_tools = []
-    if control_state is not None and control_state.run_id not in excluded and control_state.unresolved_tool_subtask_ids:
-        unresolved_tools.append((control_state.run_id, control_state.unresolved_tool_subtask_ids))
+    if control_state is not None and control_state.run_id not in excluded and control_state.undisposed_tool_subtask_ids:
+        unresolved_tools.append((control_state.run_id, control_state.undisposed_tool_subtask_ids))  # Wave 2 Slice A: STARTED-never-COMPLETED and failed-after-effect-may-have-begun
     # D1: a direct `kriya tools execute` whose RunRecord says "started" and never durably finished (whatever the record's lifecycle now says).
     unresolved_tools.extend((record.run_id, (record.unresolved_tool_execution,)) for record in scan.records
                             if record.run_id not in excluded and record.unresolved_tool_execution)

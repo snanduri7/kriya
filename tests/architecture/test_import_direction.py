@@ -158,6 +158,7 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.cli_commands.runs", "kriya.control.recovery"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     ("kriya.cli_commands.runs", "kriya.control.retention"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
     ("kriya.cli_commands.runs", "kriya.control.run_ownership"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE
+    ("kriya.cli_commands.runs", "kriya.control.tool_disposition"): ("O2", _O2),  # direction ADAPTER-CLI -> STATE (Wave 2 Slice A: the thin operator adapter)
     # E14: the authority group's config.authority_approval edge MOVED (kriya.cli no longer imports it); three edges
     # SPLIT (sites unchanged, entries +1 each; owner: the new module; removal slice O2 unchanged): config.authority
     # (the typed operator errors; kriya.cli keeps the traces KUP config-error path's), core.logging_setup
@@ -447,6 +448,7 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     # E12: moved count-neutral with the enforce loop (its only user: the typed authority requests sealed before an
     # admission stop) from workflow_controller to enforce_loop; removal slice P2 unchanged
     ("kriya.workflow.enforce_loop", "kriya.workflow.authority_request"): ("P2", _P2),  # non-public AUTHORITY module
+    ("kriya.workflow.enforce_loop", "kriya.tools.tool"): ("P2", _P2),  # non-public TOOLBOX module (Wave 2 Slice A: ToolEffectBoundary, the execution owner's fact)
     # E11: moved count-neutral with build_planning_structural_evidence (its only user) to planning_request
     ("kriya.workflow.planning_request", "kriya.analyzer.graph"): ("P2", _P2),  # non-public RETRIEVAL module
     ("kriya.workflow.workflow_controller", "kriya.control.artifacts"): ("P2", _P2),  # non-public STATE module
@@ -459,6 +461,7 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.workflow.workflow_controller", "kriya.tools.knowledge"): ("P2", _P2),  # non-public KNOWLEDGE module
     ("kriya.workflow.workflow_controller", "kriya.workflow.acceptance_approval"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.workflow.workflow_types", "kriya.control.decisions"): ("P2", _P2),  # non-public STATE module
+    ("kriya.workflow.workflow_types", "kriya.tools.tool"): ("P2", _P2),  # non-public TOOLBOX module (Wave 2 Slice A: ToolEffectBoundary on SubtaskResult)
     ("kriya.workflow.worktree", "kriya.policy.enforcement"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.workflow.worktree", "kriya.policy.errors"): ("P2", _P2),  # non-public AUTHORITY module
     ("kriya.workflow.worktree", "kriya.policy.model"): ("P2", _P2),  # non-public AUTHORITY module

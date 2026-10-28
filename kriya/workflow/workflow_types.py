@@ -22,6 +22,7 @@ from enum import Enum
 from typing import Any, Dict, Optional, Tuple
 
 from kriya.control.decisions import Decision
+from kriya.tools.tool import ToolEffectBoundary
 
 
 class SubtaskStatus(str, Enum):
@@ -66,6 +67,15 @@ class SubtaskResult:
 
     error: Optional[str] = None
     reason_codes: Tuple[str, ...] = ()
+
+    # Wave 2 Slice A: for a failed TOOL result, whether its external effect may have begun - the fact the execution owner attached (kriya/tools/tool.py). None = no fact
+    # (a MODEL or COMPLETED result, or a TOOL result nobody classified); every consumer reads it through ``resolved_effect_boundary``, where None is MAY_HAVE_EFFECTED (fail
+    # closed). Deliberately not part of to_dict().
+    effect_boundary: Optional[ToolEffectBoundary] = None
+
+    @property
+    def resolved_effect_boundary(self) -> ToolEffectBoundary:
+        return self.effect_boundary if self.effect_boundary is not None else ToolEffectBoundary.MAY_HAVE_EFFECTED
 
     def to_dict(self) -> Dict[str, Any]:
         return {

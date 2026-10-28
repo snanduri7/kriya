@@ -109,7 +109,12 @@ from kriya.control.run_coordinator import (
     mark_run_stage,
 )
 from kriya.control.run_record import RunLifecycle
-from kriya.control.state import SUBTASK_STATE_TOOL_STARTED, ControlState
+from kriya.control.state import (
+    SUBTASK_STATE_TOOL_ABANDONED,
+    SUBTASK_STATE_TOOL_FAILED,
+    SUBTASK_STATE_TOOL_STARTED,
+    ControlState,
+)
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.llm import InferenceDeadlineError
 from kriya.policy.filesystem import WriteScopeMode
@@ -414,7 +419,10 @@ def _planning_deps() -> planning_request.PlanningDeps:
 def _resume_deps() -> resume_support.ResumeDeps:
     """The moved resume-support code's collaborators (kriya/workflow/resume_support.py), resolved through this module
     NOW (at call time), so a test patch of ``logger`` here reaches the moved quarantine exactly as it reached it when it lived here."""
-    return resume_support.ResumeDeps(logger=logger, tool_started_state=SUBTASK_STATE_TOOL_STARTED)
+    return resume_support.ResumeDeps(
+        logger=logger, tool_started_state=SUBTASK_STATE_TOOL_STARTED,
+        tool_failed_state=SUBTASK_STATE_TOOL_FAILED, tool_abandoned_state=SUBTASK_STATE_TOOL_ABANDONED,
+    )
 
 
 def _shadow_mode() -> Any:
@@ -521,6 +529,7 @@ def _enforce_deps(controller: WorkflowController) -> Any:
         compute_abandoned_plan_files=compute_abandoned_plan_files,
         evaluate_plan_edit_feasibility=evaluate_plan_edit_feasibility,
         classify_tool_resume=classify_tool_resume, SUBTASK_STATE_TOOL_STARTED=SUBTASK_STATE_TOOL_STARTED,
+        SUBTASK_STATE_TOOL_FAILED=SUBTASK_STATE_TOOL_FAILED, SUBTASK_STATE_TOOL_ABANDONED=SUBTASK_STATE_TOOL_ABANDONED,
         find_missing_grounded_production_artifacts=find_missing_grounded_production_artifacts, logger=logger,
         nearest_mutating_upstream_owner=nearest_mutating_upstream_owner,
         quarantine_abandoned_plan_files=quarantine_abandoned_plan_files,
