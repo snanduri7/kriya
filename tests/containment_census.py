@@ -289,6 +289,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_validate_maven_acquisition.py': ('N', 'C'),
  'tests/test_validate_oci.py': ('N', 'C'),
  'tests/test_r3_dependency_cache_poisoning.py': ('N', 'C'),
+ 'tests/test_r3_python_venv_scope.py': ('N', 'C'),
  'tests/test_r3_runtime_dependency_layer.py': ('N', 'C'),
  'tests/test_validate_package_audit.py': ('S', 'M'),
  'tests/test_validate_policy_audit.py': ('S', 'M'),

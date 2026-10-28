@@ -13,6 +13,7 @@ from typing import Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _dependency_scope import hold_dependency_scope
 from _strict_doubles import developer_double
 
 from kriya.agents.agent import DeveloperAgent, RunVerifierAgent
@@ -4790,7 +4791,7 @@ def test_managed_service_python_command_is_grounded_to_the_project_environment_w
     (tmp_path / "app.py").write_text("print('hi')\n", encoding="utf-8")
     from kriya.tools.validate import PolymorphicValidator
 
-    validator = PolymorphicValidator(str(tmp_path))
+    validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path)))  # R3: admission grounds the interpreter, i.e. builds the project venv, inside a verification scope
     assert validator.stack == "python"
 
     managed_service = {
@@ -4814,7 +4815,7 @@ def test_managed_service_uses_the_identical_interpreter_the_finite_test_path_res
     (tmp_path / "app.py").write_text("print('hi')\n", encoding="utf-8")
     from kriya.tools.validate import PolymorphicValidator
 
-    validator = PolymorphicValidator(str(tmp_path))
+    validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path)))  # R3: admission grounds the interpreter, i.e. builds the project venv, inside a verification scope
     expected_interpreter, install_error = validator._resolve_python_interpreter()
     assert install_error is None
 
@@ -4838,7 +4839,7 @@ def test_managed_service_grounding_does_not_mutate_the_original_judgment_command
     (tmp_path / "app.py").write_text("print('hi')\n", encoding="utf-8")
     from kriya.tools.validate import PolymorphicValidator
 
-    validator = PolymorphicValidator(str(tmp_path))
+    validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path)))  # R3: admission grounds the interpreter, i.e. builds the project venv, inside a verification scope
     original_command = ["python", "manage.py", "runserver"]
     managed_service = {
         "service_command": original_command,

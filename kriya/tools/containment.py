@@ -87,13 +87,15 @@ class BackendUnavailableError(ContainmentSetupError):
 
 PERSISTENT_DEPENDENCY_CACHE_WRITABLE = "PERSISTENT_DEPENDENCY_CACHE_WRITABLE"
 DEPENDENCY_CACHE_SCOPE_REQUIRED = "DEPENDENCY_CACHE_SCOPE_REQUIRED"
-DEPENDENCY_CACHE_REASON_CODES = frozenset({PERSISTENT_DEPENDENCY_CACHE_WRITABLE, DEPENDENCY_CACHE_SCOPE_REQUIRED})
+PROJECT_VENV_NOT_DISCARDED = "PROJECT_VENV_NOT_DISCARDED"
+DEPENDENCY_CACHE_REASON_CODES = frozenset({PERSISTENT_DEPENDENCY_CACHE_WRITABLE, DEPENDENCY_CACHE_SCOPE_REQUIRED, PROJECT_VENV_NOT_DISCARDED})
 
 
 class DependencyCacheError(ContainmentSetupError):
     """R3 (kriya/tools/dependency_cache.py): a dependency cache could not be given to candidate-controlled execution on the terms R3 requires - a
     writable cache that is not a verification scope's ephemeral one (PERSISTENT_DEPENDENCY_CACHE_WRITABLE), or a cache asked for outside a scope
-    (DEPENDENCY_CACHE_SCOPE_REQUIRED). The command is not run, never run with a persistent cache instead. ``reason_code`` is one of
+    (DEPENDENCY_CACHE_SCOPE_REQUIRED), or a project venv an earlier scope left that cannot be removed (PROJECT_VENV_NOT_DISCARDED). The command is
+    not run, never run with a persistent cache or venv instead. ``reason_code`` is one of
     DEPENDENCY_CACHE_REASON_CODES."""
 
     def __init__(self, reason_code: str, detail: str) -> None:

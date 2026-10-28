@@ -13,6 +13,7 @@ import os
 import re
 
 import pytest
+from _dependency_scope import hold_dependency_scope
 
 from kriya.config.config import AutonomyConfig
 from kriya.tools.validate import PolymorphicValidator
@@ -51,7 +52,7 @@ def _fake_commands(validator, calls, *, pip_returncode=0):
 def test_a_dependency_free_contained_project_gets_a_venv_with_pytest(tmp_path, manifest):
     if manifest:
         (tmp_path / manifest[0]).write_text(manifest[1])
-    validator = _validator(tmp_path, contained=True)
+    validator = hold_dependency_scope(_validator(tmp_path, contained=True))  # R3: the project venv exists only inside a verification scope
     calls = []
     _fake_commands(validator, calls)
     assert validator._resolve_python_interpreter() == (".kriya/venv/bin/python", None)
@@ -69,8 +70,10 @@ def test_a_failed_pytest_install_fails_the_gate_with_pips_output_never_the_bare_
     validator = _validator(tmp_path, contained=True)
     calls = []
     _fake_commands(validator, calls, pip_returncode=1)
-    interpreter, install_error = validator._resolve_python_interpreter()
+    with validator.dependency_cache_scope():
+        interpreter, install_error = validator._resolve_python_interpreter()
     assert interpreter == "python3" and "pip said no" in install_error
+    calls.clear()  # R3: the gate builds its OWN venv (the one resolved above, outside any scope, is discarded when the gate's scope opens)
     result = validator.run_tests(None)
     assert result["success"] is False and "pip said no" in result["output"]
     assert result["test_execution"]["reason"] == "TEST_PROCESS_NOT_RUN"
@@ -78,7 +81,7 @@ def test_a_failed_pytest_install_fails_the_gate_with_pips_output_never_the_bare_
 
 
 def test_a_failed_venv_creation_keeps_the_fail_closed_bare_interpreter(tmp_path):
-    validator = _validator(tmp_path, contained=True)
+    validator = hold_dependency_scope(_validator(tmp_path, contained=True))
     calls = []
 
     def run(cmd, cwd, **kwargs):

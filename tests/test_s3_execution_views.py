@@ -175,8 +175,8 @@ def test_a_view_is_bound_to_the_origins_identity_even_for_a_validator_built_with
 def test_the_origin_venv_is_mounted_into_the_view_read_only_and_writable_only_when_asked(tmp_path):
     origin = _repo(tmp_path)
     validator = PolymorphicValidator(str(origin), original_workspace_path=str(origin), autonomy_cfg=_contained())
-    (origin / ".kriya" / "venv").mkdir(parents=True)
     with validator.verification_session("tests"):
+        (origin / ".kriya" / "venv").mkdir(parents=True)  # R3: the venv is built INSIDE the scope that uses it (one an earlier scope left is discarded on entry)
         read_only, _b = validator.build_containment_profile_and_backend()
         writable, _b = validator.build_containment_profile_and_backend(venv_writable=True)
         view = validator.workspace_path

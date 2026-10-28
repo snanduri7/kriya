@@ -17,6 +17,8 @@ existing, already-tested treatment of the same class of problem for Java.
 import os
 import sys
 
+from _dependency_scope import hold_dependency_scope
+
 from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.acceptance import runtime_verification_infrastructure_reason
 from kriya.workflow.attempt import (
@@ -387,7 +389,7 @@ def test_run_app_sequence_result_independent_of_process_cwd(tmp_path):
 
 def test_managed_service_test_target_fails_closed(tmp_path):
     _write_library_fixture(tmp_path)
-    validator = PolymorphicValidator(str(tmp_path))
+    validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path)))  # R3: the admission grounds its interpreter inside the session that runs the service
     spec, error = _validate_and_convert_managed_service_contract(
         {
             "service_command": [sys.executable, "tests/test_email_rules.py"],
@@ -402,7 +404,7 @@ def test_managed_service_test_target_fails_closed(tmp_path):
 
 def test_managed_service_module_form_test_target_fails_closed(tmp_path):
     _write_library_fixture(tmp_path)
-    validator = PolymorphicValidator(str(tmp_path))
+    validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path)))  # R3: the admission grounds its interpreter inside the session that runs the service
     spec, error = _validate_and_convert_managed_service_contract(
         {
             "service_command": [sys.executable, "-m", "tests.test_email_rules"],
@@ -417,7 +419,7 @@ def test_managed_service_module_form_test_target_fails_closed(tmp_path):
 
 def test_managed_service_legitimate_target_still_accepted(tmp_path):
     _write_app_fixture(tmp_path)
-    validator = PolymorphicValidator(str(tmp_path))
+    validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path)))  # R3: the admission grounds its interpreter inside the session that runs the service
     spec, error = _validate_and_convert_managed_service_contract(
         {
             "service_command": [sys.executable, "-m", "http.server", "8000"],

@@ -374,6 +374,8 @@ def _validator(world: World):
     validator = object.__new__(PolymorphicValidator)
     validator.original_workspace_path = str(world.ws)
     validator.workspace_path = str(world.ws)
+    validator._venv_install_cache = {}  # pylint: disable=protected-access  # the scope's bookkeeping (R3: the project venv's memo is cleared on scope entry)
+    validator._venv_creation_error = None  # pylint: disable=protected-access
     return validator
 
 

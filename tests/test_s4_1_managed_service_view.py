@@ -146,12 +146,11 @@ def test_state_a_service_wrote_in_one_run_cannot_influence_the_next_and_the_work
     second = _Run(first.root, cfg=AutonomyConfig(), command=first.judgment["managed_service"]["service_command"],
                   port=first.judgment["managed_service"]["probe"]["port"])
     assert _outcome(second.go()) == ServiceVerificationOutcomeKind.PROBE_PASSED.value, "the first run's state file did not survive into the second"
-    # S7: the contained verification keeps its project environment in ``<worktree>/.kriya/venv`` (Kriya's own, not the service's output): it is the only thing that may
-    # have appeared, and nothing the service wrote may sit beside or inside it.
+    # R3: the contained verification's project environment (``<worktree>/.kriya/venv``, Kriya's own) lives only as long as the verification that built it, so after
+    # the runs nothing is left of it either: no venv, and nothing the service wrote, in the worktree (at most the empty ``.kriya`` directory that held it).
     after = sorted(p.name for p in first.root.iterdir())
     assert [name for name in after if name != ".kriya"] == before, "nothing the service wrote reached the worktree"
-    assert ".kriya" in after, "premise: the contained flow's project environment is in the worktree"
-    assert sorted(p.name for p in (first.root / ".kriya").iterdir()) == ["venv"]
+    assert not (first.root / ".kriya").exists() or list((first.root / ".kriya").iterdir()) == []
 
 
 def test_with_the_tree_bound_the_state_a_service_creates_is_runtime_state_not_an_unauthorized_creation(tmp_path):

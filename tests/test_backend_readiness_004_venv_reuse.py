@@ -14,6 +14,8 @@ import subprocess
 import sys
 from unittest.mock import patch
 
+from _dependency_scope import hold_dependency_scope
+
 from kriya.config.config import AutonomyConfig
 from kriya.tools import validate as v
 from kriya.tools.validate import PolymorphicValidator
@@ -48,7 +50,7 @@ def _faithful_runner(installs):
 
 
 def _validator(root):
-    return PolymorphicValidator(str(root), autonomy_cfg=AutonomyConfig())
+    return hold_dependency_scope(PolymorphicValidator(str(root), autonomy_cfg=AutonomyConfig()))  # R3: the project venv exists only inside a verification scope
 
 
 def test_01_dropping_a_declared_dependency_rebuilds_the_venv_so_the_removed_module_is_gone(tmp_path):
@@ -97,8 +99,8 @@ def test_02_a_requirements_line_removal_is_a_removed_specifier_too(tmp_path):
     # has an UNKNOWN installed set and is rebuilt once - never trusted as-is.
     assert v._installed_specifiers(str(tmp_path / "nowhere")) is None
     os.remove(os.path.join(str(root / ".kriya" / "venv"), v._VENV_INSTALLED_MARKER))
-    next_attempt = _validator(root)  # a new attempt gets a new validator (the per-validator install cache is gone)
+    validator._venv_install_cache.clear()  # R3: a venv does not outlive its scope, so the unknown-marker case is a venv whose marker was lost INSIDE the scope
     with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=_faithful_runner(installs)):
-        next_attempt._resolve_python_interpreter()
-    assert next_attempt.venv_recreations == 1 and v._installed_specifiers(str(root / ".kriya" / "venv")) == ["attrs"]
+        validator._resolve_python_interpreter()
+    assert validator.venv_recreations == 2 and v._installed_specifiers(str(root / ".kriya" / "venv")) == ["attrs"]
     assert v._declared_specifiers(str(root), ["-r", "missing.txt"]) == ["-r:missing.txt:unreadable"]

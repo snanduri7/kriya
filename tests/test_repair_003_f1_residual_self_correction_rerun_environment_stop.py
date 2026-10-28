@@ -24,8 +24,6 @@ before grading, before Developer retry and before owner recovery - no new taxono
 output-text matching. A re-run that genuinely executed keeps its grading (application) and its process-exit verdict
 (deterministic sequence) exactly as before.
 """
-import os
-import shutil
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -101,8 +99,7 @@ def _declare_dependency(worktree):
 
 def _declare_dependency_and_lose_the_environment(worktree):
     """S7: every run is contained, so the FIRST run already prepared a project environment; what makes the re-run need one that cannot be prepared is that the environment is
-    gone by then (host: the first run needed none, the declaration created the need)."""
-    shutil.rmtree(os.path.join(worktree, ".kriya", "venv"))
+    gone by then (R3: the project environment has the lifetime of the verification scope that built it, so it always is - nothing needs removing)."""
     return _declare_dependency(worktree)
 
 
@@ -162,7 +159,7 @@ async def test_f1_residual_control_a_rerun_that_launched_and_still_fails_is_grad
     assert not (failure.diagnostics or {}).get("reason_code")
     assert failure.self_correction_attempt["turns_used"] == 1
     assert run_verifier.grade.await_count == 2 and len(repair.calls) == 1
-    assert len(_app_launched(stub.commands)) == 2 and len(_venv_attempted(stub.commands)) == 1     # S7: the environment is created once, for the first run
+    assert len(_app_launched(stub.commands)) == 2 and len(_venv_attempted(stub.commands)) == 2     # R3: each run builds its OWN environment (it does not outlive the run that built it)
     assert state.gate_outcomes[-1]["type"] == "run_verification" and state.gate_outcomes[-1]["graded_by"] == "llm"
     assert state.environment_failure is None
 
@@ -190,7 +187,7 @@ async def test_f1_residual_control_a_deterministic_rerun_that_executed_keeps_its
             patch("kriya.workflow.self_correction.run_self_correction_loop", new=repair):
         await run_attempt(state, ctx)  # must not raise
     assert len(repair.calls) == 1 and run_verifier.grade.await_count == 0
-    assert len(_app_launched(stub.commands)) == 2 and len(_venv_attempted(stub.commands)) == 1
+    assert len(_app_launched(stub.commands)) == 2 and len(_venv_attempted(stub.commands)) == 2  # R3: each run builds its own environment
     outcome = state.gate_outcomes[-1]
     assert outcome["type"] == "test" and outcome["success"] is True and outcome["graded_by"] == "process_exit"
     assert state.environment_failure is None

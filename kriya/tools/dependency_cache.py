@@ -13,11 +13,16 @@ back into any other scope. No persistent dependency material is mounted into can
 candidate code (a POM names build extensions and plugin coordinates; even ``dependency:go-offline`` loads them), so there is no safe promotion seam, and
 whatever the pre-R3 persistent directories hold was written by candidate code and is unprovenanced. The accepted cost is reduced cache reuse.
 
+The Python project venv is the same surface (``<worktree>/.kriya/venv``): the pip-install step runs candidate-declared install and build hooks with the
+venv WRITABLE, and the venv used to be reused across attempts. MEASURED at ebd022a: a hook in attempt 1 planted a pytest plugin that made attempt 2's
+honest failing test pass. The venv now has the lifetime of the verification scope that builds it: ``discard_project_venv`` removes it when the
+outermost scope opens (anything an earlier run or scope left is unprovenanced) and when it closes.
+
 The structural guard. ``is_ephemeral_cache`` is what the OCI backend consults (``containment_oci._require_ephemeral_writable_caches``) before any docker
 resource exists: a profile that mounts a dependency cache WRITABLE must name a directory this module created (a Kriya-owned marker in the unit directory
 above it, which is never mounted). Anything else is the typed refusal ``PERSISTENT_DEPENDENCY_CACHE_WRITABLE``; a gate that asks for a cache outside a
 scope gets ``DEPENDENCY_CACHE_SCOPE_REQUIRED`` (both ``kriya.tools.containment.DependencyCacheError``). Never a fallback. This module imports nothing of
-Kriya's, so the OCI backend and the validator can both use it without an import cycle.
+Kriya's but the ``.kriya`` directory-name constant (a leaf), so the OCI backend and the validator can both use it without an import cycle.
 """
 
 from __future__ import annotations
@@ -28,9 +33,12 @@ import os
 import shutil
 import tempfile
 
+from kriya.config.environment import KRIYA_DIRECTORY_NAME
+
 logger = logging.getLogger(__name__)
 
 CACHES_DIRECTORY = "gate-caches"
+PROJECT_VENV = (KRIYA_DIRECTORY_NAME, "venv")
 EPHEMERAL_MARKER = ".kriya-ephemeral-dependency-cache"
 _UNIT_PREFIX = "cache-"
 
@@ -71,6 +79,16 @@ def _sweep_dead_units(base: str) -> None:
             continue
         if not _process_alive(pid):
             _remove_tree(os.path.join(base, name))
+
+
+def discard_project_venv(workspace_path: str) -> bool:
+    """Remove the project venv of ``workspace_path`` (never its target when it is a link: the link itself goes). True when nothing is left there."""
+    venv = os.path.join(workspace_path, *PROJECT_VENV)
+    if os.path.islink(venv):
+        os.unlink(venv)
+    elif os.path.lexists(venv):
+        _remove_tree(venv)
+    return not os.path.lexists(venv)
 
 
 def create_ephemeral_cache(state_root: str, tool: str) -> str:

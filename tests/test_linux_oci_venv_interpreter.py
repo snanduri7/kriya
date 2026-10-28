@@ -6,6 +6,8 @@ without the declared dependencies - "No module named 'pytest'").
 """
 import os
 
+from _dependency_scope import hold_dependency_scope
+
 from kriya.config.config import AutonomyConfig
 from kriya.tools.validate import PolymorphicValidator
 
@@ -30,7 +32,7 @@ def _fake_commands(validator, calls, link_target):
 
 
 def test_a_contained_venv_linking_to_the_container_interpreter_is_used(tmp_path):
-    validator = _validator(tmp_path, contained=True)
+    validator = hold_dependency_scope(_validator(tmp_path, contained=True))  # R3: the project venv exists only inside a verification scope
     calls = []
     _fake_commands(validator, calls, CONTAINER_ONLY_INTERPRETER)
     assert not os.path.exists(CONTAINER_ONLY_INTERPRETER)

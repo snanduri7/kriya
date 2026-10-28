@@ -429,8 +429,14 @@ def test_a_stale_report_from_another_invocation_is_never_read(tmp_path):
     reports.mkdir(parents=True, exist_ok=True)
     (reports / "earlier.xml").write_text(
         '<testsuite><testcase classname="kriya_acceptance" name="test_double_doubles"/></testsuite>')
-    with patch.object(PolymorphicValidator, "_run_cmd_with_timeout",
-                      return_value={"returncode": 0, "stdout": "", "stderr": ""}):
+    def runner_that_writes_nothing(cmd, *_args, **_kwargs):
+        if cmd[1:3] == ["-m", "venv"]:  # R3: the run builds its own project venv (the first run's is gone); a real `python -m venv` leaves the interpreter
+            interpreter = root / ".kriya" / "venv" / "bin" / "python"
+            interpreter.parent.mkdir(parents=True, exist_ok=True)
+            interpreter.write_text("#!/bin/sh\n")
+        return {"returncode": 0, "stdout": "", "stderr": ""}
+
+    with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", side_effect=runner_that_writes_nothing):
         run = _run(artifact, root)
     judgment = ao.judge_acceptance(artifact, run)["REQ-1"]
     assert judgment.code == ao.ACCEPTANCE_EVIDENCE_INDETERMINATE

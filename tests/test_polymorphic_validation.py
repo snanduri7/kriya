@@ -11,7 +11,6 @@ from _validator_runner import ScriptedRunner, fail, ok
 from kriya.config import AppConfig
 from kriya.tools.validate import (
     PolymorphicValidator,
-    _record_installed_specifiers,
     get_pom_dependencies,
     get_pom_own_coordinate,
     get_pom_reactor_modules,
@@ -496,20 +495,16 @@ def test_run_app_sequence_uses_isolated_venv_interpreter_for_python(tmp_path, mo
     environment's, spelled as the contained flow spells it: workspace-relative.)"""
     (tmp_path / "requirements.txt").write_text("django==5.2\n")
     (tmp_path / "manage.py").write_text("print('would run django here')\n")
-    venv_python = tmp_path / ".kriya" / "venv" / "bin" / "python"
-    venv_python.parent.mkdir(parents=True)
-    venv_python.write_text("#!/bin/sh\n")
-    _record_installed_specifiers(str(venv_python.parent.parent), [])  # a venv Kriya built carries its marker (review F5)
 
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "python"
 
-    runner = ScriptedRunner(monkeypatch, ok("Successfully installed django"), ok("ok"))
+    runner = ScriptedRunner(monkeypatch, _venv_creator(tmp_path), ok("Successfully installed django"), ok("ok"))
     res = validator.run_app_sequence([["python", "manage.py", "runserver", "--help"]])
 
     assert res["success"] is True, res["output"]
-    assert runner.roles() == ["pip", "other"], runner.commands
-    run_cmd = runner.commands[1]
+    assert runner.roles() == ["venv", "pip", "other"], runner.commands  # R3: the scope builds its own venv, never inherits one
+    run_cmd = runner.commands[2]
     assert run_cmd[0] == ".kriya/venv/bin/python"
     assert run_cmd[0] != sys.executable
     assert run_cmd[1:] == ["manage.py", "runserver", "--help"]
@@ -517,21 +512,17 @@ def test_run_app_sequence_uses_isolated_venv_interpreter_for_python(tmp_path, mo
 def test_run_app_sequence_reports_pip_install_failure_without_running_commands(tmp_path, monkeypatch):
     (tmp_path / "requirements.txt").write_text("this-package-does-not-exist==999.0\n")
     (tmp_path / "manage.py").write_text("pass\n")
-    venv_python = tmp_path / ".kriya" / "venv" / "bin" / "python"
-    venv_python.parent.mkdir(parents=True)
-    venv_python.write_text("#!/bin/sh\n")
-    _record_installed_specifiers(str(venv_python.parent.parent), [])  # a venv Kriya built carries its marker (review F5)
 
     validator = PolymorphicValidator(str(tmp_path))
 
-    runner = ScriptedRunner(monkeypatch, fail(stderr="ERROR: No matching distribution found"), strict=True)
+    runner = ScriptedRunner(monkeypatch, _venv_creator(tmp_path), fail(stderr="ERROR: No matching distribution found"), strict=True)
     res = validator.run_app_sequence([["python", "manage.py", "runserver"]])
 
     assert res["success"] is False
     assert "pip install" in res["output"]
     # Only the failed install call should have been made - the run command
     # must never execute against a dependency environment known to be broken.
-    assert runner.roles() == ["pip"], runner.commands
+    assert runner.roles() == ["venv", "pip"], runner.commands
 
 
 def test_python_run_tests_resolves_src_layout_imports(tmp_path):
@@ -604,20 +595,16 @@ def test_python_run_tests_installs_requirements_into_isolated_venv_before_pytest
     validator's choke point; the command is the contained one, so the venv and the requirements file are workspace-relative.)"""
     (tmp_path / "requirements.txt").write_text("django==5.2\n")
     (tmp_path / "app.py").write_text("import django\n")
-    venv_python = tmp_path / ".kriya" / "venv" / "bin" / "python"
-    venv_python.parent.mkdir(parents=True)
-    venv_python.write_text("#!/bin/sh\n")  # simulates an already-created venv
-    _record_installed_specifiers(str(venv_python.parent.parent), [])  # a venv Kriya built carries its marker (review F5)
 
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "python"
 
-    runner = ScriptedRunner(monkeypatch, ok("Successfully installed django"), ok("1 passed"), strict=True)
+    runner = ScriptedRunner(monkeypatch, _venv_creator(tmp_path), ok("Successfully installed django"), ok("1 passed"), strict=True)
     res = validator.run_tests()
 
     assert res["success"] is True, res["output"]
-    assert runner.roles() == ["pip", "pytest"], runner.commands
-    install_cmd, pytest_cmd = runner.commands
+    assert runner.roles() == ["venv", "pip", "pytest"], runner.commands  # R3: the scope builds its own venv, never inherits one
+    _create_cmd, install_cmd, pytest_cmd = runner.commands
     assert install_cmd == [".kriya/venv/bin/python", "-m", "pip", "install", "-q", "-r", "requirements.txt", "pytest"]
     # pytest itself must run under the VENV's interpreter, not sys.executable -
     # installing into an isolated venv is pointless if the test run doesn't
@@ -628,14 +615,10 @@ def test_python_run_tests_installs_requirements_into_isolated_venv_before_pytest
 def test_python_run_tests_reports_pip_install_failure_without_running_pytest(tmp_path, monkeypatch):
     (tmp_path / "requirements.txt").write_text("this-package-does-not-exist==999.0\n")
     (tmp_path / "app.py").write_text("pass\n")
-    venv_python = tmp_path / ".kriya" / "venv" / "bin" / "python"
-    venv_python.parent.mkdir(parents=True)
-    venv_python.write_text("#!/bin/sh\n")
-    _record_installed_specifiers(str(venv_python.parent.parent), [])  # a venv Kriya built carries its marker (review F5)
 
     validator = PolymorphicValidator(str(tmp_path))
 
-    runner = ScriptedRunner(monkeypatch, fail(stderr="ERROR: No matching distribution found for this-package-does-not-exist==999.0"), strict=True)
+    runner = ScriptedRunner(monkeypatch, _venv_creator(tmp_path), fail(stderr="ERROR: No matching distribution found for this-package-does-not-exist==999.0"), strict=True)
     res = validator.run_tests()
 
     assert res["success"] is False
@@ -643,7 +626,7 @@ def test_python_run_tests_reports_pip_install_failure_without_running_pytest(tmp
     assert "this-package-does-not-exist" in res["output"]
     # Only the failed install call should have been made - pytest must never
     # run against a dependency environment known to be broken.
-    assert runner.roles() == ["pip"], runner.commands
+    assert runner.roles() == ["venv", "pip"], runner.commands
 
 
 def test_python_run_tests_creates_venv_from_scratch_when_not_already_present(tmp_path, monkeypatch):

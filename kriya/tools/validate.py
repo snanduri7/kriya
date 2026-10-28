@@ -26,6 +26,7 @@ from kriya.policy.model import ActionRequest, ActionType
 from kriya.tools import test_execution
 from kriya.tools.containment import (
     DEPENDENCY_CACHE_SCOPE_REQUIRED,
+    PROJECT_VENV_NOT_DISCARDED,
     ContainmentBackend,
     ContainmentProfile,
     ContainmentSetupError,
@@ -37,7 +38,7 @@ from kriya.tools.containment import (
     decide_external_execution,
 )
 from kriya.tools.containment_oci import MAVEN_CACHE_MOUNT, VENV_CONTAINER_PATH, finalize_registry_acquisition_result
-from kriya.tools.dependency_cache import create_ephemeral_cache, remove_ephemeral_cache
+from kriya.tools.dependency_cache import create_ephemeral_cache, discard_project_venv, remove_ephemeral_cache
 from kriya.tools.dependency_execution import (
     MAVEN_INVOCATION_FAILED,
     OfflineFailureKind,
@@ -664,6 +665,7 @@ class PolymorphicValidator:
         candidate-controlled commands outside a gate (the authority-bundle run) enters it itself."""
         outermost = self._cache_scope_depth == 0
         if outermost:
+            self._discard_project_venv(required=True)
             self._gate_caches = {}
         self._cache_scope_depth += 1
         try:
@@ -674,6 +676,25 @@ class PolymorphicValidator:
                 caches, self._gate_caches = self._gate_caches or {}, None
                 for path in caches.values():
                     remove_ephemeral_cache(path)
+                self._discard_project_venv(required=False)
+
+    def _discard_project_venv(self, *, required: bool) -> None:
+        """R3 (Python): the project venv lives exactly as long as the outermost verification scope that builds it. A venv an earlier scope, attempt or
+        Kriya version left behind was written by candidate-controlled install hooks and is unprovenanced: removed on entry (``required``: one that cannot
+        be removed is the typed refusal PROJECT_VENV_NOT_DISCARDED, never reused) and again on exit (best effort: the next entry settles it). The
+        scope's memo of what was installed goes with it. Called only when no view is open, so ``workspace_path`` is the origin tree."""
+        self._venv_install_cache.clear()
+        self._venv_creation_error = None
+        try:
+            gone = discard_project_venv(self.workspace_path)
+        except OSError as error:
+            gone, detail = False, str(error)
+        else:
+            detail = "it is still present"
+        if not gone:
+            if required:
+                raise DependencyCacheError(PROJECT_VENV_NOT_DISCARDED, f"the project venv under {self.workspace_path} could not be removed ({detail})")
+            logger.warning("The project venv under %s could not be removed at the end of its scope (%s); the next scope refuses until it is", self.workspace_path, detail)
 
     _DECLARED_OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024
 
@@ -790,6 +811,12 @@ class PolymorphicValidator:
         deterministically identical outcome, never a "failure silently
         becomes success" risk (the cached value IS the real, already-
         observed outcome, verbatim - not re-derived or reinterpreted)."""
+        if self._cache_scope_depth == 0:
+            # R3 (Python): a venv built outside a verification scope would be discarded when the next scope opens, so whatever asked for it would find nothing
+            # (MEASURED: the managed-service admission grounded its interpreter before its session opened). Never created, never half-used.
+            raise DependencyCacheError(
+                DEPENDENCY_CACHE_SCOPE_REQUIRED,
+                "the project venv was asked for outside a verification scope (a gate, a verification session or an authority run)")
         signature = self._venv_install_signature(install_args)
         if signature in self._venv_install_cache:
             return self._venv_install_cache[signature]

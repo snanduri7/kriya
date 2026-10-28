@@ -730,8 +730,9 @@ def test_the_venv_a_view_gate_uses_is_the_origin_trees_not_the_views(tmp_path, m
 
     for _ in range(2):  # two outermost gates of one validator
         _verification_gate("tests")(body)(validator)
-    assert pythons == [os.path.join(".kriya", "venv", "bin", "python")] * 2 and created == [os.path.join(".kriya", "venv")]
-    assert validator.venv_install_attempts == 1
+    # R3: each outermost gate builds its OWN venv (the first gate's is discarded with its scope), so two gates create and install twice
+    assert pythons == [os.path.join(".kriya", "venv", "bin", "python")] * 2 and created == [os.path.join(".kriya", "venv")] * 2
+    assert validator.venv_install_attempts == 2
     # ...and the venv a view gate runs is the ORIGIN's: the mount source is the origin's `.kriya/venv`, read-only, at the mount-relative path
     for mount in mounts:
         [spec] = mount

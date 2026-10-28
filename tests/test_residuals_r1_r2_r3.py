@@ -24,6 +24,7 @@ import os
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from _dependency_scope import hold_dependency_scope
 
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
@@ -59,9 +60,10 @@ def _make_fake_venv(workspace_path: str) -> None:
 
 class TestPerfDependency001VenvCache:
     def test_repeated_interpreter_resolution_acquires_once(self, tmp_path):
-        _make_fake_venv(str(tmp_path))
         (tmp_path / "requirements.txt").write_text("requests==2.31.0\n", encoding="utf-8")
-        validator = PolymorphicValidator(str(tmp_path))
+        validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path)))
+        # R3: the venv a scope uses is built inside it (one an earlier scope left is discarded when the scope opens), so the pre-built shape goes in after the scope is open
+        _make_fake_venv(str(tmp_path))
         with patch.object(
             validator, "_run_cmd_with_timeout",
             return_value={"returncode": 0, "stdout": "", "stderr": ""},
@@ -76,9 +78,10 @@ class TestPerfDependency001VenvCache:
     def test_multiple_validator_methods_share_one_acquisition(self, tmp_path):
         # Mirrors the real shape: ONE validator instance, compile_check then
         # run_tests then run_app_sequence all resolving the SAME interpreter.
-        _make_fake_venv(str(tmp_path))
         (tmp_path / "requirements.txt").write_text("django==5.0\n", encoding="utf-8")
-        validator = PolymorphicValidator(str(tmp_path))
+        validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path)))
+        # R3: the venv a scope uses is built inside it (one an earlier scope left is discarded when the scope opens), so the pre-built shape goes in after the scope is open
+        _make_fake_venv(str(tmp_path))
         with patch.object(
             validator, "_run_cmd_with_timeout",
             return_value={"returncode": 0, "stdout": "", "stderr": ""},
@@ -88,10 +91,11 @@ class TestPerfDependency001VenvCache:
         assert validator.venv_install_attempts == 1
 
     def test_manifest_content_change_invalidates_cache(self, tmp_path):
-        _make_fake_venv(str(tmp_path))
         req_path = tmp_path / "requirements.txt"
         req_path.write_text("requests==2.31.0\n", encoding="utf-8")
-        validator = PolymorphicValidator(str(tmp_path))
+        validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path)))
+        # R3: the venv a scope uses is built inside it (one an earlier scope left is discarded when the scope opens), so the pre-built shape goes in after the scope is open
+        _make_fake_venv(str(tmp_path))
         with patch.object(
             validator, "_run_cmd_with_timeout",
             return_value={"returncode": 0, "stdout": "", "stderr": ""},
@@ -107,9 +111,10 @@ class TestPerfDependency001VenvCache:
         assert validator.venv_install_attempts == 2
 
     def test_failure_is_cached_verbatim_never_reinterpreted_as_success(self, tmp_path):
-        _make_fake_venv(str(tmp_path))
         (tmp_path / "requirements.txt").write_text("nonexistent-package==0.0.0\n", encoding="utf-8")
-        validator = PolymorphicValidator(str(tmp_path))
+        validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path)))
+        # R3: the venv a scope uses is built inside it (one an earlier scope left is discarded when the scope opens), so the pre-built shape goes in after the scope is open
+        _make_fake_venv(str(tmp_path))
         with patch.object(
             validator, "_run_cmd_with_timeout",
             return_value={"returncode": 1, "stdout": "", "stderr": "No matching distribution found"},
@@ -126,10 +131,11 @@ class TestPerfDependency001VenvCache:
         ws_a = tmp_path_factory.mktemp("ws_a")
         ws_b = tmp_path_factory.mktemp("ws_b")
         for ws in (ws_a, ws_b):
-            _make_fake_venv(str(ws))
             (ws / "requirements.txt").write_text("requests==2.31.0\n", encoding="utf-8")
-        validator_a = PolymorphicValidator(str(ws_a))
-        validator_b = PolymorphicValidator(str(ws_b))
+        validator_a = hold_dependency_scope(PolymorphicValidator(str(ws_a)))
+        validator_b = hold_dependency_scope(PolymorphicValidator(str(ws_b)))
+        for ws in (ws_a, ws_b):  # R3: the venv a scope uses is built inside it (one an earlier scope left is discarded when the scope opens), so the pre-built shape goes in after
+            _make_fake_venv(str(ws))
         with patch.object(
             validator_a, "_run_cmd_with_timeout",
             return_value={"returncode": 0, "stdout": "", "stderr": ""},
@@ -149,7 +155,7 @@ class TestPerfDependency001VenvCache:
     def test_venv_install_signature_content_derived_for_requirements_txt(self, tmp_path):
         req_path = tmp_path / "requirements.txt"
         req_path.write_text("requests==2.31.0\n", encoding="utf-8")
-        validator = PolymorphicValidator(str(tmp_path))
+        validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path)))
         sig1 = validator._venv_install_signature(["-r", str(req_path)])
         req_path.write_text("requests==2.31.0\nflask==3.0\n", encoding="utf-8")
         sig2 = validator._venv_install_signature(["-r", str(req_path)])
@@ -158,7 +164,7 @@ class TestPerfDependency001VenvCache:
         assert sig2 == ("-r", expected_digest)
 
     def test_venv_install_signature_is_content_derived_for_pyproject_list(self, tmp_path):
-        validator = PolymorphicValidator(str(tmp_path))
+        validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path)))
         sig_a = validator._venv_install_signature(["requests==2.31.0"])
         sig_b = validator._venv_install_signature(["requests==2.31.0", "flask==3.0"])
         assert sig_a != sig_b

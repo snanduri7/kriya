@@ -10,6 +10,7 @@ import shutil
 import subprocess
 
 import pytest
+from _dependency_scope import hold_dependency_scope
 
 from kriya.config.config import AutonomyConfig
 from kriya.tools.validate import PolymorphicValidator
@@ -46,7 +47,7 @@ def test_contained_python_validation_uses_container_interpreter_never_host_execu
         "import six\n\ndef test_six_is_importable():\n    assert six.__version__ == '1.16.0'\n"
     )
 
-    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=_contained_cfg())
+    validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path), autonomy_cfg=_contained_cfg()))  # R3: the project venv exists only inside a verification scope
     assert validator.stack == "python"
 
     result = validator.run_tests()
@@ -82,7 +83,7 @@ def test_contained_python_validation_without_manifest_runs_tests_from_a_pytest_v
     (tmp_path / "tests" / "test_pkg.py").write_text(
         "from pkg import answer\n\ndef test_answer():\n    assert answer() == 42\n")
 
-    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=_contained_cfg())
+    validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path), autonomy_cfg=_contained_cfg()))
     assert validator.stack == "python"
     result = validator.run_tests()
     assert result["success"] is True, result["output"]

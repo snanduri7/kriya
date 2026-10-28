@@ -181,20 +181,25 @@ def test_under_oci_the_test_execution_report_and_the_declared_outputs_still_work
     assert not (root / ".kriya" / "test-reports").exists()  # the report died with the view; it never reached the worktree
 
 
-def test_under_oci_the_project_venv_lives_in_the_origin_and_persists_across_gates(tmp_path):
+def test_under_oci_the_project_venv_lives_in_the_origin_for_its_scope_and_is_gone_after_it(tmp_path):
+    """R3: the venv is hoisted OUT of the view (it lives in the origin, so the gates of one scope share it) but it has the lifetime of the verification scope that
+    built it: gates inside one session share it, and nothing of it outlives the session (a later attempt builds its own)."""
     root = _repo(tmp_path, calc=CALC2, extra={"requirements.txt": ""})
     validator = _validator(root)
-    assert _gate(root, validator=validator)[0] is True
     venv_python = root / ".kriya" / "venv" / "bin" / "python"
-    assert os.path.lexists(venv_python), "the venv must be created in the ORIGIN tree, not inside the throwaway view"
-    first_attempts = validator.venv_install_attempts
-    assert _gate(root, validator=validator, bound=False)[0] is True
-    assert validator.venv_install_attempts == first_attempts  # reused (the install cache), not rebuilt per view
+    with validator.verification_session("tests"):
+        assert _gate(root, validator=validator)[0] is True
+        assert os.path.lexists(venv_python), "the venv must be created in the ORIGIN tree, not inside the throwaway view"
+        first_attempts = validator.venv_install_attempts
+        assert _gate(root, validator=validator, bound=False)[0] is True
+        assert validator.venv_install_attempts == first_attempts  # reused inside the scope (the install cache), not rebuilt per view
+    assert not os.path.lexists(root / ".kriya" / "venv"), "the venv outlived the scope that built it"
 
 
 def test_under_oci_a_gate_cannot_modify_the_project_venv(tmp_path):
     """The venv is mounted READ-ONLY for every gate: candidate code that tries to plant something in it (a ``.pth`` that runs on every interpreter
-    start) fails, and the origin venv is byte-identical afterwards."""
+    start) fails, and the origin venv is byte-identical afterwards. (R3: both gates run inside one session, so the venv the first gate built is the one the second
+    gate's candidate code tries to poison - without it the before/after comparison would be of two empty listings.)"""
     plant = (
         "import os\n\ndef test_try_to_poison_the_venv():\n"
         "    target = '.kriya/venv/lib/evil.pth'\n"
@@ -203,12 +208,15 @@ def test_under_oci_a_gate_cannot_modify_the_project_venv(tmp_path):
     )
     root = _repo(tmp_path, calc=CALC2, extra={"requirements.txt": "", "tests/test_poison.py": plant})
     validator = _validator(root)
-    _gate(root, validator=validator)  # creates and populates the venv
-    before = sorted(str(p.relative_to(root / ".kriya" / "venv")) for p in (root / ".kriya" / "venv").rglob("*") if "__pycache__" not in p.parts)
-    success, _v, result = _gate(root, target="tests/test_poison.py", validator=validator, bound=False)
-    assert success is True, result["output"]
-    after = sorted(str(p.relative_to(root / ".kriya" / "venv")) for p in (root / ".kriya" / "venv").rglob("*") if "__pycache__" not in p.parts)
-    assert before == after and not (root / ".kriya" / "venv" / "lib" / "evil.pth").exists()
+    venv = root / ".kriya" / "venv"
+    with validator.verification_session("tests"):
+        _gate(root, validator=validator)  # creates and populates the venv
+        before = sorted(str(p.relative_to(venv)) for p in venv.rglob("*") if "__pycache__" not in p.parts)
+        assert before, "premise: the venv exists and is populated while the scope is open"
+        success, _v, result = _gate(root, target="tests/test_poison.py", validator=validator, bound=False)
+        assert success is True, result["output"]
+        after = sorted(str(p.relative_to(venv)) for p in venv.rglob("*") if "__pycache__" not in p.parts)
+        assert before == after and not (venv / "lib" / "evil.pth").exists()
 
 
 def test_under_oci_the_view_is_removed_and_the_worktree_is_untouched_after_a_contained_gate(tmp_path):

@@ -1145,43 +1145,46 @@ async def _execute_managed_service_verification(
     called."""
     if deps._managed_service_blocked_without_approval_subject(state, ctx):
         return
-    spec, invalid_reason = deps._validate_and_convert_managed_service_contract(
-        judgment.get("managed_service"), ctx.worktree_path, validator,
-    )
-    if invalid_reason:
-        # RUNTIME-VERIFICATION-ENV-STOP-001 (review F1, 2026-10-10): the
-        # admission grounds service_command through the interpreter
-        # resolver, which records on the validator - structured, (code,
-        # message) - that the REQUIRED environment could not be prepared.
-        # That is the environment stop, never a verdict on the judgment's
-        # contract: the service cannot start whatever the contract says.
-        environment = validator.python_environment_error
-        if environment is not None:
-            deps._stop_on_environment_gate_result(
-                state, {"environment_reason_code": environment[0], "output": environment[1]}, "managed_service",
-            )
-        message = f"MANAGED_SERVICE_CONTRACT_INVALID: {invalid_reason}"
-        deps.logger.warning(message)
-        failure = Failure(
-            type="verification_infrastructure_failure", message=message,
-            raw_output=message, attempt=state.attempt_number,
-        )
-        state.record_gate_outcome(failure.to_gate_outcome())
-        raise QualityGateFailure(failure)
-
-    deps.logger.info(
-        "Quality Gates: Running managed_service verification: service=%s probe=%s %s:%d%s",
-        " ".join(spec.service_command), spec.probe.method, spec.probe.host, spec.probe.port, spec.probe.path,
-    )
-    pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
-    _managed_service_started = deps.time.monotonic()
-    # D2 S4.1 (OI-142): the build, the service, its readiness checks and its probes are ONE verification in ONE exact-bound view of the candidate,
-    # alive from before the build until the process is terminated and its output collected - so an ignored or untracked file in the worktree (a
-    # stale artifact, a planted module, build configuration, a prior run's state) can decide none of it, and what the build produces (target/)
-    # is what the service runs. Contained or not, the SAME containment decision the validator's gates take (build_containment_profile_and_backend,
-    # built for the view): its profile mounts the view, and a contained build takes the validator's contained Maven path (registry-scoped
-    # acquisition), never the host and never the project's ./mvnw.
+    # R3 (Python venv): the admission below grounds the service command through the project-interpreter resolver, which BUILDS the project venv, and the venv
+    # lives exactly as long as the verification scope that built it. So admission and the run are ONE session: the venv admission prepared is the venv the
+    # service is started with (a session opened only around the run discarded it on entry and the service could not start).
     with validator.verification_session(RUNTIME_VERIFICATION_GATE):
+        spec, invalid_reason = deps._validate_and_convert_managed_service_contract(
+            judgment.get("managed_service"), ctx.worktree_path, validator,
+        )
+        if invalid_reason:
+            # RUNTIME-VERIFICATION-ENV-STOP-001 (review F1, 2026-10-10): the
+            # admission grounds service_command through the interpreter
+            # resolver, which records on the validator - structured, (code,
+            # message) - that the REQUIRED environment could not be prepared.
+            # That is the environment stop, never a verdict on the judgment's
+            # contract: the service cannot start whatever the contract says.
+            environment = validator.python_environment_error
+            if environment is not None:
+                deps._stop_on_environment_gate_result(
+                    state, {"environment_reason_code": environment[0], "output": environment[1]}, "managed_service",
+                )
+            message = f"MANAGED_SERVICE_CONTRACT_INVALID: {invalid_reason}"
+            deps.logger.warning(message)
+            failure = Failure(
+                type="verification_infrastructure_failure", message=message,
+                raw_output=message, attempt=state.attempt_number,
+            )
+            state.record_gate_outcome(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+
+        deps.logger.info(
+            "Quality Gates: Running managed_service verification: service=%s probe=%s %s:%d%s",
+            " ".join(spec.service_command), spec.probe.method, spec.probe.host, spec.probe.port, spec.probe.path,
+        )
+        pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
+        _managed_service_started = deps.time.monotonic()
+        # D2 S4.1 (OI-142): the build, the service, its readiness checks and its probes are ONE verification in ONE exact-bound view of the candidate,
+        # alive from before the build until the process is terminated and its output collected - so an ignored or untracked file in the worktree (a
+        # stale artifact, a planted module, build configuration, a prior run's state) can decide none of it, and what the build produces (target/)
+        # is what the service runs. Contained or not, the SAME containment decision the validator's gates take (build_containment_profile_and_backend,
+        # built for the view): its profile mounts the view, and a contained build takes the validator's contained Maven path (registry-scoped
+        # acquisition), never the host and never the project's ./mvnw.
         refusal = validator.view_command_refusal(spec.service_command, validator.workspace_path)
         if refusal is not None:
             message = f"MANAGED_SERVICE_CONTRACT_INVALID: {refusal}"
