@@ -37,7 +37,7 @@ import shlex
 import shutil
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from kriya.config.environment import toolchain, user_home
 from kriya.tools.containment import ContainmentBackend, ContainmentProfile, NetworkAuthority, TrustClass
@@ -131,15 +131,42 @@ MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID = "MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID
 # adapter that met an exception or an uninterpretable result observed nothing about the candidate: an environment outcome, never a PASS and never a candidate conviction.
 MAVEN_COMPILE_INDETERMINATE = "MAVEN_COMPILE_INDETERMINATE"                # the Maven compile step raised, or its result could not be interpreted
 GRADLE_COMPILE_INDETERMINATE = "GRADLE_COMPILE_INDETERMINATE"              # the Gradle compile step raised, or its result could not be interpreted
+# Slice F (COMPILE-GATE-CONVICTION-WITHOUT-VERDICT-001; owner decision 2026-10-28): source compilation is convicted ONLY from a positively located compiler diagnostic
+# (see classify_compile_failure). A build tool that ran, failed and left no such diagnostic observed nothing about the candidate source. Compile-specific names: the
+# MAVEN_VALIDATE_* codes describe the POM-validation gate and keep their own semantics (W2-16 is separate).
+MAVEN_COMPILE_TIMED_OUT = "MAVEN_COMPILE_TIMED_OUT"                        # started, did not finish within its bound
+GRADLE_COMPILE_TIMED_OUT = "GRADLE_COMPILE_TIMED_OUT"
+MAVEN_COMPILE_TERMINATED = "MAVEN_COMPILE_TERMINATED"                      # killed by a signal (host: no exit status; contained: a 128+signal exit such as 137) with no located diagnostic
+GRADLE_COMPILE_TERMINATED = "GRADLE_COMPILE_TERMINATED"
+MAVEN_COMPILE_OPERATOR_CONFIG_INVALID = "MAVEN_COMPILE_OPERATOR_CONFIG_INVALID"  # Maven refused its OWN configuration (settings / toolchains), a document the candidate did not write
+MAVEN_COMPILE_RESOLUTION_UNVERIFIED = "MAVEN_COMPILE_RESOLUTION_UNVERIFIED"      # dependency / plugin resolution, acquisition or transfer failed: ownership of the failure is NOT inferred from text
+GRADLE_COMPILE_RESOLUTION_UNVERIFIED = "GRADLE_COMPILE_RESOLUTION_UNVERIFIED"
+MAVEN_COMPILE_NO_DIAGNOSTICS = "MAVEN_COMPILE_NO_DIAGNOSTICS"              # non-zero exit with no located source diagnostic (empty output, a bare summary, unrelated text)
+GRADLE_COMPILE_NO_DIAGNOSTICS = "GRADLE_COMPILE_NO_DIAGNOSTICS"
+COMPILE_NO_VERDICT_CODES = frozenset({
+    MAVEN_COMPILE_TIMED_OUT, GRADLE_COMPILE_TIMED_OUT, MAVEN_COMPILE_TERMINATED, GRADLE_COMPILE_TERMINATED, MAVEN_COMPILE_OPERATOR_CONFIG_INVALID,
+    MAVEN_COMPILE_RESOLUTION_UNVERIFIED, GRADLE_COMPILE_RESOLUTION_UNVERIFIED, MAVEN_COMPILE_NO_DIAGNOSTICS, GRADLE_COMPILE_NO_DIAGNOSTICS})
 # The codes of a build tool that DID start or produced no interpretable verdict (the gate words them "returned no trustworthy verdict" instead of "could not start").
 MAVEN_VALIDATE_NO_VERDICT_CODES = frozenset({MAVEN_VALIDATE_TIMED_OUT, MAVEN_VALIDATE_TERMINATED, MAVEN_VALIDATE_RESOLUTION_UNVERIFIED, MAVEN_VALIDATE_NO_DIAGNOSTICS,
-                                             MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID, MAVEN_COMPILE_INDETERMINATE, GRADLE_COMPILE_INDETERMINATE})
+                                             MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID, MAVEN_COMPILE_INDETERMINATE, GRADLE_COMPILE_INDETERMINATE}) | COMPILE_NO_VERDICT_CODES
 
 
 def compile_environment_result(code: str, output: str) -> Dict[str, Any]:
     """The compile gate's typed "no trustworthy verdict" result (F9): ``success`` False plus the ``environment_reason_code`` the gates already consume
     (``_stop_on_environment_gate_result`` raises it as ``verification_infrastructure_failure``). Never a PASS, never a candidate conviction."""
     return {"success": False, "environment_reason_code": code, "output": output}
+
+
+def compile_no_verdict_result(validation_result: Dict[str, Any], command_result: Mapping[str, Any]) -> Dict[str, Any]:
+    """Slice F: a compile gate result (built by ``_validation_result`` with the typed code) plus the diagnostics of the run that gave no verdict - its exit status, whether it
+    timed out and the acquisition phase's bounded record (``acquisition_evidence``: useful evidence, truncated, NOT authority for ownership). Never a PASS, never a conviction."""
+    result = dict(validation_result)
+    result["returncode"] = command_result.get("returncode")
+    if command_result.get("timeout"):
+        result["timed_out"] = True
+    if command_result.get("acquisition_evidence") is not None:
+        result["acquisition_evidence"] = command_result["acquisition_evidence"]
+    return result
 
 # Resolution / transport diagnostics, as real Maven 3.9 prints them (recorded: tests/fixtures/maven_validate and the live logs they cite). Any of them makes the POM verdict untrustworthy,
 # because a model problem reported next to an unresolved parent / BOM / plugin is usually a cascade of the failed resolution (the recorded env-T2 output shows exactly that).
@@ -181,6 +208,64 @@ def classify_maven_validate_failure(returncode: int, timed_out: bool, combined_o
     if _MAVEN_POM_MODEL_PROBLEM_RE.search(combined_output):
         return None
     return MAVEN_VALIDATE_NO_DIAGNOSTICS
+# --- Slice F: the compile-gate classifier ---------------------------------------------------------------------------------------------------------------------------------
+# The compiler's verdict on the SOURCE is the only thing that may convict it. Maven prints one `[ERROR] <abs path>.java:[line,col] <message>` line per javac error; Gradle's javac
+# output is `<abs path>.java:<line>: error: <message>`. Both are anchored to the start of a build-output line: Maven's own `[ERROR] ` prefix, and for Gradle (whose javac output
+# carries no prefix and echoes the offending source line raw) an absolute path that is never `//`, so a source line javac echoes cannot pose as one. A `[WARNING] ...java:[l,c]`
+# line is not a conviction and is not suppression either. A summary line (`COMPILATION ERROR`,
+# `Compilation failure`) is printed by the build tool whether or not a located diagnostic exists, so it supports located evidence but never substitutes for it.
+_MAVEN_LOCATED_SOURCE_ERROR_RE = re.compile(r"^\[ERROR\] (?!\s)[^\n]*?\.java:\[\d+,\d+\] \S", re.MULTILINE)
+_GRADLE_LOCATED_SOURCE_ERROR_RE = re.compile(r"^(?:[A-Za-z]:[\\/]|/(?!/))[^\n]*?\.java:\d+: error: \S", re.MULTILINE)
+# Error-level dependency / plugin resolution, acquisition and transfer failures (Maven resolves them before it compiles, so they never coexist with a located source error).
+# The existing resolution/transport pattern plus the wordings the measured Maven 3.9 adds: a cached failure ("was not found in <repo> during a previous attempt"), the
+# dependency-collection variant and an unavailable ("present, but unavailable") artifact. Applied to `[ERROR]` lines only: a `[WARNING] Could not transfer metadata` is noise.
+_MAVEN_COMPILE_RESOLUTION_RE = re.compile(
+    _MAVEN_RESOLUTION_OR_TRANSPORT_RE.pattern
+    + r"|Could not resolve|Could not collect dependencies|was not found in .{1,400} during a previous attempt|\(present, but unavailable\)|Cannot access .{1,400} in offline mode"
+)
+_MAVEN_ACQUISITION_MARKER_RE = re.compile(r"^MAVEN_ACQUISITION_INCOMPLETE:", re.MULTILINE)
+# Gradle has no log levels: anchored to the start of its failure-report lines (`> Could not resolve ...`, `Could not GET ...`, ...).
+_GRADLE_COMPILE_RESOLUTION_RE = re.compile(
+    r"^[ >*]*(?:Could not (?:resolve|GET|HEAD|POST|PUT|download|determine the dependencies)|No cached version of|Cannot resolve external dependency|"
+    r"Plugin \[id: [^\n]*was not found|Failed to (?:resolve|transfer)|(?:java\.net\.)?(?:UnknownHostException|ConnectException|SocketTimeoutException)|"
+    r"(?:javax\.net\.ssl\.)?SSLHandshakeException|PKIX path|(?:Connect|Read) timed out|Connection (?:refused|reset)|Network is unreachable|No route to host)"
+    r"|^GRADLE_ACQUISITION_INCOMPLETE:|^GRADLE_DISTRIBUTION_UNAVAILABLE", re.MULTILINE)
+
+
+def _has_resolution_failure(build_system: str, output: str) -> bool:
+    if build_system == "gradle":
+        return bool(_GRADLE_COMPILE_RESOLUTION_RE.search(output))
+    if _MAVEN_ACQUISITION_MARKER_RE.search(output):
+        return True
+    return any(_MAVEN_COMPILE_RESOLUTION_RE.search(line) for line in output.splitlines()
+               if line.startswith("[ERROR]") and not _MAVEN_LOCATED_SOURCE_ERROR_RE.match(line))
+
+
+def classify_compile_failure(build_system: str, returncode: int, timed_out: bool, combined_output: str) -> Optional[str]:
+    """Why a failed (non-zero) ``mvn``/``gradle`` compile may NOT convict the candidate's source: the environment reason code, or None when positively located compiler
+    evidence shows the source was judged (a source failure).
+
+    Order: a timeout and a host signal kill (no exit status) carry no verdict; Maven's refusal of its own operator documents is not a source verdict; error-level
+    resolution / acquisition / transfer failures are NO verdict (whether a bad coordinate or an absent cache entry caused them is not inferred from text); only then does a
+    located source diagnostic convict - whatever the exit status, so a build tool killed after javac reported (a contained 128+signal exit) still convicts what javac judged
+    - and a non-zero exit with no located diagnostic is NO verdict (a contained signal-style exit is named as terminated). Captured output is the caller's to preserve."""
+    gradle = build_system == "gradle"
+    if timed_out:
+        return GRADLE_COMPILE_TIMED_OUT if gradle else MAVEN_COMPILE_TIMED_OUT
+    if returncode < 0:
+        return GRADLE_COMPILE_TERMINATED if gradle else MAVEN_COMPILE_TERMINATED
+    if not gradle and _MAVEN_OPERATOR_CONFIG_RE.search(combined_output):
+        return MAVEN_COMPILE_OPERATOR_CONFIG_INVALID
+    if _has_resolution_failure(build_system, combined_output):
+        return GRADLE_COMPILE_RESOLUTION_UNVERIFIED if gradle else MAVEN_COMPILE_RESOLUTION_UNVERIFIED
+    located = _GRADLE_LOCATED_SOURCE_ERROR_RE if gradle else _MAVEN_LOCATED_SOURCE_ERROR_RE
+    if located.search(combined_output):
+        return None
+    if returncode in _POSIX_SIGNAL_EXIT_CODE_RANGE:
+        return GRADLE_COMPILE_TERMINATED if gradle else MAVEN_COMPILE_TERMINATED
+    return GRADLE_COMPILE_NO_DIAGNOSTICS if gradle else MAVEN_COMPILE_NO_DIAGNOSTICS
+
+
 # The offline run still misses a dependency/plugin after one bounded,
 # registry-scoped acquisition (the Maven marker's Gradle twin; a marker in
 # the output, repair-eligible like Maven's: a candidate may have declared

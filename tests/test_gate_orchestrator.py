@@ -330,7 +330,7 @@ class _MavenOracle:
         return {"returncode": 0, "stdout": "[INFO] BUILD SUCCESS\n", "stderr": "", "timed_out": False}
 
 
-def _jvm_run(tmp_path: Path, *, autonomous: bool, target: str = APP) -> Dict[str, Any]:
+def _jvm_run(tmp_path: Path, *, autonomous: bool, target: str = APP, oracle: Any = None) -> Dict[str, Any]:
     """A Maven project through the real legacy pipeline: 'java' resolves to JDK 17 and 'mvn' to JDK 26 (the
     toolchain probe scripted), the goal states Java 17, the first Developer answer does not compile."""
     from _scripted_run import engine, git_workspace
@@ -378,7 +378,7 @@ def _jvm_run(tmp_path: Path, *, autonomous: bool, target: str = APP) -> Dict[str
             return f"FIX ANALYSIS: add mul\nFILE CONTENT:\n{content}"
         return json.dumps([{"filepath": APP, "content": content}])
     llm.complete = complete
-    oracle = _MavenOracle()
+    oracle = oracle if oracle is not None else _MavenOracle()   # Slice F: a case may script what the mvn process answers
     probes: List[str] = []
     homes: List[str] = []
 

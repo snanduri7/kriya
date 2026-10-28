@@ -65,7 +65,9 @@ class GradleBuildAdapter(BuildAdapter):
         from kriya.tools.dependency_execution import (
             GRADLE_COMPILE_INDETERMINATE,
             GRADLE_INVOCATION_FAILED,
+            classify_compile_failure,
             compile_environment_result,
+            compile_no_verdict_result,
         )
 
         if not self.detects(v.workspace_path):
@@ -86,7 +88,14 @@ class GradleBuildAdapter(BuildAdapter):
                 return v._validation_result(
                     False, f"{res['environment_reason_code']}: Gradle could not be started to verify this candidate:\n"
                            f"{res['stdout']}\n{res['stderr']}", res)
-            return v._validation_result(False, f"Gradle compilation failed:\n{res['stdout']}\n{res['stderr']}", res)
+            captured = f"{res['stdout']}\n{res['stderr']}"
+            # Slice F (owner decision 2026-10-28): same rule as the Maven adapter - only a positively located javac diagnostic convicts the source.
+            no_verdict = classify_compile_failure("gradle", res["returncode"], bool(res.get("timeout")), captured)
+            if no_verdict is not None:
+                return compile_no_verdict_result(v._validation_result(
+                    False, f"Gradle returned no trustworthy compilation verdict ({no_verdict}); nothing about the candidate source was judged:\n{captured}",
+                    {**res, "environment_reason_code": no_verdict}), res)
+            return v._validation_result(False, f"Gradle compilation failed:\n{captured}", res)
         except OSError as e:
             # Same reasoning as the mvn case: the launcher could not be started (missing, not executable, ENOEXEC) - typed, never a fall-through to the
             # javac fallback and never a candidate conviction.

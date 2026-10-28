@@ -238,11 +238,12 @@ def test_gradle_compile_uses_the_project_wrapper_when_it_ships_one(tmp_path, wra
 
 
 def test_a_gradle_compile_failure_is_decided_with_its_output(tmp_path):
-    seen, patched = _gradle_runs(tmp_path, result={"returncode": 1, "stdout": "e: App.java:3", "stderr": "FAILED"})
+    # Slice F: a source failure needs a LOCATED javac diagnostic (the bare `e: App.java:3` of the earlier fixture is not one and is a typed no-verdict now).
+    seen, patched = _gradle_runs(tmp_path, result={"returncode": 1, "stdout": "/ws/App.java:3: error: cannot find symbol", "stderr": "FAILED"})
     with patched:
         result = _validator(tmp_path).run_compile_check(["App.java"])
     assert seen == [["gradle", *GRADLE_CONTAINED_FLAGS, "compileJava"]]
-    assert result["success"] is False and "Gradle compilation failed:\ne: App.java:3\nFAILED" in result["output"]
+    assert result["success"] is False and "Gradle compilation failed:\n/ws/App.java:3: error: cannot find symbol\nFAILED" in result["output"]
 
 
 def test_a_gradle_start_failure_is_a_typed_no_verdict_never_undecided(tmp_path):

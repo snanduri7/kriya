@@ -124,14 +124,18 @@ def test_a_gradle_without_a_verdict_is_a_typed_failure_and_javac_is_never_consul
 # --- the supported behaviours stay exactly right (controls: the tests above must not pass by making everything fail) ---------------------
 def test_a_genuine_maven_compiler_failure_is_a_candidate_failure_not_an_environment_outcome(tmp_path):
     validator = _workspace(tmp_path, pom=True)
-    with patch.object(PolymorphicValidator, "_run_maven_cmd", return_value={"returncode": 1, "stdout": "[ERROR] COMPILATION ERROR", "stderr": ""}):
+    with patch.object(PolymorphicValidator, "_run_maven_cmd", return_value={
+            "returncode": 1, "stderr": "",
+            # Slice F: the conviction needs a LOCATED diagnostic; the bare summary this control used to carry is a typed no-verdict now (tests/test_slice_f_compile_classifier.py)
+            "stdout": "[ERROR] COMPILATION ERROR\n[ERROR] /ws/src/main/java/App.java:[1,24] incompatible types"}):
         result = validator.run_compile_check(["src/main/java/App.java"])
     assert result["success"] is False and "environment_reason_code" not in result and result["output"].startswith("Maven compilation failed:")
 
 
 def test_a_genuine_gradle_compiler_failure_is_a_candidate_failure_not_an_environment_outcome(tmp_path):
     validator = _workspace(tmp_path, gradle=True)
-    with patch.object(PolymorphicValidator, "_run_gradle_cmd", return_value={"returncode": 1, "stdout": "e: App.java:1", "stderr": "FAILED"}):
+    with patch.object(PolymorphicValidator, "_run_gradle_cmd", return_value={
+            "returncode": 1, "stdout": "/ws/src/main/java/App.java:1: error: incompatible types", "stderr": "FAILED"}):   # Slice F: a LOCATED javac diagnostic
         result = validator.run_compile_check(["src/main/java/App.java"])
     assert result["success"] is False and "environment_reason_code" not in result and result["output"].startswith("Gradle compilation failed:")
 
