@@ -419,7 +419,7 @@ def _workspace(tmp_path, java):
 
 def _report(workspace, **commands):
     from kriya.workflow.milestones import replay_prior_milestone_report
-    return replay_prior_milestone_report(str(workspace), _state(**commands), autonomy_cfg=strict_config(autonomy=CONTAINED).autonomy)
+    return asyncio.run(replay_prior_milestone_report(str(workspace), _state(**commands), autonomy_cfg=strict_config(autonomy=CONTAINED).autonomy, approval_callback=lambda files, reason: True))  # W2-04: approved through the run's channel
 
 
 @REAL_DOCKER
@@ -432,7 +432,7 @@ def test_real_docker_replay_of_a_missing_executable_is_not_executed_and_blocks(t
     assert report.regressions == [] and report.entries[0]["reason"] == "runtime verification command could not be executed"
     assert "not found" in report.entries[0]["cause"] or "Permission denied" in report.entries[0]["cause"] or report.entries[0]["cause"], "the shell's own diagnostic is kept as the cause"
     with pytest.raises(MilestoneReplayNotExecuted):
-        replay_prior_milestone_verifications(str(workspace), _state(M1=[MISSING]), autonomy_cfg=strict_config(autonomy=CONTAINED).autonomy)
+        asyncio.run(replay_prior_milestone_verifications(str(workspace), _state(M1=[MISSING]), autonomy_cfg=strict_config(autonomy=CONTAINED).autonomy, approval_callback=lambda files, reason: True))
 
 
 @REAL_DOCKER
@@ -456,6 +456,7 @@ def test_real_docker_the_terminal_result_blocks_with_the_s6_reason_and_the_evide
     driver = object.__new__(_MilestonePlanDriver)
     driver.workspace_path, driver.run_state, driver.total = str(workspace), _state(M1=[MISSING]), 2
     driver.engine_config, driver._replay_evidence = strict_config(autonomy=CONTAINED), None  # pylint: disable=protected-access
+    driver.generation_kwargs = {"approval_callback": lambda files, reason: True}  # W2-04
     result = asyncio.run(driver.run_phase(TerminalPhase.REPLAY_PRIOR_VERIFICATIONS))
     assert result is not None and result["status"] == "milestone_replay_not_executed" and result["quality_gates_passed"] is False
     assert result["reason_codes"] == [MILESTONE_REPLAY_NOT_EXECUTED] and result["failures"] == []

@@ -21,6 +21,10 @@ from kriya.workflow.milestones import MilestoneRunState, _MilestonePlanDriver, r
 PLAN = {"group_id": "g1", "original_goal": "x", "milestones": [{"id": "M1", "goal": "g", "depends_on": []}]}
 
 
+def _approve(files, reason):  # W2-04: the run's approval channel approves the replay commands (human-in-the-loop is the default mode)
+    return True
+
+
 def _scenario(tmp_path):
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -37,7 +41,7 @@ def _autonomy(**fields):
 def test_a_run_that_requires_containment_never_replays_on_the_host(tmp_path):
     workspace, sentinel, state = _scenario(tmp_path)
     try:
-        replay_prior_milestone_verifications(workspace, state, autonomy_cfg=_autonomy(contained_execution_required=True))
+        asyncio.run(replay_prior_milestone_verifications(workspace, state, autonomy_cfg=_autonomy(contained_execution_required=True), approval_callback=_approve))
     except Exception as refusal:  # a platform with no containment backend refuses; either way nothing ran on the host
         assert "contain" in str(refusal).lower() or "sandbox" in str(refusal).lower() or "backend" in str(refusal).lower(), refusal
     assert not sentinel.exists(), "the replayed command wrote outside the workspace: it ran uncontained"
@@ -54,6 +58,7 @@ def _driver(workspace, state, engine_config):
     driver.run_state = state
     driver.total = 1
     driver.engine_config = engine_config
+    driver.generation_kwargs = {"approval_callback": _approve}
     return driver
 
 

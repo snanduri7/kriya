@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import Milestone, MilestoneMode, MilestoneV2
+from kriya.config.authority import is_human_in_the_loop
 from kriya.context.workspace_identity import (
     authority_root,
     ensure_existing_document_owned,
@@ -52,6 +53,14 @@ from kriya.control.persistence import (
 )
 from kriya.control.run_coordinator import annotate_run, coordinated_mutation, owning_run_commits
 from kriya.control.run_record import COMMIT_COMMITTED
+from kriya.policy.approval import (
+    MAX_REVIEW_ROUNDS,
+    TypedApprovalCallback,
+    approval_matches,
+    build_subject,
+    commands_authored_in_goal,
+)
+from kriya.policy.approval import ask as ask_runtime_commands
 from kriya.workflow.acceptance import runtime_verification_infrastructure_reason
 from kriya.workflow.attempt import _build_python_runtime_grounding
 from kriya.workflow.checkpoint import compute_registry_hash, delete_checkpoint, list_checkpoints
@@ -1149,8 +1158,101 @@ def _first_unstarted_cause(run_res: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def replay_prior_milestone_report(
-    workspace_path: str, run_state: MilestoneRunState, *, autonomy_cfg: Any
+# W2-04 (MILESTONE-REPLAY-UNAPPROVED-COMMANDS-001, owner decision R-A, 2026-10-28): a replay invocation is ONE synchronous authority transaction -
+#   derive the ordered replay set from the persisted verification commands -> bind it to the replay context (the owner workspace) -> the canonical typed
+#   approval (policy/approval.py, the same seam and the same mode/policy semantics as attempt-time runtime verification) -> execute exactly that approved set,
+#   once, through the contained validator -> the report.
+# Nothing is persisted between those steps: an interrupted replay leaves no pending or started state, and the next invocation starts at the authority boundary
+# again. Approval given for an attempt (bound to the isolated worktree) never carries over: this subject's working directory is the owner workspace.
+REPLAY_APPROVAL_NOT_GRANTED = "REPLAY_APPROVAL_NOT_GRANTED"   # human-in-the-loop mode: the replay command set was declined, had no approval channel, or could not be reviewed
+REPLAY_COMMANDS_CHANGED = "REPLAY_COMMANDS_CHANGED"           # the set differed from the approved one when it was about to run: never executed
+
+
+@dataclass(frozen=True)
+class _ReplayItem:
+    """One milestone of a replay: the RESOLVED argv lists that will execute, or why it cannot run."""
+
+    milestone_id: str
+    commands: Optional[Tuple[Tuple[str, ...], ...]] = None
+    problem: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class _ReplayPlan:
+    """The ordered structure a replay approves and executes: ``[(milestone_id, argv lists)]`` in milestone-id order, plus the milestones that cannot run."""
+
+    items: Tuple[_ReplayItem, ...]
+
+    @property
+    def runnable(self) -> Tuple[_ReplayItem, ...]:
+        return tuple(item for item in self.items if item.commands is not None)
+
+    @property
+    def commands(self) -> Tuple[Tuple[str, ...], ...]:
+        return tuple(command for item in self.runnable for command in (item.commands or ()))
+
+    @property
+    def digest(self) -> str:
+        return hashlib.sha256(json.dumps([[item.milestone_id, [list(command) for command in (item.commands or ())]] for item in self.runnable],
+                                         separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _derive_replay_plan(workspace_path: str, run_state: MilestoneRunState) -> _ReplayPlan:
+    items: List[_ReplayItem] = []
+    for milestone_id in sorted(set(run_state.verification_commands) | set(run_state.replay_evidence_unavailable)):
+        if milestone_id in run_state.replay_evidence_unavailable:  # the commands on record (if any) belong to an earlier attempt: not trusted
+            items.append(_ReplayItem(milestone_id, problem=f"{REPLAY_EVIDENCE_UNAVAILABLE}: {run_state.replay_evidence_unavailable[milestone_id]}"))
+            continue
+        raw_commands = run_state.verification_commands.get(milestone_id)
+        if not raw_commands:
+            continue
+        if not _well_formed_commands(raw_commands):
+            items.append(_ReplayItem(milestone_id, problem=f"{REPLAY_INPUT_INVALID}: the persisted verification commands are not a list of non-empty argv lists"))
+            continue
+        items.append(_ReplayItem(milestone_id, commands=tuple(tuple(_resolve_run_command(cmd, workspace_path)) for cmd in raw_commands)))
+    return _ReplayPlan(tuple(items))
+
+
+def _replay_subject(plan: _ReplayPlan, workspace_path: str) -> Any:
+    """What the person approves: the complete ordered set, shown whole (never truncated), with the owner workspace as the working directory."""
+    lines = []
+    for item in plan.runnable:
+        lines.append(f"  Milestone {item.milestone_id}:")
+        lines.extend(f"    {index}. {' '.join(command)}" for index, command in enumerate(item.commands or (), 1))
+    reason = ("Milestone replay: re-run the verification command(s) recorded for the completed milestone(s), against the CURRENT project workspace "
+              f"({workspace_path}).\n" + "\n".join(lines) +
+              "\nAllow Kriya to execute these command(s), under the run's execution policy and containment?")
+    return build_subject(unit_id=None, criterion="replay of the completed milestones' recorded verification: " + ", ".join(item.milestone_id for item in plan.runnable),
+                         working_directory=workspace_path, commands=[list(command) for command in plan.commands], input_channel="none", stdin_payload=None, reason=reason)
+
+
+async def _authorize_replay(
+    workspace_path: str, run_state: MilestoneRunState, autonomy_cfg: Any, approval_callback: Any,
+) -> Tuple[_ReplayPlan, Optional[str]]:
+    """(the plan to execute, None) or (the plan, why it must not execute). The approval policy is the canonical one: only human-in-the-loop mode asks, the terminal
+    keeps the exact-words exemption, a typed (desktop) callback always asks, and an autonomous mode runs as attempt-time verification does. Any answer that is not an
+    approval bound to exactly what is about to run - including a set that changed while the person decided - executes nothing."""
+    plan = _derive_replay_plan(workspace_path, run_state)
+    if not plan.runnable or not is_human_in_the_loop(autonomy_cfg.mode):  # OI-135: the fail-closed reader
+        return plan, None
+    if not isinstance(approval_callback, TypedApprovalCallback) and commands_authored_in_goal(plan.commands, run_state.original_goal, None):
+        return plan, None
+    if approval_callback is None:
+        return plan, f"{REPLAY_APPROVAL_NOT_GRANTED}: human-in-the-loop mode requires the operator's approval of the replay commands and no approval channel is available"
+    for review_round in range(MAX_REVIEW_ROUNDS):
+        decision = await ask_runtime_commands(approval_callback, _replay_subject(plan, workspace_path))
+        if not decision.approved:
+            return plan, f"{REPLAY_APPROVAL_NOT_GRANTED}: the replay commands were not approved (declined, or not offered for review)"
+        current = _derive_replay_plan(workspace_path, run_state)
+        if current.digest == plan.digest and approval_matches(decision, _replay_subject(current, workspace_path)):
+            return plan, None
+        logger.warning("%s: the milestone replay command set differs from the one that was approved; it is not executed (review round %d)", REPLAY_COMMANDS_CHANGED, review_round + 1)
+        plan = current
+    return plan, f"{REPLAY_COMMANDS_CHANGED}: the replay command set changed while it was being reviewed, so it was not executed"
+
+
+async def replay_prior_milestone_report(
+    workspace_path: str, run_state: MilestoneRunState, *, autonomy_cfg: Any, approval_callback: Any
 ) -> MilestoneReplayReport:
     """Re-executes every completed milestone's own persisted verification command sequence against the CURRENT workspace state and re-checks the
     [VERIFICATION] PASS/FAIL marker via the SAME extract_contract_verdict() the normal pipeline already uses for a single goal - closing a gap nothing else in
@@ -1158,13 +1260,14 @@ def replay_prior_milestone_report(
     never replays an EARLIER goal's command sequence during a LATER one. Runs BEFORE the integration call (not after) so a regression is attributable to
     milestone-to-milestone drift specifically, not muddied by the integration call's own edits.
 
-    Returns a MilestoneReplayReport: one entry per milestone with its OUTCOME. A replay that did not run (refused, no backend, never started, a failed
+    Returns a MilestoneReplayReport: one entry per milestone with its OUTCOME. A replay that did not run (refused, not approved, no backend, never started, a failed
     prerequisite, invalid persisted commands, evidence that could not be captured) is ``not_executed`` - never an empty list, never a pass. An executed
     milestone with no deterministic marker and no deterministic command kind has no verdict (``not_evaluable``): it is recorded and not counted as a failure -
     a false alarm here would be worse than staying silent, and the integration call's own full regression suite still runs regardless.
 
-    ``autonomy_cfg`` is the RUN's autonomy configuration (required, no default: Wave-2 item 1(b)). The replay executes persisted argv, so it runs under the same containment and
-    resource authority as every other validator construction in kriya/workflow; a default ``AutonomyConfig()`` here executed them on the host in a run that required containment."""
+    ``autonomy_cfg`` is the RUN's autonomy configuration and ``approval_callback`` its approval channel (both required, no default: Wave-2 item 1(b), W2-04). The replay executes
+    persisted argv, so it runs under the same containment and resource authority as every other validator construction in kriya/workflow (a default ``AutonomyConfig()``
+    here executed them on the host in a run that required containment) and, in human-in-the-loop mode, only after the canonical approval of the exact set (see the W2-04 note above)."""
     from kriya.tools.validate import PolymorphicValidator
     from kriya.workflow.verification_authority import deterministic_sequence_kind
 
@@ -1174,49 +1277,47 @@ def replay_prior_milestone_report(
         report.entries.append({"milestone_id": milestone_id, "outcome": outcome, "reason": reason, **extra})
 
     validator = PolymorphicValidator(workspace_path, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
-    for milestone_id in sorted(set(run_state.verification_commands) | set(run_state.replay_evidence_unavailable)):
-        if milestone_id in run_state.replay_evidence_unavailable:  # the commands on record (if any) belong to an earlier attempt: not trusted
-            record(milestone_id, REPLAY_NOT_EXECUTED, f"{REPLAY_EVIDENCE_UNAVAILABLE}: {run_state.replay_evidence_unavailable[milestone_id]}")
+    plan, refusal = await _authorize_replay(workspace_path, run_state, autonomy_cfg, approval_callback)
+    for item in plan.items:
+        if item.problem is not None:
+            record(item.milestone_id, REPLAY_NOT_EXECUTED, item.problem)
             continue
-        raw_commands = run_state.verification_commands.get(milestone_id)
-        if not raw_commands:
+        if refusal is not None:
+            record(item.milestone_id, REPLAY_NOT_EXECUTED, refusal)
             continue
-        if not _well_formed_commands(raw_commands):
-            record(milestone_id, REPLAY_NOT_EXECUTED, f"{REPLAY_INPUT_INVALID}: the persisted verification commands are not a list of non-empty argv lists")
-            continue
-        resolved_commands = [_resolve_run_command(cmd, workspace_path) for cmd in raw_commands]
+        resolved_commands = [list(command) for command in item.commands or ()]  # exactly the approved argv: never re-resolved after the approval
         run_res = validator.run_app_sequence(resolved_commands)
         unstarted = _not_executed_reason(run_res)
         if unstarted is not None:
             cause = _first_unstarted_cause(run_res)
-            record(milestone_id, REPLAY_NOT_EXECUTED, unstarted, **({"cause": cause} if cause else {}))
+            record(item.milestone_id, REPLAY_NOT_EXECUTED, unstarted, **({"cause": cause} if cause else {}))
             continue
         if run_res["timed_out"]:
-            record(milestone_id, REPLAY_REGRESSED, "replay timed out - possible resource-lifecycle regression")
+            record(item.milestone_id, REPLAY_REGRESSED, "replay timed out - possible resource-lifecycle regression")
             continue
         deterministic_kind = deterministic_sequence_kind(resolved_commands)
         if deterministic_kind is not None:
             if not run_res["success"]:
-                record(milestone_id, REPLAY_REGRESSED, f"replayed deterministic {deterministic_kind} verification returned a non-zero process status")
+                record(item.milestone_id, REPLAY_REGRESSED, f"replayed deterministic {deterministic_kind} verification returned a non-zero process status")
             else:
-                record(milestone_id, REPLAY_PASSED, f"replayed deterministic {deterministic_kind} verification returned a zero process status")
+                record(item.milestone_id, REPLAY_PASSED, f"replayed deterministic {deterministic_kind} verification returned a zero process status")
             continue
         verdict = extract_contract_verdict(run_res["output"])
         if verdict is None:
-            record(milestone_id, REPLAY_NOT_EVALUABLE, "the replayed command ran but printed no [VERIFICATION] marker: no verdict exists", returncode=run_res.get("returncode"))
+            record(item.milestone_id, REPLAY_NOT_EVALUABLE, "the replayed command ran but printed no [VERIFICATION] marker: no verdict exists", returncode=run_res.get("returncode"))
         elif not verdict.get("passed"):
-            record(milestone_id, REPLAY_REGRESSED, verdict.get("reasoning") or "verification marker reported FAIL on replay")
+            record(item.milestone_id, REPLAY_REGRESSED, verdict.get("reasoning") or "verification marker reported FAIL on replay")
         else:
-            record(milestone_id, REPLAY_PASSED, "the verification marker reported PASS on replay")
+            record(item.milestone_id, REPLAY_PASSED, "the verification marker reported PASS on replay")
     return report
 
 
-def replay_prior_milestone_verifications(
-    workspace_path: str, run_state: MilestoneRunState, *, autonomy_cfg: Any
+async def replay_prior_milestone_verifications(
+    workspace_path: str, run_state: MilestoneRunState, *, autonomy_cfg: Any, approval_callback: Any
 ) -> List[Dict[str, Any]]:
     """The regressed milestones (``{"milestone_id", "reason"}``) of a replay that RAN every milestone it was asked to. An empty list therefore means exactly
     "executed, none regressed (or no verdict to give)": a replay that did not run raises ``MilestoneReplayNotExecuted`` instead - it is never an empty list."""
-    report = replay_prior_milestone_report(workspace_path, run_state, autonomy_cfg=autonomy_cfg)
+    report = await replay_prior_milestone_report(workspace_path, run_state, autonomy_cfg=autonomy_cfg, approval_callback=approval_callback)
     if report.not_executed:
         raise MilestoneReplayNotExecuted(report)
     return report.regressions
@@ -1587,8 +1688,9 @@ class _MilestonePlanDriver(PlanDriver):
     async def run_phase(self, phase: TerminalPhase) -> Optional[Dict[str, Any]]:
         if phase is not TerminalPhase.REPLAY_PRIOR_VERIFICATIONS:
             raise ValueError(f"milestone plans have no '{phase.value}' phase")
-        report = replay_prior_milestone_report(
+        report = await replay_prior_milestone_report(
             self.workspace_path, self.run_state, autonomy_cfg=self.engine_config.autonomy,  # the run's config; a missing one is an error, never a default
+            approval_callback=self.generation_kwargs.get("approval_callback"),  # the run's approval channel: the replay commands are approved through it, in human-in-the-loop mode
         )
         self._replay_evidence = report.to_dict()
         if report.not_executed:  # D2 S6: a replay that did not run is its own typed terminal state, never "no regression"

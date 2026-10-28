@@ -56,6 +56,10 @@ def failing_backend(monkeypatch):
     return dict(contained_execution_required=True, containment_backend="s6-failing-backend")
 
 
+def _approve(files, reason):  # W2-04: the run's approval channel approves the replay commands (human-in-the-loop is the default mode)
+    return True
+
+
 def _state(**commands):
     state = MilestoneRunState.from_dict(PLAN)
     state.verification_commands.update(commands)
@@ -65,7 +69,7 @@ def _state(**commands):
 def _replay(tmp_path, state, **autonomy):
     workspace = tmp_path / "ws"
     workspace.mkdir(exist_ok=True)
-    return replay_prior_milestone_report(str(workspace), state, autonomy_cfg=_autonomy(**autonomy)), workspace
+    return asyncio.run(replay_prior_milestone_report(str(workspace), state, autonomy_cfg=_autonomy(**autonomy), approval_callback=_approve)), workspace
 
 
 def _driver(workspace, state, **autonomy):
@@ -74,6 +78,7 @@ def _driver(workspace, state, **autonomy):
     driver.run_state = state
     driver.total = 2
     driver.engine_config = strict_config(autonomy=autonomy)
+    driver.generation_kwargs = {"approval_callback": _approve}
     driver._replay_evidence = None
     return driver
 
@@ -99,7 +104,7 @@ def test_a_refused_replay_is_not_executed_not_an_empty_list_and_not_a_regression
     assert "could not be executed" in entry["reason"] and "CONTAINMENT_BACKEND_PROVIDES_NO_ISOLATION" in entry["cause"], entry
     assert not sentinel.exists()
     with pytest.raises(MilestoneReplayNotExecuted):
-        replay_prior_milestone_verifications(str(workspace), _state(M1=[refused_command]), autonomy_cfg=_autonomy(**REFUSED))
+        asyncio.run(replay_prior_milestone_verifications(str(workspace), _state(M1=[refused_command]), autonomy_cfg=_autonomy(**REFUSED), approval_callback=_approve))
 
 
 def test_the_driver_turns_a_refused_replay_into_its_own_terminal_status_and_the_integration_never_starts(tmp_path):
@@ -231,7 +236,7 @@ def test_a_replay_that_really_ran_with_zero_regressions_succeeds_and_is_distingu
     assert ran.state == "executed" and _outcomes(ran) == {"M1": "passed", "M2": "passed"}
     assert never.state == "not_executed" and _outcomes(never) == {"M1": "not_executed", "M2": "not_executed"}
     assert ran.to_dict() != never.to_dict()
-    assert replay_prior_milestone_verifications(str(workspace), _state(M1=[PASS], M2=[PASS]), autonomy_cfg=_autonomy(**DEFAULT)) == []
+    assert asyncio.run(replay_prior_milestone_verifications(str(workspace), _state(M1=[PASS], M2=[PASS]), autonomy_cfg=_autonomy(**DEFAULT), approval_callback=_approve)) == []
     driver = _driver(workspace, _state(M1=[PASS], M2=[PASS]), **DEFAULT)
     assert _phase(driver) is None, "a replay that ran clean lets the plan proceed"
     assert driver._replay_evidence["state"] == "executed" and driver._replay_evidence["passed"] == ["M1", "M2"]

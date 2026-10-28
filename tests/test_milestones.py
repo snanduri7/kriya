@@ -1,3 +1,4 @@
+import asyncio
 import os
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1375,6 +1376,10 @@ async def test_run_milestones_never_skips_a_completed_milestone_without_proof():
 REPLAY_AUTONOMY = strict_config(autonomy={"contained_execution_required": True}).autonomy  # the run's config the replay must execute under (Wave-2 item 1(b))
 
 
+def _replay_approval(files, reason):  # W2-04: human-in-the-loop mode (the default) approves the replay commands through the run's approval channel
+    return True
+
+
 def test_replay_catches_a_real_regression():
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(
@@ -1388,7 +1393,7 @@ def test_replay_catches_a_real_regression():
         }
         with patch("kriya.tools.validate.PolymorphicValidator", return_value=mock_validator) as validator_class, \
              patch("kriya.workflow.milestones._resolve_run_command", side_effect=lambda c, w: c):
-            failures = replay_prior_milestone_verifications(tmp, state, autonomy_cfg=REPLAY_AUTONOMY)
+            failures = asyncio.run(replay_prior_milestone_verifications(tmp, state, autonomy_cfg=REPLAY_AUTONOMY, approval_callback=_replay_approval))
     assert len(failures) == 1
     assert failures[0]["milestone_id"] == "M1"
     assert "something broke" in failures[0]["reason"]
@@ -1406,7 +1411,7 @@ def test_replay_no_marker_is_not_treated_as_failure():
         mock_validator.run_app_sequence.return_value = {"timed_out": False, "output": "no marker here"}
         with patch("kriya.tools.validate.PolymorphicValidator", return_value=mock_validator), \
              patch("kriya.workflow.milestones._resolve_run_command", side_effect=lambda c, w: c):
-            failures = replay_prior_milestone_verifications(tmp, state, autonomy_cfg=REPLAY_AUTONOMY)
+            failures = asyncio.run(replay_prior_milestone_verifications(tmp, state, autonomy_cfg=REPLAY_AUTONOMY, approval_callback=_replay_approval))
     assert failures == []
 
 
@@ -1423,7 +1428,7 @@ def test_replay_uses_process_status_for_deterministic_build_command():
         }
         with patch("kriya.tools.validate.PolymorphicValidator", return_value=mock_validator), \
              patch("kriya.workflow.milestones._resolve_run_command", side_effect=lambda c, w: c):
-            failures = replay_prior_milestone_verifications(tmp, state, autonomy_cfg=REPLAY_AUTONOMY)
+            failures = asyncio.run(replay_prior_milestone_verifications(tmp, state, autonomy_cfg=REPLAY_AUTONOMY, approval_callback=_replay_approval))
     assert failures == [{
         "milestone_id": "M1",
         "reason": "replayed deterministic build verification returned a non-zero process status",
@@ -1441,7 +1446,7 @@ def test_replay_timeout_is_reported_as_a_failure():
         mock_validator.run_app_sequence.return_value = {"timed_out": True, "output": ""}
         with patch("kriya.tools.validate.PolymorphicValidator", return_value=mock_validator), \
              patch("kriya.workflow.milestones._resolve_run_command", side_effect=lambda c, w: c):
-            failures = replay_prior_milestone_verifications(tmp, state, autonomy_cfg=REPLAY_AUTONOMY)
+            failures = asyncio.run(replay_prior_milestone_verifications(tmp, state, autonomy_cfg=REPLAY_AUTONOMY, approval_callback=_replay_approval))
     assert len(failures) == 1
     assert failures[0]["milestone_id"] == "M1"
     assert "timed out" in failures[0]["reason"]
