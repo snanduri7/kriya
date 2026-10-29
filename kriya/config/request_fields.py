@@ -14,6 +14,11 @@ The invariant: a provider extension payload may not override a Kriya-owned,
 authority-bearing request field. Kriya's model selector is ``llm.model`` (or
 the governed binding's model); ``extra_body`` is never a second selector.
 
+B1 (Wave-2): a runtime may own further fields (``InferenceRuntimePort.owned_request_fields``): the native
+runtime's ``format`` is where Kriya sends ``response_format`` (``"json"`` / the schema), so an ``extra_body.format`` either
+replaced Kriya's value silently or, when Kriya sent none, grammar-constrained Kriya's unstructured calls from repository
+configuration. It is refused through the same checker, never stripped.
+
 Pure data and one pure function, so config validation (which cannot import
 ``kriya.core``) and the request boundary enforce the same set."""
 from typing import Any, Mapping, Optional, Tuple
@@ -24,12 +29,15 @@ RESERVED_REQUEST_FIELDS: Tuple[str, ...] = (
 )
 
 
-def reserved_extra_body_keys(extra_body: Optional[Mapping[str, Any]]) -> Tuple[str, ...]:
-    """The Kriya-owned request fields ``extra_body`` tries to set (sorted;
-    empty for None, a non-mapping or a clean body)."""
+def reserved_extra_body_keys(extra_body: Optional[Mapping[str, Any]], runtime_owned: Tuple[str, ...] = ()) -> Tuple[str, ...]:
+    """The Kriya-owned request fields ``extra_body`` tries to set (empty for
+    None, a non-mapping or a clean body). ``runtime_owned`` are the fields
+    Kriya owns on ONE runtime beyond the global set (B1: the native Ollama
+    runtime carries structured output in ``format``, which the OpenAI-
+    compatible runtime does not own)."""
     if not isinstance(extra_body, Mapping):
         return ()
-    return tuple(key for key in RESERVED_REQUEST_FIELDS if key in extra_body)
+    return tuple(key for key in (*RESERVED_REQUEST_FIELDS, *runtime_owned) if key in extra_body)
 
 
 def reserved_extra_body_message(keys: Tuple[str, ...]) -> str:

@@ -1214,6 +1214,8 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
     capabilities = RuntimeCapabilities(per_request_context_window=True, native_identity_probe=True, stream_usage=True,
                                        json_schema_output=True)
     provider_capabilities = OLLAMA_NATIVE_CAPABILITIES
+    # B1: ``format`` is the native carrier of Kriya's response_format (json / schema), set by _payload below.
+    owned_request_fields = ("format",)
 
     def request_plan(self, extra_body: Optional[Dict[str, Any]], *, temperature: Optional[float],
                      reasoning_flag: bool, requested_context_window: Optional[int],
@@ -1267,6 +1269,11 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
 
     @staticmethod
     def _payload(request: ChatRequest, *, stream: bool) -> Dict[str, Any]:
+        from kriya.core.provider_contract import refuse_extra_body_request_fields
+
+        # B1: the last gate before the transport for a request built outside LLMClient (qualification, doctor).
+        refuse_extra_body_request_fields(request.extra_body, model=request.model,
+                                         runtime_owned=OllamaNativeRuntimeAdapter.owned_request_fields)
         body = dict(request.extra_body or {})
         options = dict(body.pop("options", None) or {})
         if request.temperature is not None:

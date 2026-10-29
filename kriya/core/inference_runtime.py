@@ -42,7 +42,7 @@ import logging
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +147,9 @@ class InferenceRuntimePort(abc.ABC):
 
     name: str
     capabilities: RuntimeCapabilities
+    # Request fields Kriya owns on THIS runtime beyond kriya.config.request_fields.RESERVED_REQUEST_FIELDS (an
+    # ``extra_body`` naming one is refused by the same checker, before any provider contact).
+    owned_request_fields: Tuple[str, ...] = ()
 
     # -- the exact request body ------------------------------------------
     def wire_payload(self, request: ChatRequest, *, stream: bool) -> Optional[Dict[str, Any]]:

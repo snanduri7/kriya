@@ -82,13 +82,15 @@ class ProviderContractError(ValueError):
         self.details = dict(details or {})
 
 
-def refuse_extra_body_request_fields(extra_body: Optional[Mapping[str, Any]], *, model: Optional[str] = None) -> None:
+def refuse_extra_body_request_fields(extra_body: Optional[Mapping[str, Any]], *, model: Optional[str] = None,
+                                     runtime_owned: Tuple[str, ...] = ()) -> None:
     """Refuse (typed, before any provider contact) an ``extra_body`` that sets
-    a request field Kriya owns. Never strips the key: a request that asked for
+    a request field Kriya owns (globally, or on this request's runtime:
+    ``runtime_owned``). Never strips the key: a request that asked for
     another model is refused, not quietly rewritten into one that did not."""
     from kriya.config.request_fields import reserved_extra_body_keys, reserved_extra_body_message
 
-    keys = reserved_extra_body_keys(extra_body)
+    keys = reserved_extra_body_keys(extra_body, runtime_owned)
     if keys:
         raise ProviderContractError(PROVIDER_REQUEST_FIELD_CONFLICT, reserved_extra_body_message(keys),
                                     {"fields": list(keys), "requested_model": model})

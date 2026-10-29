@@ -252,6 +252,73 @@ def test_the_reason_code_is_a_typed_provider_contract_stop():
     assert PROVIDER_REQUEST_FIELD_CONFLICT in PROVIDER_CONTRACT_REASON_CODES      # outcome.py reads this set to name the stop
 
 
+# -- B1 (Wave-2): the native runtime's ``format`` is Kriya's structured-output carrier, so it is Kriya-owned there ----------------------
+# MEASURED at 04c8db4 (WAVE2_STEP11 B1): a repository-safe llm.extra_body.format reached /api/chat unchanged when Kriya sent no structured
+# request (a cloned repo could grammar-constrain Kriya's unstructured calls) and was silently overwritten when Kriya sent one.
+NATIVE_FORMATS = [pytest.param("json", id="json"), pytest.param({"type": "object", "properties": {"x": {"type": "string"}}}, id="schema")]
+
+
+@pytest.mark.parametrize("fmt", NATIVE_FORMATS)
+@pytest.mark.parametrize("call", [pytest.param(CHAT, id="chat"), pytest.param(TOOL_TURN, id="tool_turn")])
+def test_b1_a_native_extra_body_format_is_refused_with_zero_provider_calls(tmp_path, monkeypatch, server, fmt, call):
+    cfg = _config(server.url, runtime="ollama_native", extra_body={"options": {"top_p": 0.8}, "format": fmt})
+    outcome, error, records = _run(tmp_path, monkeypatch, cfg, call)
+    assert outcome is None
+    assert isinstance(error, ProviderContractError) and error.reason_code == PROVIDER_REQUEST_FIELD_CONFLICT
+    assert error.details["fields"] == ["format"] and error.details["requested_model"] == GOVERNED
+    assert server.received == []                                   # no POST, and no GET probe either
+    assert [r for r in _kind(records, "model.request") if r["payload"].get("dispatched")] == []
+
+
+def test_b1_a_caller_override_of_format_is_refused_on_the_native_runtime(tmp_path, monkeypatch, server):
+    cfg = _config(server.url, runtime="ollama_native")
+    outcome, error, _records = _run(
+        tmp_path, monkeypatch, cfg, lambda llm: llm.complete_result("S", "U", extra_body_override={"format": "json"}))
+    assert outcome is None and error.reason_code == PROVIDER_REQUEST_FIELD_CONFLICT and error.details["fields"] == ["format"]
+    assert server.received == []
+
+
+def test_b1_the_native_adapter_refuses_it_for_a_request_built_anywhere_else():
+    """Qualification probes and the doctor build ChatRequest directly: the wire builder is the last gate before the transport."""
+    request = ChatRequest(model=GOVERNED, messages=[], temperature=0.1, max_tokens=8, extra_body={"options": {}, "format": "json"})
+    with pytest.raises(ProviderContractError) as raised:
+        OllamaNativeRuntimeAdapter().wire_payload(request, stream=False)
+    assert raised.value.reason_code == PROVIDER_REQUEST_FIELD_CONFLICT and raised.value.details["fields"] == ["format"]
+    structured = ChatRequest(model=GOVERNED, messages=[], temperature=0.1, max_tokens=8, response_format={"type": "json_object"},
+                             extra_body={"format": {"type": "object"}})
+    with pytest.raises(ProviderContractError):
+        OllamaNativeRuntimeAdapter().wire_payload(structured, stream=True)      # never "Kriya's value wins silently"
+
+
+def test_b1_the_openai_compatible_runtime_does_not_own_format_and_carries_it_additively(tmp_path, monkeypatch, server):
+    cfg = _config(server.url, extra_body={"options": {"top_p": 0.8}, "format": "json"})
+    outcome, error, _records = _run(tmp_path, monkeypatch, cfg, CHAT)
+    assert error is None and outcome is not None
+    assert [body.get("format") for method, _path, body in server.received if method == "POST" and body] == ["json"]
+
+
+def test_b1_a_non_conflicting_native_extension_still_works_and_kriyas_own_format_is_unchanged(tmp_path, monkeypatch, server):
+    cfg = _config(server.url, runtime="ollama_native", extra_body={"options": {"top_p": 0.8}, "keep_alive": "5m"})
+    outcome, error, _records = _run(tmp_path, monkeypatch, cfg, CHAT)
+    assert error is None and outcome is not None
+    [body] = [body for method, _path, body in server.received if method == "POST" and body]
+    assert body["keep_alive"] == "5m" and "format" not in body and body["options"]["top_p"] == 0.8
+    base = dict(model=GOVERNED, messages=[{"role": "user", "content": "u"}], temperature=0.1, max_tokens=8)
+    native = OllamaNativeRuntimeAdapter()
+    assert native.wire_payload(ChatRequest(**base, response_format={"type": "json_object"}), stream=False)["format"] == "json"
+    schema = {"type": "object"}
+    assert native.wire_payload(ChatRequest(**base, response_format={"type": "json_schema", "schema": schema}), stream=False)["format"] == schema
+
+
+def test_b1_every_field_the_native_wire_builder_sets_beyond_the_global_set_is_declared_runtime_owned():
+    base = dict(model=GOVERNED, messages=[{"role": "user", "content": "u"}], temperature=0.1, max_tokens=8)
+    native = OllamaNativeRuntimeAdapter()
+    for shape in (dict(), dict(tools=TOOLS), dict(response_format={"type": "json_object"}), dict(response_format={"type": "json_schema", "schema": {}})):
+        set_by_kriya = set(native.wire_payload(ChatRequest(**base, **shape), stream=False)) - {"options", "truncate"}
+        assert set_by_kriya <= set(RESERVED_REQUEST_FIELDS) | set(native.owned_request_fields), (shape, set_by_kriya)
+    assert OllamaRuntimeAdapter().owned_request_fields == ()
+
+
 # -- 3. repository configuration cannot select B ------------------------------------------------------------------------------------
 def test_a_repository_kriya_yaml_cannot_select_another_model(tmp_path, monkeypatch):
     repo = tmp_path / "repo"

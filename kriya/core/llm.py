@@ -349,8 +349,7 @@ class LLMClient:
         fields and a served window other than the requested one are refused."""
         return getattr(self.config, "runtime_profile", None) == "production"
 
-    @staticmethod
-    def _refuse_owned_request_fields(model: str, extra_body: Optional[Dict[str, Any]]) -> None:
+    def _refuse_owned_request_fields(self, model: str, extra_body: Optional[Dict[str, Any]]) -> None:
         """MODEL-IDENTITY-EXTRA-BODY-OVERRIDE-001: the resolved extra_body (the
         binding's, or a caller's override) names no request field Kriya owns.
         Checked before the runtime fingerprint, the served-context observation
@@ -358,7 +357,7 @@ class LLMClient:
         ChatRequest enforces the same set for anything built elsewhere."""
         from kriya.core.provider_contract import refuse_extra_body_request_fields
 
-        refuse_extra_body_request_fields(extra_body, model=model)
+        refuse_extra_body_request_fields(extra_body, model=model, runtime_owned=self._runtime(model).owned_request_fields)
 
     def _provider_plan(self, runtime: InferenceRuntimePort, *, extra_body: Optional[Dict[str, Any]],
                        temperature: Optional[float], is_reasoning: bool, declared_window: Optional[int],
