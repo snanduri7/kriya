@@ -41,6 +41,7 @@ from enum import Enum
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from kriya.config.environment import toolchain, user_home
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.tools.containment import ContainmentBackend, ContainmentProfile, NetworkAuthority, TrustClass
 from kriya.tools.containment_oci import (
     MAVEN_CACHE_MOUNT,
@@ -223,8 +224,9 @@ def maven_model_text_assessment(workspace_root: str, *, goals: Sequence[str] = (
             target = os.path.realpath(os.path.join(os.path.dirname(real), module.strip()))
             if not os.path.exists(target):
                 continue                                    # a module that does not exist contributes no POM (Maven reports the missing module itself)
-            if target != root and not target.startswith(root + os.sep):
-                # An existing POM outside the mounted workspace: a contained Maven cannot read it, but this assessment cannot prove that for the run it describes, and it must not claim a complete POM set.
+            if path_relation(root, target) is not PathRelation.WITHIN:
+                # An existing POM outside the mounted workspace (or whose filesystem identity cannot be established): a contained Maven cannot read it, but this assessment cannot prove that for the run it
+                # describes, and it must not claim a complete POM set. By filesystem identity (kriya.platform), never a lexical prefix.
                 return MavenModelTextAssessment(contaminated=f"module {module.strip()!r} in {rel} resolves outside the workspace, so the POM set cannot be assessed completely",
                                                 malformed_poms=tuple(malformed))
             queue.append(os.path.join(target, "pom.xml") if os.path.isdir(target) else target)

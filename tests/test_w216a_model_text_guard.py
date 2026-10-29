@@ -330,6 +330,14 @@ def test_an_existing_module_outside_the_mounted_workspace_fails_closed_never_sil
     assert "outside the workspace" in assessment.contaminated and assessment.text_untrustworthy == assessment.contaminated and assessment.withhold_acquisition
 
 
+def test_a_module_whose_filesystem_identity_cannot_be_established_fails_closed(tmp_path):
+    """`path_relation` answers UNKNOWN when identity cannot be established; the assessment treats that as not-within, never as clean."""
+    _write(tmp_path, "pom.xml", BASE.format(extra="<packaging>pom</packaging><modules><module>m1</module></modules>"))
+    _write(tmp_path, "m1/pom.xml", BASE.format(extra=""))
+    with patch.object(de, "path_relation", return_value=de.PathRelation.UNKNOWN):
+        assert "outside the workspace" in maven_model_text_assessment(str(tmp_path)).contaminated
+
+
 def test_a_module_that_does_not_exist_contributes_nothing_even_outside_the_workspace(tmp_path):
     _write(tmp_path / "ws", "pom.xml", BASE.format(extra="<packaging>pom</packaging><modules><module>../nowhere</module><module>missing</module></modules>"))
     assert maven_model_text_assessment(str(tmp_path / "ws")).withhold_acquisition is False
