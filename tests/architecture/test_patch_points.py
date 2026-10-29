@@ -302,7 +302,8 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (C, 'check_plan_targets'): P(1, 'kriya.workflow.plan_targets', ((C, 1),), ()),
     (C, 'classify_planner_outcome'): P(1, 'kriya.workflow.planner_repair', ((C, 2),), ()),
     (C, 'coalesce_same_file_owners'): P(1, 'kriya.workflow.plan_normalization', ((C, 1),), ()),
-    (C, 'commit_verified_candidate'): P(3, 'kriya.workflow.commit_service', ((C, 1),), ()),  # P-B: +1 (the deferral's enforce proof)
+    # Step 6 (artifact registry): +1 site (tests/test_artifact_registry_strict_read.py corrupts the registry right after the source commit: the proof that the post-commit persistence failure never invalidates the commit).
+    (C, 'commit_verified_candidate'): P(4, 'kriya.workflow.commit_service', ((C, 1),), ()),  # P-B: +1 (the deferral's enforce proof)
     (C, 'derive_verification_contracts'): P(1, 'kriya.workflow.plan_normalization', ((C, 1),), ()),
     (C, 'find_ownership_findings'): P(1, 'kriya.workflow.ownership_findings', ((C, 1),), ()),
     (C, 'findings_prompt_block'): P(1, 'kriya.workflow.ownership_findings', ((C, 1),), ()),
@@ -443,7 +444,8 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # generate command renders)
     # P-B skill-verification deferral (tests/test_skill_verification_deferral.py): +1 W site (final_review: the stage-5 closer seeded
     # with a held verification on a failed run) and +1 C site (commit_verified_candidate: the enforce terminal commit it defers behind)
-    assert totals == {A: 113, W: 98, C: 385}  # D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
+    # Step 6 (artifact registry): +1 C site (commit_verified_candidate: tests/test_artifact_registry_strict_read.py, the registry corrupted right after the source commit)
+    assert totals == {A: 113, W: 98, C: 386}  # D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
     assert len(PATCH_POINTS) == 134  # P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
 
 

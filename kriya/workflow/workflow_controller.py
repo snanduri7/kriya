@@ -83,6 +83,7 @@ from kriya.agents.contracts import (
 from kriya.control.artifacts import (
     ArtifactRegistry as ArtifactRegistry,  # re-export: the suite patches workflow_controller.ArtifactRegistry.derive_from_workspace
 )
+from kriya.control.artifacts import ArtifactRegistryCorruptError
 from kriya.control.commit_state import assess_workspace_commit_state
 from kriya.control.contracts import ContractRegistryCorruptError
 from kriya.control.decisions import (
@@ -1179,6 +1180,15 @@ def quarantine_abandoned_plan_files(
     )
 
 
+def _artifact_registry_hash(workspace_path: str) -> str:
+    """The hash of the artifact registry as it is on disk now, for the control state a run leaves behind. A registry that became unreadable DURING the run hashes to its reason code - a value no
+    readable registry can have - so a later resume invalidates (artifact_registry_hash) instead of this finalization raising after the run's work is done."""
+    try:
+        return compute_registry_hash(load_artifact_registry(workspace_path).to_dict())
+    except ArtifactRegistryCorruptError as exc:
+        return exc.reason_code
+
+
 class WorkflowController:
     """Wraps an existing WorkflowEngine (kriya/workflow/workflow.py) -
     never constructs its own agents/LLM client, and deliberately reuses
@@ -1586,7 +1596,18 @@ class WorkflowController:
                     "persistence_error": str(exc),
                 },
             )
-        artifact_registry = load_artifact_registry(workspace_path)
+        try:
+            artifact_registry = load_artifact_registry(workspace_path)
+        except ArtifactRegistryCorruptError as exc:
+            # An unreadable artifact registry is never treated as empty (it switched ARTIFACT_DRIFT off and the next save overwrote the evidence): the twin of the contract-registry refusal above.
+            return WorkflowResult(
+                run_id=run_state.group_id, control_state=control_state, route=route,
+                legacy_result={
+                    "status": "needs_review", "group_id": run_state.group_id, "quality_gates_passed": False,
+                    "reason_codes": [exc.reason_code], "persistence_store": "artifact_registry",
+                    "persistence_error": str(exc),
+                },
+            )
         # PRD-008 S4b: un-complete milestones whose completion proof fails
         # BEFORE milestone_states is derived from completed_milestone_ids,
         # so ControlState never marks a milestone done that will rerun.
@@ -1669,7 +1690,7 @@ class WorkflowController:
                 for milestone in milestones
             },
             current_contract_hash=compute_registry_hash(load_contract_registry(workspace_path).to_dict()),
-            current_artifact_registry_hash=compute_registry_hash(load_artifact_registry(workspace_path).to_dict()),
+            current_artifact_registry_hash=_artifact_registry_hash(workspace_path),
         )
 
         try:

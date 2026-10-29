@@ -44,6 +44,7 @@ from kriya.control.contracts import (
 )
 from kriya.control.control_store import MILESTONE_SIDECAR_RELATIVE_DIR, write_control_file
 from kriya.control.persistence import (
+    ArtifactRegistryCorruptError,
     load_artifact_registry,
     load_contract_registry,
     load_control_state,
@@ -156,6 +157,14 @@ def _live_contract_registry(workspace_path: str, milestone_id: Optional[str] = N
         return load_contract_registry(workspace_path)
     except ContractRegistryCorruptError as exc:
         raise MilestonePersistenceError(exc.reason_code, "contract_registry", str(exc), milestone_id) from exc
+
+
+def _live_artifact_registry(workspace_path: str, milestone_id: Optional[str] = None) -> Any:
+    """The artifact registry as it is on disk now. An unreadable registry fails closed (never empty, never overwritten): the twin of _live_contract_registry."""
+    try:
+        return load_artifact_registry(workspace_path)
+    except ArtifactRegistryCorruptError as exc:
+        raise MilestonePersistenceError(exc.reason_code, "artifact_registry", str(exc), milestone_id) from exc
 
 
 def _persist_milestone_control_state(
@@ -593,7 +602,7 @@ def _reconstruct_completions(
             run_state.commit_ledger.extend(entry.to_dict() for entry in candidate.new_entries)
         if candidate.failure is None:
             if artifact_registry is None:
-                artifact_registry = load_artifact_registry(workspace_path)
+                artifact_registry = _live_artifact_registry(workspace_path, milestone.id)
             error = _complete_milestone(
                 workspace_path, run_state, milestone, candidate.entries,
                 sorted({op.path for entry in candidate.entries for op in entry.operations if op.kind != "DELETE"}),
@@ -1861,7 +1870,11 @@ async def run_milestones(
     # file_context per-milestone persistence convention rather than the
     # once-at-the-end pattern enforce mode uses for its own different reason
     # (a subtask plan's "success" is only meaningful once ALL subtasks pass).
-    artifact_registry = load_artifact_registry(workspace_path)
+    try:
+        artifact_registry = load_artifact_registry(workspace_path)
+    except ArtifactRegistryCorruptError as exc:
+        # fail closed, like the contract registry above: never proceed (or later save) as though an unreadable registry were empty.
+        return MilestonePersistenceError(exc.reason_code, "artifact_registry", str(exc)).to_result(run_state.group_id)
     contract_changes: List[Any] = []
     for m in run_state.milestones:
         if m.provides:

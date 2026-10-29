@@ -3748,6 +3748,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 post_commit_persistence_errors.append({
                     "operation": "save_artifact_registry",
                     "error": f"{type(error).__name__}: {error}",
+                    # an unreadable registry was left exactly as it was (never overwritten) and the commit stands: the reason travels with the report
+                    **({"reason_code": error.reason_code} if isinstance(getattr(error, "reason_code", None), str) else {}),
                 })
         # PRD-029: the ContractRegistry transition committed with the source.
         aggregated["contract_registry"] = committed_contract_registry

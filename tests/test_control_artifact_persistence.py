@@ -5,7 +5,7 @@ import tempfile
 
 import pytest
 
-from kriya.control.artifacts import ArtifactRecord, ArtifactRegistry
+from kriya.control.artifacts import ArtifactRecord, ArtifactRegistry, ArtifactRegistryCorruptError
 from kriya.control.persistence import (
     artifact_registry_path,
     load_artifact_registry,
@@ -38,8 +38,13 @@ def test_save_and_load_round_trips(workspace):
 
 
 def test_load_fails_closed_on_corrupt_file(workspace):
+    """Fails closed means a typed refusal that leaves the bytes alone. (It used to return an EMPTY registry - the defect ARTIFACT-REGISTRY-MALFORMED-READ-AS-EMPTY-001: drift detection went silently
+    off and the next save overwrote the evidence. Full matrix: tests/test_artifact_registry_strict_read.py.)"""
     path = artifact_registry_path(workspace)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         f.write("not json")
-    assert load_artifact_registry(workspace).all_records() == ()
+    with pytest.raises(ArtifactRegistryCorruptError):
+        load_artifact_registry(workspace)
+    with open(path) as f:
+        assert f.read() == "not json"

@@ -33,6 +33,21 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Tuple
 
+ARTIFACT_REGISTRY_CORRUPT = "ARTIFACT_REGISTRY_CORRUPT"
+
+
+class ArtifactRegistryCorruptError(RuntimeError):
+    """The persisted artifact registry exists but cannot be read as a valid registry. Never treated as an empty registry (which switched ARTIFACT_DRIFT detection off and let the next save
+    overwrite the evidence) and never overwritten automatically: the bytes are left exactly as they are. The twin of ContractRegistryCorruptError (PRD-029)."""
+
+    reason_code = ARTIFACT_REGISTRY_CORRUPT
+
+    def __init__(self, path: str, detail: str):
+        super().__init__(f"{ARTIFACT_REGISTRY_CORRUPT}: {path}: {detail}")
+        self.path = path
+        self.detail = detail
+
+
 _MAVEN_RESOURCE_CANDIDATES: Tuple[str, ...] = (
     os.path.join("src", "main", "java"),
     os.path.join("src", "main", "resources"),

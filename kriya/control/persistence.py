@@ -35,7 +35,7 @@ from kriya.context.workspace_identity import (
     ownership_metadata,
     validate_ownership,
 )
-from kriya.control.artifacts import ArtifactRegistry
+from kriya.control.artifacts import ArtifactRegistry, ArtifactRegistryCorruptError
 from kriya.control.contracts import ContractRegistry, ContractRegistryCorruptError, ContractRegistryTransitionError
 from kriya.control.control_store import write_control_file
 from kriya.control.human_decision_store import human_decision_path, write_document
@@ -690,12 +690,29 @@ def save_artifact_registry(workspace_path: str, registry: ArtifactRegistry) -> N
 
 
 def load_artifact_registry(workspace_path: str) -> ArtifactRegistry:
-    data = _load_json_document(artifact_registry_path(workspace_path), workspace_path)
-    if data is None:
+    """Never returns None: a registry that was never saved is a valid, empty starting state. A registry file that EXISTS but cannot be read as a valid registry raises
+    ArtifactRegistryCorruptError - it is never interpreted as empty (which switched ARTIFACT_DRIFT detection off, lost the earlier records on the next save and overwrote the malformed
+    bytes with no copy). The file is never touched here; a workspace-ownership refusal still propagates as it always did."""
+    path = artifact_registry_path(workspace_path)
+    if not os.path.isfile(path):
         return ArtifactRegistry()
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError as error:
+        raise ArtifactRegistryCorruptError(path, f"unreadable: {error}") from error
+    except UnicodeDecodeError as error:
+        raise ArtifactRegistryCorruptError(path, f"unreadable: not valid UTF-8 ({error})") from error
+    try:
+        data = json.loads(text)
+    except ValueError as error:
+        raise ArtifactRegistryCorruptError(path, f"unreadable: {error}") from error
+    if not isinstance(data, dict):
+        raise ArtifactRegistryCorruptError(path, "registry payload is not an object")
+    validate_ownership(workspace_path, data, path)
+    data = dict(data)
     data.pop("_run_record", None)
     try:
         return ArtifactRegistry.from_dict(data)
-    except Exception:
-        logger.warning("Failed to reconstruct ArtifactRegistry from %s - starting empty", artifact_registry_path(workspace_path), exc_info=True)
-        return ArtifactRegistry()
+    except (KeyError, TypeError, ValueError, AttributeError) as error:
+        raise ArtifactRegistryCorruptError(path, f"invalid registry: {type(error).__name__}: {error}") from error
