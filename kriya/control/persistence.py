@@ -676,7 +676,9 @@ def complete_contract_transition(workspace_path: str, transaction_id: str, inten
                 workspace_path, transaction_id,
                 before_digest=intent.get("before_digest"), after_digest=intent.get("after_digest"),
             )
-        except (ContractRegistryTransitionError, OSError, ValueError):
+        except (ContractRegistryTransitionError, ContractRegistryCorruptError, OSError, ValueError):
+            # A staged (or, by now, live) registry that cannot be read as a registry is as much "needs review" as one that is not the recorded after-state: a typed disposition with the
+            # evidence left exactly where it is (nothing promoted, nothing discarded, nothing invented) - never a traceback out of recovery.
             return TRANSITION_NEEDS_REVIEW
         return TRANSITION_PROMOTED
     if current != intent.get("before_digest"):

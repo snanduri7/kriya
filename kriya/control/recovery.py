@@ -727,7 +727,7 @@ def _complete_contract_transitions(
             report.errors.append(
                 f"run {record.run_id}: contract registry transition {transaction_id} needs review "
                 "(the live registry is neither the recorded before- nor after-state, or its staged "
-                "after-state is missing)"
+                "after-state is missing or unreadable)"
             )
             complete = False
     return complete
