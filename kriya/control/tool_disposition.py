@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.control.decisions import DecisionLedger, load_decision_ledger
@@ -189,6 +189,17 @@ def inspect_tool_dispositions(workspace_path: str) -> ToolDispositionReport:
     return ToolDispositionReport(workspace=canonical, run_id=state.run_id, entries=tuple(entries))
 
 
+def _with_audit_state(canonical: str, result: "DispositionResult") -> "DispositionResult":
+    """B-004 (tolerate and preserve): when the decision ledger holds lines that cannot be read as decisions, the result says so in a structured field. The lines are neither repaired nor hidden, and
+    the disposition itself was never blocked by them (its durable audit record is appended after them)."""
+    ledger = load_decision_ledger(canonical)
+    if not ledger.degraded:
+        return result
+    return replace(result, details={**result.details, "audit_degraded": {
+        "malformed_ledger_lines": [line.to_dict() for line in ledger.malformed_lines],
+        "note": "the decision ledger holds lines that cannot be read as decisions; they are preserved byte-for-byte and were not repaired"}})
+
+
 def _disposition_id(run_id: str, subtask_id: str, action: str, from_attempt: Optional[int]) -> str:
     label = "legacy" if from_attempt is None else str(from_attempt)
     return hashlib.sha256(f"{run_id}|{subtask_id}|{action}|{label}".encode("utf-8")).hexdigest()[:24]
@@ -216,7 +227,7 @@ def apply_disposition(workspace_path: str, action: str, subtask_id: str, *, expe
             return _refused(action, subtask_id, CONTROL_STATE_UNREADABLE, str(error))
         if state is None:
             return _refused(action, subtask_id, NO_CONTROL_STATE, "this workspace has no control state; there is nothing to dispose of.")
-        return _apply_locked(canonical, state, action, subtask_id, expected_attempt, operator)
+        return _with_audit_state(canonical, _apply_locked(canonical, state, action, subtask_id, expected_attempt, operator))
 
 
 def _apply_locked(canonical: str, state: ControlState, action: str, subtask_id: str, expected_attempt: Optional[int], operator: str) -> DispositionResult:
@@ -380,7 +391,7 @@ def apply_direct_abandon(workspace_path: str, run_id: str, *, operator: str, con
             return _direct_refused(run_id, RUN_RECORD_UNREADABLE, str(error))
         if record is None:
             return _direct_refused(run_id, RUN_NOT_FOUND, f"no run record {run_id!r} exists in this workspace.")
-        return _abandon_direct_locked(canonical, record, operator)
+        return _with_audit_state(canonical, _abandon_direct_locked(canonical, record, operator))
 
 
 def _direct_refused(run_id: str, code: str, message: str, **kwargs: Any) -> DispositionResult:

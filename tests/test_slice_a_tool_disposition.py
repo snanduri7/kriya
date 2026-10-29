@@ -238,9 +238,9 @@ def _spy_on_control_writes(monkeypatch):
     for module in (decisions, persistence):
         real = module.write_control_file
 
-        def spy(workspace_path, path, content, *, expected_revision, durable=False, _real=real):
+        def spy(workspace_path, path, content, *, expected_revision, durable=False, _real=real, **rest):   # **rest: the writer's optional content_bytes (B-004: exact bytes)
             seen.append((os.path.basename(path), durable))
-            return _real(workspace_path, path, content, expected_revision=expected_revision, durable=durable)
+            return _real(workspace_path, path, content, expected_revision=expected_revision, durable=durable, **rest)
 
         monkeypatch.setattr(module, "write_control_file", spy)
     return seen

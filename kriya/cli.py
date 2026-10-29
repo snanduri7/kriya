@@ -31,6 +31,7 @@ from kriya.cli_commands.metrics import metrics_report as metrics_report
 from kriya.cli_commands.runs import _RUNS_EXIT_ACTION_REQUIRED as _RUNS_EXIT_ACTION_REQUIRED
 from kriya.cli_commands.runs import _RUNS_EXIT_PERSISTENCE_FAILED as _RUNS_EXIT_PERSISTENCE_FAILED
 from kriya.cli_commands.runs import _RUNS_EXIT_RUN_ACTIVE as _RUNS_EXIT_RUN_ACTIVE
+from kriya.cli_commands.runs import _echo_audit_degraded as _echo_audit_degraded
 from kriya.cli_commands.runs import _print_direct_entry as _print_direct_entry
 from kriya.cli_commands.runs import _print_recovery_assessment as _print_recovery_assessment
 from kriya.cli_commands.runs import _print_tool_entry as _print_tool_entry

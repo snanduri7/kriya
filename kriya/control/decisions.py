@@ -28,9 +28,9 @@ import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from kriya.context.workspace_identity import WorkspaceOwnershipError, validate_ledger_line_ownership, workspace_identity
+from kriya.context.workspace_identity import validate_ledger_line_ownership, workspace_identity
 from kriya.control.control_store import write_control_file
 from kriya.control.persistence import decision_ledger_path
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
@@ -40,6 +40,53 @@ from kriya.repository.commit import read_file_revision
 logger = logging.getLogger(__name__)
 
 _MAX_FIELD_VALUE_CHARS = 4000
+
+
+# B-004 (owner decision: tolerate and preserve): a line of the audit ledger that cannot be read as a decision is NEVER silently treated as absent and NEVER repaired or rewritten. The reader
+# skips it with a structured record, the writer carries its bytes forward verbatim, and the degraded state is reported to whoever asked (the operator's disposition result, the log).
+LEDGER_LINE_NOT_UTF8 = "LEDGER_LINE_NOT_UTF8"
+LEDGER_LINE_NOT_JSON = "LEDGER_LINE_NOT_JSON"
+LEDGER_LINE_NOT_A_DECISION = "LEDGER_LINE_NOT_A_DECISION"
+
+
+@dataclass(frozen=True)
+class MalformedLedgerLine:
+    line_number: int
+    reason: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"line_number": self.line_number, "reason": self.reason}
+
+
+@dataclass(frozen=True)
+class LedgerAppendResult:
+    """What ``append_to_file`` reports besides having written: the malformed lines it carried forward untouched (empty for a healthy ledger)."""
+
+    preserved_malformed_lines: Tuple[MalformedLedgerLine, ...] = ()
+
+    @property
+    def degraded(self) -> bool:
+        return bool(self.preserved_malformed_lines)
+
+
+def _classify_ledger_line(workspace_path: str, raw: bytes, source: str) -> Tuple[Optional["Decision"], Optional[str]]:
+    """(the Decision, None) for a readable line; (None, reason) for a malformed one. A line stamped for ANOTHER workspace, or carrying no stamp, is not malformed - it is the ownership refusal
+    (D2 M4) and raises WorkspaceOwnershipError exactly as it always did."""
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None, LEDGER_LINE_NOT_UTF8
+    try:
+        payload = json.loads(text)
+    except (ValueError, RecursionError):
+        return None, LEDGER_LINE_NOT_JSON
+    if not isinstance(payload, dict):
+        return None, LEDGER_LINE_NOT_A_DECISION
+    validate_ledger_line_ownership(workspace_path, payload, source)
+    try:
+        return Decision.from_dict(payload), None
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None, LEDGER_LINE_NOT_A_DECISION
 
 
 def _now_iso() -> str:
@@ -97,6 +144,16 @@ class DecisionLedger:
 
     def __init__(self) -> None:
         self._decisions: List[Decision] = []
+        self._malformed_lines: List[MalformedLedgerLine] = []
+
+    @property
+    def malformed_lines(self) -> Tuple[MalformedLedgerLine, ...]:
+        """The lines of the ledger FILE this ledger was loaded from that could not be read as decisions (preserved on disk, absent from ``all()``)."""
+        return tuple(self._malformed_lines)
+
+    @property
+    def degraded(self) -> bool:
+        return bool(self._malformed_lines)
 
     def record(self, decision_type: str, **fields: Any) -> Decision:
         decision = Decision(type=decision_type, fields=_truncate_field_values(fields))
@@ -110,7 +167,7 @@ class DecisionLedger:
     def filter_by_type(self, decision_type: str) -> Tuple[Decision, ...]:
         return tuple(d for d in self._decisions if d.type == decision_type)
 
-    def append_to_file(self, workspace_path: str, decision: Decision, *, durable: bool = False) -> None:
+    def append_to_file(self, workspace_path: str, decision: Decision, *, durable: bool = False) -> LedgerAppendResult:
         """Persists ONE decision by rewriting the full decisions.jsonl with
         it appended - see class docstring for why this isn't a true
         streaming append. Loads the existing file's raw lines first (not
@@ -119,12 +176,17 @@ class DecisionLedger:
         makes the write fsync-grade through the same control-store writer; the default is the unchanged atomic-only write."""
 
         path = decision_ledger_path(workspace_path)
-        existing_lines: List[str] = []
+        existing_lines: List[bytes] = []
+        preserved: List[MalformedLedgerLine] = []
         if os.path.isfile(path):
-            with open(path, "r", encoding="utf-8") as f:
-                existing_lines = [line.rstrip("\n") for line in f if line.strip()]
-            for line_number, line in enumerate(existing_lines, start=1):
-                validate_ledger_line_ownership(workspace_path, json.loads(line), f"{path} line {line_number}")
+            with open(path, "rb") as f:
+                for line_number, raw in enumerate(f, start=1):
+                    if not raw.strip():
+                        continue
+                    _decision, reason = _classify_ledger_line(workspace_path, raw, f"{path} line {line_number}")
+                    if reason is not None:
+                        preserved.append(MalformedLedgerLine(line_number, reason))
+                    existing_lines.append(raw.rstrip(b"\n"))                       # the exact bytes of every prior line, readable or not
         serialized = redact_value(decision.to_dict())  # S20r (I-11): the stored line is redacted; the Decision is not touched
         serialized["_workspace_id"] = workspace_identity(workspace_path)
         from kriya.control.run_coordinator import current_run_context
@@ -135,12 +197,16 @@ class DecisionLedger:
                 "run_id": context.run_id,
                 "revision": context.record_revision,
             }
-        existing_lines.append(json.dumps(serialized, sort_keys=True))
-        content = "\n".join(existing_lines) + "\n"
+        existing_lines.append(json.dumps(serialized, sort_keys=True).encode("utf-8"))
+        content_bytes = b"\n".join(existing_lines) + b"\n"
 
         os.makedirs(os.path.dirname(path), exist_ok=True)
         expected_revision = read_file_revision(path)
-        write_control_file(workspace_path, path, content, expected_revision=expected_revision, durable=durable)
+        write_control_file(workspace_path, path, content_bytes.decode("utf-8", errors="replace"), expected_revision=expected_revision, durable=durable, content_bytes=content_bytes)
+        if preserved:
+            logger.warning("Decision ledger %s holds %d malformed line(s) (lines %s); they were preserved byte-for-byte and the new decision was appended after them.",
+                           path, len(preserved), ", ".join(str(m.line_number) for m in preserved))
+        return LedgerAppendResult(tuple(preserved))
 
     def record_and_persist(self, workspace_path: str, decision_type: str, **fields: Any) -> Decision:
         decision = self.record(decision_type, **fields)
@@ -159,17 +225,14 @@ def load_decision_ledger(workspace_path: str) -> DecisionLedger:
     path = decision_ledger_path(workspace_path)
     if not os.path.isfile(path):
         return ledger
-    with open(path, "r", encoding="utf-8") as f:
-        for line_number, line in enumerate(f, start=1):
-            line = line.strip()
-            if not line:
+    with open(path, "rb") as f:
+        for line_number, raw in enumerate(f, start=1):
+            if not raw.strip():
                 continue
-            try:
-                payload = json.loads(line)
-                validate_ledger_line_ownership(workspace_path, payload, f"{path} line {line_number}")
-                ledger._decisions.append(Decision.from_dict(payload))
-            except WorkspaceOwnershipError:
-                raise
-            except Exception:
-                logger.warning("Skipping malformed decision-ledger line %d in %s", line_number, path, exc_info=True)
+            decision, reason = _classify_ledger_line(workspace_path, raw, f"{path} line {line_number}")
+            if reason is not None:
+                ledger._malformed_lines.append(MalformedLedgerLine(line_number, reason))
+                logger.warning("Skipping malformed decision-ledger line %d in %s (%s); it is preserved on disk, never repaired", line_number, path, reason)
+                continue
+            ledger._decisions.append(decision)
     return ledger

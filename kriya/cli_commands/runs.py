@@ -366,6 +366,14 @@ def _runs_durable_write_failed(error, as_json: bool) -> None:
     sys.exit(_RUNS_EXIT_PERSISTENCE_FAILED)
 
 
+def _echo_audit_degraded(result) -> None:
+    """B-004: the decision ledger holds lines that cannot be read; they were preserved and the disposition was not blocked by them."""
+    degraded = (result.details or {}).get("audit_degraded")
+    if degraded:
+        lines = ", ".join(str(item["line_number"]) for item in degraded["malformed_ledger_lines"])
+        click.secho(f"Note: the decision ledger has unreadable line(s) {lines}; they were preserved byte-for-byte, not repaired.", fg="yellow", err=True)
+
+
 def _runs_tool_dispose(action: str, subtask_id: str, workspace: str, attempt: Optional[int], legacy: bool, confirmed: bool, operator: Optional[str], as_json: bool) -> None:
     import getpass
 
@@ -399,8 +407,10 @@ def _runs_tool_dispose(action: str, subtask_id: str, workspace: str, attempt: Op
         click.echo(json.dumps(result.to_dict(), indent=2, sort_keys=True))
     elif result.ok:
         click.secho(f"{result.status}: {result.message}", fg="green")
+        _echo_audit_degraded(result)
     else:
         click.secho(f"Refused ({result.reason_code}): {result.message}", fg="red", err=True)
+        _echo_audit_degraded(result)
     if not result.ok:
         sys.exit(_RUNS_EXIT_ACTION_REQUIRED)
 
@@ -431,8 +441,10 @@ def _runs_tool_abandon_direct(run_id: str, workspace: str, confirmed: bool, oper
         click.echo(json.dumps(result.to_dict(), indent=2, sort_keys=True))
     elif result.ok:
         click.secho(f"{result.status}: {result.message}", fg="green")
+        _echo_audit_degraded(result)
     else:
         click.secho(f"Refused ({result.reason_code}): {result.message}", fg="red", err=True)
+        _echo_audit_degraded(result)
     if not result.ok:
         sys.exit(_RUNS_EXIT_ACTION_REQUIRED)
 

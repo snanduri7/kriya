@@ -11,6 +11,7 @@ cannot reach control state, and this writer cannot reach repository files.
 from __future__ import annotations
 
 import os
+from typing import Optional
 
 from kriya.context.workspace_identity import authority_root
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
@@ -26,7 +27,7 @@ class ControlStorePathError(ValueError):
     """A control-state write whose target is not beneath ``.kriya/``."""
 
 
-def write_control_file(workspace_path: str, path: str, content: str, *, expected_revision: str, durable: bool = False) -> str:
+def write_control_file(workspace_path: str, path: str, content: str, *, expected_revision: str, durable: bool = False, content_bytes: Optional[bytes] = None) -> str:
     """Atomically write ``content`` to ``path`` beneath the workspace's
     ``.kriya/`` directory if its base revision is unchanged; returns the new
     revision. A target outside ``.kriya/`` (or whose location cannot be
@@ -38,4 +39,4 @@ def write_control_file(workspace_path: str, path: str, content: str, *, expected
     if path_relation(control_root, path) is not PathRelation.WITHIN and path_relation(authority_control_root, path) is not PathRelation.WITHIN:
         raise ControlStorePathError(f"control-state write outside {control_root!r} refused: {path!r}")
     return commit_revision_grounded_file(path, content, expected_revision=expected_revision,
-                                         workspace_path=workspace_path, durable=durable)
+                                         workspace_path=workspace_path, content_bytes=content_bytes, durable=durable)
