@@ -41,6 +41,28 @@ async def test_the_attempt_number_is_on_disk_when_the_effect_runs_and_a_may_have
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("result,boundary", [(MAY_FAILED, "may_have_effected"), (PRE_REFUSED, "proven_pre_effect")], ids=["may-have-effected", "proven-pre-effect"])
+async def test_every_tool_attempt_is_appended_to_the_decision_ledger_with_its_attempt_and_effect_boundary(tmp_path, result, boundary):
+    """Rule-4 normal output of the broad catch around the ledger append in the enforce loop (`_record_tool_attempt`): when the append works, the
+    history record exists, durable, naming the attempt number, status and boundary - the ControlState still decides what a resume may do."""
+    from kriya.control.decisions import DecisionLedger, load_decision_ledger
+
+    real_append, durable_flags = DecisionLedger.append_to_file, []
+
+    def spy(self, workspace_path, decision, **kwargs):
+        if decision.type == "subtask_attempt":
+            durable_flags.append(kwargs.get("durable"))
+        return real_append(self, workspace_path, decision, **kwargs)
+
+    with patch(f"{C}.subtask_executor.execute", new=AsyncMock(return_value=result)), patch.object(DecisionLedger, "append_to_file", spy):
+        await _enforce(_enforce_engine(tmp_path), tmp_path, _plan())
+    assert durable_flags == [True]                                    # fsync-grade history, not the default best-effort append
+    attempts = [d.to_dict() for d in load_decision_ledger(str(tmp_path)).all() if d.type == "subtask_attempt" and d.fields.get("subtask_id") == "t1"]
+    assert len(attempts) == 1
+    assert (attempts[0]["attempt"], attempts[0]["status"], attempts[0]["execution_method"], attempts[0]["effect_boundary"]) == (1, "failed", "tool", boundary)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("resume", [True, False], ids=["resume", "fresh-run"])
 async def test_a_terminal_failed_attempt_is_never_executed_again_by_a_resume_or_a_fresh_run_and_its_record_survives(tmp_path, resume):
     with patch(f"{C}.subtask_executor.execute", new=AsyncMock(return_value=MAY_FAILED)):

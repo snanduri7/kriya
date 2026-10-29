@@ -279,6 +279,39 @@ def test_an_unreadable_record_under_a_subdirectory_fails_closed(world):
     assert not assess_workspace_commit_state(str(world["repo"])).safe
 
 
+def _plant_pre_rule_commit_evidence(world, state, transaction_id="tx-old"):
+    from kriya.context.workspace_identity import ownership_metadata
+    from kriya.repository.commit import CommitEvidence
+
+    commits = world["sub"] / ".kriya" / "control" / "commits"
+    commits.mkdir(parents=True)
+    payload = CommitEvidence(2, transaction_id, state, 1.0, 2.0, (), {}).to_dict()
+    payload["_workspace"] = ownership_metadata(str(world["repo"]))
+    (commits / f"{transaction_id}.json").write_text(json.dumps(payload))
+
+
+@pytest.mark.parametrize("state_name", ["IN_PROGRESS", "UNCERTAIN"])
+def test_readable_unsettled_commit_evidence_under_a_subdirectory_is_reported_with_its_state_not_as_unreadable(world, state_name):
+    """Rule-4 normal output of the legacy scan's broad catch (nested_control_state): a READABLE document is reported as what it is."""
+    from kriya.repository.commit import CommitState
+
+    _plant_pre_rule_commit_evidence(world, CommitState[state_name])
+    found, complete = nested_control_state(str(world["repo"]))
+    assert complete and [directory for directory, _reason in found] == [str(world["sub"])]
+    reason = found[0][1]
+    assert f"tx-old.json: commit {state_name.lower()}" in reason and "unreadable" not in reason
+    assert not assess_workspace_commit_state(str(world["repo"])).safe
+
+
+def test_settled_commit_evidence_under_a_subdirectory_is_not_a_block(world):
+    from kriya.repository.commit import CommitState
+
+    _plant_pre_rule_commit_evidence(world, CommitState.COMMITTED)
+    found, complete = nested_control_state(str(world["repo"]))
+    assert complete and found == ()
+    assert assess_workspace_commit_state(str(world["repo"])).safe
+
+
 def test_the_legacy_scan_is_bounded_and_says_when_it_did_not_finish(world, monkeypatch):
     import kriya.control.persistence as persistence
 
