@@ -292,6 +292,26 @@ def test_thresholds_have_no_default_and_evaluate_every_status(db, tmp_path):
     assert only_gap["status"] == "INCONCLUSIVE"
 
 
+def test_a_threshold_below_its_sample_floor_is_inconclusive_never_pass(db, tmp_path):
+    """Campaign-A m-2c95fd: "INCONCLUSIVE if any lacks evidence, else PASS" - INSUFFICIENT_EVIDENCE is lacking evidence,
+    and next to a PASS (no FAIL to dominate it) it still keeps the overall result from being PASS."""
+    _log(db, "ok")
+    _log(db, "bad", status="failure", category="no_progress")
+    content = derive_metrics(_runs(db))
+    path = _thresholds(tmp_path, [
+        {"metric": "outcomes.generation.final_verified_success", "comparator": "min", "value": 0.4, "min_samples": 2},
+        {"metric": "outcomes.generation.final_verified_success", "comparator": "min", "value": 0.4, "min_samples": 50},
+    ])
+    thresholds, digest = load_thresholds(path, workspace_root=str(tmp_path / "ws"))
+    insufficient_only = evaluate_thresholds(content, thresholds[1:2], digest)
+    assert [row["status"] for row in insufficient_only["results"]] == ["INSUFFICIENT_EVIDENCE"]
+    assert insufficient_only["status"] == "INCONCLUSIVE"
+    mixed = evaluate_thresholds(content, thresholds, digest)
+    assert [row["status"] for row in mixed["results"]] == ["PASS", "INSUFFICIENT_EVIDENCE"]
+    assert mixed["status"] == "INCONCLUSIVE"
+    assert evaluate_thresholds(content, thresholds[0:1], digest)["status"] == "PASS"   # the satisfied threshold alone
+
+
 def test_threshold_files_are_validated_and_never_inside_the_workspace(tmp_path, db):
     with pytest.raises(ThresholdConfigError, match="unknown metric"):
         evaluate_thresholds(derive_metrics([]), load_thresholds(_thresholds(tmp_path, [
