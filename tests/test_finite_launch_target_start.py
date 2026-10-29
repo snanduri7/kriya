@@ -641,11 +641,26 @@ def test_a_gradle_that_never_started_is_an_environment_outcome_and_acquires_noth
         assert "Gradle compilation failed" not in verdict["output"]
 
 
-def test_the_same_status_and_text_from_a_gradle_that_started_is_still_an_ordinary_failure(tmp_path):
-    """The negative control: neither the exit status nor the message is the evidence - only the backend's never-started fact is."""
+def test_the_same_status_and_text_from_a_gradle_that_started_is_not_a_never_started_outcome(tmp_path):
+    """The negative control: neither the exit status nor the message is the evidence - only the backend's never-started fact is. A Gradle that STARTED and printed the same status and text
+    is therefore never GRADLE_INVOCATION_FAILED. Slice F (COMPILE-GATE-CONVICTION-WITHOUT-VERDICT-001) changed what it IS: a build tool that ran and left no located compiler diagnostic
+    observed nothing about the source, so it is the typed GRADLE_COMPILE_NO_DIAGNOSTICS no-verdict (it used to be called an 'ordinary failure')."""
     from kriya.capabilities.gradle import GradleBuildAdapter
+    from kriya.tools.dependency_execution import GRADLE_COMPILE_NO_DIAGNOSTICS, GRADLE_INVOCATION_FAILED
     validator = _gradle_validator(tmp_path)
     stack, calls = _gradle_runs((126, "kriya-launch: 4: exec: ./gradlew: Permission denied", None))
+    with stack:
+        verdict = GradleBuildAdapter().compile(validator, [], deadline=None)
+    assert verdict["success"] is False and verdict["environment_reason_code"] == GRADLE_COMPILE_NO_DIAGNOSTICS != GRADLE_INVOCATION_FAILED
+    assert "Gradle compilation failed" not in verdict["output"]                          # not a conviction of the source either
+    assert len(calls) == 1
+
+
+def test_the_same_status_with_a_located_compiler_diagnostic_from_a_gradle_that_started_is_an_ordinary_failure(tmp_path):
+    """The other half of the negative control: the same exit status 126 from a Gradle that started and printed a LOCATED javac diagnostic is an ordinary source failure."""
+    from kriya.capabilities.gradle import GradleBuildAdapter
+    validator = _gradle_validator(tmp_path)
+    stack, calls = _gradle_runs((126, f"{tmp_path}/src/main/java/A.java:3: error: cannot find symbol", None))
     with stack:
         verdict = GradleBuildAdapter().compile(validator, [], deadline=None)
     assert verdict["success"] is False and "environment_reason_code" not in verdict and verdict["output"].startswith("Gradle compilation failed")

@@ -211,13 +211,15 @@ def test_run_app_sequence_containment_failure_reaches_infrastructure_classificat
 # --- 9/10/11: ordinary failures remain ordinary failures (no regression) ---
 
 def test_ordinary_maven_compile_failure_remains_ordinary_failure(tmp_path):
+    """Slice F (COMPILE-GATE-CONVICTION-WITHOUT-VERDICT-001): the source is convicted only by a positively LOCATED compiler diagnostic, so the ordinary failure this pins now carries one
+    (a bare `[ERROR] cannot find symbol` with no location is a typed no-verdict - tests/test_slice_f_compile_classifier.py). The assertion is unchanged: it stays an ordinary failure."""
     validator = _contained_validator(tmp_path)
     (tmp_path / "Foo.java").write_text("public class Foo { this is not valid java }")
     validator._run_maven_cmd = lambda *a, **k: {
-        "returncode": 1, "stdout": "", "stderr": "[ERROR] cannot find symbol",
+        "returncode": 1, "stdout": "", "stderr": f"[ERROR] {tmp_path}/Foo.java:[1,26] cannot find symbol",
     }
     result = validator.run_compile_check(["Foo.java"])
-    assert result["success"] is False
+    assert result["success"] is False and "environment_reason_code" not in result
     assert "Maven compilation failed" in result["output"]
 
 
