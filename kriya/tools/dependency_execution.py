@@ -167,6 +167,14 @@ class MavenModelTextAssessment:
     def withhold_acquisition(self) -> bool:
         return self.contaminated is not None or bool(self.malformed_poms)
 
+    @property
+    def text_untrustworthy(self) -> Optional[str]:
+        """Why NO source authority may be drawn from Maven's text (the compile classifier's question): a contaminated POM set, or a POM that is not well-formed XML (Maven stopped there, so a
+        located compiler diagnostic in its output cannot be Maven's). The XML defect itself stays with its existing owner."""
+        if self.contaminated is not None:
+            return self.contaminated
+        return f"not well-formed XML: {', '.join(self.malformed_poms)}" if self.malformed_poms else None
+
 
 def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
@@ -213,8 +221,13 @@ def maven_model_text_assessment(workspace_root: str, *, goals: Sequence[str] = (
                 return MavenModelTextAssessment(contaminated=f"<{name}> in {rel} contains a line break", malformed_poms=tuple(malformed))
         for module in _field_values(project, MAVEN_NEWLINE_ECHO_FIELDS["module"]):
             target = os.path.realpath(os.path.join(os.path.dirname(real), module.strip()))
-            if (target == root or target.startswith(root + os.sep)) and os.path.exists(target):
-                queue.append(os.path.join(target, "pom.xml") if os.path.isdir(target) else target)
+            if not os.path.exists(target):
+                continue                                    # a module that does not exist contributes no POM (Maven reports the missing module itself)
+            if target != root and not target.startswith(root + os.sep):
+                # An existing POM outside the mounted workspace: a contained Maven cannot read it, but this assessment cannot prove that for the run it describes, and it must not claim a complete POM set.
+                return MavenModelTextAssessment(contaminated=f"module {module.strip()!r} in {rel} resolves outside the workspace, so the POM set cannot be assessed completely",
+                                                malformed_poms=tuple(malformed))
+            queue.append(os.path.join(target, "pom.xml") if os.path.isdir(target) else target)
     return MavenModelTextAssessment(malformed_poms=tuple(malformed))
 
 
@@ -272,6 +285,7 @@ MAVEN_COMPILE_OPERATOR_CONFIG_INVALID = "MAVEN_COMPILE_OPERATOR_CONFIG_INVALID" 
 MAVEN_COMPILE_RESOLUTION_UNVERIFIED = "MAVEN_COMPILE_RESOLUTION_UNVERIFIED"      # dependency / plugin resolution, acquisition or transfer failed: ownership of the failure is NOT inferred from text
 GRADLE_COMPILE_RESOLUTION_UNVERIFIED = "GRADLE_COMPILE_RESOLUTION_UNVERIFIED"
 MAVEN_COMPILE_NO_DIAGNOSTICS = "MAVEN_COMPILE_NO_DIAGNOSTICS"              # non-zero exit with no located source diagnostic (empty output, a bare summary, unrelated text)
+MAVEN_COMPILE_MODEL_TEXT_CONTAMINATED = "MAVEN_COMPILE_MODEL_TEXT_CONTAMINATED"  # the candidate's POM set makes Maven's text unattributable: a located "diagnostic" in it may be the candidate's own line
 GRADLE_COMPILE_NO_DIAGNOSTICS = "GRADLE_COMPILE_NO_DIAGNOSTICS"
 # COMPILE-GATE-RAW-JAVAC-CONVICTION-WITHOUT-VERDICT-001 (owner decision 2026-10-28): the raw-javac fallback's twins of the same invariant. javac has no resolution phase; its only
 # source evidence is a diagnostic located at one of the exact source paths it was given (see classify_javac_failure). Compile-specific names: no Maven / Gradle code is reused.
@@ -283,7 +297,7 @@ JAVAC_COMPILE_NO_DIAGNOSTICS = "JAVAC_COMPILE_NO_DIAGNOSTICS"              # non
 COMPILE_NO_VERDICT_CODES = frozenset({
     MAVEN_COMPILE_TIMED_OUT, GRADLE_COMPILE_TIMED_OUT, MAVEN_COMPILE_TERMINATED, GRADLE_COMPILE_TERMINATED, MAVEN_COMPILE_OPERATOR_CONFIG_INVALID,
     MAVEN_COMPILE_RESOLUTION_UNVERIFIED, GRADLE_COMPILE_RESOLUTION_UNVERIFIED, MAVEN_COMPILE_NO_DIAGNOSTICS, GRADLE_COMPILE_NO_DIAGNOSTICS,
-    JAVAC_COMPILE_TIMED_OUT, JAVAC_COMPILE_TERMINATED, JAVAC_COMPILE_NO_DIAGNOSTICS})
+    MAVEN_COMPILE_MODEL_TEXT_CONTAMINATED, JAVAC_COMPILE_TIMED_OUT, JAVAC_COMPILE_TERMINATED, JAVAC_COMPILE_NO_DIAGNOSTICS})
 # The codes of a build tool that DID start or produced no interpretable verdict (the gate words them "returned no trustworthy verdict" instead of "could not start").
 MAVEN_VALIDATE_NO_VERDICT_CODES = frozenset({MAVEN_VALIDATE_TIMED_OUT, MAVEN_VALIDATE_TERMINATED, MAVEN_VALIDATE_RESOLUTION_UNVERIFIED, MAVEN_VALIDATE_NO_DIAGNOSTICS,
                                              MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID, MAVEN_VALIDATE_MODEL_TEXT_CONTAMINATED, MAVEN_COMPILE_INDETERMINATE,
@@ -390,19 +404,25 @@ def _has_resolution_failure(build_system: str, output: str) -> bool:
                if line.startswith("[ERROR]") and not _MAVEN_LOCATED_SOURCE_ERROR_RE.match(line))
 
 
-def classify_compile_failure(build_system: str, returncode: int, timed_out: bool, combined_output: str) -> Optional[str]:
+def classify_compile_failure(build_system: str, returncode: int, timed_out: bool, combined_output: str, *, model_text_untrustworthy: Optional[str] = None) -> Optional[str]:
     """Why a failed (non-zero) ``mvn``/``gradle`` compile may NOT convict the candidate's source: the environment reason code, or None when positively located compiler
     evidence shows the source was judged (a source failure).
 
     Order: a timeout and a host signal kill (no exit status) carry no verdict; Maven's refusal of its own operator documents is not a source verdict; error-level
     resolution / acquisition / transfer failures are NO verdict (whether a bad coordinate or an absent cache entry caused them is not inferred from text); only then does a
     located source diagnostic convict - whatever the exit status, so a build tool killed after javac reported (a contained 128+signal exit) still convicts what javac judged
-    - and a non-zero exit with no located diagnostic is NO verdict (a contained signal-style exit is named as terminated). Captured output is the caller's to preserve."""
+    - and a non-zero exit with no located diagnostic is NO verdict (a contained signal-style exit is named as terminated). Captured output is the caller's to preserve.
+
+    ``model_text_untrustworthy`` (``MavenModelTextAssessment.text_untrustworthy``, Maven only): the candidate's POM set holds a line break in a field Maven echoes, or is not well-formed XML, so
+    a located diagnostic in the output may be the candidate's own forged line (MEASURED: a newline in ``packaging`` convicted the source). No source authority is drawn from that text: the typed
+    stop. A timeout and a signal kill keep their own non-text codes."""
     gradle = build_system == "gradle"
     if timed_out:
         return GRADLE_COMPILE_TIMED_OUT if gradle else MAVEN_COMPILE_TIMED_OUT
     if returncode < 0:
         return GRADLE_COMPILE_TERMINATED if gradle else MAVEN_COMPILE_TERMINATED
+    if not gradle and model_text_untrustworthy is not None:
+        return MAVEN_COMPILE_MODEL_TEXT_CONTAMINATED
     if not gradle and maven_model_read_abort(combined_output):
         return MAVEN_COMPILE_NO_DIAGNOSTICS   # a modelVersion abort (owner decision A): Maven never reached the sources, and text after the opening is the candidate's, so no resolution / located-source scan
     if not gradle and _MAVEN_OPERATOR_CONFIG_RE.search(combined_output):

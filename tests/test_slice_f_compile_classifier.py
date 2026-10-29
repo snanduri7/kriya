@@ -194,7 +194,7 @@ def test_an_ordinary_non_zero_exit_with_no_diagnostic_is_not_called_a_signal(rc)
 # -- the vocabulary and the W2-16 boundary ---------------------------------------------------------------------------------------------
 def test_the_compile_codes_are_compile_specific_and_worded_as_no_verdict_by_the_gate():
     assert COMPILE_NO_VERDICT_CODES <= MAVEN_VALIDATE_NO_VERDICT_CODES
-    assert all("_COMPILE_" in code for code in COMPILE_NO_VERDICT_CODES) and len(COMPILE_NO_VERDICT_CODES) == 12   # 9 Maven/Gradle + the 3 raw-javac twins (COMPILE-GATE-RAW-JAVAC-CONVICTION-WITHOUT-VERDICT-001)
+    assert all("_COMPILE_" in code for code in COMPILE_NO_VERDICT_CODES) and len(COMPILE_NO_VERDICT_CODES) == 13   # 10 Maven/Gradle (incl. MAVEN_COMPILE_MODEL_TEXT_CONTAMINATED, Step-3 residuals) + the 3 raw-javac twins (COMPILE-GATE-RAW-JAVAC-CONVICTION-WITHOUT-VERDICT-001)
     validate_names = {value for name, value in vars(de).items() if name.startswith("MAVEN_VALIDATE_") and isinstance(value, str)
                       and name != "MAVEN_VALIDATE_NO_VERDICT_CODES"}
     assert not (COMPILE_NO_VERDICT_CODES & validate_names)     # no validation-specific code name is reused

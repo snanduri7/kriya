@@ -47,10 +47,12 @@ class MavenBuildAdapter(BuildAdapter):
         propagates."""
         from kriya.tools.dependency_execution import (
             MAVEN_COMPILE_INDETERMINATE,
+            MAVEN_COMPILE_MODEL_TEXT_CONTAMINATED,
             MAVEN_INVOCATION_FAILED,
             classify_compile_failure,
             compile_environment_result,
             compile_no_verdict_result,
+            maven_model_text_assessment,
         )
         from kriya.tools.validate import get_pom_reactor_modules
 
@@ -183,10 +185,14 @@ class MavenBuildAdapter(BuildAdapter):
                 # Slice F (owner decision 2026-10-28): the source is convicted only by a positively located compiler diagnostic. A Maven that ran and failed without one - a
                 # timeout, a signal (host, or a contained 128+signal exit), its own operator settings, an error-level resolution / acquisition / transfer failure (whether a bad
                 # coordinate or an absent cache entry is NOT inferred from text), an empty or bare-summary failure - judged nothing: a typed no-verdict, never a repair request.
-                no_verdict = classify_compile_failure("maven", res["returncode"], bool(res.get("timeout")), captured)
+                # Step-3 residuals (owner decision): a line break in a candidate field Maven echoes (or a POM that is not well-formed XML) makes the located diagnostics in Maven's text possibly the
+                # candidate's own forged lines, so no source conviction is drawn from them - the same assessment the POM-validate gate and the acquisition decision use.
+                untrustworthy = maven_model_text_assessment(v.workspace_path).text_untrustworthy
+                no_verdict = classify_compile_failure("maven", res["returncode"], bool(res.get("timeout")), captured, model_text_untrustworthy=untrustworthy)
                 if no_verdict is not None:
                     return compile_no_verdict_result(v._validation_result(
-                        False, f"Maven returned no trustworthy compilation verdict ({no_verdict}); nothing about the candidate source was judged:\n{captured}",
+                        False, f"Maven returned no trustworthy compilation verdict ({no_verdict}{': ' + untrustworthy if no_verdict == MAVEN_COMPILE_MODEL_TEXT_CONTAMINATED else ''}); "
+                        f"nothing about the candidate source was judged:\n{captured}",
                         {**res, "environment_reason_code": no_verdict}), res)
                 error_output = f"Maven compilation failed:\n{captured}"
                 try:

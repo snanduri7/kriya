@@ -314,27 +314,34 @@ def test_unrelated_repository_xml_is_never_read(tmp_path):
 
 def test_a_module_may_name_a_pom_file_and_cycles_terminate(tmp_path):
     _write(tmp_path, "pom.xml", BASE.format(extra="<packaging>pom</packaging><modules><module>child.xml</module><module>.</module></modules>"))
-    _write(tmp_path, "child.xml", BASE.format(extra="<packaging>pom</packaging><modules><module>..</module></modules>"))
+    _write(tmp_path, "child.xml", BASE.format(extra="<packaging>pom</packaging><modules><module>.</module></modules>"))
     assert maven_model_text_assessment(str(tmp_path)).withhold_acquisition is False
     _write(tmp_path, "child.xml", BASE.replace("<groupId>g</groupId>", "<groupId>g\nh</groupId>").format(extra=""))
     assert "child.xml" in maven_model_text_assessment(str(tmp_path)).contaminated
 
 
-def test_a_module_outside_the_mounted_workspace_is_not_read(tmp_path):
+def test_an_existing_module_outside_the_mounted_workspace_fails_closed_never_silently_omitted(tmp_path):
+    """A contained Maven cannot read it, but the assessment cannot prove that for the run it describes, so it must not claim a complete POM set."""
     outside = tmp_path / "outside"
-    _write(outside, "pom.xml", BASE.replace("<artifactId>a</artifactId>", "<artifactId>a\nb</artifactId>").format(extra=""))
+    _write(outside, "pom.xml", BASE.format(extra=""))
     workspace = tmp_path / "ws"
     _write(workspace, "pom.xml", BASE.format(extra="<packaging>pom</packaging><modules><module>../outside</module></modules>"))
-    assert maven_model_text_assessment(str(workspace)).withhold_acquisition is False
+    assessment = maven_model_text_assessment(str(workspace))
+    assert "outside the workspace" in assessment.contaminated and assessment.text_untrustworthy == assessment.contaminated and assessment.withhold_acquisition
 
 
-def test_a_symlinked_module_escaping_the_workspace_is_not_read(tmp_path):
+def test_a_module_that_does_not_exist_contributes_nothing_even_outside_the_workspace(tmp_path):
+    _write(tmp_path / "ws", "pom.xml", BASE.format(extra="<packaging>pom</packaging><modules><module>../nowhere</module><module>missing</module></modules>"))
+    assert maven_model_text_assessment(str(tmp_path / "ws")).withhold_acquisition is False
+
+
+def test_a_symlinked_module_escaping_the_workspace_fails_closed(tmp_path):
     outside = tmp_path / "outside"
-    _write(outside, "pom.xml", BASE.replace("<artifactId>a</artifactId>", "<artifactId>a\nb</artifactId>").format(extra=""))
+    _write(outside, "pom.xml", BASE.format(extra=""))
     workspace = tmp_path / "ws"
     _write(workspace, "pom.xml", BASE.format(extra="<packaging>pom</packaging><modules><module>link</module></modules>"))
     os.symlink(outside, workspace / "link")
-    assert maven_model_text_assessment(str(workspace)).withhold_acquisition is False
+    assert "outside the workspace" in maven_model_text_assessment(str(workspace)).contaminated
 
 
 def test_a_contaminated_module_is_found_even_when_the_root_is_clean_and_the_root_even_when_a_module_is_malformed(tmp_path):
