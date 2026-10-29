@@ -35,6 +35,7 @@ import os
 import re
 import shlex
 import shutil
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Mapping, Optional, Sequence
@@ -122,6 +123,101 @@ def maven_resolution_decision_view(output: str) -> str:
     return "\n".join(line for line in output.splitlines() if not _MAVEN_MODEL_PROBLEM_WRAPPER_RE.match(line))
 
 
+# Step-3 residuals (owner decision A): a non-numeric `<modelVersion>` aborts Maven while it reads the model, with `[ERROR] Internal error: java.lang.NumberFormatException: For input
+# string: "<value>"` as the first diagnostic (MEASURED, real Maven 3.9.16). Nothing after that opening is a resolution or a model-problem report Maven made about anything else, so
+# the recognised opening is a typed STOP before any resolution / model-problem scan: the candidate's wording can neither start an acquisition nor decide a conviction. A forged opening can
+# at worst cause that STOP. Only this exact NumberFormatException template (ERROR/FATAL level) is recognised; a generic `Internal error:` is not.
+_MAVEN_MODEL_READ_ABORT_RE = re.compile(r"^(?:\[(?:ERROR|FATAL)\][ \t]*)+Internal error: " + _MAVEN_NUMBER_FORMAT_ECHO, re.MULTILINE)
+
+
+def maven_model_read_abort(combined_output: str) -> bool:
+    """True when Maven's output opens with the measured modelVersion model-read abort (see above)."""
+    return bool(_MAVEN_MODEL_READ_ABORT_RE.search(combined_output))
+
+
+# Step-3 residuals (owner decision B-prime): the fields whose raw value Maven prints inside a message and where a LINE BREAK in the value let the rest of the value stand as a line of its own,
+# forging a resolution line (MEASURED, real Maven 3.9.16, WAVE2_STEP3_RESIDUALS_2026-10-29: acquisition + offline retry + the Kriya marker in each). An exact, evidence-driven table -
+# NOT "every non-free-text leaf": `description`, `name`, plugin configuration and every other element are not in it, and neither are the positions Maven does not echo in that form
+# (a self-referencing dependency's scope, the unrecognised / duplicated tag snippets). `modelVersion` is owned by the abort recognition above, not by this table. Paths are relative to
+# `<project>` and name direct children, so a `<parent>` or `<dependencyManagement>` value is never confused with the project's own.
+MAVEN_NEWLINE_ECHO_FIELDS: Mapping[str, Sequence[str]] = {
+    "packaging": ("packaging",),
+    "module": ("modules", "module"),
+    "artifactId": ("artifactId",),
+    "groupId": ("groupId",),
+    "dependency.groupId": ("dependencies", "dependency", "groupId"),
+    "dependency.artifactId": ("dependencies", "dependency", "artifactId"),
+    "dependency.scope": ("dependencies", "dependency", "scope"),
+}
+# Every character `str.splitlines()` (the decision view's splitter) treats as a line boundary, not only "\n": a value cannot start a forged line in the view unless it holds one of these.
+_LINE_BREAK_CHARS = frozenset("\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029")
+_MAX_MODEL_POMS = 256
+
+
+@dataclass(frozen=True)
+class MavenModelTextAssessment:
+    """What the candidate's own POMs say about whether Maven's combined text can be attributed. It is only a precondition for TEXT-derived decisions, never a verdict on the POM:
+    ``contaminated`` names the reason when a measured echo field holds a line break or the POM set could not be read; ``malformed_poms`` lists POMs that are not well-formed XML (Maven
+    stops at them before resolving anything, so they never justify an acquisition, and their conviction stays with its existing owner)."""
+
+    contaminated: Optional[str] = None
+    malformed_poms: Sequence[str] = ()
+
+    @property
+    def withhold_acquisition(self) -> bool:
+        return self.contaminated is not None or bool(self.malformed_poms)
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _field_values(project: ET.Element, path: Sequence[str]) -> List[str]:
+    nodes = [project]
+    for name in path:
+        nodes = [child for node in nodes for child in node if _local_name(child.tag) == name]
+    return ["".join(node.itertext()) for node in nodes]
+
+
+def maven_model_text_assessment(workspace_root: str, *, goals: Sequence[str] = ()) -> MavenModelTextAssessment:
+    """Assess the exact POM set a Maven invocation in ``workspace_root`` reads: the root ``pom.xml`` and, transitively, the POM of every ``<module>`` it declares that exists inside the
+    mounted workspace (a module outside it cannot be read by a contained Maven; a missing one contributes nothing). Fails closed (contaminated) for anything that stops the boolean from being
+    derived: an unreadable file, an unexpected parse failure, more than ``_MAX_MODEL_POMS`` POMs, or an invocation that selects another POM with ``-f`` / ``--file``. A POM that is simply not
+    well-formed XML is recorded in ``malformed_poms`` instead of contaminating (see MavenModelTextAssessment)."""
+    if any(goal in ("-f", "--file") or goal.startswith("--file=") for goal in goals):
+        return MavenModelTextAssessment(contaminated="the Maven invocation selects a POM file with -f/--file, so the POM set is not the workspace root's")
+    root = os.path.realpath(workspace_root)
+    root_pom = os.path.join(root, "pom.xml")
+    if not os.path.isfile(root_pom):
+        return MavenModelTextAssessment()
+    seen: set = set()
+    malformed: List[str] = []
+    queue = [root_pom]
+    while queue:
+        real = os.path.realpath(queue.pop())
+        if real in seen:
+            continue
+        seen.add(real)
+        rel = os.path.relpath(real, root)
+        if len(seen) > _MAX_MODEL_POMS:
+            return MavenModelTextAssessment(contaminated=f"more than {_MAX_MODEL_POMS} POMs in the module graph", malformed_poms=tuple(malformed))
+        try:
+            project = ET.parse(real).getroot()
+        except ET.ParseError:
+            malformed.append(rel)
+            continue
+        except Exception as error:  # noqa: BLE001 - any other failure means the boolean cannot be derived: fail closed, never "clean"
+            return MavenModelTextAssessment(contaminated=f"POM {rel} could not be read ({type(error).__name__})", malformed_poms=tuple(malformed))
+        for name, path in MAVEN_NEWLINE_ECHO_FIELDS.items():
+            if any(_LINE_BREAK_CHARS & set(value) for value in _field_values(project, path)):
+                return MavenModelTextAssessment(contaminated=f"<{name}> in {rel} contains a line break", malformed_poms=tuple(malformed))
+        for module in _field_values(project, MAVEN_NEWLINE_ECHO_FIELDS["module"]):
+            target = os.path.realpath(os.path.join(os.path.dirname(real), module.strip()))
+            if (target == root or target.startswith(root + os.sep)) and os.path.exists(target):
+                queue.append(os.path.join(target, "pom.xml") if os.path.isdir(target) else target)
+    return MavenModelTextAssessment(malformed_poms=tuple(malformed))
+
+
 def classify_maven_offline_failure_text(combined_output: str) -> OfflineFailureKind:
     """The text-only half of `_classify_maven_offline_failure`, factored
     out (SEC-001-P6 Stage 2, 2026-09-11) so a caller with its own
@@ -131,6 +227,8 @@ def classify_maven_offline_failure_text(combined_output: str) -> OfflineFailureK
     empirically-verified Maven offline-error patterns instead of
     duplicating the regex. Callers decide success/failure themselves first
     (this function only classifies WHY a known failure happened)."""
+    if maven_model_read_abort(combined_output):
+        return OfflineFailureKind.ORDINARY_FAILURE   # a modelVersion abort: nothing was resolved, so nothing is missing (see _MAVEN_MODEL_READ_ABORT_RE)
     if _MAVEN_OFFLINE_MISSING_RE.search(maven_resolution_decision_view(combined_output)):
         return OfflineFailureKind.MISSING_DEPENDENCY
     return OfflineFailureKind.ORDINARY_FAILURE
@@ -158,6 +256,7 @@ MAVEN_VALIDATE_TERMINATED = "MAVEN_VALIDATE_TERMINATED"                    # kil
 MAVEN_VALIDATE_RESOLUTION_UNVERIFIED = "MAVEN_VALIDATE_RESOLUTION_UNVERIFIED"  # parent / plugin / dependency resolution or transfer failed: no trustworthy POM verdict
 MAVEN_VALIDATE_NO_DIAGNOSTICS = "MAVEN_VALIDATE_NO_DIAGNOSTICS"            # non-zero exit with no interpretable POM-model diagnostics
 MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID = "MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID"  # Maven refused its OWN configuration (settings / toolchains) before it read the POM
+MAVEN_VALIDATE_MODEL_TEXT_CONTAMINATED = "MAVEN_VALIDATE_MODEL_TEXT_CONTAMINATED"  # a candidate field Maven echoes holds a line break: Maven's text cannot be attributed, so no text-derived verdict
 # F9 (Wave-2; owner decision D6): the compile gate's twins of the same invariant - no compile path returns PASS unless a trustworthy compiler established it. A compile
 # adapter that met an exception or an uninterpretable result observed nothing about the candidate: an environment outcome, never a PASS and never a candidate conviction.
 MAVEN_COMPILE_INDETERMINATE = "MAVEN_COMPILE_INDETERMINATE"                # the Maven compile step raised, or its result could not be interpreted
@@ -187,8 +286,8 @@ COMPILE_NO_VERDICT_CODES = frozenset({
     JAVAC_COMPILE_TIMED_OUT, JAVAC_COMPILE_TERMINATED, JAVAC_COMPILE_NO_DIAGNOSTICS})
 # The codes of a build tool that DID start or produced no interpretable verdict (the gate words them "returned no trustworthy verdict" instead of "could not start").
 MAVEN_VALIDATE_NO_VERDICT_CODES = frozenset({MAVEN_VALIDATE_TIMED_OUT, MAVEN_VALIDATE_TERMINATED, MAVEN_VALIDATE_RESOLUTION_UNVERIFIED, MAVEN_VALIDATE_NO_DIAGNOSTICS,
-                                             MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID, MAVEN_COMPILE_INDETERMINATE, GRADLE_COMPILE_INDETERMINATE,
-                                             JAVAC_COMPILE_INDETERMINATE}) | COMPILE_NO_VERDICT_CODES
+                                             MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID, MAVEN_VALIDATE_MODEL_TEXT_CONTAMINATED, MAVEN_COMPILE_INDETERMINATE,
+                                             GRADLE_COMPILE_INDETERMINATE, JAVAC_COMPILE_INDETERMINATE}) | COMPILE_NO_VERDICT_CODES
 
 
 def compile_environment_result(code: str, output: str) -> Dict[str, Any]:
@@ -232,15 +331,23 @@ _MAVEN_POM_MODEL_PROBLEM_RE = re.compile(
 )
 
 
-def classify_maven_validate_failure(returncode: int, timed_out: bool, combined_output: str) -> Optional[str]:
+def classify_maven_validate_failure(returncode: int, timed_out: bool, combined_output: str, *, model_text_contaminated: Optional[str] = None) -> Optional[str]:
     """Why a failed (non-zero) ``mvn validate`` may NOT convict the POM: the environment reason code, or None when Maven ran and rejected the POM with trustworthy model diagnostics.
 
     Order: a timeout and a signal kill carry no verdict; Maven's own refusal of an operator document (settings / toolchains) is not a POM verdict; resolution / transport evidence (checked BEFORE model problems - a cascade is not a verdict) makes any model message
-    untrustworthy; only then do located POM-model diagnostics convict; a non-zero exit with neither is uninterpretable. Captured output is the caller's to preserve."""
+    untrustworthy; only then do located POM-model diagnostics convict; a non-zero exit with neither is uninterpretable. Captured output is the caller's to preserve.
+
+    ``model_text_contaminated`` (maven_model_text_assessment): when the candidate's own POM set holds a line break in a field Maven echoes, the combined text cannot be attributed, so every
+    text-derived decision below is withheld and the result is the typed stop; a timeout and a signal kill keep their own, non-text codes. A recognised modelVersion abort is the typed
+    no-diagnostics stop before any other text is read."""
     if timed_out:
         return MAVEN_VALIDATE_TIMED_OUT
     if returncode < 0:
         return MAVEN_VALIDATE_TERMINATED
+    if model_text_contaminated is not None:
+        return MAVEN_VALIDATE_MODEL_TEXT_CONTAMINATED
+    if maven_model_read_abort(combined_output):
+        return MAVEN_VALIDATE_NO_DIAGNOSTICS
     if _MAVEN_OPERATOR_CONFIG_RE.search(combined_output):
         return MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID
     if (classify_maven_offline_failure_text(combined_output) is OfflineFailureKind.MISSING_DEPENDENCY
@@ -296,6 +403,8 @@ def classify_compile_failure(build_system: str, returncode: int, timed_out: bool
         return GRADLE_COMPILE_TIMED_OUT if gradle else MAVEN_COMPILE_TIMED_OUT
     if returncode < 0:
         return GRADLE_COMPILE_TERMINATED if gradle else MAVEN_COMPILE_TERMINATED
+    if not gradle and maven_model_read_abort(combined_output):
+        return MAVEN_COMPILE_NO_DIAGNOSTICS   # a modelVersion abort (owner decision A): Maven never reached the sources, and text after the opening is the candidate's, so no resolution / located-source scan
     if not gradle and _MAVEN_OPERATOR_CONFIG_RE.search(combined_output):
         return MAVEN_COMPILE_OPERATOR_CONFIG_INVALID
     if _has_resolution_failure(build_system, combined_output):

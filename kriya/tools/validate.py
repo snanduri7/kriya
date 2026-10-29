@@ -46,6 +46,7 @@ from kriya.tools.dependency_execution import (
     classify_maven_validate_failure,
     log_acquisition_outcome,
     maven_missing_artifact_signature,
+    maven_model_text_assessment,
 )
 from kriya.tools.dependency_execution import (
     MAVEN_VALIDATE_NO_VERDICT_CODES as MAVEN_VALIDATE_NO_VERDICT_CODES,  # re-exported: the gate words these codes (kriya/workflow imports this module, not dependency_execution)
@@ -1764,6 +1765,13 @@ class PolymorphicValidator:
         first_output = first.get("stdout", "") + first.get("stderr", "")
         if classify_maven_offline_failure_text(first_output) != OfflineFailureKind.MISSING_DEPENDENCY:
             return first
+        # Step-3 residuals (owner decision B-prime): the missing-dependency signature was read from Maven's TEXT. If a candidate field Maven echoes holds a line break (or the POM set cannot be
+        # read), that text cannot be attributed to Maven, so it is not allowed to start a registry acquisition; the offline result is returned with its raw output untouched.
+        unattributable = maven_model_text_assessment(cwd, goals=goals)
+        if unattributable.withhold_acquisition:
+            logger.info("mvn %s: the missing-dependency text is not attributable to Maven (%s); no acquisition.", " ".join(goals),
+                        unattributable.contaminated or f"malformed POM(s): {', '.join(unattributable.malformed_poms)}")
+            return first
 
         if _deadline_exhausted():
             return self._acquisition_incomplete(first, goals, "the run's generation deadline left no time to acquire it")
@@ -1956,11 +1964,15 @@ class PolymorphicValidator:
             # F7 (owner decision): only a Maven that RAN and rejected the POM with trustworthy model diagnostics convicts it. A timeout (ProcessController: returncode -1 +
             # timeout=True), a signal kill, resolution / transfer evidence, or a non-zero exit with no interpretable diagnostics is NO verdict: an environment outcome with the
             # captured output preserved, never a POM defect and never offered to the Developer for repair.
-            code = classify_maven_validate_failure(res["returncode"], bool(res.get("timeout")), captured)
+            # Step-3 residuals (owner decision B-prime): a line break in a candidate field Maven echoes makes the combined text unattributable, so no text-derived verdict is drawn from it.
+            contaminated = maven_model_text_assessment(self.workspace_path).contaminated
+            code = classify_maven_validate_failure(res["returncode"], bool(res.get("timeout")), captured, model_text_contaminated=contaminated)
             if code is None:
                 return {"success": False, "output": f"Maven POM validation failed:\n{res['stdout']}\n{res['stderr']}"}
             result: Dict[str, Any] = {"success": False, "environment_reason_code": code, "returncode": res["returncode"],
                                       "output": f"Maven returned no trustworthy POM-validation verdict ({code}):\n{captured}"}
+            if contaminated is not None:
+                result["model_text_contamination"] = contaminated
             if res.get("timeout"):
                 result["timed_out"] = True
             return result

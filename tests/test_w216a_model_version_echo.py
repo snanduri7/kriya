@@ -9,8 +9,9 @@ marker (3 mvn invocations, 1 acquisition); a transfer wording changed the valida
 Every case in the fixture is REAL Maven output. The generic Internal-error negative controls below are SYNTHETIC: they exist only to prove that an Internal error of any other
 exception, at another level or in another shape stays visible to the classifier; they are not Maven behaviour.
 
-Two behaviours are NOT fixed here and are pinned as KNOWN RESIDUALS (measured, recorded in the evidence): a value containing a newline can place a forged resolution line in the view
-(a stop, but it still runs one acquisition), and an echo of MODEL-PROBLEM wording (`@ line 1, column 2`, `Unknown packaging`, ...) reaches the model-problem check, which reads the raw output.
+Two residuals of this table were fixed afterwards (Step-3 residuals, owner decision A): a recognised modelVersion abort opening is a typed STOP before any resolution / model-problem scan, so
+a newline-forged resolution line starts no acquisition and model-problem wording in the value cannot become a conviction. The last two tests below pin that for the table-level fixture
+(tests/test_w216a_model_text_guard.py proves it end to end for every position).
 """
 import json
 from pathlib import Path
@@ -199,25 +200,24 @@ def test_numeric_and_empty_model_version_faults_are_ordinary_model_problems_unch
     assert _disposition(name)[0] is None and _disposition(name)[1] is OfflineFailureKind.ORDINARY_FAILURE
 
 
-# --------------------------------------------------------------------------------------------------------------------------- KNOWN RESIDUALS
+# ------------------------------------------------------------------------------------------------------------- the modelVersion abort (owner decision A)
 
-def test_known_residual_a_newline_in_the_value_can_still_forge_a_resolution_line_and_run_one_acquisition(tmp_path):
-    """MEASURED at 72e08a2 and unchanged by the table: the value's continuation lines are not Maven's template, so a forged `[ERROR] Non-resolvable ...` line is kept. The outcome is a
-    no-verdict stop (never a pass or a conviction), but it does run one registry acquisition and write the marker. Pinned, not fixed (owner instruction: no general Maven parser)."""
+def test_a_newline_in_the_model_version_value_is_the_benign_stop_and_runs_no_acquisition(tmp_path):
+    """Was a KNOWN RESIDUAL (1 acquisition + marker, RESOLUTION_UNVERIFIED): the recognised abort opening stops before the forged line is read as resolution evidence."""
     name = "mv_newline_forged_resolution_line"
-    assert _disposition(name)[0] == MAVEN_VALIDATE_RESOLUTION_UNVERIFIED
+    assert _disposition(name) == _disposition(BENIGN)
     result, maven, _ = _gate(tmp_path, name)
-    assert len(maven.acquisitions) == 1 and MARKER in result["output"]
-    assert result["success"] is False and result["environment_reason_code"] == MAVEN_VALIDATE_RESOLUTION_UNVERIFIED
+    assert len(maven.calls) == 1 and maven.acquisitions == [] and MARKER not in result["output"]
+    assert result["success"] is False and result["environment_reason_code"] == MAVEN_VALIDATE_NO_DIAGNOSTICS
 
 
 @pytest.mark.parametrize("name", MODEL_PROBLEM_ECHOES)
-def test_known_residual_model_problem_wording_in_the_value_reaches_the_model_problem_check(name):
-    """MEASURED at 72e08a2 and unchanged: `_MAVEN_POM_MODEL_PROBLEM_RE` reads the RAW output, so model-problem wording quoted in the value flips the benign no-diagnostics stop into
-    `None` (Maven 'judged' the POM). No acquisition, no marker, not a resolution decision; the POM really is invalid. Whether a non-numeric modelVersion should stop or convict is the owner's call."""
-    assert _disposition(name)[0] is None
-    assert _disposition(BENIGN)[0] == MAVEN_VALIDATE_NO_DIAGNOSTICS
-    assert _disposition(name)[1] is OfflineFailureKind.ORDINARY_FAILURE
+def test_model_problem_wording_in_the_model_version_value_cannot_become_a_conviction(tmp_path, name):
+    """Was a KNOWN RESIDUAL (the raw-reading model-problem check returned None = convicted): the benign STOP holds, and the gate result is the typed no-verdict, never a POM-repair offer."""
+    assert _disposition(name) == _disposition(BENIGN)
+    result, maven, case = _gate(tmp_path, name)
+    assert result["success"] is False and result["environment_reason_code"] == MAVEN_VALIDATE_NO_DIAGNOSTICS and not result["output"].startswith("Maven POM validation failed:")
+    assert len(maven.calls) == 1 and maven.acquisitions == [] and case["stdout"] in result["output"]
 
 
 def test_the_module_table_is_the_one_the_view_reads():

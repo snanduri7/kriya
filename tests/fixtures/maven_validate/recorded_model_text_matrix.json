@@ -1,0 +1,498 @@
+{
+ "_provenance": {
+  "capture_script": "capture_matrix.py (WAVE2_STEP3_RESIDUALS_2026-10-29)",
+  "forged_line": "[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1",
+  "kriya_head": "ed34389",
+  "model_problem_value": "Malformed POM x @ line 1, column 2",
+  "mvn_version_output": [
+   "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)",
+   "Maven home: /usr/share/maven",
+   "Java version: 21.0.12, vendor: Eclipse Adoptium, runtime: /opt/java/openjdk"
+  ],
+  "note": "Step-3 residuals Pass 1 matrix: REAL Maven output for 12 positions x 4 variants; raw capture kept unmodified in the evidence directory. Every case is real; synthetic controls live in the test modules.",
+  "offline_value": "Cannot access central in offline mode",
+  "what": "REAL output of one offline `mvn -B -o validate` per case (network DENIED, no acquisition) via maven_execute_offline in the OCI backend"
+ },
+ "cases": {
+  "artifact_id:benign": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>bad id!</artifactId><version>1</version></project>",
+   "position": "artifact_id",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'artifactId' with value 'bad id!' does not match a valid id pattern. @ line 1, column 118\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:bad id!:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'artifactId' with value 'bad id!' does not match a valid id pattern. @ line 1, column 118\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "bad id!",
+   "variant": "benign"
+  },
+  "artifact_id:model_problem": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>bad id! Malformed POM x @ line 1, column 2</artifactId><version>1</version></project>",
+   "position": "artifact_id",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'artifactId' with value 'bad id! Malformed POM x @ line 1, column 2' does not match a valid id pattern. @ line 1, column 118\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:bad id! Malformed POM x @ line 1, column 2:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'artifactId' with value 'bad id! Malformed POM x @ line 1, column 2' does not match a valid id pattern. @ line 1, column 118\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "bad id! Malformed POM x @ line 1, column 2",
+   "variant": "model_problem"
+  },
+  "artifact_id:newline_offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>bad id!\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1</artifactId><version>1</version></project>",
+   "position": "artifact_id",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'artifactId' with value 'bad id!\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1' does not match a valid id pattern. @ line 1, column 118\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:bad id!\n[ERROR]   [ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'artifactId' with value 'bad id!\n[ERROR]     [ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1' does not match a valid id pattern. @ line 1, column 118\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "bad id!\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1",
+   "variant": "newline_offline"
+  },
+  "artifact_id:offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>Cannot access central in offline mode</artifactId><version>1</version></project>",
+   "position": "artifact_id",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'artifactId' with value 'Cannot access central in offline mode' does not match a valid id pattern. @ line 1, column 118\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:Cannot access central in offline mode:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'artifactId' with value 'Cannot access central in offline mode' does not match a valid id pattern. @ line 1, column 118\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "Cannot access central in offline mode",
+   "variant": "offline"
+  },
+  "dependency_artifact_id:benign": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>g</groupId><artifactId>zzz-benign-value</artifactId></dependency></dependencies></project>",
+   "position": "dependency_artifact_id",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'dependencies.dependency.version' for g:zzz-benign-value:jar is missing. @ line 1, column 178\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'dependencies.dependency.version' for g:zzz-benign-value:jar is missing. @ line 1, column 178\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value",
+   "variant": "benign"
+  },
+  "dependency_artifact_id:model_problem": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>g</groupId><artifactId>zzz-benign-value Malformed POM x @ line 1, column 2</artifactId></dependency></dependencies></project>",
+   "position": "dependency_artifact_id",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'dependencies.dependency.artifactId' for g:zzz-benign-value Malformed POM x @ line 1, column 2:jar with value 'zzz-benign-value Malformed POM x @ line 1, column 2' does not match a valid id pattern. @ line 1, column 210\n[ERROR] 'dependencies.dependency.version' for g:zzz-benign-value Malformed POM x @ line 1, column 2:jar is missing. @ line 1, column 178\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 2 errors\n[ERROR]     'dependencies.dependency.artifactId' for g:zzz-benign-value Malformed POM x @ line 1, column 2:jar with value 'zzz-benign-value Malformed POM x @ line 1, column 2' does not match a valid id pattern. @ line 1, column 210\n[ERROR]     'dependencies.dependency.version' for g:zzz-benign-value Malformed POM x @ line 1, column 2:jar is missing. @ line 1, column 178\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value Malformed POM x @ line 1, column 2",
+   "variant": "model_problem"
+  },
+  "dependency_artifact_id:newline_offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>g</groupId><artifactId>zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1</artifactId></dependency></dependencies></project>",
+   "position": "dependency_artifact_id",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'dependencies.dependency.artifactId' for g:zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1:jar with value 'zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1' does not match a valid id pattern. @ line 1, column 210\n[ERROR] 'dependencies.dependency.version' for g:zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1:jar is missing. @ line 1, column 178\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 2 errors\n[ERROR]     'dependencies.dependency.artifactId' for g:zzz-benign-value\n[ERROR]     [ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1:jar with value 'zzz-benign-value\n[ERROR]     [ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1' does not match a valid id pattern. @ line 1, column 210\n[ERROR]     'dependencies.dependency.version' for g:zzz-benign-value\n[ERROR]     [ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1:jar is missing. @ line 1, column 178\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1",
+   "variant": "newline_offline"
+  },
+  "dependency_artifact_id:offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>g</groupId><artifactId>Cannot access central in offline mode</artifactId></dependency></dependencies></project>",
+   "position": "dependency_artifact_id",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'dependencies.dependency.artifactId' for g:Cannot access central in offline mode:jar with value 'Cannot access central in offline mode' does not match a valid id pattern. @ line 1, column 210\n[ERROR] 'dependencies.dependency.version' for g:Cannot access central in offline mode:jar is missing. @ line 1, column 178\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 2 errors\n[ERROR]     'dependencies.dependency.artifactId' for g:Cannot access central in offline mode:jar with value 'Cannot access central in offline mode' does not match a valid id pattern. @ line 1, column 210\n[ERROR]     'dependencies.dependency.version' for g:Cannot access central in offline mode:jar is missing. @ line 1, column 178\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "Cannot access central in offline mode",
+   "variant": "offline"
+  },
+  "dependency_group_id:benign": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>zzz-benign-value</groupId><artifactId>b</artifactId></dependency></dependencies></project>",
+   "position": "dependency_group_id",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'dependencies.dependency.version' for zzz-benign-value:b:jar is missing. @ line 1, column 178\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'dependencies.dependency.version' for zzz-benign-value:b:jar is missing. @ line 1, column 178\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value",
+   "variant": "benign"
+  },
+  "dependency_group_id:model_problem": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>zzz-benign-value Malformed POM x @ line 1, column 2</groupId><artifactId>b</artifactId></dependency></dependencies></project>",
+   "position": "dependency_group_id",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'dependencies.dependency.groupId' for zzz-benign-value Malformed POM x @ line 1, column 2:b:jar with value 'zzz-benign-value Malformed POM x @ line 1, column 2' does not match a valid id pattern. @ line 1, column 187\n[ERROR] 'dependencies.dependency.version' for zzz-benign-value Malformed POM x @ line 1, column 2:b:jar is missing. @ line 1, column 178\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 2 errors\n[ERROR]     'dependencies.dependency.groupId' for zzz-benign-value Malformed POM x @ line 1, column 2:b:jar with value 'zzz-benign-value Malformed POM x @ line 1, column 2' does not match a valid id pattern. @ line 1, column 187\n[ERROR]     'dependencies.dependency.version' for zzz-benign-value Malformed POM x @ line 1, column 2:b:jar is missing. @ line 1, column 178\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value Malformed POM x @ line 1, column 2",
+   "variant": "model_problem"
+  },
+  "dependency_group_id:newline_offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1</groupId><artifactId>b</artifactId></dependency></dependencies></project>",
+   "position": "dependency_group_id",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'dependencies.dependency.groupId' for zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1:b:jar with value 'zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1' does not match a valid id pattern. @ line 1, column 187\n[ERROR] 'dependencies.dependency.version' for zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1:b:jar is missing. @ line 1, column 178\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 2 errors\n[ERROR]     'dependencies.dependency.groupId' for zzz-benign-value\n[ERROR]     [ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1:b:jar with value 'zzz-benign-value\n[ERROR]     [ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1' does not match a valid id pattern. @ line 1, column 187\n[ERROR]     'dependencies.dependency.version' for zzz-benign-value\n[ERROR]     [ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1:b:jar is missing. @ line 1, column 178\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1",
+   "variant": "newline_offline"
+  },
+  "dependency_group_id:offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>Cannot access central in offline mode</groupId><artifactId>b</artifactId></dependency></dependencies></project>",
+   "position": "dependency_group_id",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'dependencies.dependency.groupId' for Cannot access central in offline mode:b:jar with value 'Cannot access central in offline mode' does not match a valid id pattern. @ line 1, column 187\n[ERROR] 'dependencies.dependency.version' for Cannot access central in offline mode:b:jar is missing. @ line 1, column 178\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 2 errors\n[ERROR]     'dependencies.dependency.groupId' for Cannot access central in offline mode:b:jar with value 'Cannot access central in offline mode' does not match a valid id pattern. @ line 1, column 187\n[ERROR]     'dependencies.dependency.version' for Cannot access central in offline mode:b:jar is missing. @ line 1, column 178\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "Cannot access central in offline mode",
+   "variant": "offline"
+  },
+  "dependency_scope:benign": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>g</groupId><artifactId>b</artifactId><scope>zzz-benign-value</scope></dependency></dependencies></project>",
+   "position": "dependency_scope",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'dependencies.dependency.version' for g:b:jar is missing. @ line 1, column 178\n[WARNING] 'dependencies.dependency.scope' for g:b:jar must be one of [provided, compile, runtime, test, system] but is 'zzz-benign-value'. @ line 1, column 231\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'dependencies.dependency.version' for g:b:jar is missing. @ line 1, column 178\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value",
+   "variant": "benign"
+  },
+  "dependency_scope:model_problem": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>g</groupId><artifactId>b</artifactId><scope>zzz-benign-value Malformed POM x @ line 1, column 2</scope></dependency></dependencies></project>",
+   "position": "dependency_scope",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'dependencies.dependency.version' for g:b:jar is missing. @ line 1, column 178\n[WARNING] 'dependencies.dependency.scope' for g:b:jar must be one of [provided, compile, runtime, test, system] but is 'zzz-benign-value Malformed POM x @ line 1, column 2'. @ line 1, column 231\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'dependencies.dependency.version' for g:b:jar is missing. @ line 1, column 178\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value Malformed POM x @ line 1, column 2",
+   "variant": "model_problem"
+  },
+  "dependency_scope:newline_offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>g</groupId><artifactId>b</artifactId><scope>zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1</scope></dependency></dependencies></project>",
+   "position": "dependency_scope",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'dependencies.dependency.version' for g:b:jar is missing. @ line 1, column 178\n[WARNING] 'dependencies.dependency.scope' for g:b:jar must be one of [provided, compile, runtime, test, system] but is 'zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1'. @ line 1, column 231\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'dependencies.dependency.version' for g:b:jar is missing. @ line 1, column 178\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1",
+   "variant": "newline_offline"
+  },
+  "dependency_scope:offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>g</groupId><artifactId>b</artifactId><scope>Cannot access central in offline mode</scope></dependency></dependencies></project>",
+   "position": "dependency_scope",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'dependencies.dependency.version' for g:b:jar is missing. @ line 1, column 178\n[WARNING] 'dependencies.dependency.scope' for g:b:jar must be one of [provided, compile, runtime, test, system] but is 'Cannot access central in offline mode'. @ line 1, column 231\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'dependencies.dependency.version' for g:b:jar is missing. @ line 1, column 178\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "Cannot access central in offline mode",
+   "variant": "offline"
+  },
+  "dependency_scope_self_reference:benign": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>g</groupId><artifactId>a</artifactId><version>1</version><scope>zzz-benign-value</scope></dependency></dependencies></project>",
+   "position": "dependency_scope_self_reference",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[FATAL] 'dependencies.dependency[g:a:1]' for g:a:1 is referencing itself. @ line 1, column 178\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'dependencies.dependency[g:a:1]' for g:a:1 is referencing itself. @ line 1, column 178\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value",
+   "variant": "benign"
+  },
+  "dependency_scope_self_reference:model_problem": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>g</groupId><artifactId>a</artifactId><version>1</version><scope>zzz-benign-value Malformed POM x @ line 1, column 2</scope></dependency></dependencies></project>",
+   "position": "dependency_scope_self_reference",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[FATAL] 'dependencies.dependency[g:a:1]' for g:a:1 is referencing itself. @ line 1, column 178\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'dependencies.dependency[g:a:1]' for g:a:1 is referencing itself. @ line 1, column 178\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value Malformed POM x @ line 1, column 2",
+   "variant": "model_problem"
+  },
+  "dependency_scope_self_reference:newline_offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>g</groupId><artifactId>a</artifactId><version>1</version><scope>zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1</scope></dependency></dependencies></project>",
+   "position": "dependency_scope_self_reference",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[FATAL] 'dependencies.dependency[g:a:1]' for g:a:1 is referencing itself. @ line 1, column 178\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'dependencies.dependency[g:a:1]' for g:a:1 is referencing itself. @ line 1, column 178\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1",
+   "variant": "newline_offline"
+  },
+  "dependency_scope_self_reference:offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>g</groupId><artifactId>a</artifactId><version>1</version><scope>Cannot access central in offline mode</scope></dependency></dependencies></project>",
+   "position": "dependency_scope_self_reference",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[FATAL] 'dependencies.dependency[g:a:1]' for g:a:1 is referencing itself. @ line 1, column 178\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'dependencies.dependency[g:a:1]' for g:a:1 is referencing itself. @ line 1, column 178\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "Cannot access central in offline mode",
+   "variant": "offline"
+  },
+  "duplicated_tag_seen_snippet:benign": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><!--benign--><version>2</version></project>",
+   "position": "duplicated_tag_seen_snippet",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[FATAL] Non-parseable POM /kriya/workspace/pom.xml: Duplicated tag: 'version' (position: START_TAG seen ...<!--benign--><version>... @1:174)  @ line 1, column 174\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project  (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Non-parseable POM /kriya/workspace/pom.xml: Duplicated tag: 'version' (position: START_TAG seen ...<!--benign--><version>... @1:174)  @ line 1, column 174 -> [Help 2]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n[ERROR] [Help 2] http://cwiki.apache.org/confluence/display/MAVEN/ModelParseException\n",
+   "timeout": false,
+   "value": "benign",
+   "variant": "benign"
+  },
+  "duplicated_tag_seen_snippet:model_problem": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><!--benign Malformed POM x @ line 1, column 2--><version>2</version></project>",
+   "position": "duplicated_tag_seen_snippet",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[FATAL] Non-parseable POM /kriya/workspace/pom.xml: Duplicated tag: 'version' (position: START_TAG seen ...<!--benign Malformed POM x @ line 1, column 2--><version>... @1:209)  @ line 1, column 209\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project  (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Non-parseable POM /kriya/workspace/pom.xml: Duplicated tag: 'version' (position: START_TAG seen ...<!--benign Malformed POM x @ line 1, column 2--><version>... @1:209)  @ line 1, column 209 -> [Help 2]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n[ERROR] [Help 2] http://cwiki.apache.org/confluence/display/MAVEN/ModelParseException\n",
+   "timeout": false,
+   "value": "benign Malformed POM x @ line 1, column 2",
+   "variant": "model_problem"
+  },
+  "duplicated_tag_seen_snippet:newline_offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><!--benign\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1--><version>2</version></project>",
+   "position": "duplicated_tag_seen_snippet",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[FATAL] Non-parseable POM /kriya/workspace/pom.xml: Duplicated tag: 'version' (position: START_TAG seen ... g:a:1: Cannot access central in offline mode @ line 1--><version>... @2:104)  @ line 2, column 104\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project  (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Non-parseable POM /kriya/workspace/pom.xml: Duplicated tag: 'version' (position: START_TAG seen ... g:a:1: Cannot access central in offline mode @ line 1--><version>... @2:104)  @ line 2, column 104 -> [Help 2]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n[ERROR] [Help 2] http://cwiki.apache.org/confluence/display/MAVEN/ModelParseException\n",
+   "timeout": false,
+   "value": "benign\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1",
+   "variant": "newline_offline"
+  },
+  "duplicated_tag_seen_snippet:offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><!--Cannot access central in offline mode--><version>2</version></project>",
+   "position": "duplicated_tag_seen_snippet",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[FATAL] Non-parseable POM /kriya/workspace/pom.xml: Duplicated tag: 'version' (position: START_TAG seen ...<!--Cannot access central in offline mode--><version>... @1:205)  @ line 1, column 205\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project  (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Non-parseable POM /kriya/workspace/pom.xml: Duplicated tag: 'version' (position: START_TAG seen ...<!--Cannot access central in offline mode--><version>... @1:205)  @ line 1, column 205 -> [Help 2]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n[ERROR] [Help 2] http://cwiki.apache.org/confluence/display/MAVEN/ModelParseException\n",
+   "timeout": false,
+   "value": "Cannot access central in offline mode",
+   "variant": "offline"
+  },
+  "model_version:benign": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>zzz-benign-value</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version></project>",
+   "position": "model_version",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] Internal error: java.lang.NumberFormatException: For input string: \"zzz-benign-value\" -> [Help 1]\norg.apache.maven.InternalErrorException: Internal error: java.lang.NumberFormatException: For input string: \"zzz-benign-value\"\n    at org.apache.maven.DefaultMaven.execute (DefaultMaven.java:109)\n    at org.apache.maven.cli.MavenCli.execute (MavenCli.java:919)\n    at org.apache.maven.cli.MavenCli.doMain (MavenCli.java:285)\n    at org.apache.maven.cli.MavenCli.main (MavenCli.java:207)\n    at jdk.internal.reflect.DirectMethodHandleAccessor.invoke (DirectMethodHandleAccessor.java:103)\n    at java.lang.reflect.Method.invoke (Method.java:580)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.launchEnhanced (Launcher.java:255)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.launch (Launcher.java:201)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.mainWithExitCode (Launcher.java:362)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.main (Launcher.java:314)\nCaused by: java.lang.NumberFormatException: For input string: \"zzz-benign-value\"\n    at java.lang.NumberFormatException.forInputString (NumberFormatException.java:67)\n    at java.lang.Long.parseLong (Long.java:709)\n    at java.lang.Long.valueOf (Long.java:1157)\n    at org.apache.maven.model.validation.DefaultModelValidator.compareModelVersions (DefaultModelValidator.java:1536)\n    at org.apache.maven.model.validation.DefaultModelValidator.validateModelVersion (DefaultModelValidator.java:1480)\n    at org.apache.maven.model.validation.DefaultModelValidator.validateRawModel (DefaultModelValidator.java:164)\n    at org.apache.maven.model.building.DefaultModelBuilder.readModel (DefaultModelBuilder.java:649)\n    at org.apache.maven.model.building.DefaultModelBuilder.build (DefaultModelBuilder.java:262)\n    at org.apache.maven.model.building.DefaultModelBuilder.build (DefaultModelBuilder.java:248)\n    at org.apache.maven.project.DefaultProjectBuilder.build (DefaultProjectBuilder.java:447)\n    at org.apache.maven.project.DefaultProjectBuilder.build (DefaultProjectBuilder.java:410)\n    at org.apache.maven.project.DefaultProjectBuilder.build (DefaultProjectBuilder.java:367)\n    at org.apache.maven.graph.DefaultGraphBuilder.collectProjects (DefaultGraphBuilder.java:351)\n    at org.apache.maven.graph.DefaultGraphBuilder.getProjectsForMavenReactor (DefaultGraphBuilder.java:342)\n    at org.apache.maven.graph.DefaultGraphBuilder.build (DefaultGraphBuilder.java:76)\n    at org.apache.maven.DefaultMaven.buildGraph (DefaultMaven.java:448)\n    at org.apache.maven.DefaultMaven.doExecute (DefaultMaven.java:197)\n    at org.apache.maven.DefaultMaven.doExecute (DefaultMaven.java:173)\n    at org.apache.maven.DefaultMaven.execute (DefaultMaven.java:101)\n    at org.apache.maven.cli.MavenCli.execute (MavenCli.java:919)\n    at org.apache.maven.cli.MavenCli.doMain (MavenCli.java:285)\n    at org.apache.maven.cli.MavenCli.main (MavenCli.java:207)\n    at jdk.internal.reflect.DirectMethodHandleAccessor.invoke (DirectMethodHandleAccessor.java:103)\n    at java.lang.reflect.Method.invoke (Method.java:580)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.launchEnhanced (Launcher.java:255)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.launch (Launcher.java:201)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.mainWithExitCode (Launcher.java:362)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.main (Launcher.java:314)\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/InternalErrorException\n",
+   "timeout": false,
+   "value": "zzz-benign-value",
+   "variant": "benign"
+  },
+  "model_version:model_problem": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>zzz-benign-value Malformed POM x @ line 1, column 2</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version></project>",
+   "position": "model_version",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] Internal error: java.lang.NumberFormatException: For input string: \"zzz-benign-value Malformed POM x @ line 1, column 2\" -> [Help 1]\norg.apache.maven.InternalErrorException: Internal error: java.lang.NumberFormatException: For input string: \"zzz-benign-value Malformed POM x @ line 1, column 2\"\n    at org.apache.maven.DefaultMaven.execute (DefaultMaven.java:109)\n    at org.apache.maven.cli.MavenCli.execute (MavenCli.java:919)\n    at org.apache.maven.cli.MavenCli.doMain (MavenCli.java:285)\n    at org.apache.maven.cli.MavenCli.main (MavenCli.java:207)\n    at jdk.internal.reflect.DirectMethodHandleAccessor.invoke (DirectMethodHandleAccessor.java:103)\n    at java.lang.reflect.Method.invoke (Method.java:580)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.launchEnhanced (Launcher.java:255)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.launch (Launcher.java:201)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.mainWithExitCode (Launcher.java:362)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.main (Launcher.java:314)\nCaused by: java.lang.NumberFormatException: For input string: \"zzz-benign-value Malformed POM x @ line 1, column 2\"\n    at java.lang.NumberFormatException.forInputString (NumberFormatException.java:67)\n    at java.lang.Long.parseLong (Long.java:709)\n    at java.lang.Long.valueOf (Long.java:1157)\n    at org.apache.maven.model.validation.DefaultModelValidator.compareModelVersions (DefaultModelValidator.java:1536)\n    at org.apache.maven.model.validation.DefaultModelValidator.validateModelVersion (DefaultModelValidator.java:1480)\n    at org.apache.maven.model.validation.DefaultModelValidator.validateRawModel (DefaultModelValidator.java:164)\n    at org.apache.maven.model.building.DefaultModelBuilder.readModel (DefaultModelBuilder.java:649)\n    at org.apache.maven.model.building.DefaultModelBuilder.build (DefaultModelBuilder.java:262)\n    at org.apache.maven.model.building.DefaultModelBuilder.build (DefaultModelBuilder.java:248)\n    at org.apache.maven.project.DefaultProjectBuilder.build (DefaultProjectBuilder.java:447)\n    at org.apache.maven.project.DefaultProjectBuilder.build (DefaultProjectBuilder.java:410)\n    at org.apache.maven.project.DefaultProjectBuilder.build (DefaultProjectBuilder.java:367)\n    at org.apache.maven.graph.DefaultGraphBuilder.collectProjects (DefaultGraphBuilder.java:351)\n    at org.apache.maven.graph.DefaultGraphBuilder.getProjectsForMavenReactor (DefaultGraphBuilder.java:342)\n    at org.apache.maven.graph.DefaultGraphBuilder.build (DefaultGraphBuilder.java:76)\n    at org.apache.maven.DefaultMaven.buildGraph (DefaultMaven.java:448)\n    at org.apache.maven.DefaultMaven.doExecute (DefaultMaven.java:197)\n    at org.apache.maven.DefaultMaven.doExecute (DefaultMaven.java:173)\n    at org.apache.maven.DefaultMaven.execute (DefaultMaven.java:101)\n    at org.apache.maven.cli.MavenCli.execute (MavenCli.java:919)\n    at org.apache.maven.cli.MavenCli.doMain (MavenCli.java:285)\n    at org.apache.maven.cli.MavenCli.main (MavenCli.java:207)\n    at jdk.internal.reflect.DirectMethodHandleAccessor.invoke (DirectMethodHandleAccessor.java:103)\n    at java.lang.reflect.Method.invoke (Method.java:580)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.launchEnhanced (Launcher.java:255)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.launch (Launcher.java:201)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.mainWithExitCode (Launcher.java:362)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.main (Launcher.java:314)\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/InternalErrorException\n",
+   "timeout": false,
+   "value": "zzz-benign-value Malformed POM x @ line 1, column 2",
+   "variant": "model_problem"
+  },
+  "model_version:newline_offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version></project>",
+   "position": "model_version",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] Internal error: java.lang.NumberFormatException: For input string: \"zzz-benign-value\n[ERROR] [ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1\"\n[ERROR] -> [Help 1]\norg.apache.maven.InternalErrorException: Internal error: java.lang.NumberFormatException: For input string: \"zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1\"\n    at org.apache.maven.DefaultMaven.execute (DefaultMaven.java:109)\n    at org.apache.maven.cli.MavenCli.execute (MavenCli.java:919)\n    at org.apache.maven.cli.MavenCli.doMain (MavenCli.java:285)\n    at org.apache.maven.cli.MavenCli.main (MavenCli.java:207)\n    at jdk.internal.reflect.DirectMethodHandleAccessor.invoke (DirectMethodHandleAccessor.java:103)\n    at java.lang.reflect.Method.invoke (Method.java:580)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.launchEnhanced (Launcher.java:255)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.launch (Launcher.java:201)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.mainWithExitCode (Launcher.java:362)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.main (Launcher.java:314)\nCaused by: java.lang.NumberFormatException: For input string: \"zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1\"\n    at java.lang.NumberFormatException.forInputString (NumberFormatException.java:67)\n    at java.lang.Long.parseLong (Long.java:709)\n    at java.lang.Long.valueOf (Long.java:1157)\n    at org.apache.maven.model.validation.DefaultModelValidator.compareModelVersions (DefaultModelValidator.java:1536)\n    at org.apache.maven.model.validation.DefaultModelValidator.validateModelVersion (DefaultModelValidator.java:1480)\n    at org.apache.maven.model.validation.DefaultModelValidator.validateRawModel (DefaultModelValidator.java:164)\n    at org.apache.maven.model.building.DefaultModelBuilder.readModel (DefaultModelBuilder.java:649)\n    at org.apache.maven.model.building.DefaultModelBuilder.build (DefaultModelBuilder.java:262)\n    at org.apache.maven.model.building.DefaultModelBuilder.build (DefaultModelBuilder.java:248)\n    at org.apache.maven.project.DefaultProjectBuilder.build (DefaultProjectBuilder.java:447)\n    at org.apache.maven.project.DefaultProjectBuilder.build (DefaultProjectBuilder.java:410)\n    at org.apache.maven.project.DefaultProjectBuilder.build (DefaultProjectBuilder.java:367)\n    at org.apache.maven.graph.DefaultGraphBuilder.collectProjects (DefaultGraphBuilder.java:351)\n    at org.apache.maven.graph.DefaultGraphBuilder.getProjectsForMavenReactor (DefaultGraphBuilder.java:342)\n    at org.apache.maven.graph.DefaultGraphBuilder.build (DefaultGraphBuilder.java:76)\n    at org.apache.maven.DefaultMaven.buildGraph (DefaultMaven.java:448)\n    at org.apache.maven.DefaultMaven.doExecute (DefaultMaven.java:197)\n    at org.apache.maven.DefaultMaven.doExecute (DefaultMaven.java:173)\n    at org.apache.maven.DefaultMaven.execute (DefaultMaven.java:101)\n    at org.apache.maven.cli.MavenCli.execute (MavenCli.java:919)\n    at org.apache.maven.cli.MavenCli.doMain (MavenCli.java:285)\n    at org.apache.maven.cli.MavenCli.main (MavenCli.java:207)\n    at jdk.internal.reflect.DirectMethodHandleAccessor.invoke (DirectMethodHandleAccessor.java:103)\n    at java.lang.reflect.Method.invoke (Method.java:580)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.launchEnhanced (Launcher.java:255)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.launch (Launcher.java:201)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.mainWithExitCode (Launcher.java:362)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.main (Launcher.java:314)\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/InternalErrorException\n",
+   "timeout": false,
+   "value": "zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1",
+   "variant": "newline_offline"
+  },
+  "model_version:offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>Cannot access central in offline mode</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version></project>",
+   "position": "model_version",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] Internal error: java.lang.NumberFormatException: For input string: \"Cannot access central in offline mode\" -> [Help 1]\norg.apache.maven.InternalErrorException: Internal error: java.lang.NumberFormatException: For input string: \"Cannot access central in offline mode\"\n    at org.apache.maven.DefaultMaven.execute (DefaultMaven.java:109)\n    at org.apache.maven.cli.MavenCli.execute (MavenCli.java:919)\n    at org.apache.maven.cli.MavenCli.doMain (MavenCli.java:285)\n    at org.apache.maven.cli.MavenCli.main (MavenCli.java:207)\n    at jdk.internal.reflect.DirectMethodHandleAccessor.invoke (DirectMethodHandleAccessor.java:103)\n    at java.lang.reflect.Method.invoke (Method.java:580)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.launchEnhanced (Launcher.java:255)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.launch (Launcher.java:201)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.mainWithExitCode (Launcher.java:362)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.main (Launcher.java:314)\nCaused by: java.lang.NumberFormatException: For input string: \"Cannot access central in offline mode\"\n    at java.lang.NumberFormatException.forInputString (NumberFormatException.java:67)\n    at java.lang.Long.parseLong (Long.java:709)\n    at java.lang.Long.valueOf (Long.java:1157)\n    at org.apache.maven.model.validation.DefaultModelValidator.compareModelVersions (DefaultModelValidator.java:1536)\n    at org.apache.maven.model.validation.DefaultModelValidator.validateModelVersion (DefaultModelValidator.java:1480)\n    at org.apache.maven.model.validation.DefaultModelValidator.validateRawModel (DefaultModelValidator.java:164)\n    at org.apache.maven.model.building.DefaultModelBuilder.readModel (DefaultModelBuilder.java:649)\n    at org.apache.maven.model.building.DefaultModelBuilder.build (DefaultModelBuilder.java:262)\n    at org.apache.maven.model.building.DefaultModelBuilder.build (DefaultModelBuilder.java:248)\n    at org.apache.maven.project.DefaultProjectBuilder.build (DefaultProjectBuilder.java:447)\n    at org.apache.maven.project.DefaultProjectBuilder.build (DefaultProjectBuilder.java:410)\n    at org.apache.maven.project.DefaultProjectBuilder.build (DefaultProjectBuilder.java:367)\n    at org.apache.maven.graph.DefaultGraphBuilder.collectProjects (DefaultGraphBuilder.java:351)\n    at org.apache.maven.graph.DefaultGraphBuilder.getProjectsForMavenReactor (DefaultGraphBuilder.java:342)\n    at org.apache.maven.graph.DefaultGraphBuilder.build (DefaultGraphBuilder.java:76)\n    at org.apache.maven.DefaultMaven.buildGraph (DefaultMaven.java:448)\n    at org.apache.maven.DefaultMaven.doExecute (DefaultMaven.java:197)\n    at org.apache.maven.DefaultMaven.doExecute (DefaultMaven.java:173)\n    at org.apache.maven.DefaultMaven.execute (DefaultMaven.java:101)\n    at org.apache.maven.cli.MavenCli.execute (MavenCli.java:919)\n    at org.apache.maven.cli.MavenCli.doMain (MavenCli.java:285)\n    at org.apache.maven.cli.MavenCli.main (MavenCli.java:207)\n    at jdk.internal.reflect.DirectMethodHandleAccessor.invoke (DirectMethodHandleAccessor.java:103)\n    at java.lang.reflect.Method.invoke (Method.java:580)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.launchEnhanced (Launcher.java:255)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.launch (Launcher.java:201)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.mainWithExitCode (Launcher.java:362)\n    at org.codehaus.plexus.classworlds.launcher.Launcher.main (Launcher.java:314)\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/InternalErrorException\n",
+   "timeout": false,
+   "value": "Cannot access central in offline mode",
+   "variant": "offline"
+  },
+  "module_name:benign": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><packaging>pom</packaging><modules><module>zzz-benign-value</module></modules></project>",
+   "position": "module_name",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] Child module /kriya/workspace/zzz-benign-value of /kriya/workspace/pom.xml does not exist @ \n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Child module /kriya/workspace/zzz-benign-value of /kriya/workspace/pom.xml does not exist\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value",
+   "variant": "benign"
+  },
+  "module_name:model_problem": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><packaging>pom</packaging><modules><module>zzz-benign-value Malformed POM x @ line 1, column 2</module></modules></project>",
+   "position": "module_name",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] Child module /kriya/workspace/zzz-benign-value Malformed POM x @ line 1, column 2 of /kriya/workspace/pom.xml does not exist @ \n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Child module /kriya/workspace/zzz-benign-value Malformed POM x @ line 1, column 2 of /kriya/workspace/pom.xml does not exist\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value Malformed POM x @ line 1, column 2",
+   "variant": "model_problem"
+  },
+  "module_name:newline_offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><packaging>pom</packaging><modules><module>zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1</module></modules></project>",
+   "position": "module_name",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] Child module /kriya/workspace/zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1 of /kriya/workspace/pom.xml does not exist @ \n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Child module /kriya/workspace/zzz-benign-value\n[ERROR]     [ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1 of /kriya/workspace/pom.xml does not exist\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1",
+   "variant": "newline_offline"
+  },
+  "module_name:offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><packaging>pom</packaging><modules><module>Cannot access central in offline mode</module></modules></project>",
+   "position": "module_name",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] Child module /kriya/workspace/Cannot access central in offline mode of /kriya/workspace/pom.xml does not exist @ \n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Child module /kriya/workspace/Cannot access central in offline mode of /kriya/workspace/pom.xml does not exist\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "Cannot access central in offline mode",
+   "variant": "offline"
+  },
+  "packaging:benign": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><packaging>zzz-benign-value</packaging></project>",
+   "position": "packaging",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] Unknown packaging: zzz-benign-value @ line 1, column 163\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Unknown packaging: zzz-benign-value @ line 1, column 163\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value",
+   "variant": "benign"
+  },
+  "packaging:model_problem": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><packaging>zzz-benign-value Malformed POM x @ line 1, column 2</packaging></project>",
+   "position": "packaging",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] Unknown packaging: zzz-benign-value Malformed POM x @ line 1, column 2 @ line 1, column 163\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Unknown packaging: zzz-benign-value Malformed POM x @ line 1, column 2 @ line 1, column 163\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value Malformed POM x @ line 1, column 2",
+   "variant": "model_problem"
+  },
+  "packaging:newline_offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><packaging>zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1</packaging></project>",
+   "position": "packaging",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] Unknown packaging: zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1 @ line 1, column 163\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Unknown packaging: zzz-benign-value\n[ERROR]     [ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1 @ line 1, column 163\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1",
+   "variant": "newline_offline"
+  },
+  "packaging:offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><packaging>Cannot access central in offline mode</packaging></project>",
+   "position": "packaging",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] Unknown packaging: Cannot access central in offline mode @ line 1, column 163\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Unknown packaging: Cannot access central in offline mode @ line 1, column 163\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "Cannot access central in offline mode",
+   "variant": "offline"
+  },
+  "parent_relative_path:benign": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><parent><groupId>g</groupId><artifactId>p</artifactId><version>1</version><relativePath>zzz-benign-value</relativePath></parent><groupId>g</groupId><artifactId>a</artifactId><version>1</version></project>",
+   "position": "parent_relative_path",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[FATAL] Non-resolvable parent POM for g:a:1: The following artifacts could not be resolved: g:p:pom:1 (absent): Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact g:p:pom:1 has not been downloaded from it before. and 'parent.relativePath' points at wrong local POM @ line 1, column 94\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Non-resolvable parent POM for g:a:1: The following artifacts could not be resolved: g:p:pom:1 (absent): Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact g:p:pom:1 has not been downloaded from it before. and 'parent.relativePath' points at wrong local POM @ line 1, column 94 -> [Help 2]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n[ERROR] [Help 2] http://cwiki.apache.org/confluence/display/MAVEN/UnresolvableModelException\n",
+   "timeout": false,
+   "value": "zzz-benign-value",
+   "variant": "benign"
+  },
+  "parent_relative_path:model_problem": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><parent><groupId>g</groupId><artifactId>p</artifactId><version>1</version><relativePath>zzz-benign-value Malformed POM x @ line 1, column 2</relativePath></parent><groupId>g</groupId><artifactId>a</artifactId><version>1</version></project>",
+   "position": "parent_relative_path",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[FATAL] Non-resolvable parent POM for g:a:1: The following artifacts could not be resolved: g:p:pom:1 (absent): Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact g:p:pom:1 has not been downloaded from it before. and 'parent.relativePath' points at wrong local POM @ line 1, column 94\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Non-resolvable parent POM for g:a:1: The following artifacts could not be resolved: g:p:pom:1 (absent): Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact g:p:pom:1 has not been downloaded from it before. and 'parent.relativePath' points at wrong local POM @ line 1, column 94 -> [Help 2]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n[ERROR] [Help 2] http://cwiki.apache.org/confluence/display/MAVEN/UnresolvableModelException\n",
+   "timeout": false,
+   "value": "zzz-benign-value Malformed POM x @ line 1, column 2",
+   "variant": "model_problem"
+  },
+  "parent_relative_path:newline_offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><parent><groupId>g</groupId><artifactId>p</artifactId><version>1</version><relativePath>zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1</relativePath></parent><groupId>g</groupId><artifactId>a</artifactId><version>1</version></project>",
+   "position": "parent_relative_path",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[FATAL] Non-resolvable parent POM for g:a:1: The following artifacts could not be resolved: g:p:pom:1 (absent): Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact g:p:pom:1 has not been downloaded from it before. and 'parent.relativePath' points at wrong local POM @ line 1, column 94\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Non-resolvable parent POM for g:a:1: The following artifacts could not be resolved: g:p:pom:1 (absent): Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact g:p:pom:1 has not been downloaded from it before. and 'parent.relativePath' points at wrong local POM @ line 1, column 94 -> [Help 2]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n[ERROR] [Help 2] http://cwiki.apache.org/confluence/display/MAVEN/UnresolvableModelException\n",
+   "timeout": false,
+   "value": "zzz-benign-value\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1",
+   "variant": "newline_offline"
+  },
+  "parent_relative_path:offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><parent><groupId>g</groupId><artifactId>p</artifactId><version>1</version><relativePath>Cannot access central in offline mode</relativePath></parent><groupId>g</groupId><artifactId>a</artifactId><version>1</version></project>",
+   "position": "parent_relative_path",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[FATAL] Non-resolvable parent POM for g:a:1: The following artifacts could not be resolved: g:p:pom:1 (absent): Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact g:p:pom:1 has not been downloaded from it before. and 'parent.relativePath' points at wrong local POM @ line 1, column 94\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Non-resolvable parent POM for g:a:1: The following artifacts could not be resolved: g:p:pom:1 (absent): Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact g:p:pom:1 has not been downloaded from it before. and 'parent.relativePath' points at wrong local POM @ line 1, column 94 -> [Help 2]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n[ERROR] [Help 2] http://cwiki.apache.org/confluence/display/MAVEN/UnresolvableModelException\n",
+   "timeout": false,
+   "value": "Cannot access central in offline mode",
+   "variant": "offline"
+  },
+  "project_group_id:benign": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>bad id!</groupId><artifactId>a</artifactId><version>1</version></project>",
+   "position": "project_group_id",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'groupId' with value 'bad id!' does not match a valid id pattern. @ line 1, column 95\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project bad id!:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'groupId' with value 'bad id!' does not match a valid id pattern. @ line 1, column 95\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "bad id!",
+   "variant": "benign"
+  },
+  "project_group_id:model_problem": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>bad id! Malformed POM x @ line 1, column 2</groupId><artifactId>a</artifactId><version>1</version></project>",
+   "position": "project_group_id",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'groupId' with value 'bad id! Malformed POM x @ line 1, column 2' does not match a valid id pattern. @ line 1, column 95\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project bad id! Malformed POM x @ line 1, column 2:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'groupId' with value 'bad id! Malformed POM x @ line 1, column 2' does not match a valid id pattern. @ line 1, column 95\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "bad id! Malformed POM x @ line 1, column 2",
+   "variant": "model_problem"
+  },
+  "project_group_id:newline_offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>bad id!\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1</groupId><artifactId>a</artifactId><version>1</version></project>",
+   "position": "project_group_id",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'groupId' with value 'bad id!\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1' does not match a valid id pattern. @ line 1, column 95\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project bad id!\n[ERROR]   [ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'groupId' with value 'bad id!\n[ERROR]     [ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1' does not match a valid id pattern. @ line 1, column 95\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "bad id!\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1",
+   "variant": "newline_offline"
+  },
+  "project_group_id:offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>Cannot access central in offline mode</groupId><artifactId>a</artifactId><version>1</version></project>",
+   "position": "project_group_id",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] 'groupId' with value 'Cannot access central in offline mode' does not match a valid id pattern. @ line 1, column 95\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project Cannot access central in offline mode:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     'groupId' with value 'Cannot access central in offline mode' does not match a valid id pattern. @ line 1, column 95\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n",
+   "timeout": false,
+   "value": "Cannot access central in offline mode",
+   "variant": "offline"
+  },
+  "unrecognised_tag_seen_snippet:benign": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><!--benign--><unknownTag/></project>",
+   "position": "unrecognised_tag_seen_snippet",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] Malformed POM /kriya/workspace/pom.xml: Unrecognised tag: 'unknownTag' (position: START_TAG seen ...<!--benign--><unknownTag/>... @1:178)  @ /kriya/workspace/pom.xml, line 1, column 178\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Malformed POM /kriya/workspace/pom.xml: Unrecognised tag: 'unknownTag' (position: START_TAG seen ...<!--benign--><unknownTag/>... @1:178)  @ /kriya/workspace/pom.xml, line 1, column 178 -> [Help 2]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n[ERROR] [Help 2] http://cwiki.apache.org/confluence/display/MAVEN/ModelParseException\n",
+   "timeout": false,
+   "value": "benign",
+   "variant": "benign"
+  },
+  "unrecognised_tag_seen_snippet:model_problem": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><!--benign Malformed POM x @ line 1, column 2--><unknownTag/></project>",
+   "position": "unrecognised_tag_seen_snippet",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] Malformed POM /kriya/workspace/pom.xml: Unrecognised tag: 'unknownTag' (position: START_TAG seen ...<!--benign Malformed POM x @ line 1, column 2--><unknownTag/>... @1:213)  @ /kriya/workspace/pom.xml, line 1, column 213\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Malformed POM /kriya/workspace/pom.xml: Unrecognised tag: 'unknownTag' (position: START_TAG seen ...<!--benign Malformed POM x @ line 1, column 2--><unknownTag/>... @1:213)  @ /kriya/workspace/pom.xml, line 1, column 213 -> [Help 2]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n[ERROR] [Help 2] http://cwiki.apache.org/confluence/display/MAVEN/ModelParseException\n",
+   "timeout": false,
+   "value": "benign Malformed POM x @ line 1, column 2",
+   "variant": "model_problem"
+  },
+  "unrecognised_tag_seen_snippet:newline_offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><!--benign\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1--><unknownTag/></project>",
+   "position": "unrecognised_tag_seen_snippet",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] Malformed POM /kriya/workspace/pom.xml: Unrecognised tag: 'unknownTag' (position: START_TAG seen ...:1: Cannot access central in offline mode @ line 1--><unknownTag/>... @2:108)  @ /kriya/workspace/pom.xml, line 2, column 108\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Malformed POM /kriya/workspace/pom.xml: Unrecognised tag: 'unknownTag' (position: START_TAG seen ...:1: Cannot access central in offline mode @ line 1--><unknownTag/>... @2:108)  @ /kriya/workspace/pom.xml, line 2, column 108 -> [Help 2]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n[ERROR] [Help 2] http://cwiki.apache.org/confluence/display/MAVEN/ModelParseException\n",
+   "timeout": false,
+   "value": "benign\n[ERROR] Non-resolvable parent POM for g:a:1: Cannot access central in offline mode @ line 1",
+   "variant": "newline_offline"
+  },
+  "unrecognised_tag_seen_snippet:offline": {
+   "pom": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId><version>1</version><!--Cannot access central in offline mode--><unknownTag/></project>",
+   "position": "unrecognised_tag_seen_snippet",
+   "returncode": 1,
+   "stderr": "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+   "stdout": "[INFO] Scanning for projects...\n[ERROR] [ERROR] Some problems were encountered while processing the POMs:\n[ERROR] Malformed POM /kriya/workspace/pom.xml: Unrecognised tag: 'unknownTag' (position: START_TAG seen ...<!--Cannot access central in offline mode--><unknownTag/>... @1:209)  @ /kriya/workspace/pom.xml, line 1, column 209\n @ \n[ERROR] The build could not read 1 project -> [Help 1]\n[ERROR]   \n[ERROR]   The project g:a:1 (/kriya/workspace/pom.xml) has 1 error\n[ERROR]     Malformed POM /kriya/workspace/pom.xml: Unrecognised tag: 'unknownTag' (position: START_TAG seen ...<!--Cannot access central in offline mode--><unknownTag/>... @1:209)  @ /kriya/workspace/pom.xml, line 1, column 209 -> [Help 2]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException\n[ERROR] [Help 2] http://cwiki.apache.org/confluence/display/MAVEN/ModelParseException\n",
+   "timeout": false,
+   "value": "Cannot access central in offline mode",
+   "variant": "offline"
+  }
+ }
+}
