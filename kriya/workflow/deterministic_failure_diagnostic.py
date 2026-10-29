@@ -271,6 +271,12 @@ def evaluate_candidate_independent_failure(
         # NON_CANDIDATE_CORRECTABLE verdict and never recorded: the caller's existing retry behaviour continues untouched.
         logger.warning("Candidate-independent deterministic failure check skipped for fail_type=%s: %s", fail_type, error)
         return None
+    if not isinstance(baseline_result, dict) or baseline_result.get("environment_reason_code"):
+        # A typed no-verdict (timeout, signal, resolution failure, invocation failure, contaminated Maven text, ...) or no answer at all: the replay judged nothing. It is neither "the baseline compiles"
+        # (CANDIDATE_CORRECTABLE) nor "the baseline reproduces the failure" (NON_CANDIDATE_CORRECTABLE), so no conclusion is recorded or cached - the next recurrence replays again once the environment answers.
+        logger.warning("Candidate-independent deterministic failure check skipped for fail_type=%s: the baseline replay returned no trustworthy verdict (%s)", fail_type,
+                       baseline_result.get("environment_reason_code") if isinstance(baseline_result, dict) else type(baseline_result).__name__)
+        return None
     if baseline_result.get("success"):
         record = DeterministicFailureDiagnosticRecord(
             failure_signature=current_failure_signature,
