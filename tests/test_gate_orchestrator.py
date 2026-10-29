@@ -613,10 +613,11 @@ def _event_form(event: Any) -> Dict[str, Any]:
 
 def run_gates(tmp_path: Path, case: Callable[..., Any], *, script: _Script, files=None, candidate=None,
               cfg=None, ctx_overrides=None, state: Optional[GenerationState] = None,
-              self_correction: Any = None, repair: Any = None) -> Dict[str, Any]:
+              self_correction: Any = None, repair: Any = None, managed_effect: Optional[Callable[[Any, Any], None]] = None) -> Dict[str, Any]:
     """Runs ``case(state, ctx, script)`` (a call of the gate functions through kriya.workflow.attempt) and returns the
     recorded form: validator log, gate outcomes, run events, seam calls, the raised failure or 'returned'.
-    ``ctx_overrides`` may be a callable of the workspace path."""
+    ``ctx_overrides`` may be a callable of the workspace path. ``managed_effect(state, ctx)`` (OI-55) lets a case script what the managed-service verification does besides
+    recording the call: set ``run_verification_declined``, raise a QualityGateFailure ... ; the default is the unchanged "it passed"."""
     files = REPO if files is None else files
     candidate = {"calc.py": CALC_NEW} if candidate is None else candidate
     workspace, worktree = _trees(tmp_path, files, candidate)
@@ -652,6 +653,8 @@ def run_gates(tmp_path: Path, case: Callable[..., Any], *, script: _Script, file
     async def managed_service(state_arg, ctx_arg, judgment, known_files, validator):
         seams.record("_execute_managed_service_verification", validator=validator.index, same_state=state_arg is state,
                      same_ctx=ctx_arg is ctx, judgment=judgment, known_files=known_files)
+        if managed_effect is not None:
+            managed_effect(state_arg, ctx_arg)
     real_judge = attempt._judge_candidate_suite
 
     def judge_suite(state_arg, ctx_arg, result, scope):
@@ -901,6 +904,8 @@ ATTEMPT_CASES: Dict[str, Dict[str, Any]] = {
     "runtime_required_judged_should_not_run": dict(
         script=lambda: _Script(), cfg=lambda: _config(run_verification_enabled=True),
         ctx_overrides=dict(runtime_verification_required=True)),
+    # OI-55 (Wave 2 Step 9): the name is historical (the golden file keeps it). The executing gates NO LONGER return after a managed-service verification: the golden now records the
+    # goal-spec gate running and candidate_gates_succeeded True (tests/test_oi55_managed_service_continues.py has the controls).
     "runtime_managed_service_returns_early": dict(
         script=lambda: _Script(), cfg=lambda: _config(run_verification_enabled=True, spec_compliance_enabled=True),
         judge={**JUDGE_RUN, "execution_mode": "managed_service"}),

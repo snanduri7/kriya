@@ -1,9 +1,9 @@
 {
  "result": {
-  "candidate_gates_passed": false,
-  "failure_category": "quality_gates_exhausted",
+  "candidate_gates_passed": true,
+  "failure_category": null,
   "overall_attempt_passed": true,
-  "quality_gates_passed": false,
+  "quality_gates_passed": true,
   "terminal_regression_passed": true
  },
  "terminal_path": "managed service (autonomous): started, ready, probed (PROBE_PASSED), terminated",
@@ -62,6 +62,10 @@
    },
    "success": true,
    "type": "run_verification"
+  },
+  {
+   "event": "candidate_gates.passed",
+   "evidence": "event"
   },
   {
    "evidence": "gate.result",

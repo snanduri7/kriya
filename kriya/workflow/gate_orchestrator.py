@@ -1142,7 +1142,13 @@ async def _run_executing_candidate_gates(
                     sorted(set(state.all_files_written) | set(ctx.established_files)),
                     validator,
                 )
-                return
+                # OI-55 (owner decision 2026-10-18): a managed-service verification that PASSED, or that an optional check declined (recorded as run_verification_declined), is one gate of
+                # the attempt - not its end. A failure or a REQUIRED decline raised above, so reaching here means the later required gates (migration completion, goal-spec compliance,
+                # candidate_gates_succeeded) must still run, exactly once. The ordinary runtime-command path below must NOT run a second time for the same judgment, so it is neutralised the
+                # way the advisory-only case above does (a local copy; the cached judgment is untouched).
+                judgment = dict(judgment)
+                judgment["should_run"] = False
+                judgment["run_commands"] = None
             if (
                 ctx.runtime_verification_required
                 and judgment.get("should_run")

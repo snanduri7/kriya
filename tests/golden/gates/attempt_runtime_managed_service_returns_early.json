@@ -1,5 +1,19 @@
 {
- "events": [],
+ "events": [
+  {
+   "attempt": 1,
+   "authority": "authoritative",
+   "details": {
+    "passed": true,
+    "terminal": false
+   },
+   "failure_type": null,
+   "kind": "candidate_gates.passed",
+   "message": "",
+   "operation": null,
+   "source": "workflow"
+  }
+ ],
  "gate_outcomes": [
   {
    "attempt": 1,
@@ -9,6 +23,12 @@
     "image": "scripted-compile"
    },
    "type": "compile"
+  },
+  {
+   "attempt": 1,
+   "output": "every requirement is met",
+   "success": true,
+   "type": "goal_spec_compliance"
   }
  ],
  "outcome": "returned",
@@ -51,7 +71,7 @@
    "should_run": true,
    "success_criteria": "prints 6"
   },
-  "candidate_gates_succeeded": false,
+  "candidate_gates_succeeded": true,
   "java_home_override": null,
   "ledger": null,
   "plan_scope_conflict": null,
@@ -116,7 +136,24 @@
   },
   {
    "call": "spec_checks",
-   "kwargs": []
+   "kwargs": [
+    {
+     "authoritative_context": null,
+     "baseline_contents": {
+      "calc.py": "def add(a, b):\n    return a + b\n",
+      "lib.py": "LIB = 1\n"
+     },
+     "file_contents": {
+      "calc.py": "def add(a, b):\n    return a + b\n\n\ndef mul(a, b):\n    return a * b\n",
+      "lib.py": "LIB = 1\n"
+     },
+     "files_written": [
+      "calc.py",
+      "lib.py"
+     ],
+     "goal": "Add mul(a, b) to calc.py."
+    }
+   ]
   }
  ]
 }
