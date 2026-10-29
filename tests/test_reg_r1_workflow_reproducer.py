@@ -7,7 +7,7 @@ baseline's and the run stopped REGRESSION_UNATTRIBUTED; after REG-R1 per-test au
 stability lets the candidate through and retains the decision. This module imports nothing introduced by REG-R1, so
 it runs unchanged against the pre-fix product (the BEFORE evidence).
 """
-from _chaos_harness import CALC, CALC_WITH_SUB, benign_roles, chaos_config
+from _chaos_harness import CALC, CALC_WITH_SUB, benign_roles, chaos_config, git
 from _reg_r1_fixture import SUITE
 from _t6_harness import direct_run
 
@@ -63,15 +63,36 @@ def test_reg_r1_a_candidate_that_changes_no_outcome_survives_run_varying_pre_exi
     assert len(full_suite_runs) == 4
 
 
-def test_reg_r1_a_baseline_that_its_own_run_changed_cannot_excuse_a_difference_and_blames_nothing(tmp_path,
-                                                                                                  monkeypatch):
-    """A repository whose test run leaves non-ignored output (here __pycache__) has no untouched baseline to replay
-    once the baseline ran: stability is INDETERMINATE, the run fails closed (unattributed), and no pre-existing
-    failure is ever reported as candidate-caused. (Such a candidate worktree also inherits that output through the
-    workspace sync - a separate, recorded finding.)"""
-    files = {name: text for name, text in FILES.items() if name != ".gitignore"}
+def test_reg_r1_the_baselines_own_run_leaves_the_repository_untouched_so_stability_is_measured(tmp_path, monkeypatch):
+    """The CURRENT invariant (REGR1-REPRODUCER-STALE-PREMISE-001): verification is contained, so the baseline's own pytest run does not write interpreter output into
+    the repository, even one that does not ignore it. The pristine revision therefore stays the baseline's, and stability is measured (not BASELINE_REVISION_CHANGED).
+    This replaces the old premise 'the baseline's own run dirties a repository without a .gitignore', which the product can no longer produce."""
+    files = {name: text for name, text in FILES.items() if name != ".gitignore"}                  # nothing ignores __pycache__ here
     observed = direct_run(tmp_path, monkeypatch, _developer, files,
                           cfg=chaos_config(brownfield_full_regression_baseline_policy="required"))
+    [decision] = [r for r in observed.of("regression.decision") if r["payload"]["scope"] == "full_regression"]
+    stability = __import__("json").loads(observed.run.blob(decision["blobs"]["stability"]))
+    assert stability and "BASELINE_REVISION_CHANGED" not in {r.get("reason") for r in stability}
+    assert all(r["envelope"]["unresolved"] != "BASELINE_REVISION_CHANGED" for r in stability)
+    assert not list(observed.workspace.rglob("__pycache__"))                                       # the run wrote no bytecode into the repository
+    status = [line for line in git(observed.workspace, "status", "--porcelain").splitlines() if line != "?? .kriya/"]     # .kriya/ is Kriya's own state, not run residue
+    assert status == [" M calc.py"], status                                                         # only the candidate's own accepted change; no run residue
+
+
+def test_reg_r1_a_baseline_changed_out_of_band_cannot_excuse_a_difference_and_blames_nothing(tmp_path, monkeypatch):
+    """The safeguard, end to end: if the pristine repository changes after the baseline was taken (here a stray file written into it while the run is in progress),
+    there is no untouched baseline to replay: stability is INDETERMINATE (BASELINE_REVISION_CHANGED), the run fails closed, and no pre-existing failure is ever
+    reported as candidate-caused. Direct unit controls: tests/test_reg_r1_pytest_regression_authority.py."""
+    workspace = tmp_path / "ws"
+
+    def writes_out_of_band(role, request):
+        if role == "developer":
+            (workspace / "stray_output.txt").write_text("written into the pristine repository by something else\n")
+        return _developer(role, request)
+
+    observed = direct_run(tmp_path, monkeypatch, writes_out_of_band, FILES,
+                          cfg=chaos_config(brownfield_full_regression_baseline_policy="required"))
+    assert (workspace / "stray_output.txt").exists()                                              # the premise really occurred
     [decision] = [r for r in observed.of("regression.decision") if r["payload"]["scope"] == "full_regression"]
     comparison = __import__("json").loads(observed.run.blob(decision["blobs"]["comparison"]))
     stability = __import__("json").loads(observed.run.blob(decision["blobs"]["stability"]))
