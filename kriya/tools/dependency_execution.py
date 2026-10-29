@@ -97,13 +97,21 @@ _PIP_OFFLINE_MISSING_RE = re.compile(
 # `MAVEN_ACQUISITION_INCOMPLETE:` marker, which the POM-validate classifier then trusted). CLOSED table of the measured Maven openings, anchored at the start of a Maven
 # `[ERROR]`/`[FATAL]`/`[WARNING]` line (the level marker repeats and is indented; Maven reports a validation WARNING for e.g. an invalid `<scope>` in the same quoted-field shape); an opening not listed here keeps the line in the decision view (fail closed). Maven's own resolution
 # openings (`Non-resolvable ... POM`, `Unresolveable build extension`, `Plugin ... could not be resolved`, `Failed to execute goal`, ...) are deliberately NOT in it, and
-# neither is `Internal error:`.
+# neither is a generic `Internal error:`.
+# The one Internal-error form that is in it (MEASURED, Maven 3.9.16, `<modelVersion>` that is not a number): Maven's model validator parses each dot-separated segment with
+# `Long.valueOf`, and the failure is printed three times with the candidate's segment quoted by the JDK's own `NumberFormatException: For input string: "<value>"` template -
+# as `[ERROR] Internal error: ...`, as `org.apache.maven.InternalErrorException: Internal error: ...` and as `Caused by: ...`. Only that exception class and message template is
+# listed (the value between the quotes is the candidate's); an Internal error of any other exception, or at another level, stays in the view.
+_MAVEN_NUMBER_FORMAT_ECHO = r'java\.lang\.NumberFormatException: For input string: "'
 _MAVEN_MODEL_PROBLEM_WRAPPER_RE = re.compile(
     r"^(?:\[(?:ERROR|FATAL|WARNING)\][ \t]*)+(?:"
     r"Unknown packaging: |Child module |"
     r"'[A-Za-z][\w.\[\]:\-]*' (?:with value|for) |"
     r"The project .* \(.+\) has \d+ errors?$|"
     r"(?:Malformed|Non-parseable) POM )"
+    r"|^(?:\[(?:ERROR|FATAL)\][ \t]*)+Internal error: " + _MAVEN_NUMBER_FORMAT_ECHO
+    + r"|^org\.apache\.maven\.InternalErrorException: Internal error: " + _MAVEN_NUMBER_FORMAT_ECHO
+    + r"|^Caused by: " + _MAVEN_NUMBER_FORMAT_ECHO
 )
 
 

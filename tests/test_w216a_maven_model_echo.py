@@ -9,7 +9,8 @@ classifier's resolution check); the captured output is never replaced.
 
 Metamorphic rule: the same POM position with an ECHO value vs a BENIGN value (no resolution wording) must reach the same disposition. Two positions are NOT misclassifications and
 are pinned as such: a parent `relativePath` (the parent really cannot be resolved, so every variant is no-verdict) and the historical Pass-C scope form (a self-referencing dependency,
-for which Maven never evaluates the scope). `modelVersion` is an `Internal error:` line, deliberately outside the closed table: stop either way, the code name may differ."""
+for which Maven never evaluates the scope). `modelVersion` is an `Internal error:` (NumberFormatException) line: it was first left outside the closed table (stop either way); the Step-3
+completion (tests/test_w216a_model_version_echo.py) lists exactly that measured exception template, so its echo now has the benign disposition."""
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -82,8 +83,8 @@ def test_a_parent_relative_path_is_a_genuine_unresolved_parent_in_every_variant(
 
 @pytest.mark.parametrize("kind", ["benign", "echo_transfer", "echo_offline"])
 def test_a_model_version_internal_error_is_a_stop_in_every_variant(kind):
-    """`Internal error:` is outside the closed table (owner decision): the code name may differ between variants, never the stop. KNOWN RESIDUAL: its offline-wording echo can still
-    read as a missing dependency in the acquisition decision (stop -> stop; recorded in the Step-3 evidence)."""
+    """Stop in every variant. (Superseded detail: the offline-wording echo used to read as a missing dependency in the acquisition decision and the code name differed between variants;
+    since the Step-3 completion the measured NumberFormatException template is in the closed table and every variant has the benign code - pinned in test_w216a_model_version_echo.py.)"""
     assert _validate_code(f"model_version:{kind}") in MAVEN_VALIDATE_NO_VERDICT_CODES
 
 
@@ -117,7 +118,7 @@ def test_the_view_only_drops_lines_of_the_closed_table_and_never_changes_the_cap
         iterator = iter(raw_lines)
         assert all(line in iterator for line in view_lines), f"{name}: the view must be an in-order subsequence of the raw lines"
         dropped = [line for line in raw_lines if line not in set(view_lines)]
-        assert all(line.lstrip().startswith("[") for line in dropped), name
+        assert all(line.lstrip().startswith("[") or 'java.lang.NumberFormatException: For input string: "' in line for line in dropped), name   # the Step-3 completion's modelVersion template lines carry no level marker
 
 
 @pytest.mark.parametrize("line", [
@@ -145,7 +146,7 @@ def test_each_opening_of_the_closed_table_is_dropped_from_the_view(line):
     "[ERROR] Plugin g:x:1 or one of its dependencies could not be resolved:",
     "[ERROR] \tCannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact g:x:jar:1 has not been downloaded",
     "[ERROR] Failed to execute goal g:p:1:x on project a: Unknown packaging: x Could not transfer artifact g:y:pom:1",
-    "[ERROR] Internal error: java.lang.NumberFormatException: For input string: \"Cannot access central (https://repo\" -> [Help 1]",
+    "[ERROR] Internal error: java.lang.IllegalStateException: Cannot access central (https://repo.maven.apache.org/maven2) in offline mode -> [Help 1]",   # a generic Internal error (the modelVersion NumberFormatException template is dropped since the Step-3 completion)
     "[ERROR] Some other error mentioning Unknown packaging: in offline mode",
     "[INFO] Unknown packaging: in offline mode",
     "Unknown packaging: in offline mode",
