@@ -296,6 +296,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_validate_policy_audit.py': ('S', 'M'),
  'tests/test_validate_resource_authority.py': ('N', 'C'),
  'tests/test_validation_baseline.py': ('S', 'M'),
+ 'tests/test_validation_baseline_no_verdict_truth.py': ('S', 'M'),
  'tests/test_ver004_pyproject_dependency_evidence.py': ('S', 'M'),
  'tests/test_ver005_python_runtime_target_grounding.py': ('S', 'M'),
  'tests/test_verification_contract_003_authority.py': ('N', 'C'),

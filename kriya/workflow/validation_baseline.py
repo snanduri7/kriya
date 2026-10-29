@@ -749,7 +749,18 @@ def build_validation_outcome(
     validator-execution contract this module depends on (invariant 9:
     "existing validator callers remain compatible" - this function is
     purely additive, called AFTER an existing call site's own unchanged
-    validator invocation, never replacing it)."""
+    validator invocation, never replacing it).
+
+    A result carrying a typed ``environment_reason_code`` is the validator's
+    NO-VERDICT (the tool could not start, or returned nothing trustworthy):
+    it is read before ``success`` and is an ``environment_failure`` outcome,
+    never a completed failure of the code under test."""
+    environment_code = raw_result.get("environment_reason_code")
+    if environment_code:
+        return replace(
+            environment_failure_outcome(f"{environment_code}: {raw_result.get('output') or ''}"),
+            evidence_ref=evidence_ref,
+        )
     success = bool(raw_result.get("success"))
     output = raw_result.get("output") or ""
     # A Maven test run is identified by its Surefire Results blocks, never by
@@ -827,6 +838,14 @@ def capture_validation_baseline(
             indeterminate_reason=indeterminate_reason or "validator did not produce a result",
         )
     outcome = build_validation_outcome(raw_result, evidence_ref=evidence_ref)
+    if outcome.execution_status != "completed":
+        # A no-verdict run is not a baseline: nothing about the pristine workspace was observed.
+        return ValidationBaseline(
+            workspace_revision=workspace_revision, run_id=run_id, invocation=invocation,
+            captured_at=captured_at, outcome=None, status="baseline_indeterminate",
+            indeterminate_reason=indeterminate_reason
+            or f"validator returned no trustworthy verdict ({raw_result.get('environment_reason_code')})",
+        )
     return ValidationBaseline(
         workspace_revision=workspace_revision, run_id=run_id, invocation=invocation,
         captured_at=captured_at, outcome=outcome, status="captured",
