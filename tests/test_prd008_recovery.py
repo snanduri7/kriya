@@ -249,6 +249,38 @@ def test_crash_after_staging_settles_rolled_back_and_removes_staged_files(tmp_pa
     _assert_gate_admits(workspace)
 
 
+def test_staged_files_of_an_unsettled_transaction_are_kept_until_a_later_recovery_settles_it(tmp_path, monkeypatch):
+    """Campaign-A m-8c4762: "staged temp files are removed only once their transaction is settled". A settle that
+    fails (the commit-evidence write raises) is reported and leaves the staged candidate copies, the evidence and the
+    sources exactly as they were; a later recovery without the fault settles the transaction and then removes them."""
+    import kriya.control.recovery as recovery_module
+
+    workspace = _crash(_workspace(tmp_path), "stage1")
+    staged, source = _staged(workspace), _source_snapshot(workspace)
+    assert len(staged) == 2
+    evidence_before = Path(workspace, ".kriya/control/commits/tx1.json").read_bytes()
+
+    def failing_settle(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(recovery_module, "_settle_evidence", failing_settle)
+    report = recover_workspace(workspace)
+
+    assert [error for error in report.errors if error.startswith("tx1: evidence not settled: ")] == [
+        "tx1: evidence not settled: disk full"]
+    assert report.settled_evidence == [] and report.removed_staged_files == []
+    assert _staged(workspace) == staged
+    assert _source_snapshot(workspace) == source
+    assert Path(workspace, ".kriya/control/commits/tx1.json").read_bytes() == evidence_before
+    assert report.after.status != STATUS_CLEAN
+
+    monkeypatch.undo()
+    healed = recover_workspace(workspace)
+    assert healed.after.status == STATUS_CLEAN and not healed.errors
+    assert _evidence(workspace).state is CommitState.ROLLED_BACK
+    assert _staged(workspace) == [] and len(healed.removed_staged_files) == 2
+
+
 def test_crash_after_every_replace_settles_committed_but_never_success(tmp_path):
     workspace = _crash(_workspace(tmp_path), "evidence2")
     assert _evidence(workspace).state is CommitState.IN_PROGRESS
