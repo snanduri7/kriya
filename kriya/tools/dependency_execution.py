@@ -91,6 +91,29 @@ _PIP_OFFLINE_MISSING_RE = re.compile(
 )
 
 
+# W2-16a (Step 3): Maven reports a located POM-model problem in a line that QUOTES the candidate's own value (a packaging, a module name, an id, a coordinate, the text around a
+# parser fault). Resolution-looking words inside such a line are the candidate's text, not Maven's report that a dependency could not be obtained, so they are no evidence for
+# the resolution / acquisition decisions (MEASURED: a packaging of "... in offline mode" made `_run_maven_cmd` run a registry acquisition and write the
+# `MAVEN_ACQUISITION_INCOMPLETE:` marker, which the POM-validate classifier then trusted). CLOSED table of the measured Maven openings, anchored at the start of a Maven
+# `[ERROR]`/`[FATAL]`/`[WARNING]` line (the level marker repeats and is indented; Maven reports a validation WARNING for e.g. an invalid `<scope>` in the same quoted-field shape); an opening not listed here keeps the line in the decision view (fail closed). Maven's own resolution
+# openings (`Non-resolvable ... POM`, `Unresolveable build extension`, `Plugin ... could not be resolved`, `Failed to execute goal`, ...) are deliberately NOT in it, and
+# neither is `Internal error:`.
+_MAVEN_MODEL_PROBLEM_WRAPPER_RE = re.compile(
+    r"^(?:\[(?:ERROR|FATAL|WARNING)\][ \t]*)+(?:"
+    r"Unknown packaging: |Child module |"
+    r"'[A-Za-z][\w.\[\]:\-]*' (?:with value|for) |"
+    r"The project .* \(.+\) has \d+ errors?$|"
+    r"(?:Malformed|Non-parseable) POM )"
+)
+
+
+def maven_resolution_decision_view(output: str) -> str:
+    """The text VIEW the Maven resolution / acquisition decisions read: ``output`` without the lines of ``_MAVEN_MODEL_PROBLEM_WRAPPER_RE``. It only drops lines for those
+    decisions; the captured output is the caller's to preserve and is never replaced by this view. Known residual (fail closed): a candidate value that itself contains a newline
+    can place a forged ``[ERROR] Non-resolvable ...`` line in the view, which is a stop, never a pass or a conviction."""
+    return "\n".join(line for line in output.splitlines() if not _MAVEN_MODEL_PROBLEM_WRAPPER_RE.match(line))
+
+
 def classify_maven_offline_failure_text(combined_output: str) -> OfflineFailureKind:
     """The text-only half of `_classify_maven_offline_failure`, factored
     out (SEC-001-P6 Stage 2, 2026-09-11) so a caller with its own
@@ -100,7 +123,7 @@ def classify_maven_offline_failure_text(combined_output: str) -> OfflineFailureK
     empirically-verified Maven offline-error patterns instead of
     duplicating the regex. Callers decide success/failure themselves first
     (this function only classifies WHY a known failure happened)."""
-    if _MAVEN_OFFLINE_MISSING_RE.search(combined_output):
+    if _MAVEN_OFFLINE_MISSING_RE.search(maven_resolution_decision_view(combined_output)):
         return OfflineFailureKind.MISSING_DEPENDENCY
     return OfflineFailureKind.ORDINARY_FAILURE
 
@@ -212,7 +235,8 @@ def classify_maven_validate_failure(returncode: int, timed_out: bool, combined_o
         return MAVEN_VALIDATE_TERMINATED
     if _MAVEN_OPERATOR_CONFIG_RE.search(combined_output):
         return MAVEN_VALIDATE_OPERATOR_CONFIG_INVALID
-    if classify_maven_offline_failure_text(combined_output) is OfflineFailureKind.MISSING_DEPENDENCY or _MAVEN_RESOLUTION_OR_TRANSPORT_RE.search(combined_output):
+    if (classify_maven_offline_failure_text(combined_output) is OfflineFailureKind.MISSING_DEPENDENCY
+            or _MAVEN_RESOLUTION_OR_TRANSPORT_RE.search(maven_resolution_decision_view(combined_output))):
         return MAVEN_VALIDATE_RESOLUTION_UNVERIFIED
     if _MAVEN_POM_MODEL_PROBLEM_RE.search(combined_output):
         return None
@@ -244,9 +268,10 @@ _GRADLE_COMPILE_RESOLUTION_RE = re.compile(
 def _has_resolution_failure(build_system: str, output: str) -> bool:
     if build_system == "gradle":
         return bool(_GRADLE_COMPILE_RESOLUTION_RE.search(output))
-    if _MAVEN_ACQUISITION_MARKER_RE.search(output):
+    view = maven_resolution_decision_view(output)
+    if _MAVEN_ACQUISITION_MARKER_RE.search(view):
         return True
-    return any(_MAVEN_COMPILE_RESOLUTION_RE.search(line) for line in output.splitlines()
+    return any(_MAVEN_COMPILE_RESOLUTION_RE.search(line) for line in view.splitlines()
                if line.startswith("[ERROR]") and not _MAVEN_LOCATED_SOURCE_ERROR_RE.match(line))
 
 
