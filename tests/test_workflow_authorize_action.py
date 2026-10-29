@@ -259,7 +259,7 @@ async def test_stage_2a_enforce_true_require_approval_asks_once_not_per_library(
 
 
 @pytest.mark.asyncio
-async def test_stage_2a_enforce_true_require_approval_rejected_aborts_via_existing_path(tmp_path):
+async def test_stage_2a_enforce_true_require_approval_rejected_stops_as_human_rejected(tmp_path):
     from kriya.tools.knowledge import GapReport
 
     cfg = AppConfig()
@@ -287,7 +287,15 @@ async def test_stage_2a_enforce_true_require_approval_rejected_aborts_via_existi
     approval_callback = MagicMock(return_value=False)  # human declines the aggregate prompt
 
     with patch("kriya.tools.knowledge.KnowledgeGuard.check_goal", side_effect=[initial_report, post_report]):
-        with pytest.raises(ValueError, match="Workflow aborted"):
-            await engine.run_generation_workflow(
-                goal="Build a feature", workspace_path=str(tmp_path), approval_callback=approval_callback,
-            )
+        result = await engine.run_generation_workflow(
+            goal="Build a feature", workspace_path=str(tmp_path), approval_callback=approval_callback,
+        )
+
+    # A person's decline of the post-cutoff dependency risk is a typed stop (`human_rejected`), not an exception (stage_architecture Stage 2A; the apply gate has the same split).
+    assert result["status"] == "human_rejected"
+    assert "rejected the post-cutoff dependency risk" in result["reason"]
+    assert result["quality_gates_passed"] is False and result["files"] == []                  # nothing was generated or applied
+    stage_2a_calls = [c for c in approval_callback.call_args_list if "proceed with these dependencies" in c.args[1]]
+    assert len(stage_2a_calls) == 1                                                            # asked once, and the decline was final
+    assert llm.complete.await_count == 2                                                       # Planner and Architect only: no Developer work followed the decline
+    assert [e.name for e in tmp_path.iterdir() if e.name != ".kriya"] == []                    # no project file was written (.kriya is the early-exit trace the stop itself persists)
