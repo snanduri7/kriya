@@ -67,6 +67,22 @@ def test_01_clean_needs_a_positive_control_and_a_hidden_line_in_a_prompt_is_a_le
     assert lc.check_run(state, "no-such-run", hidden_texts=[HIDDEN]).verdict == lc.UNAVAILABLE
 
 
+def test_01b_public_controls_that_appear_in_no_blob_are_inconclusive_never_clean(tmp_path):
+    """Campaign-A m-3713c8: a positive control that was NAMED but not FOUND proves the blobs carry no workspace content
+    at all - no hits cannot then mean CLEAN (the empty-controls branch is test_01's)."""
+    state = _store(tmp_path, "run-unfound", prompt_text="Workspace file tests/test_ttl.py:\n" + PUBLIC)
+    other_public = "def test_other_file():\n    assert other_thing() == 7\n"
+    report = lc.check_run(state, "run-unfound", hidden_texts=["def test_secret_case():\n    assert secret() == 42\n"],
+                          public_texts=[other_public])
+    assert report.positive_control["units"] > 0 and report.positive_control["found"] == 0
+    assert report.hits == [] and report.verdict == lc.INCONCLUSIVE
+    assert any("no positive-control unit was found" in problem for problem in report.problems)
+    # the same run IS clean once a control that the blobs do carry is named (the verdict is decided by the control)
+    found = lc.check_run(state, "run-unfound", hidden_texts=["def test_secret_case():\n    assert secret() == 42\n"],
+                         public_texts=[PUBLIC])
+    assert found.positive_control["found"] >= 1 and found.verdict == lc.CLEAN
+
+
 def test_02_hidden_only_units_exclude_what_the_public_file_shares_and_trivial_lines():
     units = lc.hidden_only_units([HIDDEN], [PUBLIC])
     assert "import pytest" not in units and "cache = TTLCache(maxsize=3, ttl=3, timer=Timer())" not in units
