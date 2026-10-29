@@ -64,6 +64,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.config.authority import ConfigAuthorityViolation, get_field_value
 from kriya.config.environment import Environment, authority_home
+from kriya.config.environment import trust_file as environment_trust_file
 from kriya.context.workspace_identity import workspace_identity
 from kriya.foundation.redaction import redact_value
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
@@ -370,6 +371,21 @@ def validate_trust_path_outside_workspace(trust_path: str, workspace_root: str) 
     trust_dir = os.path.dirname(trust_path) or "."
     if path_relation(workspace_root, trust_dir) is not PathRelation.OUTSIDE:
         raise TrustPathInsideWorkspaceError(trust_path, workspace_root)
+
+
+def checked_trust_file(explicit: Optional[str], workspace_root: str, environment: Optional[Environment] = None) -> Optional[str]:
+    """The ONE resolution of the operator's trust file: the explicit ``--trust-file`` value, else ``KRIYA_TRUST_FILE`` of ``environment`` (default the process's), else None. A path
+    resolving inside the workspace is refused (``TrustPathInsideWorkspaceError``) before any approval lookup, and never falls through to the local store. Every command that consults
+    a trust file - ``load_config`` (so every trust-aware command) and ``kriya authority inspect`` - calls this; none has a resolver of its own (W2-21)."""
+    effective = explicit or environment_trust_file(environment)
+    if effective:
+        # The REAL target is checked (validate_trust_path_outside_workspace looks at the containing directory): a trust file that is a symlink to a file inside the workspace would otherwise load
+        # repository-controlled content as "trusted" from an apparently outside location. The path is returned as given.
+        try:
+            validate_trust_path_outside_workspace(os.path.realpath(effective), workspace_root)
+        except TrustPathInsideWorkspaceError:
+            raise TrustPathInsideWorkspaceError(effective, workspace_root) from None      # the refusal names the path as the operator gave it (a pinned message contract)
+    return effective or None
 
 
 def default_local_approval_path(workspace_root: str) -> str:

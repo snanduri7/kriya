@@ -6,7 +6,6 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from kriya.config.environment import Environment, expand_user
-from kriya.config.environment import trust_file as environment_trust_file
 
 # D3: the resolution names below moved to kriya/config/resolution.py; re-exported here (PARTIAL_FACADES). Removed in P1.
 from kriya.config.request_fields import reserved_extra_body_keys, reserved_extra_body_message
@@ -1738,20 +1737,15 @@ def load_config(config_path: Optional[str] = None, trust_file: Optional[str] = N
     supported here cannot become blanket repository trust).
     """
     from kriya.config.authority import ConfigAuthorityError
-    from kriya.config.authority_approval import resolve_with_approval, validate_trust_path_outside_workspace
+    from kriya.config.authority_approval import checked_trust_file, resolve_with_approval
 
     state = resolve_config_state(config_path)
 
     if state.violations:
-        effective_trust_file = trust_file or environment_trust_file(environment)
-        if effective_trust_file:
-            # Refuses a trust-file path resolving inside the workspace root -
-            # the load-bearing guard against a checked-out branch shipping
-            # both a hostile config and its own matching "approval" (see
-            # authority_approval.py's module docstring). Raises before any
-            # approval lookup even happens - never silently falls through to
-            # the local store when an explicit trust_file is itself unsafe.
-            validate_trust_path_outside_workspace(effective_trust_file, state.workspace_root)
+        # Refuses a trust-file path resolving inside the workspace root - the load-bearing guard against a checked-out branch shipping both a hostile config and its own matching
+        # "approval" (see authority_approval.py's module docstring). Raises before any approval lookup even happens - never silently falls through to the local store when an explicit
+        # trust_file is itself unsafe. The same resolution `kriya authority inspect` uses (W2-21): checked_trust_file.
+        effective_trust_file = checked_trust_file(trust_file, state.workspace_root, environment)
         remaining = resolve_with_approval(state.violations, state.config_dict, state.workspace_root, effective_trust_file)
         if remaining:
             raise ConfigAuthorityError(remaining)

@@ -93,13 +93,43 @@ def authority_inspect(ctx: click.Context) -> None:
     fields (field path, classification, provenance, and a secret-redacted
     value) and whether an existing local approval currently covers them.
     Read-only - never writes anything, never itself approves."""
-    from kriya.config.authority_approval import describe_pending, is_approval_current_for, load_approval_artifact
+    from kriya.config.authority_approval import (
+        checked_trust_file,
+        describe_pending,
+        is_approval_current_for,
+        load_approval_artifact,
+    )
 
     state = _authority_state(ctx)
     pending = describe_pending(state.violations, state.config_dict)
     _print_pending(pending)
 
     if not state.violations:
+        return
+
+    # W2-21: the trust file in effect (--trust-file, else KRIYA_TRUST_FILE) is consulted exactly as load_config consults it - the same checked_trust_file: inside the workspace is refused, and an
+    # explicit trust file is authoritative (never silently replaced by the local store). An unreadable / invalid one is a typed refusal here (load_config denies the same file).
+    try:
+        trust_file = checked_trust_file(ctx.obj.get('trust_file'), state.workspace_root)
+    except _authority_user_errors() as error:
+        _authority_fail(error)
+    if trust_file:
+        try:
+            artifact = load_approval_artifact(trust_file)
+        except _authority_user_errors() as error:
+            _authority_fail(error)
+        if artifact is None:
+            click.echo(f"\nNo approval on file at the trust file {trust_file}.")
+            click.echo(f"Run 'kriya authority approve --out {trust_file}' to grant it.")
+        elif is_approval_current_for(artifact, state.violations, state.config_dict, state.workspace_root):
+            click.secho(f"\nTrust file {trust_file} is CURRENT and covers all pending fields.", fg="green")
+        else:
+            click.secho(
+                f"\nTrust file {trust_file} exists but does NOT cover the current configuration "
+                "(it is stale, tampered, or was granted for a different security-field set) - "
+                "the fields above remain denied.",
+                fg="yellow",
+            )
         return
 
     path = _authority_local_path(state.workspace_root)
