@@ -342,6 +342,28 @@ def test_a_security_refusal_makes_no_request():
     post.assert_not_awaited()
 
 
+@pytest.mark.real_embedding_identity
+def test_a_security_refusal_makes_no_identity_probe_request_either():
+    """Campaign-A m-9d8f0c: the model-identity probe (``/api/tags``, ``/api/show``) is an embedding-endpoint request
+    too - under ``local_only`` a non-local endpoint is refused before ANY request, not after the probe already left."""
+    external = "https://embeddings.example.com/v1"
+    get, post = AsyncMock(), AsyncMock()
+    with patch("httpx.AsyncClient.get", new=get), patch("httpx.AsyncClient.post", new=post), \
+         pytest.raises(EgressViolationError):
+        _run(OllamaEmbeddingClient(base_url=external, model="m", egress_policy="local_only").fingerprint())
+    get.assert_not_awaited()
+    post.assert_not_awaited()
+
+
+@pytest.mark.real_embedding_identity
+def test_the_identity_probe_does_reach_a_local_endpoint_so_the_refusal_above_is_not_vacuous():
+    get = AsyncMock(return_value=_response(payload={"models": []}))
+    with patch("httpx.AsyncClient.get", new=get), patch("httpx.AsyncClient.post", new=AsyncMock(return_value=_response(payload={}))), \
+         pytest.raises(EmbeddingUnavailableError, match="not served"):
+        _run(_client().fingerprint())
+    get.assert_awaited_once()
+
+
 def test_an_exhausted_run_deadline_is_the_run_deadline_not_an_embedding_failure():
     post = AsyncMock()
     with patch("httpx.AsyncClient.post", new=post), pytest.raises(InferenceDeadlineError) as raised:
