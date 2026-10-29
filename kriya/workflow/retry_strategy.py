@@ -708,6 +708,10 @@ async def _record_attempt_failure(
             "this subtask's validated scope, and the target names no existing file "
             "with a real owner to hand recovery off to - retrying cannot discover a "
             "legal target that doesn't exist."
+            if classified.unrecoverable_denial_reason == "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE" else
+            f"UNAUTHORIZED_GENERATION_TARGET: policy refused the Developer's proposed action "
+            f"({classified.unrecoverable_denial_reason}); a policy denial is terminal for the "
+            "authority decision that produced it, so retrying the same action cannot change it."
         )
 
     # Read fresh from the worktree's CURRENT pom.xml each attempt,
@@ -1502,6 +1506,7 @@ async def _record_attempt_failure(
         state.budgets, attempt_mode=state.last_attempt_mode,
         plan_scope_conflict=state.plan_scope_conflict is not None,
         failure_family_changed=failure_family_changed,
+        terminal_policy_denial=state.unrecoverable_scope_denial_count > 0,
     )
     if state.api_contract_recovery and not api_contract_recovery_handed_back(state):
         # Later compiler/test failures remain diagnostic history; they cannot

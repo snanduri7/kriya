@@ -72,17 +72,15 @@ class ClassifiedAttemptFailure:
     raw_error_context: str
     # The retry mode as logged: "full-set", "targeted", "missing_files", ...
     attempt_mode: str
-    # A PolicyDeniedError (FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE) that could
-    # not be grounded into a plan-scope conflict, or a trusted control path
-    # (TRUSTED_CONTROL_PATH_DENIED, PLAT-039); its reason code.
+    # B4: a PolicyDeniedError that could not be grounded into a plan-scope
+    # conflict - a policy refusal of this authority decision, terminal whatever
+    # its reason code (FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE, PLAT-039's
+    # TRUSTED_CONTROL_PATH_DENIED, SENSITIVE_PATH_DENIED, ...); its reason code
+    # is ``unrecoverable_denial_reason``. (The name predates B4.)
     unrecoverable_scope_denial: bool
     internal_framework_bug: bool
     containment_setup_failure: bool
     unrecoverable_denial_reason: Optional[str] = None
-
-
-# Writer denials no retry can resolve: the stop is on the first one.
-UNRECOVERABLE_WRITE_DENIALS = frozenset({"FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE", "TRUSTED_CONTROL_PATH_DENIED"})
 
 
 @dataclass(frozen=True)
@@ -114,12 +112,12 @@ def classify_attempt_exception(
     attached_failure = getattr(exc, "failure", None)
     scope_denial_failure = attached_failure is None and ground_scope_denial(exc, ctx)
     unclassified = attached_failure is None and not scope_denial_failure
-    # PRV-17: a denial that could not be grounded into a plan_scope_conflict
-    # (no real existing owner to hand recovery to) is unrecoverable.
-    unrecoverable_scope_denial = (
-        unclassified and isinstance(exc, PolicyDeniedError)
-        and exc.result.reason_code in UNRECOVERABLE_WRITE_DENIALS
-    )
+    # PRV-17 / B4: a denial that could not be grounded into a plan_scope_conflict
+    # (no real existing owner to hand recovery to) is unrecoverable, and so is
+    # every other policy refusal: a policy denial is terminal for the authority
+    # decision that produced it, so no model retry repeats the denied action. A
+    # later attempt needs fresh authority/state, i.e. a new run.
+    unrecoverable_scope_denial = unclassified and isinstance(exc, PolicyDeniedError)
     internal_framework_bug = unclassified and isinstance(exc, INTERNAL_FRAMEWORK_ERROR_TYPES)
     # SEC-001: containment refused to run a command uncontained; retrying
     # cannot make a backend available.

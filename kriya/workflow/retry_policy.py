@@ -299,14 +299,16 @@ def force_strategy_transition(
 
 
 def charge_failed_attempt(budgets, *, attempt_mode: Optional[str], plan_scope_conflict: bool,
-                          failure_family_changed: bool) -> None:
+                          failure_family_changed: bool, terminal_policy_denial: bool = False) -> None:
     """Charge one failed attempt to the budget of the family it ran in, and
     to no other. A plan-scope conflict exits to the authoritative controller
     (a plan transition, not a retry) and charges nothing; a targeted or
     missing-files repair that exposed a new failure family starts that
     family at zero; the one-shot fallback-targeted attempt is bounded by its
-    own flag; everything else is a full-set attempt."""
-    if plan_scope_conflict:
+    own flag; everything else is a full-set attempt. A terminal policy denial
+    (B4) is a refusal of an authority decision, not a model failure the budget
+    pays to repeat: it charges nothing (the loop stops on it)."""
+    if plan_scope_conflict or terminal_policy_denial:
         return
     if attempt_mode == RetryAction.API_CONTRACT_RECOVERY.value:
         budgets.api_contract_recovery_count += 1

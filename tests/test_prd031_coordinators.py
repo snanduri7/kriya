@@ -78,8 +78,12 @@ def test_an_ungrounded_scope_denial_is_unrecoverable():
     assert classified.failure.type == "general_error"
 
 
-def test_another_policy_denial_is_not_an_unrecoverable_scope_denial():
-    assert not _classify(_scope_denial("SENSITIVE_PATH_REQUIRES_APPROVAL")).unrecoverable_scope_denial
+def test_another_policy_denial_is_an_unrecoverable_scope_denial_too():
+    """B4 (Wave-2) reversed the earlier contract (only two write denials were terminal; every other policy refusal was an
+    ordinary retry): a policy denial is terminal for the authority decision that produced it, whatever its reason code.
+    tests/test_b4_policy_denial_terminal.py pins the whole behaviour."""
+    classified = _classify(_scope_denial("SENSITIVE_PATH_REQUIRES_APPROVAL"))
+    assert classified.unrecoverable_scope_denial and classified.unrecoverable_denial_reason == "SENSITIVE_PATH_REQUIRES_APPROVAL"
 
 
 def test_a_grounded_scope_denial_becomes_its_plan_scope_conflict():
