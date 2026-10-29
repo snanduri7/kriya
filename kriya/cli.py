@@ -2219,6 +2219,8 @@ def skills_show(ctx: click.Context, skill_name: str) -> None:
             click.echo("             Run 'kriya skills unverify " + skill_name + "' if you believe this is now stale.")
         else:
             click.secho("Verified:    no - future generation runs will be asked to strengthen this skill.", fg="yellow")
+            if s.verified_claim:
+                click.echo("             (its skill.yaml says verified: true, but a skill inside the workspace cannot attest its own verification)")
 
 
         if s.rules:
@@ -2545,7 +2547,7 @@ def skills_unverify(ctx: click.Context, skill_name: str) -> None:
         click.secho(f"Skill '{skill_name}' not found.", fg="red")
         sys.exit(1)
 
-    if not skill.verified and not skill.verification_gap_acknowledged:
+    if not (skill.verified or skill.verified_claim) and not skill.verification_gap_acknowledged:
         click.secho(f"Skill '{skill_name}' is already unverified.", fg="yellow")
         return
 

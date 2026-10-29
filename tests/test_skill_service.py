@@ -73,7 +73,7 @@ def test_one_skill_is_described_fully_and_unknowns_are_explicit(tmp_path):
     d = items[0]
     assert (d.id, d.name) == ("org.apache:artemis", "Org.Apache:Artemis")
     assert (d.description, d.category, d.tags, d.supported_versions) == ("Skill artemis", "Messaging", ("a", "b"), ">=2.0 <3.0")
-    assert (d.verified, d.verified_at, d.verified_context) == (True, "2026-10-01", "ran gate")
+    assert (d.verified, d.verified_at, d.verified_context) == (False, "2026-10-01", "ran gate")  # B3: a workspace skill.yaml "verified: true" is an untrusted claim; its advisory provenance is still shown
     assert (d.rule_count, d.staged_rule_count, d.example_count, d.has_instructions) == (2, 1, 1, True)
     assert d.skill_version is None and "skill_version" in d.unknown_fields
     assert d.source == "local_directory"
@@ -133,8 +133,16 @@ def test_verified_and_unverified_are_distinct(tmp_path):
     skills = tmp_path / "skills"
     _write_skill(skills, "good", verified=True, rules=["r"])
     _write_skill(skills, "raw", verified=False, rules=["r"])
-    items, _ = SkillService(_cfg(skills), str(tmp_path)).list()
+    # B3: the skills directory is the operator's (outside the workspace), so its skill.yaml verification is believed
+    items, _ = SkillService(_cfg(skills), str(tmp_path / "workspace")).list()
     assert {i.id: i.verified for i in items} == {"good": True, "raw": False}
+
+
+def test_a_workspace_skill_that_claims_verified_is_listed_unverified(tmp_path):
+    skills = tmp_path / "skills"
+    _write_skill(skills, "forged", verified=True, rules=["r"])
+    items, _ = SkillService(_cfg(skills), str(tmp_path)).list()
+    assert {i.id: i.verified for i in items} == {"forged": False}
 
 
 def test_staged_rules_are_counted_not_returned(tmp_path):

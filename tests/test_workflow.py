@@ -17003,7 +17003,7 @@ async def test_workflow_skill_conflict_check_sees_rule_extracted_earlier_in_same
     (skills_dir / "brokeralpha" / "skill.yaml").write_text("name: brokeralpha\ndescription: Test\ntags: [brokeralpha]\n")
     (skills_dir / "brokeralpha" / "rules.txt").write_text("")
     (skills_dir / "brokerbeta").mkdir(parents=True)
-    (skills_dir / "brokerbeta" / "skill.yaml").write_text("name: brokerbeta\ndescription: Test\ntags: [brokerbeta]\nverified: true\n")
+    (skills_dir / "brokerbeta" / "skill.yaml").write_text("name: brokerbeta\ndescription: Test\ntags: [brokerbeta]\n")
     (skills_dir / "brokerbeta" / "rules.txt").write_text(f"{_BETA_RULE}\n")
 
     cfg = AppConfig()
@@ -17029,12 +17029,19 @@ async def test_workflow_skill_conflict_check_sees_rule_extracted_earlier_in_same
     def conflict_cb(skill_a, rule_a, skill_b, rule_b, explanation):
         return "prefer_b"  # brokerbeta (pre-existing, verified) wins
 
+    # B3: "pre-existing, verified" is Kriya's own fact (a verification held earlier in this run), not a skill.yaml line
+    from kriya.skills.skill import HeldSkillVerification, SkillEngine
+    skill_engine = SkillEngine.from_config(cfg, workspace_path=str(tmp_path))
+    skill_engine.discover_and_load()
+    skill_engine.hold_verifications([HeldSkillVerification("brokerbeta", "held earlier in this run", None)])
+
     we = WorkflowEngine(kernel, llm)
     res = await we.run_generation_workflow(
         goal="Build something using both the brokeralpha and brokerbeta skills",
         workspace_path=str(tmp_path),
         skill_gap_callback=skill_gap_cb,
         skill_conflict_callback=conflict_cb,
+        skill_engine_override=skill_engine,
     )
 
     assert res["quality_gates_passed"] is True

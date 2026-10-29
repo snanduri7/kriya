@@ -408,6 +408,7 @@ class Skill(BaseModel):
     supported_versions: str = Field(default="*", description="Supported version range (e.g. >=2.15.0 <3.0.0).")
     verified: bool = Field(default=False, description="True once a Runtime Verification Gate run using this skill has passed, or a human has explicitly promoted a rule into it.")
     verification_gap_acknowledged: bool = Field(default=False, description="True once the user has been asked to strengthen this unverified skill and declined - suppresses re-asking until it actually becomes verified.")
+    verified_claim: bool = Field(default=False, description="B3: what the skill's own skill.yaml says about `verified`, as UNTRUSTED metadata (display only). `verified` above is Kriya's: a skill inside the workspace cannot self-attest it.")
     verified_at: Optional[str] = Field(default=None, description="Date (YYYY-MM-DD) the skill was last marked verified - advisory provenance for a human to judge staleness, not used to automatically re-trigger anything.")
     verified_context: Optional[str] = Field(default=None, description="Best-effort description of what was actually verified (e.g. a version mentioned in the goal, or 'promoted from X') - advisory provenance only, same as verified_at.")
     source_path: Optional[str] = Field(default=None, description="Filesystem path to this skill's folder, set by discover_and_load - not part of skill.yaml itself.")
@@ -570,6 +571,15 @@ class SkillEngine:
             self.skills_dir = self.canonical_skills_dir
             self.discover_and_load()
 
+    def _skill_verification_is_authoritative(self, folder_path: str) -> bool:
+        """B3: whether the `verified` value in this skill folder's skill.yaml may be believed. A skill in the Kriya install's
+        library is Kriya's; a skill inside the workspace is project-supplied and may not attest its own verification; one
+        elsewhere (an operator-chosen skills directory) is the operator's. Unknown relations fail closed."""
+        durable = self.canonical_path(folder_path)
+        if path_relation(get_global_skills_dir(), durable) is PathRelation.WITHIN:
+            return True
+        return path_relation(self.workspace_path, durable) is PathRelation.OUTSIDE
+
     def discover_and_load(self) -> None:
         """Walks the skills directories to discover and parse skills (later paths override earlier ones)."""
         self._skills = {}
@@ -621,6 +631,8 @@ class SkillEngine:
                                 except Exception as ex:
                                     logger.warning(f"Could not read example file '{file}' in skill '{name}': {ex}")
 
+                    # B3: only a literal boolean true is a claim, and only a skill outside the workspace may be believed.
+                    claimed_verified = meta.get("verified") is True
                     # Build Skill object
                     skill = Skill(
                         name=meta.get("name", folder),
@@ -631,7 +643,8 @@ class SkillEngine:
                         rules=rules,
                         examples=examples,
                         supported_versions=meta.get("supported_versions", "*"),
-                        verified=bool(meta.get("verified", False)),
+                        verified=claimed_verified and self._skill_verification_is_authoritative(folder_path),
+                        verified_claim=claimed_verified,
                         verification_gap_acknowledged=bool(meta.get("verification_gap_acknowledged", False)),
                         verified_at=meta.get("verified_at"),
                         verified_context=meta.get("verified_context"),
@@ -790,7 +803,10 @@ class SkillEngine:
         provenance - visible via `kriya skills list`/`show` for a human to judge
         staleness themselves later (e.g. a pinned version gets yanked, or a new major
         version changes the config shape) - nothing here automatically re-triggers
-        anything; that's a deliberate choice over guessing at staleness automatically."""
+        anything; that's a deliberate choice over guessing at staleness automatically.
+
+        B3: for a skill inside the workspace the `verified: true` written here is a compatibility/display record only - a later
+        load reads it back as an untrusted claim (`verified_claim`), never as verification (see `_skill_verification_is_authoritative`)."""
         fields = {
             "verified": True,
             "verification_gap_acknowledged": False,

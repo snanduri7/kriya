@@ -207,7 +207,10 @@ def _observers(timeline):
             patch.object(development_loop, "apply_terminal_candidate", apply)]
 
 
-async def _run_standalone(tmp_path, skills, answers, goal, **callbacks):
+async def _run_standalone(tmp_path, skills, answers, goal, kriya_verified=(), **callbacks):
+    """`kriya_verified`: skill names Kriya itself already verified earlier in this run (a held verification, the run-local owner);
+    B3: a `verified: true` line in a workspace skill.yaml no longer stands for that."""
+    from kriya.skills.skill import HeldSkillVerification
     from kriya.workflow.workflow import WorkflowEngine
     ws = _repo(tmp_path, skills)
     cfg = AppConfig()
@@ -220,6 +223,11 @@ async def _run_standalone(tmp_path, skills, answers, goal, **callbacks):
     with ExitStack() as stack:
         for observer in _observers(timeline):
             stack.enter_context(observer)
+        if kriya_verified:
+            engine = SkillEngine.from_config(cfg, workspace_path=str(ws))
+            engine.discover_and_load()
+            engine.hold_verifications([HeldSkillVerification(name, "held earlier in this run", None) for name in kriya_verified])
+            callbacks["skill_engine_override"] = engine
         result = await WorkflowEngine(Kernel(config=cfg), llm).run_generation_workflow(goal=goal, workspace_path=str(ws), **callbacks)
     return result, timeline
 
@@ -256,11 +264,12 @@ CONFLICT = json.dumps({"conflicts": [{"rule_a_index": 1, "rule_b_index": 1, "exp
 
 @pytest.mark.asyncio
 async def test_a_standalone_extraction_and_conflict_resolution_commit_before_the_sandbox_exists_so_every_gate_binds(tmp_path):
-    skills = {"brokeralpha": ("", ""), "brokerbeta": ("verified: true\n", BETA_RULE + "\n")}
+    skills = {"brokeralpha": ("", ""), "brokerbeta": ("", BETA_RULE + "\n")}
     extraction = json.dumps({"rules": [ALPHA_RULE], "examples": {}, "conflicts": []})
 
     result, timeline = await _run_standalone(
         tmp_path, skills, [extraction, CONFLICT, *GENERATION], "Build something using both the brokeralpha and brokerbeta skills",
+        kriya_verified=("brokerbeta",),
         skill_gap_callback=lambda reason, names: "Reference material establishing the alpha broker's port rule.",
         skill_conflict_callback=lambda *args: "prefer_b")
 
@@ -398,7 +407,8 @@ PROBES = {
     "mark_rules_verified": lambda engine, ws: [r["verified"] for r in load_rule_provenance(_skill_dir(engine))] == [True],
     "generate_skill_template": lambda engine, ws: os.path.isfile(engine.effective_skills_dir(str(ws / "skills")) + "/org.example-mylib-core-1.4.2/skill.yaml"),
     "stage_facts": lambda engine, ws: bool(knowledge_staging.load_staged(engine.effective_skills_dir(str(ws / "skills")) + "/auto-ws")),
-    "apply_held_verifications": lambda engine, ws: engine.get_skill("widgetlib").verified is True,
+    # B3: persistence still writes the claim into skill.yaml (display/compat), but a reload never believes it
+    "apply_held_verifications": lambda engine, ws: engine.get_skill("widgetlib").verified_claim is True and engine.get_skill("widgetlib").verified is False,
 }
 IN_RUN_LEARNING_WRITERS = sorted(PROBES)
 

@@ -79,7 +79,7 @@ def test_skills_list_returns_descriptors_without_rule_text_or_paths(project):
     _valid("SkillsList", data)
     assert [s["id"] for s in data["items"]] == ["alpha", "beta"] and data["total"] == 2 and data["truncated"] is False
     alpha = data["items"][0]
-    assert (alpha["verified"], alpha["rule_count"], alpha["staged_rule_count"], alpha["scope"], alpha["origin"]) == (True, 2, 1, "workspace", "workspace_or_configured")
+    assert (alpha["verified"], alpha["rule_count"], alpha["staged_rule_count"], alpha["scope"], alpha["origin"]) == (False, 2, 1, "workspace", "workspace_or_configured")  # B3: the workspace file says verified: true; that is an untrusted claim, not Kriya's verification
     assert alpha["provenance"]["state"] == "RECORDED" and alpha["provenance"]["sources"][0]["source"] == "https://docs.example.org/a"
     blob = json.dumps(data["items"])
     assert "SECRET" not in blob and "PROPRIETARY" not in blob

@@ -201,7 +201,7 @@ def test_context_lists_skills_as_metadata_only_and_never_returns_rule_text(proje
     names = [s["name"] for s in data["skills"]["items"]]
     assert names == ["alpha", "beta"] and data["skills"]["selection"] == "automatic"
     alpha = data["skills"]["items"][0]
-    assert alpha["verified"] is True and alpha["verified_context"] == "ran gate" and alpha["rule_count"] == 2 and alpha["staged_rule_count"] == 2 and alpha["has_instructions"] is True
+    assert alpha["verified"] is False and alpha["verified_context"] == "ran gate" and alpha["rule_count"] == 2 and alpha["staged_rule_count"] == 2 and alpha["has_instructions"] is True
     beta = data["skills"]["items"][1]
     assert beta["verified"] is False and beta["rule_count"] == 0
     blob = json.dumps(data)

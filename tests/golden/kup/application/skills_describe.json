@@ -38,7 +38,7 @@
     "skill_version"
    ],
    "verification_gap_acknowledged": false,
-   "verified": true,
+   "verified": false,
    "verified_at": "<volatile>",
    "verified_context": "ran gate"
   },

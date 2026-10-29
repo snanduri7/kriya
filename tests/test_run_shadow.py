@@ -297,7 +297,10 @@ def test_discarding_a_run_changes_nothing_canonical_and_drops_the_engines_view_o
 
 # ------------------------------------------------------------------------------------------------ the real stages use the shadow
 
-def _shadowed_workflow_engine(tmp_path, skills, answers):
+def _shadowed_workflow_engine(tmp_path, skills, answers, kriya_verified=()):
+    """`kriya_verified`: skills Kriya itself already verified earlier in this run (a held verification); B3: a workspace skill.yaml's
+    `verified: true` no longer stands for that."""
+    from kriya.skills.skill import HeldSkillVerification
     from kriya.workflow.workflow import WorkflowEngine
     ws = _repo(tmp_path, skills)
     cfg = AppConfig()
@@ -309,6 +312,7 @@ def _shadowed_workflow_engine(tmp_path, skills, answers):
     engine = SkillEngine.from_config(cfg, workspace_path=str(ws))
     engine.discover_and_load()
     assert engine.activate_run_shadow(str(ws), _state(tmp_path)) is True
+    engine.hold_verifications([HeldSkillVerification(name, "held earlier in this run", None) for name in kriya_verified])
     return ws, engine, WorkflowEngine(Kernel(config=cfg), llm)
 
 
@@ -334,9 +338,9 @@ async def test_the_real_gap_stage_writes_its_acknowledgement_to_the_shadow_and_a
 
 @pytest.mark.asyncio
 async def test_the_real_extraction_and_conflict_stages_use_the_shadow_for_rules_the_registry_and_the_next_unit(tmp_path):
-    skills = {"brokeralpha": ("", ""), "brokerbeta": ("verified: true\n", BETA_RULE + "\n")}
+    skills = {"brokeralpha": ("", ""), "brokerbeta": ("", BETA_RULE + "\n")}
     extraction = json.dumps({"rules": [ALPHA_RULE], "examples": {}, "conflicts": []})
-    ws, engine, workflow = _shadowed_workflow_engine(tmp_path, skills, [extraction, CONFLICT, *GENERATION, *GENERATION])
+    ws, engine, workflow = _shadowed_workflow_engine(tmp_path, skills, [extraction, CONFLICT, *GENERATION, *GENERATION], kriya_verified=("brokerbeta",))
     resolutions = []
 
     def resolve(*args):

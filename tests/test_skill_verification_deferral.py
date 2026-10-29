@@ -697,15 +697,17 @@ def test_a_durably_verified_skill_is_effectively_verified_with_nothing_held(tmp_
 
 
 @pytest.mark.asyncio
-async def test_a_durably_verified_skill_is_not_asked_about_either(tmp_path):
+async def test_a_workspace_skill_yaml_that_claims_verified_is_still_asked_about(tmp_path):
+    """B3 (reload expectation, formerly "a durably verified skill is not asked about"): the workspace file cannot prove Kriya wrote
+    `verified: true`, so after a reload the claim is untrusted and the gap is asked exactly as for an unverified skill."""
     _skill_workspace(tmp_path, rules="Widgets must be printed in uppercase.\n")
     (tmp_path / "skills" / "widgetlib" / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\nverified: true\n")
     _git(tmp_path, "add", "-A")
-    _git(tmp_path, "commit", "-q", "-m", "verified")
+    _git(tmp_path, "commit", "-q", "-m", "claims verified")
 
     res, asked, _ = await _gap_run(tmp_path, engine=_engine(tmp_path))
 
-    assert res["quality_gates_passed"] is True and asked == []
+    assert res["quality_gates_passed"] is True and asked == [["widgetlib"]]
 
 
 @pytest.mark.asyncio
