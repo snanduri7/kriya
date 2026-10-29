@@ -56,6 +56,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set,
 
 from kriya.config.environment import expand_user
 from kriya.config.environment import state_dir as environment_state_dir
+from kriya.repository.bound_tree import BoundTreeError, copy_bound_tree
 from kriya.tools import test_execution
 from kriya.tools.containment import declare_execution_copy
 
@@ -89,7 +90,6 @@ _LINKAGE_TYPES = ("java.lang.NoClassDefFoundError", "java.lang.ClassNotFoundExce
                   "java.lang.UnsatisfiedLinkError", "java.lang.IncompatibleClassChangeError",
                   "java.lang.AbstractMethodError", "java.lang.VerifyError", "java.lang.ClassFormatError")
 _FRAME = re.compile(r"^\s*at\s+(?:[\w.]+/)?([\w.$]+)\.[\w$<>]+\(", re.M)
-_COPY_IGNORE = (".git", ".kriya", "target", "build", ".gradle", "node_modules")
 _FAILED_GOAL = re.compile(r"Failed to execute goal (\S+)")
 _STAGING_DIR = "acceptance-runs"
 
@@ -208,33 +208,28 @@ def _file_digest(path: str) -> Optional[str]:
         return None
 
 
-def _main_classes(root: str) -> Set[str]:
-    """Fully-qualified names of the candidate's main classes (every module's
-    ``src/main/java``)."""
+def _main_classes(root: str, bound: Iterable[str]) -> Set[str]:
+    """Fully-qualified names of the candidate's main classes (every module's ``src/main/java``), read from the BOUND tree (R5: ``bound`` is what
+    ``copy_bound_tree`` returned, so a package named ``build`` or ``target`` is a package, not an excluded directory)."""
     found: Set[str] = set()
-    for directory, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if d not in _COPY_IGNORE]
-        rel = os.path.relpath(directory, root).replace(os.sep, "/")
-        marker = "src/main/java"
-        index = rel.find(marker)
-        if index < 0 or (index > 0 and rel[index - 1] != "/"):
+    marker = "src/main/java"
+    for rel in bound:
+        if not rel.endswith(".java") or not os.path.isfile(os.path.join(root, rel)):
             continue
-        package = rel[index + len(marker):].strip("/").replace("/", ".")
-        for name in files:
-            if name.endswith(".java"):
-                found.add(f"{package}.{name[:-5]}" if package else name[:-5])
+        directory, name = os.path.split(rel)
+        index = directory.find(marker)
+        if index < 0 or (index > 0 and directory[index - 1] != "/"):
+            continue
+        package = directory[index + len(marker):].strip("/").replace("/", ".")
+        found.add(f"{package}.{name[:-5]}" if package else name[:-5])
     return found
 
 
-def _main_digest(root: str) -> str:
+def _main_digest(root: str, bound: Iterable[str]) -> str:
     entries = []
-    for directory, dirs, files in os.walk(root):
-        dirs[:] = sorted(d for d in dirs if d not in _COPY_IGNORE)
-        for name in sorted(files):
-            path = os.path.join(directory, name)
-            rel = os.path.relpath(path, root).replace(os.sep, "/")
-            if "src/main/" in f"/{rel}" or rel.startswith("src/main/"):
-                entries.append(f"{rel}\0{_file_digest(path)}")
+    for rel in sorted(set(bound)):
+        if ("src/main/" in f"/{rel}" or rel.startswith("src/main/")) and os.path.isfile(os.path.join(root, rel)):
+            entries.append(f"{rel}\0{_file_digest(os.path.join(root, rel))}")
     return hashlib.sha256("\n".join(entries).encode()).hexdigest()
 
 
@@ -317,9 +312,13 @@ def run_java_acceptance(
     export = os.path.join(stage, "workspace")
     try:
         os.makedirs(stage)
-        shutil.copytree(candidate_root, export, symlinks=True, ignore=shutil.ignore_patterns(*_COPY_IGNORE))
-        run.candidate_digest = _main_digest(export)
-        run.candidate_classes = sorted(_main_classes(export))
+        try:
+            bound = copy_bound_tree(candidate_root, export)   # R5: exactly the canonical bound tree, never a name-filtered approximation
+        except BoundTreeError as error:
+            run.refusal = AcceptanceError(ACCEPTANCE_TRUST_SURFACE_UNAVAILABLE, f"the bound tree could not be copied: {error}")
+            return run
+        run.candidate_digest = _main_digest(export, bound)
+        run.candidate_classes = sorted(_main_classes(export, bound))
         validator = validator_factory(export)
         declare_execution_copy(validator, export)       # D2 S3 (creator provenance): THIS function made the git-less copy, so it, not the factory, declares it
         if getattr(validator, "stack", None) != "java":
@@ -350,7 +349,7 @@ def run_java_acceptance(
             run.case_details = _case_details(export, run.report)
         if _file_digest(target) != artifact.digest:
             run.integrity_problem = ("ACCEPTANCE_ARTIFACT_CHANGED", "the injected acceptance class changed during the run")
-        elif _main_digest(export) != run.candidate_digest:
+        elif _main_digest(export, bound) != run.candidate_digest:
             run.integrity_problem = ("ACCEPTANCE_CANDIDATE_CHANGED_DURING_RUN",
                                      "candidate main sources changed while the acceptance class ran")
     finally:

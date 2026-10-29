@@ -24,14 +24,13 @@ import hashlib
 import logging
 import os
 import shutil
-import stat
 import threading
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
-from kriya.config.environment import KRIYA_DIRECTORY_NAME
 from kriya.context.workspace_identity import find_repository_root
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
+from kriya.repository.bound_tree import BOUND_TREE_IDENTITY_MISMATCH, BoundTreeError, copy_and_prove
 from kriya.repository.snapshot import _content_identity, _stat_identity, visible_repository_paths
 from kriya.tools.containment import ContainmentSetupError
 
@@ -43,7 +42,6 @@ GATE_VIEW_PATH_CONFUSION = "GATE_VIEW_PATH_CONFUSION"
 GATE_VIEW_REASON_CODES = frozenset({GATE_VIEW_UNAVAILABLE, GATE_VIEW_IDENTITY_MISMATCH, GATE_VIEW_PATH_CONFUSION})
 
 _VIEWS_DIRECTORY = "gate-views"
-_NEVER_COPIED = (".git", KRIYA_DIRECTORY_NAME)
 
 
 class GateViewError(ContainmentSetupError):
@@ -164,19 +162,12 @@ def build_gate_view(origin: str, *, state_root: str, manifest: Optional[Mapping[
         raise GateViewError(GATE_VIEW_UNAVAILABLE, f"no directory for the gate view under {base}: {error}") from error
     view = GateView(root=root, origin=os.path.realpath(origin), workspace_path=origin, environment_roots=environment_roots)
     try:
-        for relpath in sorted(paths):
-            if relpath.startswith(KRIYA_DIRECTORY_NAME + "/") or relpath in _NEVER_COPIED or relpath.startswith(".git/") or os.path.isabs(relpath) \
-                    or ".." in relpath.split("/"):
-                continue
-            source = os.path.join(origin, relpath)
-            if manifest is None or relpath not in expected:
-                expected[relpath] = _content_identity(source)
-            _copy_entry(source, os.path.join(root, relpath))
-        mismatched = sorted(path for path, identity in expected.items()
-                            if path in paths and _content_identity(os.path.join(root, path)) != identity)
-        if mismatched:
-            raise GateViewError(GATE_VIEW_IDENTITY_MISMATCH,
-                                f"the view does not hold the bound content of {', '.join(mismatched[:10])}")
+        try:
+            copy_and_prove(origin, root, paths, expected, manifest_given=manifest is not None)
+        except BoundTreeError as error:
+            if error.reason_code == BOUND_TREE_IDENTITY_MISMATCH:
+                raise GateViewError(GATE_VIEW_IDENTITY_MISMATCH, f"the view does not hold the bound content of {', '.join(error.paths[:10])}") from error
+            raise GateViewError(GATE_VIEW_UNAVAILABLE, error.detail) from error
         view.expected = {path: identity for path, identity in expected.items() if path in paths}
         view.stats = {path: _stat_identity(os.path.join(root, path)) for path in view.expected}
     except GateViewError:
@@ -186,23 +177,6 @@ def build_gate_view(origin: str, *, state_root: str, manifest: Optional[Mapping[
         view.close()
         raise GateViewError(GATE_VIEW_UNAVAILABLE, f"the view of the bound tree could not be built: {error}") from error
     return view
-
-
-def _copy_entry(source: str, destination: str) -> None:
-    """One entry, as itself: a link stays a link (never followed), a file keeps its mode and times, an absent path stays absent, a
-    directory entry (a Git submodule) becomes an empty directory. Anything else is refused."""
-    if not os.path.lexists(source):
-        return
-    os.makedirs(os.path.dirname(destination), exist_ok=True)
-    mode = os.lstat(source).st_mode
-    if stat.S_ISLNK(mode):
-        os.symlink(os.readlink(source), destination)
-    elif stat.S_ISREG(mode):
-        shutil.copy2(source, destination, follow_symlinks=False)
-    elif stat.S_ISDIR(mode):
-        os.makedirs(destination, exist_ok=True)
-    else:
-        raise GateViewError(GATE_VIEW_UNAVAILABLE, f"{source} is neither a file, a link nor a directory")
 
 
 def guard_against_origin(view: GateView, argv: Iterable[str], cwd: str) -> None:

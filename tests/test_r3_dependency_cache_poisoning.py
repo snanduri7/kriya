@@ -202,6 +202,8 @@ def test_a_later_authority_bundle_run_never_consumes_dependency_bytes_an_earlier
 
     victim = _project(tmp_path / "victim", "VictimTest", _VICTIM_TEST)
     attacker = _project(tmp_path / "attacker", "AttackTest", _ATTACK_TEST)
+    for candidate in (victim, attacker):   # R5: a candidate is a Git work tree; the run copies exactly its bound tree
+        subprocess.run(["git", "init", "-q"], cwd=candidate, check=True, capture_output=True)
     control = run(victim, ("mvn", "-B", "test-compile"))
     assert control.reason_code == AUTHORITY_FAILED, (control.reason_code, control.reason)
     attack = run(attacker, ("mvn", "-B", "test"))

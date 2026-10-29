@@ -110,7 +110,8 @@ MODULES: Dict[str, Module] = {
         owner_paths=("kriya/repository/",),
         public=("kriya.repository", "kriya.repository.port", "kriya.repository.atomic_write",
                 "kriya.repository.commit", "kriya.repository.snapshot", "kriya.repository.worktree",
-                "kriya.repository.git", "kriya.repository.carried_state"),
+                "kriya.repository.git", "kriya.repository.carried_state",
+                "kriya.repository.bound_tree"),   # R5/R6: the one copy of the canonical bound tree (gate views, authority and baseline copies)
         layer=2),
     "EXECUTION": Module(
         owner_paths=("kriya/tools/", "kriya/capabilities/", "kriya/static_analysis/"),

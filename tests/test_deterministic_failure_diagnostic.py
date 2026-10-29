@@ -367,14 +367,18 @@ def test_real_baseline_replay_reproduces_failure_against_real_maven(tmp_path):
     assert set(os.listdir(workspace)) == before_entries
 
 
-def test_copy_baseline_workspace_excludes_control_and_build_dirs(tmp_path):
+def test_copy_baseline_workspace_is_exactly_the_bound_tree_not_a_directory_name_filter(tmp_path):
+    """R6: the replay copy holds the canonical bound tree (Git's own view): git-ignored build output (a stale target/) and the repository's metadata are out;
+    a legitimate source under a directory that merely NAMED build or target is in. (Was: a name blacklist that dropped both; tests/test_r5_r6_bound_tree_copy.py
+    pins the full contract at all four copy sites.)"""
     source = tmp_path / "source"
-    (source / ".git").mkdir(parents=True)
-    (source / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
     (source / "target" / "classes").mkdir(parents=True)
     (source / "target" / "classes" / "Stale.class").write_bytes(b"stale")
-    (source / "src").mkdir()
+    (source / "src" / "main" / "java" / "build").mkdir(parents=True)
     (source / "src" / "Real.java").write_text("class Real {}\n")
+    (source / "src" / "main" / "java" / "build" / "Gen.java").write_text("class Gen {}\n")
+    (source / ".gitignore").write_text("/target/\n")
+    subprocess.run(["git", "init", "-q"], cwd=source, check=True, capture_output=True)
 
     dest = tmp_path / "dest"
     dest.mkdir()
@@ -383,6 +387,7 @@ def test_copy_baseline_workspace_excludes_control_and_build_dirs(tmp_path):
     assert not (dest / ".git").exists()
     assert not (dest / "target").exists()
     assert (dest / "src" / "Real.java").read_text() == "class Real {}\n"
+    assert (dest / "src" / "main" / "java" / "build" / "Gen.java").read_text() == "class Gen {}\n"
 
 
 # --- Category 3: wiring through handle_attempt_failure ---------------------

@@ -9,7 +9,7 @@ from typing import Dict, Set, Tuple
 
 from .execution_sites import REPO, ROOTS
 
-CREATES = {"copytree", "mkdtemp", "TemporaryDirectory", "export_base"}
+CREATES = {"copytree", "mkdtemp", "TemporaryDirectory", "export_base", "copy_bound_tree"}   # R5/R6: copy_bound_tree is the one copy of the bound tree (kriya/tools/gate_view.py)
 
 # (file, function) -> (kind, why)
 CREATOR_DECLARES = "CREATOR_DECLARES"        # makes a git-less copy bound to the run's original checkout: MUST call declare_execution_copy after its factory returns
@@ -23,6 +23,7 @@ SITES: Dict[Tuple[str, str], str] = {
     ("kriya/workflow/authority_bundle.py", "run_authority_bundle"): CREATOR_DECLARES,
     ("kriya/workflow/named_test_oracle.py", "judge_named_tests"): CREATOR_DECLARES,             # copytree-free: export_base + TemporaryDirectory
     ("kriya/workflow/deterministic_failure_diagnostic.py", "replay_deterministic_verification_against_baseline"): REPLAY_NO_METADATA,
+    ("kriya/workflow/deterministic_failure_diagnostic.py", "_copy_baseline_workspace"): NOT_A_VALIDATOR_TREE,          # R6: fills the directory its two replay callers created (classified above/below)
     ("kriya/workflow/regression_attribution.py", "_replay_test_ids_against_workspace"): REPLAY_NO_METADATA,
     ("kriya/workflow/workflow.py", "exported"): KEEPS_GIT,                                          # the baseline-authority export keeps .git (ignore list below)
     ("kriya/workflow/worktree.py", "_create_scoped_snapshot_sandbox"): OWN_REPOSITORY,
@@ -113,8 +114,11 @@ def test_only_the_creators_declare_and_no_downstream_keyword_exists():
 
 def test_the_classified_non_declaring_copies_really_are_what_they_are_classified_as():
     exported = _functions(_parse("kriya/workflow/workflow.py"))["exported"]
-    ignored = [c for c in ast.walk(exported) if isinstance(c, ast.Call) and _call_name(c) == "ignore_patterns"]
-    assert ignored and not any(isinstance(a, ast.Constant) and a.value == ".git" for c in ignored for a in c.args), "the baseline export must keep its .git"
+    calls = [c for c in ast.walk(exported) if isinstance(c, ast.Call)]
+    assert not [c for c in calls if _call_name(c) == "ignore_patterns"], "the baseline export is the bound tree, not a name-filtered copy (R5)"
+    assert [c for c in calls if _call_name(c) == "copy_bound_tree"], "the baseline export copies the bound tree through the one function"
+    assert [c for c in calls if _call_name(c) == "copytree" and any(isinstance(n, ast.Name) and n.id == "git_path" for a in c.args for n in ast.walk(a))], \
+        "the baseline export must keep its .git (run_java_acceptance reads the base revision from the tree it is given)"
     for relpath, function in (("kriya/workflow/deterministic_failure_diagnostic.py", "replay_deterministic_verification_against_baseline"),
                               ("kriya/workflow/regression_attribution.py", "_replay_test_ids_against_workspace")):
         node = _functions(_parse(relpath))[function]

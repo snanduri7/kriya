@@ -17,6 +17,7 @@ failure_diagnostic.py):
 
 No live model/Ollama calls anywhere in this file.
 """
+import subprocess
 from unittest.mock import patch
 
 from kriya.config import AppConfig
@@ -203,6 +204,9 @@ def test_real_isolated_replay_distinguishes_regression_from_full_suite_artifact(
         "def test_real_regression():\n    assert 1 == 2  # candidate broke this\n\n"
         "def test_looks_new_but_isnt():\n    assert 1 == 1\n"
     )
+
+    for directory in (pristine_dir, candidate_dir):   # R6: both are Git work trees (as in a run); the replay copies exactly the bound tree of each
+        subprocess.run(["git", "init", "-q"], cwd=directory, check=True, capture_output=True)
 
     level2 = {
         "tests/test_x.py::test_real_regression": DeltaClassification.NOT_COMPARABLE,

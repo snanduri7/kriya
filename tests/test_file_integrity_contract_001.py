@@ -891,6 +891,9 @@ _AUDITED_WRITE_SITES = {
     # GRADLE-WRAPPER-CONTAINMENT-001: the host-cache seed copies a verified Gradle distribution into the
     # Kriya-managed dependency cache under the state root (never a source tree) and writes its completion marker.
     "kriya/tools/dependency_execution.py": 3,
+    # R5/R6: kriya/repository/bound_tree.py is the one copy of the canonical bound tree (a link, a file with its mode and times, a directory entry) into a Kriya-owned
+    # destination - a gate view, an authority export or a baseline replay directory under the state root or a temp dir, never a source tree.
+    "kriya/repository/bound_tree.py": 2,
     # R3: kriya/tools/dependency_cache.py owns the ephemeral dependency layers under the Kriya state root (the unit directory's marker file, the removal of
     # a scope's layer and of a crashed process's) and the removal of the project venv under a worktree's own .kriya/ - Kriya's scratch, never tracked content.
     "kriya/tools/dependency_cache.py": 3,

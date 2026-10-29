@@ -7,6 +7,7 @@ f3b7d39, ``tests/test_r3_dependency_cache_poisoning.py``). Now each outermost ve
 These are the host-side (no Docker) pins of that contract; the containment proof is the Docker-tier test of the same area."""
 import os
 import shutil
+import subprocess
 
 import pytest
 
@@ -268,6 +269,7 @@ def _authority_inputs(tmp_path):
     candidate = tmp_path / "candidate"
     candidate.mkdir()
     (candidate / "pom.xml").write_text("<project/>")
+    subprocess.run(["git", "init", "-q"], cwd=candidate, check=True, capture_output=True)   # R5: a candidate is a Git work tree; the run copies exactly its bound tree
     bundle = AuthorityBundle(
         digest="d" * 64, stored_dir=str(tmp_path / "stored"), source_path="bundle.json", authority_id="a" * 16, goal_sha256="g" * 64,
         requirement_set_sha256="r" * 64, base_revision="b" * 40, assets={}, prepare=("echo", "prepare"), verify=("echo", "verify"),

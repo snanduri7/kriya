@@ -1259,6 +1259,7 @@ def run_contract_baseline(engine: Any, contract: Any, requirement_set: Any, work
     import uuid
 
     from kriya.core.state_paths import resolve_state_directory
+    from kriya.repository.bound_tree import copy_bound_tree
     from kriya.tools import test_execution
     from kriya.workflow.acceptance_jvm import run_java_acceptance
     from kriya.workflow.acceptance_oracle import judge_acceptance, run_acceptance
@@ -1281,9 +1282,14 @@ def run_contract_baseline(engine: Any, contract: Any, requirement_set: Any, work
     def exported() -> str:
         if not os.path.isdir(export):
             os.makedirs(scratch, exist_ok=True)
-            shutil.copytree(workspace_path, export, symlinks=True,
-                            ignore=shutil.ignore_patterns(".kriya", "target", "build", ".gradle", "node_modules",
-                                                          "__pycache__", ".pytest_cache"))
+            copy_bound_tree(workspace_path, export)   # R5: exactly the canonical bound tree (a BoundTreeError is the caller's typed AUTHORITY_EXECUTION_UNAVAILABLE stop)
+            # The export keeps the repository's own Git metadata (run_java_acceptance reads the base revision from the tree it is given); that metadata is
+            # not part of the bound set, so it is copied as itself, as it always was.
+            git_path = os.path.join(workspace_path, ".git")
+            if os.path.isdir(git_path) and not os.path.islink(git_path):
+                shutil.copytree(git_path, os.path.join(export, ".git"), symlinks=True)
+            elif os.path.lexists(git_path):
+                shutil.copy2(git_path, os.path.join(export, ".git"), follow_symlinks=False)
         return export
 
     def judge(artifact: Any) -> Callable[[], Mapping[str, Any]]:

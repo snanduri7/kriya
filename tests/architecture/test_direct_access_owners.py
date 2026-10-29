@@ -186,19 +186,17 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         "kriya.static_analysis.scope": (1, "P2", _P2),
         "kriya.tools.test_execution": (1, "P2", _P2),
         "kriya.tools.validate": (4, "P2", _P2),
-        "kriya.workflow.acceptance_jvm": (1, "P2", _P2),
         "kriya.workflow.acceptance_oracle": (2, "P2", _P2),
         # E14: one of attempt.py's 2 sites moved with find_ungrounded_java_child_process_tests (the default grounded
         # classpath `.kriya/runtime-verification/classes`) to process_boundary: the entry SPLIT (sites unchanged, entries
         # +1; owner: the new module; removal slice P2 unchanged); the other (_PYTHON_RUNTIME_GROUNDING_EXCLUDED_DIRS) stays
         "kriya.workflow.attempt": (1, "P2", _P2),
         "kriya.workflow.process_boundary": (1, "P2", _P2),
-        "kriya.workflow.authority_bundle": (2, "P2", _P2),
+        "kriya.workflow.authority_bundle": (1, "P2", _P2),
         "kriya.workflow.baseline_policy": (1, "P2", _P2),
         "kriya.workflow.checkpoint": (1, "M2", "the `git rm --cached -- .kriya` argv of compute_workspace_content_hash (re-tagged in D2: the checkpoint store and its CHECKPOINT_DIR moved to control.checkpoint, STATE; the git helper moves to kriya/repository)"),
         "kriya.workflow.compile_regression": (1, "P2", _P2),
         "kriya.workflow.contract_lifecycle": (1, "P2", _P2),
-        "kriya.workflow.deterministic_failure_diagnostic": (1, "P2", _P2),
         "kriya.workflow.example_oracle_java": (3, "P2", _P2),
         "kriya.workflow.failure_grounding": (1, "P2", _P2),
         "kriya.workflow.file_resolution": (9, "P2", _P2),
@@ -216,7 +214,6 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         # _candidate_test_files, close_requirements_by_documentation and mutation_scope_evidence: the `.kriya`
         # skip-sets of their tree walks / git listings); same removal slice, same reason.
         "kriya.workflow.requirement_closers": (3, "P2", _P2),
-        "kriya.workflow.workflow": (1, "P2", _P2),
         # E11: the controller's 3 sites moved with their code, same removal slice and reason (one entry split in two,
         # sites unchanged): planning_request 1 (the `.kriya` entry of _authoritative_planner_extension_candidates'
         # ignored-directory set), resume_support 2 (the abandoned-plan quarantine root and the milestone sidecar path)

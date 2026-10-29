@@ -55,12 +55,13 @@ reproduces the failure can do that."""
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import tempfile
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, Iterable, Optional, Tuple
+
+from kriya.repository.bound_tree import BoundTreeError, copy_bound_tree
 
 logger = logging.getLogger(__name__)
 
@@ -81,18 +82,6 @@ class DeterministicFailureCorrectability(str, Enum):
 # failure-family additions (see kriya/workflow/obligations.py's own
 # ObligationKind docstring for the identical discipline applied there).
 _DETERMINISTIC_REPLAYABLE_FAIL_TYPES = frozenset({"compile"})
-
-# Mirrors compute_effective_workspace_hash's own exclusion set (kriya/
-# workflow/retry_strategy.py) so the baseline copy is the same kind of
-# "real project content" comparison, minus control-plane/build-output
-# directories that are either irrelevant or would make the copy itself
-# expensive/misleading (a stale target/ from a PRIOR compile could mask
-# whether ADD candidate change nothing).
-_BASELINE_COPY_EXCLUDED_DIRS = frozenset({
-    ".git", ".kriya", ".pytest_cache", "__pycache__", "node_modules",
-    "target", "build", "dist",
-})
-
 
 # A store key is (subtask_id, failure_signature) - fail_type is already
 # baked into failure_signature's own leading element (build_failure_
@@ -155,27 +144,11 @@ class DeterministicFailureDiagnosticStore:
 
 
 def _copy_baseline_workspace(source_workspace_path: str, dest_dir: str) -> None:
-    """Copies real project content only - excludes control-plane/build-
-    output directories, matching compute_effective_workspace_hash's own
-    exclusion set. The destination is a fresh tempfile.mkdtemp() directory
-    the caller owns and removes; this function never touches
-    source_workspace_path itself (read-only os.walk + shutil.copy2)."""
-    for root, dirs, files in os.walk(source_workspace_path):
-        dirs[:] = sorted(name for name in dirs if name not in _BASELINE_COPY_EXCLUDED_DIRS)
-        relative_root = os.path.relpath(root, source_workspace_path)
-        dest_root = dest_dir if relative_root == "." else os.path.join(dest_dir, relative_root)
-        os.makedirs(dest_root, exist_ok=True)
-        for name in files:
-            source_path = os.path.join(root, name)
-            if os.path.islink(source_path) or not os.path.isfile(source_path):
-                continue
-            try:
-                shutil.copy2(source_path, os.path.join(dest_root, name))
-            except OSError:
-                # A concurrently-changing file must not turn this diagnostic
-                # replay itself into a new workflow failure - the same
-                # tolerance compute_effective_workspace_hash already applies.
-                continue
+    """Copies exactly the canonical bound tree of the source (R6): Git's own view of it - every tracked path and every untracked non-ignored one, ``.git`` and
+    ``.kriya`` never (``kriya.repository.bound_tree.copy_bound_tree``) - so a legitimate ``build/``- or ``target/``-named source directory is in the replay and
+    git-ignored build output is not. The destination is a fresh tempfile.mkdtemp() directory the caller owns and removes; the source is only read. A source
+    Git cannot list (not a work tree) raises ``BoundTreeError``: there is no name-based approximation to fall back to."""
+    copy_bound_tree(source_workspace_path, dest_dir)
 
 
 def replay_deterministic_verification_against_baseline(
@@ -286,12 +259,18 @@ def evaluate_candidate_independent_failure(
         "baseline copy.",
         fail_type, subtask_id,
     )
-    baseline_result = replay_deterministic_verification_against_baseline(
-        fail_type=fail_type,
-        authoritative_workspace_path=authoritative_workspace_path,
-        known_files=known_files,
-        autonomy_cfg=autonomy_cfg,
-    )
+    try:
+        baseline_result = replay_deterministic_verification_against_baseline(
+            fail_type=fail_type,
+            authoritative_workspace_path=authoritative_workspace_path,
+            known_files=known_files,
+            autonomy_cfg=autonomy_cfg,
+        )
+    except BoundTreeError as error:
+        # R6: the baseline copy of the bound tree cannot be made, so there is nothing to replay against. That is no conclusion either way - never a
+        # NON_CANDIDATE_CORRECTABLE verdict and never recorded: the caller's existing retry behaviour continues untouched.
+        logger.warning("Candidate-independent deterministic failure check skipped for fail_type=%s: %s", fail_type, error)
+        return None
     if baseline_result.get("success"):
         record = DeterministicFailureDiagnosticRecord(
             failure_signature=current_failure_signature,

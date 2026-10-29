@@ -53,6 +53,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from kriya.repository.bound_tree import BoundTreeError, copy_bound_tree
 from kriya.tools.containment import (
     ContainmentSetupError,
     NetworkAuthority,
@@ -100,7 +101,6 @@ _COVER_FIELDS = frozenset({"requirement_id", "requirement_text_sha256", "claim",
 _COVERABLE_CLAIMS = frozenset({BEHAVIOR, API_PRESERVATION, DOCUMENTATION_CLAIM, REGRESSION_PRESERVATION})
 _LANGUAGES = frozenset({"python", "java"})
 _BUILD_TOOLS = frozenset({"maven", "gradle", "pip", "none"})
-_COPY_IGNORE = (".git", ".kriya", "target", "build", ".gradle", "node_modules", "__pycache__", ".pytest_cache")
 
 AUTHORITY_INVALID = "AUTHORITY_INVALID"
 AUTHORITY_GOAL_MISMATCH = "AUTHORITY_GOAL_MISMATCH"
@@ -385,15 +385,19 @@ class AuthorityRun:
                 "verdict_file": self.verdict_file, "candidate_digest": self.candidate_digest}
 
 
-def _tree_digest(root: str) -> str:
+def _tree_digest(root: str, bound: Iterable[str]) -> str:
+    """The digest of exactly the bound tree under ``root`` (R5): the paths ``copy_bound_tree`` returned, never a directory walk - so a legitimate ``build/Util.java``
+    is covered, and output the run generates beside the bound set (``target/classes``) is outside by construction."""
     digests: Dict[str, str] = {}
-    for current, dirs, files in os.walk(root):
-        dirs[:] = sorted(d for d in dirs if d not in _COPY_IGNORE)
-        for name in sorted(files):
-            full = os.path.join(current, name)
-            rel = os.path.relpath(full, root)
-            if rel.startswith(STAGE_RELATIVE):
-                continue
+    for rel in sorted(set(bound)):
+        full = os.path.join(root, rel)
+        if os.path.islink(full):
+            digests[rel] = "link:" + os.readlink(full)
+        elif not os.path.lexists(full):
+            continue            # a tracked path deleted in the origin: no entry (one that appears during the run changes the digest by appearing)
+        elif os.path.isdir(full):
+            continue            # a submodule's directory entry: no content of its own
+        else:
             try:
                 with open(full, "rb") as handle:
                     digests[rel] = _sha256(handle.read())
@@ -452,8 +456,12 @@ def run_authority_bundle(
     scopes = contextlib.ExitStack()  # R3: the run's ephemeral dependency layer, shared by its prepare and verify phases and removed with the scratch
     try:
         os.makedirs(scratch)
-        shutil.copytree(candidate_root, export, symlinks=True, ignore=shutil.ignore_patterns(*_COPY_IGNORE))
-        run.candidate_digest = _tree_digest(export)
+        try:
+            bound = copy_bound_tree(candidate_root, export)   # R5: exactly the canonical bound tree, never a name-filtered approximation
+        except BoundTreeError as error:
+            run.reason_code, run.reason = AUTHORITY_EXECUTION_UNAVAILABLE, f"the bound tree could not be copied: {error}"
+            return run
+        run.candidate_digest = _tree_digest(export, bound)
         try:
             validator = validator_factory(export)
             declare_execution_copy(validator, export)   # D2 S3 (creator provenance): THIS function made the git-less copy, so it, not the factory, declares it
@@ -489,7 +497,7 @@ def run_authority_bundle(
         if changed is not None:
             run.reason_code, run.reason = AUTHORITY_ASSETS_CHANGED, f"asset {changed} changed during the run"
             return run
-        if _tree_digest(export) != run.candidate_digest:
+        if _tree_digest(export, bound) != run.candidate_digest:
             run.reason_code = AUTHORITY_CANDIDATE_CHANGED_DURING_RUN
             run.reason = "candidate files changed while the authority ran"
             return run
