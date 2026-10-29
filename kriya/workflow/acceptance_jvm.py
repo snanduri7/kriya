@@ -27,7 +27,9 @@ Execution (never in the candidate's real workspace):
    anything else is ``ACCEPTANCE_RUNNER_UNSUPPORTED``. The runner is detected once per run and sealed on every
    judgment (``runner``, ``runner_contract_digest``): a report from the other runner is never read.
 4. The candidate's own main code is compiled there first (the ordinary Maven compile gate): a failure is
-   ``ACCEPTANCE_CANDIDATE_COMPILE_FAILED`` - an ordinary candidate failure, never acceptance counter-evidence.
+   ``ACCEPTANCE_CANDIDATE_COMPILE_FAILED`` - an ordinary candidate failure, never acceptance counter-evidence. A compile gate that
+   returned no trustworthy verdict (a typed ``environment_reason_code``, or no interpretable result) is not a candidate failure:
+   it is ``ACCEPTANCE_ENVIRONMENT_UNAVAILABLE`` and nothing runs.
 5. The operator class is injected (create-exclusive) and run alone through the ordinary test gate of the detected
    runner (Maven ``-Dtest=<Class>``, Gradle ``test --tests <Class>``; containment/offline policy and the FS-1A fresh
    report binding unchanged). A missing report with the injected class in a compilation error is
@@ -266,6 +268,16 @@ def _case_details(workspace: str, report: test_execution.TestExecutionReport) ->
     return details
 
 
+def _compile_no_verdict(compiled: Any) -> Optional[str]:
+    """Why the compile gate produced no trustworthy verdict, or None when it decided (a pass or a real rejection). The gates' own rule
+    (``gate_orchestrator._stop_on_environment_gate_result``): a typed ``environment_reason_code`` is read before ``success``, so a coded
+    result is never trusted; a result that is not a dict is no answer either (``None`` is only "not applicable", and a JVM project applies)."""
+    if not isinstance(compiled, dict):
+        return f"no interpretable result: {type(compiled).__name__}"
+    code = compiled.get("environment_reason_code")
+    return str(code) if code else None
+
+
 def run_java_acceptance(
     artifact: Any, candidate_root: str, *, candidate_paths: Iterable[str], base_revision: Optional[str],
     validator_factory: Callable[[str], Any],
@@ -273,7 +285,12 @@ def run_java_acceptance(
     """Check the trust surface on the candidate, then run the bound operator
     class once in a fresh Kriya-owned copy of the candidate."""
     from kriya.repository.git import GIT_READ_FAILURES
-    from kriya.workflow.acceptance_oracle import AcceptanceError, AcceptanceRun, read_stored
+    from kriya.workflow.acceptance_oracle import (
+        ACCEPTANCE_ENVIRONMENT_UNAVAILABLE,
+        AcceptanceError,
+        AcceptanceRun,
+        read_stored,
+    )
     from kriya.workflow.named_test_oracle import BaseTree, OracleSurface, changed_surface, surface_digest
 
     run = AcceptanceRun()
@@ -326,7 +343,14 @@ def run_java_acceptance(
                                           f"not a JVM project (stack: {getattr(validator, 'stack', None)})")
             return run
         compiled = validator.run_compile_check([p for p in candidate_paths if p.endswith(".java")] or ["pom.xml"])
-        if not (isinstance(compiled, dict) and compiled.get("success")):
+        no_verdict = _compile_no_verdict(compiled)
+        if no_verdict is not None:
+            run.refusal = AcceptanceError(ACCEPTANCE_ENVIRONMENT_UNAVAILABLE,
+                                          f"the candidate's own main code was not judged: the compile gate returned no trustworthy "
+                                          f"verdict ({no_verdict}); nothing about the candidate was observed, so this is neither a "
+                                          f"candidate failure nor acceptance evidence")
+            return run
+        if not compiled.get("success"):
             run.refusal = AcceptanceError(ACCEPTANCE_CANDIDATE_COMPILE_FAILED,
                                           "the candidate's own main code does not compile (an ordinary candidate "
                                           "failure, not acceptance evidence)")

@@ -21,7 +21,8 @@ annotations. Repositories that enforce source headers (Apache RAT) need the repo
 Trust surface = C0's `OracleSurface` (build files and parent/module poms, `.mvn/`, wrapper, every non-main source set,
 `junit-platform.properties`, `META-INF/services/`, output-root writes) vs the run base. Execution in a Kriya-owned copy
 (`<state>/acceptance-runs/<uuid>/workspace`): candidate main compile first (`ACCEPTANCE_CANDIDATE_COMPILE_FAILED` =
-ordinary candidate failure, never evidence), operator class injected create-exclusive, run alone through the ordinary
+ordinary candidate failure, never evidence; a compile gate that returned NO trustworthy verdict - a typed `environment_reason_code`, or no
+interpretable result - is `ACCEPTANCE_ENVIRONMENT_UNAVAILABLE`: the candidate was not judged and nothing runs), operator class injected create-exclusive, run alone through the ordinary
 Maven test gate (`-Dtest=<Class>`, containment/offline policy and FS-1A fresh report unchanged), case detail re-read from
 the digest-verified Surefire XML (MEASURED shape: `name` = bare method, `classname` = FQCN; assertions `<failure>`,
 exceptions `<error>` with stack text). VIOLATED only for an assertion-type failure in a class referencing candidate code
