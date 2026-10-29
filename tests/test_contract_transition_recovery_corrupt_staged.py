@@ -154,6 +154,51 @@ def test_the_already_applied_branch_is_unchanged(tmp_path):
     assert complete_contract_transition(ws, TX, already, committed=True) == TRANSITION_ALREADY_APPLIED and not os.path.exists(staged)
 
 
+# ------------------------------------------------------------------------------- the staged reader types its own read failures (CONTRACT-REGISTRY-PENDING-NON-UTF8-RAW-001)
+
+def test_a_non_utf8_staged_file_is_the_typed_corruption_error_not_a_raw_decode_error(tmp_path):
+    """TRACED in B-002 and left open: read_pending_contract_registry let a UnicodeDecodeError escape raw while ASCII garbage was typed. The commit transaction's promotion catches everything
+    (UNCERTAIN / CONTRACT_REGISTRY_TRANSITION_INCOMPLETE, the cycle open for recovery) and recovery maps both to NEEDS_REVIEW; the reader now types it the same way."""
+    from kriya.control.persistence import (
+        ContractRegistryCorruptError,
+        promote_pending_contract_registry,
+        read_pending_contract_registry,
+    )
+
+    ws, _good, intent = _world(tmp_path)
+    staged = _stage(ws, b"\xff\xfe\x00garbage")
+    with pytest.raises(ContractRegistryCorruptError) as raised:
+        read_pending_contract_registry(ws, TX)
+    assert "not valid UTF-8" in raised.value.detail and raised.value.path == staged
+    with pytest.raises(ContractRegistryCorruptError):
+        promote_pending_contract_registry(ws, TX, before_digest=intent["before_digest"], after_digest=intent["after_digest"])
+    assert open(staged, "rb").read() == b"\xff\xfe\x00garbage"                       # evidence untouched
+    assert complete_contract_transition(ws, TX, intent, committed=True) == TRANSITION_NEEDS_REVIEW
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="a permission-denied read cannot be provoked as root")
+def test_an_unreadable_staged_file_is_the_typed_corruption_error_too(tmp_path):
+    from kriya.control.persistence import ContractRegistryCorruptError, read_pending_contract_registry
+
+    ws, good, intent = _world(tmp_path)
+    staged = _stage(ws, good.encode())
+    os.chmod(staged, 0)
+    try:
+        with pytest.raises(ContractRegistryCorruptError) as raised:
+            read_pending_contract_registry(ws, TX)
+        assert "unreadable" in raised.value.detail
+        assert complete_contract_transition(ws, TX, intent, committed=True) == TRANSITION_NEEDS_REVIEW
+    finally:
+        os.chmod(staged, 0o600)
+
+
+def test_a_missing_staged_file_is_still_none_for_the_reader(tmp_path):
+    from kriya.control.persistence import read_pending_contract_registry
+
+    ws, _good, _intent = _world(tmp_path)
+    assert read_pending_contract_registry(ws, TX) is None
+
+
 # ------------------------------------------------------------------------------------------------------------ the real recovery run, end to end
 
 def _uncertain_run_with_a_staged_registry(tmp_path):

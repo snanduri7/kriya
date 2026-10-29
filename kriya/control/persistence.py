@@ -611,8 +611,14 @@ def read_pending_contract_registry(
     path = pending_contract_registry_path(workspace_path, transaction_id)
     if not os.path.isfile(path):
         return None
-    with open(path, "r", encoding="utf-8") as handle:
-        text = handle.read()
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError as error:
+        raise ContractRegistryCorruptError(path, f"unreadable: {error}") from error
+    except UnicodeDecodeError as error:
+        # RDCG B-002, applied to the staged file too: bytes that are not UTF-8 are as unreadable as bytes that are not JSON - the same typed refusal, never a raw decode error.
+        raise ContractRegistryCorruptError(path, f"unreadable: not valid UTF-8 ({error})") from error
     return text, _registry_from_text(path, text, workspace_path)
 
 
