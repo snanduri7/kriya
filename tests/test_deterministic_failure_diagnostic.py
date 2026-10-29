@@ -26,6 +26,7 @@ from _strict_doubles import developer_double
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
+from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.attempt import AttemptContext
 from kriya.workflow.deterministic_failure_diagnostic import (
     DeterministicFailureCorrectability,
@@ -286,20 +287,12 @@ def _dir_fingerprint(path):
     return digest.hexdigest()
 
 
-def _mock_mvn_success():
-    mock_process = MagicMock(returncode=0)
-    mock_process.communicate.return_value = ("BUILD SUCCESS", "")
-    return mock_process
-
-
 def test_baseline_replay_reproduces_failure_and_is_isolated(tmp_path):
     """Test 8: baseline replay runs against an ISOLATED COPY, never the
-    authoritative workspace itself. Maven itself is mocked (matching this
-    suite's own established convention in test_polymorphic_validation.py's
-    _mock_mvn_success/_mock_mvn_failure - never requires a real toolchain to
-    run by default) reporting a clean returncode=0 build with no real
-    compilation happening, so the TEMP COPY's own target/classes genuinely
-    stays empty - exercising the real, unmocked "zero .class files" branch
+    authoritative workspace itself. Maven itself is scripted (never requires
+    a real toolchain to run by default) reporting a clean returncode=0 build
+    with no real compilation happening, so the TEMP COPY's own
+    target/classes genuinely stays empty - exercising the real, unmocked "zero .class files" branch
     of PolymorphicValidator.run_compile_check() against the isolated copy."""
     workspace = str(tmp_path)
     with open(os.path.join(workspace, "pom.xml"), "w") as fh:
@@ -308,18 +301,24 @@ def test_baseline_replay_reproduces_failure_and_is_isolated(tmp_path):
     os.makedirs(java_dir)
     with open(os.path.join(java_dir, "Foo.java"), "w") as fh:
         fh.write(_JAVA_SOURCE)
+    _init_git_repo(tmp_path)    # R5/R6: the baseline copy is exactly Git's view of the workspace (copy_bound_tree), so the workspace must be a work tree
 
     before_fingerprint = _dir_fingerprint(workspace)
     before_entries = set(os.listdir(workspace))
 
-    # S7: every run is contained, so a git-metadata export (git rev-parse) and the containment launcher run before Maven. Only the MAVEN spawn is faked; a blanket
-    # patch of subprocess.Popen also answered git, whose `subprocess.run` then failed unpacking the fake process
-    real_popen = subprocess.Popen
+    # S7: every run is contained, so Maven is no longer a bare `mvn` process this test can recognise in a Popen argv (git metadata and the containment launcher run
+    # first). The documented seam is the Maven runner itself, scripted to a clean build that compiles nothing; everything above it (the bound-tree copy, the real
+    # compile check and its zero-.class branch) is real.
+    clean_build = {"returncode": 0, "stdout": "BUILD SUCCESS", "stderr": ""}
+    bound_to = []
+    real_compile_check = PolymorphicValidator.run_compile_check
 
-    def popen(cmd, *args, **kwargs):
-        return _mock_mvn_success() if "mvn" in [os.path.basename(str(token)) for token in cmd] else real_popen(cmd, *args, **kwargs)
+    def spy_compile_check(self, *args, **kwargs):
+        bound_to.append(os.path.realpath(self.workspace_path))
+        return real_compile_check(self, *args, **kwargs)
 
-    with patch("subprocess.Popen", side_effect=popen):
+    with patch.object(PolymorphicValidator, "_run_maven_cmd", lambda self, goals, cwd, *a, **k: dict(clean_build)), \
+            patch.object(PolymorphicValidator, "run_compile_check", spy_compile_check):
         result = replay_deterministic_verification_against_baseline(
             fail_type="compile",
             authoritative_workspace_path=workspace,
@@ -329,6 +328,8 @@ def test_baseline_replay_reproduces_failure_and_is_isolated(tmp_path):
 
     assert result["success"] is False
     assert "zero .class files" in result["output"]
+    assert len(bound_to) == 1 and bound_to[0] != os.path.realpath(workspace)            # the check was bound to a copy, never the authoritative workspace ...
+    assert "kriya-baseline-replay-" in bound_to[0] and not os.path.exists(bound_to[0])   # ... a temp copy of its own, removed before the replay returned
     assert _dir_fingerprint(workspace) == before_fingerprint
     assert set(os.listdir(workspace)) == before_entries
 
