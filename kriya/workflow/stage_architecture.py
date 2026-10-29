@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from kriya.agents.contracts import partition_file_list_escapes
 from kriya.policy.approval import await_if_awaitable, resolve_approval, resolve_approval_result
+from kriya.policy.egress import web_lookup_allowed
 from kriya.workflow.file_resolution import (
     _resolve_file_paths_from_design,
     artifact_resolution_scope,
@@ -423,7 +424,7 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
     # than a single extra confirmation prompt is to annoy. Still silently skips if
     # lookup is disabled entirely, so a project that hasn't opted in sees no
     # behavior change at all.
-    if deps.config.autonomy.web_lookup_enabled and deps.config.search.base_url:
+    if web_lookup_allowed(deps.config):
         new_design_terms: List[str] = []
         try:
             known_terms = {s.name.lower() for s in se.list_skills()}

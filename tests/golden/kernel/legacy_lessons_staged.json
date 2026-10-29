@@ -82,7 +82,7 @@
     {
      "attempt": null,
      "content": {
-      "event": "sha256:8f08e547d11c0ff0"
+      "event": "sha256:b20eda0e76785f8e"
      },
      "event": "egress.authority",
      "kind": "mirror.event",
@@ -5049,7 +5049,7 @@
     {
      "attempt": 0,
      "authority": "auxiliary",
-     "details": "sha256:ff89600b152149ff",
+     "details": "sha256:2206fbdb018b79b2",
      "kind": "egress.authority",
      "source": "workflow.run_generation_workflow"
     },

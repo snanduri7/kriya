@@ -449,8 +449,7 @@ async def test_self_correction_resolve_missing_dependency_looks_up_a_real_coordi
         {"content": "done", "tool_calls": []},
     ])
     validator = MagicMock()
-    validator.autonomy_cfg.egress_policy = "unrestricted"
-    validator.autonomy_cfg.web_lookup_enabled = True
+    validator.dependency_lookup_allowed = True    # B2: the egress authority's decision (kriya.policy.egress.dependency_lookup_decision), not the autonomy flags
 
     with patch(
         "kriya.workflow.self_correction.resolve_maven_class",
@@ -468,7 +467,7 @@ async def test_self_correction_resolve_missing_dependency_looks_up_a_real_coordi
 
 
 @pytest.mark.asyncio
-async def test_self_correction_dependency_lookup_respects_local_only_policy(tmp_path):
+async def test_self_correction_dependency_lookup_respects_the_egress_decision(tmp_path):
     llm = MagicMock()
     llm.complete_with_tools = AsyncMock(side_effect=[
         {"content": "", "tool_calls": [{
@@ -478,8 +477,7 @@ async def test_self_correction_dependency_lookup_respects_local_only_policy(tmp_
         {"content": "done", "tool_calls": []},
     ])
     validator = MagicMock()
-    validator.autonomy_cfg.egress_policy = "local_only"
-    validator.autonomy_cfg.web_lookup_enabled = True
+    validator.dependency_lookup_allowed = False   # B2: local_only / offline / unconfigured lookup is refused by the decision
 
     with patch("kriya.workflow.self_correction.resolve_maven_class") as mock_resolve:
         result = await run_self_correction_loop(

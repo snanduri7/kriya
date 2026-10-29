@@ -17,7 +17,14 @@ from __future__ import annotations
 
 from typing import Any, Iterable, List, Tuple
 
-from kriya.policy.egress import EgressCapability, EgressDecision, capability_for
+from kriya.policy.egress import (
+    DEPENDENCY_LOOKUP_HOSTS,
+    EgressCapability,
+    EgressDecision,
+    capability_for,
+    dependency_lookup_decision,
+    web_lookup_allowed,
+)
 from kriya.tools.containment import decide_external_execution, mcp_subject
 
 
@@ -67,7 +74,7 @@ def describe_run_egress(cfg: Any) -> List[EgressDecision]:
         else "KnowledgeGuard release-date lookups for libraries named in the goal",
     ))
 
-    lookup = bool(autonomy.web_lookup_enabled and cfg.search.base_url)
+    lookup = web_lookup_allowed(cfg)
     decisions.append(EgressDecision(
         channel="web_lookup",
         capability=EgressCapability.APPROVED_PUBLIC_KNOWLEDGE if lookup else EgressCapability.DENIED,
@@ -76,6 +83,8 @@ def describe_run_egress(cfg: Any) -> List[EgressDecision]:
         reason="sanitized public terms only, per-query approval; fetched pages must be public addresses"
         if lookup else "live lookup disabled",
     ))
+
+    decisions.append(dependency_lookup_decision(cfg))
 
     decisions.append(EgressDecision(
         channel="verification_execution",
@@ -134,4 +143,5 @@ def egress_authority_details(cfg: Any) -> dict:
     return {"decisions": [decision.to_dict() for decision in describe_run_egress(cfg)]}
 
 
-__all__ = ["describe_run_egress", "egress_authority_details"]
+__all__ = ["DEPENDENCY_LOOKUP_HOSTS", "dependency_lookup_decision", "describe_run_egress", "egress_authority_details",
+           "web_lookup_allowed"]

@@ -44,6 +44,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy import approval as source_review
+from kriya.policy.egress import dependency_lookup_decision
 from kriya.workflow.obligations import (
     ObligationAuthority,
     ObligationKind,
@@ -1025,6 +1026,7 @@ async def _attempt_owner_recovery_self_correction(
     validator = PolymorphicValidator(
         plan_workspace_path, original_workspace_path=workspace_path,
         autonomy_cfg=kernel.config.autonomy,
+        dependency_lookup_allowed=dependency_lookup_decision(kernel.config).allowed,
         # PRD-011: the owner's own authorized files are the authority to
         # change a toolchain declaration here.
         toolchain_declaration_mutable=toolchain_declaration_mutable(

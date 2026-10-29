@@ -39,6 +39,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 from kriya.control.run_coordinator import mark_run_stage
 from kriya.control.run_record import RunLifecycle
+from kriya.policy.egress import dependency_lookup_decision
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.repository.git import RepositoryContentFilterRefused
 from kriya.tools.validate import PolymorphicValidator, execution_evidence
@@ -1011,6 +1012,7 @@ def run_terminal_regression(ctx: StageContext, deps: StageDeps, run: Development
     validator = PolymorphicValidator(
         worktree_path, original_workspace_path=workspace_path,
         autonomy_cfg=deps.config.autonomy,
+        dependency_lookup_allowed=dependency_lookup_decision(deps.config).allowed,
         toolchain_declaration_mutable=toolchain_declaration_mutable(
             write_scope_mode, allowed_write_relpaths, structured_plan,
         ),

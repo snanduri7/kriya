@@ -16,6 +16,7 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.policy.approval import await_if_awaitable, resolve_approval_result
+from kriya.policy.egress import web_lookup_allowed
 from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.live_lookup import _extract_first_usable, _resolve_via_web_lookup
 from kriya.workflow.run_events import EventAuthority, RunEvent
@@ -247,7 +248,7 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
         # term live lookup tried and came up empty on falls through to the normal
         # human-ask path exactly as if lookup had never run at all.
         auto_resolutions: List[Tuple[Any, Dict[str, Any], str]] = []
-        if deps.config.autonomy.web_lookup_enabled and deps.config.search.base_url:
+        if web_lookup_allowed(deps.config):
             lookup_terms = [s.name for s in unverified_relevant] + missing_skill_candidates
             if await deps.approve_web_lookup(lookup_terms, deps.config.search.base_url, web_lookup_query_callback):
                 found = await _resolve_via_web_lookup(

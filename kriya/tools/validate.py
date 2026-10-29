@@ -474,7 +474,11 @@ class PolymorphicValidator:
         java_home_override: Optional[str] = None,
         authorized_dependency_removals: Optional[Iterable[str]] = None,
         toolchain_declaration_mutable: bool = False,
+        dependency_lookup_allowed: bool = False,
     ) -> None:
+        # B2: the egress authority's decision (kriya.workflow.egress_authority.dependency_lookup_decision), handed in by the
+        # caller that holds the full configuration; a validator built without it never contacts the public registry.
+        self.dependency_lookup_allowed = bool(dependency_lookup_allowed)
         self.workspace_path = os.path.abspath(workspace_path)
         self.original_workspace_path = os.path.abspath(original_workspace_path) if original_workspace_path else None
         # D2 S3: the trees THIS validator's executions may prepare a Git-metadata mount target in (realpaths): a gate view, a Kriya-created

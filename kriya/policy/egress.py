@@ -8,7 +8,11 @@ with its own enum or flag:
 - autonomy.web_lookup_enabled / search.base_url: live lookup;
 - knowledge.offline_mode: registry release metadata.
 
-This module does not replace any of them and never decides anything itself.
+This module does not replace any of them and decides nothing itself, with one
+exception (B2, Wave-2): the two live-lookup decisions that several owners used
+to recompute from partial settings - ``web_lookup_allowed`` and
+``dependency_lookup_decision`` below - live here so every consumer and the
+egress report (kriya/workflow/egress_authority.py) ask the same function.
 It names the one capability class each owner's decision belongs to, so
 every decision can be recorded, compared and audited the same way.
 
@@ -149,4 +153,47 @@ class EgressDecision:
         return record
 
 
-__all__ = ["EgressCapability", "EgressDecision", "capability_for"]
+
+def web_lookup_allowed(cfg: Any) -> bool:
+    """The one decision for live (search) lookup: the operator enabled it AND configured the search endpoint. Every consumer
+    (the stages, the retry loop, the application projection, this report) asks here; unreadable policy state is a refusal."""
+    try:
+        return bool(cfg.autonomy.web_lookup_enabled and cfg.search.base_url)
+    except AttributeError:
+        return False
+
+
+# B2: the Maven Central class/coordinate lookup of the javac/Maven compile gates and the resolve_missing_dependency tool
+# (kriya/tools/resolver.py). It runs in the Kriya process against this fixed public host - not inside containment.
+DEPENDENCY_LOOKUP_HOSTS = ("search.maven.org",)
+
+
+def dependency_lookup_decision(cfg: Any) -> EgressDecision:
+    """B2: the ONE decision whether a compile gate or the repair tool may contact the public dependency registry. Allowed only when
+    the egress policy is open, live lookup is enabled and configured (``web_lookup_allowed``) and ``knowledge.offline_mode`` is off.
+    The gates consume this decision (``PolymorphicValidator.dependency_lookup_allowed``) and the egress report records it, so what
+    runs and what is reported cannot differ. Missing or unreadable policy state denies."""
+    try:
+        refusals = []
+        if cfg.autonomy.egress_policy != "unrestricted":
+            refusals.append("autonomy.egress_policy is not unrestricted")
+        if not web_lookup_allowed(cfg):
+            refusals.append("live lookup is not enabled and configured (autonomy.web_lookup_enabled + search.base_url)")
+        if cfg.knowledge.offline_mode:
+            refusals.append("knowledge.offline_mode")
+    except AttributeError:
+        refusals = ["policy state unavailable"]
+    allowed = not refusals
+    return EgressDecision(
+        channel="dependency_lookup",
+        capability=EgressCapability.APPROVED_PUBLIC_KNOWLEDGE if allowed else EgressCapability.DENIED,
+        allowed=allowed,
+        authority_source="autonomy.egress_policy + autonomy.web_lookup_enabled + search.base_url + knowledge.offline_mode",
+        destinations=DEPENDENCY_LOOKUP_HOSTS if allowed else (),
+        reason=("compile-gate and repair-tool class lookups against the public dependency registry; sanitized class names only"
+                if allowed else "refused: " + "; ".join(refusals)),
+    )
+
+
+__all__ = ["DEPENDENCY_LOOKUP_HOSTS", "EgressCapability", "EgressDecision", "capability_for", "dependency_lookup_decision",
+           "web_lookup_allowed"]

@@ -405,14 +405,10 @@ def _dispatch_tool_call(
             )
         last_segment = symbol.rsplit(".", 1)[-1]
         query_type = "fc" if last_segment[:1].isupper() else "g"
-        autonomy_cfg = validator.autonomy_cfg
-        allow_external_lookup = bool(
-            autonomy_cfg.egress_policy != "local_only"
-            and autonomy_cfg.web_lookup_enabled
-        )
+        allow_external_lookup = bool(validator.dependency_lookup_allowed)       # B2: the egress authority's decision
         if not allow_external_lookup:
             return (
-                "External dependency lookup is disabled by local-only or web-lookup policy; "
+                "External dependency lookup is disabled by the egress policy (local-only, web-lookup or offline mode); "
                 "use project-local dependencies and classpath evidence instead."
             )
         coord = resolve_maven_class(

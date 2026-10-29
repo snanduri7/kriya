@@ -199,10 +199,7 @@ class MavenBuildAdapter(BuildAdapter):
                     from kriya.tools.resolver import enrich_java_compiler_errors
                     error_output = enrich_java_compiler_errors(
                         error_output,
-                        allow_external_lookup=(
-                            v.autonomy_cfg.egress_policy != "local_only"
-                            and v.autonomy_cfg.web_lookup_enabled
-                        ),
+                        allow_external_lookup=v.dependency_lookup_allowed,
                     )
                 except Exception as ree:
                     logger.warning(f"Resolver failed to run: {ree}")

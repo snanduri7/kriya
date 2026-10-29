@@ -174,6 +174,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_prd011_toolchain_identity.py': ('S', 'M'),
  'tests/test_prd011_toolchain_migration.py': ('S', 'M'),
  'tests/test_prd012_egress.py': ('N', 'C'),
+ 'tests/test_b2_dependency_lookup_authority.py': ('N', 'C'),
  'tests/test_prd012_egress_docker.py': ('N', 'C'),
  'tests/test_prd015_completion_result.py': ('F2', 'F'),
  'tests/test_prd016_adaptive_budget.py': ('F2', 'F'),

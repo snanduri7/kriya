@@ -32,7 +32,7 @@ INVENTORY = {
         1, "fetch_url_text: public-address SSRF guard on every hop; callers are live lookup (above), "
            "an operator URL under a non-local_only policy, or the operator's own `kriya learn -u`"),
     ("kriya/tools/resolver.py", "httpx.Client"): (
-        1, "allow_external_lookup = egress_policy != local_only AND web_lookup_enabled (every caller)"),
+        1, "allow_external_lookup = kriya.policy.egress.dependency_lookup_decision (egress_policy open AND web lookup configured AND NOT knowledge.offline_mode); every caller passes it"),
     ("kriya/tools/knowledge.py", "httpx.Client"): (
         7, "knowledge.offline_mode (production forces true); fixed platform REGISTRY_METADATA_HOSTS"),
     ("kriya/tools/service_runtime.py", "HTTPConnection"): (

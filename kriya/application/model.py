@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List
 
 from kriya.context.model import RequestContext
 from kriya.foundation.redaction import safe_endpoint
+from kriya.policy.egress import web_lookup_allowed
 from kriya.skills.service import MAX_SKILLS, SkillService
 
 ROLES = ("planner", "architect", "developer", "reviewer", "run_verifier", "skill_gap", "spec_compliance")
@@ -77,7 +78,7 @@ class ModelService:
     def context(self, ctx: RequestContext, cfg, skills: Dict[str, Any]) -> Dict[str, Any]:
         """Routing, Skills (``skills``, from ``ModelService.skills``), tools and egress of a resolved configuration."""
         return {"routing": routing(cfg), "skills": skills, "tools": tools_summary(cfg),
-                "egress": {"policy": cfg.autonomy.egress_policy, "web_lookup_enabled": bool(cfg.autonomy.web_lookup_enabled and cfg.search.base_url)}}
+                "egress": {"policy": cfg.autonomy.egress_policy, "web_lookup_enabled": web_lookup_allowed(cfg)}}
 
     def probe(self, ctx: RequestContext, cfg, *, probe: ProbeEndpoint, deadline_seconds: float, max_endpoints: int) -> Dict[str, Any]:
         """Every configured binding (default, per-role overrides, fallback chain) checked against ONE probe of its distinct (endpoint,

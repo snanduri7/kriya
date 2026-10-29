@@ -548,12 +548,20 @@ def test_a_plain_java_workspace_has_no_test_gate(tmp_path):
         "INDETERMINATE", "NO_STRUCTURED_REPORT_FOR_RUNNER:javac")
 
 
-@pytest.mark.parametrize("egress, web_lookup, expected", [
-    ("local_only", True, False), ("local_only", False, False), ("unrestricted", True, True), ("unrestricted", False, False)])
-def test_javac_resolver_lookup_needs_both_open_egress_and_web_lookup(tmp_path, egress, web_lookup, expected):
+@pytest.mark.parametrize("egress, web_lookup, search, offline, expected", [
+    ("local_only", True, "http://127.0.0.1:8888", False, False), ("local_only", False, "http://127.0.0.1:8888", False, False),
+    ("unrestricted", True, "http://127.0.0.1:8888", False, True), ("unrestricted", False, "http://127.0.0.1:8888", False, False),
+    ("unrestricted", True, "", False, False), ("unrestricted", True, "http://127.0.0.1:8888", True, False)])
+def test_javac_resolver_lookup_follows_the_egress_decision(tmp_path, egress, web_lookup, search, offline, expected):
+    """B2 (was: egress open AND web lookup on): the gate consumes kriya.policy.egress.dependency_lookup_decision, so the
+    search endpoint and knowledge.offline_mode count too. tests/test_b2_dependency_lookup_authority.py pins the whole contract."""
+    from kriya.policy.egress import dependency_lookup_decision
+
     _write(tmp_path, "App.java", "class App {")
-    autonomy = AppConfig().autonomy.model_copy(update={"egress_policy": egress, "web_lookup_enabled": web_lookup})
-    v = PolymorphicValidator(str(tmp_path), autonomy_cfg=autonomy)
+    cfg = AppConfig()
+    cfg.autonomy.egress_policy, cfg.autonomy.web_lookup_enabled = egress, web_lookup
+    cfg.search.base_url, cfg.knowledge.offline_mode = search, offline
+    v = PolymorphicValidator(str(tmp_path), autonomy_cfg=cfg.autonomy, dependency_lookup_allowed=dependency_lookup_decision(cfg).allowed)
     seen = []
     _, patched = _javac_runs({"returncode": 1, "stdout": "", "stderr": "App.java:1: error: reached end of file while parsing"})
     with patched, patch("kriya.tools.resolver.enrich_java_compiler_errors",

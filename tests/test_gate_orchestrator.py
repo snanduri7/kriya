@@ -458,7 +458,9 @@ class _Script:
 
         class ScriptedValidator:
             def __init__(self, workspace_path, original_workspace_path=None, autonomy_cfg=None, java_home_override=None,
-                         authorized_dependency_removals=None, toolchain_declaration_mutable=False):
+                         authorized_dependency_removals=None, toolchain_declaration_mutable=False,
+                         dependency_lookup_allowed=False):
+                self.dependency_lookup_allowed = dependency_lookup_allowed
                 self.index = script.count
                 script.count += 1
                 self.workspace_path = workspace_path

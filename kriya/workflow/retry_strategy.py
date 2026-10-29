@@ -31,6 +31,7 @@ import os
 from typing import Any, Dict, List, Optional, Sequence
 
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
+from kriya.policy.egress import web_lookup_allowed
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.workflow.attribution import (
@@ -765,8 +766,7 @@ async def _record_attempt_failure(
         # thing standing between a first occurrence and live lookup, so
         # it should fire on the same schedule, not a slower one.
         and fail_type in ("compile", "run_verification", "run_verification_hung", "unaddressed_error_location")
-        and ctx.kernel.config.autonomy.web_lookup_enabled
-        and ctx.kernel.config.search.base_url
+        and web_lookup_allowed(ctx.kernel.config)
         and error_terms
         and await ctx.approve_web_lookup(error_terms, ctx.kernel.config.search.base_url, ctx.web_lookup_query_callback)
     ):

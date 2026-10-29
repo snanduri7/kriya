@@ -49,6 +49,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
+from kriya.policy.egress import dependency_lookup_decision
 from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode
 from kriya.tools.validate import MAVEN_VALIDATE_NO_VERDICT_CODES, execution_evidence
 from kriya.workflow.acceptance import output_confirms_nonzero_test_execution, subtask_owns_test_obligation
@@ -388,6 +389,7 @@ async def _run_verification_only_attempt(deps: GateDeps, state: RunState, ctx: A
         ctx.worktree_path, original_workspace_path=ctx.workspace_path,
         autonomy_cfg=ctx.kernel.config.autonomy,
         toolchain_declaration_mutable=deps._ctx_toolchain_declaration_mutable(ctx),
+        dependency_lookup_allowed=dependency_lookup_decision(ctx.kernel.config).allowed,
     )
     # PRD-031: the declared verifiers are sequenced by VerificationCoordinator.
     await VerificationCoordinator(
@@ -425,6 +427,7 @@ def _run_pom_validation_gate(deps: GateDeps, state: RunState, ctx: AttemptCtx, t
     if pom_files:
         pom_validator = PolymorphicValidator(
             ctx.worktree_path, autonomy_cfg=ctx.kernel.config.autonomy,
+            dependency_lookup_allowed=dependency_lookup_decision(ctx.kernel.config).allowed,
         )
         pom_validator.tree_binding = tree_binding
         pom_validate_res = pom_validator.run_pom_validate()
@@ -457,6 +460,7 @@ def _new_candidate_validator(deps: GateDeps, ctx: AttemptCtx) -> Any:
         ctx.worktree_path, original_workspace_path=ctx.workspace_path,
         autonomy_cfg=ctx.kernel.config.autonomy,
         toolchain_declaration_mutable=deps._ctx_toolchain_declaration_mutable(ctx),
+        dependency_lookup_allowed=dependency_lookup_decision(ctx.kernel.config).allowed,
         # PRV-05 (2026-08-28, run 5): the dependency-preservation check
         # below used to unconditionally reject ANY pom.xml dependency
         # removal, restoring Gson every time the subtask that owns
