@@ -214,6 +214,24 @@ def _tracked_workspace_paths(workspace_path: str) -> List[str]:
         return []
 
 
+def authoritative_tracked_workspace_paths(workspace_path: str) -> List[str]:
+    """The tracked set that SEALS a run's contract (``compile_run_contract``, the CLI's verification-authority admission): on a Git-backed root Git's answer or the
+    typed ``BoundTreeError(BOUND_TREE_UNAVAILABLE)`` - never ``[]``. "Git could not list the tracked files" is not "the repository tracks nothing": the empty answer
+    seals ``language=None``, drops the file-immutability / API-preservation bindings and seals a conditional documentation request as not applicable. The two closers
+    keep ``_tracked_workspace_paths`` (a missing listing there can only withhold a SATISFIED, so it fails closed on its own). A root with no repository (pre-bootstrap
+    greenfield) keeps the lenient answer: that class has no membership owner yet (parked)."""
+    from kriya.repository.bound_tree import BOUND_TREE_UNAVAILABLE, GIT_BACKED, BoundTreeError, workspace_root_class
+    from kriya.repository.git import GIT_READ_FAILURES
+    from kriya.workflow.worktree import git_read_lines
+
+    if workspace_root_class(workspace_path) != GIT_BACKED:
+        return _tracked_workspace_paths(workspace_path)
+    try:
+        return [path for path in git_read_lines(workspace_path, "ls-files") if path]
+    except GIT_READ_FAILURES as error:
+        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"git ls-files failed: {type(error).__name__}: {error}") from error
+
+
 def _workspace_file_reader(workspace_path: str) -> Callable[[str], Optional[bytes]]:
     """A reader of tracked files for the contract compiler's documentation
     referent inspection; None for an unreadable path (fail closed there)."""

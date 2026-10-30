@@ -2795,12 +2795,12 @@ def _bind_verification_authority(cfg: AppConfig, authority_path: str, requiremen
     from kriya.core.state_paths import resolve_state_directory
     from kriya.workflow.authority_bundle import load_authority_bundle
     from kriya.workflow.requirement_contract import requirement_set_for
-    from kriya.workflow.workflow import _project_language, _tracked_workspace_paths, _workspace_head
+    from kriya.workflow.workflow import _project_language, _workspace_head, admission_tracked_workspace_paths
 
     return load_authority_bundle(
         authority_path, requirement_set_for(requirement_goal, contract), requirement_goal,
         state_root=resolve_state_directory(cfg)[0], workspace=workspace, base_revision=_workspace_head(workspace),
-        project_language=_project_language(_tracked_workspace_paths(workspace)),
+        project_language=_project_language(admission_tracked_workspace_paths(workspace)),
     )
 
 

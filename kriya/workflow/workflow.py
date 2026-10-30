@@ -264,6 +264,9 @@ from kriya.workflow.requirement_closers import _tracked_workspace_paths as _trac
 from kriya.workflow.requirement_closers import _workspace_file_reader as _workspace_file_reader
 from kriya.workflow.requirement_closers import _workspace_head as _workspace_head
 from kriya.workflow.requirement_closers import (
+    authoritative_tracked_workspace_paths as authoritative_tracked_workspace_paths,
+)
+from kriya.workflow.requirement_closers import (
     close_requirements_by_documentation as close_requirements_by_documentation,
 )
 from kriya.workflow.requirement_closers import documentation_referent_paths as documentation_referent_paths
@@ -1142,6 +1145,18 @@ _PYTHON_MANIFESTS = frozenset({"pyproject.toml", "setup.py", "setup.cfg", "requi
 _JVM_MANIFESTS = frozenset({"pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"})
 
 
+def admission_tracked_workspace_paths(workspace_path: str) -> List[str]:
+    """The tracked set the CLI's verification-authority admission binds the project language from: ``authoritative_tracked_workspace_paths``, with the repository
+    layer's ``BoundTreeError`` mapped to the admission's own typed refusal (``AuthorityBundleError``, ``AUTHORITY_EXECUTION_UNAVAILABLE`` - the code the run itself
+    ends with). No authority is admitted against a membership Git could not give."""
+    from kriya.workflow.authority_bundle import AUTHORITY_EXECUTION_UNAVAILABLE, AuthorityBundleError
+
+    try:
+        return authoritative_tracked_workspace_paths(workspace_path)
+    except BoundTreeError as error:
+        raise AuthorityBundleError(AUTHORITY_EXECUTION_UNAVAILABLE, f"the workspace's tracked files cannot be listed ({error})") from error
+
+
 def _project_language(tracked_paths: Iterable[str]) -> Optional[str]:
     """"python" / "java" / None from the repository's own manifests, else its
     sources (VERIFICATION-CONTRACT-003: which API-preservation predicate, if
@@ -1174,7 +1189,7 @@ def compile_run_contract(engine: Any, requirement_goal: Optional[str], goal: str
     from kriya.workflow.example_oracle import derive_example_artifact, example_authority
     from kriya.workflow.requirement_disposition import bound_dispositions
 
-    tracked = _tracked_workspace_paths(workspace_path)
+    tracked = authoritative_tracked_workspace_paths(workspace_path)
     origins = statement_origins(requirement_goal) if (requirement_goal and requirement_set.contract_digest is None) else {}
     authorities = list(bound_external_authorities(engine))
     # The goal's own example lines, compiled deterministically into a sealed

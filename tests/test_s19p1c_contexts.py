@@ -91,6 +91,7 @@ _GIT_READ_LINES_CALLERS = {
     # (file, function, verb): every argv a caller hands kriya.workflow.worktree.git_read_lines (S19 P1c 8(a)).
     ("kriya/cli.py", "_bind_approval", "rev-parse"),
     ("kriya/workflow/requirement_closers.py", "_tracked_workspace_paths", "ls-files"),
+    ("kriya/workflow/requirement_closers.py", "authoritative_tracked_workspace_paths", "ls-files"),     # W3-3 U2: the contract-sealing listing (typed on failure)
     ("kriya/workflow/requirement_closers.py", "_workspace_head", "rev-parse"),
     ("kriya/workflow/requirement_closers.py", "_oracle_base_revision", "rev-parse"),
     ("kriya/workflow/requirement_closers.py", "mutation_scope_evidence", "rev-parse"),
