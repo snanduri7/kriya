@@ -446,7 +446,7 @@ def test_attr_tree_refusal_precedes_every_evidence_bearing_git_operation_and_cha
 
 
 def test_the_model_facing_diff_exposes_a_crlf_rewrite_the_hosts_own_view_hides(tmp_path, host):
-    """ACCEPTED CONSEQUENCE (owner, 2026-10-31): Kriya's deterministic git view may show a byte difference the user's host
+    """ACCEPTED CONSEQUENCE (owner, 2026-10-30): Kriya's deterministic git view may show a byte difference the user's host
     configuration hides. MEASURED: blob LF, working file CRLF, host autocrlf=true -> the host's `git diff` is empty (0 lines); the
     pinned one is a real diff. Deterministic evidence is preferred to cosmetic parity with the host."""
     from plugins.core_tools import GitArgs, GitTool

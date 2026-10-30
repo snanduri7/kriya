@@ -16705,19 +16705,33 @@ async def test_workflow_skill_gap_refuses_url_fetch_under_local_only_egress(tmp_
     assert skill.rules == ["Existing rule."]
 
 
-@pytest.mark.asyncio
-async def test_workflow_skill_gap_decline_marks_acknowledged_and_proceeds(tmp_path):
-    """Declining the skill-gap ask (callback returns None) must not fail generation -
-    it proceeds with the skill as-is, same as today's baseline - and must remember the
-    decline so future runs don't keep re-asking about the same skill."""
-    from kriya.skills.skill import SkillEngine
+_GAP_SKILL_YAML = "name: widgetlib\ndescription: Test\ntags: [widgetlib]\n"
 
-    skills_dir = tmp_path / "skills"
-    skill_folder = skills_dir / "widgetlib"
-    skill_folder.mkdir(parents=True)
-    (skill_folder / "skill.yaml").write_text("name: widgetlib\ndescription: Test\ntags: [widgetlib]\n")
-    (skill_folder / "rules.txt").write_text("Existing rule.\n")
 
+def _write_gap_skill(skills_dir, skill_yaml=_GAP_SKILL_YAML):
+    folder = skills_dir / "widgetlib"
+    folder.mkdir(parents=True)
+    (folder / "skill.yaml").write_text(skill_yaml)
+    (folder / "rules.txt").write_text("Existing rule.\n")
+    return skills_dir
+
+
+def _skills_bytes(skills_dir):
+    return {str(p.relative_to(skills_dir)): p.read_bytes() for p in sorted(skills_dir.rglob("*")) if p.is_file()}
+
+
+def _commits_touching(workspace, subpath):
+    """Commits in the workspace's repository that touch ``subpath``. The run binds a repository (validity control: it must exist,
+    otherwise "no commit touched it" would hold vacuously)."""
+    assert (workspace / ".git").exists(), "the run did not bind a repository, so a commit-free skills directory proves nothing"
+    out = subprocess.run(["git", "-C", str(workspace), "log", "--all", "--format=%H", "--", subpath], capture_output=True, text=True, check=True)
+    return out.stdout.split()
+
+
+async def _run_gap_workflow(workspace, skills_dir, engine=None):
+    """One generation run in which the human declines the skill-gap ask (the callback returns None); returns (result, the
+    callback's calls). ``engine`` is a controller-owned SkillEngine (skill_engine_override): the run does not end its
+    run-local state, so a test can read what the run recorded."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(skills_dir)
@@ -16740,16 +16754,54 @@ async def test_workflow_skill_gap_decline_marks_acknowledged_and_proceeds(tmp_pa
     we = WorkflowEngine(kernel, llm)
     res = await we.run_generation_workflow(
         goal="Build something with the widgetlib skill",
-        workspace_path=str(tmp_path),
+        workspace_path=str(workspace),
         skill_gap_callback=skill_gap_cb,
+        skill_engine_override=engine,
     )
+    return res, calls
+
+
+@pytest.mark.asyncio
+async def test_workflow_skill_gap_decline_marks_acknowledged_and_proceeds(tmp_path):
+    """Declining the skill-gap ask (callback returns None) must not fail generation - it proceeds with the skill as-is - and
+    the decline is acknowledged for THIS RUN only (W3-1): a skill inside the workspace is project-supplied, so the decline lives
+    in the run-local owner (`SkillEngine.is_gap_acknowledged`), is never written into the project (no skill.yaml byte, no
+    commit) and the next run asks again.
+
+    Superseded: this test used to assert the decline was PERSISTED (`verification_gap_acknowledged: true` re-read from
+    skill.yaml). That made a project file the authority for suppressing the human gap prompt; the persisted-decline
+    assertion was replaced, not dropped, by the three below (run-local, no project byte, fresh run asks again)."""
+    from kriya.skills.skill import SkillEngine
+
+    skills_dir = _write_gap_skill(tmp_path / "skills")
+    before = _skills_bytes(skills_dir)
+
+    engine = SkillEngine(str(skills_dir), load_global=False, workspace_path=str(tmp_path))
+    engine.discover_and_load()
+    # validity control: the engine really treats this as a workspace skill and nothing is acknowledged before the run
+    assert engine._skill_verification_is_authoritative(engine.get_skill("widgetlib").source_path) is False
+    assert engine.is_gap_acknowledged(engine.get_skill("widgetlib")) is False
+
+    res, calls = await _run_gap_workflow(tmp_path, skills_dir, engine=engine)
 
     assert res["quality_gates_passed"] is True
     assert calls == [["widgetlib"]]
-
-    se = SkillEngine(str(skills_dir), load_global=False)
-    se.discover_and_load()
-    assert se.get_skill("widgetlib").verification_gap_acknowledged is True
+    # same run: acknowledged through the run-local owner, and it survives a reload (`discover_and_load`)
+    assert engine.is_gap_acknowledged(engine.get_skill("widgetlib")) is True
+    engine.discover_and_load()
+    assert engine.is_gap_acknowledged(engine.get_skill("widgetlib")) is True
+    # the project is untouched: not one skills byte changed, no key written, no commit touching the skills
+    assert _skills_bytes(skills_dir) == before
+    assert b"verification_gap_acknowledged" not in (skills_dir / "widgetlib" / "skill.yaml").read_bytes()
+    assert _commits_touching(tmp_path, "skills") == []
+    # a fresh run (a new engine reading the same project) is not suppressed, and the human is asked again
+    fresh = SkillEngine(str(skills_dir), load_global=False, workspace_path=str(tmp_path))
+    fresh.discover_and_load()
+    assert fresh.is_gap_acknowledged(fresh.get_skill("widgetlib")) is False
+    (tmp_path / "app.py").unlink()                       # the first run's generated output, so the second run starts from the same project
+    res2, calls2 = await _run_gap_workflow(tmp_path, skills_dir)
+    assert res2["quality_gates_passed"] is True
+    assert calls2 == [["widgetlib"]]
     # Regression test for a real, previously-invisible gap: skill-gap detection
     # and the decline path both correctly happen, but nothing downstream ever
     # connected a resulting run - pass or fail - back to "this proceeded on an
@@ -16757,6 +16809,26 @@ async def test_workflow_skill_gap_decline_marks_acknowledged_and_proceeds(tmp_pa
     # without it" is still a genuinely unresolved gap for the code that gets
     # generated, distinct from a real fact being added.
     assert res["unresolved_skill_gaps"] == ["widgetlib"]
+    assert res2["unresolved_skill_gaps"] == ["widgetlib"]
+
+
+@pytest.mark.asyncio
+async def test_workflow_workspace_skill_claiming_gap_acknowledged_is_asked_again(tmp_path):
+    """W3-1: a workspace skill.yaml that CLAIMS `verification_gap_acknowledged: true` is project-supplied text, not the human's
+    decline: the run asks about the gap anyway, and the claim is neither honoured nor rewritten."""
+    skills_dir = _write_gap_skill(
+        tmp_path / "skills", _GAP_SKILL_YAML + "verification_gap_acknowledged: true\n"
+    )
+    before = _skills_bytes(skills_dir)
+
+    res, calls = await _run_gap_workflow(tmp_path, skills_dir)
+
+    assert res["quality_gates_passed"] is True
+    assert calls == [["widgetlib"]]                       # asked despite the project's claim
+    assert res["unresolved_skill_gaps"] == ["widgetlib"]
+    assert _skills_bytes(skills_dir) == before            # the claim is not rewritten, nothing else written to the skill
+    assert _commits_touching(tmp_path, "skills") == []
+
 
 @pytest.mark.asyncio
 async def test_workflow_no_skill_gap_callback_still_reports_unresolved_gap(tmp_path):
@@ -16827,44 +16899,44 @@ async def test_workflow_unresolved_skill_gaps_none_when_nothing_flagged(tmp_path
 
 @pytest.mark.asyncio
 async def test_workflow_skill_gap_not_reasked_once_acknowledged(tmp_path):
-    """A second run must not re-invoke the callback for a skill already acknowledged
-    by a prior decline."""
-    skills_dir = tmp_path / "skills"
-    skill_folder = skills_dir / "widgetlib"
-    skill_folder.mkdir(parents=True)
-    (skill_folder / "skill.yaml").write_text(
-        "name: widgetlib\ndescription: Test\ntags: [widgetlib]\nverification_gap_acknowledged: true\n"
-    )
-    (skill_folder / "rules.txt").write_text("Existing rule.\n")
+    """A skill whose gap is already acknowledged by an authority Kriya honours is not asked about again: a decline recorded
+    earlier in the SAME run (run-local owner), or a decline in a skills directory the operator owns (outside the workspace).
+    Only the authority changed in W3-1 (a workspace skill.yaml's own claim no longer counts - see
+    test_workflow_workspace_skill_claiming_gap_acknowledged_is_asked_again); the no-re-ask behaviour itself is kept, and each
+    case below carries a control that the callback WOULD have fired without the acknowledgement."""
+    from kriya.skills.skill import SkillEngine
 
-    cfg = AppConfig()
-    cfg.autonomy.mode = "guardrails"
-    cfg.paths.skills = str(skills_dir)
-    cfg.autonomy.run_verification_enabled = False
-    kernel = Kernel(config=cfg)
-    llm = LLMClient(cfg)
+    # (a) same run, workspace skill: the run-local acknowledgement suppresses the ask
+    ws_a = tmp_path / "a"
+    skills_a = _write_gap_skill(ws_a / "skills")
+    engine = SkillEngine(str(skills_a), load_global=False, workspace_path=str(ws_a))
+    engine.discover_and_load()
+    assert engine.mark_gap_acknowledged("widgetlib") is True
+    engine.discover_and_load()                  # a reload (every work unit does one) drops the in-memory field: only the run-local owner holds the decline
+    assert engine.get_skill("widgetlib").verification_gap_acknowledged is False      # validity control: the raw field no longer says so
+    assert engine.is_gap_acknowledged(engine.get_skill("widgetlib")) is True
+    res_a, calls_a = await _run_gap_workflow(ws_a, skills_a, engine=engine)
+    assert res_a["quality_gates_passed"] is True
+    assert calls_a == []
+    # control (a): the identical run without the acknowledgement asks
+    ws_a2 = tmp_path / "a2"
+    skills_a2 = _write_gap_skill(ws_a2 / "skills")
+    _, calls_a2 = await _run_gap_workflow(ws_a2, skills_a2)
+    assert calls_a2 == [["widgetlib"]]
 
-    llm.complete = AsyncMock(side_effect=[
-        "Step 1: Write code",
-        "Design: Write app.py",
-        '[{"filepath": "app.py", "content": "print(1)\\n"}]',
-        "Review: Approved"
-    ])
-
-    calls = []
-    def skill_gap_cb(reason, names):
-        calls.append(names)
-        return None
-
-    we = WorkflowEngine(kernel, llm)
-    res = await we.run_generation_workflow(
-        goal="Build something with the widgetlib skill",
-        workspace_path=str(tmp_path),
-        skill_gap_callback=skill_gap_cb,
-    )
-
-    assert res["quality_gates_passed"] is True
-    assert calls == []
+    # (b) an operator-owned skills directory (outside the workspace): its persisted acknowledged decline is honoured
+    ws_b, operator_skills = tmp_path / "b", tmp_path / "operator-skills"
+    ws_b.mkdir()
+    _write_gap_skill(operator_skills, _GAP_SKILL_YAML + "verification_gap_acknowledged: true\n")
+    res_b, calls_b = await _run_gap_workflow(ws_b, operator_skills)
+    assert res_b["quality_gates_passed"] is True
+    assert calls_b == []
+    # control (b): the same operator-owned skill WITHOUT the acknowledgement asks
+    ws_b2, operator_skills2 = tmp_path / "b2", tmp_path / "operator-skills2"
+    ws_b2.mkdir()
+    _write_gap_skill(operator_skills2)
+    _, calls_b2 = await _run_gap_workflow(ws_b2, operator_skills2)
+    assert calls_b2 == [["widgetlib"]]
 
 
 def _make_conflicting_skills_dir(tmp_path):
