@@ -258,11 +258,26 @@ def ignored_repository_paths(root: str, relpaths: Sequence[str]) -> frozenset:
     return frozenset(os.fsdecode(item) for item in result.stdout.split(b"\0") if item)
 
 
-def visible_repository_paths(root: str) -> frozenset:
-    """Git's own view of the tree at ``root``: every tracked path and every untracked non-ignored one (its exclude semantics), Kriya's
-    ``.kriya/`` state excluded. A failing listing raises (fail closed)."""
-    result = subprocess.run(git_argv(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"]), cwd=root, capture_output=True, env=git_environment(child_environment()))
+def repository_paths_by_declaration(root: str) -> Tuple[frozenset, frozenset]:
+    """W3-3 A2 follow-on: ``(tracked, untracked)`` from the ONE ``git ls-files`` listing that decides repository membership (``-t`` tags every entry: ``?`` is an
+    untracked non-ignored path, anything else an indexed one), Kriya's ``.kriya/`` state excluded from both. Their union is exactly ``visible_repository_paths``;
+    the split is Git's own declaration (committed or staged vs merely present), never a second scan. A failing or unparseable listing raises (fail closed)."""
+    result = subprocess.run(git_argv(["git", "ls-files", "-t", "-z", "--cached", "--others", "--exclude-standard"]), cwd=root, capture_output=True, env=git_environment(child_environment()))
     if result.returncode != 0:
         raise RuntimeError(f"git ls-files failed: {os.fsdecode(result.stderr).strip() or result.returncode}")
-    return frozenset(path for path in (os.fsdecode(item) for item in result.stdout.split(b"\0") if item)
-                     if path != ".kriya" and not path.startswith(".kriya/"))
+    tracked, untracked = set(), set()
+    for item in (os.fsdecode(raw) for raw in result.stdout.split(b"\0") if raw):
+        if len(item) < 3 or item[1] != " ":
+            raise RuntimeError(f"git ls-files -t returned an unparseable entry: {item!r}")
+        path = item[2:]
+        if path == ".kriya" or path.startswith(".kriya/"):
+            continue
+        (untracked if item[0] == "?" else tracked).add(path)
+    return frozenset(tracked), frozenset(untracked)
+
+
+def visible_repository_paths(root: str) -> frozenset:
+    """Git's own view of the tree at ``root``: every tracked path and every untracked non-ignored one (its exclude semantics), Kriya's
+    ``.kriya/`` state excluded. A failing listing raises (fail closed). The union of ``repository_paths_by_declaration``."""
+    tracked, untracked = repository_paths_by_declaration(root)
+    return tracked | untracked

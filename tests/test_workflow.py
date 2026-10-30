@@ -18006,7 +18006,8 @@ async def test_response_construction_owner_false_positive_never_reaches_architec
 
     # The real function ran, with the real goal - not skipped because
     # engineering_route.kind ended up outside (TASK, ENHANCEMENT).
-    spy.assert_called_once_with(["audit_logger.py"], goal, str(tmp_path))
+    # W3-3 A2 follow-on: the widening is told the run's scope (None: an unrestricted run - only DECLARED candidates may be added).
+    spy.assert_called_once_with(["audit_logger.py"], goal, str(tmp_path), authorized_paths=None)
     assert res["quality_gates_passed"] is True
     assert "views.py" not in res["files"]
     assert views_path.read_text() == original_views_content

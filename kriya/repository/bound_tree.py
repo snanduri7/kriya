@@ -18,7 +18,7 @@ from typing import Dict, Optional, Set, Tuple
 from kriya.config.environment import KRIYA_DIRECTORY_NAME
 from kriya.platform.filesystem_semantics import identity_key
 from kriya.repository.git import RepositoryContentFilterRefused, is_plainly_not_a_repository, work_tree_root
-from kriya.repository.snapshot import _content_identity, visible_repository_paths
+from kriya.repository.snapshot import _content_identity, repository_paths_by_declaration, visible_repository_paths
 
 BOUND_TREE_UNAVAILABLE = "BOUND_TREE_UNAVAILABLE"
 BOUND_TREE_IDENTITY_MISMATCH = "BOUND_TREE_IDENTITY_MISMATCH"
@@ -122,6 +122,17 @@ def bound_tree_paths(root: str) -> frozenset:
     _require_exact_work_tree_root(root)
     try:
         return visible_repository_paths(root)
+    except RuntimeError as error:
+        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, str(error)) from error
+
+
+def bound_tree_declaration(root: str) -> Tuple[frozenset, frozenset]:
+    """W3-3 A2 follow-on: ``(tracked, untracked)`` of the canonical bound tree of ``root`` - the same membership as ``bound_tree_paths`` (their union), the same
+    exact-root proof, the same typed ``BoundTreeError``, from ONE Git listing (``snapshot.repository_paths_by_declaration``). Membership answers "which files exist
+    for consideration"; this split is only Git's own declaration (tracked vs merely present) for a caller that must tell positive declaration from presence."""
+    _require_exact_work_tree_root(root)
+    try:
+        return repository_paths_by_declaration(root)
     except RuntimeError as error:
         raise BoundTreeError(BOUND_TREE_UNAVAILABLE, str(error)) from error
 

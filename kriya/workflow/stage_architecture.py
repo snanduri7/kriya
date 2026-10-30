@@ -19,12 +19,14 @@ from kriya.agents.contracts import partition_file_list_escapes
 from kriya.policy.approval import await_if_awaitable, resolve_approval, resolve_approval_result
 from kriya.policy.egress import web_lookup_allowed
 from kriya.workflow.file_resolution import (
+    FILE_RESOLUTION_OWNER_UNDECLARED,
     _resolve_file_paths_from_design,
     artifact_resolution_scope,
     extract_expected_files,
     identify_redirected_test_obligations,
     planned_new_artifact_paths,
     resolve_planned_artifact_owners,
+    undeclared_response_construction_owners,
 )
 from kriya.workflow.live_lookup import _extract_first_usable, _resolve_via_web_lookup
 from kriya.workflow.requirements import requirements_prompt_block
@@ -236,6 +238,15 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
                          f"'{_refusal['owner']}' outside this unit's authorized files; the planned path is kept"),
                 details={**_refusal, "authorized_paths": list(_artifact_scope or []), "stage": "architect"},
             ))
+        # W3-3 A2 follow-on: an existing owner the evidence points at that is only PRESENT (untracked, not written by this run) is reported, never applied.
+        for _indication in _artifact_resolution.undeclared_owner_indications:
+            state.record_event(RunEvent(
+                kind="file_resolution.owner_undeclared", attempt=0, source="workflow.architect_file_resolution",
+                authority=EventAuthority.ADVISORY,
+                message=(f"{_indication['reason_code']}: planned '{_indication['planned']}' points at existing '{_indication['owner']}', which is untracked "
+                         "and was not written by this run; the planned path is kept"),
+                details={**_indication, "stage": "architect"},
+            ))
         # Test-obligation preservation (2026-09-20): captured HERE,
         # before include_response_construction_owners() below can add
         # further entries unrelated to this specific redirect - a
@@ -253,8 +264,18 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
         # Full synchronous tree-walk + per-file read; offload so it
         # doesn't block the event loop inside this async workflow.
         architect_files = await asyncio.to_thread(
-            include_response_construction_owners, architect_files, goal, workspace_path,
+            include_response_construction_owners, architect_files, goal, workspace_path, authorized_paths=_artifact_scope,
         )
+        for _undeclared_owner in await asyncio.to_thread(
+            undeclared_response_construction_owners, workspace_path, goal, architect_files, authorized_paths=_artifact_scope,
+        ):
+            state.record_event(RunEvent(
+                kind="file_resolution.owner_undeclared", attempt=0, source="workflow.architect_file_resolution",
+                authority=EventAuthority.ADVISORY,
+                message=(f"{FILE_RESOLUTION_OWNER_UNDECLARED}: existing '{_undeclared_owner}' constructs the requested response shape but is untracked and was "
+                         "not written by this run; it is not added to the planned files"),
+                details={"owner": _undeclared_owner, "reason_code": FILE_RESOLUTION_OWNER_UNDECLARED, "stage": "architect", "kind": "response_construction"},
+            ))
         # PRD-021: files still new after the deterministic owner rules
         # above, against the grounded candidates shown before planning.
         if owner_candidates:

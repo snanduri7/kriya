@@ -3436,8 +3436,17 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             paths_to_resolve, ctx.goal, ctx.workspace_path,
             authorized_paths=artifact_resolution_scope(ctx.write_scope_mode, ctx.allowed_write_relpaths),
             new_artifact_paths=planned_new_artifact_paths(ctx.structured_plan, ctx.current_subtask_id),
+            declared_paths=state.all_files_written,   # W3-3 A2 follow-on: proven written by THIS run (path-exact, per-run object, not resumed)
         )
         resolution = dict(zip(paths_to_resolve, artifact_resolution.resolved, strict=True))  # one per path
+        for indication in artifact_resolution.undeclared_owner_indications:
+            state.record_event(RunEvent(
+                kind="file_resolution.owner_undeclared", attempt=state.attempt_number,
+                source="attempt.developer_file_resolution", authority=EventAuthority.ADVISORY,
+                message=(f"{indication['reason_code']}: Developer path '{indication['planned']}' points at existing '{indication['owner']}', which is "
+                         "untracked and was not written by this run; the path is kept"),
+                details={**indication, "stage": "developer"},
+            ))
         for refusal in artifact_resolution.refused_redirects:
             state.record_event(RunEvent(
                 kind="file_resolution.redirect_refused", attempt=state.attempt_number,

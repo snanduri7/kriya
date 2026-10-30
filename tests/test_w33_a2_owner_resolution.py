@@ -31,6 +31,7 @@ from kriya.repository.bound_tree import (
     NESTED_IN_GIT_WORK_TREE,
     NO_GIT_REPOSITORY,
     BoundTreeError,
+    bound_tree_paths,
     workspace_root_class,
 )
 from kriya.repository.git import GIT_CONFIG_UNINSPECTABLE, RepositoryContentFilterRefused
@@ -158,11 +159,13 @@ def test_a_gitignored_output_is_not_a_member_whatever_its_name(tmp_path, ignored
     assert resolve_planned_artifact_owners([PLANNED], GOAL, str(repo)).resolved == [PLANNED]
 
 
-def test_an_untracked_but_not_ignored_source_is_a_member(tmp_path):
+def test_an_untracked_but_not_ignored_source_is_a_member_but_cannot_redirect_automatically(tmp_path):
+    """Membership (Git's view) still lists it; the responsibility-owner eligibility contract (test_w33_a2b_owner_eligibility.py) keeps it from redirecting."""
     repo = _repo(tmp_path, {"README.md": "r\n"})
     _write(repo, {f"src/build/{SERVICE}": "class X {}\n"})
     assert f"src/build/{SERVICE}" not in _tracked(repo)
-    assert resolve_planned_artifact_owners([PLANNED], GOAL, str(repo)).resolved == [f"src/build/{SERVICE}"]
+    assert f"src/build/{SERVICE}" in bound_tree_paths(str(repo))
+    assert resolve_planned_artifact_owners([PLANNED], GOAL, str(repo)).resolved == [PLANNED]
 
 
 def test_a_tracked_path_deleted_from_the_work_tree_is_not_an_owner_a_redirect_may_name(tmp_path):

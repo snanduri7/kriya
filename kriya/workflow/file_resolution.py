@@ -8,10 +8,10 @@ import shlex
 import shutil
 import sys
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
-from kriya.repository.bound_tree import EXACT_GIT_ROOT, bound_tree_paths, workspace_root_class
+from kriya.repository.bound_tree import EXACT_GIT_ROOT, bound_tree_declaration, bound_tree_paths, workspace_root_class
 from kriya.workflow.failure import Failure, FileLocation
 
 logger = logging.getLogger(__name__)
@@ -161,21 +161,32 @@ def _parked_root_filesystem_files(workspace_path: str) -> List[str]:
     return files
 
 
-def _owner_candidate_files(workspace_path: str) -> List[str]:
-    """The existing files a planned or discovered ARTIFACT OWNER may be chosen from (W3-3 A2: ``resolve_planned_artifact_owners`` and
-    ``discover_response_construction_owners``). Root-class dispatch on the canonical classification (``bound_tree.workspace_root_class``):
-    - ``EXACT_GIT_ROOT``: the canonical bound tree's membership, never a directory name, narrowed to what is a real file on disk NOW - a tracked path deleted
-      from the work tree, or a submodule's directory entry, is a bound path but not an owner a redirect or a write scope may name. Sorted.
-    - the two PARKED classes: the legacy filesystem walk (see ``_PARKED_ROOT_PRUNED_DIRECTORY_NAMES``).
+def _owner_candidates(workspace_path: str, declared_paths: Iterable[str] = ()) -> Tuple[List[str], List[str]]:
+    """``(DECLARED, AMBIGUOUS)`` - the existing files a planned or discovered ARTIFACT OWNER may be considered from (W3-3 A2 and its responsibility-owner
+    eligibility follow-on: ``resolve_planned_artifact_owners`` and ``discover_response_construction_owners``). Root-class dispatch on the canonical
+    classification (``bound_tree.workspace_root_class``):
+    - ``EXACT_GIT_ROOT``: the canonical bound tree's membership, never a directory name, narrowed to what is a real file on disk NOW (a tracked path deleted
+      from the work tree, or a submodule's directory entry, is a bound path but not an owner a redirect or a write scope may name). Membership answers "which
+      files exist for consideration"; it does NOT answer "may this file claim an existing responsibility". That needs a positive DECLARATION:
+      DECLARED = Git tracked (``bound_tree_declaration``, the same single listing) or proven written by the CURRENT run (``declared_paths``, path-exact);
+      AMBIGUOUS = a pre-existing untracked non-ignored file (a project's own uncommitted source and a dependency tree nobody ignored look identical to every
+      signal measured: reference edges, sibling files, locality - the G/H cases - so none of them is authority). The order is immaterial to every consumer.
+    - the two PARKED classes (NO_GIT_REPOSITORY / NESTED_IN_GIT_WORK_TREE): the legacy filesystem walk (see ``_PARKED_ROOT_PRUNED_DIRECTORY_NAMES``), every file
+      DECLARED as before - UNCHANGED until the owner decides those roots.
     A root git cannot ANSWER for is the typed ``BoundTreeError`` (never the legacy walk): the classification refuses, it does not fall through."""
     if workspace_root_class(workspace_path) != EXACT_GIT_ROOT:
-        return _parked_root_filesystem_files(workspace_path)
-    present = []
-    for path in (os.path.normpath(member) for member in bound_tree_paths(workspace_path)):
-        full = os.path.join(workspace_path, path)
-        if os.path.lexists(full) and not os.path.isdir(full):
-            present.append(path)
-    return present
+        return _parked_root_filesystem_files(workspace_path), []
+    tracked, untracked = bound_tree_declaration(workspace_path)
+    written = {os.path.normpath(path) for path in declared_paths}
+    declared: List[str] = []
+    ambiguous: List[str] = []
+    for is_tracked, members in ((True, tracked), (False, untracked)):
+        for member in (os.path.normpath(path) for path in members):
+            full = os.path.join(workspace_path, member)
+            if not os.path.lexists(full) or os.path.isdir(full):
+                continue
+            (declared if is_tracked or member in written else ambiguous).append(member)
+    return declared, ambiguous
 
 
 def _semantic_tokens(text: str) -> set[str]:
@@ -225,6 +236,9 @@ def _explicitly_requests_new_artifact(path: str, goal: str) -> bool:
 
 
 FILE_RESOLUTION_REDIRECT_OUT_OF_SCOPE = "FILE_RESOLUTION_REDIRECT_OUT_OF_SCOPE"
+# W3-3 A2 follow-on: an existing owner the evidence points at that is only PRESENT (untracked, not written by this run), so it may not redirect or widen
+# anything automatically in an unrestricted run; it is reported, never applied.
+FILE_RESOLUTION_OWNER_UNDECLARED = "FILE_RESOLUTION_OWNER_UNDECLARED"
 _RESOLUTION_TIER_MESSAGES = {
     "exact_name": "Resolved nonexistent planned artifact '%s' to unique exact-name existing owner '%s'.",
     "token_containment": "Resolved renamed planned artifact '%s' to unique token-containing existing owner '%s'.",
@@ -237,11 +251,14 @@ class ArtifactOwnerResolution:
     """FILE-RESOLUTION-SCOPE-ESCAPE-001: ``resolved`` has one entry per planned
     path, in order; ``refused_redirects`` lists every owner the authorized scope
     refused (planned, owner, tier, reason_code - the planned path was kept);
-    ``new_artifacts_kept`` the planned paths an explicit create action exempted."""
+    ``new_artifacts_kept`` the planned paths an explicit create action exempted;
+    ``undeclared_owner_indications`` the owners an UNRESTRICTED run's evidence pointed at that were only present (AMBIGUOUS: untracked, not written by this
+    run) - reported with FILE_RESOLUTION_OWNER_UNDECLARED, never applied (the planned path was kept)."""
 
     resolved: List[str]
     refused_redirects: List[Dict[str, Any]]
     new_artifacts_kept: List[str]
+    undeclared_owner_indications: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def artifact_resolution_scope(write_scope_mode: Any, allowed_write_relpaths: Optional[Iterable[str]]) -> Optional[List[str]]:
@@ -318,6 +335,7 @@ def _existing_owner_for(
 def resolve_planned_artifact_owners(
     planned_files: Iterable[str], goal: str, workspace_path: str, *,
     authorized_paths: Optional[Iterable[str]] = None, new_artifact_paths: Iterable[str] = (),
+    declared_paths: Iterable[str] = (),
 ) -> ArtifactOwnerResolution:
     """prefer_existing_artifact_owners with its decisions reported.
 
@@ -337,12 +355,20 @@ def resolve_planned_artifact_owners(
       call and a retry with the same scope decides identically (never widened).
     - ``new_artifact_paths`` (the unit's planned files with a validated
       ``create`` action): an explicit new artifact is never redirected, the
-      way an explicit "create a new ..." goal phrase already exempts one."""
+      way an explicit "create a new ..." goal phrase already exempts one.
+
+    W3-3 A2 follow-on (responsibility-owner eligibility): in an UNRESTRICTED run (``authorized_paths`` None) only a DECLARED candidate may redirect a planned
+    path - Git tracked, or in ``declared_paths`` (written by the current run). An AMBIGUOUS one (untracked, pre-existing) never does; when the evidence
+    points at it the planned path is kept and the pointer is reported in ``undeclared_owner_indications``. A scoped run keeps every Git-visible candidate: the
+    typed scope refusal above owns that decision, unchanged."""
     planned = list(planned_files)
     scope = None if authorized_paths is None else {os.path.normpath(p) for p in authorized_paths}
     explicit_new = {os.path.normpath(p) for p in new_artifact_paths}
 
-    existing = _owner_candidate_files(workspace_path)
+    declared, ambiguous = _owner_candidates(workspace_path, declared_paths)
+    existing = declared if scope is None else declared + ambiguous
+    ambiguous_set = set(ambiguous)
+    undeclared: List[Dict[str, Any]] = []
 
     goal_tokens = _semantic_tokens(goal or "")
     resolved: List[str] = []
@@ -362,6 +388,15 @@ def resolve_planned_artifact_owners(
             resolved.append(path)
             continue
         found = _existing_owner_for(path, existing, claimed, goal_tokens)
+        if scope is None and ambiguous:
+            pointed = _existing_owner_for(path, declared + ambiguous, claimed, goal_tokens)
+            if pointed is not None and pointed[0] in ambiguous_set:
+                undeclared.append({"planned": path, "owner": pointed[0], "tier": pointed[1],
+                                   "reason_code": FILE_RESOLUTION_OWNER_UNDECLARED})
+                logger.info(
+                    "%s: planned artifact '%s' points at existing owner '%s' (%s tier), which is only present (untracked, not written by this run): "
+                    "reported, not redirected.", FILE_RESOLUTION_OWNER_UNDECLARED, path, pointed[0], pointed[1],
+                )
         if found is None:
             resolved.append(path)
             continue
@@ -379,7 +414,8 @@ def resolve_planned_artifact_owners(
         resolved.append(owner)
         claimed.add(owner)
         logger.info(_RESOLUTION_TIER_MESSAGES[tier], path, owner)
-    return ArtifactOwnerResolution(resolved=resolved, refused_redirects=refused, new_artifacts_kept=new_kept)
+    return ArtifactOwnerResolution(resolved=resolved, refused_redirects=refused, new_artifacts_kept=new_kept,
+                                   undeclared_owner_indications=undeclared)
 
 
 def prefer_existing_artifact_owners(
@@ -603,23 +639,27 @@ _RESPONSE_CONSTRUCTION_RE = re.compile(
 )
 
 
-def discover_response_construction_owners(
-    workspace_path: str, goal: str, planned_files: Iterable[str] = (),
+def _response_owner_scan(
+    workspace_path: str, goal: str, planned_files: Iterable[str], authorized_paths: Optional[Iterable[str]],
+    declared_paths: Iterable[str], *, undeclared_only: bool,
 ) -> List[str]:
-    """Find existing files that construct a requested endpoint/response shape.
-
-    Domain and service owners are insufficient when the repository explicitly
-    materializes responses in a controller/presenter/serializer. Candidates
-    must have both an architectural owner signal and response-construction
-    syntax; goal/planned-file vocabulary then grounds them to this request.
-    """
+    """The one scan behind ``discover_response_construction_owners`` (``undeclared_only`` False: the owners that may be ADDED) and
+    ``undeclared_response_construction_owners`` (True: the AMBIGUOUS ones the same evidence points at, reported only). W3-3 A2 follow-on: in an UNRESTRICTED
+    run (``authorized_paths`` None) only a DECLARED candidate may be added - an untracked pre-existing file would widen the planned work on presence alone;
+    a scoped run keeps every Git-visible candidate (its scope, not this scan, owns what may be written)."""
     if not _goal_expresses_positive_response_mutation_intent(goal):
         return []
     vocabulary = _semantic_tokens(goal or "")
     for path in planned_files:
         vocabulary.update(_artifact_name_tokens(path))
+    declared, ambiguous = _owner_candidates(workspace_path, declared_paths)
+    unrestricted = authorized_paths is None
+    if undeclared_only:
+        pool = ambiguous if unrestricted else []
+    else:
+        pool = declared if unrestricted else declared + ambiguous
     owners = []
-    for path in _owner_candidate_files(workspace_path):
+    for path in pool:
         if _is_test_or_doc_file(path) or not _RESPONSE_OWNER_PATH_RE.search(path):
             continue
         try:
@@ -635,8 +675,33 @@ def discover_response_construction_owners(
     return sorted(set(owners))
 
 
+def discover_response_construction_owners(
+    workspace_path: str, goal: str, planned_files: Iterable[str] = (), *,
+    authorized_paths: Optional[Iterable[str]] = None, declared_paths: Iterable[str] = (),
+) -> List[str]:
+    """Find existing files that construct a requested endpoint/response shape.
+
+    Domain and service owners are insufficient when the repository explicitly
+    materializes responses in a controller/presenter/serializer. Candidates
+    must have both an architectural owner signal and response-construction
+    syntax; goal/planned-file vocabulary then grounds them to this request.
+    Only DECLARED candidates are returned in an unrestricted run (``_response_owner_scan``).
+    """
+    return _response_owner_scan(workspace_path, goal, planned_files, authorized_paths, declared_paths, undeclared_only=False)
+
+
+def undeclared_response_construction_owners(
+    workspace_path: str, goal: str, planned_files: Iterable[str] = (), *,
+    authorized_paths: Optional[Iterable[str]] = None, declared_paths: Iterable[str] = (),
+) -> List[str]:
+    """The AMBIGUOUS (untracked, not written by this run) files the same evidence points at in an unrestricted run - reported as an advisory pointer, never
+    added to the planned work. Empty for a scoped run."""
+    return _response_owner_scan(workspace_path, goal, planned_files, authorized_paths, declared_paths, undeclared_only=True)
+
+
 def include_response_construction_owners(
-    planned_files: Iterable[str], goal: str, workspace_path: str,
+    planned_files: Iterable[str], goal: str, workspace_path: str, *,
+    authorized_paths: Optional[Iterable[str]] = None, declared_paths: Iterable[str] = (),
 ) -> List[str]:
     """Add grounded existing response owners without replacing planned owners."""
     planned = list(planned_files)
@@ -647,7 +712,8 @@ def include_response_construction_owners(
         # shares vocabulary tokens with the goal.
         return planned
     return list(dict.fromkeys(
-        planned + discover_response_construction_owners(workspace_path, goal, planned)
+        planned + discover_response_construction_owners(
+            workspace_path, goal, planned, authorized_paths=authorized_paths, declared_paths=declared_paths)
     ))
 
 
