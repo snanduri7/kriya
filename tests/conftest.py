@@ -683,6 +683,19 @@ def pytest_runtest_makereport(item, call):
 
 
 @pytest.fixture
+def bound_workspace(tmp_path):
+    """W3-3: the test's ``tmp_path`` as a GIT-BACKED real workspace. The result-truth guards of ``kriya.workflow.file_resolution`` decide
+    membership from the canonical bound tree (Git), never from a directory name, and a run only reaches them after ``create_git_worktree``
+    has made the workspace a work tree; a plain directory is the typed ``BoundTreeError``. A fresh ``git init`` is enough: the test's files are
+    untracked and not ignored, which the bound tree includes. Opt in by naming the fixture; it is never autouse."""
+    import subprocess
+
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, capture_output=True, env=env)
+    return tmp_path
+
+
+@pytest.fixture
 def chaos_case(request, tmp_path):
     """PRD-032: the invariant checker of one @chaos scenario (tests/_chaos_harness.py)."""
     from _chaos_harness import close_case, open_case

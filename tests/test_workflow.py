@@ -804,7 +804,7 @@ async def test_multi_file_recovery_cumulative_content(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_non_recovery_completeness_unchanged(tmp_path):
+async def test_non_recovery_completeness_unchanged(tmp_path, bound_workspace):
     """P9-R1 #5 NON_RECOVERY_COMPLETENESS_UNCHANGED - with NO active
     api_contract_recovery, an under-delivering Developer response must still
     trip IncompleteGenerationError exactly as before, even when stale
@@ -1918,7 +1918,7 @@ def test_brownfield_owner_resolution_prefers_unique_existing_implementation(tmp_
     ]
 
 
-def test_brownfield_gate_rejects_parallel_owner_and_test_redirection(tmp_path):
+def test_brownfield_gate_rejects_parallel_owner_and_test_redirection(tmp_path, bound_workspace):
     owner = "src/main/java/example/Customer.java"
     test = "src/test/java/example/CustomerTest.java"
     (tmp_path / owner).parent.mkdir(parents=True)
@@ -1962,7 +1962,7 @@ def test_brownfield_gate_allows_new_coverage_that_keeps_existing_owner(tmp_path)
     ) == []
 
 
-def test_brownfield_bug_fix_preserves_referenced_public_api(tmp_path):
+def test_brownfield_bug_fix_preserves_referenced_public_api(tmp_path, bound_workspace):
     owner = "src/main/java/example/Customer.java"
     caller = "src/test/java/example/CustomerTest.java"
     original = "public class Customer { public String displayName(String middle) { return middle; } }\n"
@@ -1984,7 +1984,7 @@ def test_brownfield_bug_fix_preserves_referenced_public_api(tmp_path):
     }]
 
 
-def test_brownfield_bug_fix_allows_private_change_with_public_api_unchanged(tmp_path):
+def test_brownfield_bug_fix_allows_private_change_with_public_api_unchanged(tmp_path, bound_workspace):
     owner = "src/main/java/example/Customer.java"
     caller = "src/test/java/example/CustomerTest.java"
     original = "public class Customer { public String displayName() { return helper(); } private String helper() { return null; } }\n"
@@ -1999,7 +1999,7 @@ def test_brownfield_bug_fix_allows_private_change_with_public_api_unchanged(tmp_
     ) == []
 
 
-def test_brownfield_guard_does_not_detect_public_method_body_behavior_change(tmp_path):
+def test_brownfield_guard_does_not_detect_public_method_body_behavior_change(tmp_path, bound_workspace):
     """P10 (PRV-10, 2026-09-08) BEHAVIORAL-PRESERVATION GAP, ISSUE B - a
     CHARACTERIZATION of existing, unchanged behavior, not a new assertion
     about desired behavior. find_brownfield_public_api_changes() is
@@ -2047,7 +2047,7 @@ def test_brownfield_guard_does_not_detect_public_method_body_behavior_change(tmp
     assert violations == []  # documents the gap - the guard has no body-semantics coverage
 
 
-def test_brownfield_enhancement_rejects_unrequested_record_component_addition(tmp_path):
+def test_brownfield_enhancement_rejects_unrequested_record_component_addition(tmp_path, bound_workspace):
     """EXISTING_CONTRACT_PRESERVATION: a record's canonical constructor
     component shape is as much an established public contract as any
     method signature - PRV-03 hardened (2026-08-27) added displayName as a
@@ -2080,7 +2080,7 @@ def test_brownfield_enhancement_rejects_unrequested_record_component_addition(tm
     }]
 
 
-def test_brownfield_enhancement_rejects_unrequested_return_type_change(tmp_path):
+def test_brownfield_enhancement_rejects_unrequested_return_type_change(tmp_path, bound_workspace):
     """EXISTING_CONTRACT_PRESERVATION: changing an existing method's return
     type (same name, same params) is exactly as much a contract break as
     renaming it, even though the old name+params-only signature key would
@@ -2114,7 +2114,7 @@ def test_brownfield_enhancement_rejects_unrequested_return_type_change(tmp_path)
     }]
 
 
-def test_brownfield_enhancement_allows_new_public_method_alongside_preserved_contract(tmp_path):
+def test_brownfield_enhancement_allows_new_public_method_alongside_preserved_contract(tmp_path, bound_workspace):
     """EXISTING_CONTRACT_PRESERVATION only blocks REMOVING/CHANGING an
     established contract - adding a new derived public method (or a new
     record component-free accessor) alongside the untouched original is
@@ -2222,7 +2222,7 @@ def _single_owner_plan(owner_path: str, subtask_id: str = "s1") -> EngineeringPl
     )
 
 
-def test_explicit_add_field_authorized(tmp_path):
+def test_explicit_add_field_authorized(tmp_path, bound_workspace):
     """DIRECT_AUTHORIZATION #1 - owner, symbol, and ADD category all
     grounded in the same clause of the raw authoritative goal text."""
     owner = "m1/src/main/java/com/example/m1/CustomerRecord.java"
@@ -2256,7 +2256,7 @@ def test_explicit_add_field_authorized(tmp_path):
     assert violations == []
 
 
-def test_explicit_remove_symbol_authorized(tmp_path):
+def test_explicit_remove_symbol_authorized(tmp_path, bound_workspace):
     """DIRECT_AUTHORIZATION #2 - a named METHOD removal, grounded and
     allowed."""
     goal = "Remove the deprecated `legacyGreet` method from `Customer`."
@@ -2280,7 +2280,7 @@ def test_explicit_remove_symbol_authorized(tmp_path):
     assert violations == []
 
 
-def test_explicit_modify_named_signature_authorized(tmp_path):
+def test_explicit_modify_named_signature_authorized(tmp_path, bound_workspace):
     """DIRECT_AUTHORIZATION #3 - a named METHOD's signature change (MODIFY),
     grounded and allowed."""
     goal = "Change the `find` method on `CustomerService` to accept an id."
@@ -2360,7 +2360,7 @@ def test_planner_text_cannot_create_direct_authorization(tmp_path):
     assert derive_direct_contract_authorizations(grounding_goal, plan) == []
 
 
-def test_same_file_unrelated_public_delta_rejected(tmp_path):
+def test_same_file_unrelated_public_delta_rejected(tmp_path, bound_workspace):
     """SAME_FILE_OVERREACH - an authorized field ADD and an unrelated,
     unauthorized method rename in the SAME file, SAME batch: the authorized
     delta is allowed, the unrelated one is independently rejected (per-
@@ -2396,7 +2396,7 @@ def test_same_file_unrelated_public_delta_rejected(tmp_path):
     }]
 
 
-def test_authorized_direct_delta_with_stale_consumer_rejected_or_revalidated_correctly(tmp_path):
+def test_authorized_direct_delta_with_stale_consumer_rejected_or_revalidated_correctly(tmp_path, bound_workspace):
     """DIRECT authorization is a permission grant, orthogonal to whether
     consumers were updated - it must still allow the authorized owner's own
     delta even when a caller elsewhere still shows evidence of the OLD
@@ -2429,7 +2429,7 @@ def test_authorized_direct_delta_with_stale_consumer_rejected_or_revalidated_cor
     assert violations == []
 
 
-def test_prv08_customerrecord_direct_change_authorized(tmp_path):
+def test_prv08_customerrecord_direct_change_authorized(tmp_path, bound_workspace):
     """PRV08_CustomerRecord_direct_change_authorized - the real, frozen
     authoritative goal, the real fixture shape: CustomerRecord's OWN
     extension is DIRECT-authorized and allowed."""
@@ -2459,7 +2459,7 @@ def test_prv08_customerrecord_direct_change_authorized(tmp_path):
     assert violations == []
 
 
-def test_prv08_customersummary_change_not_authorized(tmp_path):
+def test_prv08_customersummary_change_not_authorized(tmp_path, bound_workspace):
     """PRV08_CustomerSummary_change_not_authorized - CHARACTERIZATION,
     proves the real P9 defect reproduces deterministically and remains
     correctly rejected even with DIRECT authorization now live: the real
@@ -2520,6 +2520,7 @@ def test_prv08_customersummary_change_not_authorized(tmp_path):
 
 def test_completed_planner_dependency_cannot_authorize_public_api_change_without_requirement_authority(
     tmp_path,
+bound_workspace,
 ):
     """PLANNER-AUTHORITY-LAUNDERING PROTECTION, the real test: a merely-
     completed Planner dependency edge must never, by itself, authorize a
@@ -2594,7 +2595,7 @@ def test_completed_planner_dependency_cannot_authorize_public_api_change_without
     assert any(v["owner"] == summary_owner for v in violations)
 
 
-def test_candidate_overlay_consumer_updated_in_same_batch_is_not_stale_evidence(tmp_path):
+def test_candidate_overlay_consumer_updated_in_same_batch_is_not_stale_evidence(tmp_path, bound_workspace):
     """CANDIDATE_OVERLAY_CONSUMER_UPDATED (Step 6) - a consumer file that
     genuinely stops calling the old API entirely (not merely evolving to a
     compatible new arity) is updated in the SAME candidate batch. The
@@ -2621,7 +2622,7 @@ def test_candidate_overlay_consumer_updated_in_same_batch_is_not_stale_evidence(
     assert violations == []
 
 
-def test_candidate_overlay_consumer_not_updated_remains_evidence(tmp_path):
+def test_candidate_overlay_consumer_not_updated_remains_evidence(tmp_path, bound_workspace):
     """CANDIDATE_OVERLAY_CONSUMER_NOT_UPDATED (Step 6, inverse) - same
     rename as above, but the candidate batch does NOT touch the caller file
     at all this attempt. Its stale on-disk content, still calling the old
@@ -2650,7 +2651,7 @@ def test_candidate_overlay_consumer_not_updated_remains_evidence(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_prv08_shaped_deterministic_integration(tmp_path):
+async def test_prv08_shaped_deterministic_integration(tmp_path, bound_workspace):
     """PRV08_SHAPED_DETERMINISTIC_INTEGRATION - end-to-end through the real
     run_attempt() pre-write gate (no live LLM - the Developer is mocked to
     return the deterministic candidate content real P9 attempt 1 produced).
@@ -2830,7 +2831,7 @@ async def test_prv08_shaped_deterministic_integration(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_rejects_contract_change_on_a_later_attempt_not_just_the_first(tmp_path):
+async def test_run_attempt_rejects_contract_change_on_a_later_attempt_not_just_the_first(tmp_path, bound_workspace):
     """EXISTING_CONTRACT_PRESERVATION regression test: PRV-03 hardened
     (2026-08-27) introduced its record-arity contract break on attempt 10,
     not attempt 1 - the brownfield-API-change pre-write check used to only
@@ -2881,7 +2882,7 @@ async def test_run_attempt_rejects_contract_change_on_a_later_attempt_not_just_t
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_hard_rejects_a_write_under_deny_all_write_scope(tmp_path):
+async def test_run_attempt_hard_rejects_a_write_under_deny_all_write_scope(tmp_path, bound_workspace):
     """WriteScopeMode.DENY_ALL regression test (PRV-05, 2026-08-28): even if
     the Developer (a bug, a misbehaving model, or a recovery/fallback loop)
     still returns a file to write for a verification-only subtask, the real
@@ -2931,7 +2932,7 @@ _PRV18_OTHER_ORIGINAL = "def helper():\n    return 1\n"
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_rejects_mixed_batch_with_unauthorized_target_under_allowlist(tmp_path):
+async def test_run_attempt_rejects_mixed_batch_with_unauthorized_target_under_allowlist(tmp_path, bound_workspace):
     """The exact PRV-18 shape: a validated subtask's ALLOWLIST authorizes
     only src/app.py, but the Developer's candidate also proposes an edit to
     src/other.py, an existing file outside that scope. Must be rejected with
@@ -2975,7 +2976,7 @@ async def test_run_attempt_rejects_mixed_batch_with_unauthorized_target_under_al
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_accepts_single_authorized_target_under_allowlist(tmp_path):
+async def test_run_attempt_accepts_single_authorized_target_under_allowlist(tmp_path, bound_workspace):
     """Positive control for the test above, through the same integration
     path: when the Developer's candidate only touches the one file the
     validated subtask's ALLOWLIST actually authorizes, the write succeeds
@@ -3017,7 +3018,7 @@ async def test_run_attempt_accepts_single_authorized_target_under_allowlist(tmp_
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_accepts_trailing_slash_allowlist_entry_matching_bare_developer_target(tmp_path):
+async def test_run_attempt_accepts_trailing_slash_allowlist_entry_matching_bare_developer_target(tmp_path, bound_workspace):
     """PRV-17 (2026-09-03) end-to-end regression: even with the plan-schema
     fix (PlannedFile now rejects a bare directory path outright, see
     test_plan_schema.py), the write gate itself must independently
@@ -3542,7 +3543,7 @@ async def test_run_coordinated_repair_generation_supports_more_than_two_particip
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_uses_coordinated_generation_when_contract_active(tmp_path):
+async def test_run_attempt_uses_coordinated_generation_when_contract_active(tmp_path, bound_workspace):
     """The direct counter to the PRV-06 Bucket A oscillation: with an ACTIVE
     RepairContract, a single targeted-retry attempt must generate/stage BOTH
     participants together, via _run_coordinated_repair_generation - never
@@ -3621,7 +3622,7 @@ async def test_run_attempt_uses_coordinated_generation_when_contract_active(tmp_
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_ordinary_targeted_retry_unaffected_without_contract(tmp_path):
+async def test_run_attempt_ordinary_targeted_retry_unaffected_without_contract(tmp_path, bound_workspace):
     """Regression: with NO active RepairContract (state.repair_contract is
     None, the default/every-existing-run case), the ordinary single-file
     _build_targeted_retry_prompt path must run completely unchanged -
@@ -3692,7 +3693,7 @@ async def test_run_attempt_ordinary_targeted_retry_unaffected_without_contract(t
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_coordinated_anchored_edit_response_reaches_shared_pipeline_without_internal_exception(tmp_path):
+async def test_run_attempt_coordinated_anchored_edit_response_reaches_shared_pipeline_without_internal_exception(tmp_path, bound_workspace):
     """The direct live reproduction and fix-proof: a coordinated response
     returned as edits=[...] (content=None) must reach the shared anchored-
     edit application further down run_attempt() and succeed, never raise
@@ -3763,7 +3764,7 @@ async def test_run_attempt_coordinated_anchored_edit_response_reaches_shared_pip
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_coordinated_active_code_context_reflects_candidate_view(tmp_path):
+async def test_run_attempt_coordinated_active_code_context_reflects_candidate_view(tmp_path, bound_workspace):
     """§6 (candidate-view correctness): active_code_context for the MA9
     coordinated branch must be built from the SAME candidate_view
     _run_coordinated_repair_generation already accumulates in memory (Rule
@@ -3852,7 +3853,7 @@ def test_required_runtime_verification_missing_message_placeholder_when_absent()
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_classifies_surefire_fork_crash_and_records_obligation(tmp_path):
+async def test_run_attempt_classifies_surefire_fork_crash_and_records_obligation(tmp_path, bound_workspace):
     """Integration regression test for PRV-06 (2026-08-28): a real
     run_attempt() call whose test gate fails with a Surefire fork-crash
     signature must raise QualityGateFailure typed test_process_terminated
@@ -3912,7 +3913,7 @@ async def test_run_attempt_classifies_surefire_fork_crash_and_records_obligation
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_ordinary_test_failure_records_no_process_boundary_obligation(tmp_path):
+async def test_run_attempt_ordinary_test_failure_records_no_process_boundary_obligation(tmp_path, bound_workspace):
     """(1) An ordinary assertion failure must stay a plain "test" failure -
     no test_process_terminated upgrade, and no PROCESS_BOUNDARY_COMPATIBILITY
     obligation recorded at all (the call site only records one when
@@ -3962,7 +3963,7 @@ async def test_run_attempt_ordinary_test_failure_records_no_process_boundary_obl
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_escalates_message_when_process_boundary_failure_recurs(tmp_path):
+async def test_run_attempt_escalates_message_when_process_boundary_failure_recurs(tmp_path, bound_workspace):
     """PRV-06 (2026-08-28): recording the obligation alone only makes the
     conflict OBSERVABLE - this proves it also makes the SECOND consecutive
     occurrence for the same subtask actually say so in the message shown to
@@ -4125,7 +4126,7 @@ async def test_run_attempt_verification_only_subtask_raises_typed_failure_on_tes
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_verification_only_subtask_falls_through_without_a_direct_verifier(tmp_path):
+async def test_run_attempt_verification_only_subtask_falls_through_without_a_direct_verifier(tmp_path, bound_workspace):
     """Safety net (PRV-06, 2026-08-28: updated for the new application_runtime
     direct-execution path added below - this specific requirement dict is
     deliberately under-specified, missing verifier_kind entirely, so it
@@ -4352,7 +4353,7 @@ async def test_run_attempt_terminal_subtask_still_executes_declared_runtime_veri
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_allowlist_subtask_treats_inferred_runtime_verification_as_advisory(tmp_path):
+async def test_run_attempt_allowlist_subtask_treats_inferred_runtime_verification_as_advisory(tmp_path, bound_workspace):
     """PRV-17 Runtime Verification Contract Closure (2026-09-03): the
     second, previously-unpatched authority. The two tests above
     (test_run_attempt_intermediate_subtask_treats_inferred_runtime_
@@ -4421,7 +4422,7 @@ async def test_run_attempt_allowlist_subtask_treats_inferred_runtime_verificatio
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_allowlist_subtask_still_executes_declared_runtime_verification(tmp_path):
+async def test_run_attempt_allowlist_subtask_still_executes_declared_runtime_verification(tmp_path, bound_workspace):
     """Positive control for the test above, through the identical
     ALLOWLIST context: when THIS subtask's own approved plan DOES declare
     the runtime obligation (runtime_verification_required=True - e.g. s4,
@@ -4587,7 +4588,7 @@ def _managed_service_probe_result(**overrides) -> "ManagedServiceVerificationRes
 
 
 @pytest.mark.asyncio
-async def test_existing_finite_judgment_without_execution_mode_still_executes_through_existing_path(tmp_path):
+async def test_existing_finite_judgment_without_execution_mode_still_executes_through_existing_path(tmp_path, bound_workspace):
     """(1) Backward compatibility: a judge() response with no execution_mode
     key at all (an old cached judgment, or any stub that predates this
     field) must be treated exactly as execution_mode="finite_command" -
@@ -4633,7 +4634,7 @@ async def test_existing_finite_judgment_without_execution_mode_still_executes_th
 
 
 @pytest.mark.asyncio
-async def test_current_managed_service_judgment_reaches_execution_primitive_with_separate_fields(tmp_path):
+async def test_current_managed_service_judgment_reaches_execution_primitive_with_separate_fields(tmp_path, bound_workspace):
     """(2)+(5)+(3) A CURRENT-owned (runtime_verification_required=True,
     terminal s4) managed_service judgment reaches run_managed_service_
     verification() with a real ManagedServiceVerificationSpec, and the
@@ -4725,7 +4726,7 @@ def _managed_service_ctx_for_grounding(tmp_path, *, service_command):
 
 
 @pytest.mark.asyncio
-async def test_managed_service_python_command_is_rewritten_when_wiring_calls_through(tmp_path):
+async def test_managed_service_python_command_is_rewritten_when_wiring_calls_through(tmp_path, bound_workspace):
     """(1) Proves the WIRING itself: _validate_and_convert_managed_service_
     contract calls PolymorphicValidator._substitute_python_interpreter and
     uses ITS result, regardless of how that method internally decides to
@@ -4855,7 +4856,7 @@ def test_managed_service_grounding_does_not_mutate_the_original_judgment_command
 
 
 @pytest.mark.asyncio
-async def test_future_managed_service_judgment_is_not_executed(tmp_path):
+async def test_future_managed_service_judgment_is_not_executed(tmp_path, bound_workspace):
     """(4) The SAME advisory-only ownership check Round 8 fixed for the
     finite path applies identically to managed_service: an intermediate
     subtask (s1, runtime_verification_required=False) whose judge() call
@@ -4947,7 +4948,7 @@ async def _run_managed_service_terminal_attempt(tmp_path, judge_result):
 
 
 @pytest.mark.asyncio
-async def test_probe_passed_maps_to_successful_verification(tmp_path):
+async def test_probe_passed_maps_to_successful_verification(tmp_path, bound_workspace):
     """(6) PROBE_PASSED -> a passing gate_outcome, no exception, evidence
     (stdout/probe status/body) preserved."""
     state, developer, mock_run_managed_service, raised = await _run_managed_service_terminal_attempt(
@@ -4963,7 +4964,7 @@ async def test_probe_passed_maps_to_successful_verification(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_probe_failed_maps_to_behavioral_grounded_failure(tmp_path):
+async def test_probe_failed_maps_to_behavioral_grounded_failure(tmp_path, bound_workspace):
     """(7) PROBE_FAILED -> a normal run_verification-typed QualityGateFailure
     (grounded, behavioral - NOT verification_infrastructure_failure),
     eligible for the ordinary Developer-repair retry path."""
@@ -4993,7 +4994,7 @@ async def test_probe_failed_maps_to_behavioral_grounded_failure(tmp_path):
     ServiceVerificationOutcomeKind.PREPARATION_FAILED,
     ServiceVerificationOutcomeKind.ARTIFACT_MATERIALIZATION_FAILED,
 ])
-async def test_infrastructure_outcomes_map_to_verification_infrastructure_failure(tmp_path, outcome):
+async def test_infrastructure_outcomes_map_to_verification_infrastructure_failure(tmp_path, outcome, bound_workspace):
     """(8) Every non-behavioral outcome maps to verification_infrastructure_
     failure - the same type the finite path already routes through
     STOP_ENVIRONMENT with zero further (retry) Developer calls, proven
@@ -5054,7 +5055,7 @@ async def _run_managed_service_terminal_attempt_with_files(tmp_path, judge_resul
 
 
 @pytest.mark.asyncio
-async def test_managed_service_readiness_timeout_with_project_local_module_traceback_becomes_runtime_plan_gap(tmp_path):
+async def test_managed_service_readiness_timeout_with_project_local_module_traceback_becomes_runtime_plan_gap(tmp_path, bound_workspace):
     """Runtime-Evidence Plan Repair (PRV-17 Run 13, 2026-09-04): a
     READINESS_TIMEOUT whose captured output shows Django's own
     ModuleNotFoundError for a module whose top-level package (myproject)
@@ -5093,7 +5094,7 @@ async def test_managed_service_readiness_timeout_with_project_local_module_trace
 
 
 @pytest.mark.asyncio
-async def test_managed_service_readiness_timeout_with_genuinely_missing_external_package_stays_environment_failure(tmp_path):
+async def test_managed_service_readiness_timeout_with_genuinely_missing_external_package_stays_environment_failure(tmp_path, bound_workspace):
     """Regression companion to the test above: when classify_environment_
     failure() DOES conclude this is a genuine external-dependency gap (the
     top-level module is not project-local, and no manifest exists for the
@@ -5238,7 +5239,7 @@ async def test_managed_service_readiness_and_probe_reject_non_local_host(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_managed_service_readiness_and_probe_accept_private_and_loopback_hosts(tmp_path):
+async def test_managed_service_readiness_and_probe_accept_private_and_loopback_hosts(tmp_path, bound_workspace):
     """Positive control: a private-network host (matching kriya.core.llm.
     is_local_url's own local/private definition, not merely "localhost")
     is still accepted - this is a policy-controlled boundary reusing the
@@ -5330,7 +5331,7 @@ def test_resolve_execution_mode_rejects_unhashable_malformed_values():
 
 
 @pytest.mark.asyncio
-async def test_finite_commands_with_ordinary_shell_looking_argv_remain_unaffected(tmp_path):
+async def test_finite_commands_with_ordinary_shell_looking_argv_remain_unaffected(tmp_path, bound_workspace):
     """(11) A genuine finite_command judgment is never routed through the
     managed-service validator at all, even when one of its own argv tokens
     happens to contain an ampersand as a literal value (not a shell
@@ -5377,7 +5378,7 @@ async def test_finite_commands_with_ordinary_shell_looking_argv_remain_unaffecte
 
 
 @pytest.mark.asyncio
-async def test_prv17_managed_service_semantic_shape_never_constructs_compound_command(tmp_path):
+async def test_prv17_managed_service_semantic_shape_never_constructs_compound_command(tmp_path, bound_workspace):
     """One additional acceptance condition (2026-09-03): through the REAL
     production path (run_attempt(), a real EngineeringPlan with s1/s4 stage
     ownership, a mocked RunVerifierAgent.judge() - no live LLM), prove
@@ -5897,7 +5898,7 @@ def test_surefire_booter_classpath_is_not_a_grounded_child_application_launch(tm
 
 
 @pytest.mark.asyncio
-async def test_ungrounded_child_launch_is_rejected_before_surefire_and_targets_test(tmp_path):
+async def test_ungrounded_child_launch_is_rejected_before_surefire_and_targets_test(tmp_path, bound_workspace):
     app_path = "src/main/java/com/example/App.java"
     test_path = "src/test/java/com/example/AppTest.java"
     (tmp_path / app_path).parent.mkdir(parents=True)
@@ -5970,7 +5971,7 @@ def test_process_boundary_detection_uses_resolved_argv_not_test_method_name(tmp_
 
 
 @pytest.mark.asyncio
-async def test_unsafe_process_terminating_test_is_rejected_before_test_runner_and_targets_test_only(tmp_path):
+async def test_unsafe_process_terminating_test_is_rejected_before_test_runner_and_targets_test_only(tmp_path, bound_workspace):
     app_path = "src/main/java/Main.java"
     test_path = "src/test/java/MainTest.java"
     (tmp_path / app_path).parent.mkdir(parents=True)
@@ -6022,7 +6023,7 @@ async def test_unsafe_process_terminating_test_is_rejected_before_test_runner_an
 
 
 @pytest.mark.asyncio
-async def test_prv12_production_candidate_path_uses_relevant_process_boundary_invariant_before_surefire(tmp_path):
+async def test_prv12_production_candidate_path_uses_relevant_process_boundary_invariant_before_surefire(tmp_path, bound_workspace):
     """Production-path regression for the real bypass: s3 owns only a test
     verifier while the nonzero fact is available through its relevant gi2.
     The safety gate must consume that approved-plan fact before run_tests."""
@@ -6109,7 +6110,7 @@ async def test_prv12_production_candidate_path_uses_relevant_process_boundary_in
 
 
 @pytest.mark.asyncio
-async def test_prv12_share10_s1_candidate_uses_authoritative_goal_before_surefire(tmp_path):
+async def test_prv12_share10_s1_candidate_uses_authoritative_goal_before_surefire(tmp_path, bound_workspace):
     """Exact initial AppTest shape from PRV-12-share(10).
 
     The approved plan lost the invalid-input exit requirement from gi1 and
@@ -6525,7 +6526,7 @@ async def test_django_test_command_bypasses_application_entrypoint_infrastructur
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_mutating_subtask_with_planned_files_ignores_direct_execution_path(tmp_path):
+async def test_run_attempt_mutating_subtask_with_planned_files_ignores_direct_execution_path(tmp_path, bound_workspace):
     """(5) files present + application_runtime: the normal mutating flow
     remains available when the subtask actually owns files to write - the
     direct-execution short-circuit only ever fires under DENY_ALL, which a
@@ -6609,7 +6610,7 @@ _APP_MAIN_JAVA = (
 )
 
 
-def test_unrequested_architectural_surface_allows_extending_existing_entrypoint(tmp_path):
+def test_unrequested_architectural_surface_allows_extending_existing_entrypoint(tmp_path, bound_workspace):
     """UNREQUESTED_ARCHITECTURAL_SURFACE only blocks a NEW entrypoint - the
     existing App.main(...) being extended in place, with no new main()
     anywhere, is exactly the shape PRV-04's own production change used and
@@ -6624,7 +6625,7 @@ def test_unrequested_architectural_surface_allows_extending_existing_entrypoint(
     ) == []
 
 
-def test_unrequested_architectural_surface_rejects_second_entrypoint_in_test_file(tmp_path):
+def test_unrequested_architectural_surface_rejects_second_entrypoint_in_test_file(tmp_path, bound_workspace):
     """UNREQUESTED_ARCHITECTURAL_SURFACE: PRV-04 (2026-08-27) - a runtime-
     verification pass gave AppTest.java its own main() instead of reusing
     the real, already-correctly-extended App.main(...) entrypoint."""
@@ -6650,7 +6651,7 @@ def test_unrequested_architectural_surface_rejects_second_entrypoint_in_test_fil
     }]
 
 
-def test_unrequested_architectural_surface_rejects_second_entrypoint_in_production_file(tmp_path):
+def test_unrequested_architectural_surface_rejects_second_entrypoint_in_production_file(tmp_path, bound_workspace):
     """Deliberately NOT keyed to test-filename convention - the same mistake
     landing in a production file (e.g. a second Application/Main class) is
     the same failure family, not a different, uncovered one."""
@@ -6683,7 +6684,7 @@ def test_unrequested_architectural_surface_allows_explicit_goal_request(tmp_path
     ) == []
 
 
-def test_unrequested_architectural_surface_allows_first_ever_entrypoint(tmp_path):
+def test_unrequested_architectural_surface_allows_first_ever_entrypoint(tmp_path, bound_workspace):
     """No baseline entrypoint anywhere yet (a genuine greenfield project) -
     nothing established to protect, matching find_established_stack_drift's
     own no-op-when-nothing-established convention."""
@@ -6694,7 +6695,7 @@ def test_unrequested_architectural_surface_allows_first_ever_entrypoint(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_rejects_unrequested_second_entrypoint(tmp_path):
+async def test_run_attempt_rejects_unrequested_second_entrypoint(tmp_path, bound_workspace):
     """Same run_attempt()-level wiring as the EXISTING_CONTRACT_PRESERVATION
     regression test above, for UNREQUESTED_ARCHITECTURAL_SURFACE: the
     pre-write gate must reject the candidate before it ever reaches compile,
@@ -6761,7 +6762,7 @@ _PRV05_GOAL = (
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_rejects_incomplete_migration_before_spec_compliance(tmp_path):
+async def test_run_attempt_rejects_incomplete_migration_before_spec_compliance(tmp_path, bound_workspace):
     """MIGRATION_INCOMPLETE regression test for PRV-05 (2026-08-28): a
     candidate that leaves the goal's explicit migration unfinished (both
     dependencies still declared, the grounded existing owner still using
@@ -6811,7 +6812,7 @@ async def test_run_attempt_rejects_incomplete_migration_before_spec_compliance(t
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_migration_check_uses_grounding_goal_for_bounded_subtask(tmp_path):
+async def test_run_attempt_migration_check_uses_grounding_goal_for_bounded_subtask(tmp_path, bound_workspace):
     """Regression test for PRV-05 (2026-08-28 rerun): the migration check
     never fired for ANY subtask across a full live run, even though the
     migration genuinely completed with Gson still declared. Root cause: a
@@ -6856,7 +6857,7 @@ async def test_run_attempt_migration_check_uses_grounding_goal_for_bounded_subta
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_raises_spec_compliance_indeterminate_after_two_indeterminate_verdicts(tmp_path):
+async def test_run_attempt_raises_spec_compliance_indeterminate_after_two_indeterminate_verdicts(tmp_path, bound_workspace):
     """SPEC_COMPLIANCE_INDETERMINATE regression test (2026-08-28): the
     fail-open bug this replaces used to silently treat this exact shape as
     compliant=True. Now it must retry once (still bounded - not a retry-
@@ -6905,7 +6906,7 @@ async def test_run_attempt_raises_spec_compliance_indeterminate_after_two_indete
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_suppresses_spec_compliance_indeterminate_when_migration_already_satisfied(tmp_path):
+async def test_run_attempt_suppresses_spec_compliance_indeterminate_when_migration_already_satisfied(tmp_path, bound_workspace):
     """Regression test for a real live PRV-05 defect (2026-08-28, Legacy
     run, 11-attempt exhaustion): the migration was ALREADY fully and
     correctly complete (confirmed directly against the real worktree
@@ -11118,7 +11119,7 @@ async def test_full_regression_locator_regrounds_stale_target_to_unique_reposito
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_isolated_compile_failure_raises_quality_gate_failure(tmp_path):
+async def test_run_attempt_isolated_compile_failure_raises_quality_gate_failure(tmp_path, bound_workspace):
     """The actual payoff of Slice 2: a targeted fix to Quality Gates logic can
     now be tested by calling run_attempt() directly with a hand-built
     GenerationState/AttemptContext and a mocked Developer/validator - no full
@@ -11144,7 +11145,7 @@ async def test_run_attempt_isolated_compile_failure_raises_quality_gate_failure(
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_rejects_a_new_file_that_redeclares_an_existing_class(tmp_path):
+async def test_run_attempt_rejects_a_new_file_that_redeclares_an_existing_class(tmp_path, bound_workspace):
     """Regression test for a real live bug, 2026-08-21 (protocol_encoder_java):
     three separate, incompatible `Protocol.java` files ended up coexisting in
     one workspace, in three different packages, because nothing noticed a
@@ -11194,7 +11195,7 @@ async def test_run_attempt_rejects_a_new_file_that_redeclares_an_existing_class(
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_allows_a_repair_that_reuses_its_own_existing_class_name(tmp_path):
+async def test_run_attempt_allows_a_repair_that_reuses_its_own_existing_class_name(tmp_path, bound_workspace):
     """A REPAIR of a file that already legitimately owns its own path must
     never be rejected for "redeclaring" its own class - only a genuinely NEW
     file at a DIFFERENT path is a conflict."""
@@ -11237,7 +11238,7 @@ async def test_run_attempt_allows_a_repair_that_reuses_its_own_existing_class_na
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_rejects_output_missing_a_goal_named_field(tmp_path):
+async def test_run_attempt_rejects_output_missing_a_goal_named_field(tmp_path, bound_workspace):
     """Regression test for a real live bug, 2026-08-21 (ignite_qpid_protocol,
     milestone 1): the goal literally named required fields, but the
     generated class had a different, incompatible set - compile and tests
@@ -11296,7 +11297,7 @@ async def test_run_attempt_rejects_output_missing_a_goal_named_field(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_passes_when_spec_compliant(tmp_path):
+async def test_run_attempt_passes_when_spec_compliant(tmp_path, bound_workspace):
     from kriya.config import AppConfig
     from kriya.core.kernel import Kernel
 
@@ -11345,7 +11346,7 @@ async def test_run_attempt_passes_when_spec_compliant(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_records_unavailable_not_a_real_pass_when_spec_check_call_fails(tmp_path):
+async def test_run_attempt_records_unavailable_not_a_real_pass_when_spec_check_call_fails(tmp_path, bound_workspace):
     """VAL-001 G1-DEVINV2 (2026-09-20, run 7ec06f51 forensic follow-up):
     live-confirmed real incident - SpecComplianceAgent.check()'s own call-
     failure/malformed-JSON handler returns {"compliant": True, "status":
@@ -11409,7 +11410,7 @@ async def test_run_attempt_records_unavailable_not_a_real_pass_when_spec_check_c
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_strict_spec_compliance_fails_closed_on_unavailable_check(tmp_path):
+async def test_run_attempt_strict_spec_compliance_fails_closed_on_unavailable_check(tmp_path, bound_workspace):
     """The EXISTING escalation policy (ctx.strict_spec_compliance=True) must
     still raise on an unavailable check exactly as before this fix - this
     fix only changes what gets RECORDED in the non-strict/default path,
@@ -11460,7 +11461,7 @@ async def test_run_attempt_strict_spec_compliance_fails_closed_on_unavailable_ch
 
 
 @pytest.mark.asyncio
-async def test_prv17_scaffold_gate_defers_future_health_endpoint_before_retry(tmp_path):
+async def test_prv17_scaffold_gate_defers_future_health_endpoint_before_retry(tmp_path, bound_workspace):
     """Production candidate gates evaluate only criteria owned by this stage."""
     scaffold = Subtask(
         id="s1", description="Create the Django project scaffold",
@@ -11704,7 +11705,7 @@ def test_settled_goal_spec_requirement_pure_function():
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_goal_spec_reuses_settled_verdict_against_unchanged_evidence(tmp_path):
+async def test_run_attempt_goal_spec_reuses_settled_verdict_against_unchanged_evidence(tmp_path, bound_workspace):
     """Correctness Continuity Part A (PRV-06, 2026-08-29) - evidence
     monotonicity. The SAME requirement + SAME checked-file content already
     satisfied goal_spec_compliance for this subtask on an earlier attempt
@@ -11776,7 +11777,7 @@ async def test_run_attempt_goal_spec_reuses_settled_verdict_against_unchanged_ev
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_goal_spec_reevaluates_when_evidence_changes(tmp_path):
+async def test_run_attempt_goal_spec_reevaluates_when_evidence_changes(tmp_path, bound_workspace):
     """Correctness Continuity Part A6 - a real content/requirement change
     produces a DIFFERENT evidence fingerprint, so a genuinely new violation
     is always free to (re)invalidate - evidence monotonicity protects
@@ -11840,7 +11841,7 @@ async def test_run_attempt_goal_spec_reevaluates_when_evidence_changes(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_rejects_anchored_edit_for_unauthorized_target_before_apply(tmp_path):
+async def test_run_attempt_rejects_anchored_edit_for_unauthorized_target_before_apply(tmp_path, bound_workspace):
     """Correctness Continuity Part B4 (PRV-06, 2026-08-29) - rejected BEFORE
     apply_anchored_edits is even called, distinct from (and in addition to)
     the final AuthorizedFileWriter write-scope gate later in the pipeline -
@@ -11902,7 +11903,7 @@ async def test_run_attempt_rejects_anchored_edit_for_unauthorized_target_before_
 
 
 @pytest.mark.asyncio
-async def test_bounded_spec_compliance_includes_verified_upstream_files(tmp_path):
+async def test_bounded_spec_compliance_includes_verified_upstream_files(tmp_path, bound_workspace):
     from kriya.config import AppConfig
     from kriya.core.kernel import Kernel
 
@@ -11950,7 +11951,7 @@ async def test_bounded_spec_compliance_includes_verified_upstream_files(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_spec_compliance_receives_authoritative_context_when_migration_already_satisfied(tmp_path):
+async def test_spec_compliance_receives_authoritative_context_when_migration_already_satisfied(tmp_path, bound_workspace):
     """MA8 (spec §31, Batch 1 follow-up): when the ledger already reports
     every current MIGRATION_COMPLETION obligation SATISFIED, SpecCompliance
     must be called with an authoritative_context naming them up front, not
@@ -11992,7 +11993,7 @@ async def test_spec_compliance_receives_authoritative_context_when_migration_alr
 
 
 @pytest.mark.asyncio
-async def test_authoritative_spec_compliance_unknown_requires_review(tmp_path):
+async def test_authoritative_spec_compliance_unknown_requires_review(tmp_path, bound_workspace):
     state = GenerationState()
     developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
@@ -12023,7 +12024,7 @@ async def test_authoritative_spec_compliance_unknown_requires_review(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_required_runtime_judge_infrastructure_failure_cannot_pass(tmp_path):
+async def test_required_runtime_judge_infrastructure_failure_cannot_pass(tmp_path, bound_workspace):
     state = GenerationState()
     developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
@@ -12052,7 +12053,7 @@ async def test_required_runtime_judge_infrastructure_failure_cannot_pass(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_behavioral_contract_rejects_build_only_verification_sequence(tmp_path):
+async def test_behavioral_contract_rejects_build_only_verification_sequence(tmp_path, bound_workspace):
     state = GenerationState()
     developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
@@ -12084,7 +12085,7 @@ async def test_behavioral_contract_rejects_build_only_verification_sequence(tmp_
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_skips_spec_compliance_gate_when_disabled(tmp_path):
+async def test_run_attempt_skips_spec_compliance_gate_when_disabled(tmp_path, bound_workspace):
     """autonomy.spec_compliance_enabled defaults False - confirms the gate
     genuinely doesn't fire (never even calls the agent) unless a project
     explicitly opts in, unlike run_verification_enabled's default-True gate."""
@@ -12116,7 +12117,7 @@ async def test_run_attempt_skips_spec_compliance_gate_when_disabled(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_deterministically_corrects_java_entrypoint_end_to_end(tmp_path):
+async def test_run_attempt_deterministically_corrects_java_entrypoint_end_to_end(tmp_path, bound_workspace):
     """Regression test for a real live bug, 2026-08-21 (ignite_qpid_protocol,
     milestone 3/4): a Java project with no pom.xml/build.gradle has zero
     deterministic compile/run grounding, so RunVerifierAgent.judge() guessed
@@ -12297,7 +12298,7 @@ def test_ground_java_entrypoint_never_guesses_an_unmatched_ambiguous_class_name(
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_disables_run_verification_end_to_end_when_no_real_entrypoint_exists(tmp_path):
+async def test_run_attempt_disables_run_verification_end_to_end_when_no_real_entrypoint_exists(tmp_path, bound_workspace):
     """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol
     milestone 2/5): confirms the None-override fires end-to-end through
     run_attempt() itself (not just the pure ground_java_entrypoint_in_no_build_
@@ -12343,7 +12344,7 @@ async def test_run_attempt_disables_run_verification_end_to_end_when_no_real_ent
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_disables_run_verification_end_to_end_for_python_test_shaped_target(tmp_path):
+async def test_run_attempt_disables_run_verification_end_to_end_for_python_test_shaped_target(tmp_path, bound_workspace):
     """VER-005 implementation (2026-09-13) - the Python sibling of the Java
     test just above, confirming the SAME None-override fires end-to-end
     through run_attempt() itself for the real E4 live defect (docs/
@@ -12408,7 +12409,7 @@ async def test_run_attempt_disables_run_verification_end_to_end_for_python_test_
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_never_rewrites_a_developer_package_declaration_end_to_end(tmp_path):
+async def test_run_attempt_never_rewrites_a_developer_package_declaration_end_to_end(tmp_path, bound_workspace):
     """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol,
     milestone 3/4): the Developer wrote Protocol.java directly under
     src/main/java/ (no subdirectory nesting) with `package src.main.java;` -
@@ -12491,7 +12492,7 @@ def test_correct_exec_main_class_property_never_guesses_when_ambiguous_or_absent
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_deterministically_corrects_exec_main_class_end_to_end(tmp_path):
+async def test_run_attempt_deterministically_corrects_exec_main_class_end_to_end(tmp_path, bound_workspace):
     """Confirms the correction fires end-to-end through run_attempt() itself
     (not just the pure correct_exec_main_class_property() unit): a pom.xml
     copied from a skill's example with the placeholder exec.mainClass value
@@ -12541,7 +12542,7 @@ async def test_run_attempt_deterministically_corrects_exec_main_class_end_to_end
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_full_set_escalation_passes_fallback_extra_body_to_developer(tmp_path):
+async def test_run_attempt_full_set_escalation_passes_fallback_extra_body_to_developer(tmp_path, bound_workspace):
     """Regression test for a real gap, 2026-08-22: a full-set retry escalated
     to a fallback model used to unconditionally pass the PRIMARY model's own
     extra_body to the Developer completion call regardless of which model was
@@ -12578,7 +12579,7 @@ async def test_run_attempt_full_set_escalation_passes_fallback_extra_body_to_dev
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_raises_cross_package_mismatch_end_to_end(tmp_path):
+async def test_run_attempt_raises_cross_package_mismatch_end_to_end(tmp_path, bound_workspace):
     """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol,
     milestone 3/4): a fresh milestone's Architect chose a Maven-conventional
     package (`com.example`) for its own new App.java, but Protocol.java -
@@ -12645,7 +12646,7 @@ async def test_run_attempt_raises_cross_package_mismatch_end_to_end(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_cross_package_mismatch_fires_without_any_dependency_graph_indexing(tmp_path):
+async def test_run_attempt_cross_package_mismatch_fires_without_any_dependency_graph_indexing(tmp_path, bound_workspace):
     """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol):
     the cross-package-mismatch check above only ever fired in testing because
     the test pre-indexed Protocol.java into a real DependencyGraph DB via
@@ -12715,7 +12716,7 @@ async def test_run_attempt_cross_package_mismatch_fires_without_any_dependency_g
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_includes_established_files_in_compile_check(tmp_path):
+async def test_run_attempt_includes_established_files_in_compile_check(tmp_path, bound_workspace):
     """Established-files audit (2026-08-22): the raw javac fallback
     (kriya/tools/validate.py) extends its `files` argument DIRECTLY into the
     compile command line, so an established file not explicitly passed is
@@ -12744,7 +12745,7 @@ async def test_run_attempt_includes_established_files_in_compile_check(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_includes_established_files_in_self_correction_scope(tmp_path):
+async def test_run_attempt_includes_established_files_in_self_correction_scope(tmp_path, bound_workspace):
     """Established-files audit (2026-08-22): the self-correction micro-loop's
     own files_in_scope previously only ever covered state.all_files_written -
     the same blind spot already fixed at several sibling call sites this
@@ -12780,7 +12781,7 @@ async def test_run_attempt_includes_established_files_in_self_correction_scope(t
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_static_violation_can_attribute_to_an_established_file(tmp_path):
+async def test_run_attempt_static_violation_can_attribute_to_an_established_file(tmp_path, bound_workspace):
     """Established-files audit (2026-08-22): a static rule violation (here,
     mixing Ignite's two startup mechanisms) can legitimately span an
     established file plus one this attempt just wrote - confirms likely_files
@@ -12814,7 +12815,7 @@ async def test_run_attempt_static_violation_can_attribute_to_an_established_file
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_misdirected_edit_can_target_an_established_file(tmp_path):
+async def test_run_attempt_misdirected_edit_can_target_an_established_file(tmp_path, bound_workspace):
     """Established-files audit (2026-08-22): find_misdirected_edit_target()'s
     own `other_files` candidate set previously only ever scanned
     state.all_files_written - an anchored edit whose search block actually
@@ -12842,7 +12843,7 @@ async def test_run_attempt_misdirected_edit_can_target_an_established_file(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_uses_narrow_nonstandard_maven_source_directory(tmp_path):
+async def test_run_attempt_uses_narrow_nonstandard_maven_source_directory(tmp_path, bound_workspace):
     """End-to-end regression test for the real live incident, 2026-08-22
     (ignite_qpid_protocol milestone 3/4): a pom.xml introduced for the first
     time while established Java files live in a bounded nonstandard source
@@ -12885,7 +12886,7 @@ async def test_run_attempt_uses_narrow_nonstandard_maven_source_directory(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_rejects_create_no_change_before_any_quality_gate(tmp_path):
+async def test_run_attempt_rejects_create_no_change_before_any_quality_gate(tmp_path, bound_workspace):
     state = GenerationState()
     developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
@@ -12909,7 +12910,7 @@ async def test_run_attempt_rejects_create_no_change_before_any_quality_gate(tmp_
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_rejects_zero_tests_for_explicit_test_contract(tmp_path):
+async def test_run_attempt_rejects_zero_tests_for_explicit_test_contract(tmp_path, bound_workspace):
     state = GenerationState()
     developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
@@ -12941,7 +12942,7 @@ async def test_run_attempt_rejects_zero_tests_for_explicit_test_contract(tmp_pat
     assert "zero tests executed" in exc_info.value.failure.message
 
 @pytest.mark.asyncio
-async def test_run_attempt_targets_real_test_module_not_package_initializer(tmp_path):
+async def test_run_attempt_targets_real_test_module_not_package_initializer(tmp_path, bound_workspace):
     """End-to-end regression for the python_task_tracker live failure."""
     state = GenerationState()
     developer = developer_double()
@@ -12976,7 +12977,7 @@ async def test_run_attempt_targets_real_test_module_not_package_initializer(tmp_
     assert not any(outcome["type"] == "test_acceptance" for outcome in state.gate_outcomes)
 
 @pytest.mark.asyncio
-async def test_run_attempt_zero_test_target_falls_back_to_suite_without_model_repair(tmp_path):
+async def test_run_attempt_zero_test_target_falls_back_to_suite_without_model_repair(tmp_path, bound_workspace):
     state = GenerationState()
     developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
@@ -13015,7 +13016,7 @@ async def test_run_attempt_zero_test_target_falls_back_to_suite_without_model_re
     )
 
 @pytest.mark.asyncio
-async def test_run_attempt_still_requests_approval_when_goal_explicit_claim_is_ungrounded(tmp_path):
+async def test_run_attempt_still_requests_approval_when_goal_explicit_claim_is_ungrounded(tmp_path, bound_workspace):
     """Independent brutal review finding #2, end-to-end: RunVerifierAgent.judge()
     self-reporting command_source="goal_explicit" for a command whose
     executable never appears in the goal text must NOT bypass the human-in-
@@ -13060,7 +13061,7 @@ async def test_run_attempt_still_requests_approval_when_goal_explicit_claim_is_u
     assert "curl" in confirm_reason
 
 @pytest.mark.asyncio
-async def test_run_attempt_static_check_fires_before_compile_gate(tmp_path):
+async def test_run_attempt_static_check_fires_before_compile_gate(tmp_path, bound_workspace):
     """Regression test for the static pre-check added 2026-08-12 (evidenced by
     the SAME live ignite_qpid_protocol run's "already been started" failure):
     a generated app mixing Apache Ignite's Method A (Ignition.start() direct)
@@ -13204,6 +13205,13 @@ async def test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_
     snapshot_untracked_files() must now fall back to a plain filesystem diff
     instead of giving up."""
     assert not os.path.exists(os.path.join(str(tmp_path), ".git"))
+    # W3-3: what is git-less here is the candidate SANDBOX (tmp_path: the directory whose runtime leftovers the cleanup must sweep).
+    # The result-truth guards of run_attempt decide from the REAL workspace, which a run only reaches once it is a git work tree
+    # (create_git_worktree bootstraps it), so that is a separate, git-backed directory - the production topology.
+    real_workspace = tmp_path.parent / (tmp_path.name + "-real-workspace")
+    real_workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=real_workspace, check=True, capture_output=True,
+                   env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
     state = GenerationState()
     developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": "app.py", "content": "print('hi')\n"}])
@@ -13217,7 +13225,7 @@ async def test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_
     # The run succeeds, so the grader passes it. Stated explicitly: an unset
     # grade was a bare AsyncMock whose .get("passed") is a truthy coroutine.
     run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "run succeeded", "likely_files": []})
-    ctx = _minimal_attempt_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+    ctx = _minimal_attempt_ctx(tmp_path, developer=developer, run_verifier=run_verifier, workspace_path=str(real_workspace))
 
     tasks_json_path = os.path.join(str(tmp_path), "tasks.json")
     pre_call_leftover_content = []
@@ -13264,7 +13272,7 @@ async def test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_static_check_scopes_likely_files_not_every_written_file(tmp_path):
+async def test_run_attempt_static_check_scopes_likely_files_not_every_written_file(tmp_path, bound_workspace):
     """Regression test for a real bug found live (2026-08-13,
     ignite_qpid_protocol): a static_rule_violation's likely_files was
     hardcoded to state.all_files_written (every file this run has ever
@@ -13316,7 +13324,7 @@ async def test_run_attempt_static_check_scopes_likely_files_not_every_written_fi
     assert state.gate_outcomes[-1]["likely_files"] == ["ProtocolApp.java"]
 
 @pytest.mark.asyncio
-async def test_run_attempt_diagnosis_mismatch_bypassed_when_static_check_genuinely_resolved(tmp_path):
+async def test_run_attempt_diagnosis_mismatch_bypassed_when_static_check_genuinely_resolved(tmp_path, bound_workspace):
     """End-to-end regression test for the deterministic-validation-first
     bypass added 2026-08-17 (kriya/workflow/attempt.py's
     _diagnosis_mismatch_bypass_reason), for its static_rule_violation half -
@@ -13384,7 +13392,7 @@ async def test_run_attempt_diagnosis_mismatch_bypassed_when_static_check_genuine
     assert not any(g["type"] == "diagnosis_mismatch" for g in state.gate_outcomes)
 
 @pytest.mark.asyncio
-async def test_run_attempt_diagnosis_mismatch_bypassed_for_pom_semantic_validation(tmp_path):
+async def test_run_attempt_diagnosis_mismatch_bypassed_for_pom_semantic_validation(tmp_path, bound_workspace):
     """End-to-end regression test for the pom_semantic_validation half of the
     deterministic-validation-first bypass, added 2026-08-17 after a real live
     false positive (ignite_qpid_person, run b-10o): a correct edit wrapped a
@@ -13457,7 +13465,7 @@ async def test_run_attempt_diagnosis_mismatch_bypassed_for_pom_semantic_validati
     assert not any(g["type"] == "diagnosis_mismatch" for g in state.gate_outcomes)
 
 @pytest.mark.asyncio
-async def test_run_attempt_diagnosis_mismatch_bounded_veto_bypasses_second_rejection(tmp_path):
+async def test_run_attempt_diagnosis_mismatch_bounded_veto_bypasses_second_rejection(tmp_path, bound_workspace):
     """Regression test for the bounded-veto policy added 2026-08-17
     (kriya/workflow/state.py's diagnosis_mismatch_veto_counts,
     kriya/workflow/attempt.py's _diagnosis_mismatch_bypass_reason): this
@@ -13518,7 +13526,7 @@ async def test_run_attempt_diagnosis_mismatch_bounded_veto_bypasses_second_rejec
     assert len(diagnosis_mismatch_outcomes) == 1, "must never reject the same file's diagnosis a second time"
 
 @pytest.mark.asyncio
-async def test_run_attempt_diagnosis_mismatch_bypassed_for_targeted_test(tmp_path):
+async def test_run_attempt_diagnosis_mismatch_bypassed_for_targeted_test(tmp_path, bound_workspace):
     """End-to-end regression test for the targeted_test half of the
     deterministic-validation-first bypass, added 2026-08-17 alongside the
     bounded-veto policy: run_tests(target_test=...) (kriya/tools/validate.py)
@@ -13565,7 +13573,7 @@ async def test_run_attempt_diagnosis_mismatch_bypassed_for_targeted_test(tmp_pat
     assert not any(g["type"] == "diagnosis_mismatch" for g in state.gate_outcomes)
 
 @pytest.mark.asyncio
-async def test_run_attempt_rejects_a_whole_response_no_op_edit(tmp_path):
+async def test_run_attempt_rejects_a_whole_response_no_op_edit(tmp_path, bound_workspace):
     """End-to-end regression test for the Layer 0 no-op check added
     2026-08-17 (find_whole_response_no_op, kriya/workflow/attribution.py),
     reproducing the real b-10l incident this closes (design doc §7.32): a
@@ -13610,7 +13618,7 @@ async def test_run_attempt_rejects_a_whole_response_no_op_edit(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_no_op_edit_redirects_to_different_file_named_by_own_analysis(tmp_path):
+async def test_no_op_edit_redirects_to_different_file_named_by_own_analysis(tmp_path, bound_workspace):
     """The exact demo1 retry shape: a targeted XML response changes nothing,
     while its own analysis correctly identifies Application.java. The
     edit-level no-op failure must preserve that current-turn evidence instead
@@ -13656,7 +13664,7 @@ async def test_no_op_edit_redirects_to_different_file_named_by_own_analysis(tmp_
 
 
 @pytest.mark.asyncio
-async def test_targeted_no_change_redirects_before_rerunning_quality_gates(tmp_path):
+async def test_targeted_no_change_redirects_before_rerunning_quality_gates(tmp_path, bound_workspace):
     """A genuine NO CHANGE NEEDED response is negative attribution evidence,
     not permission to spend another runtime-verification timeout on an
     unchanged worktree."""
@@ -13709,7 +13717,7 @@ async def test_targeted_no_change_redirects_before_rerunning_quality_gates(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_targeted_no_change_without_fix_analysis_still_widens_before_gates(tmp_path):
+async def test_targeted_no_change_without_fix_analysis_still_widens_before_gates(tmp_path, bound_workspace):
     """Local models sometimes emit only the NO CHANGE NEEDED marker. The
     parser deliberately represents that as content=None, edits=None,
     analysis=None; it must still reject the stale target rather than silently
@@ -13742,7 +13750,7 @@ async def test_targeted_no_change_without_fix_analysis_still_widens_before_gates
 
 
 @pytest.mark.asyncio
-async def test_targeted_byte_identical_edit_cannot_erase_authoritative_locator(tmp_path):
+async def test_targeted_byte_identical_edit_cannot_erase_authoritative_locator(tmp_path, bound_workspace):
     """Compiler/test locations outrank a repair model's advisory no-op.
 
     The target is stack-neutral and intentionally named App.java rather than
@@ -13908,7 +13916,7 @@ def test_failure_signature_treats_line_shift_as_same_runtime_exception():
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_no_op_check_does_not_flag_a_companion_edit(tmp_path):
+async def test_run_attempt_no_op_check_does_not_flag_a_companion_edit(tmp_path, bound_workspace):
     """Negative case for the same Layer 0 check: a response with ONE no-op
     edit sitting alongside a genuinely real edit (the b-10f companion-edit
     shape, §7.29) must pass through Layer 0 untouched - only a response
@@ -13946,7 +13954,7 @@ async def test_run_attempt_no_op_check_does_not_flag_a_companion_edit(tmp_path):
     assert not any(g["type"] == "no_op_edit" for g in state.gate_outcomes)
 
 @pytest.mark.asyncio
-async def test_run_attempt_isolated_success_passes_quality_gates(tmp_path):
+async def test_run_attempt_isolated_success_passes_quality_gates(tmp_path, bound_workspace):
     """Mirror of the failure-path test above: a clean compile with no tests
     and Runtime Verification disabled returns normally (no exception), having
     recorded exactly one passing compile gate outcome - proving the isolated
@@ -13972,7 +13980,7 @@ async def test_run_attempt_isolated_success_passes_quality_gates(tmp_path):
     assert state.last_attempt_mode == "full_set"
 
 @pytest.mark.asyncio
-async def test_run_attempt_scopes_first_full_set_attempt_to_implicated_files_after_budget_exhaustion(tmp_path):
+async def test_run_attempt_scopes_first_full_set_attempt_to_implicated_files_after_budget_exhaustion(tmp_path, bound_workspace):
     """A failure's first full-set escalation stays dependency-scoped even if
     global full-set history is zero and its own narrow budgets are exhausted."""
     state = GenerationState()
@@ -14006,7 +14014,7 @@ async def test_run_attempt_scopes_first_full_set_attempt_to_implicated_files_aft
     assert call_kwargs["known_target_files"] == ["Protocol.java"]
 
 @pytest.mark.asyncio
-async def test_run_attempt_does_not_scope_a_later_full_set_attempt(tmp_path):
+async def test_run_attempt_does_not_scope_a_later_full_set_attempt(tmp_path, bound_workspace):
     """The same failure broadens after its one dependency-scoped full-set shot."""
     state = GenerationState()
     state.budgets.retry_count = 1
@@ -14042,7 +14050,7 @@ async def test_run_attempt_does_not_scope_a_later_full_set_attempt(tmp_path):
     assert call_kwargs["known_target_files"] is None
 
 @pytest.mark.asyncio
-async def test_run_attempt_never_writes_planner_code_even_with_full_coverage(tmp_path):
+async def test_run_attempt_never_writes_planner_code_even_with_full_coverage(tmp_path, bound_workspace):
     """FILE-INTEGRITY-CONTRACT-001B: a plan whose fenced blocks cover every
     expected file is still not repository content - attempt 1 asks the
     Developer, and only its parsed answer is written (this test pinned the
@@ -14073,7 +14081,7 @@ async def test_run_attempt_never_writes_planner_code_even_with_full_coverage(tmp
     }
 
 @pytest.mark.asyncio
-async def test_run_attempt_falls_back_to_developer_when_planner_coverage_partial(tmp_path):
+async def test_run_attempt_falls_back_to_developer_when_planner_coverage_partial(tmp_path, bound_workspace):
     """A Planner plan covering only SOME of the expected files must not be
     used at all (deliberately all-or-nothing) - falls through to the normal
     Developer generation path unchanged."""
@@ -14101,7 +14109,7 @@ async def test_run_attempt_falls_back_to_developer_when_planner_coverage_partial
     assert (tmp_path / "app.py").read_text() == "print('from developer')\n"
 
 @pytest.mark.asyncio
-async def test_run_attempt_does_not_reuse_planner_code_on_retry(tmp_path):
+async def test_run_attempt_does_not_reuse_planner_code_on_retry(tmp_path, bound_workspace):
     """Planner-code reuse is scoped to attempt 1 only (retry_count == 0) -
     a plan that already led to a failed attempt isn't a trustworthy source
     for a fresh one, matching the same scoping the known_target_files
@@ -14130,7 +14138,7 @@ async def test_run_attempt_does_not_reuse_planner_code_on_retry(tmp_path):
     assert (tmp_path / "app.py").read_text() == "print('from developer')\n"
 
 @pytest.mark.asyncio
-async def test_run_attempt_persists_grader_reasoning_on_run_verification_failure(tmp_path):
+async def test_run_attempt_persists_grader_reasoning_on_run_verification_failure(tmp_path, bound_workspace):
     """Regression test for a real bug found live, 2026-08-11
     (kriya-oneshot-protocol-ignite-qpid audit): Failure.to_gate_outcome()'s
     "output" field always preferred raw_output over message, so the grader's
@@ -14186,7 +14194,7 @@ async def test_run_attempt_persists_grader_reasoning_on_run_verification_failure
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_accepts_expected_nonzero_only_after_application_started(tmp_path):
+async def test_run_attempt_accepts_expected_nonzero_only_after_application_started(tmp_path, bound_workspace):
     state = GenerationState()
     developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
@@ -14266,7 +14274,7 @@ def _gate_patches(run_result):
 
 
 @pytest.mark.asyncio
-async def test_prd025_llm_pass_cannot_override_undeclared_nonzero_exit(tmp_path):
+async def test_prd025_llm_pass_cannot_override_undeclared_nonzero_exit(tmp_path, bound_workspace):
     """PRD-025 defect repro (main run_attempt path): before the fix the
     grader's PASS over a nonzero exit was admitted whenever the process had
     merely launched - the judge/grader (LLM) alone decided that exit was
@@ -14297,7 +14305,7 @@ async def test_prd025_llm_pass_cannot_override_undeclared_nonzero_exit(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_prd025_exit_rule_is_reapplied_after_self_correction_reverification(tmp_path):
+async def test_prd025_exit_rule_is_reapplied_after_self_correction_reverification(tmp_path, bound_workspace):
     """The re-run after a self-correction repair replaces the grade; the
     deterministic exit rule must be applied to THAT grade too."""
     state = GenerationState()
@@ -14379,7 +14387,7 @@ async def test_prd025_enforce_subtask_text_cannot_declare_an_expected_exit(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_prd025_developer_authored_pass_marker_cannot_admit_an_undeclared_exit(tmp_path):
+async def test_prd025_developer_authored_pass_marker_cannot_admit_an_undeclared_exit(tmp_path, bound_workspace):
     """The Developer controls what the application prints, including a
     verification-contract PASS marker and prose claiming the exit is
     expected. Neither is the user's goal: exit 2 stays authoritative."""
@@ -14454,7 +14462,7 @@ def _real_grader(reply: dict):
 
 
 @pytest.mark.asyncio
-async def test_prd025_real_grader_receives_bounded_package_with_middle_marker(tmp_path):
+async def test_prd025_real_grader_receives_bounded_package_with_middle_marker(tmp_path, bound_workspace):
     """Real producer + consumer: run_attempt -> _resolve_runtime_verification_
     grade -> RunVerifierAgent.grade builds the package from the per-step
     capture; the gate outcome records what the grader saw."""
@@ -14482,7 +14490,7 @@ async def test_prd025_real_grader_receives_bounded_package_with_middle_marker(tm
 
 
 @pytest.mark.asyncio
-async def test_prd025_capture_loss_turns_grader_pass_into_unknown_gate_failure(tmp_path):
+async def test_prd025_capture_loss_turns_grader_pass_into_unknown_gate_failure(tmp_path, bound_workspace):
     grader, _ = _real_grader({"verdict": "PASS", "passed": True, "reasoning": "looks fine"})
     ctx = _nonzero_app_attempt(tmp_path, goal="Run the app and print DONE.", grade_mock=None)
     ctx.run_verifier.grade = grader.grade
@@ -15677,7 +15685,7 @@ def test_planner_only_arbitration_is_a_no_op_without_both_section_headers():
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_does_not_fail_candidate_gates_on_planner_only_spec_requirement(tmp_path):
+async def test_run_attempt_does_not_fail_candidate_gates_on_planner_only_spec_requirement(tmp_path, bound_workspace):
     """Integration regression test for the live incident: a real run_attempt()
     call whose SpecComplianceAgent mock reproduces the exact observed verdict
     ("the goal requires a displayName field") against a properly
@@ -25050,7 +25058,7 @@ def test_repair_contract_authorized_scope_stays_separate_from_participation(tmp_
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_coordinated_repair_denies_unauthorized_participant_atomically(tmp_path):
+async def test_run_attempt_coordinated_repair_denies_unauthorized_participant_atomically(tmp_path, bound_workspace):
     """§28.6/§28.11: a coordinated participant outside the subtask's
     authorized write scope is denied by the EXISTING AuthorizedFileWriter
     boundary exactly like any other file - MA9 grants no bypass - and
@@ -25186,7 +25194,7 @@ async def test_run_coordinated_repair_generation_allows_participant_no_change(tm
 
 
 @pytest.mark.asyncio
-async def test_run_attempt_coordinated_contract_survives_compile_failure_across_attempts(tmp_path):
+async def test_run_attempt_coordinated_contract_survives_compile_failure_across_attempts(tmp_path, bound_workspace):
     """§28.13: an active coordinated contract must survive an intermediate
     LOCAL implementation failure (a real compile error in one participant's
     candidate) - the NEXT full run_attempt() call, for the SAME subtask,
@@ -25478,7 +25486,7 @@ def test_derive_repair_groups_literal_worked_example_filenames(tmp_path):
 # tests/test_context_source.py. See docs/assurance/CTX_001_P1_ARCHITECTURE.md.
 
 @pytest.mark.asyncio
-async def test_known_target_context_supplies_the_real_source_content_separately(tmp_path):
+async def test_known_target_context_supplies_the_real_source_content_separately(tmp_path, bound_workspace):
     """C1/C6 + WP7 wiring proof: attempt-1's known-target source content now
     flows through build_known_target_context() into existing_code_context,
     while _brownfield_owner_contract_block()'s own instruction text lands
@@ -25515,7 +25523,7 @@ async def test_known_target_context_supplies_the_real_source_content_separately(
 
 
 @pytest.mark.asyncio
-async def test_known_target_package_recorded_as_run_evidence(tmp_path):
+async def test_known_target_package_recorded_as_run_evidence(tmp_path, bound_workspace):
     """C6: the default pipeline now produces a real ContextPackage/omission
     record for attempt-1 known-target evidence - observable via the run's
     own event trace, not just internal state."""
@@ -25543,7 +25551,7 @@ async def test_known_target_package_recorded_as_run_evidence(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_targeted_retry_context_uses_current_worktree_revision_java(tmp_path):
+async def test_targeted_retry_context_uses_current_worktree_revision_java(tmp_path, bound_workspace):
     """C3/F9, exercised through the real retry path: workspace has a STALE
     copy, worktree has the CURRENT one - the retry's own Graph-RAG matched/
     related context (build_code_context, now ctx.worktree_path-sourced)
@@ -25579,7 +25587,7 @@ async def test_targeted_retry_context_uses_current_worktree_revision_java(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_targeted_retry_context_uses_current_worktree_revision_python(tmp_path):
+async def test_targeted_retry_context_uses_current_worktree_revision_python(tmp_path, bound_workspace):
     workspace = tmp_path / "workspace"
     worktree = tmp_path / "worktree"
     workspace.mkdir()
@@ -25611,7 +25619,7 @@ async def test_targeted_retry_context_uses_current_worktree_revision_python(tmp_
 
 
 @pytest.mark.asyncio
-async def test_graph_context_excludes_a_path_already_shown_via_retry_evidence(tmp_path):
+async def test_graph_context_excludes_a_path_already_shown_via_retry_evidence(tmp_path, bound_workspace):
     """DUPLICATE_SOURCE_CONTEXT_PATHS=0: a path that's both Graph-RAG
     related AND already written by this attempt must be shown exactly
     once in the prompt, not once (possibly skeletonized) via
@@ -25659,7 +25667,7 @@ def test_context_budget_functions_carry_no_write_authority_parameters():
 
 
 @pytest.mark.asyncio
-async def test_known_target_priority_does_not_alter_ctx_write_scope(tmp_path):
+async def test_known_target_priority_does_not_alter_ctx_write_scope(tmp_path, bound_workspace):
     """Runtime companion to the structural proof above: a real attempt-1
     run with known targets and a restricted write scope must leave
     ctx.write_scope_mode/ctx.allowed_write_relpaths exactly as configured -
@@ -25698,7 +25706,7 @@ async def test_known_target_priority_does_not_alter_ctx_write_scope(tmp_path):
 # for the resolver/allocator-level unit tests this complements.
 
 @pytest.mark.asyncio
-async def test_known_target_with_graph_rag_member_evidence_triggers_member_aware_context(tmp_path):
+async def test_known_target_with_graph_rag_member_evidence_triggers_member_aware_context(tmp_path, bound_workspace):
     """Required regression: known target + Graph-RAG member hit -> member-
     aware known-target context, through the real attempt-1 wiring."""
     (tmp_path / "Owner.py").write_text(
@@ -25732,7 +25740,7 @@ async def test_known_target_with_graph_rag_member_evidence_triggers_member_aware
 
 
 @pytest.mark.asyncio
-async def test_known_target_without_member_evidence_retains_file_level_fallback(tmp_path):
+async def test_known_target_without_member_evidence_retains_file_level_fallback(tmp_path, bound_workspace):
     """Required regression: known target WITHOUT a grounded member hit ->
     existing file-level known-target behavior, unchanged."""
     (tmp_path / "Owner.py").write_text("class Owner:\n    def method(self):\n        pass\n")
@@ -25761,7 +25769,7 @@ async def test_known_target_without_member_evidence_retains_file_level_fallback(
 
 
 @pytest.mark.asyncio
-async def test_c2_p0_large_file_production_reachable_member_retained_no_manual_hints(tmp_path):
+async def test_c2_p0_large_file_production_reachable_member_retained_no_manual_hints(tmp_path, bound_workspace):
     """The C2 P0 fixture, driven end-to-end: a large file with a relevant
     member near the end and substantial irrelevant body -> production
     wiring alone (ctx.retrieval_member_hints, exactly as workflow.py would
@@ -25804,7 +25812,7 @@ async def test_c2_p0_large_file_production_reachable_member_retained_no_manual_h
 
 
 @pytest.mark.asyncio
-async def test_retry_failure_location_triggers_member_aware_retry_context_java(tmp_path):
+async def test_retry_failure_location_triggers_member_aware_retry_context_java(tmp_path, bound_workspace):
     """Required regression: compiler/test failure at a member line ->
     current member resolved -> exact member context retained on a real
     targeted retry, through the real attempt.py wiring."""
@@ -25846,7 +25854,7 @@ async def test_retry_failure_location_triggers_member_aware_retry_context_java(t
 
 
 @pytest.mark.asyncio
-async def test_retry_failure_location_triggers_member_aware_retry_context_python(tmp_path):
+async def test_retry_failure_location_triggers_member_aware_retry_context_python(tmp_path, bound_workspace):
     (tmp_path / "owner.py").write_text(
         "class Owner:\n    def method(self):\n        return 'REAL_MARKER_PY'\n"
     )
@@ -25877,7 +25885,7 @@ async def test_retry_failure_location_triggers_member_aware_retry_context_python
 
 
 @pytest.mark.asyncio
-async def test_retry_worktree_version_b_member_selected_over_stale_workspace_version_a(tmp_path):
+async def test_retry_worktree_version_b_member_selected_over_stale_workspace_version_a(tmp_path, bound_workspace):
     """C3, at the retry member-hint level specifically: workspace has a
     STALE copy, worktree has the CURRENT one - the resolved retry member
     hint must reflect the worktree's own line numbers/content, never the
@@ -25918,7 +25926,7 @@ async def test_retry_worktree_version_b_member_selected_over_stale_workspace_ver
 
 
 @pytest.mark.asyncio
-async def test_retry_failure_location_does_not_authorize_an_unimplicated_file(tmp_path):
+async def test_retry_failure_location_does_not_authorize_an_unimplicated_file(tmp_path, bound_workspace):
     """A FileLocation naming a file that is NOT one of this retry's own
     already-authorized implicated targets must never surface that file's
     content via the member-hint mechanism - failure location narrows WHICH
@@ -25957,7 +25965,7 @@ async def test_retry_failure_location_does_not_authorize_an_unimplicated_file(tm
 
 
 @pytest.mark.asyncio
-async def test_member_hint_generation_does_not_expand_write_authority(tmp_path):
+async def test_member_hint_generation_does_not_expand_write_authority(tmp_path, bound_workspace):
     """Authority test: member-hint resolution/consumption (both the
     known-target and retry paths) must never mutate or expand
     allowed_write_relpaths/write_scope_mode - proven end-to-end, not just
@@ -25998,7 +26006,7 @@ async def test_member_hint_generation_does_not_expand_write_authority(tmp_path):
 # ONCE, then calls run_attempt() repeatedly with the same object).
 
 @pytest.mark.asyncio
-async def test_source_cache_reused_across_two_real_run_attempt_calls(tmp_path):
+async def test_source_cache_reused_across_two_real_run_attempt_calls(tmp_path, bound_workspace):
     """Attempt 1 (full-set) derives Shared.java's Graph-RAG skeleton;
     attempt 2 (a targeted retry, SAME ctx/source_cache, Shared.java
     unchanged) must reuse that derivation - a real, production-path
@@ -26041,7 +26049,7 @@ async def test_source_cache_reused_across_two_real_run_attempt_calls(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_source_cache_does_not_interfere_with_member_rename_fallback(tmp_path):
+async def test_source_cache_does_not_interfere_with_member_rename_fallback(tmp_path, bound_workspace):
     """Member-hint interaction (required scenario): ctx.source_cache's own
     read cache (populated by an attempt-1 Graph-RAG read of Owner.py) must
     never let a STALE attempt-1 member boundary survive a real rename

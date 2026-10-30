@@ -68,14 +68,21 @@ def copy_and_prove(origin: str, root: str, paths: Set[str], expected: Dict[str, 
         raise BoundTreeError(BOUND_TREE_IDENTITY_MISMATCH, f"the copy does not hold the bound content of {', '.join(mismatched[:10])}", tuple(mismatched))
 
 
+def bound_tree_paths(root: str) -> frozenset:
+    """The membership of the canonical bound tree of ``root``: every path Git tracks or leaves visible (``visible_repository_paths``), never a directory
+    name. A root Git cannot list (not a work tree, a failing listing) is the typed ``BoundTreeError(BOUND_TREE_UNAVAILABLE)``: there is no name-based
+    approximation to fall back to, and a caller must never read that error as "no such file"."""
+    try:
+        return visible_repository_paths(root)
+    except RuntimeError as error:
+        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, str(error)) from error
+
+
 def copy_bound_tree(origin: str, destination: str) -> frozenset:
     """Copy the canonical bound tree of ``origin`` into ``destination`` (created if absent) and prove it. Membership is the repository's, never a directory name.
     An origin Git cannot list (not a work tree) or a destination that cannot be written is a typed ``BoundTreeError``.
     Returns the relative paths now present in ``destination`` (a tracked path deleted in ``origin`` is not among them)."""
-    try:
-        paths = set(visible_repository_paths(origin))
-    except RuntimeError as error:
-        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, str(error)) from error
+    paths = set(bound_tree_paths(origin))
     try:
         os.makedirs(destination, exist_ok=True)
         copy_and_prove(origin, destination, paths, {}, manifest_given=False)

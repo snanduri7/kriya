@@ -539,7 +539,7 @@ class TestD3PublicApiScope:
 
 
 class TestD3FindBrownfieldPublicApiChanges:
-    def test_genuine_reachable_consumer_still_detected(self, tmp_path):
+    def test_genuine_reachable_consumer_still_detected(self, tmp_path, bound_workspace):
         original = {
             "owner.py": "def public_fn(x):\n    return x\n",
             "caller.py": "from owner import public_fn\npublic_fn(1)\n",
@@ -553,7 +553,7 @@ class TestD3FindBrownfieldPublicApiChanges:
         removed = {v["removed_signature"] for v in violations}
         assert "public_fn(x)" in removed
 
-    def test_g1_nested_closures_produce_zero_violations(self, tmp_path):
+    def test_g1_nested_closures_produce_zero_violations(self, tmp_path, bound_workspace):
         original = {"engine.py": _SYNTHETIC_ENGINE_SHAPE}
         # A candidate that drops the nested closures but keeps every real
         # module/class-level signature - must produce ZERO violations now,

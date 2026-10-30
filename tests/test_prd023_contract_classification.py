@@ -96,7 +96,7 @@ def _classify(repo, candidate, *, goal=GOAL, plan=PLAN):
 
 # ------------------------------------------------ one case per status
 
-def test_a_removed_signature_with_an_active_caller_is_unauthorized(tmp_path):
+def test_a_removed_signature_with_an_active_caller_is_unauthorized(tmp_path, bound_workspace):
     (tmp_path / "calc.py").write_text("def compute(x):\n    return x\n")
     (tmp_path / "use.py").write_text("from calc import compute\nprint(compute(1))\n")
     original = {"calc.py": "def compute(x):\n    return x\n",
@@ -111,7 +111,7 @@ def test_a_removed_signature_with_an_active_caller_is_unauthorized(tmp_path):
     assert c.evidence["callers"] == ["use.py"]
 
 
-def test_a_directly_authorized_change_is_classified_authorized_direct(repo):
+def test_a_directly_authorized_change_is_classified_authorized_direct(repo, bound_workspace):
     candidate = {RECORD: ("package com.example.m1; public record CustomerRecord(long customerId,"
                           "String firstName,String region) {}\n")}
     (repo / "m2" / "Use.java").write_text("new CustomerRecord(1,\"a\");\n")
@@ -124,7 +124,7 @@ def test_a_directly_authorized_change_is_classified_authorized_direct(repo):
     assert c.status is ContractChangeStatus.AUTHORIZED_DIRECT and c.evidence["authorization_ids"]
 
 
-def test_an_ambiguous_downstream_migration_is_potentially_derived_never_authorized(repo):
+def test_an_ambiguous_downstream_migration_is_potentially_derived_never_authorized(repo, bound_workspace):
     """The real PRV-08 shape: the goal authorizes CustomerRecord; the
     candidate also reshapes CustomerSummary, which SummaryService maps from
     CustomerRecord. Evidence for a derived change - still a violation."""
@@ -133,14 +133,14 @@ def test_an_ambiguous_downstream_migration_is_potentially_derived_never_authoriz
     assert c.evidence["relationship"] == [f"{SERVICE} maps CustomerRecord ({RECORD}) to {SUMMARY}"]
 
 
-def test_an_unsupported_relationship_is_indeterminate(repo):
+def test_an_unsupported_relationship_is_indeterminate(repo, bound_workspace):
     candidate = {LABEL: "package com.example.m2; public record Label(String text,int size) {}\n",
                  LABELER: "package com.example.m2; public class Labeler { Label make(){return new Label(\"x\",1);} }\n"}
     [c] = _classify(repo, candidate)
     assert c.owner == LABEL and c.status is ContractChangeStatus.INDETERMINATE
 
 
-def test_callers_left_on_the_old_shape_or_no_authorized_change_at_all_are_unauthorized(repo):
+def test_callers_left_on_the_old_shape_or_no_authorized_change_at_all_are_unauthorized(repo, bound_workspace):
     [left] = _classify(repo, {SUMMARY: CANDIDATE[SUMMARY]})  # SummaryService not co-updated
     assert left.status is ContractChangeStatus.UNAUTHORIZED and left.evidence["stale_callers"] == [SERVICE]
     [none] = _classify(repo, CANDIDATE, goal="Improve the summary output")  # nothing authorized
@@ -168,7 +168,7 @@ async def _escalate(repo, ctx, candidate=CANDIDATE):
 
 
 @pytest.mark.asyncio
-async def test_the_default_policy_never_asks_and_stays_blocked(repo):
+async def test_the_default_policy_never_asks_and_stays_blocked(repo, bound_workspace):
     callback = AsyncMock(return_value=True)
     ctx = _ctx(repo, mode="human-in-the-loop", callback=callback)
     _, remaining, classes, reason = await _escalate(repo, ctx)
@@ -179,7 +179,7 @@ async def test_the_default_policy_never_asks_and_stays_blocked(repo):
 
 
 @pytest.mark.asyncio
-async def test_autonomous_mode_fails_closed_when_a_human_is_required_but_unavailable(repo):
+async def test_autonomous_mode_fails_closed_when_a_human_is_required_but_unavailable(repo, bound_workspace):
     for ctx in (_ctx(repo, escalation="human", mode="guardrails", callback=AsyncMock(return_value=True)),
                 _ctx(repo, escalation="human", mode="human-in-the-loop", callback=None)):
         state, remaining, _, reason = await _escalate(repo, ctx)
@@ -188,7 +188,7 @@ async def test_autonomous_mode_fails_closed_when_a_human_is_required_but_unavail
 
 
 @pytest.mark.asyncio
-async def test_a_declined_escalation_stays_blocked(repo):
+async def test_a_declined_escalation_stays_blocked(repo, bound_workspace):
     ctx = _ctx(repo, escalation="human", mode="human-in-the-loop", callback=lambda diffs, reason: False)
     _, remaining, _, reason = await _escalate(repo, ctx)
     assert len(remaining) == 1 and reason == CONTRACT_ESCALATION_DECLINED
@@ -218,7 +218,7 @@ def _shaped(kind, value):
     (ApprovalOutcome.unavailable_because(APPROVAL_LAUNCH_CANNOT_ASK), CONTRACT_ESCALATION_UNAVAILABLE),
     (ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED), CONTRACT_ESCALATION_UNAVAILABLE), (None, CONTRACT_ESCALATION_UNAVAILABLE)],
     ids=["False", "DECLINED", "UNAVAILABLE-launch", "UNAVAILABLE-expired", "None"])
-async def test_the_escalation_reason_tells_a_human_decline_from_an_answer_nobody_gave(repo, kind, value, expected):
+async def test_the_escalation_reason_tells_a_human_decline_from_an_answer_nobody_gave(repo, kind, value, expected, bound_workspace):
     """N1 + F4: only an actual decline is CONTRACT_ESCALATION_DECLINED; a launch that cannot ask, an expired review or an unrecognized answer is UNAVAILABLE. A Task/Future is resolved,
     never read as approval. In every case the change stays a violation and nothing is authorized."""
     ctx = _ctx(repo, escalation="human", mode="human-in-the-loop", callback=_shaped(kind, value))
@@ -230,14 +230,14 @@ async def test_the_escalation_reason_tells_a_human_decline_from_an_answer_nobody
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["sync", "coroutine", "task", "future"])
 @pytest.mark.parametrize("value", [True, ApprovalOutcome.approve()], ids=["True", "APPROVED"])
-async def test_an_approval_resolves_from_every_awaitable_shape_and_authorizes_the_offered_change(repo, kind, value):
+async def test_an_approval_resolves_from_every_awaitable_shape_and_authorizes_the_offered_change(repo, kind, value, bound_workspace):
     ctx = _ctx(repo, escalation="human", mode="human-in-the-loop", callback=_shaped(kind, value))
     state, remaining, _, reason = await _escalate(repo, ctx)
     assert reason is None and remaining == [] and len(state.human_contract_authorizations) == 1
 
 
 @pytest.mark.asyncio
-async def test_an_approval_creates_a_revision_bound_record_for_only_the_offered_changes(repo, tmp_path):
+async def test_an_approval_creates_a_revision_bound_record_for_only_the_offered_changes(repo, tmp_path, bound_workspace):
     # The candidate also removes an unrelated signature a caller still uses:
     # clearly unauthorized, never offered, still blocking.
     (repo / "m2" / "src" / "main" / "java" / "com" / "example" / "m2" / "Old.java").write_text(
@@ -274,7 +274,7 @@ async def test_an_approval_creates_a_revision_bound_record_for_only_the_offered_
 # ------------------------------------------------ end to end through run_attempt
 
 @pytest.mark.asyncio
-async def test_the_pre_write_gate_escalates_and_the_approval_authorizes_the_candidate(repo):
+async def test_the_pre_write_gate_escalates_and_the_approval_authorizes_the_candidate(repo, bound_workspace):
     from test_workflow import _minimal_attempt_ctx
 
     def run_ctx(escalation, callback):

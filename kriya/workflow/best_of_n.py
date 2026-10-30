@@ -24,6 +24,7 @@ patching it - one candidate needs to succeed, not the first one.
 """
 import logging
 
+from kriya.repository.bound_tree import BoundTreeError
 from kriya.repository.git import RepositoryContentFilterRefused
 from kriya.workflow.repair_contract import RepairContractStatus
 from kriya.workflow.state import RecoveryPhaseAdvanced
@@ -159,6 +160,10 @@ async def run_attempt_with_best_of_n(state, attempt_ctx, n: int) -> None:
             # S19e (OI-162): a typed repository refusal is never a candidate
             # failure: it is not recorded, no independent candidate follows,
             # and it ends the run as itself.
+            raise
+        except BoundTreeError:
+            # W3-3: the same for the membership authority: a tree it cannot list
+            # is not a candidate defect, so nothing is recorded or resampled.
             raise
         except Exception as e:
             if i == n - 1:

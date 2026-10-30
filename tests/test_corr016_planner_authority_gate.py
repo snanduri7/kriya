@@ -229,7 +229,7 @@ def test_third_planner_selected_file_gets_no_authorization():
     assert owner_unrelated not in owners
 
 
-def test_unrelated_planner_selected_file_behavioral_change_rejected_at_brownfield_gate(tmp_path):
+def test_unrelated_planner_selected_file_behavioral_change_rejected_at_brownfield_gate(tmp_path, bound_workspace):
     """End-to-end (Task 3's required adversarial case, brownfield-signature
     slice): the same third file, if the candidate actually removes/renames
     an existing public signature there, is rejected by

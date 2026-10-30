@@ -11,6 +11,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
+from kriya.repository.bound_tree import bound_tree_paths
 from kriya.workflow.failure import Failure, FileLocation
 
 logger = logging.getLogger(__name__)
@@ -132,6 +133,16 @@ def normalize_written_filepath(filepath: str, workspace_path: str) -> Optional[s
 
 _MAIN_METHOD_PATTERN = re.compile(r"public\s+static\s+void\s+main\s*\(\s*String(?:\s*\[\s*\]|\.\.\.)\s+\w+\s*\)")
 _PACKAGE_DECL_PATTERN = re.compile(r"^\s*package\s+([\w.]+)\s*;", re.MULTILINE)
+
+
+def _bound_workspace_files(workspace_path: str) -> List[str]:
+    """The files of the git-backed real workspace that a result-truth guard may reason about: the canonical bound tree's membership
+    (``kriya.repository.bound_tree.bound_tree_paths``: tracked and untracked-but-not-ignored, ``.git``/``.kriya`` never), sorted. NEVER a
+    directory name: a legitimate ``build/``, ``target/`` or ``dist/`` package is in, a git-ignored output is out. A tracked path that is
+    gone from disk, or a submodule's directory entry, is not a readable file: every reader opens it under ``except OSError: continue``.
+    A root Git cannot list is the typed ``BoundTreeError(BOUND_TREE_UNAVAILABLE)`` - never an empty list: "no membership" is not "no such
+    file", and a guard that read it that way would stand down (fail open)."""
+    return sorted(bound_tree_paths(workspace_path))
 
 
 def _semantic_tokens(text: str) -> set[str]:
@@ -665,22 +676,18 @@ def find_brownfield_test_redirections(
     if not new_candidates:
         return []
 
-    ignored = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
     existing_owners = []
-    for root, dirs, filenames in os.walk(workspace_path):
-        dirs[:] = [name for name in dirs if name not in ignored]
-        for filename in filenames:
-            path = os.path.relpath(os.path.join(root, filename), workspace_path)
-            if is_runnable_test_file(path) or _is_test_or_doc_file(path):
-                continue
-            if os.path.splitext(path)[1].lower() not in _PRODUCTION_SOURCE_EXTENSIONS:
-                continue
-            try:
-                with open(os.path.join(workspace_path, path), encoding="utf-8", errors="replace") as fh:
-                    content = fh.read()
-            except OSError:
-                continue
-            existing_owners.append((path, _behavioral_owner_identifiers(path, content)))
+    for path in _bound_workspace_files(workspace_path):
+        if is_runnable_test_file(path) or _is_test_or_doc_file(path):
+            continue
+        if os.path.splitext(path)[1].lower() not in _PRODUCTION_SOURCE_EXTENSIONS:
+            continue
+        try:
+            with open(os.path.join(workspace_path, path), encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except OSError:
+            continue
+        existing_owners.append((path, _behavioral_owner_identifiers(path, content)))
 
     violations = []
     for test_path, final_test in final_contents.items():
@@ -926,16 +933,12 @@ def find_brownfield_public_api_changes(
     if _goal_explicitly_requests_api_change(goal):
         return []
     evidence_contents: Dict[str, str] = {}
-    ignored = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
-    for root, dirs, filenames in os.walk(workspace_path):
-        dirs[:] = [name for name in dirs if name not in ignored]
-        for filename in filenames:
-            evidence_path = os.path.relpath(os.path.join(root, filename), workspace_path)
-            try:
-                with open(os.path.join(workspace_path, evidence_path), encoding="utf-8", errors="replace") as fh:
-                    evidence_contents[evidence_path] = fh.read()
-            except OSError:
-                continue
+    for evidence_path in _bound_workspace_files(workspace_path):
+        try:
+            with open(os.path.join(workspace_path, evidence_path), encoding="utf-8", errors="replace") as fh:
+                evidence_contents[evidence_path] = fh.read()
+        except OSError:
+            continue
     # Candidate overlay (Step 6, CORR-016 investigation - independently
     # correct, kept unmodified across every CORR-016 revision): a consumer
     # file already updated in this SAME candidate batch must be evaluated on
@@ -1069,21 +1072,17 @@ def find_unrequested_architectural_surfaces(
     # `original_contents` only covers files THIS batch is about to write,
     # but "is there already an established entrypoint ANYWHERE in this
     # repo" must be answered against the whole workspace.
-    ignored = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
     baseline_entrypoints: set = set()
-    for root, dirs, filenames in os.walk(workspace_path):
-        dirs[:] = [name for name in dirs if name not in ignored]
-        for filename in filenames:
-            if not filename.endswith(".java"):
-                continue
-            full_path = os.path.join(root, filename)
-            try:
-                with open(full_path, encoding="utf-8", errors="replace") as fh:
-                    content = fh.read()
-            except OSError:
-                continue
-            if _JAVA_MAIN_ENTRYPOINT_RE.search(content):
-                baseline_entrypoints.add(os.path.relpath(full_path, workspace_path))
+    for path in _bound_workspace_files(workspace_path):
+        if not path.endswith(".java"):
+            continue
+        try:
+            with open(os.path.join(workspace_path, path), encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except OSError:
+            continue
+        if _JAVA_MAIN_ENTRYPOINT_RE.search(content):
+            baseline_entrypoints.add(path)
 
     if not baseline_entrypoints:
         # Nothing established yet (a genuinely first-ever entrypoint, e.g. a

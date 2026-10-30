@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Optional, Type
 
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
+from kriya.repository.bound_tree import BoundTreeError
 from kriya.repository.git import RepositoryContentFilterRefused
 from kriya.workflow.retry_policy import RetryAction, RetryDecision, decide_for_state
 from kriya.workflow.run_events import EventAuthority, RunEvent
@@ -198,6 +199,8 @@ async def run_iteration(
         return IterationOutcome(IterationEnd.RETRY)
     except RepositoryContentFilterRefused:
         raise               # S19e (OI-162): the typed refusal ends the run as itself, never a retried attempt failure
+    except BoundTreeError:
+        raise               # W3-3: the membership authority could not list the tree - a typed stop of the run, never a retried candidate failure
     except Exception as e:
         if await handle_attempt_failure(state, attempt_ctx, e):
             return IterationOutcome(IterationEnd.STOP)
