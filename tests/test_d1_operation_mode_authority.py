@@ -760,7 +760,7 @@ class TestCriticalPropagation:
     subsequent full_set attempt's own completeness gate remains correctly
     mandatory."""
 
-    def test_unauthorized_full_file_candidate_rejected_pre_write_sandbox_unchanged(self, tmp_path):
+    def test_unauthorized_full_file_candidate_rejected_pre_write_sandbox_unchanged(self, tmp_path, bound_workspace):  # noqa: ARG002 - git-backed real workspace (W3-3)
         baseline = _write(tmp_path, "target.py", _very_large_baseline_content())
         ctx = _minimal_attempt_ctx(
             tmp_path, architect_files=["target.py"], expected_files_upfront=["target.py"],
@@ -861,7 +861,7 @@ class TestRejectedCandidateCannotResurrectViaCarryForward:
     content) THIS attempt - never for a file the enforcement loop rejected
     or never reached."""
 
-    def test_rejected_full_file_candidate_never_resurfaces_via_later_recovery_fold_in(self, tmp_path):
+    def test_rejected_full_file_candidate_never_resurfaces_via_later_recovery_fold_in(self, tmp_path, bound_workspace):  # noqa: ARG002 - git-backed real workspace (W3-3)
         target_baseline = _write(tmp_path, "target.py", _very_large_baseline_content())
         owner_baseline = "def format(x):\n    return x\n"
         _write(tmp_path, "owner.py", owner_baseline)
@@ -1039,7 +1039,7 @@ class TestValidationBaselinePreservedByD1Rejection:
     touched anywhere in this fix, and a captured baseline on `state` must
     survive an unrelated D1 rejection completely unchanged."""
 
-    def test_captured_baseline_unchanged_by_a_d1_rejected_attempt(self, tmp_path):
+    def test_captured_baseline_unchanged_by_a_d1_rejected_attempt(self, tmp_path, bound_workspace):  # noqa: ARG002 - git-backed real workspace (W3-3)
         from kriya.workflow.validation_baseline import (
             ValidationInvocation,
             capture_validation_baseline,

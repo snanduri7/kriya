@@ -24,6 +24,7 @@ are added with it (see the second half of this file).
 """
 import asyncio
 import os
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -78,6 +79,10 @@ class _Run:
                     continue
                 (root / path).parent.mkdir(parents=True, exist_ok=True)
                 (root / path).write_bytes(data)
+        # W3-3: a run only reaches the bound-tree membership guards after ``create_git_worktree`` has made the REAL workspace a Git work tree
+        # (its own top level - not a subdirectory of ``tmp_path``); the sandbox is a plain copy.
+        subprocess.run(["git", "init", "-q"], cwd=self.workspace, check=True, capture_output=True,
+                       env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
         self.files = files
         self.state = GenerationState()
         self.emitted: List[Tuple[str, Dict[str, Any], Dict[str, Optional[str]]]] = []

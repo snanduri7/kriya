@@ -136,6 +136,7 @@ import asyncio
 import gzip
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -243,6 +244,9 @@ def _attempt_context(tmp_path: Path, responses: Dict[str, int]) -> AttemptContex
         target = tmp_path / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
+    # W3-3: the REAL workspace of a run is a Git work tree by the time the membership guards run (``create_git_worktree``).
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, capture_output=True,
+                   env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
     config = AppConfig()
     config.llm.model = PRIMARY
     developer = DeveloperAgent("developer", LLMClient(config))
