@@ -13,6 +13,7 @@ No live model, no Docker.
 import ast
 import asyncio
 import os
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -543,6 +544,9 @@ def test_the_contract_escalation_stops_typed(tmp_path, kind):
     """spec_compliance contract-change escalation (PRD-023): decided on the mode only after the reader."""
     import test_prd023_contract_classification as prd023
 
+    for git_args in (["init", "-q"], ["config", "user.email", "test@test.com"], ["config", "user.name", "Test"],
+                     ["commit", "-q", "--allow-empty", "-m", "initial"]):       # a Git-backed workspace: membership is Git's view
+        subprocess.run(["git", *git_args], cwd=tmp_path, check=True)
     for path, content in prd023.ORIGINAL.items():
         (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / path).write_text(content)

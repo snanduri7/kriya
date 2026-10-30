@@ -9,6 +9,7 @@ The existing authority model (attribution.py): `Failure.authoritative_files` - d
 self-diagnosis, which outranks locator/judge. The static-rule raise site never set it. It now does, from the exact repository
 paths the check itself printed in its violation message.
 """
+import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -187,6 +188,9 @@ async def test_run_attempt_production_path_records_the_vacuous_test_file_as_the_
 
     from kriya.workflow.attempt import run_attempt  # noqa: PLC0415
 
+    for git_args in (["init", "-q"], ["config", "user.email", "test@test.com"], ["config", "user.name", "Test"],
+                     ["commit", "-q", "--allow-empty", "-m", "initial"]):       # a Git-backed workspace: membership is Git's view
+        subprocess.run(["git", *git_args], cwd=tmp_path, check=True)
     developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": POM, "content": "<project></project>\n"},

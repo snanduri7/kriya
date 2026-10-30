@@ -10,6 +10,7 @@ applied by _rewrite exactly as the agent does), never by the write loop, and
 the rewrite keeps the file's final-newline state and line-ending convention.
 """
 import asyncio
+import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -56,6 +57,9 @@ def _ctx(workspace, developer):
 
 
 def _rewrite(tmp_path, original, model_content, target="Target.java"):
+    for git_args in (["init", "-q"], ["config", "user.email", "test@test.com"], ["config", "user.name", "Test"],
+                     ["commit", "-q", "--allow-empty", "-m", "initial"]):       # a Git-backed workspace: membership is Git's view
+        subprocess.run(["git", *git_args], cwd=tmp_path, check=True)
     path = tmp_path / target
     if original is not None:
         path.write_bytes(original.encode("utf-8"))
