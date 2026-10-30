@@ -33,6 +33,7 @@ Do not redesign: MA8 authority hierarchy, MA9 recovery model, FUTURE_OWNER
 semantics, StackContract, write authorization, global retry budgets. Every
 fix this test exercises reuses an existing mechanism/field; none of them
 were touched here."""
+import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -199,6 +200,9 @@ def _ctx(tmp_path, plan, subtask_id, *, developer, spec_compliance=None, run_ver
 
 @pytest.mark.asyncio
 async def test_prv17_stage_contract_architecture(tmp_path):
+    for git_args in (["init", "-q"], ["config", "user.email", "test@test.com"], ["config", "user.name", "Test"],
+                     ["commit", "-q", "--allow-empty", "-m", "initial"]):       # a Git-backed workspace: membership is Git's view
+        subprocess.run(["git", *git_args], cwd=tmp_path, check=True)
     plan = _stage_contract_plan()
 
     # --- 1. s1 Spec Compliance does not require future project/app files,

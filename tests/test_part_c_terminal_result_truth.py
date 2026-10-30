@@ -90,8 +90,14 @@ async def test_d_f3_the_deliberate_fail_closed_error_of_repository_content_paths
     repo = _repo(tmp_path, tmp_path / "FILTER_RAN")
     config = strict_config(autonomy={"spec_compliance_enabled": True})
 
-    def cannot_list(_workspace_path):
-        raise RuntimeError("git ls-files failed: fatal: the index could not be read")
+    listing = workflow_worktree.repository_content_paths
+
+    def cannot_list(workspace_path):
+        # Only the terminal requirement gate's call fails: the sandbox creation lists the same paths earlier in the run, and a
+        # listing failure there is a different (pre-run) stop, not the gate's deliberate fail-closed error this test pins.
+        if any(frame.name == "_requirement_gap" for frame in traceback.extract_stack()):
+            raise RuntimeError("git ls-files failed: fatal: the index could not be read")
+        return listing(workspace_path)
     monkeypatch.setattr(workflow_worktree, "repository_content_paths", cannot_list)
     with pytest.raises(RuntimeError, match="git ls-files failed") as raised:
         await _enforce(repo, _engine(config, bind_filter=False))
