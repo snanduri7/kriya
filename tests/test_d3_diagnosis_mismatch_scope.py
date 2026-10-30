@@ -16,6 +16,7 @@ compile / pom_semantic_validation / targeted_test, now also static_rule_violatio
 import gzip
 import json
 import re
+import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -70,6 +71,9 @@ def attempt6():
 def _setup(tmp_path, attempt6, signature, new_test=None):
     from test_workflow import _minimal_attempt_ctx  # noqa: PLC0415 - heavy module, only these tests need it
 
+    for git_args in (["init", "-q"], ["config", "user.email", "test@test.com"], ["config", "user.name", "Test"],
+                     ["commit", "-q", "--allow-empty", "-m", "initial"]):       # a Git-backed workspace: membership is Git's view
+        subprocess.run(["git", *git_args], cwd=tmp_path, check=True)
     old = {POM: attempt6["old_pom"], TEST_FILE: attempt6["old_test"], MAIN_FILE: OLD_MAIN}
     state = GenerationState()
     for path, text in old.items():

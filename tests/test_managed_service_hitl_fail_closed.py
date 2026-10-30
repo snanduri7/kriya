@@ -10,6 +10,7 @@ with a typed ``verification_infrastructure_failure`` (reason code MANAGED_SERVIC
 admitted, before any interpreter/build preparation and before any process is spawned. It is not a rejection (nobody refused
 anything) and no approval is requested. Every other mode keeps today's behaviour.
 """
+import subprocess
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -51,6 +52,9 @@ def _verification_only_ctx(tmp_path, *, mode, judgment, required=True):
 
 
 def _mutating_ctx(tmp_path, *, mode, judgment=None, required=True, planned=True):
+    for git_args in (["init", "-q"], ["config", "user.email", "test@test.com"], ["config", "user.name", "Test"],
+                     ["commit", "-q", "--allow-empty", "-m", "initial"]):       # a Git-backed workspace: membership is Git's view
+        subprocess.run(["git", *git_args], cwd=tmp_path, check=True)
     plan = _managed_service_plan()
     views_py = "customers/views.py"
     developer = developer_double()

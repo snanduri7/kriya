@@ -19,6 +19,7 @@ following the two live runs that surfaced the path-canonicalization,
 directory-artifact, and unrecoverable-scope-denial defects this same
 session fixed in kriya/policy/filesystem.py, kriya/workflow/plan_schema.py,
 and kriya/workflow/retry_strategy.py)."""
+import subprocess
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -53,6 +54,9 @@ def _minimal_ctx(tmp_path, **overrides) -> AttemptContext:
     PRV-18's real production-path tests already use) at a smaller scope,
     so this preflight file has no import-time dependency on that other
     (large, unrelated) test module."""
+    for git_args in (["init", "-q"], ["config", "user.email", "test@test.com"], ["config", "user.name", "Test"],
+                     ["commit", "-q", "--allow-empty", "-m", "initial"]):       # a Git-backed workspace: membership is Git's view
+        subprocess.run(["git", *git_args], cwd=tmp_path, check=True)
     defaults = dict(
         goal="Implement the customers health endpoint",
         plan="Step 1: write it", design="Design: one file",

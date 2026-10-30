@@ -24,6 +24,7 @@ before grading, before Developer retry and before owner recovery - no new taxono
 output-text matching. A re-run that genuinely executed keeps its grading (application) and its process-exit verdict
 (deterministic sequence) exactly as before.
 """
+import subprocess
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -57,6 +58,9 @@ GRADE_FAILED = {"passed": False, "reasoning": "APP_RAN printed but the process e
 def _mutating_ctx(tmp_path, run_commands, *, grades):
     """The mutating path: the Developer writes app.py, the real compile and test gates run, the judge asks for
     ``run_commands``; the grader answers ``grades`` in order (one entry per grade() call the test expects)."""
+    for git_args in (["init", "-q"], ["config", "user.email", "test@test.com"], ["config", "user.name", "Test"],
+                     ["commit", "-q", "--allow-empty", "-m", "initial"]):       # a Git-backed workspace: membership is Git's view
+        subprocess.run(["git", *git_args], cwd=tmp_path, check=True)
     developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": "app.py", "content": APP_CRASH}])
     run_verifier = AsyncMock()
@@ -87,6 +91,10 @@ class _ScriptedRepair:
         assert kwargs["failure_type"] == "run_verification"
         written = self.edit(kwargs["worktree_path"])
         assert set(written) <= set(kwargs["writable_files"]), (written, kwargs["writable_files"])
+        tree_binding = getattr(kwargs["validator"], "tree_binding", None)
+        for path in written:                                                  # the real loop's own authorized write (self_correction.py), which a Git-backed tree is bound against
+            if tree_binding is not None:
+                tree_binding.authorize(path)
         return SelfCorrectionResult(resolved=True, turns_used=1, final_compile_output="py_compile: ok",
                                     modified_files={path: "" for path in written})
 
