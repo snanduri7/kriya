@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.workflow.validation_baseline import DeltaClassification
+from kriya.workflow.worktree import candidate_member_paths
 
 _SOURCE = r"(?P<path>[^\s:\[\]]+\.(?:java|kt|groovy|scala))"
 _MAVEN_ERROR = re.compile(r"^\[ERROR\]\s+" + _SOURCE + r":\[(?P<line>\d+)(?:,\d+)?\]", re.MULTILINE)
@@ -75,12 +76,12 @@ def compiler_error_locations(output: str) -> List[Tuple[str, int]]:
 def _tree_index(root: str) -> Dict[str, List[str]]:
     """basename -> repository-relative paths in the candidate tree."""
     index: Dict[str, List[str]] = {}
-    for current, dirs, files in os.walk(root):
-        dirs[:] = sorted(d for d in dirs if d not in _EXCLUDED_DIRS)
-        for name in files:
-            full = os.path.join(current, name)
-            if os.path.isfile(full) and not os.path.islink(full):
-                index.setdefault(name, []).append(os.path.relpath(full, root).replace(os.sep, "/"))
+    # W3-3 unit U1: a Git-backed candidate's files are its canonical bound tree, never a directory name (a tracked ``build/`` source resolves, a git-ignored output is
+    # not a candidate file; a tree Git cannot list is the typed ``BoundTreeError``). ``_EXCLUDED_DIRS`` prunes ONLY the parked root classes' legacy walk, UNCHANGED.
+    for relative in candidate_member_paths(root, _EXCLUDED_DIRS):
+        full = os.path.join(root, relative)
+        if os.path.isfile(full) and not os.path.islink(full):
+            index.setdefault(os.path.basename(relative), []).append(relative.replace(os.sep, "/"))
     return index
 
 

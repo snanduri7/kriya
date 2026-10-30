@@ -1245,7 +1245,7 @@ async def _run_executing_candidate_gates(
                 # real Java one), so no interaction between them.
                 if any(f.endswith(".py") for f in entrypoint_known_files) or validator.stack == "python":
                     all_python_files, package_dirs, entrypoint_files = deps._build_python_runtime_grounding(
-                        validator.workspace_path
+                        validator.workspace_path, state.all_files_written   # W3-3 U1: DECLARED = tracked or proven written by THIS run
                     )
                     corrected_py_commands = ground_python_runtime_target(
                         judgment["run_commands"], judgment["command_source"],

@@ -2156,9 +2156,9 @@ def _collect_python_runtime_grounding_facts(root: str) -> Tuple[FrozenSet[str], 
     return runtime_verification._collect_python_runtime_grounding_facts(_runtime_deps(), root)
 
 
-def _build_python_runtime_grounding(root: str) -> Tuple[FrozenSet[str], FrozenSet[str], List[str]]:
+def _build_python_runtime_grounding(root: str, declared_paths: Iterable[str] = ()) -> Tuple[FrozenSet[str], FrozenSet[str], List[str]]:
     """The body is kriya/workflow/runtime_verification.py (E9); its collaborators are resolved here, at call time (_runtime_deps)."""
-    return runtime_verification._build_python_runtime_grounding(_runtime_deps(), root)
+    return runtime_verification._build_python_runtime_grounding(_runtime_deps(), root, declared_paths)
 
 
 _JAVA_PACKAGE_DECL_RE = re.compile(r"^\s*package\s+([\w.]+)\s*;", re.MULTILINE)

@@ -965,6 +965,13 @@ def _is_scoped_snapshot(worktree_path: str) -> bool:
     return at_managed_location and os.path.exists(os.path.join(path, _SCOPED_SNAPSHOT_SENTINEL))
 
 
+def candidate_has_canonical_membership(root: str) -> bool:
+    """W3-3: whether ``root`` has a canonical membership owner today - a Git-backed (D-001) root that is not the scoped-snapshot sandbox. The ONE place the parked root
+    classes (the pre-bootstrap ``NO_GIT_REPOSITORY`` workspace; the scoped-snapshot sandbox, whose synthetic ``.git`` proves root identity, not selected-path provenance)
+    are told apart from the Git-backed ones: ``candidate_member_files`` and every consumer of the bound tree's declaration split dispatch on it."""
+    return not (_is_scoped_snapshot(root) or workspace_root_class(root) != GIT_BACKED)
+
+
 def candidate_member_files(root: str) -> Optional[List[str]]:
     """W3-3 (units B and C1): the real files of the canonical membership of a candidate or workspace ``root``, sorted and relative to it - the D-001 bound tree
     (``bound_tree.bound_tree_paths``: never a directory name; a legitimate ``build/`` package is in, a git-ignored output is out), narrowed to what is a file on disk
@@ -973,7 +980,7 @@ def candidate_member_files(root: str) -> Optional[List[str]]:
     and the scoped-snapshot sandbox (its synthetic ``.git`` proves root identity, not selected-path provenance, and it lists the enclosing repository's ignored
     outputs - C2). A Git-backed root Git cannot list, or that D-001 and Git disagree about, is the typed ``BoundTreeError`` - NEVER ``None`` and never an empty list:
     absence of membership is not absence of the file."""
-    if _is_scoped_snapshot(root) or workspace_root_class(root) != GIT_BACKED:
+    if not candidate_has_canonical_membership(root):
         return None
     return sorted(member for member in bound_tree_paths(root)
                   if os.path.lexists(os.path.join(root, member)) and not os.path.isdir(os.path.join(root, member)))

@@ -1670,7 +1670,7 @@ class _MilestonePlanDriver(PlanDriver):
                 milestone_known_files = result.get("files", [])
                 if any(f.endswith(".py") for f in milestone_known_files):
                     all_python_files, package_dirs, entrypoint_files = _build_python_runtime_grounding(
-                        self.workspace_path
+                        self.workspace_path, milestone_known_files   # W3-3 U1: DECLARED = tracked or proven written by THIS milestone
                     )
                     corrected_py_commands = ground_python_runtime_target(
                         judgment["run_commands"], judgment["command_source"],

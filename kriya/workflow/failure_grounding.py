@@ -9,6 +9,7 @@ from typing import Any, Collection, Dict, Iterable, List, Optional, Tuple
 
 from kriya.workflow.failure import Failure, FileLocation
 from kriya.workflow.generation_manifest import FileRole, classify_file_role
+from kriya.workflow.worktree import candidate_member_paths
 
 logger = logging.getLogger(__name__)
 
@@ -1311,18 +1312,20 @@ def resolve_repository_locator_files(
     }
     matches: Dict[str, List[str]] = {basename: [] for basename in unresolved}
     scanned = 0
-    for root, dirs, files in os.walk(workspace_path):
-        dirs[:] = sorted(name for name in dirs if name not in excluded_dirs)
-        for filename in sorted(files):
-            scanned += 1
-            if scanned > max_files_scanned:
-                return []
-            if filename not in unresolved:
-                continue
-            full_path = os.path.join(root, filename)
-            if not os.path.isfile(full_path) or os.path.islink(full_path):
-                continue
-            matches[filename].append(os.path.relpath(full_path, workspace_path))
+    # W3-3 unit U1: a Git-backed candidate's files are its canonical bound tree (a tracked ``build/`` source is a member, a git-ignored output is not; a tree Git
+    # cannot list is the typed ``BoundTreeError``, never "no file"). ``excluded_dirs`` prunes ONLY the parked root classes' legacy walk (pre-bootstrap non-Git
+    # workspace, scoped-snapshot sandbox) - UNCHANGED, not endorsed.
+    for relative in candidate_member_paths(workspace_path, excluded_dirs):
+        scanned += 1
+        if scanned > max_files_scanned:
+            return []
+        filename = os.path.basename(relative)
+        if filename not in unresolved:
+            continue
+        full_path = os.path.join(workspace_path, relative)
+        if not os.path.isfile(full_path) or os.path.islink(full_path):
+            continue
+        matches[filename].append(relative)
 
     return sorted(
         paths[0] for paths in matches.values() if len(paths) == 1

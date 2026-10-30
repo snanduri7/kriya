@@ -53,7 +53,7 @@ import dataclasses
 import hashlib
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from kriya.config.authority import is_human_in_the_loop
 from kriya.policy.approval import (
@@ -80,6 +80,7 @@ from kriya.workflow.failure_grounding import (
     extract_missing_project_local_python_module,
 )
 from kriya.workflow.file_resolution import (
+    declared_and_ambiguous_member_files,
     downgrade_ungrounded_goal_explicit_commands,
     extract_jvm_module_flags,
     ground_java_entrypoint_in_no_build_file_projects,
@@ -91,7 +92,12 @@ from kriya.workflow.file_resolution import (
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.verification_authority import deterministic_sequence_kind, deterministic_verification_kind
 from kriya.workflow.verification_contract import ContractVerdictState, classify_contract_verdict
-from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
+from kriya.workflow.worktree import (
+    candidate_has_canonical_membership,
+    candidate_member_files,
+    clean_untracked_files_since,
+    snapshot_untracked_files,
+)
 
 RunState = Any    # kriya.workflow.state.GenerationState
 AttemptCtx = Any  # kriya.workflow.attempt.AttemptContext
@@ -664,18 +670,46 @@ def _run_verification_basis_hash(ctx: AttemptCtx, state: RunState) -> str:
     return digest.hexdigest()
 
 
+def _python_grounding_facts_from_members(root: str, members: Iterable[str]) -> Tuple[FrozenSet[str], FrozenSet[str]]:
+    """W3-3 unit U1: the two grounding facts of a Git-backed root from its canonical membership (``members``: root-relative real files), never from a directory name -
+    every in-scope ``.py`` member, and the directories of the ``__init__.py`` members ("" is the root). The same per-entry ``is_within_scope`` containment as the
+    legacy walk: a symlink member that resolves outside ``root`` never reaches either set."""
+    scope = make_workspace_scope(root)
+    all_py: set = set()
+    package_dirs: set = set()
+    for member in members:
+        rel = member.replace(os.sep, "/")
+        name = rel.rsplit("/", 1)[-1]
+        if name == "__init__.py":
+            package_dirs.add(rel.rpartition("/")[0])
+        if name.endswith(".py") and is_within_scope(scope, os.path.join(root, member)):
+            all_py.add(rel)
+    return frozenset(all_py), frozenset(package_dirs)
+
+
 def _collect_python_runtime_grounding_facts(deps: RuntimeDeps, root: str) -> Tuple[FrozenSet[str], FrozenSet[str]]:
-    """Bounded, single-pass walk of `root` collecting every real, in-scope
-    `.py` file's workspace-relative path, plus the set of real Python
-    package directories (those containing __init__.py) - the two
-    repository-wide facts ground_python_runtime_target() (kriya/workflow/
+    """Every real, in-scope `.py` file's workspace-relative path, plus the set
+    of real Python package directories (those containing __init__.py) - the
+    two repository-wide facts ground_python_runtime_target() (kriya/workflow/
     file_resolution.py) needs to validate an LLM-proposed runtime target
-    against real evidence instead of trusting it. followlinks=False plus a
-    per-entry is_within_scope() check (the same symlink-safe containment
-    idiom PolymorphicValidator.run_app_sequence()'s own javac -d directory
-    creation already uses, kriya/tools/validate.py) - a malicious symlink
-    inside the repository can never smuggle an outside path into either
-    returned set."""
+    against real evidence instead of trusting it.
+
+    W3-3 unit U1: on a Git-backed root the facts are its canonical bound
+    tree's membership (``worktree.candidate_member_files``: a tracked
+    ``pkg/build/runner.py`` is a member, a git-ignored output is not; a root
+    Git cannot list is the typed ``BoundTreeError``, never an empty set). The
+    PARKED root classes (the pre-bootstrap non-Git workspace and the
+    scoped-snapshot sandbox, which have no canonical membership owner) keep
+    the legacy bounded walk below UNCHANGED - not endorsed: its directory-name
+    prune is the defect corrected for a Git-backed root. followlinks=False
+    plus a per-entry is_within_scope() check (the same symlink-safe
+    containment idiom PolymorphicValidator.run_app_sequence()'s own javac -d
+    directory creation already uses, kriya/tools/validate.py) - a malicious
+    symlink inside the repository can never smuggle an outside path into
+    either returned set."""
+    members = candidate_member_files(root)
+    if members is not None:
+        return _python_grounding_facts_from_members(root, members)
     scope = make_workspace_scope(root)
     all_py: set = set()
     package_dirs: set = set()
@@ -699,7 +733,9 @@ def _collect_python_runtime_grounding_facts(deps: RuntimeDeps, root: str) -> Tup
     return frozenset(all_py), frozenset(package_dirs)
 
 
-def _build_python_runtime_grounding(deps: RuntimeDeps, root: str) -> Tuple[FrozenSet[str], FrozenSet[str], List[str]]:
+def _build_python_runtime_grounding(
+    deps: RuntimeDeps, root: str, declared_paths: Iterable[str] = (),
+) -> Tuple[FrozenSet[str], FrozenSet[str], List[str]]:
     """(all_python_files, package_dirs, entrypoint_files) - the real,
     repository-wide facts ground_python_runtime_target() validates an
     LLM-proposed Python runtime-verification target against (VER-005
@@ -723,10 +759,31 @@ def _build_python_runtime_grounding(deps: RuntimeDeps, root: str) -> Tuple[Froze
     the Python sibling of _build_java_main_class_map's real-main()-method
     detection, but grounded in Python's own semantics (see python_file_
     is_runnable_script()'s own docstring for why a required `__main__`
-    guard is the wrong transliteration of Java's requirement)."""
-    all_py, package_dirs = deps._collect_python_runtime_grounding_facts(root)
+    guard is the wrong transliteration of Java's requirement).
+
+    W3-3 unit U1 - membership is not target authority. On a Git-backed root
+    ``all_python_files`` / ``package_dirs`` are the canonical bound tree's
+    (visible evidence: the file exists), but only a DECLARED file may be an
+    entrypoint the grounding selects or substitutes: DECLARED = Git tracked or
+    proven written by THIS run (``declared_paths``, path-exact - the caller's
+    ``state.all_files_written``), the one positive-declaration split
+    ``file_resolution.declared_and_ambiguous_member_files`` also applies to
+    artifact owners. A pre-existing untracked, non-ignored file (a project's own
+    uncommitted script and a dependency tree nobody ignored are
+    indistinguishable by presence) stays visible but never becomes an
+    automatically selected runtime target on membership alone - by no directory
+    name. The parked root classes keep the legacy facts and every file a
+    candidate, UNCHANGED."""
+    if candidate_has_canonical_membership(root):
+        declared, ambiguous = declared_and_ambiguous_member_files(root, declared_paths)
+        all_py, package_dirs = _python_grounding_facts_from_members(root, [*declared, *ambiguous])
+        selectable = {member.replace(os.sep, "/") for member in declared}
+        candidates = sorted(all_py & selectable)
+    else:
+        all_py, package_dirs = deps._collect_python_runtime_grounding_facts(root)
+        candidates = sorted(all_py)
     entrypoints: List[str] = []
-    for rel in sorted(all_py):
+    for rel in candidates:
         if python_target_path_is_test_shaped(rel) or os.path.basename(rel) == "__init__.py":
             continue
         full = os.path.join(root, rel)
@@ -1556,7 +1613,7 @@ async def _execute_runtime_verification_directly(
         # the same corrected_commands variable), so no interaction with it.
         if any(f.endswith(".py") for f in known_files) or validator.stack == "python":
             all_python_files, package_dirs, entrypoint_files = deps._build_python_runtime_grounding(
-                validator.workspace_path
+                validator.workspace_path, state.all_files_written   # W3-3 U1: DECLARED = tracked or proven written by THIS run
             )
             corrected_py_commands = ground_python_runtime_target(
                 judgment["run_commands"], judgment["command_source"],

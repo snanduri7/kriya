@@ -777,7 +777,7 @@ E9_ATTEMPT_CALLABLES = {
     "_apply_runtime_verification_contract": "(commands, input_channel)",
     "_run_verification_basis_hash": "(ctx, state)",
     "_collect_python_runtime_grounding_facts": "(root)",
-    "_build_python_runtime_grounding": "(root)",
+    "_build_python_runtime_grounding": "(root, declared_paths=())",
     "_runtime_verification_is_advisory_only": "(ctx, judgment)",
     "_derive_runtime_command_subject": "(ctx, judgment, intro)",
     "_runtime_commands_need_approval": "(ctx, state, judgment, autonomy_mode)",

@@ -177,6 +177,14 @@ def _owner_candidates(workspace_path: str, declared_paths: Iterable[str] = ()) -
     A root git cannot ANSWER for is the typed ``BoundTreeError`` (never the legacy walk): the classification refuses, it does not fall through."""
     if workspace_root_class(workspace_path) != GIT_BACKED:
         return _parked_root_filesystem_files(workspace_path), []
+    return declared_and_ambiguous_member_files(workspace_path, declared_paths)
+
+
+def declared_and_ambiguous_member_files(workspace_path: str, declared_paths: Iterable[str] = ()) -> Tuple[List[str], List[str]]:
+    """``(DECLARED, AMBIGUOUS)`` of a Git-backed root (the one positive-declaration split; ``_owner_candidates`` and W3-3 unit U1's Python runtime-target grounding
+    consume it, neither re-derives it): DECLARED = Git tracked or proven written by the CURRENT run (``declared_paths``, path-exact); AMBIGUOUS = a pre-existing untracked
+    non-ignored file - present, but its mere presence is no authority. Both are real files on disk NOW, root-relative (``os.path.normpath``). The caller has dispatched on
+    the root class: a root git cannot answer for is the typed ``BoundTreeError`` (``bound_tree_declaration``), never an empty answer."""
     tracked, untracked = bound_tree_declaration(workspace_path)
     written = {os.path.normpath(path) for path in declared_paths}
     declared: List[str] = []
