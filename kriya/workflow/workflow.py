@@ -41,6 +41,7 @@ from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 from kriya.policy.telemetry import build_decision_record
+from kriya.repository.bound_tree import BoundTreeError
 from kriya.static_analysis.service import (
     StaticAnalysisCandidate,
     StaticAnalysisService,
@@ -2137,6 +2138,25 @@ class WorkflowEngine:
         kriya/control/commit_state.py). No model call has happened."""
         return assessment.to_payload(run_id=arguments.get("trace_id_override"))
 
+    def _membership_authority_stop(self, error: BoundTreeError, state: GenerationState, run_trace: Any, goal: str, workspace_path: str, trace_id: str,
+                                   *, stage: str) -> Dict[str, Any]:
+        """W3-3 (D-001): a ``BoundTreeError`` (the repository layer's internal exception) never leaves a production entrypoint as a raw traceback. The run ends as the
+        existing typed ``AUTHORITY_EXECUTION_UNAVAILABLE`` outcome with the repository layer's detail; nothing was applied, nothing is retried or continued."""
+        from kriya.workflow.authority_bundle import (
+            AUTHORITY_EXECUTION_UNAVAILABLE,
+            membership_authority_unavailable_result,
+        )
+
+        result = membership_authority_unavailable_result(error)
+        logger.error(result["error"])
+        state.record_event(RunEvent(
+            kind="membership_authority.unavailable", attempt=state.attempt_number, source="workflow.run_generation_workflow",
+            authority=EventAuthority.AUTHORITATIVE, message=result["error"][:600],
+            details={"reason_code": AUTHORITY_EXECUTION_UNAVAILABLE, "membership_reason_code": error.reason_code, "stage": stage},
+        ))
+        persist_early_exit_trace(self._stage_deps(), state, run_trace, status="failure", failure_category=result["failure_category"])
+        return {**result, "goal": goal, "workspace_path": workspace_path, "run_id": trace_id}
+
     @coordinated_mutation
     @record_run_exceptions
     async def run_generation_workflow(
@@ -2980,7 +3000,10 @@ class WorkflowEngine:
             obligation_ledger=obligation_ledger, completed_subtask_ids=completed_subtask_ids,
             deterministic_failure_diagnostics=deterministic_failure_diagnostics,
         )
-        stage_stop = await run_design_stages(stage_ctx, self._work_unit_deps(), open_checkpoints=_open_stage_checkpoints)
+        try:
+            stage_stop = await run_design_stages(stage_ctx, self._work_unit_deps(), open_checkpoints=_open_stage_checkpoints)
+        except BoundTreeError as error:
+            return self._membership_authority_stop(error, state, run_trace, goal, workspace_path, trace_id, stage="design")
         if stage_stop is not None:
             return stage_stop
         # 4. Developer & Quality Gates (kriya/workflow/development_loop.py, full modularization E5): the prelude (prompt
@@ -2988,7 +3011,10 @@ class WorkflowEngine:
         # with the candidate's path to the terminal apply. Its collaborators arrive in StageDeps (_development_deps,
         # resolved through this module when stage 4 begins); a prelude stop or the approval gate's abort is this
         # method's result, unchanged.
-        development_stop = await run_development(stage_ctx, self._development_deps())
+        try:
+            development_stop = await run_development(stage_ctx, self._development_deps())
+        except BoundTreeError as error:
+            return self._membership_authority_stop(error, state, run_trace, goal, workspace_path, trace_id, stage="development")
         if development_stop is not None:
             return development_stop
         # What the trace checkpoint, the final review and the outcome read from the design stages and the loop.

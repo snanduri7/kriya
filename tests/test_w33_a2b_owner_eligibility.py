@@ -93,19 +93,18 @@ def test_the_split_keeps_kriya_state_out_and_refuses_an_unparseable_listing(tmp_
         repository_paths_by_declaration(str(repo))
 
 
-def test_the_bound_tree_declaration_keeps_the_exact_root_proof_and_the_typed_refusal(tmp_path):
+def test_the_bound_tree_declaration_keeps_the_authority_root_proof_and_the_typed_refusal(tmp_path):
     outer = _repo(tmp_path, {"top.txt": "t\n"}, name="outer")
     inner = outer / "inner"
     _write(inner, {"a.txt": "a\n"})
-    with pytest.raises(BoundTreeError) as nested:
-        bound_tree_declaration(str(inner))
-    assert nested.value.reason_code == BOUND_TREE_UNAVAILABLE and "enclosing repository" in str(nested.value)
     plain = tmp_path / "plain"
     plain.mkdir()
-    with pytest.raises(BoundTreeError):
+    with pytest.raises(BoundTreeError) as refused:
         bound_tree_declaration(str(plain))
+    assert refused.value.reason_code == BOUND_TREE_UNAVAILABLE
+    assert bound_tree_declaration(str(inner)) == (frozenset(), frozenset({"a.txt"}))                  # a .git-less child: the OUTER repository's view, projected to inner
     tracked, untracked = bound_tree_declaration(str(outer))
-    assert tracked == {"top.txt"} and untracked == {"inner/a.txt"}                        # the outer repo's own view of its own root, unchanged
+    assert tracked == {"top.txt"} and untracked == {"inner/a.txt"}
     assert bound_tree.bound_tree_paths(str(outer)) == tracked | untracked
 
 

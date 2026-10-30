@@ -27,8 +27,7 @@ from test_s19e_honest_refusal import (  # noqa: E402  # pylint: disable=wrong-im
 from kriya.repository import bound_tree
 from kriya.repository.bound_tree import (
     BOUND_TREE_UNAVAILABLE,
-    EXACT_GIT_ROOT,
-    NESTED_IN_GIT_WORK_TREE,
+    GIT_BACKED,
     NO_GIT_REPOSITORY,
     BoundTreeError,
     bound_tree_paths,
@@ -79,15 +78,17 @@ def _tracked(repo: Path) -> set:
 
 # ---- 1. the root classification: the one owner of the dispatch ------------------------------------------------------------------------------------
 
-def test_the_three_root_classes_are_told_apart(tmp_path):
+def test_the_root_classes_follow_the_d001_authority_root(tmp_path):
     exact = _repo(tmp_path, {"a.txt": "a\n"}, name="exact")
-    nested = exact / "inner"
-    nested.mkdir()
+    child = exact / "inner"                                   # a ``.git``-less child: part of ``exact`` (D-001)
+    child.mkdir()
+    nested_repo = _repo(exact, {"b.txt": "b\n"}, name="libx")  # an own ``.git``: its own authority
     plain = tmp_path / "plain"
     plain.mkdir()
-    assert os.path.realpath(_git(nested, "rev-parse", "--show-toplevel").strip()) == os.path.realpath(exact)    # validity: git DOES resolve the enclosing repository
-    assert workspace_root_class(str(exact)) == EXACT_GIT_ROOT
-    assert workspace_root_class(str(nested)) == NESTED_IN_GIT_WORK_TREE
+    assert os.path.realpath(_git(child, "rev-parse", "--show-toplevel").strip()) == os.path.realpath(exact)    # validity: git DOES resolve the enclosing repository
+    assert workspace_root_class(str(exact)) == GIT_BACKED
+    assert workspace_root_class(str(child)) == GIT_BACKED
+    assert workspace_root_class(str(nested_repo)) == GIT_BACKED
     assert workspace_root_class(str(plain)) == NO_GIT_REPOSITORY
 
 
@@ -265,11 +266,15 @@ def test_parked_no_git_root_keeps_the_legacy_walk_unchanged(tmp_path):
     assert resolve_planned_artifact_owners([PLANNED], GOAL, str(plain)).resolved == [f"src/util/{SERVICE}"]    # filesystem walk, unchanged
 
 
-def test_parked_nested_root_keeps_the_legacy_walk_unchanged_and_never_reads_the_enclosing_repository(tmp_path):
-    """PARKED - OWNER UNRESOLVED (NESTED-RAW-WORKSPACE-BOUND-TREE-AUTHORITY-OWNER-001): the enclosing repository's ignore rules / tracked set must not
-    become the nested folder's membership (that would be the A2-0 defect again); the legacy walk is kept unchanged until the owner decides."""
+def test_a_git_less_child_of_a_repository_uses_the_repositorys_membership_not_the_legacy_walk(tmp_path):
+    """Corrected premise (D-001): a ``.git``-less folder under a repository IS that repository's, so the resolver decides from the bound tree of the operating subtree
+    (the repository's ignore rules apply: an untracked file under a name the OUTER repository ignores is NOT a candidate, a tracked one under it is)."""
     outer = _repo(tmp_path, {".gitignore": "ignored_by_outer/\n", "top.txt": "t\n"}, name="outer")
     inner = outer / "inner"
-    _write(inner, {f"src/ignored_by_outer/{SERVICE}": "class X {}\n"})
-    assert workspace_root_class(str(inner)) == NESTED_IN_GIT_WORK_TREE
-    assert resolve_planned_artifact_owners([PLANNED], GOAL, str(inner)).resolved == [f"src/ignored_by_outer/{SERVICE}"]   # the outer .gitignore did NOT hide it
+    _write(inner, {f"src/ignored_by_outer/{SERVICE}": "class X {}\n", f"src/build/{SERVICE}": "class Y {}\n"})
+    _git(outer, "add", "-f", f"inner/src/build/{SERVICE}")
+    _git(outer, "commit", "-q", "-m", "track the build/ owner")
+    assert workspace_root_class(str(inner)) == GIT_BACKED
+    result = resolve_planned_artifact_owners([PLANNED], GOAL, str(inner))
+    assert result.resolved == [f"src/build/{SERVICE}"]                                          # the tracked owner under ``build/`` - which the legacy walk pruned - wins
+    assert result.undeclared_owner_indications == []                                            # the outer-ignored one is not even a member

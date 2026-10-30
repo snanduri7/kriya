@@ -113,6 +113,18 @@ AUTHORITY_TIMEOUT = "AUTHORITY_TIMEOUT"
 AUTHORITY_ASSETS_CHANGED = "AUTHORITY_ASSETS_CHANGED"
 AUTHORITY_CANDIDATE_CHANGED_DURING_RUN = "AUTHORITY_CANDIDATE_CHANGED_DURING_RUN"
 AUTHORITY_VERDICT_INCONSISTENT = "AUTHORITY_VERDICT_INCONSISTENT"
+
+
+def membership_authority_unavailable_result(error: BoundTreeError) -> Dict[str, Any]:
+    """W3-3 (D-001): the typed outcome of a run whose repository-membership authority could not decide which files belong to its workspace (a ``BoundTreeError`` at
+    a result-truth guard, the Architect's owner resolution or any bound-tree consumer): the existing ``AUTHORITY_EXECUTION_UNAVAILABLE`` environment outcome in the
+    existing authority-unavailable result shape (``contract_baseline.VerificationAuthorityUnavailable.result``) - no new reason code, no new failure category. The
+    detail and the repository layer's own reason code travel with it; the run stops, it is never retried, continued or read as "no such file"."""
+    message = (f"{AUTHORITY_EXECUTION_UNAVAILABLE}: the repository membership authority could not decide which files belong to this workspace, so no candidate "
+               f"could be judged - {error}")
+    return {"status": "failure", "quality_gates_passed": False, "files": [], "failure_category": "verification_authority_unavailable",
+            "reason_codes": [AUTHORITY_EXECUTION_UNAVAILABLE], "error": message, "environment_failure": message,
+            "membership_authority": {"reason_code": error.reason_code, "detail": error.detail, "paths": list(error.paths)}}
 AUTHORITY_PASSED = "AUTHORITY_PASSED"
 AUTHORITY_FAILED = "AUTHORITY_FAILED"
 AUTHORITY_INDETERMINATE = "AUTHORITY_INDETERMINATE"

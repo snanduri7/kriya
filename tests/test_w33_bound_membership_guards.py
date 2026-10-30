@@ -30,6 +30,7 @@ from test_s19e_honest_refusal import (  # noqa: E402  # pylint: disable=wrong-im
     _workspace,
 )
 
+from kriya.control.run_coordinator import begin_mutating_run
 from kriya.repository.bound_tree import BOUND_TREE_UNAVAILABLE, BoundTreeError
 from kriya.workflow.file_resolution import (
     find_brownfield_public_api_changes,
@@ -193,6 +194,14 @@ def _unlistable(monkeypatch):
     return calls
 
 
+def _assert_typed_authority_unavailable(result):
+    """W3-3 (D-001): the repository layer's BoundTreeError ends a production run as the EXISTING typed AUTHORITY_EXECUTION_UNAVAILABLE outcome, with its detail."""
+    assert result["status"] == "failure" and result["quality_gates_passed"] is False and result["files"] == []
+    assert result["reason_codes"] == ["AUTHORITY_EXECUTION_UNAVAILABLE"] and result["failure_category"] == "verification_authority_unavailable"
+    assert result["membership_authority"]["reason_code"] == BOUND_TREE_UNAVAILABLE and "injected" in result["membership_authority"]["detail"]
+    assert "AUTHORITY_EXECUTION_UNAVAILABLE" in result["error"] and result["error"] == result["environment_failure"]
+
+
 def test_a_membership_failure_in_the_attempt_ends_the_run_as_itself_without_a_retry(tmp_path, monkeypatch):
     from kriya.workflow import retry_strategy
 
@@ -207,10 +216,10 @@ def test_a_membership_failure_in_the_attempt_ends_the_run_as_itself_without_a_re
         return await real(state, ctx, exc)
     monkeypatch.setattr(retry_strategy, "handle_attempt_failure", counting)
     eng, _cfg, developer = _scripted_engine(lambda n: GOOD)
-    with pytest.raises(BoundTreeError) as raised:
-        _run(eng, workspace)
+    with begin_mutating_run(workspace):                                    # production always runs under the run lease
+        result = _run(eng, workspace)                                      # W3-3: a typed outcome, never a raw BoundTreeError out of the entrypoint
     assert calls, "the membership authority was never consulted (the exception came from somewhere else)"
-    assert raised.value.reason_code == BOUND_TREE_UNAVAILABLE
+    _assert_typed_authority_unavailable(result)
     assert developer == [PRIMARY], f"the membership failure was retried: {len(developer)} Developer calls"
     assert handled == [], "the membership failure was recorded as an attempt failure"
     assert _tree(workspace) == before                                      # nothing applied
@@ -230,8 +239,9 @@ def test_a_best_of_n_candidate_s_membership_failure_starts_no_independent_candid
         return await real(state, ctx, exc)
     monkeypatch.setattr(retry_strategy, "handle_attempt_failure", counting)
     eng, _cfg, developer = _scripted_engine(lambda n: GOOD, configure=_best_of(3))
-    with pytest.raises(BoundTreeError):
-        _run(eng, workspace, PLAIN_GOAL)
+    with begin_mutating_run(workspace):
+        result = _run(eng, workspace, PLAIN_GOAL)
+    _assert_typed_authority_unavailable(result)
     assert calls and developer == [PRIMARY] and handled == [], (calls, developer, handled)
     assert _tree(workspace) == before
 

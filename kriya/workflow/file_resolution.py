@@ -11,7 +11,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
-from kriya.repository.bound_tree import EXACT_GIT_ROOT, bound_tree_declaration, bound_tree_paths, workspace_root_class
+from kriya.repository.bound_tree import GIT_BACKED, bound_tree_declaration, bound_tree_paths, workspace_root_class
 from kriya.workflow.failure import Failure, FileLocation
 
 logger = logging.getLogger(__name__)
@@ -145,10 +145,10 @@ def _bound_workspace_files(workspace_path: str) -> List[str]:
     return sorted(bound_tree_paths(workspace_path))
 
 
-# W3-3 A2 PARKED ROOT CLASSES (NOT FIXED): a workspace that is not the exact top level of its own Git work tree has no canonical membership owner today -
-# NO_GIT_REPOSITORY (the pre-bootstrap design stage, A0.2: a typed refusal there would break the normal greenfield path) and NESTED_IN_GIT_WORK_TREE
-# (NESTED-RAW-WORKSPACE-BOUND-TREE-AUTHORITY-OWNER-001). They keep the legacy filesystem walk with its basename prune UNCHANGED until the owner decides; the
-# prune is the very defect A2 corrects for the exact-root class, so it must not be read as an endorsement for these two.
+# W3-3 A2 PARKED ROOT CLASS (NOT FIXED): NO_GIT_REPOSITORY - no repository at or above the workspace (the pre-bootstrap design stage, A0.2: a typed refusal there
+# would break the normal greenfield path) has no canonical membership owner today. It keeps the legacy filesystem walk with its basename prune UNCHANGED until the
+# owner decides; the prune is the very defect A2 corrects for a Git-backed workspace, so it must not be read as an endorsement. (A ``.git``-less folder UNDER a
+# repository is not this class: D-001 binds it to that repository, so it is Git-backed.)
 _PARKED_ROOT_PRUNED_DIRECTORY_NAMES = frozenset({".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"})
 
 
@@ -165,16 +165,17 @@ def _owner_candidates(workspace_path: str, declared_paths: Iterable[str] = ()) -
     """``(DECLARED, AMBIGUOUS)`` - the existing files a planned or discovered ARTIFACT OWNER may be considered from (W3-3 A2 and its responsibility-owner
     eligibility follow-on: ``resolve_planned_artifact_owners`` and ``discover_response_construction_owners``). Root-class dispatch on the canonical
     classification (``bound_tree.workspace_root_class``):
-    - ``EXACT_GIT_ROOT``: the canonical bound tree's membership, never a directory name, narrowed to what is a real file on disk NOW (a tracked path deleted
+    - ``GIT_BACKED`` (the operating root belongs to a Git repository by its D-001 authority root - the root itself, a subdirectory of it, or a ``.git``-less child): the
+      canonical bound tree's membership of the operating subtree, never a directory name, narrowed to what is a real file on disk NOW (a tracked path deleted
       from the work tree, or a submodule's directory entry, is a bound path but not an owner a redirect or a write scope may name). Membership answers "which
       files exist for consideration"; it does NOT answer "may this file claim an existing responsibility". That needs a positive DECLARATION:
       DECLARED = Git tracked (``bound_tree_declaration``, the same single listing) or proven written by the CURRENT run (``declared_paths``, path-exact);
       AMBIGUOUS = a pre-existing untracked non-ignored file (a project's own uncommitted source and a dependency tree nobody ignored look identical to every
       signal measured: reference edges, sibling files, locality - the G/H cases - so none of them is authority). The order is immaterial to every consumer.
-    - the two PARKED classes (NO_GIT_REPOSITORY / NESTED_IN_GIT_WORK_TREE): the legacy filesystem walk (see ``_PARKED_ROOT_PRUNED_DIRECTORY_NAMES``), every file
-      DECLARED as before - UNCHANGED until the owner decides those roots.
+    - the PARKED class (NO_GIT_REPOSITORY): the legacy filesystem walk (see ``_PARKED_ROOT_PRUNED_DIRECTORY_NAMES``), every file DECLARED as before - UNCHANGED
+      until the owner decides that root.
     A root git cannot ANSWER for is the typed ``BoundTreeError`` (never the legacy walk): the classification refuses, it does not fall through."""
-    if workspace_root_class(workspace_path) != EXACT_GIT_ROOT:
+    if workspace_root_class(workspace_path) != GIT_BACKED:
         return _parked_root_filesystem_files(workspace_path), []
     tracked, untracked = bound_tree_declaration(workspace_path)
     written = {os.path.normpath(path) for path in declared_paths}

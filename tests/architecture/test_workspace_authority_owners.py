@@ -19,6 +19,7 @@ OWNERS = {
     "kriya/control/run_coordinator.py": 1,    # D2 M3: the repository whose tracked state the run-entry refusal judges
     "kriya/control/run_ownership.py": 1,
     "kriya/production_doctor.py": 1,
+    "kriya/repository/bound_tree.py": 1,      # W3-3 R1: the bound tree proves the repository whose membership it lists is the authority root (identity_key(authority) == identity_key(Git top))
     "kriya/repository/commit.py": 1,
     "kriya/workflow/milestones.py": 1,
 }

@@ -5,6 +5,9 @@ and ``.kriya`` never). ``copy_bound_tree`` copies exactly that set, byte for byt
 empty directory), and proves every copy against the identity it was read with. A gate view (``kriya/tools/gate_view.py``) and every authority or baseline copy of the
 project go through this module, so no site can decide membership by a directory name: a legitimate ``build/Util.java`` or ``com/acme/target/T.java`` is in, a
 git-ignored ``target/classes`` is out. A tree Git cannot list is a typed ``BoundTreeError`` - there is no name-based approximation to fall back to.
+
+The membership root is the OPERATING root (the directory a run was invoked in), listed with the ignore rules and tracked set of the repository its D-001 authority
+root names: ``<repo>/sub`` gets exactly the files under ``sub`` (relative to it, no sibling), a nested repository with its own ``.git`` gets its own tree.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ import subprocess
 from typing import Dict, Optional, Set, Tuple
 
 from kriya.config.environment import KRIYA_DIRECTORY_NAME
+from kriya.context.workspace_identity import authority_root
 from kriya.platform.filesystem_semantics import identity_key
 from kriya.repository.git import RepositoryContentFilterRefused, is_plainly_not_a_repository, work_tree_root
 from kriya.repository.snapshot import _content_identity, repository_paths_by_declaration, visible_repository_paths
@@ -71,55 +75,60 @@ def copy_and_prove(origin: str, root: str, paths: Set[str], expected: Dict[str, 
         raise BoundTreeError(BOUND_TREE_IDENTITY_MISMATCH, f"the copy does not hold the bound content of {', '.join(mismatched[:10])}", tuple(mismatched))
 
 
-EXACT_GIT_ROOT = "EXACT_GIT_ROOT"                        # root IS the top level of its own Git work tree: the bound tree is its membership authority
-NESTED_IN_GIT_WORK_TREE = "NESTED_IN_GIT_WORK_TREE"      # root sits inside ANOTHER repository's work tree (no .git of its own): no membership owner (PARKED)
-NO_GIT_REPOSITORY = "NO_GIT_REPOSITORY"                  # git plainly answers "not a git repository" (a pre-bootstrap greenfield folder): no membership owner (PARKED)
+GIT_BACKED = "GIT_BACKED"                    # the D-001 authority root of the operating root is the top level of a Git work tree: Git's membership applies
+NO_GIT_REPOSITORY = "NO_GIT_REPOSITORY"      # no repository at all (a pre-bootstrap greenfield folder): no membership owner (PARKED)
 
 
-def _root_class_and_top(root: str) -> Tuple[str, Optional[str]]:
-    """``(workspace_root_class, Git top level or None)`` from ONE resolution - the body of ``workspace_root_class``."""
+def _root_class(root: str) -> str:
+    """W3-3 (D-001): which membership authority exists for the OPERATING root ``root`` (the directory the run was invoked in and operates on).
+
+    The repository the operating root belongs to is the one the D-001 workspace identity names - ``workspace_identity.authority_root``, the nearest ``.git`` entry
+    at or above it (the one repository search; none is added here). So ``<repo>``, ``<repo>/sub``, a new empty ``<repo>/sub/dir`` and a ``.git``-less raw child
+    all belong to ``<repo>`` (D-001 pins this); a nested repository with its own ``.git`` and a linked work tree are their own authority. The proof is that Git
+    agrees: ``identity_key(git_toplevel) == identity_key(authority_root)`` - NOT that the operating root equals Git's toplevel. Anything Git cannot ANSWER, or
+    answers differently from D-001 (an OSError, a timeout, an unparseable answer, a repository git refuses, a bare repository, Git resolving a repository the
+    D-001 search did not find or another one than it found, an unresolvable identity), is the typed ``BoundTreeError(BOUND_TREE_UNAVAILABLE)``: a refusal is never
+    an absence, so it can never fall through to the no-git behaviour."""
     try:
+        authority = authority_root(root)
         top = work_tree_root(root)
+        repository_found = os.path.lexists(os.path.join(authority, ".git"))
         if top is None:
+            if repository_found:
+                raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"Git cannot resolve the work tree of {root}, which belongs to the repository at {authority}")
             if is_plainly_not_a_repository(root):
-                return NO_GIT_REPOSITORY, None
+                return NO_GIT_REPOSITORY
             raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"{root} is not the root of a Git work tree: Git refuses it or it has no work tree")
     except (RepositoryContentFilterRefused, subprocess.SubprocessError, OSError) as error:
         raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"the Git work tree of {root} could not be resolved: {error}") from error
-    root_identity = identity_key(root)
-    if root_identity is None or identity_key(top) is None:
-        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"{root} is not the root of its Git work tree: the identity of {root} or of the Git top level {top} is unresolvable")
-    return (EXACT_GIT_ROOT if root_identity == identity_key(top) else NESTED_IN_GIT_WORK_TREE), top
+    if not repository_found:
+        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"Git resolves the work tree {top} for {root}, but the workspace authority search found no repository at or above it")
+    authority_identity, top_identity = identity_key(authority), identity_key(top)
+    if authority_identity is None or top_identity is None:
+        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"the identity of {root}'s authority root {authority} or of the Git top level {top} is unresolvable")
+    if authority_identity != top_identity:
+        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"the workspace authority root of {root} is {authority}, but Git resolves the work tree {top}")
+    return GIT_BACKED
 
 
 def workspace_root_class(root: str) -> str:
-    """W3-3 A2: which membership authority exists for ``root`` - the ONE classification every root-class dispatch consumes (``work_tree_root`` and
-    ``identity_key``; no second root discovery). ``EXACT_GIT_ROOT``: the bound tree is the authority. ``NESTED_IN_GIT_WORK_TREE`` and ``NO_GIT_REPOSITORY``:
-    no canonical membership owner exists today (NESTED-RAW-WORKSPACE-BOUND-TREE-AUTHORITY-OWNER-001; the pre-bootstrap design stage, A0.2), a caller that keeps
-    a legacy behaviour for them says so by name. Anything git cannot ANSWER - an OSError, a timeout, an unparseable answer, a repository git refuses to use, a
-    bare repository, an unresolvable identity - is the typed ``BoundTreeError(BOUND_TREE_UNAVAILABLE)``: a refusal is never an absence, so it can never fall
-    through to the no-git behaviour."""
-    return _root_class_and_top(root)[0]
+    """``GIT_BACKED`` (the bound tree is the authority) or ``NO_GIT_REPOSITORY`` (no canonical membership owner today: the pre-bootstrap design stage, A0.2); anything
+    else is the typed ``BoundTreeError`` (see ``_root_class``)."""
+    return _root_class(root)
 
 
-def _require_exact_work_tree_root(root: str) -> None:
-    """W3-3 A2-0: Git's membership is the bound tree of ``root`` only when ``root`` IS the top level of its work tree. A folder merely nested in another
-    repository is not: ``git ls-files`` run from it answers with the ENCLOSING repository's ignore rules and tracked set (MEASURED at 2880cba: an outer
-    ``.gitignore`` hid a legitimate ``inner/build/Util.java``), so that policy would silently become the folder's authority. Compared by filesystem identity
-    (``identity_key``: every alias of one directory is one key), the same way the project recognises one directory under several spellings."""
-    root_class, top = _root_class_and_top(root)
-    if root_class == NO_GIT_REPOSITORY:
+def _require_git_backed(root: str) -> None:
+    """The membership of ``root`` is a bound tree only when its D-001 authority root is the top level of a Git work tree that Git agrees with (``_root_class``)."""
+    if _root_class(root) == NO_GIT_REPOSITORY:
         raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"{root} is not the root of a Git work tree")
-    if root_class == NESTED_IN_GIT_WORK_TREE:
-        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"{root} is not the root of its Git work tree: Git resolves the enclosing repository {top}")
 
 
 def bound_tree_paths(root: str) -> frozenset:
-    """The membership of the canonical bound tree of ``root``: every path Git tracks or leaves visible (``visible_repository_paths``), never a directory
-    name. ``root`` must be the exact top level of its Git work tree (a folder nested in another repository has no bound tree of its own). A root Git
-    cannot list (not a work tree, an enclosing repository's folder, a failing listing) is the typed ``BoundTreeError(BOUND_TREE_UNAVAILABLE)``: there is no
+    """The membership of the canonical bound tree of the operating root ``root``: every path Git tracks or leaves visible (``visible_repository_paths``) under it,
+    relative to it, never a directory name. ``root`` must belong to a Git-backed D-001 authority root that Git agrees with (``_root_class``); a root Git cannot list
+    (no repository, a repository Git refuses or disagrees with D-001 about, a failing listing) is the typed ``BoundTreeError(BOUND_TREE_UNAVAILABLE)``: there is no
     name-based approximation to fall back to, and a caller must never read that error as "no such file"."""
-    _require_exact_work_tree_root(root)
+    _require_git_backed(root)
     try:
         return visible_repository_paths(root)
     except RuntimeError as error:
@@ -128,9 +137,9 @@ def bound_tree_paths(root: str) -> frozenset:
 
 def bound_tree_declaration(root: str) -> Tuple[frozenset, frozenset]:
     """W3-3 A2 follow-on: ``(tracked, untracked)`` of the canonical bound tree of ``root`` - the same membership as ``bound_tree_paths`` (their union), the same
-    exact-root proof, the same typed ``BoundTreeError``, from ONE Git listing (``snapshot.repository_paths_by_declaration``). Membership answers "which files exist
+    D-001 authority-root proof, the same typed ``BoundTreeError``, from ONE Git listing (``snapshot.repository_paths_by_declaration``). Membership answers "which files exist
     for consideration"; this split is only Git's own declaration (tracked vs merely present) for a caller that must tell positive declaration from presence."""
-    _require_exact_work_tree_root(root)
+    _require_git_backed(root)
     try:
         return repository_paths_by_declaration(root)
     except RuntimeError as error:

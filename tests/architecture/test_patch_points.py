@@ -213,7 +213,8 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E5 characterization: +1 site (tests/test_development_loop.py: stage 4 logs through the patched facade logger).
     # E5: 62 -> 36 lookups: the 26 logger loads of the moved Developer loop bind StageDeps.logger
     # (_development_deps -> _stage_deps, no new load).
-    (W, 'logger'): P(6, W, ((W, 36),), ()),
+    # W3-3 R1: 36 -> 37, the one logger call of _membership_authority_stop (the typed membership-authority stop).
+    (W, 'logger'): P(6, W, ((W, 37),), ()),
     (W, 'resolve_future_owner_verification_deferral'): P(1, 'kriya.workflow.attribution', ((W, 1),), ()),
     # E3 characterization: +1 site (the legacy_stage_context_success golden scripts the retrieval through it).
     (W, 'retrieve_graph_context'): P(2, 'kriya.workflow.graph_retrieval', ((W, 1),), ()),
