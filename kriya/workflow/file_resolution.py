@@ -11,7 +11,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
-from kriya.repository.bound_tree import bound_tree_paths
+from kriya.repository.bound_tree import EXACT_GIT_ROOT, bound_tree_paths, workspace_root_class
 from kriya.workflow.failure import Failure, FileLocation
 
 logger = logging.getLogger(__name__)
@@ -143,6 +143,39 @@ def _bound_workspace_files(workspace_path: str) -> List[str]:
     A root Git cannot list is the typed ``BoundTreeError(BOUND_TREE_UNAVAILABLE)`` - never an empty list: "no membership" is not "no such
     file", and a guard that read it that way would stand down (fail open)."""
     return sorted(bound_tree_paths(workspace_path))
+
+
+# W3-3 A2 PARKED ROOT CLASSES (NOT FIXED): a workspace that is not the exact top level of its own Git work tree has no canonical membership owner today -
+# NO_GIT_REPOSITORY (the pre-bootstrap design stage, A0.2: a typed refusal there would break the normal greenfield path) and NESTED_IN_GIT_WORK_TREE
+# (NESTED-RAW-WORKSPACE-BOUND-TREE-AUTHORITY-OWNER-001). They keep the legacy filesystem walk with its basename prune UNCHANGED until the owner decides; the
+# prune is the very defect A2 corrects for the exact-root class, so it must not be read as an endorsement for these two.
+_PARKED_ROOT_PRUNED_DIRECTORY_NAMES = frozenset({".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"})
+
+
+def _parked_root_filesystem_files(workspace_path: str) -> List[str]:
+    files: List[str] = []
+    for root, dirs, filenames in os.walk(workspace_path):
+        dirs[:] = [name for name in dirs if name not in _PARKED_ROOT_PRUNED_DIRECTORY_NAMES]
+        for filename in filenames:
+            files.append(os.path.relpath(os.path.join(root, filename), workspace_path))
+    return files
+
+
+def _owner_candidate_files(workspace_path: str) -> List[str]:
+    """The existing files a planned or discovered ARTIFACT OWNER may be chosen from (W3-3 A2: ``resolve_planned_artifact_owners`` and
+    ``discover_response_construction_owners``). Root-class dispatch on the canonical classification (``bound_tree.workspace_root_class``):
+    - ``EXACT_GIT_ROOT``: the canonical bound tree's membership, never a directory name, narrowed to what is a real file on disk NOW - a tracked path deleted
+      from the work tree, or a submodule's directory entry, is a bound path but not an owner a redirect or a write scope may name. Sorted.
+    - the two PARKED classes: the legacy filesystem walk (see ``_PARKED_ROOT_PRUNED_DIRECTORY_NAMES``).
+    A root git cannot ANSWER for is the typed ``BoundTreeError`` (never the legacy walk): the classification refuses, it does not fall through."""
+    if workspace_root_class(workspace_path) != EXACT_GIT_ROOT:
+        return _parked_root_filesystem_files(workspace_path)
+    present = []
+    for path in (os.path.normpath(member) for member in bound_tree_paths(workspace_path)):
+        full = os.path.join(workspace_path, path)
+        if os.path.lexists(full) and not os.path.isdir(full):
+            present.append(path)
+    return present
 
 
 def _semantic_tokens(text: str) -> set[str]:
@@ -309,12 +342,7 @@ def resolve_planned_artifact_owners(
     scope = None if authorized_paths is None else {os.path.normpath(p) for p in authorized_paths}
     explicit_new = {os.path.normpath(p) for p in new_artifact_paths}
 
-    ignored = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
-    existing: List[str] = []
-    for root, dirs, filenames in os.walk(workspace_path):
-        dirs[:] = [name for name in dirs if name not in ignored]
-        for filename in filenames:
-            existing.append(os.path.relpath(os.path.join(root, filename), workspace_path))
+    existing = _owner_candidate_files(workspace_path)
 
     goal_tokens = _semantic_tokens(goal or "")
     resolved: List[str] = []
@@ -590,24 +618,20 @@ def discover_response_construction_owners(
     vocabulary = _semantic_tokens(goal or "")
     for path in planned_files:
         vocabulary.update(_artifact_name_tokens(path))
-    ignored = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
     owners = []
-    for root, dirs, filenames in os.walk(workspace_path):
-        dirs[:] = [name for name in dirs if name not in ignored]
-        for filename in filenames:
-            path = os.path.relpath(os.path.join(root, filename), workspace_path)
-            if _is_test_or_doc_file(path) or not _RESPONSE_OWNER_PATH_RE.search(path):
-                continue
-            try:
-                with open(os.path.join(workspace_path, path), encoding="utf-8", errors="replace") as handle:
-                    content = handle.read()
-            except OSError:
-                continue
-            if not _RESPONSE_CONSTRUCTION_RE.search(content):
-                continue
-            candidate_tokens = _artifact_name_tokens(path) | _semantic_tokens(content[:4000])
-            if vocabulary & candidate_tokens:
-                owners.append(path)
+    for path in _owner_candidate_files(workspace_path):
+        if _is_test_or_doc_file(path) or not _RESPONSE_OWNER_PATH_RE.search(path):
+            continue
+        try:
+            with open(os.path.join(workspace_path, path), encoding="utf-8", errors="replace") as handle:
+                content = handle.read()
+        except OSError:
+            continue
+        if not _RESPONSE_CONSTRUCTION_RE.search(content):
+            continue
+        candidate_tokens = _artifact_name_tokens(path) | _semantic_tokens(content[:4000])
+        if vocabulary & candidate_tokens:
+            owners.append(path)
     return sorted(set(owners))
 
 

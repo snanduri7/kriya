@@ -274,9 +274,11 @@ def test_the_fixed_guards_do_not_walk_the_filesystem_and_the_remaining_walkers_a
     walkers = _functions_with_a_walk((REPO / "kriya/workflow/file_resolution.py").read_text(encoding="utf-8"))
     fixed = {"find_brownfield_test_redirections", "find_brownfield_public_api_changes", "find_unrequested_architectural_surfaces"}
     assert not walkers & fixed, walkers & fixed
-    # The remaining os.walk users are NOT unit A1: the two pre-bootstrap design-stage helpers (PARKED - OWNER UNRESOLVED for the non-git root, W3-3 A2)
-    # and the Maven main-class resolver (a build-layout read). A new walker in this module must be classified here.
-    assert walkers == {"resolve_planned_artifact_owners", "discover_response_construction_owners", "_resolve_maven_main_class"}, walkers
+    # W3-3 A2: the two owner-resolution functions no longer walk; the ONE remaining membership walker is the PARKED root classes' legacy walk
+    # (NO_GIT_REPOSITORY / NESTED_IN_GIT_WORK_TREE - OWNER UNRESOLVED), plus the Maven main-class resolver (a candidate-worktree build-layout read, unit C2).
+    # A new walker in this module must be classified here.
+    assert not walkers & {"resolve_planned_artifact_owners", "discover_response_construction_owners"}, walkers
+    assert walkers == {"_parked_root_filesystem_files", "_resolve_maven_main_class"}, walkers
 
 
 # ---- 10. row 20 stays an intentional generated-output filter (the overcorrection control for the whole slice) --------------------------------------

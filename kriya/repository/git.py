@@ -341,6 +341,14 @@ def work_tree_root(path: str) -> Optional[str]:
     return None if layout is None else layout[0]
 
 
+def is_plainly_not_a_repository(path: str) -> bool:
+    """W3-3 A2: True only when git answers that ``path`` is not in a git repository AT ALL - the ``_layout`` second element. ``work_tree_root`` is None for that
+    answer and ALSO for a git dir, a bare repository and a repository git refuses to use (dubious ownership); only the plain "not a git repository" answer means
+    a folder that has no repository, so a caller that must tell the two apart (a refusal is not an absence) asks this. Raises as ``work_tree_root`` does."""
+    _layout_answer, not_a_repository = _layout(_run, path)
+    return not_a_repository
+
+
 def _same_repository(run: _Runner, source: str, common: str) -> bool:
     """True when the folder holding ``source`` belongs to the repository whose common dir is ``common`` - any of its
     work trees, the main one or a linked one (S19 P1b, owner decision C - MEASURED: inspected from a linked worktree

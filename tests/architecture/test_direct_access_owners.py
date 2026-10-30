@@ -199,7 +199,7 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         "kriya.workflow.contract_lifecycle": (1, "P2", _P2),
         "kriya.workflow.example_oracle_java": (3, "P2", _P2),
         "kriya.workflow.failure_grounding": (1, "P2", _P2),
-        "kriya.workflow.file_resolution": (6, "P2", _P2),   # W3-3 A1: 9 -> 6 (the three basename sets that carried ".kriya" are gone)
+        "kriya.workflow.file_resolution": (5, "P2", _P2),   # W3-3 A1: 9 -> 6 (the three basename sets that carried ".kriya" are gone); A2: 6 -> 5 (the two owner walkers' sets are one parked constant)
         "kriya.workflow.goal_facts": (1, "P2", _P2),
         "kriya.workflow.migration": (1, "P2", _P2),
         "kriya.workflow.milestones": (1, "P2", _P2),

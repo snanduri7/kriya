@@ -17,7 +17,7 @@ from typing import Dict, Optional, Set, Tuple
 
 from kriya.config.environment import KRIYA_DIRECTORY_NAME
 from kriya.platform.filesystem_semantics import identity_key
-from kriya.repository.git import RepositoryContentFilterRefused, work_tree_root
+from kriya.repository.git import RepositoryContentFilterRefused, is_plainly_not_a_repository, work_tree_root
 from kriya.repository.snapshot import _content_identity, visible_repository_paths
 
 BOUND_TREE_UNAVAILABLE = "BOUND_TREE_UNAVAILABLE"
@@ -71,19 +71,46 @@ def copy_and_prove(origin: str, root: str, paths: Set[str], expected: Dict[str, 
         raise BoundTreeError(BOUND_TREE_IDENTITY_MISMATCH, f"the copy does not hold the bound content of {', '.join(mismatched[:10])}", tuple(mismatched))
 
 
+EXACT_GIT_ROOT = "EXACT_GIT_ROOT"                        # root IS the top level of its own Git work tree: the bound tree is its membership authority
+NESTED_IN_GIT_WORK_TREE = "NESTED_IN_GIT_WORK_TREE"      # root sits inside ANOTHER repository's work tree (no .git of its own): no membership owner (PARKED)
+NO_GIT_REPOSITORY = "NO_GIT_REPOSITORY"                  # git plainly answers "not a git repository" (a pre-bootstrap greenfield folder): no membership owner (PARKED)
+
+
+def _root_class_and_top(root: str) -> Tuple[str, Optional[str]]:
+    """``(workspace_root_class, Git top level or None)`` from ONE resolution - the body of ``workspace_root_class``."""
+    try:
+        top = work_tree_root(root)
+        if top is None:
+            if is_plainly_not_a_repository(root):
+                return NO_GIT_REPOSITORY, None
+            raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"{root} is not the root of a Git work tree: Git refuses it or it has no work tree")
+    except (RepositoryContentFilterRefused, subprocess.SubprocessError, OSError) as error:
+        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"the Git work tree of {root} could not be resolved: {error}") from error
+    root_identity = identity_key(root)
+    if root_identity is None or identity_key(top) is None:
+        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"{root} is not the root of its Git work tree: the identity of {root} or of the Git top level {top} is unresolvable")
+    return (EXACT_GIT_ROOT if root_identity == identity_key(top) else NESTED_IN_GIT_WORK_TREE), top
+
+
+def workspace_root_class(root: str) -> str:
+    """W3-3 A2: which membership authority exists for ``root`` - the ONE classification every root-class dispatch consumes (``work_tree_root`` and
+    ``identity_key``; no second root discovery). ``EXACT_GIT_ROOT``: the bound tree is the authority. ``NESTED_IN_GIT_WORK_TREE`` and ``NO_GIT_REPOSITORY``:
+    no canonical membership owner exists today (NESTED-RAW-WORKSPACE-BOUND-TREE-AUTHORITY-OWNER-001; the pre-bootstrap design stage, A0.2), a caller that keeps
+    a legacy behaviour for them says so by name. Anything git cannot ANSWER - an OSError, a timeout, an unparseable answer, a repository git refuses to use, a
+    bare repository, an unresolvable identity - is the typed ``BoundTreeError(BOUND_TREE_UNAVAILABLE)``: a refusal is never an absence, so it can never fall
+    through to the no-git behaviour."""
+    return _root_class_and_top(root)[0]
+
+
 def _require_exact_work_tree_root(root: str) -> None:
     """W3-3 A2-0: Git's membership is the bound tree of ``root`` only when ``root`` IS the top level of its work tree. A folder merely nested in another
     repository is not: ``git ls-files`` run from it answers with the ENCLOSING repository's ignore rules and tracked set (MEASURED at 2880cba: an outer
     ``.gitignore`` hid a legitimate ``inner/build/Util.java``), so that policy would silently become the folder's authority. Compared by filesystem identity
     (``identity_key``: every alias of one directory is one key), the same way the project recognises one directory under several spellings."""
-    try:
-        top = work_tree_root(root)
-    except (RepositoryContentFilterRefused, subprocess.SubprocessError, OSError) as error:
-        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"the Git work tree of {root} could not be resolved: {error}") from error
-    if top is None:
+    root_class, top = _root_class_and_top(root)
+    if root_class == NO_GIT_REPOSITORY:
         raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"{root} is not the root of a Git work tree")
-    root_identity = identity_key(root)
-    if root_identity is None or root_identity != identity_key(top):
+    if root_class == NESTED_IN_GIT_WORK_TREE:
         raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"{root} is not the root of its Git work tree: Git resolves the enclosing repository {top}")
 
 
