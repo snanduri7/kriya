@@ -87,10 +87,11 @@ def _assert_active_repository_refusal(refusal, driver: str = "kx") -> None:
 
 
 def _kriya_git(cwd: Path, *args: str) -> None:
-    """The operation itself, spawned exactly as Kriya spawns git (kriya.platform.git_argv)."""
-    from kriya.platform import git_argv
+    """The operation itself, spawned exactly as Kriya spawns git (kriya.platform.git_argv + git_environment, W3-2)."""
+    from kriya.platform import git_argv, git_environment
 
-    subprocess.run(git_argv(["git", *args]), cwd=cwd, capture_output=True, stdin=subprocess.DEVNULL, check=False)
+    subprocess.run(git_argv(["git", *args]), cwd=cwd, capture_output=True, stdin=subprocess.DEVNULL, check=False,
+                   env=git_environment(dict(os.environ)))
 
 
 # --------------------------------------------------------------------------------- the new contract over every site
@@ -230,14 +231,17 @@ def test_a_check_attr_answer_git_did_not_give_cleanly_refuses_a_repository_defin
     assert refusal is not None and refusal.reason_code == UNINSPECTABLE
 
 
-def test_git_s_own_attribute_resolution_failure_refuses_a_repository_definition(owner, monkeypatch):
-    """Unfaked (git 2.54.0: check-attr exits 128 for a GIT_ATTR_SOURCE naming no tree)."""
-    from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
+def test_a_host_attribute_source_naming_no_tree_does_not_refuse_a_dormant_repository_definition(owner, monkeypatch):
+    """SUPERSEDES test_git_s_own_attribute_resolution_failure_refuses_a_repository_definition (W3-2): its unfaked trigger, a host
+    GIT_ATTR_SOURCE naming no tree (git 2.54.0: check-attr exits 128), is stripped from every Kriya git environment. The
+    refusal branch stays pinned by the faked answers above and by the unresolvable materialized revision below."""
+    from kriya.repository.git import refuse_repository_content_filters
 
     _setup(owner, "config", "filter.kx.clean", "/bin/cat")
-    with pytest.raises(RepositoryContentFilterRefused) as raised:
-        refuse_repository_content_filters(str(owner), env={**os.environ, "GIT_ATTR_SOURCE": "no-such-revision"})
-    assert raised.value.reason_code == UNINSPECTABLE and "git check-attr failed" in str(raised.value)
+    hostile = {**os.environ, "GIT_ATTR_SOURCE": "no-such-revision"}
+    control = subprocess.run(["git", "check-attr", "filter", "a.py"], cwd=owner, env=hostile, capture_output=True)
+    assert control.returncode == 128, "validity: an unstripped bad GIT_ATTR_SOURCE must make check-attr fail"
+    refuse_repository_content_filters(str(owner), env=hostile)        # dormant definition, no binding in Kriya's view: admitted
 
 
 def test_a_materialized_revision_git_cannot_resolve_refuses_a_repository_definition(owner):
@@ -302,24 +306,39 @@ def _refused_or_runs_nothing(repo: Path, revisions: Tuple[str, ...], marker: Pat
 
 
 @pytest.mark.parametrize("spelling", ["relative", "absolute"])
-def test_core_attributes_file_the_checkout_itself_creates_runs_nothing_then_refuses(tmp_path, spelling):
-    """D1: repository core.attributesFile names a file only the TARGET carries: dormant at inspection, and the checkout
-    ran nothing either (MEASURED, characterization D1); once the file exists the NEXT operation's inspection sees the
-    binding and refuses."""
+def test_core_attributes_file_the_checkout_itself_creates_never_binds_a_filter_for_kriya(tmp_path, spelling):
+    """SUPERSEDES test_core_attributes_file_the_checkout_itself_creates_runs_nothing_then_refuses (W3-2). D1: repository
+    core.attributesFile names a file only the TARGET carries: dormant at inspection, and the checkout ran nothing (MEASURED,
+    characterization D1). It used to be refused by the NEXT operation's inspection once the file existed. Kriya's git now pins
+    core.attributesFile to the null device (a command-line value outranks the repository's), so the file can never bind a
+    driver for Kriya: the next inspection admits it AND Kriya's own git still runs nothing. The control proves the vector is real
+    for a git without the seam."""
     repo, target, marker = _diverging(tmp_path, {"tools/attrs": "*.txt filter=kx\n"})
     _define(repo, marker)
     _setup(repo, "config", "core.attributesFile", "tools/attrs" if spelling == "relative" else str(repo / "tools/attrs"))
     _refused_or_runs_nothing(repo, (target,), marker, ("checkout", "-f", "--no-recurse-submodules", target), "allowed")
-    _assert_active_repository_refusal(_guard(repo))
+    (repo / "a.txt").write_text("changed after the checkout\n")
+    assert _guard(repo) is None, "the repository's attributes file is unreachable for Kriya: nothing is active"
+    # `diff`, not `status`: MEASURED, status reports the size change without hashing the file (no clean filter runs), while diff does
+    _kriya_git(repo, "diff", "--stat")
+    assert not marker.exists(), "Kriya's git ran a filter bound through the repository's core.attributesFile"
+    subprocess.run(["git", "diff", "--stat"], cwd=repo, capture_output=True, stdin=subprocess.DEVNULL, check=False)
+    assert marker.exists(), "validity: plain git must run the filter the repository's core.attributesFile binds"
 
 
-def test_attr_tree_head_is_over_approximated_and_refused(tmp_path):
-    """D2: attr.tree=HEAD with the binding only in the target: git's default reading follows attr.tree, the
-    materialized target is asked too - refused (the operation itself ran nothing: an over-approximation)."""
+def test_attr_tree_head_is_refused_as_attr_tree_whatever_it_would_activate(tmp_path):
+    """SUPERSEDES test_attr_tree_head_is_over_approximated_and_refused (W3-2). D2: attr.tree=HEAD with the binding only in
+    the target used to be an over-approximated ACTIVE-driver refusal. An effective attr.tree is now refused outright with its own
+    typed reason - before any activation analysis, so the answer no longer depends on what the tree happens to bind."""
+    from kriya.repository.git import GIT_ATTR_TREE_CONFIGURED
+
     repo, target, marker = _diverging(tmp_path, {".gitattributes": "*.txt filter=kx\n"})
     _define(repo, marker)
     _setup(repo, "config", "attr.tree", "HEAD")
-    _refused_or_runs_nothing(repo, (target,), marker, (), "refused")
+    refusal = _guard(repo, (target,))
+    assert refusal is not None and refusal.reason_code == GIT_ATTR_TREE_CONFIGURED, str(refusal)
+    assert refusal.scope == "local" and refusal.key == "attr.tree"
+    assert not marker.exists()
 
 
 @pytest.mark.parametrize("defined, bound, expected", [

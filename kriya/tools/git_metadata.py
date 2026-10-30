@@ -46,8 +46,8 @@ import tempfile
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from kriya.config.environment import toolchain
-from kriya.platform import git_argv
+from kriya.config.environment import child_environment, toolchain
+from kriya.platform import git_argv, git_environment
 from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
 from kriya.tools.containment import ContainmentSetupError, GitMetadataMount
 
@@ -105,7 +105,7 @@ class GitMetadataExport:
 
 def _git(cwd: str, *args: str, input_bytes: Optional[bytes] = None) -> bytes:
     completed = subprocess.run(git_argv(["git", *args]), cwd=cwd, input=input_bytes, capture_output=True, check=True,
-                               timeout=_GIT_TIMEOUT_SECONDS)
+                               timeout=_GIT_TIMEOUT_SECONDS, env=git_environment(child_environment()))
     return completed.stdout
 
 
@@ -175,7 +175,7 @@ def _probe_env() -> Dict[str, str]:
 
 
 def _probe(git: str, cwd: str, *args: str) -> "subprocess.CompletedProcess[bytes]":
-    return subprocess.run(git_argv([git, *_PROBE_OPTIONS, *args]), cwd=cwd, env=_probe_env(), capture_output=True, check=False, timeout=_PROBE_TIMEOUT_SECONDS)
+    return subprocess.run(git_argv([git, *_PROBE_OPTIONS, *args]), cwd=cwd, env=git_environment(_probe_env()), capture_output=True, check=False, timeout=_PROBE_TIMEOUT_SECONDS)
 
 
 def _first_working_git(path: str) -> Tuple[Optional[str], Optional["subprocess.CompletedProcess[bytes]"], str]:

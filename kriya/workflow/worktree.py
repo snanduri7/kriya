@@ -9,7 +9,8 @@ import stat
 import subprocess
 from typing import Iterable, Iterator, List, Optional, Tuple
 
-from kriya.platform import git_argv
+from kriya.config.environment import child_environment
+from kriya.platform import git_argv, git_environment
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
@@ -113,7 +114,7 @@ def managed_worktree_path(repo_path: str, *, scoped: bool = False) -> str:
 
 
 def _registered_worktrees(repo_path: str) -> List[str]:
-    res = subprocess.run(git_argv(["git", "worktree", "list", "--porcelain"]), cwd=repo_path, capture_output=True, text=True)
+    res = subprocess.run(git_argv(["git", "worktree", "list", "--porcelain"]), cwd=repo_path, capture_output=True, text=True, env=git_environment(child_environment()))
     return [os.path.realpath(line[len("worktree "):]) for line in res.stdout.splitlines() if line.startswith("worktree ")]
 
 
@@ -136,7 +137,7 @@ def _remove_legacy_nested_worktrees(repo_path: str, registered: List[str]) -> No
     for path in sorted(nested, key=len, reverse=True):
         logger.warning("Removing a nested Kriya worktree left by an earlier layout: %s", path)
         subprocess.run(git_argv(["git", "worktree", "remove", "--force", "--force", path]),
-                       cwd=repo_path, check=True, capture_output=True)
+                       cwd=repo_path, check=True, capture_output=True, env=git_environment(child_environment()))
 
 
 # MA4.8 (control-plane implementation plan) - audit-only, module-level since
@@ -325,10 +326,10 @@ def repository_content_paths(workspace_path: str) -> List[str]:
     real run never gets here: create_git_worktree bootstraps Git first); any
     other failure to list it raises (fail closed)."""
     inside = subprocess.run(git_argv(["git", "rev-parse", "--is-inside-work-tree"]), cwd=workspace_path,
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, env=git_environment(child_environment()))
     if inside.returncode != 0 or inside.stdout.strip() != "true":
         return []
-    result = subprocess.run(git_argv(["git", "ls-files", "-z"]), cwd=workspace_path, capture_output=True)
+    result = subprocess.run(git_argv(["git", "ls-files", "-z"]), cwd=workspace_path, capture_output=True, env=git_environment(child_environment()))
     if result.returncode != 0:
         raise RuntimeError(f"git ls-files failed: {os.fsdecode(result.stderr).strip() or result.returncode}")
     return [path for path in (os.fsdecode(item) for item in result.stdout.split(b"\0") if item)
@@ -356,7 +357,7 @@ def git_status_entries(
     command = ["git", "status", "--porcelain=v1", "-z", f"--untracked-files={untracked}"]
     if pathspec:
         command += ["--", *pathspec]
-    result = subprocess.run(git_argv(command), cwd=repo_path, capture_output=True)
+    result = subprocess.run(git_argv(command), cwd=repo_path, capture_output=True, env=git_environment(child_environment()))
     if result.returncode != 0:
         raise RuntimeError(os.fsdecode(result.stderr).strip() or f"exit {result.returncode}")
     records = result.stdout.split(b"\0")
@@ -410,7 +411,7 @@ def _resolve_repo_head(repo_path: str) -> Optional[str]:
     behavior rather than crash."""
     try:
         res = subprocess.run(
-            git_argv(["git", "rev-parse", "HEAD"]), cwd=repo_path, capture_output=True, text=True,
+            git_argv(["git", "rev-parse", "HEAD"]), cwd=repo_path, capture_output=True, text=True, env=git_environment(child_environment()),
         )
         if res.returncode == 0:
             return res.stdout.strip()
@@ -434,7 +435,7 @@ def _bootstrap_greenfield_repository(workspace_path: str) -> None:
     init_command = ["git", *_HOOKS_DISABLED, "init"]
     _audit_git_write(init_command, workspace_path)
     initialized = subprocess.run(
-        git_argv(init_command), cwd=workspace_path, capture_output=True, text=True,
+        git_argv(init_command), cwd=workspace_path, capture_output=True, text=True, env=git_environment(child_environment()),
     )
     if initialized.returncode != 0:
         raise RuntimeError(
@@ -462,7 +463,7 @@ def _bootstrap_greenfield_repository(workspace_path: str) -> None:
     ]
     _audit_git_write(commit_command, workspace_path)
     committed = subprocess.run(
-        git_argv(commit_command), cwd=workspace_path, capture_output=True, text=True,
+        git_argv(commit_command), cwd=workspace_path, capture_output=True, text=True, env=git_environment(child_environment()),
     )
     if committed.returncode != 0:
         # S19e (OI-163): `git init` does not check ownership but the commit does - a folder owned by another user is
@@ -478,7 +479,7 @@ def _resolved_git_toplevel(workspace_path: str) -> Optional[str]:
     try:
         result = subprocess.run(
             git_argv(["git", "rev-parse", "--show-toplevel"]),
-            cwd=workspace_path, capture_output=True, text=True,
+            cwd=workspace_path, capture_output=True, text=True, env=git_environment(child_environment()),
         )
         if result.returncode == 0 and result.stdout.strip():
             return os.path.realpath(result.stdout.strip())
@@ -547,7 +548,7 @@ def git_read_lines(cwd: str, *args: str) -> List[str]:
     """A read-only git query (``rev-parse``, ``ls-tree``, ``diff --name-only``,
     ``ls-files``) in ``cwd``: its non-empty output lines. Raises on failure
     (``kriya.repository.git.GIT_READ_FAILURES``), so a caller that needs the answer can fail closed."""
-    completed = subprocess.run(git_argv(["git", *args]), cwd=cwd, capture_output=True, text=True, check=True, timeout=60)
+    completed = subprocess.run(git_argv(["git", *args]), cwd=cwd, capture_output=True, text=True, check=True, timeout=60, env=git_environment(child_environment()))
     return [line for line in completed.stdout.splitlines() if line.strip()]
 
 
@@ -560,10 +561,10 @@ def _add_worktree(repo_path: str, worktree_path: str) -> None:
     runs (``reset --hard --no-recurse-submodules``; MEASURED identical index, bytes, modes, HEAD and status). A refusal
     leaves the registered, unpopulated worktree: the reuse path inspects it again before its checkout."""
     subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "worktree", "add", "--detach", "--no-checkout", worktree_path]),
-                   cwd=repo_path, check=True, capture_output=True)
+                   cwd=repo_path, check=True, capture_output=True, env=git_environment(child_environment()))
     refuse_repository_content_filters(worktree_path, revisions=("HEAD",))    # S19 P1d: no index yet; reset reads HEAD
     subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "reset", "--hard", "--no-recurse-submodules", "-q"]),
-                   cwd=worktree_path, check=True, capture_output=True)
+                   cwd=worktree_path, check=True, capture_output=True, env=git_environment(child_environment()))
 
 
 def create_git_worktree(repo_path: str) -> str:
@@ -624,7 +625,7 @@ def create_git_worktree(repo_path: str) -> str:
             _audit_git_write(bootstrap_commit_command, repo_path)
             subprocess.run(
                 git_argv(bootstrap_commit_command),
-                cwd=repo_path, check=True, capture_output=True,
+                cwd=repo_path, check=True, capture_output=True, env=git_environment(child_environment()),
             )
         except Exception as e:
             logger.warning(
@@ -637,7 +638,7 @@ def create_git_worktree(repo_path: str) -> str:
 
     # 2. Prune any stale/orphaned worktree records in git administrative data
     try:
-        subprocess.run(git_argv(["git", "worktree", "prune"]), cwd=repo_path, capture_output=True)
+        subprocess.run(git_argv(["git", "worktree", "prune"]), cwd=repo_path, capture_output=True, env=git_environment(child_environment()))
     except Exception as e:
         logger.debug(f"git worktree prune failed (non-fatal): {e}")
 
@@ -660,7 +661,7 @@ def create_git_worktree(repo_path: str) -> str:
         # Recreate the directory physically if it was deleted but still registered
         if not os.path.exists(worktree_path):
             try:
-                subprocess.run(git_argv(["git", "worktree", "prune"]), cwd=repo_path, capture_output=True)
+                subprocess.run(git_argv(["git", "worktree", "prune"]), cwd=repo_path, capture_output=True, env=git_environment(child_environment()))
             except Exception as e:
                 logger.debug(f"git worktree prune failed (non-fatal): {e}")
             _add_worktree(repo_path, worktree_path)
@@ -681,8 +682,8 @@ def create_git_worktree(repo_path: str) -> str:
             # checkout reattach a kept <gitdir>/modules/<name> or load a child include the checkout itself created,
             # and run that child's filter where no inspection can see it (MEASURED).
             subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "checkout", "-f", "--no-recurse-submodules", target or "HEAD"]),
-                           cwd=worktree_path, check=True, capture_output=True)
-            subprocess.run(git_argv(["git", "clean", "-fd"]), cwd=worktree_path, check=True, capture_output=True)
+                           cwd=worktree_path, check=True, capture_output=True, env=git_environment(child_environment()))
+            subprocess.run(git_argv(["git", "clean", "-fd"]), cwd=worktree_path, check=True, capture_output=True, env=git_environment(child_environment()))
 
     # A worktree only ever reflects git HEAD - it knows nothing about uncommitted
     # changes in the real workspace, which is the normal state of an in-progress
@@ -925,7 +926,7 @@ def remove_git_worktree(repo_path: str, worktree_path: str) -> None:
         try:
             # S19 P1e: never recurse into submodules (see create_git_worktree's reuse checkout).
             subprocess.run(git_argv(["git", *_HOOKS_DISABLED, "checkout", "-f", "--no-recurse-submodules", target or "HEAD"]),
-                           cwd=worktree_path, capture_output=True)
-            subprocess.run(git_argv(["git", "clean", "-fd"]), cwd=worktree_path, capture_output=True)
+                           cwd=worktree_path, capture_output=True, env=git_environment(child_environment()))
+            subprocess.run(git_argv(["git", "clean", "-fd"]), cwd=worktree_path, capture_output=True, env=git_environment(child_environment()))
         except Exception as e:
             logger.debug(f"Failed to clean up worktree at '{worktree_path}' (non-fatal): {e}")

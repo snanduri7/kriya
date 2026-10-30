@@ -39,7 +39,7 @@ from kriya.control.checkpoint import load_checkpoint as load_checkpoint
 from kriya.control.checkpoint import new_run_id as new_run_id
 from kriya.control.checkpoint import save_checkpoint as save_checkpoint
 from kriya.control.checkpoint import without_observational_config as without_observational_config
-from kriya.platform import git_argv
+from kriya.platform import git_argv, git_environment
 from kriya.repository.git import refuse_repository_content_filters
 from kriya.workflow.resume_fingerprints import (
     CHECKPOINT_KEY as RESUME_FINGERPRINTS_KEY,
@@ -64,7 +64,7 @@ def compute_workspace_fingerprint(workspace_path: str) -> Optional[str]:
     refuse_repository_content_filters(workspace_path)
     try:
         head = subprocess.run(
-            git_argv(["git", "rev-parse", "HEAD"]), cwd=workspace_path, capture_output=True, text=True
+            git_argv(["git", "rev-parse", "HEAD"]), cwd=workspace_path, capture_output=True, text=True, env=git_environment(child_environment())
         )
         if head.returncode != 0:
             return None
@@ -74,7 +74,7 @@ def compute_workspace_fingerprint(workspace_path: str) -> Optional[str]:
         # checkpoint is saved and permanently block resuming it.
         status = subprocess.run(
             git_argv(["git", "status", "--porcelain", "--", ".", ":!.kriya"]),
-            cwd=workspace_path, capture_output=True, text=True
+            cwd=workspace_path, capture_output=True, text=True, env=git_environment(child_environment())
         )
         dirty = "dirty" if status.stdout.strip() else "clean"
         return f"{head.stdout.strip()}:{dirty}"
@@ -170,7 +170,7 @@ def compute_workspace_content_hash(workspace_path: str) -> Optional[str]:
         tempfile.gettempdir(), f".kriya-scratch-index-{uuid.uuid4().hex}",
     )
     try:
-        env = {**child_environment(), "GIT_INDEX_FILE": tmp_index_path}
+        env = {**git_environment(child_environment()), "GIT_INDEX_FILE": tmp_index_path}
         seed = subprocess.run(
             git_argv(["git", "read-tree", "HEAD"]), cwd=workspace_path, env=env, capture_output=True, text=True,
         )
@@ -248,7 +248,7 @@ def compute_tree_hash(workspace_path: str) -> Optional[str]:
     closed shape compute_workspace_fingerprint above already uses."""
     try:
         result = subprocess.run(
-            git_argv(["git", "rev-parse", "HEAD^{tree}"]), cwd=workspace_path, capture_output=True, text=True,
+            git_argv(["git", "rev-parse", "HEAD^{tree}"]), cwd=workspace_path, capture_output=True, text=True, env=git_environment(child_environment()),
         )
         if result.returncode != 0:
             return None
@@ -261,7 +261,7 @@ def compute_tree_hash(workspace_path: str) -> Optional[str]:
 def compute_base_commit(workspace_path: str) -> Optional[str]:
     try:
         result = subprocess.run(
-            git_argv(["git", "rev-parse", "HEAD"]), cwd=workspace_path, capture_output=True, text=True,
+            git_argv(["git", "rev-parse", "HEAD"]), cwd=workspace_path, capture_output=True, text=True, env=git_environment(child_environment()),
         )
         if result.returncode != 0:
             return None

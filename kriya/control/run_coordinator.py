@@ -21,6 +21,7 @@ from dataclasses import dataclass, field, replace
 from functools import wraps
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
 
+from kriya.config.environment import child_environment
 from kriya.context.workspace_identity import authority_root, workspace_identity
 from kriya.control.commit_state import (
     REASON_RESULT_CONTRADICTS_RUN_RECORD,
@@ -34,7 +35,7 @@ from kriya.control.run_ownership import acquire_run_lock
 from kriya.control.run_record import IllegalRunTransitionError, RunLifecycle, RunRecord
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.logging_setup import run_log
-from kriya.platform import git_argv
+from kriya.platform import git_argv, git_environment
 from kriya.repository.atomic_write import (
     DurableWriteError as DurableWriteError,  # re-exported: what a durable transition raises (kriya.cli handles it without importing the repository layer)
 )
@@ -104,7 +105,7 @@ def _git_revision(workspace_path: str, revision: str) -> Optional[str]:
             cwd=workspace_path,
             capture_output=True,
             text=True,
-            check=False,
+            check=False, env=git_environment(child_environment()),
         )
     except (OSError, ValueError):
         return None

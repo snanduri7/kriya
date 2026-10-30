@@ -12,7 +12,8 @@ import yaml
 from pydantic import BaseModel, Field
 
 from kriya.analyzer.analyzer import RepositoryModel
-from kriya.platform import git_argv
+from kriya.config.environment import child_environment
+from kriya.platform import git_argv, git_environment
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
 from kriya.skills.run_shadow import RunShadow, is_shadow_path
@@ -113,7 +114,7 @@ def _commit_in_work_tree(directory: str, path: str, only: Optional[List[str]], m
     try:
         check = subprocess.run(
             git_argv(["git", "rev-parse", "--is-inside-work-tree"]),
-            cwd=directory, capture_output=True, text=True
+            cwd=directory, capture_output=True, text=True, env=git_environment(child_environment())
         )
         if check.returncode != 0 or check.stdout.strip() != "true":
             return True
@@ -123,7 +124,7 @@ def _commit_in_work_tree(directory: str, path: str, only: Optional[List[str]], m
             logger.warning(f"Skill change at '{path}' not committed: {refusal}")
             return False
         added = subprocess.run(
-            git_argv(["git", "add", *(["-A", "--", *only] if only is not None else [path])]), cwd=directory, capture_output=True, text=True)
+            git_argv(["git", "add", *(["-A", "--", *only] if only is not None else [path])]), cwd=directory, capture_output=True, text=True, env=git_environment(child_environment()))
         if added.returncode != 0:
             logger.warning(f"Skill change at '{path}' not committed: git add failed: {added.stderr.strip()}")
             return False
@@ -134,7 +135,7 @@ def _commit_in_work_tree(directory: str, path: str, only: Optional[List[str]], m
         # repository-controlled code as a side effect.
         res = subprocess.run(
             git_argv(["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", message, *(["--", *only] if only is not None else [])]),
-            cwd=directory, capture_output=True, text=True,
+            cwd=directory, capture_output=True, text=True, env=git_environment(child_environment()),
         )
         if res.returncode == 0:
             logger.info(f"Committed skill change: {message}")

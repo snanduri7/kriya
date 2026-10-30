@@ -418,6 +418,17 @@ class ContainmentBackend(Protocol):
         ...
 
 
+def require_single_environment_source(profile: ContainmentProfile) -> None:
+    """``resolved_env`` and ``env_allowlist`` each define the child's whole environment, so a profile carrying both has no single
+    answer: a programming error (``ValueError``), never a silent precedence rule. One guard for every backend."""
+    if profile.resolved_env is not None and profile.env_allowlist:
+        raise ValueError(
+            "ContainmentProfile.resolved_env and .env_allowlist are mutually "
+            "exclusive - pass a pre-resolved environment (MCP's own SEC-003 "
+            "build_mcp_subprocess_env() output) OR an allowlist name-list, never both."
+        )
+
+
 class NullContainmentBackend:
     """Today's real, unchanged behavior: env allowlist + best-effort CPU/
     memory rlimit (`kriya/tools/sandbox.py`, wired since before this
@@ -468,7 +479,14 @@ class NullContainmentBackend:
                 f"not 'none'. Refusing rather than silently running the "
                 f"command uncontained."
             )
-        env = build_restricted_env(profile.env_allowlist) if profile.env_allowlist else None
+        # W3-2 (CHANGE TYPE D - a contract correction, not a mechanical edit): `resolved_env` is the caller's COMPLETE, already
+        # resolved child environment (it was honoured by the OCI backend only; this backend silently dropped it and inherited the
+        # whole parent environment). A caller that supplies one gets exactly it; `env_allowlist` and neither are unchanged.
+        require_single_environment_source(profile)
+        if profile.resolved_env is not None:
+            env: Optional[Dict[str, str]] = dict(profile.resolved_env)
+        else:
+            env = build_restricted_env(profile.env_allowlist) if profile.env_allowlist else None
         if profile.cpu_seconds is None and profile.memory_mb is None:
             return PreparedContainment(env=env, preexec_fn=None, backend_name=self.name)
         # LINUX-JVM-RLIMIT-AS-001: RLIMIT_AS for ordinary commands, explicit

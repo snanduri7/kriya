@@ -262,8 +262,11 @@ def _activate(repo: Path, how: str, global_config: Path, driver: str = "media") 
         raise AssertionError(how)
 
 
+# W3-2: "global attributes file" and "attr.tree" are no longer attribute sources a Kriya git call can have - the seam pins
+# core.attributesFile away (a command-line value outranks every file) and an effective attr.tree is refused outright - so they
+# leave this matrix and are pinned, with a validity control each, by the two tests that follow it.
 _SOURCES = ["committed .gitattributes", "work-tree .gitattributes", ".git/info/attributes",
-            "subdirectory .gitattributes", "global attributes file", "macro", "attr.tree"]
+            "subdirectory .gitattributes", "macro"]
 
 
 @pytest.mark.parametrize("how", _SOURCES)
@@ -272,6 +275,50 @@ def test_a_repository_that_activates_the_stale_media_filter_is_refused_naming_it
     _activate(owner, how, _isolated_git)
     _dirty(owner)
     _assert_active_refusal(lambda: _status(owner), marker)
+
+
+def _unpinned_status(repo: Path) -> None:
+    """The validity control's git: NO Kriya seam, the operator's stale global configuration in force - what a bare `git status`
+    of the developer would do. If this does not run the planted driver, the 'Kriya's git ran nothing' assertions are vacuous."""
+    subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "status", "--porcelain"], cwd=repo,
+                   capture_output=True, stdin=subprocess.DEVNULL, check=False)
+
+
+def test_a_global_attributes_file_binding_never_reaches_kriya_git(owner, _isolated_git):
+    """SUPERSEDES the 'global attributes file' row of the refusal matrix (W3-2). The operator's core.attributesFile binding
+    `*.py filter=media` was an ACTIVE-driver source; Kriya's git now runs with core.attributesFile pinned to the null device, so
+    neither its operation nor its inspection (the same pins) can see the binding: nothing is active, and nothing runs."""
+    from kriya.repository.git import refuse_repository_content_filters
+
+    marker = _alias_marker(owner)
+    _activate(owner, "global attributes file", _isolated_git)
+    _dirty(owner)
+    _unpinned_status(owner)
+    assert marker.exists(), "validity: plain git must run the planted driver through the operator's attributes file"
+    marker.unlink()
+    refuse_repository_content_filters(str(owner))                    # admitted: nothing is active in Kriya's own view
+    _status(owner)                                                   # Kriya's status, through the seam
+    assert not marker.exists(), "Kriya's git ran the filter an operator attributes file bound"
+
+
+def test_an_attr_tree_binding_is_refused_as_attr_tree_before_any_activation_analysis(owner, _isolated_git):
+    """SUPERSEDES the 'attr.tree' row of the refusal matrix (W3-2): git follows attr.tree to a tree that binds the driver (the
+    validity control proves it), and Kriya now refuses ANY effective attr.tree with its own typed reason - it has no neutral
+    value, so it is never analysed for activation and never pinned."""
+    from kriya.repository.git import GIT_ATTR_TREE_CONFIGURED
+
+    marker = _alias_marker(owner)
+    _activate(owner, "attr.tree", _isolated_git)
+    _dirty(owner)
+    _unpinned_status(owner)
+    assert marker.exists(), "validity: plain git must follow attr.tree to the tree that binds the driver"
+    marker.unlink()
+    with pytest.raises(Exception) as raised:
+        _status(owner)
+    refusal = _refusal(raised.value)
+    assert refusal is not None and refusal.reason_code == GIT_ATTR_TREE_CONFIGURED, repr(raised.value)
+    assert refusal.scope == "local" and refusal.key == "attr.tree"
+    assert not marker.exists()
 
 
 @pytest.mark.parametrize("how", ["committed .gitattributes", ".git/info/attributes"])
@@ -580,15 +627,19 @@ def test_a_check_attr_answer_git_did_not_give_cleanly_refuses(owner, monkeypatch
     assert raised.value.reason_code == UNINSPECTABLE
 
 
-def test_git_s_own_attribute_resolution_failure_refuses(owner):
-    """Unfaked: an attribute source git cannot read (GIT_ATTR_SOURCE naming no tree - MEASURED git 2.54.0: check-attr
-    exits 128 "bad --attr-source or GIT_ATTR_SOURCE") with the dormant stale lines refuses, never 'inactive'."""
-    from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
+def test_a_host_attribute_source_naming_no_tree_can_neither_break_nor_redirect_the_inspection(owner):
+    """SUPERSEDES test_git_s_own_attribute_resolution_failure_refuses (W3-2). It used a host GIT_ATTR_SOURCE naming no tree
+    (MEASURED git 2.54.0: check-attr exits 128 "bad --attr-source or GIT_ATTR_SOURCE") as the UNFAKED trigger of git's own
+    attribute-resolution failure. GIT_ATTR_SOURCE is now stripped from every Kriya git environment (it re-routed attributes: 2 CRs
+    under every argv pin), so it cannot cause that failure. The fail-closed branch itself stays pinned: faked answers above, and
+    UNFAKED by test_a_materialized_revision_git_cannot_resolve_refuses below."""
+    from kriya.repository.git import refuse_repository_content_filters
 
     _dirty(owner)
-    with pytest.raises(RepositoryContentFilterRefused) as raised:
-        refuse_repository_content_filters(str(owner), env={**os.environ, "GIT_ATTR_SOURCE": "no-such-revision"})
-    assert raised.value.reason_code == UNINSPECTABLE and "git check-attr failed" in str(raised.value)
+    hostile = {**os.environ, "GIT_ATTR_SOURCE": "no-such-revision"}
+    control = subprocess.run(["git", "check-attr", "filter", "a.py"], cwd=owner, env=hostile, capture_output=True)
+    assert control.returncode == 128, "validity: an unstripped bad GIT_ATTR_SOURCE must make check-attr fail"
+    refuse_repository_content_filters(str(owner), env=hostile)       # no refusal: the source never reaches Kriya's git
 
 
 def test_a_materialized_revision_git_cannot_resolve_refuses(owner):

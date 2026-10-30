@@ -29,7 +29,8 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
-from kriya.platform import git_argv
+from kriya.config.environment import child_environment
+from kriya.platform import git_argv, git_environment
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 logger = logging.getLogger(__name__)
@@ -96,7 +97,7 @@ def manifest(root: str) -> Dict[str, str]:
 
 
 def _git(directory: str, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(git_argv(["git", *args]), cwd=directory, capture_output=True, text=True)
+    return subprocess.run(git_argv(["git", *args]), cwd=directory, capture_output=True, text=True, env=git_environment(child_environment()))
 
 
 def _existing_ancestor(path: str) -> str:

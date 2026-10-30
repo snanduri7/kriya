@@ -21,7 +21,8 @@ import subprocess
 from dataclasses import dataclass, replace
 from typing import Optional, Sequence, Tuple
 
-from kriya.platform import git_argv
+from kriya.config.environment import child_environment
+from kriya.platform import git_argv, git_environment
 
 UNSUPPORTED_TEXT_ENCODING = "UNSUPPORTED_TEXT_ENCODING"
 MIXED_NEWLINE_UNSUPPORTED = "MIXED_NEWLINE_UNSUPPORTED"
@@ -232,11 +233,11 @@ def untracked_repository_paths(root: str) -> frozenset:
     exclude semantics: .gitignore, info/exclude, core.excludesFile), Kriya's
     ``.kriya/`` state excluded. Not a Git work tree: none. A failing listing
     raises (fail closed)."""
-    inside = subprocess.run(git_argv(["git", "rev-parse", "--is-inside-work-tree"]), cwd=root, capture_output=True, text=True)
+    inside = subprocess.run(git_argv(["git", "rev-parse", "--is-inside-work-tree"]), cwd=root, capture_output=True, text=True, env=git_environment(child_environment()))
     if inside.returncode != 0 or inside.stdout.strip() != "true":
         return frozenset()
     result = subprocess.run(git_argv(["git", "ls-files", "--others", "--exclude-standard", "-z"]), cwd=root,
-                            capture_output=True)
+                            capture_output=True, env=git_environment(child_environment()))
     if result.returncode != 0:
         raise RuntimeError(f"git ls-files --others failed: {os.fsdecode(result.stderr).strip() or result.returncode}")
     return frozenset(path for path in (os.fsdecode(item) for item in result.stdout.split(b"\0") if item)
@@ -251,7 +252,7 @@ def ignored_repository_paths(root: str, relpaths: Sequence[str]) -> frozenset:
         return frozenset()
     payload = b"".join(os.fsencode(path) + b"\0" for path in relpaths)
     result = subprocess.run(git_argv(["git", "check-ignore", "--no-index", "-z", "--stdin"]), cwd=root, input=payload,
-                            capture_output=True)
+                            capture_output=True, env=git_environment(child_environment()))
     if result.returncode not in (0, 1):  # 0: some ignored, 1: none ignored
         raise RuntimeError(f"git check-ignore failed: {os.fsdecode(result.stderr).strip() or result.returncode}")
     return frozenset(os.fsdecode(item) for item in result.stdout.split(b"\0") if item)
@@ -260,7 +261,7 @@ def ignored_repository_paths(root: str, relpaths: Sequence[str]) -> frozenset:
 def visible_repository_paths(root: str) -> frozenset:
     """Git's own view of the tree at ``root``: every tracked path and every untracked non-ignored one (its exclude semantics), Kriya's
     ``.kriya/`` state excluded. A failing listing raises (fail closed)."""
-    result = subprocess.run(git_argv(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"]), cwd=root, capture_output=True)
+    result = subprocess.run(git_argv(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"]), cwd=root, capture_output=True, env=git_environment(child_environment()))
     if result.returncode != 0:
         raise RuntimeError(f"git ls-files failed: {os.fsdecode(result.stderr).strip() or result.returncode}")
     return frozenset(path for path in (os.fsdecode(item) for item in result.stdout.split(b"\0") if item)

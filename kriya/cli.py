@@ -58,6 +58,7 @@ from kriya.cli_commands.static_analysis import static_analysis_waive as static_a
 from kriya.cli_commands.static_analysis import static_analysis_waivers as static_analysis_waivers
 from kriya.cli_output import GenerateOutput, no_progress_stop_message
 from kriya.config import AppConfig, load_config
+from kriya.config.environment import child_environment
 from kriya.control.commit_state import UncertainWorkspaceStateError
 from kriya.control.run_coordinator import DurableWriteError, begin_mutating_run, transition_mutating_run
 from kriya.control.run_ownership import WorkspaceLockHeldError
@@ -67,7 +68,7 @@ from kriya.core.kernel import Kernel
 from kriya.core.logging_setup import LogDirectoryError, configure_logging
 from kriya.core.state_paths import trace_db_path
 from kriya.foundation.redaction import redact_text, redact_value
-from kriya.platform import git_argv
+from kriya.platform import git_argv, git_environment
 from kriya.platform.services import ENTRY_REFUSED_EXIT_CODE
 from kriya.platform.services import entry_refusal as platform_entry_refusal
 from kriya.plugins.plugin import PluginManager
@@ -3879,7 +3880,7 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
             # S19 P1b (owner decision A): `git status` can run a repository-defined content filter; the one authority
             # decides through the APPLICATION use case (a typed refusal ends the review before any git runs here).
             admit_repository_read(RequestContext.local(None, request_id="review"), file_path)
-            res = subprocess.run(git_argv(["git", "status", "--porcelain", "-z"]), cwd=file_path, capture_output=True, text=True)
+            res = subprocess.run(git_argv(["git", "status", "--porcelain", "-z"]), cwd=file_path, capture_output=True, text=True, env=git_environment(child_environment()))
             if res.returncode == 0 and res.stdout.strip("\x00"):
                 entries = res.stdout.split("\x00")
                 i = 0

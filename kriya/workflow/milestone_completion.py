@@ -49,7 +49,7 @@ from kriya.control.recovery import (
 )
 from kriya.control.run_coordinator import owning_run_commits
 from kriya.control.run_record import COMMIT_COMMITTED
-from kriya.platform import git_argv
+from kriya.platform import git_argv, git_environment
 from kriya.workflow.edit_safety import CommitState, commit_evidence_dir, load_commit_evidence
 from kriya.workflow.resume_fingerprints import FingerprintStatus
 
@@ -370,7 +370,7 @@ def workspace_evidence_hash(workspace_path: str) -> Optional[str]:
     # S19 Q1: add -A/-u run clean filters; typed, never None. S19 P1d: the scratch index starts as HEAD's (read-tree).
     refuse_repository_content_filters(workspace_path, revisions=("HEAD",))
     index = os.path.join(tempfile.gettempdir(), f".kriya-evidence-index-{uuid.uuid4().hex}")
-    env = {**child_environment(), "GIT_INDEX_FILE": index}
+    env = {**git_environment(child_environment()), "GIT_INDEX_FILE": index}
     generated = [f":(exclude,glob)**/{name}/**" for name in sorted(GENERATED_OUTPUT_DIRS)]
     update = git_argv(["git", "add", "-u", "--", ".", ":!.kriya"])
     steps = (

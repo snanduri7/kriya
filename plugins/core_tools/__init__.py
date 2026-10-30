@@ -10,7 +10,8 @@ from typing import Any, Callable, List, Optional, Tuple, Type
 from pydantic import BaseModel, Field
 
 from kriya.config.config import AutonomyConfig, ExecutionPolicyConfig
-from kriya.platform import git_argv
+from kriya.config.environment import child_environment
+from kriya.platform import git_argv, git_environment
 from kriya.plugins.plugin import BasePlugin
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
@@ -571,7 +572,8 @@ class GitTool(BaseTool):
         it converts no working-tree content, so no content filter runs - spawned exactly as the diff will be (same
         controller, profile and folder, so it lists the repository the diff describes). A listing git cannot give
         whole refuses (fail closed)."""
-        profile = ContainmentProfile(trust_class=TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE, workspace_path=root)
+        profile = ContainmentProfile(trust_class=TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE, workspace_path=root,
+                                     resolved_env=git_environment(child_environment()))
         listed = ProcessController().run(
             git_argv(["git", "ls-files", "-z"]), cwd=root, timeout=self._GIT_COMMAND_TIMEOUT_SECONDS,
             containment_profile=profile, containment_backend=resolve_containment_backend("none"),
@@ -603,7 +605,8 @@ class GitTool(BaseTool):
         pathspec confinement. ``base_revision`` (S18b, a SEPARATE candidate's status/diff): it must also have a commit
         (`HEAD^{commit}`); the scoped snapshot of a nested workspace has none (empty diff, everything untracked)."""
         command = ["git", "rev-parse", "--show-toplevel", *(("HEAD^{commit}",) if base_revision else ())]
-        profile = ContainmentProfile(trust_class=TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE, workspace_path=root)
+        profile = ContainmentProfile(trust_class=TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE, workspace_path=root,
+                                     resolved_env=git_environment(child_environment()))
         try:
             probe = ProcessController().run(
                 git_argv(command), cwd=root, timeout=self._GIT_COMMAND_TIMEOUT_SECONDS, containment_profile=profile,
@@ -690,6 +693,7 @@ class GitTool(BaseTool):
         profile = ContainmentProfile(
             trust_class=TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE,
             workspace_path=cwd,
+            resolved_env=git_environment(child_environment()),
         )
         try:
             result = await ProcessController().run_async(

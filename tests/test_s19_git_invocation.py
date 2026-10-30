@@ -16,6 +16,7 @@ REFUSAL, not blanking; the two former held pins now expect the typed refusal (S1
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 from pathlib import Path
 from typing import Callable, Dict
@@ -312,8 +313,13 @@ def test_held_q1_a_repository_content_filter_never_runs(owner, site):
 def test_the_seam_inserts_the_options_after_the_executable_and_returns_a_new_list():
     from kriya.platform import GIT_INVOCATION_OPTIONS, git_argv
 
-    assert GIT_INVOCATION_OPTIONS == ("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
-                                      "-c", "commit.gpgSign=false", "-c", "log.showSignature=false")   # S19 P1e
+    # S19 P1e added log.showSignature. W3-2 (host Git configuration has no authority over Kriya's bytes or evidence) adds the three
+    # line-ending / attribute pins and spells the null device through os.devnull (identical argv on POSIX; the semantic source is
+    # pinned here, not the accident of the spelling). Old argv -> new invariant -> added options: autocrlf=false, eol=lf, attributesFile.
+    assert GIT_INVOCATION_OPTIONS == ("-c", "core.fsmonitor=false", "-c", f"core.hooksPath={os.devnull}",
+                                      "-c", "commit.gpgSign=false", "-c", "log.showSignature=false",
+                                      "-c", "core.autocrlf=false", "-c", "core.eol=lf",
+                                      "-c", f"core.attributesFile={os.devnull}")
     audited = ["git", "-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-m", "m"]
     spawned = git_argv(audited)
     assert spawned == ["git", *GIT_INVOCATION_OPTIONS, "-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-m", "m"]

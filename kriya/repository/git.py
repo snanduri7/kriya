@@ -72,7 +72,7 @@ from typing import Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from kriya.config.environment import child_environment
 from kriya.foundation.redaction import redact_text
-from kriya.platform import git_argv
+from kriya.platform import git_argv, git_environment
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 # What a read-only git query can fail with in operation: git or the filesystem refusing (OSError, a missing git), git exiting non-zero or
@@ -89,6 +89,11 @@ GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN = "GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN
 # this module only recognises git's own refusal (refuse_dubious_ownership, the one detector) - raised by the inspection
 # below before it reports any filter cause for a repository git refuses (TAF-1), and by create_git_worktree's discovery.
 GIT_REPOSITORY_OWNERSHIP_REFUSED = "GIT_REPOSITORY_OWNERSHIP_REFUSED"
+# W3-2: an effective `attr.tree` in ANY git configuration scope (system, global, local, worktree, command scope incl. an environment-injected
+# GIT_CONFIG_COUNT). It redirects attribute resolution away from the repository's own .gitattributes, so the bytes Kriya materializes and the
+# identity it records would depend on host/operator configuration; git documents no neutral value (an empty one is undocumented and version
+# dependent), so it is refused, never pinned or cleared. Kriya has no use of `attr.tree` of its own.
+GIT_ATTR_TREE_CONFIGURED = "GIT_ATTR_TREE_CONFIGURED"
 
 _REMEDY = ("Define the filter in your global or system git configuration (for Git LFS: `git lfs install`, not "
            "`git lfs install --local`) and remove it from the repository's configuration.")
@@ -120,6 +125,12 @@ CONTENT_FILTER_REFUSALS: Dict[str, str] = {
         "not run git there and never weakens that check (no safe.directory change, no retry without it). Operator "
         "remedy: run Kriya as the user who owns the repository, or, only if you trust it, mark it safe in your own git "
         "configuration as git's message describes."),
+    GIT_ATTR_TREE_CONFIGURED: (
+        "git is configured with attr.tree for the repository at {repository} ({scope} scope, {origin}). attr.tree redirects git's "
+        "attribute resolution away from the repository's own .gitattributes, so the bytes Kriya materializes and the identity it "
+        "records would depend on that setting, and git documents no neutral value for it. Kriya does not run git there. Operator "
+        "remedy: remove attr.tree from your git configuration (`git config --{scope} --unset-all attr.tree`, or the file named "
+        "above). Kriya never changes git configuration."),
 }
 # The activation part of an EXECUTABLE_UNPROVEN refusal's detail (S19 P1d): the driver git really activates.
 _ACTIVE_DETAIL = ("; the filter driver '{driver}' is ACTIVE here: git resolves filter={driver} for {count} path(s) this "
@@ -150,6 +161,9 @@ REPOSITORY_SCOPES = frozenset({"local", "worktree"})
 _FILE_ORIGIN = "file:"
 _COMMAND_ORIGIN = "command line:"
 _FILTER_COMMAND_PATTERN = r"^filter\..*\.(clean|smudge|process)$"
+_ATTR_TREE_KEY = "attr.tree"
+# ONE `git config --get-regexp` answers both questions (no second configuration scanner): content-filter commands, and attr.tree.
+_CONFIG_POLICY_PATTERN = r"^(filter\..*\.(clean|smudge|process)|attr\.tree)$"
 _GITLINK_MODE = b"160000"
 # Submodules nest; deeper than this is refused rather than half inspected.
 _MAX_NESTING = 16
@@ -181,8 +195,8 @@ def _stdin(data: Optional[bytes]) -> Dict[str, object]:
 
 
 def _run(cwd: str, *args: str, data: Optional[bytes] = None) -> "subprocess.CompletedProcess[bytes]":
-    return subprocess.run(git_argv(["git", *args]), cwd=cwd, capture_output=True, timeout=_TIMEOUT_SECONDS,
-                          check=False, **_stdin(data))
+    return subprocess.run(git_argv(["git", *args]), cwd=cwd, env=git_environment(child_environment()), capture_output=True,
+                          timeout=_TIMEOUT_SECONDS, check=False, **_stdin(data))
 
 
 _Runner = Callable[..., "subprocess.CompletedProcess[bytes]"]
@@ -198,7 +212,7 @@ def _runner(executable: Optional[str], env: Optional[Mapping[str, str]], timeout
     if executable is None and env is None and timeout == _TIMEOUT_SECONDS:
         return lambda cwd, *args, **kwargs: _run(cwd, *args, **kwargs)
     git = executable or "git"                           # a git literal the S19 seam rule sees
-    child_env = None if env is None else dict(env)
+    child_env = git_environment(child_environment() if env is None else env)
 
     def run(cwd: str, *args: str, data: Optional[bytes] = None) -> "subprocess.CompletedProcess[bytes]":
         return subprocess.run(git_argv([git, *args]), cwd=cwd, env=child_env, capture_output=True, timeout=timeout,
@@ -224,7 +238,7 @@ class _Caller:
     ``environ`` = the environment its git resolves a filter program with."""
 
     def __init__(self, executable: Optional[str], env: Optional[Mapping[str, str]], timeout: float) -> None:
-        self.environ: Mapping[str, str] = child_environment() if env is None else env
+        self.environ: Mapping[str, str] = git_environment(child_environment() if env is None else env)
         self.run = _runner(executable, env, timeout)
         if any(name in self.environ for name in _REPOSITORY_SELECTING_ENV):
             stripped = {k: v for k, v in self.environ.items() if k not in _REPOSITORY_SELECTING_ENV}
@@ -255,7 +269,7 @@ def git_discovery(path: str, *, git: Optional[str] = None, env: Optional[Mapping
     when git cannot run there at all (e.g. ``path`` is not a directory)."""
     executable = git or "git"                           # a git literal the S19 seam rule sees
     return subprocess.run(git_argv([executable, "rev-parse", "--is-inside-work-tree"]), cwd=path, capture_output=True,
-                          text=True, env={**(child_environment() if env is None else env), "LC_ALL": "C"},
+                          text=True, env={**git_environment(child_environment() if env is None else env), "LC_ALL": "C"},
                           timeout=timeout)
 
 
@@ -285,9 +299,10 @@ def _uninspectable(repository: str, what: str, completed: "Optional[subprocess.C
 
 
 def _filter_definitions(run: _Runner, path: str) -> List[Tuple[str, str, str, Optional[str]]]:
-    """(scope, origin, key, value) of every content-filter command Git sees at ``path``; value None = valueless key.
+    """(scope, origin, key, value) of every content-filter command - and every ``attr.tree`` - Git sees at ``path``; value None =
+    valueless key.
     ``-z``: ``scope NUL origin NUL key [LF value] NUL`` (MEASURED; the scope field is NUL-terminated, never TAB)."""
-    done = run(path, "config", "--show-scope", "--show-origin", "-z", "--get-regexp", _FILTER_COMMAND_PATTERN)
+    done = run(path, "config", "--show-scope", "--show-origin", "-z", "--get-regexp", _CONFIG_POLICY_PATTERN)
     if done.returncode == 1 and not done.stdout:       # no such key anywhere
         return []
     if done.returncode != 0:
@@ -653,8 +668,10 @@ def _refuse(caller: _Caller, run: _Runner, path: str, seen: Set[str], depth: int
     layout, not_a_repository = _layout(run, path)
     roots = layout if layout is not None else (os.path.realpath(path),)
     common = layout[2] if layout is not None else None
-    definitions = _filter_definitions(run, path)
-    if layout is None and not not_a_repository and (depth > 0 or any(value != "" for *_, value in definitions)):
+    configured = _filter_definitions(run, path)
+    attr_trees = [entry for entry in configured if entry[2] == _ATTR_TREE_KEY]
+    definitions = [entry for entry in configured if entry[2] != _ATTR_TREE_KEY]
+    if layout is None and not not_a_repository and (depth > 0 or attr_trees or any(value != "" for *_, value in definitions)):
         # TAF-1: no work tree because git may REFUSE this repository (ownership). Ownership is a prerequisite security
         # decision: git's own refusal is the cause, never a definition judged without activation (MEASURED at ea56d08:
         # a stale dormant ~/.gitconfig `filter.media` was reported EXECUTABLE_UNPROVEN instead). Asked only here.
@@ -664,6 +681,8 @@ def _refuse(caller: _Caller, run: _Runner, path: str, seen: Set[str], depth: int
         # unjudged, and a clean HOME must refuse exactly as a HOME with dormant host filters does. At depth 0 git itself
         # refuses every operation in the folder, so with nothing to judge nothing is asked (no extra spawn).
         caller.refuse_dubious_ownership(path, elsewhere=depth > 0)
+    for scope, origin, key, _value in attr_trees:       # ANY scope, ANY value (empty and valueless included): no contract basis to tell them apart
+        raise RepositoryContentFilterRefused(GIT_ATTR_TREE_CONFIGURED, path, key=key, scope=scope, origin=origin)
     repository: List[Tuple[str, str, str]] = []
     trusted = []
     for scope, origin, key, value in definitions:

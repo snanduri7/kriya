@@ -26,7 +26,8 @@ import shutil
 import subprocess
 from typing import Any, Dict, List, Mapping, Optional
 
-from kriya.platform import git_argv
+from kriya.config.environment import child_environment
+from kriya.platform import git_argv, git_environment
 from kriya.platform.host_properties import UNAVAILABLE, os_and_architecture
 from kriya.platform.services import platform_services
 
@@ -37,11 +38,11 @@ _COMMAND_TIMEOUT_SECONDS = 10.0
 _SOURCE_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def _command(argv: List[str], cwd: Optional[str] = None) -> Optional[str]:
+def _command(argv: List[str], cwd: Optional[str] = None, env: Optional[Mapping[str, str]] = None) -> Optional[str]:
     if shutil.which(argv[0]) is None:
         return None
     try:
-        completed = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=_COMMAND_TIMEOUT_SECONDS,
+        completed = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=_COMMAND_TIMEOUT_SECONDS,
                                    check=False)
     except (OSError, subprocess.SubprocessError):
         return None
@@ -67,8 +68,9 @@ def kriya_revision(source_root: str = _SOURCE_ROOT) -> Dict[str, Any]:
         if embedded["commit"] != UNKNOWN_BUILD:
             return {"revision": embedded["commit"], "dirty": embedded["dirty"]}
         return {"revision": UNAVAILABLE, "dirty": None}
-    revision = _command(git_argv(["git", "rev-parse", "HEAD"]), cwd=source_root)
-    status = _command(git_argv(["git", "status", "--porcelain", "--untracked-files=no"]), cwd=source_root)
+    git_env = git_environment(child_environment())
+    revision = _command(git_argv(["git", "rev-parse", "HEAD"]), cwd=source_root, env=git_env)
+    status = _command(git_argv(["git", "status", "--porcelain", "--untracked-files=no"]), cwd=source_root, env=git_env)
     return {"revision": revision or UNAVAILABLE, "dirty": None if status is None else bool(status)}
 
 

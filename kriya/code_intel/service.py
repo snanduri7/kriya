@@ -24,7 +24,8 @@ from kriya.code_intel import locate as loc
 from kriya.code_intel.model import CONFIG_KINDS, FileStructure, ParseState, Span, Symbol, source_digest
 from kriya.code_intel.parsing import is_structural_path, parse_file
 from kriya.code_intel.store import StructuralStore, identifier_terms
-from kriya.platform import git_argv
+from kriya.config.environment import child_environment
+from kriya.platform import git_argv, git_environment
 
 # Kinds a localization result may name (types are kept: a goal can target one).
 _LOCATABLE = frozenset({"method", "constructor", "function", "field", "attribute", "variable", "enum_constant",
@@ -76,7 +77,7 @@ def discover_source_files(root: str) -> List[str]:
     """Tracked and untracked-not-ignored files with a structural parser
     (code or configuration)."""
     result = subprocess.run(git_argv(["git", "ls-files", "--cached", "--others", "--exclude-standard"]), cwd=root,
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, env=git_environment(child_environment()))
     if result.returncode != 0:
         found = []
         for dirpath, dirs, files in os.walk(root):

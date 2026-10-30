@@ -10,7 +10,8 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
 from pydantic import BaseModel, Field
 
-from kriya.platform import git_argv
+from kriya.config.environment import child_environment
+from kriya.platform import git_argv, git_environment
 from kriya.platform.filesystem_semantics import identity_key
 from kriya.repository.git import refuse_repository_content_filters
 
@@ -431,11 +432,11 @@ def _repository_revision(root_path: str) -> str:
 
     refuse_repository_content_filters(root_path)
     try:
-        head = subprocess.run(git_argv(["git", "rev-parse", "HEAD"]), cwd=root_path, capture_output=True, text=True)
+        head = subprocess.run(git_argv(["git", "rev-parse", "HEAD"]), cwd=root_path, capture_output=True, text=True, env=git_environment(child_environment()))
         if head.returncode != 0:
             return ""
         dirty = subprocess.run(git_argv(["git", "status", "--porcelain", "--untracked-files=no"]), cwd=root_path,
-                               capture_output=True, text=True)
+                               capture_output=True, text=True, env=git_environment(child_environment()))
         return head.stdout.strip() + ("+dirty" if dirty.stdout.strip() else "")
     except OSError:
         return ""
@@ -988,15 +989,15 @@ class RepositoryAnalyzer:
             # S19 Q1: `git diff` runs clean filters - refused, typed, outside the fallback below (never "index all").
             refuse_repository_content_filters(self.root_path)
             try:
-                res = subprocess.run(git_argv(["git", "diff", "--name-only"]), cwd=self.root_path, capture_output=True, text=True)
+                res = subprocess.run(git_argv(["git", "diff", "--name-only"]), cwd=self.root_path, capture_output=True, text=True, env=git_environment(child_environment()))
                 # `git diff --name-only` alone only ever shows UNSTAGED
                 # changes (working tree vs. index) - a file that's been
                 # `git add`ed but not modified again since staging shows up
                 # in neither this nor the untracked-files listing below, so
                 # it was silently excluded from --changed entirely
                 # (2026-08-12 SME review).
-                res_staged = subprocess.run(git_argv(["git", "diff", "--cached", "--name-only"]), cwd=self.root_path, capture_output=True, text=True)
-                res_untracked = subprocess.run(git_argv(["git", "ls-files", "--others", "--exclude-standard"]), cwd=self.root_path, capture_output=True, text=True)
+                res_staged = subprocess.run(git_argv(["git", "diff", "--cached", "--name-only"]), cwd=self.root_path, capture_output=True, text=True, env=git_environment(child_environment()))
+                res_untracked = subprocess.run(git_argv(["git", "ls-files", "--others", "--exclude-standard"]), cwd=self.root_path, capture_output=True, text=True, env=git_environment(child_environment()))
                 if res.returncode != 0 or res_staged.returncode != 0 or res_untracked.returncode != 0:
                     # Confirmed live: on a non-git directory, both commands fail
                     # (returncode != 0, not an exception) - the OLD code silently

@@ -71,8 +71,9 @@ import tempfile
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
+from kriya.config.environment import child_environment
 from kriya.core.tomlcompat import tomllib
-from kriya.platform import git_argv
+from kriya.platform import git_argv, git_environment
 from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
 from kriya.tools import test_execution
 from kriya.tools.containment import declare_execution_copy
@@ -153,7 +154,7 @@ class BaseTree:
             return found
         request = b"".join(f"{self.revision}:{path}\n".encode() for path in wanted)
         out = subprocess.run(git_argv(["git", "cat-file", "--batch"]), cwd=self.repo, input=request, capture_output=True,
-                             check=True).stdout
+                             check=True, env=git_environment(child_environment())).stdout
         offset = 0
         for path in wanted:
             header_end = out.index(b"\n", offset)
@@ -167,7 +168,7 @@ class BaseTree:
 
 
 def _git(repo: str, *args: str) -> bytes:
-    return subprocess.run(git_argv(["git", *args]), cwd=repo, capture_output=True, check=True).stdout
+    return subprocess.run(git_argv(["git", *args]), cwd=repo, capture_output=True, check=True, env=git_environment(child_environment())).stdout
 
 
 def export_base(base: BaseTree, destination: str) -> None:
@@ -177,7 +178,7 @@ def export_base(base: BaseTree, destination: str) -> None:
     defines one."""
     refuse_repository_content_filters(base.repo, revisions=(base.revision,))    # S19 P1d: archive reads that tree
     archive = subprocess.Popen(git_argv(["git", "archive", "--format=tar", base.revision]), cwd=base.repo,
-                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=git_environment(child_environment()))
     try:
         extract = subprocess.run(["tar", "-x", "-f", "-", "-C", destination], stdin=archive.stdout,
                                  capture_output=True, check=False)

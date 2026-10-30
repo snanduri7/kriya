@@ -92,6 +92,7 @@ from kriya.tools.containment import (
     PreparedContainment,
     build_restricted_env,
     host_writer_identity,
+    require_single_environment_source,
 )
 from kriya.tools.dependency_cache import is_ephemeral_cache
 from kriya.tools.git_metadata import CONTAINER_GIT_METADATA
@@ -1304,12 +1305,7 @@ class OCIContainmentBackend:
         # that original shape (see ContainmentProfile's own docstring).
         self._probe_daemon(docker_path)
 
-        if profile.resolved_env is not None and profile.env_allowlist:
-            raise ValueError(
-                "ContainmentProfile.resolved_env and .env_allowlist are mutually "
-                "exclusive - pass a pre-resolved environment (MCP's own SEC-003 "
-                "build_mcp_subprocess_env() output) OR an allowlist name-list, never both."
-            )
+        require_single_environment_source(profile)
 
         container_name = f"kriya-oci-{uuid.uuid4().hex[:12]}"
         resolved_toolchain = None

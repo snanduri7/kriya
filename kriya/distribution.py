@@ -7,7 +7,8 @@ import tarfile
 from pathlib import Path, PurePosixPath
 from zipfile import BadZipFile, ZipFile
 
-from kriya.platform import git_argv
+from kriya.config.environment import child_environment
+from kriya.platform import git_argv, git_environment
 
 REQUIRED_RUNTIME_FILES = (
     "kriya/__init__.py",
@@ -32,7 +33,7 @@ def tracked_release_files(source_root: Path, trees: tuple[str, ...] = RELEASE_TR
     filter (MEASURED)."""
     result = subprocess.run(
         git_argv(["git", "ls-files", "-z", "--", *trees]),
-        cwd=source_root, capture_output=True, timeout=60,
+        cwd=source_root, capture_output=True, timeout=60, env=git_environment(child_environment()),
     )
     if result.returncode != 0:
         raise ValueError(f"git ls-files failed in {source_root}: "
