@@ -195,7 +195,7 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
     # future runs don't keep re-asking about a skill the user already said is fine.
     unverified_relevant = [
         s for s in se.list_skills()
-        if s.name in active_skills and not se.is_effectively_verified(s) and not s.verification_gap_acknowledged
+        if s.name in active_skills and not se.is_effectively_verified(s) and not se.is_gap_acknowledged(s)
     ]
 
     # Also detect goal-mentioned technologies with NO matching skill at all - the

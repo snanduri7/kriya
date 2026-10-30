@@ -145,6 +145,21 @@ def test_the_engine_remembers_the_commit_outcome_of_its_last_write_and_clears_it
     assert engine.mark_verified("widgetlib", context="c") is True and engine.last_write_committed is True
 
     _lock_the_index(tmp_path)
-    assert engine.mark_gap_acknowledged("widgetlib") is True and engine.last_write_committed is False
+    assert engine.mark_verified("widgetlib", context="again") is True and engine.last_write_committed is False
 
     assert engine.mark_verified("ghost", context="c") is False and engine.last_write_committed is None      # no write: no stale outcome
+
+
+def test_a_workspace_skill_gap_decline_attempts_no_write_so_it_leaves_no_commit_outcome_even_over_a_locked_index(tmp_path):
+    """W3-1: a workspace skill's acknowledgement is run-local, so it neither writes nor commits (the old write is what reported a commit
+    outcome here). A stale outcome from an earlier write must be cleared rather than reported against this call."""
+    _skill_workspace(tmp_path)
+    engine = _engine(tmp_path)
+    assert engine.mark_verified("widgetlib", context="c") is True and engine.last_write_committed is True
+    _lock_the_index(tmp_path)
+    head = _head(tmp_path)
+
+    assert engine.mark_gap_acknowledged("widgetlib") is True
+
+    assert engine.last_write_committed is None and _head(tmp_path) == head
+    assert engine.is_gap_acknowledged(engine.get_skill("widgetlib")) is True

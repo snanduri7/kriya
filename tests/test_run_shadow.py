@@ -179,7 +179,8 @@ def test_a_successful_flush_commits_exactly_the_runs_delta_and_removes_the_shado
     (ws / "unrelated.txt").write_text("staged by the user\n")
     _git(ws, "add", "unrelated.txt")
     engine.activate_run_shadow(str(ws), _state(tmp_path))
-    engine.mark_gap_acknowledged("widgetlib")
+    engine.mark_verified("widgetlib", context="c")                         # an edit of an existing skill file
+    engine.mark_gap_acknowledged("otherlib")                               # W3-1: run-local, so it contributes nothing to the delta
     engine.create_skill_skeleton("newlib")
     head = _git(ws, "rev-parse", "HEAD")
 
@@ -191,7 +192,9 @@ def test_a_successful_flush_commits_exactly_the_runs_delta_and_removes_the_shado
     assert int(_git(ws, "rev-list", "--count", f"{head}..HEAD")) == 1                       # one transaction, one commit
     assert "A  unrelated.txt" in _git(ws, "status", "--porcelain") and "?? skills/scratch.txt" in _git(ws, "status", "--porcelain")
     assert engine.run_shadow_active is False and engine.skills_dir == str(ws / "skills")
-    assert engine.get_skill("widgetlib").verification_gap_acknowledged is True and engine.get_skill("widgetlib").source_path == str(ws / "skills" / "widgetlib")
+    assert engine.get_skill("widgetlib").source_path == str(ws / "skills" / "widgetlib")
+    assert "verification_gap_acknowledged: true" not in _git(ws, "show", "HEAD:skills/otherlib/skill.yaml")
+    assert engine.is_gap_acknowledged(engine.get_skill("otherlib")) is False       # the run-local acknowledgement ended with the run
     assert not os.path.exists(os.path.join(_state(tmp_path), "run_shadow"))
 
 
@@ -227,12 +230,14 @@ def test_a_workspace_that_is_not_a_git_repository_is_flushed_as_files(tmp_path):
     engine = SkillEngine(str(ws / "skills"), load_global=False, workspace_path=str(ws))
     engine.discover_and_load()
     assert engine.activate_run_shadow(str(ws), _state(tmp_path)) is True
-    engine.mark_gap_acknowledged("widgetlib")
-    assert "verification_gap_acknowledged" not in (ws / "skills" / "widgetlib" / "skill.yaml").read_text()
+    engine.mark_gap_acknowledged("widgetlib")                              # W3-1: run-local, never a file
+    engine.create_skill_skeleton("newlib")
+    assert not (ws / "skills" / "newlib").exists()
 
     assert engine.persist_run_learning() == []
 
-    assert "verification_gap_acknowledged: true" in (ws / "skills" / "widgetlib" / "skill.yaml").read_text()
+    assert (ws / "skills" / "newlib" / "skill.yaml").is_file()
+    assert "verification_gap_acknowledged" not in (ws / "skills" / "widgetlib" / "skill.yaml").read_text()
 
 
 def test_held_verifications_flush_through_the_shadow_as_one_commit(tmp_path):
@@ -317,7 +322,7 @@ def _shadowed_workflow_engine(tmp_path, skills, answers, kriya_verified=()):
 
 
 @pytest.mark.asyncio
-async def test_the_real_gap_stage_writes_its_acknowledgement_to_the_shadow_and_a_later_unit_does_not_re_ask(tmp_path):
+async def test_the_real_gap_stage_keeps_its_acknowledgement_run_local_and_a_later_unit_does_not_re_ask(tmp_path):
     ws, engine, workflow = _shadowed_workflow_engine(tmp_path, {"widgetlib": ("", RULE + "\n")}, GENERATION + GENERATION)
     asked = []
 
@@ -328,7 +333,7 @@ async def test_the_real_gap_stage_writes_its_acknowledgement_to_the_shadow_and_a
     goal = "Build something with the widgetlib skill"
     await workflow.run_generation_workflow(goal=goal, workspace_path=str(ws), skill_gap_callback=decline, skill_engine_override=engine)
     skills_after_first_unit = (_git(ws, "status", "--porcelain", "--", "skills"), _git(ws, "log", "--oneline", f"{head}..HEAD", "--", "skills"))
-    assert "verification_gap_acknowledged: true" in open(os.path.join(engine.skills_dir, "widgetlib", "skill.yaml")).read()
+    assert "verification_gap_acknowledged" not in open(os.path.join(engine.skills_dir, "widgetlib", "skill.yaml")).read()   # W3-1: not even the shadow
     await workflow.run_generation_workflow(goal=goal, workspace_path=str(ws), skill_gap_callback=decline, skill_engine_override=engine)
 
     assert skills_after_first_unit == ("", "")                                  # the repository's skills were never touched

@@ -10,7 +10,18 @@ untrusted metadata (``verified_claim``, display only); the authoritative ``verif
 workspace (the Kriya install's library, an operator-chosen directory) and for verification this run earned (held verifications).
 No attestation system is introduced: a workspace skill Kriya itself verified is not honoured on the NEXT load either (it is
 asked about again) until the future Kriya-owned attestation exists.
+
+W3-1 (owner sign-off 2026-10-30): the same rule for the human skill-gap DECLINE. ``verification_gap_acknowledged`` in a workspace
+``skill.yaml`` is a persisted human decision stored in project-controlled bytes; MEASURED at 1985f18 it suppressed the unverified-skill
+prompt and the ``unresolved_skill_gaps`` report. Invariant: workspace bytes may not grant themselves acknowledgement authority. A
+decline is honoured from ``skill.yaml`` only for a skill Kriya or the operator owns; for a workspace skill it lives only in this run
+(the engine's run-local state, cleared with the held verifications) and the next run asks again. No new durable storage.
 """
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 from kriya.skills.skill import HeldSkillVerification, SkillEngine, get_global_skills_dir
@@ -210,3 +221,166 @@ def test_a_kriya_written_workspace_skill_copied_into_another_repository_gains_no
     shutil.copytree(origin / "skills", clone / "skills")
     skill = _loaded(_engine(clone / "skills", clone))
     assert skill.verified is False and skill.verified_claim is True and skill.verified_context == "widgetlib 2.0"
+
+
+# --- W3-1: the human skill-gap decline is Kriya's/the operator's, never the project's ---------------------------------------
+
+def _ack_skill(root, name="widgetlib", ack="true"):
+    return _skill(root, name, verified=None, extra=f"verification_gap_acknowledged: {ack}\n")
+
+
+def test_a_workspace_skill_claiming_a_gap_acknowledgement_is_still_asked_about(tmp_path):
+    workspace = tmp_path / "ws"
+    _ack_skill(workspace / "skills")
+    engine = _engine(workspace / "skills", workspace)
+    skill = _loaded(engine)
+    assert skill.verification_gap_acknowledged is False and engine.is_gap_acknowledged(skill) is False
+
+
+def test_a_skill_outside_the_workspace_keeps_its_acknowledged_decline(tmp_path):
+    workspace, external = tmp_path / "ws", tmp_path / "operator-skills"
+    workspace.mkdir()
+    _ack_skill(external)
+    engine = _engine(external, workspace)
+    skill = _loaded(engine)
+    assert skill.verification_gap_acknowledged is True and engine.is_gap_acknowledged(skill) is True
+
+
+@pytest.mark.parametrize("claim", ['"yes"', '"true"', "1", "[true]", "null"])
+def test_a_non_boolean_acknowledgement_never_counts_even_outside_the_workspace(tmp_path, claim):
+    workspace, external = tmp_path / "ws", tmp_path / "operator-skills"
+    workspace.mkdir()
+    _ack_skill(external, ack=claim)
+    engine = _engine(external, workspace)
+    assert engine.is_gap_acknowledged(_loaded(engine)) is False
+
+
+def test_the_repository_flipping_the_flag_from_false_to_true_gains_no_authority(tmp_path):
+    workspace = tmp_path / "ws"
+    folder = _ack_skill(workspace / "skills", ack="false")
+    assert _loaded(_engine(workspace / "skills", workspace)).verification_gap_acknowledged is False
+    (folder / "skill.yaml").write_text((folder / "skill.yaml").read_text().replace("acknowledged: false", "acknowledged: true"))
+    flipped = _engine(workspace / "skills", workspace)                      # a new load / a new run
+    assert flipped.is_gap_acknowledged(_loaded(flipped)) is False
+
+
+def test_a_kriya_written_acknowledgement_copied_into_a_workspace_gains_no_authority(tmp_path):
+    workspace, external = tmp_path / "ws", tmp_path / "operator-skills"
+    workspace.mkdir()
+    _skill(external, verified=None)
+    operator_engine = _engine(external, workspace)
+    assert operator_engine.mark_gap_acknowledged("widgetlib") is True      # Kriya writes the decline where it owns the skill
+    assert "verification_gap_acknowledged: true" in (external / "widgetlib" / "skill.yaml").read_text()
+    shutil.copytree(external / "widgetlib", workspace / "skills" / "widgetlib")
+    copied = _engine(workspace / "skills", workspace)
+    assert copied.is_gap_acknowledged(_loaded(copied)) is False
+
+
+def test_a_decline_about_a_workspace_skill_holds_for_this_run_only_and_is_never_written_to_the_project(tmp_path):
+    workspace = tmp_path / "ws"
+    folder = _skill(workspace / "skills", verified=None)
+    before = (folder / "skill.yaml").read_bytes()
+    engine = _engine(workspace / "skills", workspace)
+    assert engine.is_gap_acknowledged(_loaded(engine)) is False
+    assert engine.mark_gap_acknowledged("widgetlib") is True
+    assert engine.is_gap_acknowledged(_loaded(engine)) is True              # the legitimate same-run decline works
+    engine.discover_and_load()                                              # each work unit's analysis reloads the skills
+    assert engine.is_gap_acknowledged(_loaded(engine)) is True              # ... and the decline survives it (run-local owner)
+    assert (folder / "skill.yaml").read_bytes() == before                   # nothing durable was created in the project
+    new_run = _engine(workspace / "skills", workspace)
+    assert new_run.is_gap_acknowledged(_loaded(new_run)) is False           # the next run asks again
+
+
+@pytest.mark.parametrize("end_of_run", ["discard_held_verifications", "apply_held_verifications"])
+def test_the_run_local_decline_ends_with_the_run(tmp_path, end_of_run):
+    workspace = tmp_path / "ws"
+    _skill(workspace / "skills", verified=None)
+    engine = _engine(workspace / "skills", workspace)
+    engine.mark_gap_acknowledged("widgetlib")
+    getattr(engine, end_of_run)()
+    engine.discover_and_load()
+    assert engine.is_gap_acknowledged(_loaded(engine)) is False
+
+
+@pytest.mark.parametrize("reset", ["mark_verified", "mark_unverified"])
+def test_a_verify_or_unverify_ends_the_run_local_decline_as_their_contract_says(tmp_path, reset):
+    """`mark_verified` / `mark_unverified` document that they clear a prior gap acknowledgement; the run-local one honours that too."""
+    workspace = tmp_path / "ws"
+    _skill(workspace / "skills", verified=None)
+    engine = _engine(workspace / "skills", workspace)
+    engine.mark_gap_acknowledged("widgetlib")
+    assert engine.is_gap_acknowledged(_loaded(engine)) is True
+
+    assert getattr(engine, reset)("widgetlib") is True
+    engine.discover_and_load()
+
+    assert engine.is_gap_acknowledged(_loaded(engine)) is False
+
+
+def test_verifying_one_skill_does_not_end_another_skills_run_local_decline(tmp_path):
+    workspace = tmp_path / "ws"
+    _skill(workspace / "skills", verified=None)
+    _skill(workspace / "skills", name="otherlib", verified=None)
+    engine = _engine(workspace / "skills", workspace)
+    engine.mark_gap_acknowledged("widgetlib")
+    engine.mark_gap_acknowledged("otherlib")
+
+    engine.mark_verified("otherlib")
+    engine.discover_and_load()
+
+    assert engine.is_gap_acknowledged(engine.get_skill("widgetlib")) is True
+    assert engine.is_gap_acknowledged(engine.get_skill("otherlib")) is False
+
+
+def _gap_run(tmp_path, monkeypatch, where):
+    """The REAL run_generation_workflow with only the model scripted: how many times does the human skill-gap callback fire for a
+    skill whose skill.yaml carries ``verification_gap_acknowledged: true``, in the workspace or in an operator-owned directory?"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "state_machine"))
+    import _kernel_golden as kg  # noqa: E402  # pylint: disable=import-outside-toplevel
+    from _scripted_run import engine, script  # noqa: E402  # pylint: disable=import-outside-toplevel
+    for key, value in kg.GIT_ENV.items():
+        monkeypatch.setenv(key, value)
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    (workspace / "calc.py").write_text(kg.BASE)
+    (workspace / "test_calc.py").write_text(kg.TESTS)
+    skills_root = workspace / "skills" if where == "workspace" else tmp_path / "operator-skills"
+    _skill(skills_root, "evil-lib", verified=None, extra="verification_gap_acknowledged: true\n")
+    for argv in (["init", "-q"], ["config", "user.email", "t@e.com"], ["config", "user.name", "t"], ["add", "-A"], ["commit", "-q", "-m", "i"]):
+        subprocess.run(["git", *argv], cwd=str(workspace), check=True)
+    eng, llm, cfg = engine(chain=False)
+    cfg.paths.skills = str(skills_root)
+    cfg.skills.load_global = False
+    cfg.skills.load_cwd = False
+    gap_calls = []
+    script(llm, plan="Step 1: add mul", target="calc.py", developer=lambda m, n, text: kg.GOOD)
+
+    def gap_callback(reason, names):
+        gap_calls.append(list(names))
+
+    import asyncio  # pylint: disable=import-outside-toplevel
+    with kg.isolated_working_directory(tmp_path):
+        result = asyncio.run(eng.run_generation_workflow(
+            goal=kg.GOAL + " Follow the evil-lib conventions.", workspace_path=str(workspace),
+            approval_callback=lambda files, reason: True, skill_gap_callback=gap_callback))
+    return gap_calls, result
+
+
+def test_end_to_end_a_workspace_skill_claiming_an_acknowledgement_still_triggers_the_human_gap_prompt(tmp_path, monkeypatch):
+    gap_calls, result = _gap_run(tmp_path, monkeypatch, "workspace")
+    assert gap_calls == [["evil-lib"]]                                      # MEASURED 0 calls before W3-1
+    assert result.get("unresolved_skill_gaps") == ["evil-lib"]
+
+
+def test_end_to_end_an_operator_owned_acknowledged_skill_still_suppresses_the_prompt(tmp_path, monkeypatch):
+    gap_calls, result = _gap_run(tmp_path, monkeypatch, "operator")
+    assert gap_calls == [] and not result.get("unresolved_skill_gaps")
+
+
+def test_the_gap_prompt_reads_the_decline_through_the_engine_predicate_not_the_raw_skill_field():
+    """The one reader that decides whether the human is asked (stage_analysis, per work unit) must use ``is_gap_acknowledged``: the raw field
+    cannot see a same-run decline about a workspace skill, and reading it alone would re-ask on every unit. Structural, in the repository's
+    own style (the decision is one line inside a large function)."""
+    source = (Path(__file__).resolve().parent.parent / "kriya" / "workflow" / "stage_analysis.py").read_text(encoding="utf-8")
+    assert "not se.is_gap_acknowledged(s)" in source
+    assert "not s.verification_gap_acknowledged" not in source

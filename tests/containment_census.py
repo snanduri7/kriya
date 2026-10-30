@@ -101,6 +101,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_fs1c_named_test_oracle_dependency.py': ('S', 'M'),
  'tests/test_full_file_final_newline.py': ('S', 'M'),
  'tests/test_gate_orchestrator.py': ('S', 'M'),
+ 'tests/test_skill_workspace_verified_authority.py': ('S', 'M'),
  'tests/test_slice_f_gate_path.py': ('S', 'M'),
  'tests/test_w216a_compile_text_guard.py': ('S', 'M'),
  'tests/test_generation_service.py': ('S', 'M'),

@@ -129,7 +129,7 @@ def _measure(ws, sandbox, tmp_path, act):
 
 # site -> the number of commits it makes. Measured with a real sandbox worktree over a real git workspace.
 MEASURED_COMMITS = {
-    "create_skill_skeleton": 1, "mark_gap_acknowledged": 1, "write_skill_extraction": 3, "stage_skill_conflicts": 1,
+    "create_skill_skeleton": 1, "write_skill_extraction": 3, "stage_skill_conflicts": 1,
     "record_conflict_resolution": 1, "record_rule_provenance": 1, "mark_rules_verified": 2, "apply_held_verifications": 1,
 }
 
@@ -142,6 +142,19 @@ def test_every_committing_skill_writer_moves_the_workspace_head_so_a_later_bound
 
     assert result == {"commits": MEASURED_COMMITS[site], "head_moved": True, "content_changed": True, "bind_before": "bound",
                       "bind_after": GIT_METADATA_STALE, "sandbox_head_unchanged": True}
+
+
+def test_a_workspace_skill_gap_decline_is_run_local_so_it_changes_nothing_the_gates_bind_to(tmp_path):
+    """W3-1: the decline used to be a committing writer (one commit, HEAD moved, sandbox STALE). It is now held by the engine for the
+    run: no commit, no HEAD move, no content change, the binding holds - and the engine still remembers it."""
+    ws, sandbox, engine = _world(tmp_path)
+
+    result = _measure(ws, sandbox, tmp_path, _drivers(ws, engine)["mark_gap_acknowledged"])
+
+    assert result == {"commits": 0, "head_moved": False, "content_changed": False, "bind_before": "bound", "bind_after": "bound",
+                      "sandbox_head_unchanged": True}
+    assert engine.is_gap_acknowledged(engine.get_skill("widgetlib")) is True
+    assert _git(ws, "status", "--porcelain", "--", "skills") == ""
 
 
 def test_staging_a_lesson_writes_a_file_but_commits_nothing_so_the_binding_holds_and_only_the_workspace_content_moves(tmp_path):
@@ -245,16 +258,22 @@ def _assert_every_skill_commit_precedes_the_sandbox_and_every_bound_gate_saw_one
 
 
 @pytest.mark.asyncio
-async def test_a_standalone_skill_gap_decline_commits_before_the_sandbox_exists_so_every_gate_binds(tmp_path):
+async def test_a_standalone_skill_gap_decline_commits_nothing_so_every_gate_binds(tmp_path):
+    """W3-1: the decline of a workspace skill is run-local. It is still asked (the callback runs), but no skill commit happens."""
     skills = {"widgetlib": ("", RULE + "\n")}
+    asked = []
 
-    result, timeline = await _run_standalone(
-        tmp_path, skills, GENERATION, "Build something with the widgetlib skill", skill_gap_callback=lambda reason, names: None)
+    def decline(reason, names):
+        asked.append(names)
+
+    result, timeline = await _run_standalone(tmp_path, skills, GENERATION, "Build something with the widgetlib skill", skill_gap_callback=decline)
 
     assert result["quality_gates_passed"] is True
-    assert [e[1] for e in timeline.events if e[0] == "commit"] == [
-        "Kriya: set verification_gap_acknowledged=True on skill 'widgetlib'"]
-    _assert_every_skill_commit_precedes_the_sandbox_and_every_bound_gate_saw_one_identity(timeline, 1)
+    assert asked == [["widgetlib"]]
+    assert timeline.index("commit") == [] and len(timeline.index("sandbox")) == 1, timeline.events
+    gates = [event for event in timeline.events if event[0] in ("gate", "terminal_apply")]
+    assert gates and {event[2] for event in gates} == {"bound"}, timeline.events
+    assert "verification_gap_acknowledged" not in (timeline.ws / "skills" / "widgetlib" / "skill.yaml").read_text()
 
 
 ALPHA_RULE = "Broker must bind AMQP to port 5672."
@@ -398,7 +417,7 @@ def _read(path):
 
 PROBES = {
     "create_skill_skeleton": lambda engine, ws: engine._resolve_skill("newlib") is not None,
-    "mark_gap_acknowledged": lambda engine, ws: engine.get_skill("widgetlib").verification_gap_acknowledged is True,
+    "mark_gap_acknowledged": lambda engine, ws: engine.is_gap_acknowledged(engine.get_skill("widgetlib")),   # W3-1: run-local, survives discover_and_load
     "write_skill_extraction": lambda engine, ws: "Always close every widget handle after use." in engine.get_skill("widgetlib").rules,
     "stage_skill_conflicts": lambda engine, ws: "Widgets are lowercase." in _read(_skill_dir(engine) + "/staged_rules.txt"),
     "record_conflict_resolution": lambda engine, ws: find_conflict_resolution(
@@ -411,6 +430,7 @@ PROBES = {
     "apply_held_verifications": lambda engine, ws: engine.get_skill("widgetlib").verified_claim is True and engine.get_skill("widgetlib").verified is False,
 }
 IN_RUN_LEARNING_WRITERS = sorted(PROBES)
+DURABLE_LEARNING_WRITERS = [site for site in IN_RUN_LEARNING_WRITERS if site != "mark_gap_acknowledged"]     # W3-1: the decline is run-local only
 
 
 @pytest.mark.asyncio
@@ -459,7 +479,7 @@ async def test_a_contained_terminal_gate_verifies_the_identity_the_run_first_bou
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("site", IN_RUN_LEARNING_WRITERS)
+@pytest.mark.parametrize("site", DURABLE_LEARNING_WRITERS)
 async def test_the_learning_becomes_durable_only_after_the_terminal_commit_as_exactly_its_own_delta(tmp_path, site):
     result, seen = await _run_enforce_with_site(tmp_path, site)
     ws, before = seen["ws"], seen["ws_at_sandbox"]
@@ -470,6 +490,19 @@ async def test_the_learning_becomes_durable_only_after_the_terminal_commit_as_ex
     assert int(_git(ws, "rev-list", "--count", f"{before['head']}..HEAD")) >= 1  # ... after the candidate's own commit
     assert not (seen["engine"].run_shadow_active)
     assert not list(_shadow_dirs(tmp_path))                                     # the shadow is gone
+
+
+@pytest.mark.asyncio
+async def test_a_skill_gap_decline_never_becomes_durable_even_after_a_successful_terminal_commit(tmp_path):
+    """W3-1: the next subtask saw the decline (run-local), the run succeeded and committed, and a fresh engine - the next run - still asks."""
+    result, seen = await _run_enforce_with_site(tmp_path, "mark_gap_acknowledged")
+    ws = seen["ws"]
+
+    assert result.legacy_result["status"] == "success" and seen["later_sees"] is True
+    assert "post_commit_persistence_errors" not in result.legacy_result
+    assert not PROBES["mark_gap_acknowledged"](_fresh_engine(ws), ws)
+    assert "verification_gap_acknowledged" not in (ws / "skills" / "widgetlib" / "skill.yaml").read_text()
+    assert _git(ws, "status", "--porcelain", "--", "skills") == "" and not list(_shadow_dirs(tmp_path))
 
 
 def _fresh_engine(ws):

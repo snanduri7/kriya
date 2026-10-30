@@ -6,7 +6,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import yaml
 from pydantic import BaseModel, Field
@@ -407,7 +407,7 @@ class Skill(BaseModel):
     )
     supported_versions: str = Field(default="*", description="Supported version range (e.g. >=2.15.0 <3.0.0).")
     verified: bool = Field(default=False, description="True once a Runtime Verification Gate run using this skill has passed, or a human has explicitly promoted a rule into it.")
-    verification_gap_acknowledged: bool = Field(default=False, description="True once the user has been asked to strengthen this unverified skill and declined - suppresses re-asking until it actually becomes verified.")
+    verification_gap_acknowledged: bool = Field(default=False, description="True once the user has been asked to strengthen this unverified skill and declined - suppresses re-asking until it actually becomes verified. W3-1: honoured from skill.yaml only for a skill Kriya or the operator owns (outside the workspace); for a workspace skill it holds only for the run that recorded it.")
     verified_claim: bool = Field(default=False, description="B3: what the skill's own skill.yaml says about `verified`, as UNTRUSTED metadata (display only). `verified` above is Kriya's: a skill inside the workspace cannot self-attest it.")
     verified_at: Optional[str] = Field(default=None, description="Date (YYYY-MM-DD) the skill was last marked verified - advisory provenance for a human to judge staleness, not used to automatically re-trigger anything.")
     verified_context: Optional[str] = Field(default=None, description="Best-effort description of what was actually verified (e.g. a version mentioned in the goal, or 'promoted from X') - advisory provenance only, same as verified_at.")
@@ -503,6 +503,9 @@ class SkillEngine:
         self._shadow: Optional[RunShadow] = None
         self._skills: Dict[str, Skill] = {}
         self._held_verifications: Dict[str, HeldSkillVerification] = {}
+        # W3-1: declines of THIS run about a workspace-owned skill (its skill.yaml is project bytes, not authority); dropped with
+        # the held verifications at the run's end, never written to the project.
+        self._run_gap_acknowledged: Set[str] = set()
         # Whether the commit of the last `_set_skill_yaml_fields` write succeeded (False = the file is written but the repository
         # holds an uncommitted change); None before any write or when the write itself did not happen.
         self.last_write_committed: Optional[bool] = None
@@ -633,6 +636,7 @@ class SkillEngine:
 
                     # B3: only a literal boolean true is a claim, and only a skill outside the workspace may be believed.
                     claimed_verified = meta.get("verified") is True
+                    claimed_gap_acknowledged = meta.get("verification_gap_acknowledged") is True
                     # Build Skill object
                     skill = Skill(
                         name=meta.get("name", folder),
@@ -645,7 +649,9 @@ class SkillEngine:
                         supported_versions=meta.get("supported_versions", "*"),
                         verified=claimed_verified and self._skill_verification_is_authoritative(folder_path),
                         verified_claim=claimed_verified,
-                        verification_gap_acknowledged=bool(meta.get("verification_gap_acknowledged", False)),
+                        # W3-1: a decline recorded in a skill.yaml INSIDE the workspace is project-controlled bytes, so it is not authority
+                        # (the same rule as `verified`): only a skill Kriya or the operator owns can suppress the human gap prompt across runs.
+                        verification_gap_acknowledged=claimed_gap_acknowledged and self._skill_verification_is_authoritative(folder_path),
                         verified_at=meta.get("verified_at"),
                         verified_context=meta.get("verified_context"),
                         source_path=folder_path
@@ -755,6 +761,8 @@ class SkillEngine:
         if not skill or not skill.source_path:
             logger.warning(f"Cannot update skill '{skill_name}': not found or has no known source path.")
             return False
+        if fields.get("verification_gap_acknowledged") is False:
+            self._run_gap_acknowledged.discard(skill.name)       # the run-local acknowledgement ends with the one the file records
 
         # MA7.4 - HARD refusal, not a warning: durable lesson #4's real
         # incidents (see is_accidental_shared_skill_write's own docstring)
@@ -848,6 +856,7 @@ class SkillEngine:
         """Drops every held verification, persisting nothing; returns how many were dropped."""
         count = len(self._held_verifications)
         self._held_verifications = {}
+        self._run_gap_acknowledged = set()
         return count
 
     def apply_held_verifications(self) -> List[Dict[str, str]]:
@@ -856,6 +865,7 @@ class SkillEngine:
         `mark_verified`, or an exception); such a skill is neither marked verified nor has its rules flipped. It never
         raises: the candidate's verification result is already established, and a bookkeeping failure must not rewrite it."""
         held, self._held_verifications = list(self._held_verifications.values()), {}
+        self._run_gap_acknowledged = set()
         failures: List[Dict[str, str]] = []
         for item in held:
             try:
@@ -885,9 +895,25 @@ class SkillEngine:
                 })
         return failures
 
+    def is_gap_acknowledged(self, skill: Skill) -> bool:
+        """Whether the human gap prompt is suppressed for ``skill``: a decline Kriya or the operator owns (``skill.yaml`` outside the
+        workspace) or one recorded by THIS run for a workspace skill. A workspace skill.yaml's own claim never counts (W3-1)."""
+        return bool(skill.verification_gap_acknowledged) or skill.name in self._run_gap_acknowledged
+
     def mark_gap_acknowledged(self, skill_name: str) -> bool:
         """Marks that the user was asked to strengthen this unverified skill and
-        declined, so future generation runs don't keep re-asking about the same skill."""
+        declined, so the rest of this run (and, for a skill Kriya or the operator owns, future runs)
+        don't keep re-asking about the same skill.
+
+        W3-1: a skill inside the workspace is project-supplied, and what its skill.yaml says about an acknowledgement is not
+        authority (`discover_and_load`), so a decline about it lives only in this engine's in-memory Skill for the run - the same
+        run-local owner that holds verifications - and is never written into the project's bytes: the next run asks again."""
+        skill = self._resolve_skill(skill_name)
+        if skill and skill.source_path and not self._skill_verification_is_authoritative(skill.source_path):
+            self.last_write_committed = None
+            self._run_gap_acknowledged.add(skill.name)
+            skill.verification_gap_acknowledged = True       # until the next discover_and_load; `is_gap_acknowledged` is what survives it
+            return True
         return self._set_skill_yaml_field(skill_name, "verification_gap_acknowledged", True)
 
     def mark_unverified(self, skill_name: str) -> bool:

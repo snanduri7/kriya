@@ -68,9 +68,12 @@ CALLER_SITES: Dict[Tuple[str, str, str], Site] = {
         semantic="LEARNING", same_run_reader="the skill registry reload: the new skill is matched and extended by later work units",
         disposition="RUN_LOCAL_DEFER_DURABILITY", status="closed", **_LEARNING_ENFORCE),
     ("kriya/workflow/stage_analysis.py", "analyze_work_unit", "mark_gap_acknowledged"): Site(
-        "stage 1.2 skill-gap decline", "<skills>/<skill>/skill.yaml", SKILLS_IN_REPO, True, True,
-        semantic="LEARNING", same_run_reader="the gap check of later work units (not s.verified and not s.verification_gap_acknowledged)",
-        disposition="RUN_LOCAL_DEFER_DURABILITY", status="closed", **_LEARNING_ENFORCE),
+        "stage 1.2 skill-gap decline", "none: held by the engine for the run (W3-1)", SKILLS_IN_REPO, False, False,
+        semantic="LEARNING", same_run_reader="the gap check of later work units (not se.is_gap_acknowledged(s))",
+        disposition="RUN_LOCAL_DEFER_DURABILITY", status="closed",
+        note="W3-1 owner decision: a skill inside the repository is project-supplied, so its decline is run-local and is NEVER made durable "
+             "(the next run asks again); the 'defer durability' of this vocabulary therefore means 'dropped by design' here. "
+             "Nothing is written or committed, so it cannot move the bound HEAD.", **_LEARNING_ENFORCE),
     ("kriya/workflow/stage_analysis.py", "analyze_work_unit", "_write_skill_extraction"): Site(
         "stage 1.2 skill-gap extraction", "<skills>/<skill>/rules.txt, examples/, rule provenance", SKILLS_IN_REPO, True, True,
         semantic="LEARNING", same_run_reader="the skill registry reload and the unverified-rule labelling of later work units",
@@ -136,7 +139,8 @@ CALLER_SITES: Dict[Tuple[str, str, str], Site] = {
         "see callers", "FUNNEL", "CHAIN", "closed", "Reached from mark_verified / mark_unverified / _set_skill_yaml_field."),
     ("kriya/skills/skill.py", "SkillEngine.mark_gap_acknowledged", "_set_skill_yaml_field"): Site(
         "SkillEngine", "<skills>/<skill>/skill.yaml", SKILLS_IN_REPO, True, True, "see callers", "see callers", "see callers",
-        "see callers", "FUNNEL", "CHAIN", "closed", "Called by stage_analysis (classified) and the CLI."),
+        "see callers", "FUNNEL", "CHAIN", "closed",
+        "Reached only for a skill OUTSIDE the workspace (operator-owned), which is outside the bound repository; a workspace skill never gets here (W3-1). Called by stage_analysis (classified) and the CLI."),
     ("kriya/skills/skill.py", "SkillEngine.mark_verified", "_set_skill_yaml_fields"): Site(
         "SkillEngine", "<skills>/<skill>/skill.yaml", SKILLS_IN_REPO, True, True, "see callers", "see callers", "see callers",
         "see callers", "FUNNEL", "CHAIN", "closed", "Called by apply_held_verifications (post-terminal) and the CLI promote."),
@@ -340,7 +344,8 @@ def test_the_head_and_write_columns_agree_with_the_measured_dynamic_detector():
     for driver, key in by_driver.items():
         measured_commits = MEASURED_COMMITS.get(driver, 0)
         assert (measured_commits > 0) == CALLER_SITES[key].moves_head, driver
-        assert CALLER_SITES[key].writes_file is True, driver
+        # W3-1: the skill-gap decline is the one writer measured (test_midrun_workspace_mutations) to change no workspace byte
+        assert CALLER_SITES[key].writes_file is (driver != "mark_gap_acknowledged"), driver
 
 
 def test_the_registry_row_exists_and_agrees_with_the_open_rows():
