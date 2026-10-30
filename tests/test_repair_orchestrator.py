@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -655,6 +656,8 @@ def _family_coordinated(tmp_path):
     for rel, content in ((APP, APP_SOURCE), (APP_TEST, APP_TEST_SOURCE)):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text(content, encoding="utf-8")
+    for git_args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "initial"]):
+        subprocess.run(["git", *git_args], cwd=tmp_path, check=True)                # the brownfield guards need the Git-backed membership (a standalone folder is refused)
     workspace = str(tmp_path)
     cfg = _config(chain=False)
     ledger = ObligationLedger()

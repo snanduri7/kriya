@@ -254,6 +254,8 @@ def _run_attempt_case(regions, candidate_content, plan_mentions_helper=False):
         java_path = os.path.join(td, "Target.java")
         with open(java_path, "w") as f:
             f.write(TARGET_SRC)
+        for git_args in (["init", "-q"], ["config", "user.email", "test@test.com"], ["config", "user.name", "Test"], ["add", "-A"], ["commit", "-q", "-m", "initial"]):
+            subprocess.run(["git", *git_args], cwd=td, check=True)                  # the brownfield guards need the Git-backed membership (a standalone folder is refused)
         developer = developer_double()
         developer.run_generation = AsyncMock(return_value=[
             {"filepath": "Target.java", "content": candidate_content},
