@@ -212,7 +212,7 @@ def _not_synced(rel: str) -> bool:
     return rel == ".kriya" or rel.startswith(".kriya/") or _interpreter_cache_path(rel)
 
 
-def _sync_uncommitted_changes_into_worktree(repo_path: str, worktree_path: str) -> None:
+def _sync_uncommitted_changes_into_worktree(repo_path: str, worktree_path: str) -> List[str]:
     """After create_git_worktree resets the sandbox to a clean git HEAD checkout, copy
     over any uncommitted changes (modified tracked files, new untracked files) from the
     real workspace so the Developer's sandbox reflects what's actually on disk, not just
@@ -284,6 +284,71 @@ def _sync_uncommitted_changes_into_worktree(repo_path: str, worktree_path: str) 
             WORKTREE_CONTENT_MISMATCH,
             f"the sandbox does not hold the workspace's bytes after sync: {', '.join(mismatched[:10])}",
         )
+    return synced
+
+
+_COMPARE_CHUNK = 1 << 20
+
+
+def _same_bytes(first: str, second: str, chunk: int = _COMPARE_CHUNK) -> bool:
+    """Exactly equal file bytes: the sizes first (a cheap early rejection), then a streaming byte-for-byte comparison. No
+    decoding and no newline normalization - 'equal after normalizing' is precisely the claim this check exists to refuse."""
+    if os.stat(first).st_size != os.stat(second).st_size:
+        return False
+    with open(first, "rb") as one, open(second, "rb") as other:
+        while True:
+            left, right = one.read(chunk), other.read(chunk)
+            if left != right:
+                return False
+            if not left:
+                return True
+
+
+def _materialization_differences(repo_path: str, worktree_path: str, synced: Iterable[str]) -> List[str]:
+    """The tracked paths whose sandbox bytes are not the workspace's. Membership is ``repository_content_paths`` (the one
+    definition of repository content: tracked, ``.kriya`` excluded - ignored and generated output is never scanned). The paths the
+    sync itself copied are already proven byte-identical by its own check and are not compared a second time, and the paths it
+    deliberately never copies (``_not_synced``: interpreter caches the candidate tree rebuilds) are not claimed to match."""
+    proven = set(synced)
+    differing: List[str] = []
+    for rel in repository_content_paths(repo_path):
+        if rel in proven or _not_synced(rel):
+            continue
+        source, sandbox = os.path.join(repo_path, rel), os.path.join(worktree_path, rel)
+        try:
+            if os.path.islink(source) or os.path.islink(sandbox):
+                if not (os.path.islink(source) and os.path.islink(sandbox) and os.readlink(source) == os.readlink(sandbox)):
+                    differing.append(rel)
+            elif os.path.isdir(source):
+                continue                                    # a gitlink / nested repository: a directory holds no bytes of its own
+            elif not os.path.lexists(source) and not os.path.lexists(sandbox):
+                continue                                    # absent on both sides (a sparse / skip-worktree path)
+            elif not (os.path.isfile(source) and os.path.isfile(sandbox)) or not _same_bytes(source, sandbox):
+                differing.append(rel)
+        except OSError:
+            differing.append(rel)                           # bytes that cannot be read cannot be proven equal: fail closed
+    return differing
+
+
+def _verify_materialized_tracked_bytes(repo_path: str, worktree_path: str, synced: Iterable[str]) -> None:
+    """W3-2 materialization invariant, before any model or edit execution touches the sandbox: every clean tracked file the
+    checkout materialized holds EXACTLY the bytes the workspace holds. A repository-owned attribute (``eol``, ``text``,
+    ``working-tree-encoding``, ``ident`` in ``.gitattributes`` / ``info/attributes``) can legitimately rewrite bytes at checkout;
+    host configuration cannot (the Git authority pins it). When the repository's attributes do rewrite them, the sandbox is a
+    DIFFERENT candidate base than the approved workspace and a run verified against it would claim equivalence it never had: it
+    fails closed, naming the paths. Neither side is rewritten to manufacture equality."""
+    differing = _materialization_differences(repo_path, worktree_path, synced)
+    if not differing:
+        return
+    more = f" (and {len(differing) - 10} more)" if len(differing) > 10 else ""
+    raise WorktreeSyncError(
+        WORKTREE_CONTENT_MISMATCH,
+        f"the sandbox does not hold the workspace's bytes after checkout: {', '.join(differing[:10])}{more}. A repository attribute "
+        "(eol, text, working-tree-encoding or ident in .gitattributes or info/attributes) rewrote them at checkout, so what Kriya "
+        "would verify is not what the workspace holds. Nothing was changed on either side. If the repository's attributes are meant "
+        "to apply to these files, normalize them yourself (for example `git add --renormalize .` and a commit); Kriya never "
+        "normalizes the workspace or the sandbox.",
+    )
 
 
 def _refuse_control_object_aliases(identities: ControlObjectIdentities, sources: Iterable[str]) -> None:
@@ -688,7 +753,10 @@ def create_git_worktree(repo_path: str) -> str:
     # A worktree only ever reflects git HEAD - it knows nothing about uncommitted
     # changes in the real workspace, which is the normal state of an in-progress
     # project. Copy those over now so the sandbox matches what's actually on disk.
-    _sync_uncommitted_changes_into_worktree(repo_path, worktree_path)
+    synced = _sync_uncommitted_changes_into_worktree(repo_path, worktree_path)
+    # W3-2: the checkout above (a fresh `worktree add`, or the reuse path's `checkout -f`) ran under the repository's own attributes;
+    # prove it left the workspace's bytes before anything is edited or verified here.
+    _verify_materialized_tracked_bytes(repo_path, worktree_path, synced)
 
     return worktree_path
 

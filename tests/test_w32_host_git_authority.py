@@ -106,6 +106,7 @@ def make_repo(root: Path, files: Dict[str, bytes], *, gitattributes: Optional[st
     if gitattributes is not None:
         (repo / ".gitattributes").write_text(gitattributes)
     for relative, data in files.items():
+        (repo / relative).parent.mkdir(parents=True, exist_ok=True)
         (repo / relative).write_bytes(data)
     _g(repo, "add", "-A")
     _g(repo, "commit", "-q", "-m", "base")
@@ -160,10 +161,12 @@ def test_binary_bytes_are_preserved(tmp_path, host):
 
 
 def test_repository_owned_gitattributes_stay_active(tmp_path, host):
-    """Host isolation must not disable the repository's own semantics: ``eol=crlf`` in the repository's .gitattributes still
-    materializes CRLF (the exact-byte guard, not host neutralization, is what protects candidate identity there)."""
-    repo = make_repo(tmp_path, {"f.txt": LF}, gitattributes="f.txt text eol=crlf\n")
+    """Host isolation must not disable the repository's own semantics. With ``eol=crlf`` in the repository's .gitattributes and an
+    intentionally CRLF workspace (the one shape the Commit B exact-byte guard admits), the sandbox is CRLF because the repository's
+    rule is applied; were the rule ignored, the checkout would come out LF, differ from the workspace's CRLF, and be refused."""
+    repo = make_repo(tmp_path, {"f.txt": CRLF}, gitattributes="f.txt text eol=crlf\n")
     host.configure(autocrlf="false")
+    assert (repo / "f.txt").read_bytes() == CRLF
     assert sandbox_bytes(repo, "f.txt") == CRLF
 
 
