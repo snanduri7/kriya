@@ -191,3 +191,14 @@ Rows: DIRECTORY-NAME-PRUNING-SOURCE-MEMBERSHIP-RESULT-TRUTH-001 (parent, stays O
 - PARKED unchanged: pre-git `compile_run_contract` -> `derive_java_example_artifact` on a NO_GIT root; scoped-snapshot sandbox (C2); pre-git Architect root.
 - Fingerprint trail: caf2d3fef2f392de (ffc8421) -> e37c33cf40f90b27 (a5eb993). `refs/kriya/verified` unmoved at 7eddc5d6e255; nothing pushed or tagged. FOCUSED/ADJACENT ONLY; the full suite is NOT run.
 - Not started: C1, C2, pre-git Architect root, P3-siblings row, GIT-ICASE-PATHSPECS-UNQUALIFIED-001, the wrong-date comment. W3-3 is NOT closed.
+
+## 17. W3-3 unit C1 - migration scans and the contract reference scan (executable 4c21fbf, change type C+D; stale-fixture repair 40f6ead; bookkeeping separate) - owner sequencing 2026-10-30
+Rows: DIRECTORY-NAME-PRUNING-SOURCE-MEMBERSHIP-RESULT-TRUTH-001 (parent, stays OPEN; C1 recorded). No new row.
+- Root cause (CONFIRMED): `migration._scan_java_files` and `contract_lifecycle._reference_scan` walked the tree pruning directory NAMES, so a tracked consumer under build/target/dist was invisible and a gitignored `out/` file was counted; `workflow._migration_identities`, the `enforce_loop` baseline resolution and `terminal_gate_service._migration_gap` turned an unavailable membership authority into `[]` / INDETERMINATE / a prose gap.
+- Fix: `worktree.candidate_member_paths` (bound-tree members on GIT_BACKED roots, caller's legacy walk on parked classes); both scans consume it; `BoundTreeError` re-raised ahead of the three broad catches and reaches the existing `AUTHORITY_EXECUTION_UNAVAILABLE` stop. `_reference_scan` TRACED as a membership decision (gates `CONTRACT_CONSUMER_VERIFICATION_MISSING`), so FIXED rather than retained as intentional.
+- Original symptom re-measured (probe `probes/probe_c1_git_backed_migration_scans.py`; `prefix_outputs/c1_git_backed_scans_PREFIX_HEAD_3fd1641.txt` -> `..._POSTFIX_working_tree.txt`).
+- Verification: 41 tests (`tests/test_w33_c1_migration_membership.py`); 14/14 mutants killed (baseline/no-op green; two e2e tests added afterwards); adjacent targeted run 208 files: 7717 passed, 9 failed -> all 9 pre-existing (identical at detached 3fd1641; stale non-Git fixtures in test_full_file_final_newline, test_d2_validator_attribution_authority, test_s18_planned_tool_governance), repaired in 40f6ead; ruff + pylint rc=0.
+- Known residual (unchanged, not widened): `_tracked_workspace_paths` returns `[]` when git fails (language detection).
+- PARKED unchanged: NO_GIT_REPOSITORY roots; scoped-snapshot sandbox (C2); pre-git Architect root; pre-git example compile.
+- Fingerprint trail: e37c33cf40f90b27 (a5eb993) -> 11c2ffcd9c1c36f5 (4c21fbf). `refs/kriya/verified` unmoved at 7eddc5d6e255; nothing pushed or tagged. FOCUSED/ADJACENT ONLY; the full suite is NOT run.
+- Not started: C2, pre-git Architect root, P3-siblings row, GIT-ICASE-PATHSPECS-UNQUALIFIED-001, the wrong-date comment. W3-3 is NOT closed.
