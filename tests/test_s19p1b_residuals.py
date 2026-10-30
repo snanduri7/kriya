@@ -11,6 +11,9 @@ D. GUI Open Folder (`workspace.describe`, kriya/tools/git_metadata.describe_chec
    and a refused folder is reported typed (dirty/changed_entries null, ``reason`` = the refusal) without any schema change.
 B. Kriya-source/installation trust is ROLE-based: exactly the call sites in INSTALLATION_STATE read Kriya's own checkout
    as operator-managed infrastructure; the same folder opened as a TARGET is refused at every real target entry.
+   W3-2 follow-up (RELEASE-IDENTITY-ATTR-TREE-UNINSPECTED-001, owner decision 2026-10-30): that exemption is ONLY the
+   content-filter judgment (`content_filters=False`); the `attr.tree` refusal is not role-based, so kriya_revision still
+   makes the inspection call, before its git calls. A site keeps its INSTALLATION_STATE row while it passes the opt-out.
 C. An operator (global/system) definition is trusted only when its ULTIMATE file is outside the repository: direct,
    transitive, relative, conditional (includeIf gitdir/onbranch/hasconfig) and symlinked includes all report the
    ultimate file (MEASURED, scratch p1b/probes/probe_c_includes.*.out) and refuse; a file of ANY of the repository's work
@@ -500,7 +503,9 @@ UNINSPECTED_GIT = {
 INSTALLATION_STATE = {
     ("kriya/core/release_identity.py", "kriya_revision"):
         "the git revision/dirty flag of Kriya's own source (release identity, certification); its `status` CAN run a "
-        "filter (MEASURED) and is not inspected: whoever can write that checkout's configuration can write Kriya's code",
+        "filter (MEASURED) and its content-filter judgment is not applied (`content_filters=False`): whoever can write that "
+        "checkout's configuration can write Kriya's code. The attr.tree rule IS applied before its git calls "
+        "(W3-2 follow-up, RELEASE-IDENTITY-ATTR-TREE-UNINSPECTED-001)",
     ("kriya/distribution.py", "tracked_release_files"):
         "the release tool's own source checkout (--source-root); `ls-files` runs no filter (MEASURED)",
 }
@@ -511,6 +516,12 @@ def _enclosing_function(node: ast.AST, parents: dict) -> Optional[ast.AST]:
     while node is not None and not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         node = parents.get(node)
     return node
+
+
+def _exempts_content_filters(call: ast.Call) -> bool:
+    """A call to the inspection that opts out of the CONTENT-FILTER judgment (``content_filters=False``): it still enforces the
+    ``attr.tree`` rule, but it is not a full inspection, so the site stays an explicit installation-state exemption."""
+    return any(k.arg == "content_filters" and not (isinstance(k.value, ast.Constant) and k.value.value is True) for k in call.keywords)
 
 
 def _git_functions():
@@ -527,7 +538,8 @@ def _git_functions():
                         if _is_git_literal(node) and _enclosing_function(node, parents) is function
                         and (relpath, function.name, ast.unparse(node)) not in NON_SPAWN]   # S19: spawns nothing
             if literals:
-                inspects = any(isinstance(c, ast.Call) and _callee(c) in _INSPECTIONS for c in ast.walk(function))
+                inspects = any(isinstance(c, ast.Call) and _callee(c) in _INSPECTIONS and not _exempts_content_filters(c)
+                               for c in ast.walk(function))
                 yield relpath, function.name, literals, inspects
 
 
@@ -552,6 +564,41 @@ def test_the_installation_state_git_sites_are_exactly_these():
     assert set(INSTALLATION_STATE) == {("kriya/core/release_identity.py", "kriya_revision"),
                                        ("kriya/distribution.py", "tracked_release_files")}
     assert set(INSTALLATION_STATE) <= functions                          # each is still a git site
+
+
+def _exempting_calls():
+    """Every (file, enclosing function, unparsed call) in kriya/ that passes ``content_filters`` to the inspection."""
+    found = set()
+    for path in (REPO / "kriya").rglob("*.py"):
+        relpath = str(path.relative_to(REPO))
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+        for call in ast.walk(tree):
+            if isinstance(call, ast.Call) and any(k.arg == "content_filters" for k in call.keywords):
+                function = _enclosing_function(call, parents)
+                found.add((relpath, getattr(function, "name", "<module>"), ast.unparse(call)))
+    return found
+
+
+def test_the_content_filter_exemption_is_passed_only_by_the_installation_state_site_with_a_literal_false():
+    """RELEASE-IDENTITY-ATTR-TREE-UNINSPECTED-001: the inspection's content-filter opt-out is a role exemption. Exactly the
+    INSTALLATION_STATE call that inspects (kriya_revision) passes it, as the literal ``False`` (never a variable a target path could
+    reach), and the other call sites - every target-workspace entry - never pass the argument at all."""
+    calls = _exempting_calls()
+    assert {(relpath, name) for relpath, name, _call in calls} == {("kriya/core/release_identity.py", "kriya_revision")}, calls
+    assert all("content_filters=False" in call for _relpath, _name, call in calls), calls
+    assert not any(relpath.startswith("kriya/repository/") for relpath, _name, _call in calls), "the authority must not exempt itself"
+
+
+def test_kriya_revision_inspects_attr_tree_before_its_first_git_call():
+    """The exempt inspection exists and precedes both evidence calls (`_command`) in kriya_revision's body."""
+    from tests.architecture.test_git_invocation_seam import _callee
+
+    tree = ast.parse((REPO / "kriya" / "core" / "release_identity.py").read_text(encoding="utf-8"))
+    function = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "kriya_revision")
+    inspections = [c.lineno for c in ast.walk(function) if isinstance(c, ast.Call) and _callee(c) in _INSPECTIONS]
+    commands = [c.lineno for c in ast.walk(function) if isinstance(c, ast.Call) and _callee(c) == "_command"]
+    assert len(inspections) == 1 and len(commands) == 2 and inspections[0] < min(commands), (inspections, commands)
 
 
 def test_an_installation_root_comes_only_from_the_installation():

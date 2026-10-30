@@ -659,18 +659,20 @@ def _provenance_cause(caller: _Caller, path: str, command: str, roots: Tuple[str
 
 
 def _refuse(caller: _Caller, run: _Runner, path: str, seen: Set[str], depth: int,
-            revisions: Callable[[], Sequence[str]]) -> None:
+            revisions: Callable[[], Sequence[str]], content_filters: bool = True) -> None:
     """The chain for ONE repository context: effective configuration -> ultimate origin -> ACTIVATION (S19 P1d: only
     a driver git activates for a path the operation can touch is judged; S19 P1e: repository-origin definitions too)
     -> an active repository-origin definition refuses; an active trusted one is judged by executable provenance (S19
     P1c) -> the repositories git recurses into. ``revisions``: the trees the caller's operation materializes in THIS
-    repository (asked only when activation must be decided)."""
+    repository (asked only when activation must be decided). ``content_filters`` False: the content-filter judgment is not
+    applied (the caller's role is exempt from it, see :func:`refuse_repository_content_filters`); discovery, git's ownership
+    answer, the ``attr.tree`` refusal and the recursion are exactly the same."""
     layout, not_a_repository = _layout(run, path)
     roots = layout if layout is not None else (os.path.realpath(path),)
     common = layout[2] if layout is not None else None
     configured = _filter_definitions(run, path)
     attr_trees = [entry for entry in configured if entry[2] == _ATTR_TREE_KEY]
-    definitions = [entry for entry in configured if entry[2] != _ATTR_TREE_KEY]
+    definitions = [entry for entry in configured if entry[2] != _ATTR_TREE_KEY] if content_filters else []
     if layout is None and not not_a_repository and (depth > 0 or attr_trees or any(value != "" for *_, value in definitions)):
         # TAF-1: no work tree because git may REFUSE this repository (ownership). Ownership is a prerequisite security
         # decision: git's own refusal is the cause, never a definition judged without activation (MEASURED at ea56d08:
@@ -734,12 +736,13 @@ def _refuse(caller: _Caller, run: _Runner, path: str, seen: Set[str], depth: int
         # configuration is read that way too (S19 P1c: a scratch GIT_INDEX_FILE names the PARENT's index only). What a
         # recursing checkout of the caller's revisions materializes there: the commits those trees record for it.
         _refuse(caller, caller.elsewhere, child, seen, depth + 1,
-                lambda link=link: listing.gitlink_commits(link, revisions()))
+                lambda link=link: listing.gitlink_commits(link, revisions()), content_filters)
 
 
 def refuse_repository_content_filters(path: str, *, git: Optional[str] = None,
                                       env: Optional[Mapping[str, str]] = None,
-                                      timeout: float = _TIMEOUT_SECONDS, revisions: Sequence[str] = ()) -> None:
+                                      timeout: float = _TIMEOUT_SECONDS, revisions: Sequence[str] = (),
+                                      content_filters: bool = True) -> None:
     """Raise RepositoryContentFilterRefused when Git at ``path`` (or in a submodule it recurses into) could run a
     content-filter command from repository-controlled configuration, or an ACTIVE operator/command-scope command
     (S19 P1d) that is not provably operator code (S19 P1c); return when it cannot. Call it immediately before a Git
@@ -750,8 +753,12 @@ def refuse_repository_content_filters(path: str, *, git: Optional[str] = None,
     ``HEAD`` for a ``reset`` / ``read-tree HEAD`` after which the index is HEAD's): its paths and its own attribute
     files decide activation too. ``git`` / ``env``: the executable and the environment THAT operation runs with, when
     they are not this process's PATH ``git`` and environment (the GUI's Open Folder probe, S19 P1b). ``timeout``: the
-    caller's own per-spawn git timeout (the Open Folder probe's, S19 P1c). Returns without inspecting only when no Git
-    can run there at all (``path`` is not a directory, or no such git): then no filter can run either."""
+    caller's own per-spawn git timeout (the Open Folder probe's, S19 P1c). ``content_filters``: whether the content-filter
+    judgment above applies. False is the OPERATOR-MANAGED INSTALLATION exemption (S19 P1b, owner decision B), which is only
+    for a call site that reads Kriya's own application checkout (tests/test_s19p1b_residuals.py INSTALLATION_STATE names
+    them): the ``attr.tree`` refusal (W3-2: no Git path whose output becomes evidence is exempt from it) and git's ownership
+    answer for it are NEVER skipped, whatever this is. Returns without inspecting only when no Git can run there at all
+    (``path`` is not a directory, or no such git): then no filter can run either."""
     folder = os.fspath(path)
     if not os.path.isdir(folder):
         return
@@ -763,7 +770,7 @@ def refuse_repository_content_filters(path: str, *, git: Optional[str] = None,
     caller = _Caller(git, env, timeout)
     materialized = tuple(revisions)
     try:
-        _refuse(caller, caller.run, folder, set(), 0, lambda: materialized)
+        _refuse(caller, caller.run, folder, set(), 0, lambda: materialized, content_filters)
     except subprocess.TimeoutExpired as error:
         raise _uninspectable(folder, f"git did not answer within {timeout} s") from error
     except OSError as error:

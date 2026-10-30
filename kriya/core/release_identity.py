@@ -30,6 +30,7 @@ from kriya.config.environment import child_environment
 from kriya.platform import git_argv, git_environment
 from kriya.platform.host_properties import UNAVAILABLE, os_and_architecture
 from kriya.platform.services import platform_services
+from kriya.repository.git import refuse_repository_content_filters
 
 RELEASE_IDENTITY_VERSION = 1
 CURRENT = "CURRENT"
@@ -56,10 +57,15 @@ def kriya_revision(source_root: str = _SOURCE_ROOT) -> Dict[str, Any]:
     neither exists. A checkout's identity is unchanged (git is still read).
 
     INSTALLATION STATE (S19 P1b, owner decision B; tests/test_s19p1b_residuals.py INSTALLATION_STATE): this reads Kriya's
-    OWN source checkout as operator-managed application infrastructure, so its `status` (which can run a content filter)
-    is not inspected - whoever can write that checkout's configuration can already write Kriya's code. The trust is the
-    ROLE of this call, never the path: the same folder opened as a target workspace gets the untrusted-repository
-    policy (kriya.repository.git) at every target entry."""
+    OWN source checkout as operator-managed application infrastructure, so the content-filter judgment is NOT applied to its
+    `status` (which can run a content filter) - whoever can write that checkout's configuration can already write Kriya's
+    code. The trust is the ROLE of this call, never the path: the same folder opened as a target workspace gets the
+    untrusted-repository policy (kriya.repository.git) at every target entry.
+
+    That exemption is only the content-filter policy. The W3-2 `attr.tree` rule is not role-based: an effective `attr.tree`
+    (any scope, the environment this call's git runs under included) redirects the attributes that decide the `dirty` flag
+    this identity certifies, so it raises the typed `RepositoryContentFilterRefused` (GIT_ATTR_TREE_CONFIGURED) BEFORE either git
+    call and no identity is returned (RELEASE-IDENTITY-ATTR-TREE-UNINSPECTED-001, owner decision 2026-10-30)."""
     if not os.path.exists(os.path.join(source_root, ".git")):
         from kriya.foundation.build_info import UNKNOWN as UNKNOWN_BUILD
         from kriya.foundation.build_info import embedded_build_info
@@ -69,6 +75,7 @@ def kriya_revision(source_root: str = _SOURCE_ROOT) -> Dict[str, Any]:
             return {"revision": embedded["commit"], "dirty": embedded["dirty"]}
         return {"revision": UNAVAILABLE, "dirty": None}
     git_env = git_environment(child_environment())
+    refuse_repository_content_filters(source_root, env=git_env, timeout=_COMMAND_TIMEOUT_SECONDS, content_filters=False)
     revision = _command(git_argv(["git", "rev-parse", "HEAD"]), cwd=source_root, env=git_env)
     status = _command(git_argv(["git", "status", "--porcelain", "--untracked-files=no"]), cwd=source_root, env=git_env)
     return {"revision": revision or UNAVAILABLE, "dirty": None if status is None else bool(status)}

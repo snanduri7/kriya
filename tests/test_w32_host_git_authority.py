@@ -28,6 +28,7 @@ from kriya.config.environment import child_environment
 from kriya.platform import GIT_FORCED_ENVIRONMENT, GIT_STRIPPED_ENVIRONMENT, git_argv, git_environment
 from kriya.repository.git import (
     GIT_ATTR_TREE_CONFIGURED,
+    GIT_CONTENT_FILTER_REPOSITORY_DEFINED,
     RepositoryContentFilterRefused,
     refuse_repository_content_filters,
 )
@@ -480,3 +481,209 @@ def test_release_identity_is_host_independent_and_still_sees_a_real_change(tmp_p
     for configure in (dict(), dict(attributes="* text eol=crlf\n"), dict(autocrlf="true")):
         host.configure(**configure)
         assert kriya_revision(str(repo))["dirty"] is True
+
+
+# ---- release identity: the attr.tree rule governs kriya_revision (RELEASE-IDENTITY-ATTR-TREE-UNINSPECTED-001) -----------------
+# S19 decision B (Kriya's own checkout is operator-managed infrastructure) exempts ONLY the content-filter judgment of that call.
+# The W3-2 attr.tree rule is not role-based: no Git path whose output becomes certification evidence is exempt from it.
+
+class _IdentityEvents:
+    """One ordered log of every real git spawn and of every evidence-bearing ``release_identity._command`` call, each with the
+    environment it runs under, so a test can assert WHAT ran, in WHAT order and under WHICH environment."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from kriya.core import release_identity as ri
+
+        self.events: List[tuple] = []
+        real_run, real_command, log = subprocess.run, ri._command, self.events
+
+        def run(args, *a, **kw):
+            if args and os.path.basename(str(args[0])) == "git":
+                log.append(("spawn", tuple(str(word) for word in args[1:]), kw.get("env")))
+            return real_run(args, *a, **kw)
+
+        def command(argv, cwd=None, env=None):
+            log.append(("evidence", tuple(argv[1:]), env))
+            return real_command(argv, cwd=cwd, env=env)
+
+        monkeypatch.setattr(subprocess, "run", run)
+        monkeypatch.setattr(ri, "_command", command)
+
+    @property
+    def evidence(self) -> List[tuple]:
+        return [event for event in self.events if event[0] == "evidence"]
+
+    @property
+    def spawn_envs(self) -> List[Dict[str, str]]:
+        return [event[2] for event in self.events if event[0] == "spawn"]
+
+
+def _verb_of(args: tuple) -> str:
+    """The git subcommand of a spawn's argv (after the pinned ``-c key=value`` options)."""
+    words = [word for word in args if not word.startswith("-") and "=" not in word]
+    return words[0] if words else ""
+
+
+def _attr_tree_scopes(repo: Path) -> List[str]:
+    """Validity control: the scopes at which THIS git, under the environment Kriya's git runs with, really sees attr.tree."""
+    done = subprocess.run(["git", "config", "--show-scope", "--get-all", "attr.tree"], cwd=repo, capture_output=True, text=True,
+                          env=git_environment(child_environment()))
+    return [line.split("\t")[0] for line in done.stdout.splitlines()]
+
+
+def _set_command_scope(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "attr.tree")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", value)
+
+
+def _arm_global(repo: Path, host: Host, monkeypatch: pytest.MonkeyPatch) -> None:
+    host.configure(autocrlf="false", attr_tree="HEAD")
+
+
+def _arm_local(repo: Path, host: Host, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_local(repo, "HEAD")
+
+
+def _arm_command(repo: Path, host: Host, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_command_scope(monkeypatch, "HEAD")
+
+
+def _arm_command_empty(repo: Path, host: Host, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_command_scope(monkeypatch, "")
+
+
+ATTR_TREE_SCENARIOS = {"global": (_arm_global, "global"), "local": (_arm_local, "local"), "command-scope": (_arm_command, "command"),
+                       "command-scope-empty": (_arm_command_empty, "command")}
+
+
+@pytest.mark.parametrize("scenario", sorted(ATTR_TREE_SCENARIOS))
+def test_release_identity_refuses_an_effective_attr_tree_before_any_evidence_git_call(tmp_path, host, monkeypatch, scenario):
+    """Proofs 1-3 and 8: an effective attr.tree in the global file, the repository's own config, or the command-scope environment makes
+    ``kriya_revision`` and ``release_identity`` refuse typed; neither evidence git call (rev-parse HEAD, status) runs and no identity
+    (no digest) is built. A control first proves the SAME checkout yields an identity before attr.tree is configured."""
+    from kriya.core import release_identity as ri
+
+    repo = make_repo(tmp_path, {"f.txt": LF})
+    arm, scope = ATTR_TREE_SCENARIOS[scenario]
+    baseline = ri.kriya_revision(str(repo))                                  # control: an identity is produced without attr.tree
+    assert baseline["revision"] == _g(repo, "rev-parse", "HEAD").strip() and baseline["dirty"] is False
+    arm(repo, host, monkeypatch)
+    assert _attr_tree_scopes(repo) == [scope], "validity: git must see attr.tree at exactly this scope under Kriya's own environment"
+    digests = []
+    monkeypatch.setattr(ri, "_digest", lambda material: digests.append(material) or "d")
+    events = _IdentityEvents(monkeypatch)
+    for entry in (lambda: ri.kriya_revision(str(repo)), lambda: ri.release_identity("none", source_root=str(repo))):
+        with pytest.raises(RepositoryContentFilterRefused) as refused:
+            entry()
+        assert refused.value.reason_code == GIT_ATTR_TREE_CONFIGURED and refused.value.scope == scope
+    assert events.evidence == [], events.evidence                           # no evidence call ran
+    verbs = [_verb_of(args) for kind, args, _env in events.events if kind == "spawn"]
+    assert "config" in verbs, f"the inspection never ran its configuration query: {verbs}"
+    assert not set(verbs) & {"status", "add", "commit", "checkout", "reset"}, verbs
+    assert digests == [], "an identity digest was built after the refusal"
+
+
+def test_release_identity_inspects_before_its_first_git_call_and_under_the_operations_environment(tmp_path, host, monkeypatch):
+    """Proof 4 (a normal identity is unchanged) and proof 7: the inspection happens BEFORE the first evidence call, and every git
+    spawn - the inspection's and the two evidence calls' - runs under the one canonical environment, hostile inherited variables
+    included."""
+    from kriya.core import release_identity as ri
+
+    repo = make_repo(tmp_path, {"f.txt": LF})
+    monkeypatch.setenv("GIT_ATTR_SOURCE", "HEAD")
+    monkeypatch.setenv("GIT_LITERAL_PATHSPECS", "1")
+    head = _g(repo, "rev-parse", "HEAD").strip()                       # fixture git BEFORE the recorder, so it is not one of the spawns
+    events = _IdentityEvents(monkeypatch)
+    identity = ri.kriya_revision(str(repo))
+    assert identity == {"revision": head, "dirty": False}
+    first_evidence = [kind for kind, _args, _env in events.events].index("evidence")
+    assert any(kind == "spawn" and "config" in args for kind, args, _env in events.events[:first_evidence]), \
+        "the inspection's configuration query did not run before the first evidence call"
+    assert len(events.evidence) == 2
+    expected = git_environment(child_environment())
+    assert events.spawn_envs and all(env == expected for env in events.spawn_envs), "a git spawn ran under another environment"
+    assert "GIT_ATTR_SOURCE" not in expected and "GIT_LITERAL_PATHSPECS" not in expected
+
+
+def test_the_inspection_reads_the_environment_the_evidence_calls_run_under(tmp_path, host, monkeypatch):
+    """Proof 7, discriminating form: attr.tree supplied ONLY through the command-scope environment is seen by the inspection, which
+    can only be so if the inspection reads the environment the operation runs under (the host files and the repository hold nothing)."""
+    from kriya.core import release_identity as ri
+
+    repo = make_repo(tmp_path, {"f.txt": LF})
+    _set_command_scope(monkeypatch, "HEAD")
+    assert _attr_tree_scopes(repo) == ["command"]
+    assert "attr.tree" not in (repo / ".git" / "config").read_text() and "tree" not in host.gitconfig.read_text()
+    with pytest.raises(RepositoryContentFilterRefused) as refused:
+        ri.kriya_revision(str(repo))
+    assert refused.value.scope == "command"
+
+
+def _plant_repository_content_filter(repo: Path) -> None:
+    """A repository-defined content filter that is ACTIVE for a tracked path: the standard policy refuses it."""
+    (repo / ".gitattributes").write_text("* filter=noop\n")
+    _g(repo, "add", ".gitattributes")
+    _g(repo, "commit", "-q", "-m", "attrs")
+    _g(repo, "config", "filter.noop.clean", "cat")
+
+
+def test_the_installation_state_exemption_still_covers_a_content_filter_but_never_attr_tree(tmp_path, host):
+    """Proofs 5 and 6: S19 decision B exempts the content-filter judgment of Kriya's own checkout (kriya_revision answers although the
+    standard inspection refuses the same folder), and nothing else: with a content filter AND attr.tree together the attr.tree
+    refusal is the one raised."""
+    from kriya.core import release_identity as ri
+
+    repo = make_repo(tmp_path, {"f.txt": LF})
+    _plant_repository_content_filter(repo)
+    with pytest.raises(RepositoryContentFilterRefused) as control:                 # validity: the standard policy refuses this folder
+        refuse_repository_content_filters(str(repo))
+    assert control.value.reason_code == GIT_CONTENT_FILTER_REPOSITORY_DEFINED
+    identity = ri.kriya_revision(str(repo))                                        # the role-exempt call still answers
+    assert identity["revision"] == _g(repo, "rev-parse", "HEAD").strip() and identity["dirty"] is False
+    _set_local(repo, "HEAD")
+    for entry in (lambda: ri.kriya_revision(str(repo)), lambda: refuse_repository_content_filters(str(repo))):
+        with pytest.raises(RepositoryContentFilterRefused) as both:
+            entry()
+        assert both.value.reason_code == GIT_ATTR_TREE_CONFIGURED, both.value.reason_code   # attr.tree outranks the content filter in both
+
+
+def test_a_checkout_without_git_is_not_inspected_and_its_embedded_identity_is_unchanged(tmp_path, host, monkeypatch):
+    """No ``.git`` -> no git call and no inspection (the embedded build identity stands in): the follow-up changes nothing there, even
+    with an attr.tree configured."""
+    from kriya.core import release_identity as ri
+
+    host.configure(autocrlf="false", attr_tree="HEAD")
+    folder = tmp_path / "wheel"
+    folder.mkdir()
+    events = _IdentityEvents(monkeypatch)
+    identity = ri.kriya_revision(str(folder))
+    assert set(identity) == {"revision", "dirty"} and events.events == []
+
+
+def _checkout_with_submodule(root: Path) -> tuple:
+    """(parent, submodule work tree): a populated submodule, the repository the inspection recurses into."""
+    sub = make_repo(root, {"s.txt": LF}, gitattributes="* filter=noop\n", name="sub-origin")
+    parent = make_repo(root, {"f.txt": LF}, name="parent")
+    _g(parent, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "mod")
+    _g(parent, "commit", "-q", "-m", "add submodule")
+    assert (parent / "mod" / "s.txt").read_bytes() == LF, "the submodule was not populated"
+    return parent, parent / "mod"
+
+
+def test_the_exemption_reaches_a_submodule_but_so_does_the_attr_tree_rule(tmp_path, host):
+    """The recursion carries the role: a submodule's ACTIVE content filter does not refuse the exempt call (the standard policy refuses
+    it - validity control), while a submodule's own attr.tree does, before either evidence call."""
+    from kriya.core import release_identity as ri
+
+    parent, module = _checkout_with_submodule(tmp_path)
+    _g(module, "config", "filter.noop.clean", "cat")
+    with pytest.raises(RepositoryContentFilterRefused) as control:
+        refuse_repository_content_filters(str(parent))
+    assert control.value.reason_code == GIT_CONTENT_FILTER_REPOSITORY_DEFINED, "validity: the submodule's filter must be refusable"
+    assert ri.kriya_revision(str(parent))["revision"] == _g(parent, "rev-parse", "HEAD").strip()
+    _g(module, "config", "attr.tree", "HEAD")
+    with pytest.raises(RepositoryContentFilterRefused) as refused:
+        ri.kriya_revision(str(parent))
+    assert refused.value.reason_code == GIT_ATTR_TREE_CONFIGURED
+

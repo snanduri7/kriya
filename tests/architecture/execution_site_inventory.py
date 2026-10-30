@@ -96,7 +96,7 @@ INVENTORY: Dict[Tuple[str, str], Site] = {
     ("kriya/core/release_identity.py", "_command"): Site(
         INFRA, "git (git_argv) in Kriya's own source root; docker version", "no", "Kriya's own source checkout (_SOURCE_ROOT), or none", NONE,
         "release_identity", "OPERATOR_MANAGED_INSTALLATION", ("EXEMPT",),
-        "S19 P1b owner decision B: the Kriya source checkout is installation state, never a target workspace (tests/test_s19p1b_residuals.py INSTALLATION_STATE)"),
+        "S19 P1b owner decision B: the Kriya source checkout is installation state, never a target workspace (tests/test_s19p1b_residuals.py INSTALLATION_STATE); exempt from the content-filter judgment only - its caller kriya_revision refuses an effective attr.tree first (W3-2 follow-up)"),
     ("kriya/workflow/milestone_completion.py", "workspace_evidence_hash"): Site(
         INFRA, "git (every step built by git_argv in the same function)", "no (content filters refused first)", "the workspace",
         "reads the workspace tree through a scratch index outside .kriya", "milestone_completion", "TRUSTED_KRIYA_INFRASTRUCTURE", ("EXEMPT",),
