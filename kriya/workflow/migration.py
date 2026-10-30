@@ -90,6 +90,7 @@ from kriya.workflow.obligations import (
     ObligationStatus,
 )
 from kriya.workflow.plan_schema import EngineeringPlan, FileOwnershipRelation
+from kriya.workflow.worktree import candidate_member_paths
 
 _IGNORED_DIRS = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
 _NON_PRODUCTION_SCOPES = {"test", "provided", "system"}
@@ -235,18 +236,18 @@ def _file_imports_any_token(content: str, tokens: List[str]) -> bool:
 
 
 def _scan_java_files(root_path: str) -> Dict[str, str]:
+    """relpath -> content of the ``.java`` files of ``root_path`` (the baseline workspace and the candidate worktree). W3-3 unit C1: the membership is the canonical
+    bound tree for a Git-backed root (``worktree.candidate_member_paths``) - a tracked ``build/`` package is a consumer, a git-ignored output is not - and a root Git
+    cannot list is the typed ``BoundTreeError`` (a missing consumer would read as "migrated"). The parked root classes keep ``_IGNORED_DIRS`` unchanged."""
     files: Dict[str, str] = {}
-    for root, dirs, filenames in os.walk(root_path):
-        dirs[:] = [name for name in dirs if name not in _IGNORED_DIRS]
-        for filename in filenames:
-            if not filename.endswith(".java"):
-                continue
-            full_path = os.path.join(root, filename)
-            try:
-                with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
-                    files[os.path.relpath(full_path, root_path)] = fh.read()
-            except OSError:
-                continue
+    for relpath in candidate_member_paths(root_path, _IGNORED_DIRS):
+        if not relpath.endswith(".java"):
+            continue
+        try:
+            with open(os.path.join(root_path, relpath), "r", encoding="utf-8", errors="replace") as fh:
+                files[relpath] = fh.read()
+        except OSError:
+            continue
     return files
 
 

@@ -979,6 +979,22 @@ def candidate_member_files(root: str) -> Optional[List[str]]:
                   if os.path.lexists(os.path.join(root, member)) and not os.path.isdir(os.path.join(root, member)))
 
 
+def candidate_member_paths(root: str, parked_root_pruned_directory_names: Iterable[str]) -> Iterator[str]:
+    """W3-3 unit C1: the root-relative paths of the files of ``root`` for a result-truth scan - ``candidate_member_files`` (the canonical bound tree) for a Git-backed
+    root, never a directory name. The PARKED root classes (``candidate_member_files`` is ``None``: the pre-bootstrap ``NO_GIT_REPOSITORY`` workspace, the
+    scoped-snapshot sandbox - C2) keep the caller's legacy walk UNCHANGED, pruning the caller's own ``parked_root_pruned_directory_names``: that prune is the defect
+    corrected for a Git-backed root and is not an endorsement. A Git-backed root Git cannot list is the typed ``BoundTreeError``, raised when the iteration starts."""
+    members = candidate_member_files(root)
+    if members is not None:
+        yield from members
+        return
+    pruned = frozenset(parked_root_pruned_directory_names)
+    for current, directories, files in os.walk(root):
+        directories[:] = [name for name in directories if name not in pruned]
+        for filename in files:
+            yield os.path.relpath(os.path.join(current, filename), root)
+
+
 def remove_git_worktree(repo_path: str, worktree_path: str) -> None:
     """Despite the name, this resets the worktree back to repo_path's current
     commit rather than truly deleting it - the worktree is deliberately reused

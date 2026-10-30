@@ -61,6 +61,7 @@ from kriya.control.persistence import TRANSITION_DISCARDED as TRANSITION_DISCARD
 from kriya.control.persistence import TRANSITION_NEEDS_REVIEW as TRANSITION_NEEDS_REVIEW
 from kriya.control.persistence import TRANSITION_PROMOTED as TRANSITION_PROMOTED
 from kriya.control.persistence import complete_contract_transition as complete_contract_transition
+from kriya.workflow.worktree import candidate_member_paths
 
 CONTRACT_CONSUMER_VERIFICATION_MISSING = "CONTRACT_CONSUMER_VERIFICATION_MISSING"
 CONTRACT_REGISTRY_TRANSITION_INCOMPLETE = "CONTRACT_REGISTRY_TRANSITION_INCOMPLETE"
@@ -130,7 +131,14 @@ def _reference_scan(
     """consumer path -> sorted API names it references (``name(``), over the
     workspace with the candidate overlaid. Each file is matched as it is
     read (never the whole workspace in memory). Name-based: it can miss
-    dynamic or reflective use, so it is never a completeness claim."""
+    dynamic or reflective use, so it is never a completeness claim.
+    W3-3 unit C1: its result decides the consumer-verification refusal
+    (``CONTRACT_CONSUMER_VERIFICATION_MISSING``), so which files it reads is a
+    membership decision, not a detection heuristic: a Git-backed workspace is
+    read from the canonical bound tree (``worktree.candidate_member_paths`` - a
+    tracked consumer under ``build/`` is a consumer, a git-ignored output is
+    not) and a workspace Git cannot list is the typed ``BoundTreeError``, never
+    an empty consumer set. The parked root classes keep ``_SCAN_IGNORED_DIRS``."""
     patterns = {name: re.compile(rf"(?<![\w$]){re.escape(name)}\s*\(") for name in sorted(set(names))}
     if not patterns:
         return {}
@@ -143,17 +151,14 @@ def _reference_scan(
         if hits:
             consumers[relpath] = hits
 
-    for root, dirs, files in os.walk(workspace_path):
-        dirs[:] = [name for name in dirs if name not in _SCAN_IGNORED_DIRS]
-        for filename in files:
-            relpath = os.path.relpath(os.path.join(root, filename), workspace_path)
-            if relpath in overlay:
-                continue
-            try:
-                with open(os.path.join(root, filename), "r", encoding="utf-8", errors="replace") as handle:
-                    match(relpath, handle.read())
-            except OSError:
-                continue
+    for relpath in candidate_member_paths(workspace_path, _SCAN_IGNORED_DIRS):
+        if relpath in overlay:
+            continue
+        try:
+            with open(os.path.join(workspace_path, relpath), "r", encoding="utf-8", errors="replace") as handle:
+                match(relpath, handle.read())
+        except OSError:
+            continue
     for relpath, text in overlay.items():
         match(relpath, text)
     return dict(sorted(consumers.items()))

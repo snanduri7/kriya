@@ -40,6 +40,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.core.state_paths import resolve_state_directory
 from kriya.repository.atomic_write import DurableWriteError
+from kriya.repository.bound_tree import BoundTreeError
 from kriya.repository.git import RepositoryContentFilterRefused
 from kriya.tools.tool import ToolEffectBoundary
 from kriya.workflow.control_context import WorkflowControlContext
@@ -1630,6 +1631,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # exception that crashes the whole enforce run.
         try:
             migration_resolution = deps.resolve_migration_resolution(goal, workspace_path)
+        except BoundTreeError:
+            raise  # W3-3 C1: the membership authority is unavailable - a typed stop of the run (the controller), never an INDETERMINATE resolution the run continues under
         except Exception as e:
             migration_resolution = deps.MigrationResolution(
                 deps.MigrationResolutionStatus.INDETERMINATE,

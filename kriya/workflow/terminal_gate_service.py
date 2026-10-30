@@ -51,6 +51,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.persistence import load_artifact_registry
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
+from kriya.repository.bound_tree import BoundTreeError
 from kriya.static_analysis.service import StaticAnalysisCandidate, StaticAnalysisGateResult, banner
 from kriya.workflow.edit_safety import (
     CandidateMaterializationError,
@@ -439,6 +440,8 @@ class TerminalGateService:
                     f"identity could not be resolved confidently ({resolution.reason}). "
                     "Refusing to report success on an unconfirmed migration obligation."
                 )
+        except BoundTreeError:
+            raise  # W3-3 C1: the membership authority is unavailable - a typed stop of the run, not a prose gap
         except Exception as error:
             return (
                 "MIGRATION FINAL-STATE CHECK INDETERMINATE: the deterministic terminal "

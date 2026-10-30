@@ -1123,6 +1123,8 @@ def _migration_identities(goal: str, workspace_path: str) -> List[Tuple[str, str
     otherwise or when resolution fails."""
     try:
         resolution = resolve_migration_resolution(goal, workspace_path)
+    except BoundTreeError:
+        raise  # W3-3 C1: the membership authority is unavailable - never "no migration" (the entrypoints stop typed)
     except Exception:
         return []
     obligation = getattr(resolution, "obligation", None)
