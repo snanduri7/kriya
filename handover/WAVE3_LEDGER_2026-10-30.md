@@ -58,7 +58,7 @@ attribute semantics stay active and are guarded by an exact-byte check.
 - UNKNOWN: `GIT_ICASE_PATHSPECS` (the discriminating fixture collapses on APFS) -> not sanitized, row opened.
 - Invalid measurements (never evidence): the first pinned `reset` runs in zsh (unsplit `$P` -> silent failure -> "0 CRs"); two copy runs with a scratch `HOME` exported into the probe's environment; the ICASE fixture on APFS.
 
-### What changed (owner decisions 2026-10-30/31 applied)
+### What changed (owner decisions of 2026-10-30 applied)
 - `kriya/platform/__init__.py`: `GIT_INVOCATION_OPTIONS` += `core.autocrlf=false`, `core.eol=lf`, `core.attributesFile=<os.devnull>` (`hooksPath` now `os.devnull`); `git_environment(base)` (base REQUIRED: PLATFORM is L0 and `kriya.config.environment` stays the one environment reader): force `GIT_ATTR_NOSYSTEM=1`, strip `GIT_ATTR_SOURCE` and `GIT_LITERAL_PATHSPECS`; retained by decision: `GIT_CONFIG_*`, `HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL|SYSTEM|NOSYSTEM`, the repository-selecting variables (S19 contract). Per-operation `GIT_INDEX_FILE` is overlaid AFTER the policy.
 - Spawn topology (AST-measured): 64 `git_argv` sites in 19 modules -> 50 bare `subprocess` (Family A), 7 caller-built env (B), 3 GitTool via `ProcessController` (C), 4 milestone (D = B). All consume `git_environment`; `tests/architecture/test_git_invocation_seam.py` now requires argv AND environment policy through any legitimate transport (`env=`, a caller-built mapping incl. closures, `ContainmentProfile.resolved_env`) and forbids a hand-rebuilt policy variable.
 - Family C (CHANGE TYPE D, owner-approved C1): `NullContainmentBackend` honours the documented `ContainmentProfile.resolved_env` it silently dropped; the "never both" guard is one shared helper for the Null and OCI backends. Census: MCP + Null refuses before environment use (`mcp.py:333`), semgrep + Null raises on its network gate, tests using `resolved_env` are OCI / stand-ins. GitTool's three profiles carried no allowlist and no `resolved_env` (full inherit), so `git_environment(child_environment())` neither broadens nor narrows containment.
@@ -84,3 +84,9 @@ Every evidence-bearing target-workspace family inspects first: worktree material
 
 ### Next
 STOP at the W3-2 boundary. Serial order continues with W3-3 (directory-name pruning / source-membership result truth) only on the owner's go-ahead.
+
+### Date correction (my own slip, found by checking the clock)
+The W3-2 session ran entirely on 2026-10-30. I wrote `2026-10-31` into three registry rows and `2026-10-30/31` into a ledger heading; those are corrected
+in the commit that adds this note. Two COMMENTS in the executable layer still carry the wrong date - `kriya/platform/__init__.py` ("owner decisions
+2026-10-30/31") and `tests/test_w32_host_git_authority.py` ("owner, 2026-10-31") - and are deliberately LEFT: editing them would move the certified
+executable fingerprint (72f1695e3bfccf50) for a comment. Correct them in the next executable commit. They are not behaviour.
