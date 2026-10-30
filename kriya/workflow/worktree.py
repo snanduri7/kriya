@@ -22,6 +22,7 @@ from kriya.policy.filesystem import (
     names_trusted_control_path,
 )
 from kriya.policy.model import ActionRequest, ActionType
+from kriya.repository.bound_tree import GIT_BACKED, bound_tree_paths, workspace_root_class
 from kriya.repository.git import (
     RepositoryContentFilterRefused,
     git_discovery,
@@ -962,6 +963,20 @@ def _is_scoped_snapshot(worktree_path: str) -> bool:
         or (name.startswith("scoped-candidate-") and parent.endswith(os.path.join(*CANDIDATE_WORKTREES)))
     )
     return at_managed_location and os.path.exists(os.path.join(path, _SCOPED_SNAPSHOT_SENTINEL))
+
+
+def candidate_member_files(root: str) -> Optional[List[str]]:
+    """W3-3 (units B and C1): the real files of the canonical membership of a candidate or workspace ``root``, sorted and relative to it - the D-001 bound tree
+    (``bound_tree.bound_tree_paths``: never a directory name; a legitimate ``build/`` package is in, a git-ignored output is out), narrowed to what is a file on disk
+    NOW (a tracked path deleted from the work tree, or a submodule's directory entry, is a bound path but not a readable source). ``None`` means a root class with NO
+    canonical membership owner today, which the caller keeps on its legacy walk UNCHANGED (PARKED, not endorsed): the pre-bootstrap ``NO_GIT_REPOSITORY`` workspace
+    and the scoped-snapshot sandbox (its synthetic ``.git`` proves root identity, not selected-path provenance, and it lists the enclosing repository's ignored
+    outputs - C2). A Git-backed root Git cannot list, or that D-001 and Git disagree about, is the typed ``BoundTreeError`` - NEVER ``None`` and never an empty list:
+    absence of membership is not absence of the file."""
+    if _is_scoped_snapshot(root) or workspace_root_class(root) != GIT_BACKED:
+        return None
+    return sorted(member for member in bound_tree_paths(root)
+                  if os.path.lexists(os.path.join(root, member)) and not os.path.isdir(os.path.join(root, member)))
 
 
 def remove_git_worktree(repo_path: str, worktree_path: str) -> None:

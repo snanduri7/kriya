@@ -197,7 +197,7 @@ ALLOWLIST: Dict[str, Dict[str, Tuple[int, str, str]]] = {
         "kriya.workflow.checkpoint": (1, "M2", "the `git rm --cached -- .kriya` argv of compute_workspace_content_hash (re-tagged in D2: the checkpoint store and its CHECKPOINT_DIR moved to control.checkpoint, STATE; the git helper moves to kriya/repository)"),
         "kriya.workflow.compile_regression": (1, "P2", _P2),
         "kriya.workflow.contract_lifecycle": (1, "P2", _P2),
-        "kriya.workflow.example_oracle_java": (3, "P2", _P2),
+        "kriya.workflow.example_oracle_java": (1, "P2", _P2),   # W3-3 B: 3 -> 1 (the walk's pruned set is one parked-root constant; the Git-backed walk lists the bound tree)
         "kriya.workflow.failure_grounding": (1, "P2", _P2),
         "kriya.workflow.file_resolution": (5, "P2", _P2),   # W3-3 A1: 9 -> 6 (the three basename sets that carried ".kriya" are gone); A2: 6 -> 5 (the two owner walkers' sets are one parked constant)
         "kriya.workflow.goal_facts": (1, "P2", _P2),

@@ -119,6 +119,7 @@ from kriya.control.state import (
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.llm import InferenceDeadlineError
 from kriya.policy.filesystem import WriteScopeMode
+from kriya.repository.bound_tree import BoundTreeError
 from kriya.static_analysis.service import (
     StaticAnalysisCandidate,
     StaticAnalysisService,
@@ -130,6 +131,7 @@ from kriya.workflow.acceptance import goal_requires_runtime_behavior
 from kriya.workflow.acceptance_approval import bound_approval
 from kriya.workflow.acceptance_oracle import bound_acceptance
 from kriya.workflow.attribution import DETERMINISTIC_ATTRIBUTION_TIERS
+from kriya.workflow.authority_bundle import membership_authority_unavailable_result
 from kriya.workflow.checkpoint import (
     ResumeStatus,
     compute_base_commit,
@@ -1390,6 +1392,10 @@ class WorkflowController:
                 # typed stop before planning, nothing generated.
                 logger.error(f"WorkflowController enforce run {run_id!r}: {stop.message}")
                 legacy_result = {**stop.result(), "failure_type": "VERIFICATION_AUTHORITY_UNAVAILABLE", "run_id": run_id}
+            except BoundTreeError as stop:
+                # W3-3 B: the membership authority of the contract's example compilation is unavailable - the same typed stop, before planning, nothing generated.
+                logger.error(f"WorkflowController enforce run {run_id!r}: membership authority unavailable: {stop}")
+                legacy_result = {**membership_authority_unavailable_result(stop), "failure_type": "VERIFICATION_AUTHORITY_UNAVAILABLE", "run_id": run_id}
             except NoMutationRequired as decision:
                 # VERIFICATION-CONTRACT-003: the baseline already satisfies every mandatory claim
                 # under the sealed authorities - a success without a model call.

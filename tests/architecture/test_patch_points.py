@@ -225,7 +225,8 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (W, 'save_checkpoint'): P(6, 'kriya.control.checkpoint', ((W, 1),), ()),
     # E12 characterization: 3 new rows (tests/test_e12_enforce_characterization.py patches the enforce run's call-time
     # imports of the facade where they are defined: the controller's function-local imports read them here at call time).
-    (W, 'compile_run_contract'): P(1, W, ((W, 1),(C, 1),), ()),
+    # W3-3 B: +1 site (tests/test_w33_b_java_example_membership.py: the contract-stage membership stop of the direct entrypoint).
+    (W, 'compile_run_contract'): P(2, W, ((W, 1),(C, 1),), ()),
     (W, 'immutable_test_files'): P(1, W, ((C, 1),), ()),
     (W, 'run_contract_baseline'): P(3, W, ((W, 1),(C, 1),), ()),
     # kriya.workflow.workflow_controller
@@ -446,7 +447,7 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # P-B skill-verification deferral (tests/test_skill_verification_deferral.py): +1 W site (final_review: the stage-5 closer seeded
     # with a held verification on a failed run) and +1 C site (commit_verified_candidate: the enforce terminal commit it defers behind)
     # Step 6 (artifact registry): +1 C site (commit_verified_candidate: tests/test_artifact_registry_strict_read.py, the registry corrupted right after the source commit)
-    assert totals == {A: 113, W: 98, C: 386}  # D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
+    assert totals == {A: 113, W: 99, C: 386}  # W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
     assert len(PATCH_POINTS) == 134  # P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
 
 

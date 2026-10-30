@@ -1195,6 +1195,8 @@ def compile_run_contract(engine: Any, requirement_goal: Optional[str], goal: str
             artifact, report = derive(requirement_goal, requirement_set,
                                       state_root=resolve_state_directory(config)[0],
                                       candidate_root=workspace_path)
+        except BoundTreeError:
+            raise  # W3-3 B: the membership authority is unavailable - never recorded as a compiler defect and continued (the entrypoints stop typed)
         except Exception as exc:  # a compiler defect is recorded, never a silent loss of authority
             artifact, report = None, {"refusal": {"reason_code": "EXAMPLE_COMPILER_ERROR",
                                                   "message": f"{type(exc).__name__}: {exc}"}}
@@ -2138,8 +2140,8 @@ class WorkflowEngine:
         kriya/control/commit_state.py). No model call has happened."""
         return assessment.to_payload(run_id=arguments.get("trace_id_override"))
 
-    def _membership_authority_stop(self, error: BoundTreeError, state: GenerationState, run_trace: Any, goal: str, workspace_path: str, trace_id: str,
-                                   *, stage: str) -> Dict[str, Any]:
+    def _membership_authority_stop(self, error: BoundTreeError, state: GenerationState, run_trace: Optional[Any], goal: str, workspace_path: str,
+                                   trace_id: Optional[str], *, stage: str) -> Dict[str, Any]:
         """W3-3 (D-001): a ``BoundTreeError`` (the repository layer's internal exception) never leaves a production entrypoint as a raw traceback. The run ends as the
         existing typed ``AUTHORITY_EXECUTION_UNAVAILABLE`` outcome with the repository layer's detail; nothing was applied, nothing is retried or continued."""
         from kriya.workflow.authority_bundle import (
@@ -2154,7 +2156,8 @@ class WorkflowEngine:
             authority=EventAuthority.AUTHORITATIVE, message=result["error"][:600],
             details={"reason_code": AUTHORITY_EXECUTION_UNAVAILABLE, "membership_reason_code": error.reason_code, "stage": stage},
         ))
-        persist_early_exit_trace(self._stage_deps(), state, run_trace, status="failure", failure_category=result["failure_category"])
+        if run_trace is not None:       # the contract-compilation stop precedes the run's trace (opened below it): its events stay on ``state``
+            persist_early_exit_trace(self._stage_deps(), state, run_trace, status="failure", failure_category=result["failure_category"])
         return {**result, "goal": goal, "workspace_path": workspace_path, "run_id": trace_id}
 
     @coordinated_mutation
@@ -2511,8 +2514,11 @@ class WorkflowEngine:
         # VERIFICATION-CONTRACT-003: the run's verification contract, compiled
         # from the set and the repository before any model call; its digest
         # joins the resume identity, its refusal is decided below.
-        verification_contract = (compile_run_contract(self, requirement_goal, goal, workspace_path, requirement_set)
-                                 if requirement_set is not None else None)
+        try:
+            verification_contract = (compile_run_contract(self, requirement_goal, goal, workspace_path, requirement_set)
+                                     if requirement_set is not None else None)
+        except BoundTreeError as error:
+            return self._membership_authority_stop(error, state, None, goal, workspace_path, trace_id_override, stage="contract")
         if requirement_set is not None:
             state.record_event(RunEvent(
                 kind="requirement.derived", attempt=0, source="workflow.run_generation_workflow",

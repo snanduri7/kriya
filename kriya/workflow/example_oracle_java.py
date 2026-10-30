@@ -27,11 +27,12 @@ import os
 import re
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from kriya.workflow.acceptance_oracle import AcceptanceArtifact, AcceptanceError, acceptance_store
 from kriya.workflow.example_oracle import EXAMPLE_COMPILER_VERSION, _binding_requirement
 from kriya.workflow.requirements import RequirementSet
+from kriya.workflow.worktree import candidate_member_files
 
 JAVA_EXAMPLE_COMPILER_VERSION = 2  # 2: one Java-correct literal grammar (single-backslash escapes compile; malformed escapes are rejected)
 JAVA_EXAMPLE_PACKAGE = "kriya.examples"
@@ -142,14 +143,37 @@ def _split_arguments(text: str) -> Optional[List[str]]:
     return parts
 
 
+_PARKED_ROOT_PRUNED_DIRECTORY_NAMES = (".git", ".kriya", "target", "build", "node_modules")
+
+
+def _java_source_directories(candidate_root: str) -> Iterator[Tuple[str, List[str]]]:
+    """``(directory, file names)`` of the candidate tree, the shape of ``os.walk`` (parents before children, siblings sorted), for the lookups below.
+    W3-3 unit B: the membership is the canonical bound tree (``worktree.candidate_member_files``), never a directory name - a legitimate ``com.acme.build`` package
+    is in, a git-ignored ``target/`` output is out, and a hidden duplicate cannot make a type look unique. A Git-backed root Git cannot list is the typed
+    ``BoundTreeError`` (it propagates: no lookup may read it as "no such type"). PARKED, UNCHANGED, OWNER UNRESOLVED: a root with no canonical membership owner
+    today (the pre-bootstrap non-Git workspace of ``compile_run_contract``; the scoped-snapshot sandbox, C2) keeps the legacy walk with its basename prune - that
+    prune is the defect corrected for a Git-backed root and is not an endorsement."""
+    members = candidate_member_files(candidate_root)
+    if members is None:
+        for current, dirs, files in os.walk(candidate_root):
+            dirs[:] = sorted(d for d in dirs if d not in _PARKED_ROOT_PRUNED_DIRECTORY_NAMES)
+            yield current, files
+        return
+    by_directory: Dict[str, List[str]] = {}
+    for member in members:
+        directory, name = os.path.split(member)
+        by_directory.setdefault(directory, []).append(name)
+    for directory in sorted(by_directory, key=lambda relative: [part for part in relative.split(os.sep) if part]):
+        yield os.path.join(candidate_root, directory) if directory else candidate_root, by_directory[directory]
+
+
 def resolve_java_type(candidate_root: str, name: str) -> Tuple[Optional[str], str]:
     """(qualified name, why) for a type the goal names: a qualified name must
     exist as ``src/main/java/<pkg>/<Type>.java``; a simple name must match
     exactly one such unit under any ``src/main/java`` root."""
     simple = name.rsplit(".", 1)[-1]
     matches: List[str] = []
-    for current, dirs, files in os.walk(candidate_root):
-        dirs[:] = sorted(d for d in dirs if d not in (".git", ".kriya", "target", "build", "node_modules"))
+    for current, files in _java_source_directories(candidate_root):
         if f"{simple}.java" not in files:
             continue
         rel = os.path.relpath(current, candidate_root).split(os.sep)
@@ -175,8 +199,7 @@ def main_source_path(candidate_root: str, qualified_type: str) -> Optional[str]:
     package, _, simple = qualified_type.rpartition(".")
     wanted = "/".join([*package.split("."), f"{simple}.java"]) if package else f"{simple}.java"
     found: List[str] = []
-    for current, dirs, files in os.walk(candidate_root):
-        dirs[:] = sorted(d for d in dirs if d not in (".git", ".kriya", "target", "build", "node_modules"))
+    for current, files in _java_source_directories(candidate_root):
         if f"{simple}.java" not in files:
             continue
         rel = os.path.relpath(os.path.join(current, f"{simple}.java"), candidate_root).replace(os.sep, "/")
@@ -261,8 +284,7 @@ def repository_license_header(candidate_root: str, qualified_types: Sequence[str
         return ""
     found: Dict[str, str] = {}
     main_marker = os.sep.join(_MAIN_ROOT)
-    for current, dirs, files in os.walk(candidate_root):
-        dirs[:] = sorted(d for d in dirs if d not in (".git", ".kriya", "target", "build", "node_modules"))
+    for current, files in _java_source_directories(candidate_root):
         if main_marker not in current:
             continue
         for simple in wanted:
