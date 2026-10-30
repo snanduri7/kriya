@@ -332,6 +332,15 @@ def _layout(run: _Runner, path: str) -> Tuple[Optional[Tuple[str, str, str]], bo
     return (top, git_dir, common), False
 
 
+def work_tree_root(path: str) -> Optional[str]:
+    """W3-3 A2-0: the top level of the work tree Git resolves for ``path``, as an absolute real path - the ``_layout`` computation, the one place that decides it
+    - or None when ``path`` is in no work tree (not a repository, a git dir, a bare repository, a repository git refuses). It is the answer for the repository
+    git DISCOVERS from ``path``: for a folder merely nested in another repository that is the ENCLOSING repository's top, never ``path`` itself. Raises
+    ``OSError`` / ``subprocess.SubprocessError`` when git cannot answer and the typed refusal for an unparseable answer."""
+    layout, _not_a_repository = _layout(_run, path)
+    return None if layout is None else layout[0]
+
+
 def _same_repository(run: _Runner, source: str, common: str) -> bool:
     """True when the folder holding ``source`` belongs to the repository whose common dir is ``common`` - any of its
     work trees, the main one or a linked one (S19 P1b, owner decision C - MEASURED: inspected from a linked worktree

@@ -12,9 +12,12 @@ from __future__ import annotations
 import os
 import shutil
 import stat
+import subprocess
 from typing import Dict, Optional, Set, Tuple
 
 from kriya.config.environment import KRIYA_DIRECTORY_NAME
+from kriya.platform.filesystem_semantics import identity_key
+from kriya.repository.git import RepositoryContentFilterRefused, work_tree_root
 from kriya.repository.snapshot import _content_identity, visible_repository_paths
 
 BOUND_TREE_UNAVAILABLE = "BOUND_TREE_UNAVAILABLE"
@@ -68,10 +71,28 @@ def copy_and_prove(origin: str, root: str, paths: Set[str], expected: Dict[str, 
         raise BoundTreeError(BOUND_TREE_IDENTITY_MISMATCH, f"the copy does not hold the bound content of {', '.join(mismatched[:10])}", tuple(mismatched))
 
 
+def _require_exact_work_tree_root(root: str) -> None:
+    """W3-3 A2-0: Git's membership is the bound tree of ``root`` only when ``root`` IS the top level of its work tree. A folder merely nested in another
+    repository is not: ``git ls-files`` run from it answers with the ENCLOSING repository's ignore rules and tracked set (MEASURED at 2880cba: an outer
+    ``.gitignore`` hid a legitimate ``inner/build/Util.java``), so that policy would silently become the folder's authority. Compared by filesystem identity
+    (``identity_key``: every alias of one directory is one key), the same way the project recognises one directory under several spellings."""
+    try:
+        top = work_tree_root(root)
+    except (RepositoryContentFilterRefused, subprocess.SubprocessError, OSError) as error:
+        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"the Git work tree of {root} could not be resolved: {error}") from error
+    if top is None:
+        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"{root} is not the root of a Git work tree")
+    root_identity = identity_key(root)
+    if root_identity is None or root_identity != identity_key(top):
+        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"{root} is not the root of its Git work tree: Git resolves the enclosing repository {top}")
+
+
 def bound_tree_paths(root: str) -> frozenset:
     """The membership of the canonical bound tree of ``root``: every path Git tracks or leaves visible (``visible_repository_paths``), never a directory
-    name. A root Git cannot list (not a work tree, a failing listing) is the typed ``BoundTreeError(BOUND_TREE_UNAVAILABLE)``: there is no name-based
-    approximation to fall back to, and a caller must never read that error as "no such file"."""
+    name. ``root`` must be the exact top level of its Git work tree (a folder nested in another repository has no bound tree of its own). A root Git
+    cannot list (not a work tree, an enclosing repository's folder, a failing listing) is the typed ``BoundTreeError(BOUND_TREE_UNAVAILABLE)``: there is no
+    name-based approximation to fall back to, and a caller must never read that error as "no such file"."""
+    _require_exact_work_tree_root(root)
     try:
         return visible_repository_paths(root)
     except RuntimeError as error:

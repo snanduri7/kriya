@@ -25550,8 +25550,16 @@ async def test_known_target_package_recorded_as_run_evidence(tmp_path, bound_wor
     assert events[0].details["package_hash"]
 
 
+def _git_work_tree_root(path):
+    """W3-3 A2-0: ``path`` itself as the root of a Git work tree. A workspace that is only a SUBDIRECTORY of a repository has no bound tree of its own
+    (a run never reaches the membership guards with one: ``create_git_worktree`` isolates it), so a test whose real workspace is ``tmp_path / "workspace"``
+    initialises THAT directory, not its parent."""
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True, capture_output=True,
+                   env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
+
+
 @pytest.mark.asyncio
-async def test_targeted_retry_context_uses_current_worktree_revision_java(tmp_path, bound_workspace):
+async def test_targeted_retry_context_uses_current_worktree_revision_java(tmp_path):
     """C3/F9, exercised through the real retry path: workspace has a STALE
     copy, worktree has the CURRENT one - the retry's own Graph-RAG matched/
     related context (build_code_context, now ctx.worktree_path-sourced)
@@ -25559,6 +25567,7 @@ async def test_targeted_retry_context_uses_current_worktree_revision_java(tmp_pa
     workspace = tmp_path / "workspace"
     worktree = tmp_path / "worktree"
     workspace.mkdir()
+    _git_work_tree_root(workspace)
     worktree.mkdir()
     (workspace / "Target.java").write_text("VERSION_A")
     (worktree / "Target.java").write_text("VERSION_B")
@@ -25587,10 +25596,11 @@ async def test_targeted_retry_context_uses_current_worktree_revision_java(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_targeted_retry_context_uses_current_worktree_revision_python(tmp_path, bound_workspace):
+async def test_targeted_retry_context_uses_current_worktree_revision_python(tmp_path):
     workspace = tmp_path / "workspace"
     worktree = tmp_path / "worktree"
     workspace.mkdir()
+    _git_work_tree_root(workspace)
     worktree.mkdir()
     (workspace / "target.py").write_text("VERSION_A = True\n")
     (worktree / "target.py").write_text("VERSION_B = True\n")
@@ -25885,7 +25895,7 @@ async def test_retry_failure_location_triggers_member_aware_retry_context_python
 
 
 @pytest.mark.asyncio
-async def test_retry_worktree_version_b_member_selected_over_stale_workspace_version_a(tmp_path, bound_workspace):
+async def test_retry_worktree_version_b_member_selected_over_stale_workspace_version_a(tmp_path):
     """C3, at the retry member-hint level specifically: workspace has a
     STALE copy, worktree has the CURRENT one - the resolved retry member
     hint must reflect the worktree's own line numbers/content, never the
@@ -25893,6 +25903,7 @@ async def test_retry_worktree_version_b_member_selected_over_stale_workspace_ver
     workspace = tmp_path / "workspace"
     worktree = tmp_path / "worktree"
     workspace.mkdir()
+    _git_work_tree_root(workspace)
     worktree.mkdir()
     (workspace / "Owner.py").write_text("class Owner:\n    def method(self):\n        return 'VERSION_A'\n")
     (worktree / "Owner.py").write_text("class Owner:\n    def method(self):\n        return 'VERSION_B'\n")
