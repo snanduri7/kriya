@@ -406,7 +406,7 @@ def test_fix_does_not_mislabel_a_human_rejection_as_a_reviewer_report(runner, tm
              patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output      # W3-6: a human-rejected repair is not a success (was pinned at 0, KRIYA-FIX-EXIT-CODE-ZERO-ON-FAILURE-001)
     assert "=== Reviewer Report & Run Instructions ===" not in result.output
 
 

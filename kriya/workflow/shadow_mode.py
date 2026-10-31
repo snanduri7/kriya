@@ -101,6 +101,14 @@ class TraceDeps:
     load_write_outcome_trace: Callable[[], Any]
 
 
+def enforce_terminal_category(result: Dict[str, Any]) -> Optional[str]:
+    """W3-6 (KERNEL-RESULT-NO-CATEGORY-MORE-PATHS-001): the category of an enforce run's terminal result - ``None`` for a success, else its ``failure_type``, else its status. It
+    is the rule the enforce trace row (``write_enforce_trace``) records and the category the controller stamps on a result that carries no more specific one, so the result and
+    its trace row can never disagree."""
+    status = str(result.get("status") or "unknown")
+    return None if status == "success" else str(result.get("failure_type") or status)
+
+
 class ShadowMode:
     """The shadow run and the enforce run's trace row, moved verbatim from ``WorkflowController`` (E12)."""
 
@@ -397,7 +405,7 @@ class ShadowMode:
                 details={"requirement_set_digest": requirements.get("digest"),
                          "outcomes": requirements.get("outcomes"), "verdicts": requirements["verdicts"]},
             ).to_dict())
-        failure_category = None if status == "success" else str(result.get("failure_type") or status)
+        failure_category = enforce_terminal_category(result)
         try:
             trace_db = trace_db_path(kernel.config)
         except Exception as error:  # the run's own result stands; tested for the normal output

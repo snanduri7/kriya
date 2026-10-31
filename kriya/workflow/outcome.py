@@ -190,6 +190,20 @@ def terminal_failure_category(state: RunState) -> str:
         else "quality_gates_exhausted"
     )
 
+def workspace_commit_failure_message(payload: Dict[str, Any]) -> str:
+    """PRD-032 / W3-6: the ONE text of "the verified candidate's terminal commit did not commit", from the commit failure payload (``reason_code``, ``workspace_state``,
+    ``error``) that both terminals report (commit_service.commit_verified_candidate). The direct path stores it as ``environment_failure`` (the prefix
+    ``terminal_failure_category`` keys on); the enforce result carries it under the same name."""
+    reason = payload.get("reason_code") or "WORKSPACE_COMMIT_FAILED"
+    return f"{WORKSPACE_COMMIT_NOT_COMPLETED}: {reason} (workspace {payload.get('workspace_state')}): {payload.get('error')}"
+
+
+def workspace_commit_failure_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """W3-6 (KERNEL-RESULT-NO-CATEGORY-MORE-PATHS-001): the category and message an enforce result carries for a terminal commit that did not commit - the EXISTING
+    ``workspace_commit_failed`` category and ``environment_failure`` text the direct path reports for the same terminal state, so a consumer reads one contract."""
+    return {"failure_category": "workspace_commit_failed", "environment_failure": workspace_commit_failure_message(payload)}
+
+
 def deadline_stop_result(error: Any, *, goal: str, workspace_path: str, run_id: Optional[str]) -> Dict[str, Any]:
     """W3-5 (STAGE-DEADLINE-RAW-ESCAPE-PLANNER-ARCHITECT-001): the ONE result of a run whose generation deadline (``InferenceDeadlineError``) stopped a model call
     before any candidate existed - the design stages of ``run_generation_workflow`` and the enforce controller's own Planner call both build it here. It is the EXISTING
@@ -326,5 +340,5 @@ def completed_result(
     }
 
 
-__all__ = ["WORKSPACE_COMMIT_NOT_COMPLETED", "completed_result", "failure_report_dicts", "final_review_refusal_payload",
+__all__ = ["WORKSPACE_COMMIT_NOT_COMPLETED", "completed_result", "workspace_commit_failure_fields", "workspace_commit_failure_message", "failure_report_dicts", "final_review_refusal_payload",
            "terminal_failure_category"]

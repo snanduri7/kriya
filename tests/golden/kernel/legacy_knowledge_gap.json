@@ -250,7 +250,7 @@
     {
      "attempt": null,
      "kind": "unit.closed",
-     "payload": "sha256:2e4bf59a2fd69769",
+     "payload": "sha256:3c06826b3528ecd1",
      "payload_keys": [
       "failure_category",
       "outcome",
@@ -265,7 +265,7 @@
     {
      "attempt": null,
      "kind": "unit.closed",
-     "payload": "sha256:2e4bf59a2fd69769",
+     "payload": "sha256:3c06826b3528ecd1",
      "payload_keys": [
       "failure_category",
       "outcome",
@@ -429,6 +429,7 @@
   ],
   "legacy_result": {
    "keys": [
+    "failure_category",
     "gap_report",
     "goal",
     "run_id",
@@ -436,6 +437,7 @@
     "workspace_path"
    ],
    "values": {
+    "failure_category": "knowledge_gap",
     "gap_report": {
      "gaps": [
       {

@@ -44,6 +44,7 @@ from kriya.repository.bound_tree import BoundTreeError, admit_workspace_for_muta
 from kriya.repository.git import RepositoryContentFilterRefused
 from kriya.tools.tool import ToolEffectBoundary
 from kriya.workflow.control_context import WorkflowControlContext
+from kriya.workflow.outcome import workspace_commit_failure_fields
 from kriya.workflow.plan_schema import EngineeringPlan, Subtask, VerificationMethodType
 from kriya.workflow.resume_support import (
     TOOL_ATTEMPT_ABANDONED,
@@ -3713,6 +3714,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         if workspace_commit_failure is not None:
             aggregated.setdefault("reason_codes", []).append(workspace_commit_failure["reason_code"])
             aggregated["workspace_commit_failure"] = workspace_commit_failure
+            aggregated.update(workspace_commit_failure_fields(workspace_commit_failure))   # W3-6: the category/message the direct path reports for this terminal state
             deps.logger.error(
                 "WorkflowController enforce run %r: terminal workspace commit failed (%s, workspace %s): %s",
                 run_id, workspace_commit_failure["reason_code"],

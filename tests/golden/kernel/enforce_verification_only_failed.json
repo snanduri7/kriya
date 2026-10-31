@@ -2536,6 +2536,7 @@
     "accepted_risk",
     "accepted_risks",
     "contract_registry",
+    "failure_category",
     "files",
     "last_subtask_result",
     "plan_repair_attempts",
@@ -2552,6 +2553,7 @@
     "accepted_risk": false,
     "accepted_risks": [],
     "contract_registry": null,
+    "failure_category": "failed",
     "files": [
      "shop/service.py"
     ],

@@ -344,6 +344,8 @@ async def approval_gate(
             "design": design,
             "files": [],
             "quality_gates_passed": False,
+            # W3-6 (KERNEL-HUMAN-REJECTED-NO-CATEGORY-001): the category the trace row above records (human_rejected / approval_required)
+            "failure_category": status,
             "review": review_text,
             "review_included_in_approval": state.pre_approval_review is not None,
             "run_id": run_id,

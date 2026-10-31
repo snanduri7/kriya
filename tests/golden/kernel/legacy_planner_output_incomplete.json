@@ -250,7 +250,7 @@
     {
      "attempt": null,
      "kind": "unit.closed",
-     "payload": "sha256:7fa4cfc78d45b3d0",
+     "payload": "sha256:71672d196eb400c5",
      "payload_keys": [
       "failure_category",
       "outcome",
@@ -265,7 +265,7 @@
     {
      "attempt": null,
      "kind": "unit.closed",
-     "payload": "sha256:7fa4cfc78d45b3d0",
+     "payload": "sha256:71672d196eb400c5",
      "payload_keys": [
       "failure_category",
       "outcome",
@@ -459,6 +459,7 @@
   ],
   "legacy_result": {
    "keys": [
+    "failure_category",
     "goal",
     "plan",
     "reason",
@@ -467,6 +468,7 @@
     "workspace_path"
    ],
    "values": {
+    "failure_category": "planner_output_incomplete",
     "goal": {
      "chars": 52,
      "text": "sha256:0f3c92131d8b5897"

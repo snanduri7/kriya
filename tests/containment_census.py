@@ -315,6 +315,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_verification_contract_003_scopes.py': ('F2', 'F'),
  'tests/test_w204_replay_containment_docker.py': ('N', 'C'),
  'tests/test_w35_typed_boundaries.py': ('S', 'M'),
+ 'tests/test_w36_terminal_result_truth.py': ('S', 'M'),
  'tests/test_workflow.py': ('S', 'M'),
  'tests/test_workflow_authorize_action.py': ('S', 'M'),
  'tests/test_workflow_execution_policy_config_wiring.py': ('S', 'M'),
@@ -323,6 +324,12 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
 
 # exact node id -> (seam, class)
 EXCEPTIONS: Dict[str, Tuple[str, str]] = {'tests/state_machine/test_sm_attempt_metrics.py::test_a_failure_before_the_mode_is_chosen_is_a_failed_full_set_attempt': ('F2', 'F'),
+ 'tests/test_w36_terminal_result_truth.py::test_a_stage_stop_result_carries_the_category_its_trace_row_records[legacy_knowledge_gap]': ('N', 'F'),
+ 'tests/test_w36_terminal_result_truth.py::test_a_stage_stop_result_carries_the_category_its_trace_row_records[legacy_planner_output_incomplete]': ('F2', 'F'),
+ 'tests/test_w36_terminal_result_truth.py::test_a_stage_stop_result_carries_the_category_its_trace_row_records[legacy_planner_unauthorized_path]': ('F2', 'F'),
+ 'tests/test_w36_terminal_result_truth.py::test_a_stage_stop_result_carries_the_category_its_trace_row_records[legacy_planner_schema_invalid]': ('F2', 'F'),
+ 'tests/test_w36_terminal_result_truth.py::test_a_stage_stop_result_carries_the_category_its_trace_row_records[legacy_architect_file_list_rejected]': ('F2', 'F'),
+ 'tests/test_w36_terminal_result_truth.py::test_a_stage_stop_result_carries_the_category_its_trace_row_records[legacy_baseline_indeterminate]': ('S', 'M'),
  'tests/state_machine/test_sm_best_of_n.py::test_a_recorded_stop_ends_the_loop_even_without_an_environment_failure': ('F2', 'F'),
  'tests/state_machine/test_sm_best_of_n.py::test_a_stopping_candidate_failure_is_recorded_once': ('F2', 'F'),
  'tests/state_machine/test_sm_kernel_golden.py::test_a_changed_request_deadline_breaks_the_golden': ('S', 'M'),

@@ -346,6 +346,7 @@ async def prepare_development(ctx: StageContext, deps: StageDeps) -> Union[Dict[
                                  failure_category="baseline_indeterminate")
         return {
             "status": "baseline_indeterminate",
+            "failure_category": "baseline_indeterminate",
             "reason": baseline_capture.hard_stop_reason,
             "plan": plan,
             "design": design,

@@ -698,7 +698,7 @@
     {
      "attempt": null,
      "kind": "unit.closed",
-     "payload": "sha256:0e107a7a36fe88ff",
+     "payload": "sha256:72085fb809045518",
      "payload_keys": [
       "failure_category",
       "outcome",
@@ -713,7 +713,7 @@
     {
      "attempt": null,
      "kind": "unit.closed",
-     "payload": "sha256:0e107a7a36fe88ff",
+     "payload": "sha256:72085fb809045518",
      "payload_keys": [
       "failure_category",
       "outcome",
@@ -931,6 +931,7 @@
     "accepted_risk",
     "accepted_risks",
     "design",
+    "failure_category",
     "files",
     "plan",
     "quality_gates_passed",
@@ -946,6 +947,7 @@
      "chars": 22,
      "text": "sha256:9b856f09b860a3e2"
     },
+    "failure_category": "approval_required",
     "files": [],
     "plan": {
      "chars": 15,

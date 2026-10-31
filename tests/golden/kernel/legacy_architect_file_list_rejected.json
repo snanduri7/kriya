@@ -313,7 +313,7 @@
     {
      "attempt": null,
      "kind": "unit.closed",
-     "payload": "sha256:d9b6a2980a259418",
+     "payload": "sha256:02c405142e4c5ac6",
      "payload_keys": [
       "failure_category",
       "outcome",
@@ -328,7 +328,7 @@
     {
      "attempt": null,
      "kind": "unit.closed",
-     "payload": "sha256:d9b6a2980a259418",
+     "payload": "sha256:02c405142e4c5ac6",
      "payload_keys": [
       "failure_category",
       "outcome",
@@ -537,6 +537,7 @@
   "legacy_result": {
    "keys": [
     "design",
+    "failure_category",
     "goal",
     "plan",
     "reason",
@@ -550,6 +551,7 @@
      "chars": 33,
      "text": "sha256:0783dde5a4fe2375"
     },
+    "failure_category": "architect_file_list_rejected",
     "goal": {
      "chars": 52,
      "text": "sha256:0f3c92131d8b5897"

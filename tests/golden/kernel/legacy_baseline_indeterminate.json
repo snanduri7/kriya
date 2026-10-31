@@ -352,7 +352,7 @@
     {
      "attempt": null,
      "kind": "unit.closed",
-     "payload": "sha256:34c1778acf29ba3d",
+     "payload": "sha256:653225a34f198eef",
      "payload_keys": [
       "failure_category",
       "outcome",
@@ -367,7 +367,7 @@
     {
      "attempt": null,
      "kind": "unit.closed",
-     "payload": "sha256:34c1778acf29ba3d",
+     "payload": "sha256:653225a34f198eef",
      "payload_keys": [
       "failure_category",
       "outcome",
@@ -591,6 +591,7 @@
   "legacy_result": {
    "keys": [
     "design",
+    "failure_category",
     "goal",
     "plan",
     "quality_gates_passed",
@@ -604,6 +605,7 @@
      "chars": 22,
      "text": "sha256:9b856f09b860a3e2"
     },
+    "failure_category": "baseline_indeterminate",
     "goal": {
      "chars": 52,
      "text": "sha256:0f3c92131d8b5897"

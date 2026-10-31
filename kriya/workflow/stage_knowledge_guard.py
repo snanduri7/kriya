@@ -66,6 +66,7 @@ async def check_knowledge_guard(ctx: StageContext, deps: StageDeps) -> Optional[
                                  failure_category="knowledge_gap")
         return {
             "status": "knowledge_gap",
+            "failure_category": "knowledge_gap",
             "gap_report": gap_report.to_dict(),
             "goal": goal,
             "workspace_path": workspace_path,

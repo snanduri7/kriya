@@ -1488,6 +1488,11 @@ class WorkflowController:
             # its terminal status, why planning failed, the original
             # requirement verdicts, and every model call no subtask row
             # reported (planning, the terminal verifier).
+            # W3-6: a non-success result carries the category its own trace row records (one rule, shadow_mode.enforce_terminal_category); a more specific
+            # category set where the failure was decided (the commit failure, an admission or worktree refusal) is kept.
+            terminal_category = _shadow_mode().enforce_terminal_category(legacy_result)
+            if terminal_category is not None:
+                legacy_result.setdefault("failure_category", terminal_category)
             self._write_enforce_trace(run_id, goal, legacy_result, enforce_started)
 
             # Enforce mode is authoritative: repository progress without a

@@ -229,11 +229,11 @@ from kriya.workflow.obligations import (
     ObligationStatus,
 )
 from kriya.workflow.outcome import (
-    WORKSPACE_COMMIT_NOT_COMPLETED,
     completed_result,
     deadline_stop_result,
     failure_report_dicts,
     terminal_failure_category,
+    workspace_commit_failure_message,
 )
 from kriya.workflow.ownership_findings import (
     find_ownership_findings,
@@ -1643,7 +1643,7 @@ def _raise_terminal_commit_stop(state: GenerationState, outcome: Any) -> None:
     payload (commit_service.commit_verified_candidate)."""
     payload = outcome.failure_payload()
     reason = payload["reason_code"] or "WORKSPACE_COMMIT_FAILED"
-    message = f"{WORKSPACE_COMMIT_NOT_COMPLETED}: {reason} (workspace {outcome.workspace_state}): {outcome.error}"
+    message = workspace_commit_failure_message({**payload, "workspace_state": outcome.workspace_state, "error": outcome.error})   # W3-6: the one owner of this text (outcome.py)
     state.environment_failure = message
     state.terminal_commit_failure = payload
     state.record_event(RunEvent(

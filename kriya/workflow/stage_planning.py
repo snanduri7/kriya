@@ -384,6 +384,7 @@ async def plan_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[st
         persist_early_exit_trace(deps, state, stage_run_trace(ctx), status=status, failure_category=status)
         return {
             "status": status,
+            "failure_category": status,
             "reason": plan_issue,
             "plan": plan,
             "goal": goal,

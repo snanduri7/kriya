@@ -698,7 +698,7 @@
     {
      "attempt": null,
      "kind": "unit.closed",
-     "payload": "sha256:0e107a7a36fe88ff",
+     "payload": "sha256:6ae62d06606fd985",
      "payload_keys": [
       "failure_category",
       "outcome",
@@ -1009,6 +1009,7 @@
     "accepted_risk",
     "accepted_risks",
     "contract_registry",
+    "failure_category",
     "files",
     "last_subtask_result",
     "plan_repair_attempts",
@@ -1025,11 +1026,13 @@
     "accepted_risk": false,
     "accepted_risks": [],
     "contract_registry": null,
+    "failure_category": "failed",
     "files": [],
     "last_subtask_result": {
      "accepted_risk": false,
      "accepted_risks": [],
      "design": "",
+     "failure_category": "human_rejected",
      "files": [],
      "plan": {
       "chars": 31,

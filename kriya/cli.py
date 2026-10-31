@@ -2572,10 +2572,13 @@ def _print_static_analysis_banner(res: Dict[str, Any]) -> None:
 
 def _print_workspace_commit_failure(res: Dict[str, Any]) -> None:
     """PRD-032: the verified candidate's terminal commit did not commit -
-    neither a toolchain problem nor a retryable code defect."""
-    if res.get("failure_category") != "workspace_commit_failed":
+    neither a toolchain problem nor a retryable code defect. W3-6: read from the
+    recorded ``workspace_commit_failure`` (the authoritative terminal state, which
+    both the direct and the enforce result carry), not from the derived
+    ``failure_category`` label."""
+    failure = res.get("workspace_commit_failure")
+    if not failure:
         return
-    failure = res.get("workspace_commit_failure") or {}
     advice = (
         "The workspace state is UNCERTAIN: run `kriya runs recover` before any other run."
         if failure.get("workspace_state") == "UNCERTAIN"
@@ -2583,7 +2586,7 @@ def _print_workspace_commit_failure(res: Dict[str, Any]) -> None:
              "changed after verification, a disk or permission problem, refused static-analysis "
              "evidence) and run again."
     )
-    click.secho(f"\n[WORKSPACE COMMIT NOT COMPLETED] {res.get('environment_failure')}\n{advice}",
+    click.secho(f"\n[WORKSPACE COMMIT NOT COMPLETED] {res.get('environment_failure') or failure.get('error')}\n{advice}",
                 fg="yellow", bold=True)
 
 
@@ -2841,10 +2844,14 @@ def _bind_requirement_disposition(cfg: AppConfig, disposition_path: str, require
 
 
 def _echo_needs_review(res: Dict[str, Any]) -> None:
-    """A result that is neither a pass nor a plain failure (RDCG-B-001): the run's record could not confirm its commit, so the outcome is UNSETTLED. Files in the result were written to the
-    workspace (that is a fact the workflow established), so they are never described as "not applied"."""
+    """A result that is neither a pass nor a plain failure (RDCG-B-001): the run's record could not confirm its commit, so the outcome is UNSETTLED. Files in such a result were written to the
+    workspace (a fact the workflow established), so they are never described as "not applied" - EXCEPT when the terminal commit itself did not commit (W3-6), where nothing is claimed as written."""
     click.secho("Quality Gates: NOT CONFIRMED (needs review)", bold=True, fg="red")
-    if res.get("files"):
+    # W3-6: "written" is true only when the commit is confirmed. A terminal commit that did NOT commit (``workspace_commit_failure``) leaves the candidate's files out of
+    # the workspace (UNCHANGED) or in an unknown state (UNCERTAIN), so they are never described as written; the commit-failure report says what is true.
+    if res.get("workspace_commit_failure"):
+        _print_workspace_commit_failure(res)
+    elif res.get("files"):
         click.secho(f"Files written to workspace: {', '.join(str(f) for f in res['files'])}", fg="yellow")
     for error in res.get("post_commit_persistence_errors") or []:
         click.secho(f"Run record problem ({error.get('operation')}): {error.get('error')}", fg="yellow")
@@ -4753,10 +4760,12 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                     bold=True, fg="red",
                 )
             click.echo(res.get("review"))
+        return res
 
+    fix_result: Optional[Dict[str, Any]] = None
     try:
         with begin_mutating_run(os.path.abspath(workspace)):
-            asyncio.run(_closing(llm, run_fix()))
+            fix_result = asyncio.run(_closing(llm, run_fix()))
     except UncertainWorkspaceStateError as e:
         click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red")
         sys.exit(1)
@@ -4770,6 +4779,9 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
         failure.fail_with(e)
         click.secho(f"Error executing fix workflow: {failure.failure_line()}", fg="red")
         sys.exit(1)
+    # W3-6 (KRIYA-FIX-EXIT-CODE-ZERO-ON-FAILURE-001): the exit status follows the terminal result exactly as `generate` and the proposal executor do - a repair that
+    # did not pass its quality gates (or a result that carries no verdict) is never exit 0.
+    sys.exit(0 if fix_result and fix_result.get("quality_gates_passed") else 1)
 
 @main.command(name="traces")
 @click.option("-n", "--limit", type=int, default=None, show_default="20",

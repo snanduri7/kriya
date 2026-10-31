@@ -315,6 +315,7 @@
   "legacy_result": {
    "keys": [
     "error",
+    "failure_category",
     "failure_type",
     "files",
     "invalid_subtask_ids",
@@ -330,6 +331,7 @@
      "chars": 65,
      "text": "sha256:d1c618358aaea37d"
     },
+    "failure_category": "PLANNING_ERROR",
     "failure_type": "PLANNING_ERROR",
     "files": [],
     "invalid_subtask_ids": [],

@@ -59,6 +59,7 @@ def test_the_kernel_scenario_matches_its_pre_decomposition_golden(name, tmp_path
 # What each golden must show for its terminal path (read from the committed file: a regenerated golden whose run
 # silently took another path fails here, not only on the byte comparison). (result type, quality_gates_passed,
 # failure_category, status, RunRecord lifecycles in order, whether an attempt was opened)
+# W3-6: the ten stage-stop / enforce rows below now carry the category their trace row records (was None; KERNEL-RESULT-NO-CATEGORY-MORE-PATHS-001).
 EXPECTED = {
     "direct_success": ("dict", True, None, None, ["SUCCESS"], True),
     "legacy_success": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
@@ -68,32 +69,32 @@ EXPECTED = {
     "legacy_no_progress": ("WorkflowResult", False, "no_progress", None, ["FAILURE"], True),
     "legacy_budget_stop": ("WorkflowResult", False, "generation_budget_exhausted", None, ["FAILURE"], True),
     "legacy_final_review_refused": ("WorkflowResult", False, "final_review_refused", None, ["FAILURE"], True),
-    "legacy_approval_refused": ("WorkflowResult", False, None, None, ["FAILURE"], True),
+    "legacy_approval_refused": ("WorkflowResult", False, "human_rejected", None, ["FAILURE"], True),
     "legacy_resume_after_failure": ("WorkflowResult", True, None, None, ["FAILURE", "SUCCESS"], True),
     "enforce_success_with_verification_unit": ("WorkflowResult", True, None, "success", ["SUCCESS"], True),
-    "enforce_approval_refused": ("WorkflowResult", False, None, "failed", ["FAILURE"], True),
-    "enforce_plan_invalid": ("WorkflowResult", False, None, "needs_review", ["FAILURE"], False),
-    "enforce_verification_only_failed": ("WorkflowResult", False, None, "failed", ["FAILURE"], True),
+    "enforce_approval_refused": ("WorkflowResult", False, "failed", "failed", ["FAILURE"], True),
+    "enforce_plan_invalid": ("WorkflowResult", False, "PLANNING_ERROR", "needs_review", ["FAILURE"], False),
+    "enforce_verification_only_failed": ("WorkflowResult", False, "failed", "failed", ["FAILURE"], True),
     "milestone_chain_completed": ("dict", None, None, "success", ["SUCCESS"], False),
     "milestone_rerun_reuses_completed": ("dict", None, None, "success", ["SUCCESS", "SUCCESS"], False),
     "milestone_resume_after_recovered_crash": ("dict", None, None, "success", ["RECOVERED", "SUCCESS"], False),
     # E3 characterization of stages 0-3 (written from bd3c6d8, before the stages moved): the early exits return the
     # engine's dict as legacy_result (no failure_category in it; the traces.db row carries it, see the golden's extra)
-    "legacy_knowledge_gap": ("WorkflowResult", None, None, "knowledge_gap", ["FAILURE"], False),
+    "legacy_knowledge_gap": ("WorkflowResult", None, "knowledge_gap", "knowledge_gap", ["FAILURE"], False),
     "legacy_knowledge_gap_confirmed": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
     "legacy_stage_context_success": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
-    "legacy_planner_output_incomplete": ("WorkflowResult", None, None, "planner_output_incomplete", ["FAILURE"], False),
-    "legacy_planner_unauthorized_path": ("WorkflowResult", None, None, "planner_output_unauthorized_path", ["FAILURE"], False),
-    "legacy_planner_schema_invalid": ("WorkflowResult", None, None, "planner_output_schema_invalid", ["FAILURE"], False),
-    "legacy_architect_file_list_rejected": ("WorkflowResult", None, None, "architect_file_list_rejected", ["FAILURE"], False),
-    "legacy_stage2a_dependency_rejected": ("WorkflowResult", False, None, "human_rejected", ["FAILURE"], False),   # 1-E: a result (was: ValueError), the apply gate's status
+    "legacy_planner_output_incomplete": ("WorkflowResult", None, "planner_output_incomplete", "planner_output_incomplete", ["FAILURE"], False),
+    "legacy_planner_unauthorized_path": ("WorkflowResult", None, "planner_output_unauthorized_path", "planner_output_unauthorized_path", ["FAILURE"], False),
+    "legacy_planner_schema_invalid": ("WorkflowResult", None, "planner_output_schema_invalid", "planner_output_schema_invalid", ["FAILURE"], False),
+    "legacy_architect_file_list_rejected": ("WorkflowResult", None, "architect_file_list_rejected", "architect_file_list_rejected", ["FAILURE"], False),
+    "legacy_stage2a_dependency_rejected": ("WorkflowResult", False, "human_rejected", "human_rejected", ["FAILURE"], False),   # 1-E: a result (was: ValueError), the apply gate's status
     # E4 characterization of stages 5-7 and the pre-apply boundary (written from 3e5751c, before that code moved): the
     # approval-gate abort returns its own dict (no failure_category in it, as human_rejected; the traces.db row carries it)
     "legacy_static_analysis_blocked": ("WorkflowResult", False, "static_analysis_blocked", None, ["FAILURE"], True),
     "legacy_static_analysis_unknown": ("WorkflowResult", False, "static_analysis_unknown", None, ["FAILURE"], True),
     "legacy_static_analysis_unavailable": ("WorkflowResult", False, "static_analysis_unavailable", None, ["FAILURE"], True),
     "legacy_static_analysis_passed": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
-    "legacy_approval_required_no_callback": ("WorkflowResult", False, None, None, ["FAILURE"], True),
+    "legacy_approval_required_no_callback": ("WorkflowResult", False, "approval_required", None, ["FAILURE"], True),
     "legacy_autonomous_success": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
     "legacy_approval_diff_size_trigger": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
     "legacy_commit_revision_conflict": ("WorkflowResult", False, "workspace_commit_failed", None, ["FAILURE"], True),
@@ -105,7 +106,7 @@ EXPECTED = {
     "direct_workspace_refused": ("dict", False, None, "needs_review", ["COMMIT_ELIGIBLE"], False),
     # E5 characterization of the stage-4 prelude (written from aad9ab1, before that code moved; OI-39): both stops
     # return the engine's dict as legacy_result after the design stages, before any attempt
-    "legacy_baseline_indeterminate": ("WorkflowResult", False, None, "baseline_indeterminate", ["FAILURE"], False),
+    "legacy_baseline_indeterminate": ("WorkflowResult", False, "baseline_indeterminate", "baseline_indeterminate", ["FAILURE"], False),
     "legacy_worktree_sync_refused": ("WorkflowResult", False, "worktree_sync_failed", "failure", ["FAILURE"], False),
 }
 # PRD-008 refusals: refused before any model call, so no attempt-evidence store exists (the prior run's record is the

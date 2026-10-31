@@ -195,9 +195,10 @@ def test_the_baseline_indeterminate_stop_writes_the_short_row(tmp_path, _git_ide
         "reason": ("brownfield_full_regression_baseline_policy is 'required' but a trustworthy PRE-mutation baseline "
                    "could not be established: validator raised: test runner crashed"),
         "plan": "Step 1: add mul", "design": '{"files": ["calc.py"]}', "goal": kg.GOAL, "workspace_path": workspace,
-        "run_id": res["run_id"], "quality_gates_passed": False}
+        "run_id": res["run_id"], "quality_gates_passed": False,
+        "failure_category": "baseline_indeterminate"}      # W3-6: the category the short row below records
     [row] = _rows(outcome.cfg)
-    assert row["run_id"] == res["run_id"] and kwargs == [SHORT_ROW_KWARGS]
+    assert row["run_id"] == res["run_id"] and kwargs == [SHORT_ROW_KWARGS] and row["failure_category"] == res["failure_category"]
     assert _short_row(row) == _expected_row(kg.GOAL, "baseline_indeterminate", "baseline_indeterminate", IDENTITY, SEALED + [
         "requirement.lineage", "requirement.lineage", "validation_baseline.policy",
         "validation_baseline.full_regression_source", "model.role_metrics"])
@@ -229,9 +230,9 @@ def test_the_knowledge_gap_stop_writes_the_short_row_with_the_run_identity(tmp_p
     outcome = kg._apply_run(tmp_path, controller=False, patches=[spy],
                             run_kwargs={"goal": kg.STAGE_LIBRARY_GOAL, **IDENTITY})
     res = outcome.result
-    assert sorted(res) == ["gap_report", "goal", "run_id", "status", "workspace_path"] and res["status"] == "knowledge_gap"
+    assert sorted(res) == ["failure_category", "gap_report", "goal", "run_id", "status", "workspace_path"] and res["status"] == "knowledge_gap"   # W3-6: + failure_category
     [row] = _rows(outcome.cfg)
-    assert row["run_id"] == res["run_id"] and kwargs == [SHORT_ROW_KWARGS]
+    assert row["run_id"] == res["run_id"] and kwargs == [SHORT_ROW_KWARGS] and row["failure_category"] == res["failure_category"]
     assert _short_row(row) == _expected_row(kg.STAGE_LIBRARY_GOAL, "knowledge_gap", "knowledge_gap", IDENTITY,
                                             SEALED + ["model.role_metrics"])
 
@@ -255,7 +256,7 @@ def test_a_design_stage_exit_writes_the_short_row(status, tmp_path, _git_identit
     spy, kwargs = _spy_log_run()
     outcome = kg._stage_run(tmp_path, patches=[spy], **run)
     legacy = outcome.result.legacy_result
-    assert legacy["status"] == status and "failure_category" not in legacy   # OI-40: only the row carries it
+    assert legacy["status"] == status and legacy["failure_category"] == status   # OI-40 (W3-6): the result carries the category the row records
     [row] = _rows(outcome.cfg)
-    assert row["run_id"] == legacy["run_id"] and kwargs == [SHORT_ROW_KWARGS]
+    assert row["run_id"] == legacy["run_id"] and kwargs == [SHORT_ROW_KWARGS] and row["failure_category"] == legacy["failure_category"]
     assert _short_row(row) == _expected_row(run.get("goal", kg.GOAL), status, status, NO_IDENTITY, kinds)

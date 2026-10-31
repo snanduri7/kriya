@@ -179,7 +179,7 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
                 step_callback(status, plan_issue)
             persist_early_exit_trace(deps, state, stage_run_trace(ctx), status=status, failure_category=status)
             return {
-                "status": status, "reason": plan_issue, "plan": plan, "design": design, "goal": goal,
+                "status": status, "failure_category": status, "reason": plan_issue, "plan": plan, "design": design, "goal": goal,
                 "workspace_path": workspace_path, "run_id": trace_id,
                 "rejected_file_list_entries": list(partition.escaping),
             }
@@ -426,7 +426,7 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
                         step_callback(status, reason)
                     persist_early_exit_trace(deps, state, stage_run_trace(ctx), status=status, failure_category=status)
                     return {
-                        "status": status, "reason": reason, "plan": plan, "design": design, "goal": goal, "files": [], "quality_gates_passed": False, "review": reason,
+                        "status": status, "failure_category": status, "reason": reason, "plan": plan, "design": design, "goal": goal, "files": [], "quality_gates_passed": False, "review": reason,
                         "workspace_path": workspace_path, "run_id": trace_id,
                     }
             else:
