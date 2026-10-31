@@ -118,6 +118,7 @@ KINDS: Dict[Tuple[str, str], str] = {
     (C, 'find_missing_grounded_production_artifacts'): 'function',
     (C, 'grounded_owner_candidates'): 'function',
     (C, 'localization_candidates'): 'async function',
+    (C, 'STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS'): 'object:int',     # W3-5: the plan-repair bound, patched to 0 by tests/test_e14_pre_characterization.py
     (C, 'model_capacities'): 'function',
     (C, 'parse_planner_structured_output'): 'function',
     (C, 'record_plan_created'): 'function',
@@ -268,6 +269,7 @@ NOT_REACHED: Dict[Tuple[str, str], str] = {
     (C, "ArtifactRegistry.derive_from_workspace"): "artifact-registry derivation: brownfield artifacts",
     (C, "StaticAnalysisService.evaluate_candidate"): "enforce-level static analysis: the scripted runs disable it",
     (C, "collect_unit_grounding"): "unit grounding: needs code-intelligence grounding",
+    (C, "STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS"): "an int bound, not a callable seam (W3-5: proven dynamically by tests/test_e14_pre_characterization.py, which patches it to 0 and asserts the one-Planner-call terminal report)",
     (C, "find_migration_incomplete"): "migration route",
     (C, "save_artifact_registry"): "artifact registry write: brownfield artifacts",
     (C, "subtask_executor.execute"): "TOOL subtasks (TOOL-001): the scripted plans have model subtasks only",
