@@ -446,6 +446,7 @@ async def test_a_resumed_run_keeps_the_same_requirement_ids_not_the_saved_plans_
 
 # ------------------------------------------------------------ enforce path, terminal gate
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_terminal_gate_holds_a_requirement_no_subtask_mapped(tmp_path, monkeypatch):
     """The structured plan maps its only subtask to REQ-1; REQ-2 is on no
@@ -859,6 +860,7 @@ async def test_enforce_terminal_gate_closes_cannot_confirm_only_by_the_named_tes
         assert "REQ-1 (unverified)" in gap and result.legacy_result["quality_gates_passed"] is False
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_terminal_migration_gate_closes_the_migration_requirement(tmp_path, monkeypatch):
     """Production runs are enforce runs, whose subtasks carry no requirement

@@ -258,6 +258,7 @@ def _enforce(workspace, plans):
     return engine, calls, result
 
 
+@pytest.mark.usefixtures("bound_workspace")
 def test_bounded_repair_fixes_a_missing_verifier_before_any_developer_call(workspace):
     engine, calls, result = _enforce(
         workspace, [_plan(_unit(verification=[])), _plan(_unit(verification=[COMPILE]))])
@@ -270,6 +271,7 @@ def test_bounded_repair_fixes_a_missing_verifier_before_any_developer_call(works
     assert result.legacy_result["plan_repair_attempts"] == 1
 
 
+@pytest.mark.usefixtures("bound_workspace")
 def test_a_repeated_missing_verifier_plan_fails_closed_without_developer_work(workspace):
     bad = _plan(_unit(verification=[]))
     engine, calls, result = _enforce(workspace, lambda *a, **k: bad)

@@ -40,7 +40,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.core.state_paths import resolve_state_directory
 from kriya.repository.atomic_write import DurableWriteError
-from kriya.repository.bound_tree import BoundTreeError
+from kriya.repository.bound_tree import BoundTreeError, admit_workspace_for_mutation
 from kriya.repository.git import RepositoryContentFilterRefused
 from kriya.tools.tool import ToolEffectBoundary
 from kriya.workflow.control_context import WorkflowControlContext
@@ -483,6 +483,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 
         kernel_config = getattr(kernel, "config", None)
         autonomy = getattr(kernel_config, "autonomy", None)
+        admit_workspace_for_mutation(workspace_path)       # W3-3 U4: a non-empty workspace with no Git repository is refused here, before the contract (the controller maps BoundTreeError)
         verification_contract = compile_run_contract(
             deps.workflow_engine, goal, goal, workspace_path,
             deps.requirement_set_for(goal, deps.bound_requirement_contract(deps.workflow_engine)),

@@ -11,6 +11,7 @@ from kriya.core.llm import LLMClient
 from kriya.workflow.workflow import WorkflowEngine
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_auto_skills_generation_and_injection(tmp_path):
     # Setup codebase folder

@@ -175,6 +175,7 @@ def _first_run_dep0():
     return {("s0", "planned"): [{"_write": ["dep0.py"], "files": ["dep0.py"]}]}
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_writer_owner_recovery_verify_only_keeps_the_first_run_files(tmp_path):
     """Case A at the owner-recovery finalization writer (enforce_loop, the invoked_group_records loop)."""
@@ -185,6 +186,7 @@ async def test_writer_owner_recovery_verify_only_keeps_the_first_run_files(tmp_p
     assert result.control_state.subtask_written_files["s0"] == ["dep0.py", "dep1.py"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_writer_owner_recovery_must_change_adds_its_files_to_the_first_run_files(tmp_path):
     """Case B at the same writer: the first run committed dep0.py, the MUST_CHANGE recovery commits dep1.py."""
@@ -196,6 +198,7 @@ async def test_writer_owner_recovery_must_change_adds_its_files_to_the_first_run
     assert result.control_state.subtask_written_files["s0"] == ["dep0.py", "dep1.py"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_writer_owner_recovery_that_failed_adds_nothing_it_did_not_commit(tmp_path):
     """Case C at the same writer: the recovery's gates failed (its sub-run committed nothing; the scripted call writes
@@ -209,6 +212,7 @@ async def test_writer_owner_recovery_that_failed_adds_nothing_it_did_not_commit(
     assert result.control_state.subtask_written_files["s0"] == ["dep0.py"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_writer_owner_recovery_re_invoked_across_generations_accumulates(tmp_path):
     """Re-invocation: s1's consumer retry fails with a second conflict, so s0 is reopened twice (generation 0 commits
@@ -223,6 +227,7 @@ async def test_writer_owner_recovery_re_invoked_across_generations_accumulates(t
     assert result.control_state.subtask_written_files["s0"] == ["dep0.py", "dep1.py", "dep2.py"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_writer_verification_reopen_adds_its_files_to_the_first_run_files(tmp_path):
     """The verification-rerun fold (it already unioned at the base; pinned): the first run committed a.py, the accepted
@@ -241,6 +246,7 @@ async def test_writer_verification_reopen_adds_its_files_to_the_first_run_files(
     assert result.control_state.subtask_written_files == {"s0": ["a.py", "a2.py"], "sv": []}
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_writer_unit_result_records_what_the_consumer_retry_committed(tmp_path):
     """The per-unit writer after a consumer retry: s1's failed planned run committed nothing, its retry committed a.py.
@@ -251,6 +257,7 @@ async def test_writer_unit_result_records_what_the_consumer_retry_committed(tmp_
     assert result.control_state.subtask_written_files == {"s0": ["dep0.py", "dep1.py"], "s1": ["a.py"]}
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_writer_unit_result_of_a_failed_unit_records_no_uncommitted_file(tmp_path):
     """Case C at the per-unit writer: a unit whose gates failed committed nothing (its scripted call writes nothing),
@@ -262,6 +269,7 @@ async def test_writer_unit_result_of_a_failed_unit_records_no_uncommitted_file(t
     assert result.control_state.subtask_written_files == {"s0": ["dep0.py", "dep1.py"], "s1": []}
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_unit_labelled_verification_that_committed_a_file_is_recorded(tmp_path):
     """Case F: the label is no authority - a unit with the verification role whose result committed v.py is recorded
@@ -273,6 +281,7 @@ async def test_a_unit_labelled_verification_that_committed_a_file_is_recorded(tm
     assert result.control_state.subtask_written_files == {"sv": ["v.py"]}
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_new_run_starts_a_new_record(tmp_path):
     """Case D: a candidate boundary - the next run in the same workspace never inherits the previous run's record (its

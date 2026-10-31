@@ -28,6 +28,7 @@ from kriya.repository.bound_tree import (
     BOUND_TREE_UNAVAILABLE,
     GIT_BACKED,
     BoundTreeError,
+    admit_workspace_for_mutation,
     bound_tree_declaration,
     bound_tree_paths,
     copy_bound_paths,
@@ -504,8 +505,10 @@ def _bootstrap_greenfield_repository(workspace_path: str) -> None:
     Nested workspaces never reach this helper: Git discovery succeeds for
     them and create_git_worktree keeps using its scoped-snapshot boundary.
     Command-local identity avoids mutating repository/global configuration.
-    Any failure propagates so sandboxed generation fails closed.
+    Any failure propagates so sandboxed generation fails closed. W3-3 U4: only an EMPTY folder (``admit_workspace_for_mutation``) is bootstrapped; a folder that
+    already holds user entries is the typed ``BoundTreeError`` before ``git init``, so the bootstrap can never turn the filesystem into the repository's membership.
     """
+    admit_workspace_for_mutation(workspace_path)
     init_command = ["git", *_HOOKS_DISABLED, "init"]
     _audit_git_write(init_command, workspace_path)
     initialized = subprocess.run(
@@ -709,8 +712,8 @@ def create_git_worktree(repo_path: str) -> str:
                 "greenfield repository before creating its isolated worktree.", repo_path,
             )
             _bootstrap_greenfield_repository(os.path.realpath(repo_path))
-    except RepositoryContentFilterRefused:
-        raise
+    except (RepositoryContentFilterRefused, BoundTreeError):
+        raise                   # W3-3 U4: the typed refusal of a populated non-Git folder is not "bootstrap failed"
     except Exception as e:
         if not os.path.isdir(repo_path):
             raise ValueError(f"Workspace directory is unavailable: {e}") from e

@@ -32,13 +32,14 @@ from kriya.repository.snapshot import (
 BOUND_TREE_UNAVAILABLE = "BOUND_TREE_UNAVAILABLE"
 BOUND_TREE_IDENTITY_MISMATCH = "BOUND_TREE_IDENTITY_MISMATCH"
 BOUND_TREE_OPERATING_SCOPE_EXCLUDED = "BOUND_TREE_OPERATING_SCOPE_EXCLUDED"      # W3-3 U3: the invoked operating root is itself excluded by the authority repository's ignore rules
+BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY = "BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY"    # W3-3 U4: a non-Git workspace holding user entries has no brownfield source authority
 
 _NEVER_COPIED = (".git", KRIYA_DIRECTORY_NAME)
 
 
 class BoundTreeError(Exception):
-    """The bound tree could not be materialised or proved. ``reason_code`` is BOUND_TREE_UNAVAILABLE, BOUND_TREE_IDENTITY_MISMATCH or
-    BOUND_TREE_OPERATING_SCOPE_EXCLUDED; ``str(error)`` is ``"<REASON_CODE>: <detail>"``."""
+    """The bound tree could not be materialised or proved. ``reason_code`` is BOUND_TREE_UNAVAILABLE, BOUND_TREE_IDENTITY_MISMATCH,
+    BOUND_TREE_OPERATING_SCOPE_EXCLUDED or BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY; ``str(error)`` is ``"<REASON_CODE>: <detail>"``."""
 
     def __init__(self, reason_code: str, detail: str, paths: Tuple[str, ...] = ()) -> None:
         super().__init__(f"{reason_code}: {detail}")
@@ -121,6 +122,27 @@ def workspace_root_class(root: str) -> str:
     """``GIT_BACKED`` (the bound tree is the authority) or ``NO_GIT_REPOSITORY`` (no canonical membership owner today: the pre-bootstrap design stage, A0.2); anything
     else is the typed ``BoundTreeError`` (see ``_root_class``)."""
     return _root_class(root)
+
+
+def admit_workspace_for_mutation(root: str) -> None:
+    """W3-3 U4 (owner decision 2026-10-31): the production admission of a workspace that has no Git repository. An EMPTY one (no entry except Kriya's own ``.kriya``) is a
+    greenfield: the existing Git bootstrap makes it a repository before any model-originated write. Any other entry (a README, a ``.gitignore``, source, a user's hidden
+    file) makes it a brownfield WITHOUT source authority - the filesystem is never a membership authority and the bootstrap never commits user files - so it is the typed
+    ``BoundTreeError(BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY)``, raised before the contract is compiled and before anything is generated. A Git-backed root is always
+    admitted here (its membership is Git's); a directory that does not exist is left to the caller; one that cannot be listed is ``BOUND_TREE_UNAVAILABLE``."""
+    if not os.path.isdir(root) or _root_class(root) != NO_GIT_REPOSITORY:
+        return
+    try:
+        entries = sorted(name for name in os.listdir(root) if name != KRIYA_DIRECTORY_NAME)
+    except OSError as error:
+        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"the entries of {root} could not be listed: {error}") from error
+    if entries:
+        raise BoundTreeError(
+            BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY,
+            f"{root} is not a Git repository and already holds {', '.join(entries[:5])}{' ...' if len(entries) > 5 else ''}: Kriya will not derive source membership from the filesystem or "
+            "commit existing files for you. Run `git init` and commit a baseline in it (or run Kriya from inside an existing repository), or start from an empty folder.",
+            tuple(entries[:10]),
+        )
 
 
 def _require_git_backed(root: str) -> None:

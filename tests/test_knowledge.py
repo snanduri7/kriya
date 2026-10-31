@@ -3,6 +3,8 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from kriya.tools.knowledge import (
     KnowledgeGuard,
     RegistryAdapterFactory,
@@ -274,12 +276,14 @@ def _stage_2a_run(tmp_path, answer):
         return result
 
 
+@pytest.mark.usefixtures("bound_workspace")
 def test_workflow_stage_2a_gap(tmp_path):
     result = _stage_2a_run(tmp_path, False)
     assert result["status"] == "human_rejected" and result["quality_gates_passed"] is False and result["files"] == []     # a result, not an exception (1-E)
     assert "User rejected the post-cutoff dependency risk in Stage 2A" in result["reason"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 def test_workflow_stage_2a_gap_with_no_approval_decision_is_approval_required_not_a_rejection(tmp_path):
     from kriya.policy.approval import APPROVAL_LAUNCH_CANNOT_ASK, ApprovalOutcome
 
@@ -288,6 +292,7 @@ def test_workflow_stage_2a_gap_with_no_approval_decision_is_approval_required_no
     assert "APPROVAL_LAUNCH_CANNOT_ASK" in result["reason"] and "nobody declined" in result["reason"] and "rejected" not in result["reason"].lower()
 
 
+@pytest.mark.usefixtures("bound_workspace")
 def test_workflow_auto_accrual(tmp_path):
     from unittest.mock import AsyncMock
 
@@ -374,6 +379,7 @@ def test_workflow_auto_accrual(tmp_path):
         assert os.path.exists(expected_skill_path / "skill.yaml")
 
 
+@pytest.mark.usefixtures("bound_workspace")
 def test_workflow_auto_accrual_skipped_when_suggestion_never_actually_used(tmp_path):
     """Regression test for a real bug found via a live golden-use-case run
     (M1, Ignite): the resolver.py Maven-Central-search dependency-suggestion

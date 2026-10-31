@@ -592,6 +592,7 @@ async def test_a_failure_while_deciding_is_unknown_and_never_aborts_the_plan_loo
     assert [r.outcome for r in results] == [Feasibility.UNKNOWN]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_loop_gives_the_real_evaluator_the_goal_the_plan_the_workspace_and_the_kernel_config(tmp_path):
     from _strict_doubles import strict_kernel

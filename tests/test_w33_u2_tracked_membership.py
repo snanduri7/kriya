@@ -104,10 +104,17 @@ def test_a_workspace_that_does_not_exist_is_not_an_empty_repository(tmp_path):
         authoritative_tracked_workspace_paths(str(tmp_path / "missing"))
 
 
-def test_the_no_git_branch_is_unchanged_it_is_still_the_empty_answer(tmp_path):
-    """U4's decision, not U2's: a workspace with no repository keeps answering [] (MEASURED: ``language=None`` and the dropped bindings), exactly as before."""
-    (tmp_path / "pom.xml").write_text("<project/>\n", encoding="utf-8")
+def test_the_no_git_branch_answers_empty_only_for_an_empty_greenfield_and_refuses_a_populated_folder(tmp_path):
+    """W3-3 U4 (INTENTIONAL contract change; this pinned U2's "keeps answering []"): the empty answer is a greenfield's. A folder that already holds user entries has no source
+    authority, so sealing a contract from it (MEASURED pre-U4: ``language=None`` and the dropped bindings) is the typed ``BoundTreeError`` instead."""
+    from kriya.repository.bound_tree import BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY, BoundTreeError
+
     assert authoritative_tracked_workspace_paths(str(tmp_path)) == [] == requirement_closers._tracked_workspace_paths(str(tmp_path))   # pylint: disable=protected-access
+    (tmp_path / "pom.xml").write_text("<project/>\n", encoding="utf-8")
+    with pytest.raises(BoundTreeError) as stop:
+        authoritative_tracked_workspace_paths(str(tmp_path))
+    assert stop.value.reason_code == BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY
+    assert requirement_closers._tracked_workspace_paths(str(tmp_path)) == []   # pylint: disable=protected-access   # the closers' lenient listing is unchanged (it only withholds a SATISFIED)
 
 
 # ---- the original symptom: the contract the run is sealed with ----------------------------------------------------------------------------------------------------------------------------
@@ -135,12 +142,18 @@ def test_the_listable_contract_is_the_one_the_original_probe_measured(tmp_path):
     assert _bindings(doc) == ([], ["DOCUMENTATION"])                                                  # README exists: a content claim, NOT "not applicable"
 
 
-def test_a_no_git_workspace_still_seals_what_it_sealed_before(tmp_path):
+def test_a_populated_no_git_workspace_no_longer_seals_a_degraded_contract(tmp_path):
+    """W3-3 U4 (INTENTIONAL contract change; this pinned the measured ``language=None`` / dropped-binding contract of a populated folder with no repository): that folder is now
+    refused at the contract itself, so a hard requirement (``Do not modify Keep.java``) can no longer silently disappear. An EMPTY folder still compiles (a greenfield)."""
+    from kriya.repository.bound_tree import BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY, BoundTreeError
+
+    compile_run_contract(_engine(), GOALS["freeze"], GOALS["freeze"], str(tmp_path), derive_requirements(GOALS["freeze"]))              # empty: a greenfield, admitted
     for relative, content in JAVA.items():
         (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / relative).write_text(content, encoding="utf-8")
-    freeze = compile_run_contract(_engine(), GOALS["freeze"], GOALS["freeze"], str(tmp_path), derive_requirements(GOALS["freeze"]))
-    assert freeze.project_language is None and _bindings(freeze)[0] == []                                # U4's measured finding, deliberately not changed here
+    with pytest.raises(BoundTreeError) as stop:
+        compile_run_contract(_engine(), GOALS["freeze"], GOALS["freeze"], str(tmp_path), derive_requirements(GOALS["freeze"]))
+    assert stop.value.reason_code == BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY
 
 
 # ---- the CLI admission: the same unavailability, as the existing typed refusal -----------------------------------------------------------------------------------------------------------

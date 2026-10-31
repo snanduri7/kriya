@@ -500,8 +500,7 @@ def test_a_plain_folder_whose_bootstrap_commit_git_refuses_for_ownership_is_the_
     from kriya.workflow import worktree
 
     folder = tmp_path / "plain"
-    folder.mkdir()
-    (folder / "a.py").write_text("x = 1\n")
+    folder.mkdir()                      # W3-3 U4: only an EMPTY folder is bootstrapped (a populated one is refused before any git command); the bootstrap commit is the subject
     _owned_elsewhere(monkeypatch)
     with pytest.raises(RepositoryContentFilterRefused) as raised:
         worktree.create_git_worktree(str(folder))

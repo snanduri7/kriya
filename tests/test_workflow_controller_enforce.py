@@ -1773,6 +1773,7 @@ async def test_enforce_canonicalizes_wrong_action_instead_of_repairing(tmp_path)
     assert plan.subtasks[0].planned_files[0].action == FileAction.MODIFY
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_reuses_one_skill_registry_and_projects_resolved_knowledge(tmp_path):
     from kriya.config import AppConfig
@@ -2884,6 +2885,7 @@ def test_authoritative_planner_request_includes_structural_evidence_when_present
     assert "Grounded structural evidence" not in without_evidence
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_flags_missing_grounded_production_artifact_and_exhausts_on_repair(tmp_path):
     """Integration proof this fires through the REAL enforce loop, not just
@@ -2915,6 +2917,7 @@ async def test_enforce_flags_missing_grounded_production_artifact_and_exhausts_o
     we.run_generation_workflow.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_reports_grounded_semantic_provider_mismatch(tmp_path):
     _seed_structural_customer_repo(tmp_path)
@@ -2950,6 +2953,7 @@ async def test_enforce_reports_grounded_semantic_provider_mismatch(tmp_path):
     we.run_generation_workflow.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_complete_plan_is_not_blocked_by_structural_completeness_check(tmp_path):
     """The positive case: when every grounded relationship IS covered by
@@ -5310,6 +5314,7 @@ async def test_enforce_surfaces_unrelated_owner_scope_conflict_as_plan_revision_
     )
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_revises_service_scope_to_grounded_controller_and_continues(tmp_path):
     service = "src/CustomerService.java"
@@ -5395,6 +5400,7 @@ async def test_enforce_revises_service_scope_to_grounded_controller_and_continue
     assert all(item.status == SubtaskStatus.COMPLETED for item in result.subtask_results)
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_grounds_stale_pinned_test_scope_denial_and_merges_to_success(tmp_path):
     """The real P2 run-1 incident (2026-09-05, spring-ignite-demo), driven
@@ -5491,6 +5497,7 @@ async def test_enforce_grounds_stale_pinned_test_scope_denial_and_merges_to_succ
     assert all(item.status == SubtaskStatus.COMPLETED for item in result.subtask_results)
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_merge_self_satisfies_per_file_requires_capabilities_via_real_validate_plan(
     tmp_path,
@@ -5590,6 +5597,7 @@ async def test_enforce_merge_self_satisfies_per_file_requires_capabilities_via_r
     assert "raise_capped" not in merged_s1["requires"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_preserved_reference_acceptance_and_terminal_integrity_gate_a_real_run(
     tmp_path,
@@ -5793,6 +5801,7 @@ async def test_enforce_schema_self_heal_does_not_consume_a_real_repair_slot(tmp_
     assert result.legacy_result.get("plan_repair_attempts", 0) == 0
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_reopens_owner_with_grounded_diagnosis_and_commits_plan_atomically(
     tmp_path, monkeypatch,
@@ -5871,6 +5880,7 @@ async def test_enforce_reopens_owner_with_grounded_diagnosis_and_commits_plan_at
     assert result.legacy_result["plan_recovery_events"][0]["owner_recovery_passed"] is True
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_discards_successful_earlier_subtask_when_plan_fails(
     tmp_path, monkeypatch,
@@ -5935,6 +5945,7 @@ async def test_enforce_discards_successful_earlier_subtask_when_plan_fails(
     assert persisted.subtask_written_files == {}
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_terminal_commit_resolves_dependency_ordered_same_path_ownership(
     tmp_path, monkeypatch,
@@ -6098,6 +6109,7 @@ async def test_enforce_retry_locality_data_present_even_on_a_failed_subtask(tmp_
 
 # --- MA7.10: real ArtifactRegistry derivation through an actual enforce run ---
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_derives_and_persists_real_artifacts_on_full_success(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
@@ -6126,6 +6138,7 @@ async def test_enforce_derives_and_persists_real_artifacts_on_full_success(tmp_p
     assert registry_file.is_file()
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_global_final_state_check_downgrades_success_when_migration_incomplete(tmp_path):
     """Regression test for PRV-05 (2026-08-28, run 5): every subtask passing
@@ -6180,6 +6193,7 @@ async def test_enforce_global_final_state_check_downgrades_success_when_migratio
     assert "SOURCE_DEPENDENCY_REMAINS" in result.legacy_result["global_migration_gap"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_global_final_state_check_fails_closed_on_its_own_internal_error(tmp_path):
     """The global final-state check is authoritative and deterministic - an
@@ -10261,6 +10275,7 @@ async def test_enforce_accepts_targeted_provides_change_for_implicated_subtask(t
         ("artifact_registry", "artifact_error", "needs_review"),
     ],
 )
+@pytest.mark.usefixtures("bound_workspace")
 async def test_enforce_terminal_gate_failure_discards_candidate_before_commit(
     tmp_path, monkeypatch, failing_gate, expected_key, expected_status,
 ):
@@ -10382,6 +10397,7 @@ async def test_enforce_terminal_gate_failure_discards_candidate_before_commit(
     assert not sandbox.exists()
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_terminal_events_and_gate_inputs_precede_one_commit(tmp_path, monkeypatch):
     source = tmp_path / "app.py"
@@ -10503,6 +10519,7 @@ async def test_enforce_terminal_events_and_gate_inputs_precede_one_commit(tmp_pa
     assert result.legacy_result["accepted_risk"] is False
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_post_commit_registry_persistence_failure_does_not_rewrite_verification(
     tmp_path, monkeypatch,

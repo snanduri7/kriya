@@ -1306,6 +1306,7 @@ def test_f3_direct_mode_returns_the_typed_sync_stop(tmp_path, kind, code):
     assert llm.complete.await_count <= 2  # stopped before any Developer call
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.parametrize("code", [WORKTREE_SYNC_FAILED, WORKTREE_CONTENT_MISMATCH])
 def test_f3_enforce_mode_reports_the_typed_sync_stop(tmp_path, monkeypatch, code):
     import asyncio

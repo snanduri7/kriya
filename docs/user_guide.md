@@ -365,6 +365,13 @@ its scope and the file it comes from - never the command itself:
   nothing there; it never weakens git's ownership check (no `safe.directory` change, no retry without the check). Run
   Kriya as the repository's owner, or, only if you trust the repository, mark it safe in your own git configuration as
   git's message describes.
+- `BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY` (W3-3 U4) - the workspace is not a Git repository and already holds files
+  (anything except Kriya's own `.kriya/`, so a `README`, a `.gitignore` or a `kriya.yaml` counts). Kriya does not guess a
+  project's source files from the directory and does not commit your files for you, so the run stops before anything is
+  generated (`AUTHORITY_EXECUTION_UNAVAILABLE`, with this code under `membership_authority`). Run `git init` and commit a
+  baseline in the folder, or run Kriya inside an existing repository. An EMPTY folder is still a supported greenfield:
+  Kriya initialises the repository itself. (Keep a project's `kriya.yaml` outside the workspace folder, or commit it in a
+  repository, if you start from an otherwise empty folder.)
 
 A refusal met in the middle of a run (for example when the candidate's own `.gitattributes` activates such a filter)
 ends the run with that refusal and its reason code: it is never retried as a failed attempt (S19e).

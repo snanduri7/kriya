@@ -219,12 +219,20 @@ def authoritative_tracked_workspace_paths(workspace_path: str) -> List[str]:
     typed ``BoundTreeError(BOUND_TREE_UNAVAILABLE)`` - never ``[]``. "Git could not list the tracked files" is not "the repository tracks nothing": the empty answer
     seals ``language=None``, drops the file-immutability / API-preservation bindings and seals a conditional documentation request as not applicable. The two closers
     keep ``_tracked_workspace_paths`` (a missing listing there can only withhold a SATISFIED, so it fails closed on its own). A root with no repository (pre-bootstrap
-    greenfield) keeps the lenient answer: that class has no membership owner yet (parked)."""
-    from kriya.repository.bound_tree import BOUND_TREE_UNAVAILABLE, GIT_BACKED, BoundTreeError, workspace_root_class
+    greenfield) answers the empty set only when it IS empty (W3-3 U4: ``admit_workspace_for_mutation``); a non-Git folder holding user entries is the typed
+    ``BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY`` - it has no source authority to seal a contract from."""
+    from kriya.repository.bound_tree import (
+        BOUND_TREE_UNAVAILABLE,
+        GIT_BACKED,
+        BoundTreeError,
+        admit_workspace_for_mutation,
+        workspace_root_class,
+    )
     from kriya.repository.git import GIT_READ_FAILURES
     from kriya.workflow.worktree import git_read_lines
 
     if workspace_root_class(workspace_path) != GIT_BACKED:
+        admit_workspace_for_mutation(workspace_path)
         return _tracked_workspace_paths(workspace_path)
     try:
         return [path for path in git_read_lines(workspace_path, "ls-files") if path]

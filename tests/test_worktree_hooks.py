@@ -6,6 +6,8 @@ test of the hooks-disabled flag in isolation."""
 import os
 import subprocess
 
+import pytest
+
 from kriya.workflow.worktree import create_git_worktree, remove_git_worktree
 
 
@@ -49,36 +51,51 @@ def test_malicious_post_checkout_hook_does_not_fire_during_worktree_creation(tmp
     assert os.path.isdir(worktree_path)
 
 
-def test_malicious_pre_commit_hook_does_not_fire_during_greenfield_bootstrap(tmp_path):
-    """_bootstrap_greenfield_repository's own bootstrap commit, exercised
-    via create_git_worktree() on a directory that is not a git repo yet -
-    a pre-commit hook cannot even exist before the FIRST commit, so this
-    proves the init/commit sequence itself never becomes hook-triggerable
-    by planting the hook file directly (a hook only needs to be present on
-    disk under .git/hooks/, not itself be tracked/committed, to fire)."""
-    repo = str(tmp_path)
-    os.makedirs(repo, exist_ok=True)
+def test_malicious_pre_commit_hook_does_not_fire_during_greenfield_bootstrap(tmp_path, monkeypatch):
+    """_bootstrap_greenfield_repository's own bootstrap commit, exercised via create_git_worktree() on an EMPTY directory that is not a git repo yet. A hostile
+    git template directory (init.templateDir / GIT_TEMPLATE_DIR) installs a pre-commit hook into the repository ``git init`` creates, i.e. BEFORE the first commit
+    exists - the one way a hook can be present for the bootstrap commit. W3-3 U4: a folder that already holds ANYTHING (including a pre-seeded ``.git/hooks``) is
+    refused before any git command runs (see the next test), so the empty folder is the only bootstrap that can reach the commit."""
+    template = tmp_path / "template"
     sentinel = str(tmp_path / "SENTINEL_PRE_COMMIT_FIRED")
-    # Pre-seed a .git/hooks/pre-commit directly (raw file creation, no real
-    # git operations) BEFORE Kriya ever touches this directory - simulates
-    # a hostile pre-seeded environment (e.g. a template dir, or leftover
-    # state from a prior compromised run). `git rev-parse --is-inside-work-tree`
-    # still correctly reports "not a repo" here (no valid .git/HEAD/objects/
-    # refs structure exists yet, only a bare hooks/ subdirectory), so
-    # create_git_worktree() takes the SAME _bootstrap_greenfield_repository
-    # path it would for a genuinely empty directory - `git init` does not
-    # wipe a pre-existing hooks/ subdirectory when it initializes the rest
-    # of the repository structure around it (confirmed live below via the
-    # hook actually firing in the "unsuppressed" sanity check, i.e. the
-    # hook file really does survive `git init` and is really discovered).
-    _arm_hook(repo, "pre-commit", sentinel)
+    _arm_hook(str(template), "pre-commit", sentinel)
+    template_hooks = template / ".git" / "hooks"
+    (template / "hooks").mkdir()
+    (template_hooks / "pre-commit").rename(template / "hooks" / "pre-commit")
+    monkeypatch.setenv("GIT_TEMPLATE_DIR", str(template))
 
-    worktree_path = create_git_worktree(repo)
+    # Sanity check the mechanism: unsuppressed, the templated hook really fires on a first commit - otherwise the assertion below would be meaningless.
+    control = tmp_path / "control"
+    control.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=control, capture_output=True, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-qm", "c"], cwd=control, capture_output=True, check=True)
+    assert os.path.exists(sentinel), "test setup broken: the templated hook itself never fires"
+    os.remove(sentinel)
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    worktree_path = create_git_worktree(str(empty))
+    assert (empty / ".git" / "hooks" / "pre-commit").exists(), "the hostile template was not applied by the bootstrap: this test would prove nothing"
     assert not os.path.exists(sentinel), (
-        "SEC-001-P1 regression: greenfield bootstrap allowed a pre-seeded "
+        "SEC-001-P1 regression: greenfield bootstrap allowed a templated "
         "pre-commit hook to execute"
     )
     assert os.path.isdir(worktree_path)
+
+
+def test_a_pre_seeded_git_hooks_directory_is_refused_typed_before_any_git_command_that_could_run_it(tmp_path):
+    """The previous shape of the pre-commit scenario (W3-3 U4, INTENTIONAL contract change): a folder holding only a pre-seeded ``.git/hooks/pre-commit`` (no valid repository
+    around it) used to take the bootstrap path. The ``.git`` entry makes the D-001 authority search find a repository Git cannot resolve - a typed ``BOUND_TREE_UNAVAILABLE``
+    from the root class, ahead of the emptiness rule - so no bootstrap commit is attempted and the hook never runs."""
+    from kriya.repository.bound_tree import BOUND_TREE_UNAVAILABLE, BoundTreeError
+
+    repo = str(tmp_path)
+    sentinel = str(tmp_path / "SENTINEL_PRE_COMMIT_FIRED")
+    _arm_hook(repo, "pre-commit", sentinel)
+    with pytest.raises(BoundTreeError) as stop:
+        create_git_worktree(repo)
+    assert stop.value.reason_code == BOUND_TREE_UNAVAILABLE
+    assert not os.path.exists(sentinel)
 
 
 def test_malicious_post_checkout_hook_does_not_fire_during_worktree_removal(tmp_path):

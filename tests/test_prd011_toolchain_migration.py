@@ -116,6 +116,7 @@ def test_authorized_goal_target_applies_before_the_declaration_edit_lands(tmp_pa
     assert identity.selection["baseline"]["runtime_version"] == "17"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_authorized_migration_run_executes_its_gates_in_the_target_image(tmp_path, monkeypatch):
     """End to end: a direct (unrestricted-scope) run on a Java 17 repository
@@ -166,6 +167,7 @@ def test_declaration_change_without_authority_is_a_typed_conflict(tmp_path):
         PolymorphicValidator(candidate, original_workspace_path=baseline, autonomy_cfg=_contained())
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_scoped_run_needing_another_jdk_stops_before_any_candidate_command(tmp_path, monkeypatch):
     """A run scoped to one source file (no authority over pom.xml) whose goal

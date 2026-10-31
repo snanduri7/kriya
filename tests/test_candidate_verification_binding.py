@@ -277,6 +277,7 @@ def test_the_cli_names_the_refusal(calc_workspace, monkeypatch, capsys):  # noqa
 
 # --- Enforce: the real controller, static analysis disabled ------------------------------
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tamper", [False, True])
 async def test_enforce_refuses_a_candidate_changed_after_its_gates_bound(tmp_path, monkeypatch, tamper):

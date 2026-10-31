@@ -106,6 +106,7 @@ def test_a_smaller_transport_timeout_is_the_request_timeout(fake, tmp_path):
     assert llm.last_completion.protocol["provider_contract"]["inference_deadline_bound"] is True
 
 
+@pytest.mark.usefixtures("bound_workspace")
 def test_a_smaller_remaining_budget_is_the_request_timeout(fake, tmp_path):
     llm = LLMClient(_config(budget=600, read=600.0))
     _in_run(tmp_path, lambda: llm.complete_result("s", "u"), already_used=575)

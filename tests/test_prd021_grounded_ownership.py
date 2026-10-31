@@ -138,6 +138,7 @@ def test_the_justification_is_read_from_the_structured_file_list_block():
 
 # ------------------------------------------------ direct path, end to end
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_direct_run_surfaces_the_owner_before_planning_and_the_finding_before_writing(repo):
     """Planner and Architect see order_validator.py as the likely owner; the
@@ -198,6 +199,7 @@ async def test_the_direct_run_surfaces_the_owner_before_planning_and_the_finding
 
 # ------------------------------------------------ enforce path, end to end
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_shows_candidates_to_the_planner_and_records_an_acknowledged_finding(repo, monkeypatch):
     from kriya.config import AppConfig

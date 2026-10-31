@@ -209,6 +209,7 @@ def test_a_registry_that_became_unreadable_during_a_run_hashes_to_its_reason_cod
 
 # ---------------------------------------------------------------------------------------------------------------------------------- enforce runs
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_an_enforce_run_refuses_a_corrupt_artifact_registry_at_its_start_like_a_corrupt_contract_registry(tmp_path):
     """MEASURED at f076a44: this exact run reported success over the corrupt file and overwrote it at the post-commit save."""
@@ -222,6 +223,7 @@ async def test_an_enforce_run_refuses_a_corrupt_artifact_registry_at_its_start_l
         assert handle.read() == bad
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_registry_corrupted_after_the_commit_never_invalidates_the_commit_and_is_never_overwritten(tmp_path):
     """The post-commit rule: the authoritative commit stands. The derived artifacts could not be persisted, the malformed bytes are untouched, the failure travels with its reason code."""
@@ -250,6 +252,7 @@ async def test_a_registry_corrupted_after_the_commit_never_invalidates_the_commi
         assert handle.read() == garbage
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_terminal_gate_fails_on_an_unreadable_artifact_registry(tmp_path):
     (tmp_path / "pyproject.toml").write_text(_PYPROJECT)

@@ -107,6 +107,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_w33_b_java_example_membership.py': ('S', 'M'),
  'tests/test_w33_c1_migration_membership.py': ('S', 'M'),
  'tests/test_w33_u3_scoped_snapshot_projection.py': ('S', 'M'),
+ 'tests/test_w33_u4_no_git_admission.py': ('S', 'M'),
  'tests/test_w33_bound_membership_guards.py': ('S', 'M'),
  'tests/test_slice_f_gate_path.py': ('S', 'M'),
  'tests/test_w216a_compile_text_guard.py': ('S', 'M'),

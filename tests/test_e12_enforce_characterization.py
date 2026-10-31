@@ -384,6 +384,7 @@ def _request(we):
 
 # ============================================================================ enforce: contract admission and planning request
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_blocking_requirement_policy_refuses_an_unadmitted_goal_before_planning(tmp_path):
     """EP01 (the admission refusal skipped) / EP02 (the typed authority requests not sealed before the stop)."""
@@ -396,6 +397,7 @@ async def test_a_blocking_requirement_policy_refuses_an_unadmitted_goal_before_p
     assert legacy["authority_requests"] and os.path.isfile(legacy["authority_requests_path"])
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_failing_tool_listing_never_stops_the_run(tmp_path):
     """EP08: the registry's tool listing raising is logged; the run goes on."""
@@ -405,6 +407,7 @@ async def test_a_failing_tool_listing_never_stops_the_run(tmp_path):
     assert result.legacy_result["status"] == "success" and len(calls) == 1
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_resume_id_alone_requests_the_subtask_resume(tmp_path):
     """EP09 (only ``resume`` honoured): a second run with resume_id reads the prior ControlState and records its
@@ -417,6 +420,7 @@ async def test_resume_id_alone_requests_the_subtask_resume(tmp_path):
     assert decision["source"] == "control_state" and decision["prior_control_state_run_id"] == first.run_id
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_planner_output_cap_is_the_planner_agents_own(tmp_path):
     """EP11 (the agent's own max_output_tokens ignored) / EP19 (a request with nothing to fit sent with candidate
@@ -430,6 +434,7 @@ async def test_the_planner_output_cap_is_the_planner_agents_own(tmp_path):
     assert kwargs["system_prompt_override"] == AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_unavailable_owner_candidates_never_stop_the_run(tmp_path):
     """EP12: grounded owner candidates raising are logged; planning goes on without them."""
@@ -439,6 +444,7 @@ async def test_unavailable_owner_candidates_never_stop_the_run(tmp_path):
     assert result.legacy_result["status"] == "success" and len(calls) == 1
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_planner_request_carries_the_owner_localization_goal_fact_and_requirement_sections(tmp_path):
     """EP13 / EP16 / EP17 / EP18: each section reaches the Planner request, in this order."""
@@ -456,6 +462,7 @@ async def test_the_planner_request_carries_the_owner_localization_goal_fact_and_
     assert "REQ-1" in request[requirements - 200:]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_localization_deadline_stop_propagates_out_of_the_run(tmp_path):
     """EP14: Kriya's own inference deadline is a typed stop, never swallowed as 'localization unavailable'."""
@@ -495,6 +502,7 @@ def _two_units():
     ({"current_plan_hash": "another-plan"}, "PLAN_CHANGED"),
     ({"subtask_completion_scope": "candidate"}, "COMPLETIONS_NOT_IN_WORKSPACE"),
 ], ids=["requirement_contract", "acceptance_approval", "verification_contract", "plan", "completion_scope"])
+@pytest.mark.usefixtures("bound_workspace")
 async def test_a_resume_under_other_authority_reuses_nothing(tmp_path, update, reason):
     """ER01 / ER02 / ER03 / ER04 / ER05: each binding the recorded subtasks ran under refuses their reuse, in this
     precedence order, and the plan runs fresh from s1."""
@@ -506,6 +514,7 @@ async def test_a_resume_under_other_authority_reuses_nothing(tmp_path, update, r
     assert [c["current_subtask_id"] for c in calls] == ["s1", "s2"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_matching_resume_reuses_only_the_completed_subtasks_and_annotates_the_run(tmp_path):
     """ER11 (failed subtasks listed as reused) / ER12 (the decision not annotated on the run record) / ER19 (the
@@ -529,6 +538,7 @@ async def test_a_matching_resume_reuses_only_the_completed_subtasks_and_annotate
     assert (tmp_path / "old.py").read_text() == "residue\n"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_refused_resume_quarantines_only_the_abandoned_files_and_survives_a_cleanup_failure(tmp_path):
     """ER15 (a cleanup failure stops the run): the abandoned plan's residue cleanup is best effort."""
@@ -545,6 +555,7 @@ async def test_a_refused_resume_quarantines_only_the_abandoned_files_and_survive
     ("unreadable", "bad record"),
     ("missing", "prior-run"),
 ])
+@pytest.mark.usefixtures("bound_workspace")
 async def test_a_prior_run_record_that_cannot_be_trusted_refuses_the_resume(tmp_path, record, expected_in_decisions):
     """ER07 (an unreadable record's error dropped) / ER08 (a missing record not reported): the prior state's
     provenance is unknown, so the resume fails validation."""
@@ -560,6 +571,7 @@ async def test_a_prior_run_record_that_cannot_be_trusted_refuses_the_resume(tmp_
     assert [c["current_subtask_id"] for c in calls] == ["s1", "s2"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_tool_subtask_durably_completed_is_not_executed_again_on_resume_and_its_authority_is_revalidated(tmp_path):
     """ER10, rewritten by D1 (it used to pin "executed again on resume", i.e. a duplicate side effect): a TOOL subtask recorded COMPLETED is terminal - its effect is NEVER run
@@ -580,6 +592,7 @@ async def test_a_tool_subtask_durably_completed_is_not_executed_again_on_resume_
     assert [c["current_subtask_id"] for c in calls] == ["s2"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_control_state_binds_the_acceptance_approval_and_starts_unscoped(tmp_path):
     """ER18 (the approval digest not bound) / ER16 (a fresh plan's completions claimed for the workspace before any
@@ -594,6 +607,7 @@ async def test_the_control_state_binds_the_acceptance_approval_and_starts_unscop
     assert persisted[0].acceptance_approval_digest == "approval-1"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_approved_plan_records_its_ownership_findings_from_create_actions(tmp_path):
     """ER23 (findings never recorded in the obligation ledger) / ER24 (MODIFY actions judged as creations)."""
@@ -649,6 +663,7 @@ def _variant(plan, sid, description):
     return copy
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_each_normalization_feeds_the_next_and_is_recorded(tmp_path):
     """EV04 / EV05 / EV06 / EV07 (a normalization's plan dropped) / EV08 (the normalized record not written): the
@@ -676,6 +691,7 @@ async def test_each_normalization_feeds_the_next_and_is_recorded(tmp_path):
     assert calls[0]["structured_plan"].subtask_by_id("s1").description == "step 3"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_validate_plan_receives_the_sealed_requirement_ids_and_frozen_tests(tmp_path):
     """EV10 (known requirement ids dropped) / EV11 (the TEST_IMMUTABILITY frozen tests dropped)."""
@@ -688,6 +704,7 @@ async def test_validate_plan_receives_the_sealed_requirement_ids_and_frozen_test
     assert kwargs["immutable_test_files"] == ["tests/test_x.py"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_plan_target_errors_fail_the_round_and_only_inconsistent_targets_reach_the_repair(tmp_path):
     """EV13 (target errors ignored) / EV14 (consistent target evidence forwarded) / EV15 (the targets record not
@@ -707,6 +724,7 @@ async def test_plan_target_errors_fail_the_round_and_only_inconsistent_targets_r
     assert record["targets"] == [inconsistent, consistent] and record["repair_attempt"] == 0
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_an_unbounded_model_subtask_is_reported_unless_validation_already_said_so(tmp_path):
     """EV17: the MODEL_SUBTASK_MISSING_PLANNED_FILES code is suppressed only by validation's own 'declares no
@@ -720,6 +738,7 @@ async def test_an_unbounded_model_subtask_is_reported_unless_validation_already_
     assert legacy["invalid_subtask_ids"] == ["s1"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_grounded_gaps_and_infeasible_edits_fail_the_round_with_their_codes(tmp_path):
     """EV19 (MISWIRED_GROUNDED_DEPENDENCY_EDGE) / EV22 (PLANNED_EDIT_INFEASIBLE) / EV23 (the infeasible unit not
@@ -753,6 +772,7 @@ async def _regressed_round(tmp_path, regression, code):
     assert [c.args[3] for c in repair.call_args_list] == [["PLAN_VALIDATION_FAILED"], ["PLAN_VALIDATION_FAILED"]]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_silent_semantic_contract_regression_rejects_an_otherwise_valid_plan(tmp_path):
     """EV25 (SEMANTIC_CONTRACT_REGRESSION_REJECTED dropped)."""
@@ -761,6 +781,7 @@ async def test_a_silent_semantic_contract_regression_rejects_an_otherwise_valid_
                            "SEMANTIC_CONTRACT_REGRESSION_REJECTED")
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_silent_preserved_reference_regression_rejects_an_otherwise_valid_plan(tmp_path):
     """EV26 (PRESERVED_REFERENCE_REGRESSION_REJECTED dropped)."""
@@ -769,6 +790,7 @@ async def test_a_silent_preserved_reference_regression_rejects_an_otherwise_vali
                            "PRESERVED_REFERENCE_REGRESSION_REJECTED")
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_repair_prompt_must_preserve_every_validated_fact(tmp_path):
     """EV35 / EV36 / EV38: the preserved-reference and semantic-contract lines reach the repair prompt."""
@@ -781,6 +803,7 @@ async def test_the_repair_prompt_must_preserve_every_validated_fact(tmp_path):
     assert must[-2:] == ["PRESERVED-LINE", "SEMANTIC-LINE"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_exhaustion_after_a_regression_reports_the_retained_baseline(tmp_path):
     """EV40 / EV41: when the last round was rejected as a regression (a strict superset of the retained round's
@@ -803,6 +826,7 @@ async def test_exhaustion_after_a_regression_reports_the_retained_baseline(tmp_p
     assert legacy["plan_repair_attempts"] == 2
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_repair_round_sends_the_fitted_repair_prompt(tmp_path):
     """EV46 (the repair request not fitted per candidate) / EP23 (the first request not fitted): with a reference
@@ -819,6 +843,7 @@ async def test_the_repair_round_sends_the_fitted_repair_prompt(tmp_path):
 
 # ============================================================================ enforce: the plan sandbox
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_worktree_sync_refusal_is_a_typed_stop_not_a_planning_problem(tmp_path):
     """EA01: FILE-INTEGRITY-CONTRACT-001's WorktreeSyncError reaches execute() unchanged."""
@@ -832,6 +857,7 @@ async def test_a_worktree_sync_refusal_is_a_typed_stop_not_a_planning_problem(tm
     assert (legacy["failure_type"], legacy["reason_codes"]) == ("WORKTREE_SYNC", ["WORKTREE_SYNC_INCOMPLETE"])
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_sandbox_bootstrap_failure_is_a_pre_execution_planning_stop(tmp_path):
     """EA02: any other worktree failure becomes _StructuredPlanUnavailable (needs_review), never a crash."""
@@ -853,6 +879,7 @@ def _runtime_check():
                               verifier_kind=VerifierKind.APPLICATION_RUNTIME, requires_runtime_execution=True)
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_each_bounded_subtask_call_carries_its_scope_and_the_run_wide_state(tmp_path):
     """EB03 / EB04 / EB06 / EB07 / EB08 / EB09 / EB18 / EB19: the run_generation_workflow arguments of two
@@ -878,6 +905,7 @@ async def test_each_bounded_subtask_call_carries_its_scope_and_the_run_wide_stat
     assert first["reopened_owner"] is False and first["execution_scope"] == "subtask=s1 role=planned"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_subtask_sees_only_its_own_ownership_findings(tmp_path):
     """EB11: findings are projected per unit, never every unit's."""
@@ -893,6 +921,7 @@ async def test_a_subtask_sees_only_its_own_ownership_findings(tmp_path):
 
 # ============================================================================ enforce: per-subtask acceptance
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_resumed_subtasks_content_is_established_for_the_next_one(tmp_path):
     """EL02 / EL27 (resumed content not threaded) / EL25 (resumed provenance attributed to another unit)."""
@@ -919,6 +948,7 @@ def _tool(sid="t1"):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status, lifecycle", [(SubtaskStatus.NEEDS_REVIEW, "needs_review"),
                                                (SubtaskStatus.FAILED, "failed")])
+@pytest.mark.usefixtures("bound_workspace")
 async def test_a_tool_subtask_that_did_not_complete_stops_the_run(tmp_path, status, lifecycle):
     """EL05 (needs_review recorded as failed) / EL06 (the run continues) / EL07 (the tool unit's evidence lacks its
     result) / EL08 (the status persisted as completed)."""
@@ -945,6 +975,7 @@ async def test_a_tool_subtask_that_did_not_complete_stops_the_run(tmp_path, stat
     assert result.legacy_result["status"] == ("needs_review" if status == SubtaskStatus.NEEDS_REVIEW else "failed")
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_refused_final_review_is_the_subtasks_reported_cause(tmp_path):
     """EL12 / EL17: the review refusal's detail and reason code, not the generic Quality Gates text."""
@@ -957,6 +988,7 @@ async def test_a_refused_final_review_is_the_subtasks_reported_cause(tmp_path):
     assert s1["reason_codes"] == ["FINAL_REVIEW_UNSENDABLE"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_scope_conflict_is_the_subtasks_reported_cause(tmp_path):
     """EL13: the conflict report's text, NEEDS_REVIEW, and the aggregated PLAN_SCOPE_REVISION_REQUIRED; EL20 (the
@@ -977,6 +1009,7 @@ async def test_a_scope_conflict_is_the_subtasks_reported_cause(tmp_path):
     assert legacy["reason_codes"] == ["PLAN_SCOPE_REVISION_REQUIRED", "PLAN_TARGET_RELOCALIZATION_REQUIRED"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_missing_verification_evidence_is_the_subtasks_reported_cause(tmp_path):
     """EL14: gates passed but the declared verification has no evidence -> NEEDS_REVIEW with that reason."""
@@ -987,6 +1020,7 @@ async def test_missing_verification_evidence_is_the_subtasks_reported_cause(tmp_
     assert s1["error"] == "declared verification requirements have no complete authoritative evidence"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("passed", [True, False])
 async def test_verified_no_change_is_recorded_only_for_a_passing_unit(tmp_path, passed):
@@ -1003,6 +1037,7 @@ def _owner_plan():
     return _plan_of(_unit("s0", "dep.py"), _unit("s1", "a.py", depends_on=["s0"]))
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("revalidates", [True, False])
 async def test_a_planned_prerequisite_conflict_revises_the_plan_only_when_it_revalidates(tmp_path, revalidates):
@@ -1039,6 +1074,7 @@ async def test_a_planned_prerequisite_conflict_revises_the_plan_only_when_it_rev
         assert reopen[0]["reason"] == "planned prerequisite wiring failed revalidation: cycle"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_runtime_plan_gap_without_a_single_owner_is_never_guessed(tmp_path):
     """ES07: a resolvable path with no compatible owner records INDETERMINATE and revises nothing."""
@@ -1101,6 +1137,7 @@ def _defect(path, line=3, tier="architectural_owner"):
         "grounded_locations": [{"path": path, "line": line}]}}
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_chain_of_grounded_owners_is_revised_at_most_the_bound_times(tmp_path):
     """EM04 (the revision loop bounded at 1) / EM08 (the next grounded owner not re-derived) / EM10 (the revised unit
@@ -1168,6 +1205,7 @@ def _insufficient():
         "failure_type": "COMPILE_ERROR", "reason": "deps must change"}}
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_group_with_any_must_change_participant_reopens_its_owner_and_retries_the_consumer(tmp_path):
     """EO04 (a mixed group treated as VERIFY) / EO22 (the consumer retry's role) / EO25 (the cross-owner obligation
@@ -1201,6 +1239,7 @@ async def test_a_group_with_any_must_change_participant_reopens_its_owner_and_re
     assert satisfied[0].authority == created.authority == ObligationAuthority.JUDGMENT
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_failed_consumer_retry_never_closes_the_cross_owner_obligation(tmp_path):
     """EO25 (SATISFIED recorded although the recovery was rejected) / EO08 (the owner's dependents not invalidated)
@@ -1241,6 +1280,7 @@ async def test_a_failed_consumer_retry_never_closes_the_cross_owner_obligation(t
     assert result.legacy_result["status"] == "failed"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_requirement_that_exhausted_its_recovery_attempts_never_reopens_the_owner(tmp_path):
     """EO07 (the bound checked with > instead of >=): a requirement with the bound's number of prior attempts stops."""
@@ -1284,6 +1324,7 @@ def _gap_records(records):
     return [(r.id, r.status.value, r.owner_subtask_id) for r in records if r.kind == ObligationKind.RUNTIME_PLAN_GAP]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("revalidates", [True, False])
 async def test_a_runtime_plan_gap_adds_the_artifact_to_its_owner_only_when_the_revision_revalidates(tmp_path, revalidates):
@@ -1316,6 +1357,7 @@ async def test_a_runtime_plan_gap_adds_the_artifact_to_its_owner_only_when_the_r
         merge.assert_not_called()
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_runtime_plan_gap_with_no_resolvable_owner_records_indeterminate(tmp_path):
     """ES12: a resolvable path without one compatible owner is recorded INDETERMINATE, owner unset."""
@@ -1327,6 +1369,7 @@ async def test_a_runtime_plan_gap_with_no_resolvable_owner_records_indeterminate
     assert _gap_records(records) == [("runtime_plan_gap.s1.app.wsgi", "indeterminate", None)]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_runtime_plan_gap_seen_twice_before_is_no_progress_and_never_revised_again(tmp_path):
     """ES06 (the bound raised to 3) / ES11 (the no-progress obligation not VIOLATED)."""
@@ -1346,6 +1389,7 @@ async def test_a_runtime_plan_gap_seen_twice_before_is_no_progress_and_never_rev
     assert _gap_records(records) == [("runtime_plan_gap.s1.app.wsgi", "violated", None)]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_integration_obligations_are_evaluated_after_every_completed_unit(tmp_path):
     """EL24: each completed unit is the consumer the integration check evaluates, at its position."""
@@ -1382,6 +1426,7 @@ def _report(**fields):
     return BaselineAuthorityReport(base_revision="r0", **fields)
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_bound_authority_runs_at_baseline_and_its_report_is_returned(tmp_path, monkeypatch):
     """EP04 (the baseline never run) / ET50 (its report not returned)."""
@@ -1398,6 +1443,7 @@ async def test_a_bound_authority_runs_at_baseline_and_its_report_is_returned(tmp
     assert result.legacy_result["baseline_authority"] == report.to_dict() and len(calls) == 1
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", ["raises", "unavailable", "no_mutation"])
 async def test_the_baseline_decides_a_stop_before_any_model_call(tmp_path, monkeypatch, case):
@@ -1427,6 +1473,7 @@ async def test_the_baseline_decides_a_stop_before_any_model_call(tmp_path, monke
             assert entry["reason"] == "the baseline authority run raised RuntimeError: docker gone"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_contract_non_claims_and_dispositions_are_recorded_once_on_the_run_ledger(tmp_path):
     """EP27 / EP28: both contract records reach the run's obligation ledger, from the controller's source."""
@@ -1440,6 +1487,7 @@ async def test_the_contract_non_claims_and_dispositions_are_recorded_once_on_the
     assert non_claims.call_args.args[0] is calls[0]["obligation_ledger"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_request_trimmed_to_fit_is_recorded_and_one_that_fits_is_not(tmp_path):
     """EP20 (a trimmed structural section not recorded) / EP21 (an untrimmed reference recorded) / EP22 (no fit
@@ -1477,6 +1525,7 @@ _NO_CHANGE_POSSIBLE = {"quality_gates_passed": False, "status": "failed",
     ({}, True),
     ({"verification_results": []}, False),
 ], ids=["verified_owner", "owner_without_verification_evidence"])
+@pytest.mark.usefixtures("bound_workspace")
 async def test_a_failed_verification_unit_reopens_its_owner_and_reruns_only_on_an_accepted_change(
         tmp_path, owner_answer, accepted):
     """EW05 (an owner whose declared verification has no evidence accepted) / EW10 (the rerun's role): the
@@ -1493,6 +1542,7 @@ async def test_a_failed_verification_unit_reopens_its_owner_and_reruns_only_on_a
 
 # ============================================================================ enforce: terminal gates, commit and the result on each terminal path
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_terminal_events_carry_the_failed_gates_reason_and_a_failing_event_bus_is_recorded(tmp_path):
     """ET05 (a failed gate's reason dropped from its outcome event) / ET04 / ET46 (an event-bus failure not recorded
@@ -1536,6 +1586,7 @@ def _commit_failure(workspace_state):
         "reason_code": "WORKSPACE_COMMIT_FAILED", "workspace_state": workspace_state, "error": "disk full"})
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("workspace_state", ["UNCHANGED", "UNCERTAIN"])
 async def test_a_failed_workspace_commit_fails_the_run_and_keeps_the_candidate_only_when_uncertain(
@@ -1583,6 +1634,7 @@ async def test_a_failed_workspace_commit_fails_the_run_and_keeps_the_candidate_o
         assert "retained_candidate_path" not in failure
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_completed_commit_persists_the_derived_artifacts_and_reports_a_late_plan_save_failure(tmp_path):
     """ET42's positive half (artifacts persisted after a completed commit) / ET22 (a post-commit plan persistence
@@ -1602,6 +1654,7 @@ async def test_a_completed_commit_persists_the_derived_artifacts_and_reports_a_l
         {"operation": "save_approved_plan", "error": "OSError: read-only"}]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_terminal_gates_are_bound_to_the_runs_milestone(tmp_path):
     """ET54: a milestone run's terminal gates (and static-analysis unit) carry its milestone id, not the run id."""
@@ -1617,6 +1670,7 @@ async def test_the_terminal_gates_are_bound_to_the_runs_milestone(tmp_path):
     assert request.call_args.kwargs["static_analysis_candidate"].unit_id == "grp:2"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_recovery_plan_naming_an_unknown_owner_is_rejected_before_the_consumer(tmp_path, caplog):
     """EO03 (an unknown owner accepted locally) / EO24 (the rejected plan logged as passed=None)."""
@@ -1634,6 +1688,7 @@ async def test_a_recovery_plan_naming_an_unknown_owner_is_rejected_before_the_co
     assert "RECOVERY_EXECUTION_PLAN_COMPLETED plan_id=recovery.s1.0 passed=False" in caplog.text
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_an_owner_that_did_not_write_every_required_file_is_rejected(tmp_path):
     """EO15: the owner's candidate must write every required file to be accepted locally."""
@@ -1650,6 +1705,7 @@ async def test_an_owner_that_did_not_write_every_required_file_is_rejected(tmp_p
     assert (s0["status"], s0["reason_codes"]) == ("needs_review", ["PLAN_RECOVERY_OWNER_FAILED"])
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_second_recovery_cycle_gets_the_next_plan_generation_and_obligation_revision(tmp_path):
     """EO32 / EO41 (the per-subtask recovery-plan generation not advanced or not passed) / EO38 (the cross-owner
@@ -1671,6 +1727,7 @@ async def test_a_second_recovery_cycle_gets_the_next_plan_generation_and_obligat
     assert [c["execution_scope"] for c in calls].count("subtask=s1 role=consumer_retry") == 2
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_an_accepted_recovery_ends_the_cycles(tmp_path):
     """EO33 (the cycle loop continues after an accepted recovery): a consumer retry that passes ends recovery even
@@ -1684,6 +1741,7 @@ async def test_an_accepted_recovery_ends_the_cycles(tmp_path):
     assert [c.kwargs["plan_generation"] for c in build.call_args_list if c.args[2].id == "s1"] == [0]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_scope_revision_that_succeeds_commits_the_newly_owned_file_against_its_original_bytes(tmp_path):
     """EM06 (the newly scoped file's original revision not recorded): the commit applies it."""
@@ -1694,6 +1752,7 @@ async def test_a_scope_revision_that_succeeds_commits_the_newly_owned_file_again
     assert (tmp_path / "x1.py").read_text().startswith("# x1.py by s1 call 2")
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_scope_revision_that_fails_revalidation_is_not_retried(tmp_path):
     """EM09 (a rejected revision retried with the same files)."""
@@ -1714,6 +1773,7 @@ async def test_a_scope_revision_that_fails_revalidation_is_not_retried(tmp_path)
     {"_write": ["a.py", "zzz.py"], "files": ["a.py", "zzz.py"]},
     {"quality_gates_passed": None},
 ], ids=["review_refused", "unchanged_bytes", "undeclared_file", "gates_unreported"])
+@pytest.mark.usefixtures("bound_workspace")
 async def test_a_reopened_owner_candidate_must_be_reviewed_changed_and_in_scope(tmp_path, owner_answer):
     """EW04 / EW06 / EW07: each refusal leaves the verification failure standing (no rerun) and is recorded as a
     rejected reopen. The orchestrator's pin (v4) adds the owner whose Quality Gates outcome is not reported at all
@@ -1730,6 +1790,7 @@ async def test_a_reopened_owner_candidate_must_be_reviewed_changed_and_in_scope(
     assert result.legacy_result["status"] == "failed"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_an_accepted_reopen_records_the_owner_files_and_its_written_set_before_the_rerun(tmp_path):
     """EW08 (the event kind) / EW12 (a deleted planned file among the owner files) / EW14 (the reopened owner's
@@ -1755,6 +1816,7 @@ async def test_an_accepted_reopen_records_the_owner_files_and_its_written_set_be
     assert [c["execution_scope"] for c in calls][-1] == "subtask=sv role=verification_rerun"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_unit_with_planned_files_never_reopens_an_owner(tmp_path):
     """EW01: only a verification-only unit (no planned files) reopens its upstream owner."""
@@ -1764,6 +1826,7 @@ async def test_a_unit_with_planned_files_never_reopens_an_owner(tmp_path):
     assert [c["execution_scope"] for c in calls] == ["subtask=s0 role=planned", "subtask=s1 role=planned"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_terminal_gate_request_carries_the_bound_acceptance_and_its_closure_attempts_reach_the_result(tmp_path):
     """ET56 (the bound acceptance not handed to the terminal gates) / ET29 (the gates' requirement closure attempts
@@ -1789,6 +1852,7 @@ async def test_the_terminal_gate_request_carries_the_bound_acceptance_and_its_cl
     assert result.legacy_result["requirements"]["closure_attempts"] == [{"requirement_id": "REQ-1"}]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_commit_carries_the_plans_contract_transition(tmp_path):
     """ET53 (no ContractRegistry transition handed to the commit)."""
@@ -1803,6 +1867,7 @@ async def test_the_commit_carries_the_plans_contract_transition(tmp_path):
     assert result.legacy_result["status"] == "success"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_verification_unit_reopens_its_nearest_completed_ancestor_not_one_invalidated_by_recovery(tmp_path):
     """EW11 (the candidates not restricted to completed units): after an owner recovery invalidated s1 (it is never
@@ -1823,6 +1888,7 @@ async def test_a_verification_unit_reopens_its_nearest_completed_ancestor_not_on
 
 # ============================================================================ orchestrator pins (independent mutation campaign over E12)
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failing, expected", [("s1", False), ("s2", True)], ids=["nothing_completed", "one_completed"])
 async def test_a_resume_claims_its_own_established_progress_only_for_a_completed_prior_unit(tmp_path, failing, expected):
@@ -1839,6 +1905,7 @@ async def test_a_resume_claims_its_own_established_progress_only_for_a_completed
     assert validate.await_args.kwargs["resuming_own_established_progress"] is expected
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_plan_that_flips_between_violated_and_satisfied_ends_as_an_oscillation(tmp_path):
     """r4 (the oscillation reason code dropped): a plan-structure obligation recorded VIOLATED, then SATISFIED, then
@@ -1875,6 +1942,7 @@ async def test_a_refused_contract_never_runs_its_bound_authority_at_baseline(tmp
     assert "baseline_authority" not in result.legacy_result
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_structural_section_that_occurs_twice_in_the_request_is_left_unfitted(tmp_path):
     """a9 (a request fitted whenever the structural section occurs at least once): the fit splits the request at the

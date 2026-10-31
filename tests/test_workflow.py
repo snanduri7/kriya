@@ -8168,6 +8168,7 @@ async def test_workflow_cumulative_sandbox_sync(tmp_path):
          assert os.path.exists(os.path.join(tmp_path, "file2.py"))
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_full_set_prompt_includes_existing_dependencies_checklist(tmp_path):
     """The full-set retry prompt (used for attempt 1 too) must include an
@@ -16488,6 +16489,7 @@ async def test_workflow_full_regression_check_tests_the_applied_change_not_stale
         assert "a + b" in f.read()
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_passing_run_verification_marks_active_skill_verified(tmp_path):
     """A passing Runtime Verification Gate run is exactly the proof the skill-gap
@@ -16542,6 +16544,7 @@ async def test_workflow_passing_run_verification_marks_active_skill_verified(tmp
     assert skill.verified_context == "widgetlib 2.0.0"
     assert skill.verified_at is not None
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_extracted_rule_unverified_then_promoted_by_passing_run(tmp_path):
     """A freshly extracted rule must be labeled distinctly as unverified in the SAME
@@ -16663,6 +16666,7 @@ async def test_workflow_surfaces_skill_staleness_warning_on_version_drift(tmp_pa
     assert "2.20.0" in warning
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_skill_gap_refuses_url_fetch_under_local_only_egress(tmp_path):
     """A supplied URL must not be fetched when autonomy.egress_policy is local_only -
@@ -16769,6 +16773,7 @@ async def _run_gap_workflow(workspace, skills_dir, engine=None):
     return res, calls
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_skill_gap_decline_marks_acknowledged_and_proceeds(tmp_path):
     """Declining the skill-gap ask (callback returns None) must not fail generation - it proceeds with the skill as-is - and
@@ -16820,6 +16825,7 @@ async def test_workflow_skill_gap_decline_marks_acknowledged_and_proceeds(tmp_pa
     assert res2["unresolved_skill_gaps"] == ["widgetlib"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_workspace_skill_claiming_gap_acknowledged_is_asked_again(tmp_path):
     """W3-1: a workspace skill.yaml that CLAIMS `verification_gap_acknowledged: true` is project-supplied text, not the human's
@@ -16838,6 +16844,7 @@ async def test_workflow_workspace_skill_claiming_gap_acknowledged_is_asked_again
     assert _commits_touching(tmp_path, "skills") == []
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_no_skill_gap_callback_still_reports_unresolved_gap(tmp_path):
     """A gap exists but no skill_gap_callback was even wired (e.g. as `fix`
@@ -16905,6 +16912,7 @@ async def test_workflow_unresolved_skill_gaps_none_when_nothing_flagged(tmp_path
     assert res["quality_gates_passed"] is True
     assert res["unresolved_skill_gaps"] is None
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_skill_gap_not_reasked_once_acknowledged(tmp_path):
     """A skill whose gap is already acknowledged by an authority Kriya honours is not asked about again: a decline recorded
@@ -16974,6 +16982,7 @@ _CONFLICT_RESPONSE = json.dumps({
     }]
 })
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_skill_conflict_excludes_losing_rule_and_persists_resolution(tmp_path):
     """Two independently valid skills can still conflict when both are active for the
@@ -17019,6 +17028,7 @@ async def test_workflow_skill_conflict_excludes_losing_rule_and_persists_resolut
     assert len(records) == 1
     assert records[0]["resolution"] == "prefer_a"
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_skill_conflict_remembered_resolution_skips_callback(tmp_path):
     """A conflict already resolved for this exact skill/rule pair on a prior run must
@@ -17064,6 +17074,7 @@ async def test_workflow_skill_conflict_remembered_resolution_skips_callback(tmp_
     assert _BETA_RULE in planner_prompt
     assert _ALPHA_RULE not in planner_prompt
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_skill_conflict_check_sees_rule_extracted_earlier_in_same_run(tmp_path):
     """Stage 5 SME review, Finding 2 (2026-08-15): section 1.3's cross-skill conflict
@@ -17136,6 +17147,7 @@ async def test_workflow_skill_conflict_check_sees_rule_extracted_earlier_in_same
     records = load_conflict_resolutions(str(skills_dir))
     assert len(records) == 1
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_skill_conflict_no_callback_response_does_not_persist(tmp_path):
     """A callback that returns nothing usable (e.g. -y auto-skip, or a callback error)
@@ -17178,6 +17190,7 @@ async def test_workflow_skill_conflict_no_callback_response_does_not_persist(tmp
 
     assert load_conflict_resolutions(str(skills_dir)) == []
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_no_conflict_check_without_callback(tmp_path):
     """Without a skill_conflict_callback (e.g. the `fix` pipeline, which doesn't wire
@@ -17207,6 +17220,7 @@ async def test_workflow_no_conflict_check_without_callback(tmp_path):
     assert res["quality_gates_passed"] is True
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_web_lookup_auto_resolves_skill_gap(tmp_path):
     """When web_lookup_enabled and a search backend are configured, an unverified
@@ -17271,6 +17285,7 @@ async def test_workflow_web_lookup_auto_resolves_skill_gap(tmp_path):
     skill = se.get_skill("widgetlib")
     assert "The magic widget constant is 42." in skill.rules
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_web_lookup_never_fires_without_approval(tmp_path):
     """Regression test: before the pre-send confirmation gate existed, a
@@ -17321,6 +17336,7 @@ async def test_workflow_web_lookup_never_fires_without_approval(tmp_path):
     mock_search.assert_not_called()
     assert skill_gap_calls and "widgetlib" in skill_gap_calls[0]
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_web_lookup_query_callback_can_approve(tmp_path):
     """The real-time callback path (not just the auto_approve config flag) must
@@ -17429,6 +17445,7 @@ async def test_workflow_retry_loop_live_lookup_never_fires_without_approval(tmp_
     assert res["quality_gates_passed"] is True
     mock_search.assert_not_called()
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_web_lookup_falls_through_to_next_candidate_on_empty_extraction(tmp_path):
     """A single unhelpful top search result (a landing page with nothing concrete to
@@ -17492,6 +17509,7 @@ async def test_workflow_web_lookup_falls_through_to_next_candidate_on_empty_extr
     skill = se.get_skill("widgetlib")
     assert "The magic widget constant is 42." in skill.rules
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_web_lookup_declined_falls_back_to_human_ask(tmp_path):
     """Declining the live-lookup batch confirmation must fall back to the existing
@@ -17539,6 +17557,7 @@ async def test_workflow_web_lookup_declined_falls_back_to_human_ask(tmp_path):
     assert res["quality_gates_passed"] is True
     assert skill_gap_calls == [["widgetlib"]]  # fell back to asking a human
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_web_lookup_accepted_but_empty_falls_back_to_human_ask(tmp_path):
     """Bug fix: accepting the live-lookup batch doesn't by itself mean the gap is
@@ -17601,6 +17620,7 @@ async def test_workflow_web_lookup_accepted_but_empty_falls_back_to_human_ask(tm
     skill = se.get_skill("widgetlib")
     assert "The magic widget constant is 42." in skill.rules
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_web_lookup_disabled_by_default_never_calls_search(tmp_path):
     """web_lookup_enabled defaults to False - a project that hasn't opted in must see
@@ -17635,6 +17655,7 @@ async def test_workflow_web_lookup_disabled_by_default_never_calls_search(tmp_pa
     assert res["quality_gates_passed"] is True
     mock_search.assert_not_called()
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_web_lookup_design_derived_bootstraps_new_skill(tmp_path):
     """The goal alone may not name any specific technology, but the Architect's design
@@ -17689,6 +17710,7 @@ async def test_workflow_web_lookup_design_derived_bootstraps_new_skill(tmp_path)
     skill = se.get_skill("gizmolib")
     assert "Use gizmolib.connect() to open a connection." in skill.rules
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_web_lookup_design_derived_falls_back_to_human_ask_on_empty_extraction(tmp_path):
     """Bug fix, design-derived path: if live lookup finds nothing usable for a
@@ -22673,6 +22695,7 @@ def test_build_code_context_treats_a_file_missing_from_scores_as_lowest_priority
     assert "File: Scored.txt (Tier: full)" in ctx
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_wires_hybrid_match_scores_into_graph_rag_context_degradation(tmp_path):
     """Architectural add-on from a 2026-08-12 SME review (re-ranking
@@ -22761,6 +22784,7 @@ def _real_python_chunk(content: str, path: str, marker: str) -> str:
     raise AssertionError(f"no real chunk found containing {marker!r}")
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_pre_plan_grounding_reaches_planner_with_verified_and_hypothesis_labels(tmp_path):
     """End-to-end through the real run_generation_workflow(): a retrieved
@@ -22844,6 +22868,7 @@ async def test_workflow_pre_plan_grounding_reaches_planner_with_verified_and_hyp
     assert "B.foo" not in planner_prompt
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_pre_plan_grounding_resolves_nested_member_g1_shaped(tmp_path):
     """Regression resembling the real G1 incident's own structural shape (a
@@ -22899,6 +22924,7 @@ async def test_workflow_pre_plan_grounding_resolves_nested_member_g1_shaped(tmp_
     assert "engine.py: outer_extractor.walk_calls" in planner_prompt
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_heavy_context_depth_widens_retrieval_top_k(tmp_path):
     """MA2.6 (control-plane implementation plan): with process_profiles.
@@ -22998,6 +23024,7 @@ async def test_workflow_heavy_process_profile_records_telemetry_only(tmp_path):
     assert metrics["engineering_route"]["max_observed_risk_class"] == "HIGH"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_context_depth_disabled_by_default_keeps_top_k_five(tmp_path):
     """Regression lock: with process_profiles.enforce_context_depth left at
@@ -24025,6 +24052,7 @@ def test_remove_git_worktree_resets_to_current_commit_not_creation_time_commit(t
     assert os.path.exists(os.path.join(worktree_path, "pom.xml"))
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_workflow_multi_skill_gap_prompt_does_not_misattribute_extraction(tmp_path):
     """Regression test for a real bug caught live: when a single skill-gap prompt
@@ -24680,6 +24708,7 @@ def test_classify_plan_completeness_accepts_prose_only_plan_with_closed_fence_an
     assert result.classification == "complete"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_planner_prompt_includes_skill_conventions_reminder(tmp_path):
     """SME review finding 2: Planner receives convention_prompt the same as
@@ -24881,6 +24910,7 @@ async def test_workflow_genuine_truncated_json_still_stops_as_planner_output_inc
     assert llm.complete.call_count == 1
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_architect_prompt_includes_skill_conventions_reminder(tmp_path):
     """SME review finding, Architect stage (2026-08-15): same gap as
@@ -24991,6 +25021,7 @@ async def test_ensure_repository_indexed_swallows_index_failure(tmp_path):
     assert indexed is False
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_run_generation_workflow_auto_index_disabled_by_default(tmp_path):
     # autonomy.auto_index_missing_dependency_graph defaults False - the entire
@@ -25009,6 +25040,7 @@ async def test_run_generation_workflow_auto_index_disabled_by_default(tmp_path):
     mock_ensure.assert_not_called()
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_run_generation_workflow_auto_index_enabled_runs_before_generation(tmp_path):
     cfg = AppConfig(paths={"memory": str(tmp_path / "memory"), "skills": str(tmp_path / "skills")})

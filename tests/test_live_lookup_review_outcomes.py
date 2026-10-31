@@ -75,6 +75,7 @@ def _run(tmp_path, cfg, responses, found, **kwargs):
     return result, llm
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.parametrize("kind", KINDS)
 @pytest.mark.parametrize("answer,adopted", ANSWERS)
 def test_stage_analysis_adopts_the_fetched_references_only_on_an_approved_review(tmp_path, kind, answer, adopted):
@@ -103,6 +104,7 @@ def test_stage_analysis_adopts_the_fetched_references_only_on_an_approved_review
     assert asked == ([] if adopted else [["widgetlib"]])
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.parametrize("kind", KINDS)
 @pytest.mark.parametrize("answer,adopted", ANSWERS)
 def test_stage_architecture_adopts_the_design_derived_references_only_on_an_approved_review(tmp_path, kind, answer, adopted):
@@ -126,6 +128,7 @@ def test_stage_architecture_adopts_the_design_derived_references_only_on_an_appr
             engine.get_skill("gizmolib")
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.parametrize("path", ["analysis", "architecture"])
 def test_a_failing_review_callback_adopts_nothing(tmp_path, path):
     """A review callback that raises is the existing fail-closed branch: the references are discarded (and the error is not the run's)."""

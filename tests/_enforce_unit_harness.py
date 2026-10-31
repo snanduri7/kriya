@@ -41,7 +41,7 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
                 answer: Any = True, run_verification: bool = False, judge_reply: Optional[Dict[str, Any]] = None,
                 base_files: Optional[Dict[str, str]] = None, app_output: str = "ok\n", callback: Optional[Callable] = None,
                 record_steps: bool = False, on_execute: Optional[Callable[[Any], None]] = None, on_build: Optional[Callable[[], Any]] = None,
-                run_id: Optional[str] = None, on_workspace: Optional[Callable[[Any], None]] = None) -> Run:
+                run_id: Optional[str] = None, on_workspace: Optional[Callable[[Any], None]] = None, init_git: bool = True) -> Run:
     from kriya.workflow.workflow_controller import WorkflowController
 
     model_runtime.clear_model_runtime_cache()
@@ -62,9 +62,10 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
     for name, text in (base_files or {"README.md": "base\n"}).items():
         (workspace / name).parent.mkdir(parents=True, exist_ok=True)
         (workspace / name).write_text(text)
-    git(workspace, "init", "-q")
-    git(workspace, "add", "-A")
-    git(workspace, "commit", "-qm", "base")
+    if init_git:      # W3-3 U4: False leaves the folder as a plain NO_GIT directory (the production admission cases)
+        git(workspace, "init", "-q")
+        git(workspace, "add", "-A")
+        git(workspace, "commit", "-qm", "base")
     if on_workspace is not None:  # the folder exists and is a committed repository; a caller may open a launch session on it
         on_workspace(workspace)
 

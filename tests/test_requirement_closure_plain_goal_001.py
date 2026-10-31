@@ -313,6 +313,7 @@ def test_14_unchanged_closes_only_with_the_mutation_record(tmp_path):
     assert entry["closed"] is True
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_15_the_enforce_path_refuses_before_planning_under_production(tmp_path):
     """Review 5.1/5.4: the controller's admission branch, before retrieval and before the Planner."""

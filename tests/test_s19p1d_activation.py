@@ -176,15 +176,22 @@ def test_open_folder_describes_an_unrelated_repository_under_the_stale_lines(own
 
 def test_a_run_begins_in_a_plain_folder_under_the_stale_lines(tmp_path):
     """Not a repository: git activates nothing there (MEASURED: `not a git repository`); the greenfield bootstrap that
-    follows (init + an EMPTY commit) converts no file, and the new worktree is inspected in its own context."""
+    follows (init + an EMPTY commit) converts no file, and the new worktree is inspected in its own context. W3-3 U4 (INTENTIONAL contract change): only an EMPTY plain folder
+    is bootstrapped; one holding a file is the typed refusal, before any git command (no repository is created, so no file could be converted)."""
+    from kriya.repository.bound_tree import BoundTreeError
     from kriya.workflow import worktree
 
     folder = tmp_path / "plain"
     folder.mkdir()
-    (folder / "a.py").write_text("x = 1\n")
     assert _begin_run(folder)
     created = Path(worktree.create_git_worktree(str(folder)))
     assert created.is_dir()
+    populated = tmp_path / "populated"
+    populated.mkdir()
+    (populated / "a.py").write_text("x = 1\n")
+    with pytest.raises(BoundTreeError):
+        worktree.create_git_worktree(str(populated))
+    assert not (populated / ".git").exists()
 
 
 def test_an_unborn_repository_s_content_hash_is_unavailable_not_refused(tmp_path):

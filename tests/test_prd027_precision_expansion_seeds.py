@@ -200,6 +200,7 @@ def _assert_embedding_only_seed_event(events):
     assert details["matched_files"] == ["Existing.txt"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_run_records_which_hits_seeded_graph_expansion(tmp_path):
     res, _status, events = await _run_with_index(tmp_path, mode="guardrails", responses=[
@@ -209,6 +210,7 @@ async def test_the_run_records_which_hits_seeded_graph_expansion(tmp_path):
     _assert_embedding_only_seed_event(events)
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_seed_decision_is_recorded_on_a_human_rejected_run_too(tmp_path):
     res, status, events = await _run_with_index(

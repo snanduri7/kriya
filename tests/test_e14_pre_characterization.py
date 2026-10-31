@@ -548,6 +548,7 @@ def _enforce_engine(tmp_path: Path, planner_text: str):
     return we, cfg
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_oi65_current_behaviour_a_same_round_regression_in_round_0_raises_typeerror(tmp_path):
     """OI-65, CONFIRMED DEFECTIVE (reachable): a Planner response that repeats a subtask id, the first copy declaring
@@ -565,6 +566,7 @@ async def test_oi65_current_behaviour_a_same_round_regression_in_round_0_raises_
     assert [(row[0].endswith(".enforce"), row[1], row[2]) for row in _trace_rows(cfg)] == [(True, "error", "TypeError")]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["duplicate_id_violated_then_satisfied", "duplicate_id_both_satisfied", "unique_ids"])
 async def test_oi65_current_behaviour_the_controls_end_as_a_typed_plan_repair_outcome(tmp_path, name):

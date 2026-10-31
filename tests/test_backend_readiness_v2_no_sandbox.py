@@ -11,6 +11,7 @@ import pytest
 from test_backend_readiness_v2_exception_masking import BAD, BASE, GOOD, PATH
 from test_backend_readiness_v2_exception_masking import _end_to_end as sandboxed_end_to_end
 
+from kriya.repository.bound_tree import BoundTreeError
 from kriya.workflow import worktree as worktree_module
 
 
@@ -29,13 +30,19 @@ def test_create_git_worktree_never_returns_the_workspace_itself(tmp_path):
     committed.mkdir()
     _git_repo(committed, {"a.txt": "x\n"})
     bare = tmp_path / "bare"
-    bare.mkdir()
-    (bare / "a.txt").write_text("x\n")  # not a repository: bootstrapped, then still sandboxed
+    bare.mkdir()  # not a repository, and EMPTY (W3-3 U4): bootstrapped, then still sandboxed
     for workspace in (committed, bare):
         sandbox = worktree_module.create_git_worktree(str(workspace))
         assert os.path.realpath(sandbox) != os.path.realpath(workspace)
-        assert (workspace / "a.txt").read_text() == "x\n"
-        assert os.path.exists(os.path.join(sandbox, "a.txt"))
+        if workspace is committed:
+            assert (workspace / "a.txt").read_text() == "x\n"
+            assert os.path.exists(os.path.join(sandbox, "a.txt"))
+    populated = tmp_path / "populated"
+    populated.mkdir()
+    (populated / "a.txt").write_text("x\n")  # W3-3 U4 (INTENTIONAL contract change): a populated folder with no repository is refused, never bootstrapped
+    with pytest.raises(BoundTreeError):
+        worktree_module.create_git_worktree(str(populated))
+    assert not (populated / ".git").exists() and (populated / "a.txt").read_text() == "x\n"
 
 
 def test_a_sandbox_that_cannot_be_created_is_an_error_never_a_silent_in_place_fallback(tmp_path, monkeypatch):

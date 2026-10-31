@@ -41,7 +41,7 @@ from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 from kriya.policy.telemetry import build_decision_record
-from kriya.repository.bound_tree import BoundTreeError
+from kriya.repository.bound_tree import BoundTreeError, admit_workspace_for_mutation
 from kriya.static_analysis.service import (
     StaticAnalysisCandidate,
     StaticAnalysisService,
@@ -2532,6 +2532,8 @@ class WorkflowEngine:
         # from the set and the repository before any model call; its digest
         # joins the resume identity, its refusal is decided below.
         try:
+            # W3-3 U4: the production admission of a workspace with no Git repository - before the contract (a unit that compiles none, `kriya fix`, is admitted here too).
+            admit_workspace_for_mutation(workspace_path)
             verification_contract = (compile_run_contract(self, requirement_goal, goal, workspace_path, requirement_set)
                                      if requirement_set is not None else None)
         except BoundTreeError as error:

@@ -267,6 +267,7 @@ def _enforce(workspace, goal, plans):
     return engine, executed, result
 
 
+@pytest.mark.usefixtures("bound_workspace")
 def test_the_live_shape_completes_without_the_invented_runtime_unit(workspace):
     engine, executed, result = _enforce(workspace, NO_RUNTIME_GOAL, lambda *a, **k: _live_shape())
     assert [scope.split()[0] for scope, _, _ in executed] == ["subtask=s1", "subtask=s2", "subtask=s3"]
@@ -276,12 +277,14 @@ def test_the_live_shape_completes_without_the_invented_runtime_unit(workspace):
     assert result.legacy_result["status"] == "success"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 def test_a_requested_runtime_unit_still_runs_as_a_runtime_obligation(workspace):
     _, executed, result = _enforce(workspace, RUNTIME_GOAL, lambda *a, **k: _live_shape())
     assert executed[-1][0].startswith("subtask=s4") and executed[-1][2] is True
     assert result.legacy_result["status"] == "success"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 def test_an_unremovable_invented_runtime_check_is_repaired_before_any_developer_work(workspace):
     plan = _live_shape()
     s1, _, s3, _ = plan.subtasks
@@ -296,6 +299,7 @@ def test_an_unremovable_invented_runtime_check_is_repaired_before_any_developer_
     assert result.legacy_result["status"] == "success" and result.legacy_result["plan_repair_attempts"] == 1
 
 
+@pytest.mark.usefixtures("bound_workspace")
 def test_a_repeated_unremovable_runtime_check_fails_closed_typed(workspace):
     plan = _live_shape()
     bad = _with(plan, subtasks=[plan.subtasks[0], _mutation("s2", SERVICE, verification=(RUNTIME,),

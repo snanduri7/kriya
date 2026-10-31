@@ -52,12 +52,12 @@ def _patched(plan):
 
 
 def _tree_snapshot(root):
-    """Every file under ``root`` except Kriya's own control/candidate state."""
+    """Every file under ``root`` except Kriya's own control/candidate state and the Git metadata of the (W3-3 U4) Git-backed fixture: the working files are the claim."""
     snapshot = {}
     for directory, dirnames, filenames in os.walk(root):
         rel_dir = os.path.relpath(directory, root)
         if rel_dir == ".":
-            dirnames[:] = [d for d in dirnames if d not in (".kriya", "plan-sandbox")]
+            dirnames[:] = [d for d in dirnames if d not in (".kriya", "plan-sandbox", ".git")]
         for name in filenames:
             path = os.path.join(directory, name)
             with open(path, "rb") as handle:
@@ -106,6 +106,7 @@ def _no_stage_files(root):
     ]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_real_concurrent_edit_between_gates_and_commit_is_structured_conflict(tmp_path, sandboxed):
     """The conflict is produced by a real workspace edit after the gates ran,
@@ -160,6 +161,7 @@ async def test_real_concurrent_edit_between_gates_and_commit_is_structured_confl
     assert cycle["result"] == record.commit_result
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_missing_candidate_file_is_structured_materialization_failure(tmp_path, sandboxed):
     (tmp_path / "app.py").write_text("original\n")
@@ -192,6 +194,7 @@ async def test_missing_candidate_file_is_structured_materialization_failure(tmp_
     assert record.commit_intent is None
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_uncertain_commit_is_recorded_uncertain_and_candidate_retained(tmp_path, sandboxed):
     (tmp_path / "app.py").write_text("original\n")
@@ -226,6 +229,7 @@ async def test_uncertain_commit_is_recorded_uncertain_and_candidate_retained(tmp
     assert record.commits[-1]["result"] == "UNCERTAIN"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_run_record_failure_after_successful_commit_is_needs_review_with_the_persistence_error_not_success(
     tmp_path, sandboxed,
