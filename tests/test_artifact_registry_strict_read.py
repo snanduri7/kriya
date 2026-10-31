@@ -211,14 +211,16 @@ def test_a_registry_that_became_unreadable_during_a_run_hashes_to_its_reason_cod
 
 @pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
-async def test_an_enforce_run_refuses_a_corrupt_artifact_registry_at_its_start_like_a_corrupt_contract_registry(tmp_path):
-    """MEASURED at f076a44: this exact run reported success over the corrupt file and overwrote it at the post-commit save."""
+async def test_an_enforce_run_refuses_a_corrupt_artifact_registry_before_any_developer_work_as_a_typed_failure(tmp_path):
+    """MEASURED at f076a44: this exact run reported success over the corrupt file and overwrote it at the post-commit save. Until W3-5 the refusal
+    was a raised ``ArtifactRegistryCorruptError``; since W3-5 (owner decision 2026-10-30) it is the existing typed non-success result with the
+    dedicated reason code (full contract: tests/test_w35_typed_boundaries.py, which runs both registry types)."""
     (tmp_path / "pyproject.toml").write_text(_PYPROJECT)
     path, bad = _corrupt(tmp_path, "ascii_garbage")
     engine = _enforce_engine(tmp_path)
     engine.run_generation_workflow = AsyncMock(side_effect=AssertionError("no Developer work before the refusal"))
-    with pytest.raises(ArtifactRegistryCorruptError):
-        await _enforce(engine, tmp_path, _plan_of(_unit("s1")))
+    result, _calls = await _enforce(engine, tmp_path, _plan_of(_unit("s1")))
+    assert result.legacy_result["status"] == "failure" and result.legacy_result["reason_codes"] == [ARTIFACT_REGISTRY_CORRUPT]
     with open(path, "rb") as handle:
         assert handle.read() == bad
 

@@ -4539,6 +4539,24 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
         sys.exit(1)
     click.secho("Local knowledge base updated successfully.", bold=True, fg="green")
 
+def _design_stage_stop_exit(res: Dict[str, Any]) -> Optional[int]:
+    """W3-5 (KERNEL-STAGE-STOP-NO-CATEGORY-001): a design-stage stop (the KnowledgeGuard gap, a rejected Planner response, a rejected Architect file list) is a typed
+    result that ends the run BEFORE any generation, so by the stage-stop contract (pinned by tests/golden/kernel) it carries a ``status`` and a ``reason`` but no
+    ``quality_gates_passed``. ``kriya fix`` used to index that key and surfaced the refusal as a ``KeyError``. Returns the process exit code after reporting such a
+    stop, or None for every result that carries ``quality_gates_passed`` (the pre-existing branches). A knowledge gap exits 3, as the proposal executor does."""
+    if "quality_gates_passed" in res or not res.get("status"):
+        return None
+    if res["status"] == "knowledge_gap":
+        click.secho(
+            "\n[STOPPED BEFORE GENERATION] knowledge_gap: the knowledge guard found libraries Kriya has no verified information for. Nothing was generated or applied. "
+            "`kriya fix` has no knowledge-gap acknowledgement; see `kriya generate --knowledge-policy` / `--ack-knowledge-gap` for the equivalent manual-goal behavior.",
+            fg="yellow", bold=True)
+        return 3
+    reason = res.get("reason") or "no reason recorded"
+    click.secho(f"\n[STOPPED BEFORE GENERATION] {res['status']}: {reason}\nNothing was generated or applied.", fg="red", bold=True)
+    return 1
+
+
 @main.command(name="fix")
 @click.option('--error', '-e', help="Compilation or test error log string. If omitted, reads from stdin.")
 @click.option('--workspace', '-w', default=".", type=click.Path(exists=True, file_okay=False), help="Workspace directory path.")
@@ -4604,7 +4622,10 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
         if res.get("skill_staleness_warnings"):
             for warning in res["skill_staleness_warnings"]:
                 click.secho(f"\n[SKILL STALENESS] {warning}", fg="yellow")
-        if res["quality_gates_passed"]:
+        stage_stop_exit = _design_stage_stop_exit(res)
+        if stage_stop_exit is not None:
+            sys.exit(stage_stop_exit)
+        if res.get("quality_gates_passed"):
             click.secho("\n[SUCCESS] Diagnostic repair completed successfully! Compiled and verified.", fg="green", bold=True)
         elif res.get("final_review_refusal"):
             _echo_final_review_refusal(res)

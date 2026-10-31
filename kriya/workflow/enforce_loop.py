@@ -1118,7 +1118,17 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # rejection path. _is_strict_regression's own semantics (and the
             # `is_strict_regression` value fed to it) are untouched by this
             # OR - see _semantic_contract_regression_subtasks' own docstring.
-            treat_as_regression = (
+            # W3-5 (KERNEL-PLAN-REPAIR-ROUND0-REGRESSION-TYPEERROR-001): a
+            # candidate can only be "redirected to the retained baseline" when
+            # a baseline exists. Round 0 has none (retained_* are still None),
+            # so a regression flagged by that round's own validation (a
+            # repeated subtask id downgrading one obligation SATISFIED ->
+            # VIOLATED inside one validate_plan call) is not redirectable: the
+            # candidate becomes the baseline and the bounded repair loop
+            # proceeds exactly as it does for the same plan without the
+            # downgrade. Both consumers below (the next repair prompt and the
+            # terminal exhaustion report) read this one decision.
+            treat_as_regression = retained_reason_codes is not None and (
                 is_strict_regression
                 or bool(semantic_contract_regression_subtasks)
                 or bool(preserved_reference_regressions)

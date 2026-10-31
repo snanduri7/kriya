@@ -214,7 +214,8 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     # E5: 62 -> 36 lookups: the 26 logger loads of the moved Developer loop bind StageDeps.logger
     # (_development_deps -> _stage_deps, no new load).
     # W3-3 R1: 36 -> 37, the one logger call of _membership_authority_stop (the typed membership-authority stop).
-    (W, 'logger'): P(6, W, ((W, 37),), ()),
+    # W3-5: 37 -> 38, the one logger call of _design_stage_deadline_stop (the typed design-stage deadline stop).
+    (W, 'logger'): P(6, W, ((W, 38),), ()),
     (W, 'resolve_future_owner_verification_deferral'): P(1, 'kriya.workflow.attribution', ((W, 1),), ()),
     # E3 characterization: +1 site (the legacy_stage_context_success golden scripts the retrieval through it).
     (W, 'retrieve_graph_context'): P(2, 'kriya.workflow.graph_retrieval', ((W, 1),), ()),
@@ -256,6 +257,8 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (C, 'find_missing_grounded_production_artifacts'): P(3, C, ((C, 1),), ()),
     (C, 'grounded_owner_candidates'): P(2, 'kriya.workflow.ownership_findings', ((C, 1),), ()),
     (C, 'localization_candidates'): P(2, 'kriya.workflow.graph_retrieval', ((C, 1),), ()),
+    # W3-5: tests/test_e14_pre_characterization.py patches the enforce plan-repair bound to 0 to reach the terminal-exhaustion report of round 0.
+    (C, 'STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS'): P(1, C, ((C, 1),), ()),
     # E11 characterization: +2 sites (tests/test_e11_owner_modules.py).
     (C, 'model_capacities'): P(13, 'kriya.workflow.edit_feasibility', ((C, 1),), ()),
     (C, 'parse_planner_structured_output'): P(75, 'kriya.agents.contracts', ((C, 2),), ()),
@@ -447,8 +450,8 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # P-B skill-verification deferral (tests/test_skill_verification_deferral.py): +1 W site (final_review: the stage-5 closer seeded
     # with a held verification on a failed run) and +1 C site (commit_verified_candidate: the enforce terminal commit it defers behind)
     # Step 6 (artifact registry): +1 C site (commit_verified_candidate: tests/test_artifact_registry_strict_read.py, the registry corrupted right after the source commit)
-    assert totals == {A: 113, W: 99, C: 386}  # W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
-    assert len(PATCH_POINTS) == 134  # P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
+    assert totals == {A: 113, W: 99, C: 387}  # W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
+    assert len(PATCH_POINTS) == 135  # W3-5: +1 row (C.STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS); P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
 
 
 # ----------------------------------------------------------------------------- owner modules (DEPENDENCY-RULES)

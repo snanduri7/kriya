@@ -195,6 +195,7 @@ from kriya.workflow.obligations import (
 
 # E11 re-exports (tests/architecture/test_facades.py PARTIAL_FACADES): the recovery types and the gate-failure set moved
 # to owner_recovery with the owner recovery, importable from here as before. Removed in P1.
+from kriya.workflow.outcome import deadline_stop_result
 from kriya.workflow.owner_recovery import _GATE_FAILURE_TYPES as _GATE_FAILURE_TYPES
 from kriya.workflow.owner_recovery import ArtifactOwnerResolutionBasis as ArtifactOwnerResolutionBasis
 from kriya.workflow.owner_recovery import OwnerResolution as OwnerResolution
@@ -1430,6 +1431,32 @@ class WorkflowController:
                     "failure_type": "WORKTREE_SYNC",
                     "failure_category": e.reason_code.lower(),
                     "reason_codes": [e.reason_code],
+                    "error": str(e),
+                    "run_id": run_id,
+                }
+            except InferenceDeadlineError as e:
+                # W3-5 (STAGE-DEADLINE-RAW-ESCAPE-PLANNER-ARCHITECT-001, enforce boundary; MEASURED in W3-5: a Planner call stopped by the run deadline escaped
+                # execute() as a raw InferenceDeadlineError, the same shape the direct pipeline had): the same typed stop, built by the one shared owner.
+                logger.error(f"WorkflowController enforce run {run_id!r}: generation deadline stopped a model call: {e}")
+                legacy_result = deadline_stop_result(e, goal=goal, workspace_path=workspace_path, run_id=run_id)
+            except (ContractRegistryCorruptError, ArtifactRegistryCorruptError) as e:
+                # W3-5 (ENFORCE-RUN-CORRUPT-REGISTRY-RAISES-INSTEAD-OF-NEEDS-REVIEW-001, owner decision 2026-10-30): an unreadable registry is
+                # never read as empty (PRD-029 / Step 6), so the run stops before any file is written or any registry is overwritten - but it
+                # ends as the EXISTING typed non-success result (the WorktreeSyncError shape), not as a raised implementation exception. Both
+                # registry types behave identically. The dedicated corruption reason code travels in ``reason_codes``; the file path and the
+                # parse detail travel in the existing ``persistence_store``/``persistence_error`` fields the milestone path already uses. No
+                # ``recovery_command`` (its remedy, ``kriya runs recover``, is wrong for a registry) and no needs_review (that is the
+                # milestone path's contract, unchanged).
+                logger.error(f"WorkflowController enforce run {run_id!r}: {e}")
+                legacy_result = {
+                    "status": "failure",
+                    "quality_gates_passed": False,
+                    "files": [],
+                    "failure_type": "REGISTRY_CORRUPT",
+                    "failure_category": e.reason_code.lower(),
+                    "reason_codes": [e.reason_code],
+                    "persistence_store": ("contract_registry" if isinstance(e, ContractRegistryCorruptError) else "artifact_registry"),
+                    "persistence_error": str(e),
                     "error": str(e),
                     "run_id": run_id,
                 }

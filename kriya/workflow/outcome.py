@@ -190,6 +190,18 @@ def terminal_failure_category(state: RunState) -> str:
         else "quality_gates_exhausted"
     )
 
+def deadline_stop_result(error: Any, *, goal: str, workspace_path: str, run_id: Optional[str]) -> Dict[str, Any]:
+    """W3-5 (STAGE-DEADLINE-RAW-ESCAPE-PLANNER-ARCHITECT-001): the ONE result of a run whose generation deadline (``InferenceDeadlineError``) stopped a model call
+    before any candidate existed - the design stages of ``run_generation_workflow`` and the enforce controller's own Planner call both build it here. It is the EXISTING
+    failed contract: the deadline's own typed ``reason_code`` and the ``generation_budget_exhausted`` category (the ``GENERATION TIME BUDGET EXHAUSTED:`` prefix is the
+    same one ``terminal_failure_category`` and the Developer loop key on), no candidate blame, no retry and no new status. ``environment_failure`` is set because the
+    CLI's existing budget branch reads it."""
+    message = f"GENERATION TIME BUDGET EXHAUSTED: {error}"
+    return {"status": "failure", "quality_gates_passed": False, "files": [], "failure_category": "generation_budget_exhausted",
+            "reason_codes": [error.reason_code], "error": message, "environment_failure": message,
+            "goal": goal, "workspace_path": workspace_path, "run_id": run_id}
+
+
 def failure_report_dicts(state: RunState) -> List[Dict[str, Any]]:
     """MA7.6 (kriya/workflow/failure_reporting.py) - additive, NOT a
     replacement for failure_category: that field answers "why did the retry

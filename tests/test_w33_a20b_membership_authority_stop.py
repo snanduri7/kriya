@@ -97,14 +97,16 @@ def test_the_entrypoint_keeps_its_run_lease_and_exception_decorators_and_the_hel
     assert decorators(functions["_membership_authority_stop"]) == set()
 
 
-@pytest.mark.parametrize("stage_call", ["run_design_stages", "run_development"])
-def test_both_stage_runners_are_inside_the_membership_authority_handler(stage_call):
+# W3-5: the design stages additionally end a run-deadline stop as the typed failed result (InferenceDeadlineError -> _design_stage_deadline_stop); the Developer loop
+# converts that error itself (recovery_coordinator), so its handler list is unchanged.
+@pytest.mark.parametrize("stage_call,handlers", [("run_design_stages", ["BoundTreeError", "InferenceDeadlineError"]), ("run_development", ["BoundTreeError"])])
+def test_both_stage_runners_are_inside_the_membership_authority_handler(stage_call, handlers):
     entrypoint = _workflow_functions()["run_generation_workflow"]
     handled = []
     for node in ast.walk(entrypoint):
         if isinstance(node, ast.Try) and any(isinstance(sub, ast.Call) and getattr(sub.func, "id", None) == stage_call for stmt in node.body for sub in ast.walk(stmt)):
             handled.append([ast.unparse(h.type) for h in node.handlers])
-    assert handled == [["BoundTreeError"]], f"{stage_call} must sit in exactly one try whose only handler is BoundTreeError: {handled}"
+    assert handled == [handlers], f"{stage_call} must sit in exactly one try whose handlers are exactly {handlers}: {handled}"
 
 
 def test_the_handler_returns_the_typed_result_and_never_swallows_the_error():

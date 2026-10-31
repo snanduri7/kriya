@@ -550,20 +550,36 @@ def _enforce_engine(tmp_path: Path, planner_text: str):
 
 @pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
-async def test_oi65_current_behaviour_a_same_round_regression_in_round_0_raises_typeerror(tmp_path):
-    """OI-65, CONFIRMED DEFECTIVE (reachable): a Planner response that repeats a subtask id, the first copy declaring
-    the provider in depends_on and the second not, makes the REAL ``validate_plan`` record the same
-    SUBTASK_SEMANTIC_CONTRACT obligation SATISFIED then VIOLATED within round 0 (a regression event), so the enforce
-    PLAN_REPAIR loop treats round 0 as a regression and seeds the repair prompt from the retained baseline, which round
-    0 does not have: ``list(None)`` raises TypeError out of ``WorkflowController.execute``. One Planner call, no
-    generation, the RunRecord settles FAILURE and the trace row is ``error`` / ``TypeError``."""
+async def test_oi65_w35_a_same_round_regression_in_round_0_ends_as_the_typed_plan_repair_outcome(tmp_path):
+    """OI-65 / KERNEL-PLAN-REPAIR-ROUND0-REGRESSION-TYPEERROR-001, FIXED in W3-5 (this test pinned the defect until then: a raw ``TypeError``
+    out of ``WorkflowController.execute``). A Planner response that repeats a subtask id, the first copy declaring the provider in
+    depends_on and the second not, makes the REAL ``validate_plan`` record the same SUBTASK_SEMANTIC_CONTRACT obligation SATISFIED then
+    VIOLATED within round 0 (a regression event). Round 0 has no retained baseline to redirect to, so that candidate becomes the baseline and
+    the bounded PLAN_REPAIR loop runs its three Planner rounds exactly as for its controls: the EXISTING typed non-success (needs_review,
+    STRUCTURED_PLAN_REPAIR_EXHAUSTED) - never an implementation exception, nothing generated, the RunRecord settled FAILURE."""
     we, cfg = _enforce_engine(tmp_path, _planner_text("duplicate_id_satisfied_then_violated"))
-    with pytest.raises(TypeError, match="'NoneType' object is not iterable"):
-        await WorkflowController(we).execute("Create a.py", str(tmp_path), migration_mode="enforce")
+    result = await WorkflowController(we).execute("Create a.py", str(tmp_path), migration_mode="enforce")
+    legacy = result.legacy_result
+    assert legacy["status"] == "needs_review" and legacy["plan_repair_attempts"] == 2
+    assert "STRUCTURED_PLAN_REPAIR_EXHAUSTED" in legacy["reason_codes"] and "DUPLICATE_SUBTASK_ID" in legacy["reason_codes"]
+    assert we.planner.run.await_count == 3 and we.run_generation_workflow.await_count == 0
+    assert [(r.lifecycle_state.value, r.terminal_status) for r in list_run_records(str(tmp_path))] == [("FAILURE", "FAILURE")]
+    assert [(row[0].endswith(".enforce"), row[1], row[2]) for row in _trace_rows(cfg)] == [(True, "needs_review", "PLANNING_ERROR")]
+
+
+@pytest.mark.usefixtures("bound_workspace")
+@pytest.mark.asyncio
+async def test_oi65_w35_the_terminal_exhaustion_report_of_round_0_is_typed_too(tmp_path, monkeypatch):
+    """W3-5, the SECOND consumer of the round-0 redirect decision: with no repair round allowed the first (and only) candidate is itself the
+    terminal report. It is built from the candidate's own reason codes (there is no retained baseline to report), and the run ends as the same
+    typed needs_review after exactly one Planner call - not the raw ``list(None)`` TypeError the terminal branch raised."""
+    monkeypatch.setattr("kriya.workflow.workflow_controller.STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS", 0)
+    we, _cfg = _enforce_engine(tmp_path, _planner_text("duplicate_id_satisfied_then_violated"))
+    result = await WorkflowController(we).execute("Create a.py", str(tmp_path), migration_mode="enforce")
+    legacy = result.legacy_result
+    assert legacy["status"] == "needs_review" and "STRUCTURED_PLAN_REPAIR_EXHAUSTED" in legacy["reason_codes"]
+    assert "DUPLICATE_SUBTASK_ID" in legacy["reason_codes"]
     assert we.planner.run.await_count == 1 and we.run_generation_workflow.await_count == 0
-    assert [(r.lifecycle_state.value, r.terminal_status) for r in list_run_records(str(tmp_path))] == [
-        ("FAILURE", "FAILURE")]
-    assert [(row[0].endswith(".enforce"), row[1], row[2]) for row in _trace_rows(cfg)] == [(True, "error", "TypeError")]
 
 
 @pytest.mark.usefixtures("bound_workspace")

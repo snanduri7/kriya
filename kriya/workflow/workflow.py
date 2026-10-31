@@ -231,6 +231,7 @@ from kriya.workflow.obligations import (
 from kriya.workflow.outcome import (
     WORKSPACE_COMMIT_NOT_COMPLETED,
     completed_result,
+    deadline_stop_result,
     failure_report_dicts,
     terminal_failure_category,
 )
@@ -2177,6 +2178,22 @@ class WorkflowEngine:
             persist_early_exit_trace(self._stage_deps(), state, run_trace, status="failure", failure_category=result["failure_category"])
         return {**result, "goal": goal, "workspace_path": workspace_path, "run_id": trace_id}
 
+    def _design_stage_deadline_stop(self, error: InferenceDeadlineError, state: GenerationState, run_trace: Optional[Any], goal: str, workspace_path: str,
+                                    trace_id: Optional[str]) -> Dict[str, Any]:
+        """W3-5 (STAGE-DEADLINE-RAW-ESCAPE-PLANNER-ARCHITECT-001): the run's generation deadline stopped a model call (or a retrieval embedding) in the design stages
+        (KnowledgeGuard, analysis, Planner, Architect). It never leaves ``run_generation_workflow`` as a raw ``InferenceDeadlineError``: the run ends as the EXISTING
+        failed result with the deadline's own typed reason code and the same ``generation_budget_exhausted`` category the Developer loop (recovery_coordinator) and the
+        pre-generation budget check use. No candidate exists to blame, nothing is retried or written, and any stage checkpoint already saved is left as it is."""
+        result = deadline_stop_result(error, goal=goal, workspace_path=workspace_path, run_id=trace_id)
+        logger.error(result["error"])
+        state.record_event(RunEvent(
+            kind="design_stage.deadline", attempt=0, source="workflow.run_generation_workflow", authority=EventAuthority.AUTHORITATIVE, message=result["error"][:600],
+            details={"reason_code": error.reason_code, **{key: value for key, value in error.details.items() if isinstance(value, (str, int, float, bool, type(None)))}},
+        ))
+        if run_trace is not None:
+            persist_early_exit_trace(self._stage_deps(), state, run_trace, status="failure", failure_category=result["failure_category"])
+        return result
+
     @coordinated_mutation
     @record_run_exceptions
     async def run_generation_workflow(
@@ -3029,6 +3046,8 @@ class WorkflowEngine:
             stage_stop = await run_design_stages(stage_ctx, self._work_unit_deps(), open_checkpoints=_open_stage_checkpoints)
         except BoundTreeError as error:
             return self._membership_authority_stop(error, state, run_trace, goal, workspace_path, trace_id, stage="design")
+        except InferenceDeadlineError as error:
+            return self._design_stage_deadline_stop(error, state, run_trace, goal, workspace_path, trace_id)
         if stage_stop is not None:
             return stage_stop
         # 4. Developer & Quality Gates (kriya/workflow/development_loop.py, full modularization E5): the prelude (prompt

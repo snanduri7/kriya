@@ -464,12 +464,17 @@ async def test_the_planner_request_carries_the_owner_localization_goal_fact_and_
 
 @pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
-async def test_a_localization_deadline_stop_propagates_out_of_the_run(tmp_path):
-    """EP14: Kriya's own inference deadline is a typed stop, never swallowed as 'localization unavailable'."""
+async def test_a_localization_deadline_stop_is_a_typed_failed_result_never_swallowed(tmp_path):
+    """EP14: Kriya's own inference deadline is a typed stop, never swallowed as 'localization unavailable'. Until W3-5 the typed stop was the raw
+    ``InferenceDeadlineError`` propagating out of ``execute()``; since W3-5 (STAGE-DEADLINE-RAW-ESCAPE-PLANNER-ARCHITECT-001, the enforce boundary) the same
+    stop ends as the existing failed result with the deadline's own reason code. The intent is unchanged: the Planner is never called."""
     we = _enforce_engine(tmp_path)
     stop = InferenceDeadlineError("DEADLINE_EXHAUSTED", {"deadline_source": "run"})
-    with patch(f"{C}.localization_candidates", new=AsyncMock(side_effect=stop)), pytest.raises(InferenceDeadlineError):
-        await _enforce(we, tmp_path, _plan_of(_unit("s1")))
+    with patch(f"{C}.localization_candidates", new=AsyncMock(side_effect=stop)):
+        result, _calls = await _enforce(we, tmp_path, _plan_of(_unit("s1")))
+    legacy = result.legacy_result
+    assert legacy["status"] == "failure" and legacy["quality_gates_passed"] is False
+    assert legacy["reason_codes"] == ["DEADLINE_EXHAUSTED"] and legacy["failure_category"] == "generation_budget_exhausted"
     assert we.planner.run.await_count == 0
 
 
