@@ -1,13 +1,14 @@
 """Git worktree sandbox lifecycle for the Developer + Quality Gates retry loop - create/reset/sync/remove. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
 import hashlib
+import json
 import logging
 import os
 import re
 import shutil
 import stat
 import subprocess
-from typing import Iterable, Iterator, List, Optional, Tuple
+from typing import FrozenSet, Iterable, Iterator, List, Optional, Set, Tuple
 
 from kriya.config.environment import child_environment
 from kriya.platform import git_argv, git_environment
@@ -22,7 +23,17 @@ from kriya.policy.filesystem import (
     names_trusted_control_path,
 )
 from kriya.policy.model import ActionRequest, ActionType
-from kriya.repository.bound_tree import GIT_BACKED, bound_tree_paths, workspace_root_class
+from kriya.repository.bound_tree import (
+    BOUND_TREE_OPERATING_SCOPE_EXCLUDED,
+    BOUND_TREE_UNAVAILABLE,
+    GIT_BACKED,
+    BoundTreeError,
+    bound_tree_declaration,
+    bound_tree_paths,
+    copy_bound_paths,
+    operating_root_excluded_by_authority,
+    workspace_root_class,
+)
 from kriya.repository.git import (
     RepositoryContentFilterRefused,
     git_discovery,
@@ -368,19 +379,16 @@ def _refuse_control_object_aliases(identities: ControlObjectIdentities, sources:
             )
 
 
-def _snapshot_sources(workspace_path: str) -> Iterator[str]:
-    """Every file the scoped snapshot copies that does not itself lie at a trusted control path (a nested repository's
-    .git is copied as that repository's control state and stays protected by name in the snapshot)."""
-    for entry in os.listdir(workspace_path):
-        if entry in _SCOPED_SNAPSHOT_IGNORED or is_trusted_control_name(entry):
+def _scoped_member_sources(workspace_path: str, members: Iterable[str]) -> Iterator[str]:
+    """Every file of the authoritative membership ``members`` that the scoped snapshot copies and that does not itself lie at a trusted control path - the SAME set the
+    sandbox is materialised from, so the alias refusal covers exactly what is copied (no second listing). A directory entry (an embedded repository, a submodule) is not a
+    file: nothing beneath it is copied."""
+    for relative in sorted(members):
+        if names_trusted_control_path(relative):
             continue
-        source = os.path.join(workspace_path, entry)
+        source = os.path.join(workspace_path, relative)
         if not os.path.isdir(source) or os.path.islink(source):
             yield source
-            continue
-        for directory, dirnames, filenames in os.walk(source):
-            dirnames[:] = [name for name in dirnames if not is_trusted_control_name(name)]
-            yield from (os.path.join(directory, name) for name in filenames if not is_trusted_control_name(name))
 
 
 def repository_content_paths(workspace_path: str) -> List[str]:
@@ -554,32 +562,82 @@ def _resolved_git_toplevel(workspace_path: str) -> Optional[str]:
     return None
 
 
+_SCOPED_PROJECTION_FILE = "kriya-candidate-membership.json"      # inside the sandbox's synthetic .git: written once when the sandbox is built
+_SCOPED_WRITES_FILE = "kriya-candidate-writes"                      # inside the sandbox's synthetic .git: one "+path" / "-path" line per change of the candidate's own writes
+
+
+def _scoped_membership(root: str) -> Tuple[FrozenSet[str], FrozenSet[str], FrozenSet[str]]:
+    """W3-3 C2: ``(tracked, untracked, written)`` of ONE scoped snapshot sandbox - Git's declaration of the operating subtree captured when the sandbox was built (the
+    projection that was materialised), and the paths this candidate itself wrote (the same path-exact provenance as ``state.all_files_written``, mirrored at the one place
+    it is maintained). The state lives IN the sandbox's own synthetic ``.git`` - a trusted control path no candidate write can target - so it has exactly the sandbox's
+    lifetime: no registry outlives it. Nothing else acquires membership by being on disk in the sandbox (compiler output, verifier output and caches do not). A sandbox
+    that carries no readable projection is the typed ``BoundTreeError``, never \"everything on disk\"."""
+    git_dir = os.path.join(root, ".git")
+    try:
+        with open(os.path.join(git_dir, _SCOPED_PROJECTION_FILE), "r", encoding="utf-8") as handle:
+            projection = json.load(handle)
+        tracked, untracked = frozenset(projection["tracked"]), frozenset(projection["untracked"])
+        written: Set[str] = set()
+        with open(os.path.join(git_dir, _SCOPED_WRITES_FILE), "r", encoding="utf-8") as handle:
+            for line in handle.read().splitlines():
+                (written.add if line.startswith("+") else written.discard)(line[1:])
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"the scoped snapshot sandbox {root} has no readable candidate membership: {error}") from error
+    return tracked, untracked, frozenset(written)
+
+
+def _record_candidate_write_change(worktree_path: str, relative: str, sign: str) -> None:
+    if not _is_scoped_snapshot(worktree_path):
+        return
+    try:
+        with open(os.path.join(worktree_path, ".git", _SCOPED_WRITES_FILE), "a", encoding="utf-8") as handle:
+            handle.write(f"{sign}{os.path.normpath(relative)}\n")
+    except OSError as error:
+        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"the candidate's write of {relative} could not be recorded in {worktree_path}: {error}") from error
+
+
+def record_candidate_write(worktree_path: str, relative: str) -> None:
+    """The candidate wrote ``relative`` (the current-run write provenance, ``state.all_files_written.add``): it is a member of a scoped sandbox. No-op for every other worktree."""
+    _record_candidate_write_change(worktree_path, relative, "+")
+
+
+def discard_candidate_write(worktree_path: str, relative: str) -> None:
+    """``relative`` is no longer a write of the candidate (``state.all_files_written.discard``: an abandoned or byte-identical write). No-op for every other worktree."""
+    _record_candidate_write_change(worktree_path, relative, "-")
+
+
 def _create_scoped_snapshot_sandbox(workspace_path: str, sandbox_path: str) -> str:
     """Isolate a requested directory that is merely nested inside another repo.
 
     A Git worktree always checks out the owning repository's complete root. If
     ``workspace_path`` is only an untracked/ordinary directory below that root,
     using ``git worktree add`` silently imports the enclosing project's files
-    and build markers into Quality Gates. A filesystem snapshot preserves the
-    caller's explicit workspace boundary while retaining the same apply-back
-    contract used by the normal sandbox.
+    and build markers into Quality Gates. The sandbox is therefore the
+    authoritative bound-tree projection of the operating subtree (W3-3 U3): the
+    files Git tracks or leaves visible under it - what the exact-root sandbox
+    holds - and never an ignored ``.env``, ``node_modules`` or generated file
+    that merely exists on the host. The membership is listed ONCE and that same
+    set feeds the alias refusal, the copy and the candidate's membership record
+    (C2). A subtree Git lists nothing for is either genuinely new (an empty
+    sandbox) or excluded by the authority repository's ignore rules (a typed
+    ``BoundTreeError``: ignored bytes are not repository source, and the run is
+    not a greenfield workspace). The apply-back contract is unchanged.
     """
-    _refuse_control_object_aliases(ControlObjectIdentities((workspace_path,)), _snapshot_sources(workspace_path))
+    tracked, untracked = bound_tree_declaration(workspace_path)
+    members = set(tracked | untracked)
+    if not members and operating_root_excluded_by_authority(workspace_path):
+        raise BoundTreeError(
+            BOUND_TREE_OPERATING_SCOPE_EXCLUDED,
+            f"{workspace_path} is excluded by the ignore rules of its repository, so none of its files is repository source and no candidate is built from them",
+        )
+    _refuse_control_object_aliases(ControlObjectIdentities((workspace_path,)), _scoped_member_sources(workspace_path, members))
     if os.path.exists(sandbox_path):
         shutil.rmtree(sandbox_path)
-    os.makedirs(sandbox_path, exist_ok=True)
-
-    for entry in os.listdir(workspace_path):
-        if entry in _SCOPED_SNAPSHOT_IGNORED:
-            continue
-        source = os.path.join(workspace_path, entry)
-        destination = os.path.join(sandbox_path, entry)
-        if os.path.isdir(source) and not os.path.islink(source):
-            shutil.copytree(source, destination, symlinks=True)
-        elif os.path.islink(source):
-            os.symlink(os.readlink(source), destination)
-        else:
-            shutil.copy2(source, destination)
+    try:
+        present = copy_bound_paths(workspace_path, sandbox_path, members)
+    except BoundTreeError:
+        shutil.rmtree(sandbox_path, ignore_errors=True)
+        raise
 
     # Stop Git commands issued from inside the snapshot from walking upward
     # and rediscovering the enclosing repository we deliberately excluded.
@@ -607,6 +665,10 @@ def _create_scoped_snapshot_sandbox(workspace_path: str, sandbox_path: str) -> s
         description.write("Kriya workspace-scoped snapshot sandbox\n")
     with open(os.path.join(sandbox_path, _SCOPED_SNAPSHOT_SENTINEL), "w", encoding="utf-8") as marker:
         marker.write("workspace-scoped sandbox; not an enclosing-repository checkout\n")
+    with open(os.path.join(git_dir, _SCOPED_PROJECTION_FILE), "w", encoding="utf-8") as projection:
+        json.dump({"tracked": sorted(tracked & present), "untracked": sorted(untracked & present)}, projection)
+    with open(os.path.join(git_dir, _SCOPED_WRITES_FILE), "w", encoding="utf-8"):
+        pass
     return sandbox_path
 
 
@@ -966,23 +1028,38 @@ def _is_scoped_snapshot(worktree_path: str) -> bool:
 
 
 def candidate_has_canonical_membership(root: str) -> bool:
-    """W3-3: whether ``root`` has a canonical membership owner today - a Git-backed (D-001) root that is not the scoped-snapshot sandbox. The ONE place the parked root
-    classes (the pre-bootstrap ``NO_GIT_REPOSITORY`` workspace; the scoped-snapshot sandbox, whose synthetic ``.git`` proves root identity, not selected-path provenance)
-    are told apart from the Git-backed ones: ``candidate_member_files`` and every consumer of the bound tree's declaration split dispatch on it."""
-    return not (_is_scoped_snapshot(root) or workspace_root_class(root) != GIT_BACKED)
+    """W3-3: whether ``root`` has a canonical membership owner - a Git-backed (D-001) root, or a scoped snapshot sandbox (its candidate-lifetime projection, C2:
+    its synthetic ``.git`` proves root identity, not selected-path provenance, so Git is NOT asked about it). Only the pre-bootstrap ``NO_GIT_REPOSITORY`` workspace
+    has none: ``candidate_member_files`` and every consumer of the bound tree's declaration split dispatch on it."""
+    return _is_scoped_snapshot(root) or workspace_root_class(root) == GIT_BACKED
+
+
+def candidate_member_declaration(root: str) -> Tuple[FrozenSet[str], FrozenSet[str]]:
+    """``(declared, untracked)`` of a candidate or workspace ``root`` that has a canonical membership owner. A Git-backed root: Git's own split of its bound tree
+    (``bound_tree_declaration``). A scoped snapshot sandbox: the projection captured when it was built, with the files THIS candidate wrote moved to (or added
+    to) the declared side - never what merely exists in the sandbox. A scoped sandbox this process did not build is the typed ``BoundTreeError``."""
+    if _is_scoped_snapshot(root):
+        tracked, untracked, written = _scoped_membership(root)
+        return tracked | written, untracked - written
+    return bound_tree_declaration(root)
 
 
 def candidate_member_files(root: str) -> Optional[List[str]]:
-    """W3-3 (units B and C1): the real files of the canonical membership of a candidate or workspace ``root``, sorted and relative to it - the D-001 bound tree
-    (``bound_tree.bound_tree_paths``: never a directory name; a legitimate ``build/`` package is in, a git-ignored output is out), narrowed to what is a file on disk
-    NOW (a tracked path deleted from the work tree, or a submodule's directory entry, is a bound path but not a readable source). ``None`` means a root class with NO
-    canonical membership owner today, which the caller keeps on its legacy walk UNCHANGED (PARKED, not endorsed): the pre-bootstrap ``NO_GIT_REPOSITORY`` workspace
-    and the scoped-snapshot sandbox (its synthetic ``.git`` proves root identity, not selected-path provenance, and it lists the enclosing repository's ignored
-    outputs - C2). A Git-backed root Git cannot list, or that D-001 and Git disagree about, is the typed ``BoundTreeError`` - NEVER ``None`` and never an empty list:
-    absence of membership is not absence of the file."""
+    """W3-3 (units B, C1 and C2): the real files of the canonical membership of a candidate or workspace ``root``, sorted and relative to it - the D-001 bound tree
+    (``bound_tree.bound_tree_paths``: never a directory name; a legitimate ``build/`` package is in, a git-ignored output is out) for a Git-backed root, the candidate's
+    own captured projection plus its own writes for a scoped snapshot sandbox (``candidate_member_declaration``) - narrowed to what is a file on disk NOW (a tracked path
+    deleted from the work tree, or a submodule's directory entry, is a bound path but not a readable source). ``None`` means the one root class with NO canonical
+    membership owner today, which the caller keeps on its legacy walk UNCHANGED (PARKED, not endorsed): the pre-bootstrap ``NO_GIT_REPOSITORY`` workspace. A Git-backed
+    root Git cannot list, or that D-001 and Git disagree about, is the typed ``BoundTreeError`` - NEVER ``None`` and never an empty list: absence of membership is
+    not absence of the file."""
     if not candidate_has_canonical_membership(root):
         return None
-    return sorted(member for member in bound_tree_paths(root)
+    if _is_scoped_snapshot(root):
+        declared, untracked = candidate_member_declaration(root)
+        members = declared | untracked
+    else:
+        members = bound_tree_paths(root)
+    return sorted(member for member in members
                   if os.path.lexists(os.path.join(root, member)) and not os.path.isdir(os.path.join(root, member)))
 
 

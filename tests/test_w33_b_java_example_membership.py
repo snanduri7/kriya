@@ -159,15 +159,17 @@ def test_a_non_git_workspace_has_no_canonical_membership_and_keeps_the_legacy_wa
     assert ej.resolve_java_type(str(root), "Hidden")[0] is None                               # PARKED: the basename prune still applies here
 
 
-def test_the_scoped_snapshot_sandbox_has_no_canonical_membership_and_keeps_the_legacy_walk(tmp_path):
-    workspace = tmp_path / "ws"
+def test_the_scoped_snapshot_sandbox_has_the_canonical_membership_of_its_projection(tmp_path):
+    """W3-3 C2 (was the PARKED legacy-walk pin): the sandbox's members are the projection captured when it was built, so a legitimate ``build`` package resolves."""
+    enclosing = _repo(tmp_path / "enclosing", {"README.md": "enclosing\n"})
+    workspace = enclosing / "ws"
     _write(workspace, _files(_unit("com.acme.build", "Hidden"), _unit("com.acme.core", "Seen")))
-    sandbox = tmp_path / "ws" / ".kriya" / "scoped-worktree"
+    sandbox = workspace / ".kriya" / "scoped-worktree"
     _create_scoped_snapshot_sandbox(str(workspace), str(sandbox))
     assert (sandbox / ".git").is_dir()                                                         # the synthetic repository exists, so a git-only test would call it Git-backed
-    assert candidate_member_files(str(sandbox)) is None
+    assert candidate_member_files(str(sandbox)) is not None
     assert ej.resolve_java_type(str(sandbox), "Seen") == ("com.acme.core.Seen", "")
-    assert ej.resolve_java_type(str(sandbox), "Hidden")[0] is None                            # PARKED (C2)
+    assert ej.resolve_java_type(str(sandbox), "Hidden") == ("com.acme.build.Hidden", "")
 
 
 def test_a_look_alike_sentinel_outside_a_managed_location_is_still_git_backed(tmp_path):

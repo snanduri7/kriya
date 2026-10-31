@@ -419,12 +419,14 @@ def test_an_absolute_in_root_symlink_resolves_to_the_owner_bytes_in_both_views(t
 @pytest.mark.parametrize("depends_on", [(), ("m1",)], ids=["baseline", "after-model"])
 def test_files_present_in_both_views_read_the_same(three_state, depends_on):
     """Untracked files that existed when the candidate was created are synced into it; a file the enclosing
-    repository ignores is copied into the scoped snapshot."""
+    repository ignores is NOT copied into the scoped snapshot (W3-3 U3: the snapshot is the bound-tree projection of the
+    operating subtree, what the exact-root sandbox holds - ignored bytes are not repository source). The ignored file is
+    still on the owner side, so the two views deliberately differ on it."""
     s = three_state
-    for roots, path, marker in (((s.owner, s.candidate), "untracked_before.py", "UNTRACKED_BEFORE"),
-                                ((s.plain, s.snapshot), "x.log", "ENCLOSING_IGNORED_LOG")):
+    for roots, path, marker in (((s.owner, s.candidate), "untracked_before.py", "UNTRACKED_BEFORE"),):
         result = planned("filesystem", {"operation": "read", "path": path}, roots, depends_on=depends_on)
         assert result.status == SubtaskStatus.COMPLETED and marker in result.tool_output, (path, result.error)
+    assert os.path.isfile(os.path.join(s.plain, "x.log")) and not os.path.lexists(os.path.join(s.snapshot, "x.log"))
 
 
 # -- the defect: a read after a MODEL step reported the owner (strict-xfail on the unfixed bytes) ---------------------
@@ -490,7 +492,8 @@ def test_the_scoped_snapshot_is_read_after_a_model_step_with_its_kriya_markers(t
     assert {".git", ".kriya-scoped-snapshot"} <= set(os.listdir(s.snapshot))
     assert not {".git", ".kriya-scoped-snapshot"} & set(listing.tool_output)
     assert not {".git", ".kriya-scoped-snapshot"} & set(os.listdir(s.plain))
-    assert set(listing.tool_output) == set(os.listdir(s.plain)) - {".kriya"}  # the owner's own Kriya state is left out too
+    # the owner's own Kriya state is left out too, and so is the file the ENCLOSING repository ignores (W3-3 U3: the snapshot holds the bound-tree projection)
+    assert set(listing.tool_output) == set(os.listdir(s.plain)) - {".kriya", "x.log"}
 
 
 def test_an_enforce_run_reads_the_candidate_after_its_model_step_and_the_baseline_for_example_b(tmp_path, monkeypatch):

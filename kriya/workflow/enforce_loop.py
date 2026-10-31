@@ -1599,6 +1599,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             if shared_skill_engine is not None:
                 shared_skill_engine.discard_run_learning()
             raise
+        except BoundTreeError:
+            # W3-3 U3: the membership authority could not build the planning sandbox - the typed stop of the run, never a planning problem.
+            if shared_skill_engine is not None:
+                shared_skill_engine.discard_run_learning()
+            raise
         except Exception as e:
             if shared_skill_engine is not None:
                 shared_skill_engine.discard_run_learning()

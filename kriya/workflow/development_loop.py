@@ -41,6 +41,7 @@ from kriya.control.run_coordinator import mark_run_stage
 from kriya.control.run_record import RunLifecycle
 from kriya.policy.egress import dependency_lookup_decision
 from kriya.policy.filesystem import WriteScopeMode
+from kriya.repository.bound_tree import BoundTreeError
 from kriya.repository.git import RepositoryContentFilterRefused
 from kriya.tools.validate import PolymorphicValidator, execution_evidence
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
@@ -380,6 +381,8 @@ async def prepare_development(ctx: StageContext, deps: StageDeps) -> Union[Dict[
         }
     except RepositoryContentFilterRefused:
         raise                       # S19 Q1: the typed refusal reaches the run's caller as itself
+    except BoundTreeError:
+        raise                       # W3-3 U3: the membership authority could not build the candidate: the typed stop of the run (AUTHORITY_EXECUTION_UNAVAILABLE), never a raw sandbox error
     except Exception as e:
         raise RuntimeError(
             f"Failed to create an isolated generation sandbox: {e}. "

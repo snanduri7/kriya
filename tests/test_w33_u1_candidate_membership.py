@@ -216,13 +216,13 @@ def test_a_symlink_member_that_resolves_outside_the_root_is_never_a_fact(tmp_pat
 
 # =========================================================================== the parked root classes keep the legacy walks, UNCHANGED =================================================
 
-def test_the_membership_predicate_tells_the_parked_classes_apart(tmp_path):
+def test_the_membership_predicate_parks_only_the_pre_git_workspace(tmp_path):    # W3-3 C2: the scoped sandbox now has a canonical membership owner
     git = _repo(tmp_path / "git", {"a.py": "X = 1\n"})
     plain = tmp_path / "plain"
     _write(plain, {"a.py": "X = 1\n"})
     sandbox = git / ".kriya" / "scoped-worktree"
     _create_scoped_snapshot_sandbox(str(git), str(sandbox))
-    assert (candidate_has_canonical_membership(str(git)), candidate_has_canonical_membership(str(plain)), candidate_has_canonical_membership(str(sandbox))) == (True, False, False)
+    assert (candidate_has_canonical_membership(str(git)), candidate_has_canonical_membership(str(plain)), candidate_has_canonical_membership(str(sandbox))) == (True, False, True)
 
 
 def test_a_pre_git_workspace_keeps_the_legacy_python_walk_and_locator_walks(tmp_path):
@@ -233,15 +233,18 @@ def test_a_pre_git_workspace_keeps_the_legacy_python_walk_and_locator_walks(tmp_
     assert "Owner.java" not in _tree_index(str(tmp_path)) and "Seen.java" in _tree_index(str(tmp_path))
 
 
-def test_the_scoped_snapshot_sandbox_keeps_the_legacy_walks_and_ignores_declared_paths(tmp_path):
-    workspace = tmp_path / "ws"
+def test_the_scoped_snapshot_sandbox_uses_its_captured_projection_and_the_declared_split(tmp_path):
+    """W3-3 C2 (was the PARKED legacy-walk pin): the sandbox's files are its projection; ``pkg/build/runner.py`` is a member, and only a DECLARED file (written by this run) may be
+    the runtime target - the projection's untracked files stay visible but AMBIGUOUS, exactly as on a Git-backed root."""
+    enclosing = _repo(tmp_path / "enclosing", {"README.md": "enclosing\n"})
+    workspace = enclosing / "ws"
     _write(workspace, {"pkg/__init__.py": "", "pkg/build/runner.py": _MAIN, "pkg/core/other.py": _MAIN, "src/build/Owner.java": "class Owner {}\n"})
     sandbox = workspace / ".kriya" / "scoped-worktree"
     _create_scoped_snapshot_sandbox(str(workspace), str(sandbox))
     assert (sandbox / ".git").is_dir()
     all_py, _package_dirs, entrypoints = _build_python_runtime_grounding(str(sandbox), ["pkg/build/runner.py"])
-    assert all_py == frozenset({"pkg/__init__.py", "pkg/core/other.py"}) and entrypoints == ["pkg/core/other.py"]               # PARKED (C2): unchanged
-    assert resolve_repository_locator_files("at x.Owner.run(Owner.java:1)", str(sandbox), []) == []
+    assert all_py == frozenset({"pkg/__init__.py", "pkg/build/runner.py", "pkg/core/other.py"}) and entrypoints == ["pkg/build/runner.py"]
+    assert resolve_repository_locator_files("at x.Owner.run(Owner.java:1)", str(sandbox), []) == ["src/build/Owner.java"]
 
 
 # =========================================================================== a Git-backed root Git cannot list is the typed stop ======================================================

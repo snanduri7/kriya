@@ -11,8 +11,9 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
-from kriya.repository.bound_tree import GIT_BACKED, bound_tree_declaration, bound_tree_paths, workspace_root_class
+from kriya.repository.bound_tree import GIT_BACKED, bound_tree_paths, workspace_root_class
 from kriya.workflow.failure import Failure, FileLocation
+from kriya.workflow.worktree import candidate_member_declaration
 
 logger = logging.getLogger(__name__)
 
@@ -181,11 +182,11 @@ def _owner_candidates(workspace_path: str, declared_paths: Iterable[str] = ()) -
 
 
 def declared_and_ambiguous_member_files(workspace_path: str, declared_paths: Iterable[str] = ()) -> Tuple[List[str], List[str]]:
-    """``(DECLARED, AMBIGUOUS)`` of a Git-backed root (the one positive-declaration split; ``_owner_candidates`` and W3-3 unit U1's Python runtime-target grounding
+    """``(DECLARED, AMBIGUOUS)`` of a Git-backed root or scoped snapshot sandbox (the one positive-declaration split; ``_owner_candidates`` and W3-3 unit U1's Python runtime-target grounding
     consume it, neither re-derives it): DECLARED = Git tracked or proven written by the CURRENT run (``declared_paths``, path-exact); AMBIGUOUS = a pre-existing untracked
     non-ignored file - present, but its mere presence is no authority. Both are real files on disk NOW, root-relative (``os.path.normpath``). The caller has dispatched on
     the root class: a root git cannot answer for is the typed ``BoundTreeError`` (``bound_tree_declaration``), never an empty answer."""
-    tracked, untracked = bound_tree_declaration(workspace_path)
+    tracked, untracked = candidate_member_declaration(workspace_path)     # W3-3 C2: also the scoped sandbox's captured projection (+ this candidate's own writes)
     written = {os.path.normpath(path) for path in declared_paths}
     declared: List[str] = []
     ambiguous: List[str] = []

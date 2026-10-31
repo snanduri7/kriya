@@ -183,6 +183,8 @@ async def run_attempt_with_best_of_n(state, attempt_ctx, n: int) -> None:
                 create_git_worktree(attempt_ctx.workspace_path)
             except RepositoryContentFilterRefused:
                 raise           # S19e (OI-162): never absorbed as "no fresh sandbox"; the recorded failure stays recorded
+            except BoundTreeError:
+                raise           # W3-3 U3: the membership authority cannot build another candidate: not "no fresh sandbox", and no sample continues past it
             except Exception as reset_error:
                 # No clean sandbox for another candidate: stop sampling. The
                 # loop continues from the recorded failure, in its own

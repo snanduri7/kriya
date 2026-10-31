@@ -186,13 +186,15 @@ def test_a_pre_git_workspace_keeps_the_legacy_walk(tmp_path):
     assert list(mg._scan_java_files(str(tmp_path))) == [f"{_DIR}/util/Seen.java"]
 
 
-def test_the_scoped_snapshot_sandbox_keeps_the_legacy_walk(tmp_path):
-    workspace = tmp_path / "ws"
+def test_the_scoped_snapshot_sandbox_scans_its_captured_projection(tmp_path):
+    """W3-3 C2 (was the PARKED legacy-walk pin): a tracked-or-visible ``build/`` consumer is a member of the sandbox's projection."""
+    enclosing = _repo(tmp_path / "enclosing", {"README.md": "enclosing\n"})
+    workspace = enclosing / "ws"
     _write(workspace, {f"{_DIR}/util/Seen.java": "package com.example; public class Seen {}\n", f"{_DIR}/build/Hidden.java": _GSON})
     sandbox = workspace / ".kriya" / "scoped-worktree"
     _create_scoped_snapshot_sandbox(str(workspace), str(sandbox))
     assert (sandbox / ".git").is_dir()
-    assert list(mg._scan_java_files(str(sandbox))) == [f"{_DIR}/util/Seen.java"]                                               # PARKED (C2)
+    assert sorted(mg._scan_java_files(str(sandbox))) == [f"{_DIR}/build/Hidden.java", f"{_DIR}/util/Seen.java"]
 
 
 # ---- a Git-backed root Git cannot list is a typed stop, never "no consumer", "no migration" or [] ----------------------------------------------

@@ -9,7 +9,7 @@ from typing import Dict, Set, Tuple
 
 from .execution_sites import REPO, ROOTS
 
-CREATES = {"copytree", "mkdtemp", "TemporaryDirectory", "export_base", "copy_bound_tree"}   # R5/R6: copy_bound_tree is the one copy of the bound tree (kriya/tools/gate_view.py)
+CREATES = {"copytree", "mkdtemp", "TemporaryDirectory", "export_base", "copy_bound_tree", "copy_bound_paths"}   # R5/R6: copy_bound_tree is the one copy of the bound tree (kriya/tools/gate_view.py)
 
 # (file, function) -> (kind, why)
 CREATOR_DECLARES = "CREATOR_DECLARES"        # makes a git-less copy bound to the run's original checkout: MUST call declare_execution_copy after its factory returns
@@ -27,6 +27,7 @@ SITES: Dict[Tuple[str, str], str] = {
     ("kriya/workflow/regression_attribution.py", "_replay_test_ids_against_workspace"): REPLAY_NO_METADATA,
     ("kriya/workflow/workflow.py", "exported"): KEEPS_GIT,                                          # the baseline-authority export keeps .git (ignore list below)
     ("kriya/workflow/worktree.py", "_create_scoped_snapshot_sandbox"): OWN_REPOSITORY,
+    ("kriya/repository/bound_tree.py", "copy_bound_tree"): NOT_A_VALIDATOR_TREE,   # W3-3 U3: the listing wrapper over the one copy primitive (copy_bound_paths); every caller that creates a directory is classified itself
     ("kriya/tools/validate.py", "_acquire_maven_tooling"): VALIDATOR_OWNED,
     ("kriya/tools/validate.py", "_stage_declared_directory"): VALIDATOR_OWNED,
     ("kriya/tools/validate.py", "check_java_toolchain"): NOT_A_VALIDATOR_TREE,

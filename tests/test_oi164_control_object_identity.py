@@ -389,7 +389,7 @@ def test_the_worktree_sync_copies_a_symlink_as_a_link_whatever_it_names(tmp_path
     assert os.readlink(os.path.join(candidate, "cfg_link")) == os.path.join(".git", "config")
 
 
-def test_the_scoped_snapshot_refuses_to_copy_an_alias_but_copies_a_nested_repository(tmp_path):
+def test_the_scoped_snapshot_refuses_to_copy_an_alias_and_does_not_materialize_a_nested_repository(tmp_path):
     enclosing = tmp_path / "enclosing"
     _repository(enclosing)
     plain = enclosing / "plain"
@@ -401,7 +401,10 @@ def test_the_scoped_snapshot_refuses_to_copy_an_alias_but_copies_a_nested_reposi
                       if os.stat(os.path.join(d, f)).st_nlink > 1]
     assert shared_objects, "precondition: the nested repository's own objects are multi-link control objects"
     snapshot = create_git_worktree(str(plain))
-    assert os.path.isfile(os.path.join(snapshot, "vendor", "app.py"))
+    assert os.path.isfile(os.path.join(snapshot, "app.py"))
+    # W3-3 U3: a nested repository is its own authority; the enclosing repository's bound tree lists it as ONE directory entry, so neither its files nor its
+    # control objects are materialized (the exact-root sandbox skips it the same way)
+    assert not os.path.lexists(os.path.join(snapshot, "vendor", "app.py")) and not os.path.lexists(os.path.join(snapshot, "vendor", ".git"))
     os.link(nested / ".git" / "config", plain / "notes.txt")
     with pytest.raises(WorktreeSyncError) as refused:
         create_git_worktree(str(plain))

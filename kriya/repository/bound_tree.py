@@ -22,17 +22,23 @@ from kriya.config.environment import KRIYA_DIRECTORY_NAME
 from kriya.context.workspace_identity import authority_root
 from kriya.platform.filesystem_semantics import identity_key
 from kriya.repository.git import RepositoryContentFilterRefused, is_plainly_not_a_repository, work_tree_root
-from kriya.repository.snapshot import _content_identity, repository_paths_by_declaration, visible_repository_paths
+from kriya.repository.snapshot import (
+    _content_identity,
+    ignored_repository_paths,
+    repository_paths_by_declaration,
+    visible_repository_paths,
+)
 
 BOUND_TREE_UNAVAILABLE = "BOUND_TREE_UNAVAILABLE"
 BOUND_TREE_IDENTITY_MISMATCH = "BOUND_TREE_IDENTITY_MISMATCH"
+BOUND_TREE_OPERATING_SCOPE_EXCLUDED = "BOUND_TREE_OPERATING_SCOPE_EXCLUDED"      # W3-3 U3: the invoked operating root is itself excluded by the authority repository's ignore rules
 
 _NEVER_COPIED = (".git", KRIYA_DIRECTORY_NAME)
 
 
 class BoundTreeError(Exception):
-    """The bound tree could not be materialised or proved. ``reason_code`` is BOUND_TREE_UNAVAILABLE or BOUND_TREE_IDENTITY_MISMATCH; ``str(error)`` is
-    ``"<REASON_CODE>: <detail>"``."""
+    """The bound tree could not be materialised or proved. ``reason_code`` is BOUND_TREE_UNAVAILABLE, BOUND_TREE_IDENTITY_MISMATCH or
+    BOUND_TREE_OPERATING_SCOPE_EXCLUDED; ``str(error)`` is ``"<REASON_CODE>: <detail>"``."""
 
     def __init__(self, reason_code: str, detail: str, paths: Tuple[str, ...] = ()) -> None:
         super().__init__(f"{reason_code}: {detail}")
@@ -146,16 +152,39 @@ def bound_tree_declaration(root: str) -> Tuple[frozenset, frozenset]:
         raise BoundTreeError(BOUND_TREE_UNAVAILABLE, str(error)) from error
 
 
-def copy_bound_tree(origin: str, destination: str) -> frozenset:
-    """Copy the canonical bound tree of ``origin`` into ``destination`` (created if absent) and prove it. Membership is the repository's, never a directory name.
-    An origin Git cannot list (not a work tree) or a destination that cannot be written is a typed ``BoundTreeError``.
-    Returns the relative paths now present in ``destination`` (a tracked path deleted in ``origin`` is not among them)."""
-    paths = set(bound_tree_paths(origin))
+def copy_bound_paths(origin: str, destination: str, paths: Set[str]) -> frozenset:
+    """Copy exactly ``paths`` - a bound-tree membership the caller already holds (``bound_tree_paths`` / ``bound_tree_declaration``) - from ``origin`` into
+    ``destination`` (created if absent) and prove each copy. The one copy-and-prove entry point: ``copy_bound_tree`` lists and calls it; a caller that must act on the
+    SAME membership it copies (the scoped sandbox's alias refusal) lists once and calls it, so no second listing can disagree with the copy. A destination that cannot
+    be written is a typed ``BoundTreeError``. Returns the relative paths now present in ``destination``."""
     try:
         os.makedirs(destination, exist_ok=True)
-        copy_and_prove(origin, destination, paths, {}, manifest_given=False)
+        copy_and_prove(origin, destination, set(paths), {}, manifest_given=False)
     except BoundTreeError:
         raise
     except (OSError, shutil.Error) as error:
         raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"the bound tree could not be copied: {error}") from error
     return frozenset(path for path in paths if os.path.lexists(os.path.join(destination, path)))
+
+
+def copy_bound_tree(origin: str, destination: str) -> frozenset:
+    """Copy the canonical bound tree of ``origin`` into ``destination`` (created if absent) and prove it. Membership is the repository's, never a directory name.
+    An origin Git cannot list (not a work tree) or a destination that cannot be written is a typed ``BoundTreeError``.
+    Returns the relative paths now present in ``destination`` (a tracked path deleted in ``origin`` is not among them)."""
+    return copy_bound_paths(origin, destination, set(bound_tree_paths(origin)))
+
+
+def operating_root_excluded_by_authority(root: str) -> bool:
+    """W3-3 U3: whether Git's own ignore rules of the D-001 authority repository exclude the OPERATING root ``root`` itself (the root directly, or through an ignored
+    ancestor). The question is asked FROM the authority root about the root's path relative to it, without a trailing slash: asked from inside the root, its own
+    ``.gitignore`` (``*``) would answer for the root itself (MEASURED). The authority root itself is never excluded. It is read only when the bound listing is empty
+    (an empty listing alone cannot tell a new empty subtree from an ignored one); a Git that cannot answer is the typed ``BoundTreeError(BOUND_TREE_UNAVAILABLE)``."""
+    _require_git_backed(root)
+    try:
+        authority = os.path.realpath(authority_root(root))
+        relative = os.path.relpath(os.path.realpath(root), authority)
+        if relative == os.curdir:
+            return False
+        return bool(ignored_repository_paths(authority, [relative.replace(os.sep, "/")]))
+    except (RuntimeError, OSError, ValueError) as error:
+        raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"Git could not say whether {root} is excluded by its repository: {error}") from error

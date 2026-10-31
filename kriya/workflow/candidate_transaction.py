@@ -71,6 +71,7 @@ from kriya.workflow.file_integrity import (
 )
 from kriya.workflow.file_resolution import find_explanatory_prose_contamination
 from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.worktree import discard_candidate_write, record_candidate_write
 
 RunState = Any    # kriya.workflow.state.GenerationState
 AttemptCtx = Any  # kriya.workflow.attempt.AttemptContext
@@ -1443,6 +1444,7 @@ def _commit_staged_writes(deps: CandidateDeps, state: RunState, ctx: AttemptCtx,
             # PRD-022: an abandoned run-created parallel file is gone from
             # the candidate, so no later gate reads it.
             state.all_files_written.discard(filepath)
+            discard_candidate_write(ctx.worktree_path, filepath)     # W3-3 C2: the scoped sandbox's membership mirrors this provenance
             state.identical_rewrites.discard(filepath)
             deps.logger.info(f"Removed abandoned candidate from sandbox: {filepath}")
             continue
@@ -1456,12 +1458,14 @@ def _commit_staged_writes(deps: CandidateDeps, state: RunState, ctx: AttemptCtx,
             # own, and a planned one is settled by the verified no-change
             # contract from deterministic evidence (never by the write).
             state.all_files_written.discard(filepath)
+            discard_candidate_write(ctx.worktree_path, filepath)
             state.identical_rewrites.add(filepath)
             deps.logger.info(f"Candidate for {filepath} is byte-identical to the baseline: not a change.")
             continue
         state.identical_rewrites.discard(filepath)
         state.files_written.append(filepath)
         state.all_files_written.add(filepath)
+        record_candidate_write(ctx.worktree_path, filepath)
         deps.logger.info(f"Committed generated/edited candidate to sandbox: {filepath}")
 
 

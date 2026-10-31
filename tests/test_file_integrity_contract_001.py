@@ -937,10 +937,12 @@ _AUDITED_WRITE_SITES = {
 # kriya/repository/atomic_write.py (8) + kriya/repository/commit.py (10); the writer set's total is unchanged (33).
 # D1: the strict durable writer (durable_atomic_write_bytes: temp open, fchmod, replace) is three more sites INSIDE the canonical writer module, so atomic_write.py is 11 and the set is 36;
 # it is the same staged-writer owner (no new writer module) and every other module's audited count is unchanged.
+# W3-3 U3: worktree.py is 11 (was 13): the scoped snapshot's own copytree/symlink/copy2 loop (3 sites) is gone, replaced by the one
+# copy_bound_paths primitive in kriya/repository/bound_tree.py, and one cleanup rmtree was added (the partial sandbox after a refused copy).
 _WRITER_MODULES = {"kriya/repository/atomic_write.py", "kriya/repository/commit.py", "kriya/workflow/worktree.py",
                    "kriya/workflow/file_integrity.py"}
 _WRITER_MODULE_SITES = {"kriya/repository/atomic_write.py": 11, "kriya/repository/commit.py": 10,
-                        "kriya/workflow/worktree.py": 13, "kriya/workflow/file_integrity.py": 2}
+                        "kriya/workflow/worktree.py": 11, "kriya/workflow/file_integrity.py": 2}
 
 
 def _write_site_counts():
