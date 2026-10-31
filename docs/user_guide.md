@@ -366,12 +366,13 @@ its scope and the file it comes from - never the command itself:
   Kriya as the repository's owner, or, only if you trust the repository, mark it safe in your own git configuration as
   git's message describes.
 - `BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY` (W3-3 U4) - the workspace is not a Git repository and already holds files
-  (anything except Kriya's own `.kriya/`, so a `README`, a `.gitignore` or a `kriya.yaml` counts). Kriya does not guess a
+  (anything except Kriya's own control-plane artifacts: the `.kriya/` state directory and the canonical `kriya.yaml` file
+  directly in the folder; so a `README`, a `.gitignore`, a `kriya.yml` or a `kriya.yaml` that is a directory or a symlink counts). Kriya does not guess a
   project's source files from the directory and does not commit your files for you, so the run stops before anything is
   generated (`AUTHORITY_EXECUTION_UNAVAILABLE`, with this code under `membership_authority`). Run `git init` and commit a
   baseline in the folder, or run Kriya inside an existing repository. An EMPTY folder is still a supported greenfield:
-  Kriya initialises the repository itself. (Keep a project's `kriya.yaml` outside the workspace folder, or commit it in a
-  repository, if you start from an otherwise empty folder.)
+  Kriya initialises the repository itself - a folder holding nothing but `.kriya/` and/or its `kriya.yaml` is such a
+  greenfield (the bootstrap commit is empty: your `kriya.yaml` is left untouched and uncommitted).
 
 A refusal met in the middle of a run (for example when the candidate's own `.gitattributes` activates such a filter)
 ends the run with that refusal and its reason code: it is never retried as a failed attempt (S19e).

@@ -1,6 +1,7 @@
 """W3-3 U4 (owner decision 2026-10-31): production admission of a workspace that has no Git repository.
 
-An EMPTY NO_GIT workspace (no entry except Kriya's own ``.kriya``) is a supported greenfield: the existing Git bootstrap runs. Any other entry (a README, a ``.gitignore``,
+An EMPTY NO_GIT workspace (no entry except Kriya's own control-plane artifacts: the ``.kriya`` state directory and the canonical root ``kriya.yaml`` regular file; owner refinement
+2026-10-31, one explicit recognition - not an allowlist, not ignore semantics) is a supported greenfield: the existing Git bootstrap runs. Any other entry (a README, a ``.gitignore``,
 source, a user's hidden file) makes it a brownfield WITHOUT source authority, and it is refused before contract compilation and before any development: the filesystem is
 never a membership authority, the bootstrap never commits user files, and ``language`` is never degraded to ``None``. The refusal is the typed
 ``AUTHORITY_EXECUTION_UNAVAILABLE`` stop whose ``membership_authority.reason_code`` is ``BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY``.
@@ -60,7 +61,8 @@ def test_a_non_git_workspace_holding_only_kriyas_own_state_is_still_empty(tmp_pa
     _admit(tmp_path)
 
 
-@pytest.mark.parametrize("entry", ["README.md", ".gitignore", "src/App.java", "Keep.java", ".env", ".hidden", "kriya.yaml", "build/out.txt", ".kriya.bak"])
+@pytest.mark.parametrize("entry", ["README.md", ".gitignore", "src/App.java", "Keep.java", ".env", ".hidden", "build/out.txt", ".kriya.bak",
+                                   "kriya.yml", "Kriya.yaml", "kriya.yaml.bak", "kriya.yaml.orig", "sub/kriya.yaml", "kriya.yaml/inner.txt", "config.yaml", "pom.xml"])
 def test_any_other_entry_makes_a_non_git_workspace_a_refused_brownfield(tmp_path, entry):
     from kriya.repository.bound_tree import BoundTreeError
 
@@ -70,6 +72,62 @@ def test_any_other_entry_makes_a_non_git_workspace_a_refused_brownfield(tmp_path
     assert stop.value.reason_code == NEW_CODE
     assert entry.split("/")[0] in stop.value.paths
     assert "git init" in stop.value.detail and "commit" in stop.value.detail          # the operator is told what to do
+
+
+@pytest.mark.parametrize("control_plane", [(), (".kriya",), ("kriya.yaml",), (".kriya", "kriya.yaml")])
+def test_kriyas_own_control_plane_artifacts_alone_leave_a_non_git_workspace_a_greenfield(tmp_path, control_plane):
+    """Nothing; ``.kriya/``; the canonical ``kriya.yaml``; both - each is still a supported greenfield (owner refinement 2026-10-31)."""
+    for entry in control_plane:
+        _put(tmp_path, ".kriya/state/control.json" if entry == ".kriya" else entry, "{}\n" if entry == ".kriya" else "llm:\n  model: x\n")
+    _admit(tmp_path)
+
+
+@pytest.mark.parametrize("extra", ["README.md", ".gitignore", "src/App.java", ".env", "kriya.yml"])
+@pytest.mark.parametrize("control_plane", [("kriya.yaml",), (".kriya", "kriya.yaml")])
+def test_the_control_plane_exemption_does_not_extend_to_any_neighbour(tmp_path, control_plane, extra):
+    """``kriya.yaml`` beside a user entry: the user entry still makes it a brownfield, and ``kriya.yaml`` itself is not reported as the offending entry."""
+    from kriya.repository.bound_tree import BoundTreeError
+
+    for entry in control_plane:
+        _put(tmp_path, ".kriya/state/control.json" if entry == ".kriya" else entry)
+    _put(tmp_path, extra)
+    with pytest.raises(BoundTreeError) as stop:
+        _admit(tmp_path)
+    assert stop.value.reason_code == NEW_CODE
+    assert stop.value.paths == (extra.split("/")[0],)
+
+
+def test_a_kriya_yaml_that_is_a_directory_or_a_symlink_is_a_user_entry_not_the_canonical_configuration(tmp_path):
+    from kriya.repository.bound_tree import BoundTreeError
+
+    directory, link = tmp_path / "d", tmp_path / "l"
+    directory.mkdir(), link.mkdir()
+    (directory / "kriya.yaml").mkdir()
+    (link / "real.yaml").write_text("x\n")
+    os.symlink("real.yaml", str(link / "kriya.yaml"))
+    for workspace in (directory, link):
+        with pytest.raises(BoundTreeError) as stop:
+            _admit(workspace)
+        assert stop.value.reason_code == NEW_CODE and "kriya.yaml" in stop.value.paths, workspace
+
+
+def test_a_kriya_yaml_that_cannot_be_inspected_is_a_user_entry_not_the_canonical_configuration(tmp_path, monkeypatch):
+    """Fail closed: a ``kriya.yaml`` whose type cannot be established is never read as Kriya's own configuration."""
+    from kriya.repository import bound_tree
+    from kriya.repository.bound_tree import BoundTreeError
+
+    _put(tmp_path, "kriya.yaml", "llm:\n  model: x\n")
+    real_lstat = os.lstat
+
+    def lstat(path, *args, **kwargs):
+        if os.path.basename(str(path)) == "kriya.yaml":
+            raise PermissionError("denied")
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(bound_tree.os, "lstat", lstat)
+    with pytest.raises(BoundTreeError) as stop:
+        _admit(tmp_path)
+    assert stop.value.reason_code == NEW_CODE and stop.value.paths == ("kriya.yaml",)
 
 
 def test_an_empty_directory_entry_is_an_entry(tmp_path):
@@ -149,6 +207,8 @@ def test_the_contract_sealing_tracked_listing_refuses_a_non_empty_non_git_worksp
     from kriya.repository.bound_tree import BoundTreeError
     from kriya.workflow.requirement_closers import authoritative_tracked_workspace_paths
 
+    assert authoritative_tracked_workspace_paths(str(tmp_path)) == []
+    _put(tmp_path, "kriya.yaml", "llm:\n  model: x\n")                                    # Kriya's own configuration is not a source baseline
     assert authoritative_tracked_workspace_paths(str(tmp_path)) == []
     _put(tmp_path, "pom.xml", "<project/>\n")
     with pytest.raises(BoundTreeError) as stop:
@@ -242,6 +302,38 @@ def test_a_real_run_on_an_empty_non_git_workspace_is_still_a_greenfield_and_boot
     assert "membership_authority" not in result
     assert runtime.count("developer") >= 1                                                # development really started
     assert (tmp_path / ".git").is_dir()                                                   # the existing bootstrap ran
+
+
+def test_a_real_run_on_a_greenfield_holding_only_kriya_yaml_bootstraps_git_and_never_touches_the_configuration(tmp_path):
+    """The owner refinement end to end: the canonical configuration beside nothing else does not make the folder a brownfield; the bootstrap commits NOTHING of it."""
+    _put(tmp_path, "kriya.yaml", "llm:\n  model: x\n")
+    config_before = _digest(tmp_path)
+    result, runtime = _direct(tmp_path, "Create app.py with an add function")
+    assert result.get("reason_codes") != ["AUTHORITY_EXECUTION_UNAVAILABLE"], result
+    assert "membership_authority" not in result
+    assert runtime.count("developer") >= 1
+    assert (tmp_path / ".git").is_dir()
+    assert (tmp_path / "kriya.yaml").read_text() == "llm:\n  model: x\n" and config_before["kriya.yaml"] == _digest(tmp_path)["kriya.yaml"]
+    assert "kriya.yaml" not in _git(tmp_path, "ls-tree", "-r", "--name-only", "HEAD")
+
+
+def test_a_real_run_on_a_kriya_yaml_plus_a_user_file_is_still_refused_before_any_model_call(tmp_path):
+    _put(tmp_path, "kriya.yaml", "llm:\n  model: x\n")
+    _put(tmp_path, "README.md", "hello\n")
+    before = _digest(tmp_path)
+    result, runtime = _direct(tmp_path, "Create app.py with an add function")
+    assert result["reason_codes"] == ["AUTHORITY_EXECUTION_UNAVAILABLE"]
+    assert result["membership_authority"]["reason_code"] == NEW_CODE
+    assert runtime.requests == [] and _digest(tmp_path) == before and not (tmp_path / ".git").exists()
+
+
+def test_the_greenfield_bootstrap_accepts_a_kriya_yaml_only_folder_and_commits_nothing_of_it(tmp_path):
+    from kriya.workflow.worktree import _bootstrap_greenfield_repository
+
+    _put(tmp_path, "kriya.yaml", "llm:\n  model: x\n")
+    _bootstrap_greenfield_repository(str(tmp_path))
+    assert (tmp_path / ".git").is_dir() and (tmp_path / "kriya.yaml").read_text() == "llm:\n  model: x\n"
+    assert _git(tmp_path, "ls-tree", "-r", "--name-only", "HEAD") == ""
 
 
 def test_a_real_run_on_a_git_backed_brownfield_is_unchanged(tmp_path):

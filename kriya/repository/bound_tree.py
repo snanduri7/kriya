@@ -33,6 +33,7 @@ BOUND_TREE_UNAVAILABLE = "BOUND_TREE_UNAVAILABLE"
 BOUND_TREE_IDENTITY_MISMATCH = "BOUND_TREE_IDENTITY_MISMATCH"
 BOUND_TREE_OPERATING_SCOPE_EXCLUDED = "BOUND_TREE_OPERATING_SCOPE_EXCLUDED"      # W3-3 U3: the invoked operating root is itself excluded by the authority repository's ignore rules
 BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY = "BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY"    # W3-3 U4: a non-Git workspace holding user entries has no brownfield source authority
+KRIYA_CONFIG_FILE_NAME = "kriya.yaml"       # W3-3 U4: the one canonical configuration name that is control-plane state (not a user entry) in an otherwise empty NO_GIT workspace
 
 _NEVER_COPIED = (".git", KRIYA_DIRECTORY_NAME)
 
@@ -124,16 +125,27 @@ def workspace_root_class(root: str) -> str:
     return _root_class(root)
 
 
+def _is_canonical_kriya_config(root: str, name: str) -> bool:
+    """Kriya's own canonical configuration: exactly the entry ``kriya.yaml`` directly under ``root`` and a regular file (a directory, a symlink or any other name is a user entry)."""
+    if name != KRIYA_CONFIG_FILE_NAME:
+        return False
+    try:
+        return stat.S_ISREG(os.lstat(os.path.join(root, name)).st_mode)
+    except OSError:
+        return False
+
+
 def admit_workspace_for_mutation(root: str) -> None:
-    """W3-3 U4 (owner decision 2026-10-31): the production admission of a workspace that has no Git repository. An EMPTY one (no entry except Kriya's own ``.kriya``) is a
+    """W3-3 U4 (owner decisions 2026-10-31): the production admission of a workspace that has no Git repository. An EMPTY one - no entry except Kriya's own control-plane
+    artifacts, the ``.kriya`` state directory and the canonical root ``kriya.yaml`` (a regular file: Kriya's configuration is control-plane state, not a source baseline) - is a
     greenfield: the existing Git bootstrap makes it a repository before any model-originated write. Any other entry (a README, a ``.gitignore``, source, a user's hidden
-    file) makes it a brownfield WITHOUT source authority - the filesystem is never a membership authority and the bootstrap never commits user files - so it is the typed
+    file, a ``kriya.yml``, a ``kriya.yaml`` that is a directory or a symlink) makes it a brownfield WITHOUT source authority - the filesystem is never a membership authority and the bootstrap never commits user files - so it is the typed
     ``BoundTreeError(BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY)``, raised before the contract is compiled and before anything is generated. A Git-backed root is always
     admitted here (its membership is Git's); a directory that does not exist is left to the caller; one that cannot be listed is ``BOUND_TREE_UNAVAILABLE``."""
     if not os.path.isdir(root) or _root_class(root) != NO_GIT_REPOSITORY:
         return
     try:
-        entries = sorted(name for name in os.listdir(root) if name != KRIYA_DIRECTORY_NAME)
+        entries = sorted(name for name in os.listdir(root) if name != KRIYA_DIRECTORY_NAME and not _is_canonical_kriya_config(root, name))
     except OSError as error:
         raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"the entries of {root} could not be listed: {error}") from error
     if entries:
