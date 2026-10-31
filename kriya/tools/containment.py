@@ -391,6 +391,10 @@ class PreparedContainment:
     # REPLAY-CONTAINED-NOT-STARTED-001: the finite-command launch stage (see FiniteLaunchStage). None for a host process, a managed service and an MCP server: only
     # ProcessController.run()/run_async() apply it.
     finite_launch: Optional[FiniteLaunchStage] = None
+    # W3-8 (PROCESS-ORPHAN-CHILD-OUTLIVES-PARENT-SIGKILL-001): argv lists the owner-death watchdog (ProcessControlPort.guard_owner_death) runs after it kills the spawned tree
+    # when the OWNER dies without running ``cleanup`` (SIGKILL). A container belongs to the Docker daemon, not to the process group of the CLI that started it: MEASURED, a
+    # container kept running and wrote to the bind-mounted workspace 18.9 s after its owner was killed. A host backend has nothing to add (the tree kill is enough).
+    owner_death_cleanup: Tuple[Tuple[str, ...], ...] = ()
 
 
 class ContainmentBackend(Protocol):

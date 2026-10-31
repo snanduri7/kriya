@@ -103,6 +103,10 @@ class _Recording:
         self.terminated.append(process.pid)
         self._delegate.terminate_tree(process)
 
+    def guard_owner_death(self, process, cleanup=()):
+        self.guarded = getattr(self, "guarded", []) + [(process.pid, tuple(map(tuple, cleanup)))]
+        self._delegate.guard_owner_death(process, cleanup)
+
 
 @pytest.fixture
 def recording():

@@ -80,6 +80,11 @@ INVENTORY: Dict[Tuple[str, str], Site] = {
     ("kriya/production_doctor.py", "_kriya_containers"): Site(
         INFRA, "docker ps", "no", "none", NONE, "production_doctor", "TRUSTED_KRIYA_INFRASTRUCTURE", ("EXEMPT",),
         "fixed argv [docker, ps, -a, --filter, name=kriya-oci-, ...]; no workspace, no cwd argument"),
+    ("kriya/platform/posix_owner_watchdog.py", "start_owner_watchdog"): Site(
+        INFRA, "sys.executable -I -S -c <WATCHDOG_SOURCE>", "no", "inherited (the sidecar touches no project file)", NONE, "process_control (owner-death guard)",
+        "TRUSTED_KRIYA_INFRASTRUCTURE", ("EXEMPT",),
+        "W3-8: a fixed standard-library script; its only inputs are an integer process-group id and the cleanup argv lists the containment backend built from Kriya-generated names "
+        "(docker rm -f kriya-oci-<uuid>); the lifeline is its stdin, no descriptor is passed (D2); pinned by tests/test_w38_owner_death.py"),
     ("kriya/platform/host_properties.py", "_run"): Site(
         INFRA, "sysctl / nvidia-smi", "no", "inherited process cwd (no project file is read by these tools)", NONE, "host_properties",
         "TRUSTED_HOST_INFRASTRUCTURE", ("EXEMPT",),

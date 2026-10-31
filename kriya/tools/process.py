@@ -22,7 +22,7 @@ import asyncio
 import subprocess
 import threading
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from kriya.platform.capabilities import PlatformCapabilityUnavailable
 from kriya.platform.services import platform_services
@@ -164,8 +164,9 @@ def _tree_spawn_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
 ATTACH_FAILURE_REAP_SECONDS = 5.0
 
 
-def _attach_or_kill(process: Any) -> Optional[Tuple[Exception, str]]:
-    """Bind a just-created process to its tree (ProcessControlPort.attach).
+def _attach_or_kill(process: Any, owner_death_cleanup: Sequence[Sequence[str]] = ()) -> Optional[Tuple[Exception, str]]:
+    """Bind a just-created process to its tree (ProcessControlPort.attach) AND to the life of its owner (ProcessControlPort.guard_owner_death, W3-8: the tree and the
+    ``owner_death_cleanup`` commands - e.g. a container's ``docker rm -f`` - die with this process, SIGKILL included).
     Returns None on success. On failure the process is killed through the
     provider's tree termination and ``(attach error, detail)`` is returned;
     the caller reaps the process and raises, so it never reaches a caller.
@@ -175,7 +176,9 @@ def _attach_or_kill(process: Any) -> Optional[Tuple[Exception, str]]:
     live, unowned process. It is never swallowed: the caller re-raises it
     as the cause of a ContainmentSetupError."""
     try:
-        platform_services().process_control.attach(process)
+        control = platform_services().process_control
+        control.attach(process)
+        control.guard_owner_death(process, owner_death_cleanup)
         return None
     except Exception as error:
         try:
@@ -313,6 +316,7 @@ class _ResolvedExecution:
     egress: Optional[Dict[str, object]] = None
     resources: Optional[Dict[str, object]] = None
     finite_launch: Optional[FiniteLaunchStage] = None
+    owner_death_cleanup: Tuple[Tuple[str, ...], ...] = ()   # W3-8: argv lists the owner-death watchdog runs after it kills the tree (the backend's authoritative teardown)
 
 
 def _prepare_env_and_preexec(
@@ -360,7 +364,7 @@ def _prepare_env_and_preexec(
         exec_target=prepared.exec_target,
         toolchain_identity=(prepared.toolchain_identity.to_dict() if prepared.toolchain_identity else None),
         egress=egress_evidence_for(containment_profile, containment_backend),
-        resources=prepared.resources, finite_launch=launch,
+        resources=prepared.resources, finite_launch=launch, owner_death_cleanup=prepared.owner_death_cleanup,
     )
 
 
@@ -378,6 +382,7 @@ def _spawn_popen(*args: Any, **kwargs: Any) -> subprocess.Popen:
     The ProcessControlPort's spawn options are merged and its `attach` runs
     right after creation; a failed attach kills and reaps the process and
     raises `ContainmentSetupError`, so no unowned process reaches a caller."""
+    owner_death_cleanup = kwargs.pop("owner_death_cleanup", ())
     kwargs = _tree_spawn_kwargs(kwargs)
     try:
         process = subprocess.Popen(*args, **kwargs)
@@ -385,7 +390,7 @@ def _spawn_popen(*args: Any, **kwargs: Any) -> subprocess.Popen:
         raise ContainmentSetupError(
             f"Resource-limit/containment setup failed before the command could start: {e}"
         ) from e
-    refused = _attach_or_kill(process)
+    refused = _attach_or_kill(process, owner_death_cleanup)
     if refused is not None:
         error, detail = refused
         try:
@@ -401,6 +406,7 @@ async def spawn_subprocess_exec_fail_closed(*args: Any, **kwargs: Any) -> "async
     confirmed empirically to raise the same `subprocess.SubprocessError`
     shape for a failing `preexec_fn` under `asyncio.create_subprocess_exec`,
     and the same attach-or-kill-and-reap step after creation."""
+    owner_death_cleanup = kwargs.pop("owner_death_cleanup", ())
     kwargs = _tree_spawn_kwargs(kwargs)
     try:
         process = await asyncio.create_subprocess_exec(*args, **kwargs)
@@ -408,7 +414,7 @@ async def spawn_subprocess_exec_fail_closed(*args: Any, **kwargs: Any) -> "async
         raise ContainmentSetupError(
             f"Resource-limit/containment setup failed before the command could start: {e}"
         ) from e
-    refused = _attach_or_kill(process)
+    refused = _attach_or_kill(process, owner_death_cleanup)
     if refused is not None:
         error, detail = refused
         try:
@@ -456,6 +462,7 @@ class ProcessController:
             process = _spawn_popen(
                 resolved.command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 stdin=subprocess.PIPE, text=True, env=resolved.env, preexec_fn=resolved.preexec_fn,
+                owner_death_cleanup=resolved.owner_death_cleanup,
             )
             timed_out = False
             try:
@@ -533,6 +540,7 @@ class ProcessController:
             process = await spawn_subprocess_exec_fail_closed(
                 *resolved.command, cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 stdin=asyncio.subprocess.PIPE, env=resolved.env, preexec_fn=resolved.preexec_fn,
+                owner_death_cleanup=resolved.owner_death_cleanup,
             )
             timed_out = False
             stdin_bytes = (stdin_payload or "").encode("utf-8")
@@ -621,6 +629,7 @@ class ProcessController:
         process = _spawn_popen(
             resolved.command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL, text=True, env=resolved.env, preexec_fn=resolved.preexec_fn,
+            owner_death_cleanup=resolved.owner_death_cleanup,
         )
         return ManagedProcess(
             process, max_output_chars=self.max_output_chars, cleanup=resolved.cleanup,

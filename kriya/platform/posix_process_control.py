@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import os
 import signal
-from typing import Any, Dict
+from typing import Any, Dict, Sequence
 
 from kriya.platform.capabilities import CapabilityReport, CapabilityStatus, PlatformCapability
+from kriya.platform.posix_owner_watchdog import start_owner_watchdog
 
 
 class PosixProcessGroup:
@@ -38,3 +39,7 @@ class PosixProcessGroup:
         except ProcessLookupError:
             # Already gone: the desired end state, not a failure.
             pass
+
+    def guard_owner_death(self, process: Any, cleanup: Sequence[Sequence[str]] = ()) -> None:
+        # W3-8: PR_SET_PDEATHSIG does not exist on macOS and cannot be assumed on POSIX; the pipe lifeline works on every POSIX host (see posix_owner_watchdog).
+        start_owner_watchdog(process, cleanup)
