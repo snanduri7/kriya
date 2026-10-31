@@ -33,6 +33,7 @@ def _crash(tmp_path, window):
     return effects.read_text().splitlines() if effects.exists() else []
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("window", list(WINDOWS))
 async def test_a_crash_in_any_window_resumes_as_needs_review_and_the_effect_is_never_run_again(tmp_path, window):
@@ -52,6 +53,7 @@ async def test_a_crash_in_any_window_resumes_as_needs_review_and_the_effect_is_n
     assert _state(tmp_path).subtask_states["t1"] == SUBTASK_STATE_TOOL_STARTED
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("window", ["before_effect", "during_effect"])
 async def test_a_FRESH_run_after_a_crash_cannot_overwrite_the_unresolved_record_or_run_the_effect(tmp_path, window):
@@ -67,6 +69,7 @@ async def test_a_FRESH_run_after_a_crash_cannot_overwrite_the_unresolved_record_
     assert open(control_state_path(str(tmp_path)), "rb").read() == before
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_DIFFERENT_plan_cannot_complete_or_govern_another_executions_unresolved_record(tmp_path):
     """Identity: the unresolved record belongs to run/plan A. A run of plan B (different plan, same subtask ids) neither inherits it nor overwrites it."""
@@ -79,6 +82,7 @@ async def test_a_DIFFERENT_plan_cannot_complete_or_govern_another_executions_unr
     assert open(control_state_path(str(tmp_path)), "rb").read() == before
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_legacy_in_progress_record_of_a_TOOL_subtask_is_classified_needs_review_by_the_loop_never_retried(tmp_path):
     """A pre-D1 crash left plain "in_progress" (no marker, so the plan-blind gate cannot see it): the resume classification - the one owner - catches it inside the loop."""
@@ -94,6 +98,7 @@ async def test_a_legacy_in_progress_record_of_a_TOOL_subtask_is_classified_needs
     assert TOOL_EXECUTION_UNRESOLVED in _tool_results(result)["t1"]["reason_codes"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_crash_after_a_durable_completed_resumes_without_running_the_effect_again_and_revalidates_authority(tmp_path):
     assert _crash(tmp_path, "after_durable_completed") == ["EFFECT_BEGIN", "EFFECT_DONE"]   # the effect ran exactly once, in the child

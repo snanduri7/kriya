@@ -5673,6 +5673,7 @@ async def test_enforce_preserved_reference_acceptance_and_terminal_integrity_gat
     assert (tmp_path / _CUSTOMER_CONTROLLER_PATH).read_text() == _STRUCTURAL_CUSTOMER_CONTROLLER_JAVA
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_preserved_reference_terminal_integrity_fails_a_real_run_on_mutation(
     tmp_path,
@@ -6229,6 +6230,7 @@ async def test_enforce_global_final_state_check_fails_closed_on_its_own_internal
     assert "INDETERMINATE" in result.legacy_result["global_migration_gap"]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_enforce_does_not_derive_artifacts_when_a_subtask_fails(tmp_path):
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "myproj"\n')

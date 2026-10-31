@@ -78,6 +78,7 @@ def _tool_results(result):
     return {r["subtask_id"]: r for r in result.legacy_result["subtask_results"]}
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_tool_subtask_is_durably_started_before_the_effect_and_durably_completed_after_it(tmp_path):
     seen_at_effect = {}
@@ -92,6 +93,7 @@ async def test_a_tool_subtask_is_durably_started_before_the_effect_and_durably_c
     assert _state(tmp_path).subtask_states["t1"] == "completed" and result.legacy_result["status"] == "success"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("step", atomic_write.DURABLE_WRITE_STEPS)
 async def test_a_started_persistence_failure_at_any_step_means_the_effect_never_runs_and_nothing_claims_success(tmp_path, monkeypatch, step):
@@ -106,6 +108,7 @@ async def test_a_started_persistence_failure_at_any_step_means_the_effect_never_
     assert calls == [], "a later subtask ran after a TOOL STARTED failure"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("step", atomic_write.DURABLE_WRITE_STEPS)
 async def test_a_completed_persistence_failure_is_needs_review_never_success_and_never_retried(tmp_path, monkeypatch, step):

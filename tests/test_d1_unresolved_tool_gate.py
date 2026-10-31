@@ -64,6 +64,7 @@ def test_a_mutating_run_is_refused_with_the_typed_reason_and_the_record_is_untou
     assert _sha(control_state_path(workspace)) == before
 
 
+@pytest.mark.usefixtures("bound_workspace")
 def test_retention_never_erases_an_unresolved_tool_execution(tmp_path):
     """RETENTION: after a genuine crash the unresolved STARTED record (and the run record it belongs to) survives the most aggressive cleanup."""
     effects = tmp_path.parent / f"{tmp_path.name}-effects.log"

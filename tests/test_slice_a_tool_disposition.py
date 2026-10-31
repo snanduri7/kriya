@@ -174,6 +174,7 @@ def test_a_genuine_process_kill_between_the_ledger_record_and_the_state_write_is
     assert load_control_state(str(tmp_path)).tool_attempts == {"t1": 2} and len(_dispositions(tmp_path)) == 1
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_end_to_end_retry_runs_nothing_itself_then_the_next_resume_executes_attempt_2_and_attempt_1_stays_on_record(tmp_path):
     seen = {}
@@ -205,6 +206,7 @@ async def test_end_to_end_retry_runs_nothing_itself_then_the_next_resume_execute
     assert [h[0] for h in history].index("tool_disposition") > history.index(("subtask_attempt", 1, "failed"))   # attempt 1 was recorded BEFORE the operator's decision
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_retried_attempt_gets_fresh_authority_a_refusal_at_that_moment_re_arms_nothing_and_runs_no_effect(tmp_path):
     with patch(f"{C}.subtask_executor.execute", new=AsyncMock(return_value=MAY_FAILED)):
@@ -218,6 +220,7 @@ async def test_a_retried_attempt_gets_fresh_authority_a_refusal_at_that_moment_r
     assert _state(tmp_path).subtask_states["t1"] == "failed" and _state(tmp_path).tool_attempts == {"t1": 2}   # still attempt 2, not completed, no hidden grant
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_an_abandoned_subtask_stops_the_run_and_the_plan_never_completes(tmp_path):
     with patch(f"{C}.subtask_executor.execute", new=AsyncMock(return_value=MAY_FAILED)):
@@ -254,6 +257,7 @@ def test_the_operator_decision_and_the_new_state_are_written_fsync_grade(tmp_pat
     assert [name for name, durable in seen if not durable] == [], "an authoritative disposition write was not fsync-grade"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_tool_attempts_outcome_reaches_the_ledger_fsync_grade_and_survives_a_reload(tmp_path, monkeypatch):
     seen = _spy_on_control_writes(monkeypatch)
@@ -264,6 +268,7 @@ async def test_a_tool_attempts_outcome_reaches_the_ledger_fsync_grade_and_surviv
     assert attempts == [{**attempts[0], "subtask_id": "t1", "attempt": 1, "status": "failed", "effect_boundary": "may_have_effected", "error": "died after the effect began"}]
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("step", atomic_write.DURABLE_WRITE_STEPS)
 async def test_a_retry_whose_durable_evidence_write_fails_is_surfaced_re_arms_nothing_and_the_next_resume_executes_nothing(tmp_path, monkeypatch, step):

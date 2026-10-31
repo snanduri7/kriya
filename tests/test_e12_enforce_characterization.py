@@ -1929,6 +1929,7 @@ async def test_a_plan_that_flips_between_violated_and_satisfied_ends_as_an_oscil
     assert "STRUCTURED_PLAN_REPAIR_EXHAUSTED" in codes
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_refused_contract_never_runs_its_bound_authority_at_baseline(tmp_path, monkeypatch):
     """a5 (the baseline run gated only on a bound authority): a contract whose admission is refused (here recorded, not

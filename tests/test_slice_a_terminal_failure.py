@@ -23,6 +23,7 @@ PRE_REFUSED = SubtaskResult(subtask_id="t1", status=SubtaskStatus.FAILED, execut
                             effect_boundary=ToolEffectBoundary.PROVEN_PRE_EFFECT)
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_attempt_number_is_on_disk_when_the_effect_runs_and_a_may_have_effected_failure_is_terminal(tmp_path):
     seen = {}
@@ -40,6 +41,7 @@ async def test_the_attempt_number_is_on_disk_when_the_effect_runs_and_a_may_have
     assert result.legacy_result["status"] != "success" and result.legacy_result["quality_gates_passed"] is False and calls == []
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("result,boundary", [(MAY_FAILED, "may_have_effected"), (PRE_REFUSED, "proven_pre_effect")], ids=["may-have-effected", "proven-pre-effect"])
 async def test_every_tool_attempt_is_appended_to_the_decision_ledger_with_its_attempt_and_effect_boundary(tmp_path, result, boundary):
@@ -62,6 +64,7 @@ async def test_every_tool_attempt_is_appended_to_the_decision_ledger_with_its_at
     assert (attempts[0]["attempt"], attempts[0]["status"], attempts[0]["execution_method"], attempts[0]["effect_boundary"]) == (1, "failed", "tool", boundary)
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("resume", [True, False], ids=["resume", "fresh-run"])
 async def test_a_terminal_failed_attempt_is_never_executed_again_by_a_resume_or_a_fresh_run_and_its_record_survives(tmp_path, resume):
@@ -78,6 +81,7 @@ async def test_a_terminal_failed_attempt_is_never_executed_again_by_a_resume_or_
     assert open(control_state_path(str(tmp_path)), "rb").read() == before, "the terminal record was overwritten or erased"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_a_failure_proven_to_be_before_the_effect_stays_re_armable_and_keeps_its_attempt(tmp_path):
     with patch(f"{C}.subtask_executor.execute", new=AsyncMock(return_value=PRE_REFUSED)):
@@ -93,6 +97,7 @@ async def test_a_failure_proven_to_be_before_the_effect_stays_re_armable_and_kee
     assert _state(tmp_path).subtask_states["t1"] == "completed" and _state(tmp_path).tool_attempts == {"t1": 1}   # same attempt: nothing had been effected
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_an_unclassified_failure_defaults_to_terminal(tmp_path):
     """No effect_boundary supplied anywhere = the SubtaskResult default = MAY_HAVE_EFFECTED = terminal (fail closed)."""
@@ -102,6 +107,7 @@ async def test_an_unclassified_failure_defaults_to_terminal(tmp_path):
     assert _state(tmp_path).subtask_states["t1"] == SUBTASK_STATE_TOOL_FAILED
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("step", atomic_write.DURABLE_WRITE_STEPS)
 async def test_a_terminal_record_that_cannot_be_made_durable_leaves_the_started_record_and_the_effect_is_never_retried(tmp_path, monkeypatch, step):
@@ -120,6 +126,7 @@ async def test_a_terminal_record_that_cannot_be_made_durable_leaves_the_started_
     assert resumed.legacy_result["status"] == "needs_review"
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_loop_stops_at_an_abandoned_subtask_without_executing_it_and_never_reports_success(tmp_path):
     """tool_abandoned is an operator disposition, not an undisposed record: the workspace gate lets the run start, and the resume classification (one owner) stops at it."""
@@ -136,6 +143,7 @@ async def test_the_loop_stops_at_an_abandoned_subtask_without_executing_it_and_n
     assert _state(tmp_path).subtask_states["t1"] == SUBTASK_STATE_TOOL_ABANDONED and _state(tmp_path).tool_attempts == {"t1": 1}
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_the_terminal_failed_marker_is_classified_by_the_one_resume_owner_when_the_gate_is_not_in_the_way(tmp_path):
     """The loop's own terminal stop (the gate normally refuses first): reach it by excluding the gate's view of the run, as an in-process resume of the same run would."""

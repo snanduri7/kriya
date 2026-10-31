@@ -8667,6 +8667,7 @@ def test_resolve_protected_relpath_returns_none_when_the_file_is_outside_the_wor
         assert _resolve_protected_relpath(str(tmp_path), outside_file) is None
 
 
+@pytest.mark.usefixtures("bound_workspace")
 @pytest.mark.asyncio
 async def test_run_generation_workflow_refuses_to_overwrite_the_protected_goal_file(tmp_path):
     """End-to-end regression test for the real live bug above: confirms
