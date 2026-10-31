@@ -16,6 +16,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from kriya.agents.contracts import partition_file_list_escapes
+from kriya.foundation.human_wait import human_wait
 from kriya.policy.approval import await_if_awaitable, resolve_approval, resolve_approval_result
 from kriya.policy.egress import web_lookup_allowed
 from kriya.workflow.file_resolution import (
@@ -487,7 +488,8 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
             proceed = bool(found)
             if found and web_lookup_callback:
                 try:
-                    proceed = (await resolve_approval_result(web_lookup_callback(found))).approved  # a review of externally fetched references (see stage_analysis)
+                    with human_wait():  # W3-7: the generation budget does not run while a human decides
+                        proceed = (await resolve_approval_result(web_lookup_callback(found))).approved  # a review of externally fetched references (see stage_analysis)
                 except Exception as ex:
                     logger.warning(f"web_lookup_callback failed, discarding design-derived references: {ex}")
                     proceed = False
@@ -512,11 +514,12 @@ async def design_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[
                             f"technology '{term}' but none contained anything usable - falling back to asking for a better source."
                         )
                         try:
-                            supplied = await await_if_awaitable(skill_gap_callback(
-                                design_gap_reason + " Provide a URL, file path, or paste reference content to "
-                                "strengthen it, or decline to proceed with best-effort generation.",
-                                [term],
-                            ))
+                            with human_wait():  # W3-7: the generation budget does not run while a human decides
+                                supplied = await await_if_awaitable(skill_gap_callback(
+                                    design_gap_reason + " Provide a URL, file path, or paste reference content to "
+                                    "strengthen it, or decline to proceed with best-effort generation.",
+                                    [term],
+                                ))
                         except Exception as ex:
                             logger.warning(f"skill_gap_callback failed for design-derived term '{term}': {ex}")
                             supplied = None

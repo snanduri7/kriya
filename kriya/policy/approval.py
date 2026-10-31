@@ -59,6 +59,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
+from kriya.foundation.human_wait import human_wait
 from kriya.foundation.redaction import redact_value
 
 logger = logging.getLogger(__name__)
@@ -313,7 +314,8 @@ async def resolve_approval_result(answer: Any) -> ApprovalOutcome:
 async def resolve_approval(callback: Callable[..., Any], files: List[Any], reason: str) -> ApprovalOutcome:
     """Ask the general approval callback and resolve its answer. The ONE place a caller turns ``callback(files, reason)`` into a decision: no caller resolves a coroutine and then
     tests the object's truthiness itself."""
-    return await resolve_approval_result(callback(files, reason))
+    with human_wait():
+        return await resolve_approval_result(callback(files, reason))
 
 
 async def ask(callback: Callable[..., Any], subject: RuntimeCommandSubject) -> RuntimeCommandDecision:
@@ -321,7 +323,8 @@ async def ask(callback: Callable[..., Any], subject: RuntimeCommandSubject) -> R
     if isinstance(callback, TypedApprovalCallback):
         if not reviewable(subject):
             return RuntimeCommandDecision(None)
-        answer = await await_if_awaitable(callback.runtime_command_review(subject))
+        with human_wait():
+            answer = await await_if_awaitable(callback.runtime_command_review(subject))
         return answer if isinstance(answer, RuntimeCommandDecision) else RuntimeCommandDecision(None)
     if commands_carry_secret(subject.commands):
         # S2d: a plain callback shows ``subject.reason`` (which quotes the commands) through the redactor and cannot say

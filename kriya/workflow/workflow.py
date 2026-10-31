@@ -34,6 +34,7 @@ from kriya.core.kernel import Kernel
 from kriya.core.llm import InferenceDeadlineError, LLMClient
 from kriya.core.model_routing import resume_routes_from
 from kriya.core.token_budget import ContextBudgetUnsatisfiableError
+from kriya.foundation.human_wait import human_wait
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.policy.approval import resolve_approval, resolve_approval_result
 from kriya.policy.errors import PolicyDeniedError
@@ -2147,7 +2148,8 @@ class WorkflowEngine:
         if not web_lookup_query_callback:
             return False
         try:
-            return (await resolve_approval_result(web_lookup_query_callback(terms, base_url))).approved
+            with human_wait():  # W3-7: the generation budget does not run while a human decides
+                return (await resolve_approval_result(web_lookup_query_callback(terms, base_url))).approved
         except Exception as ex:
             logger.warning(f"web_lookup_query_callback failed, skipping live lookup: {ex}")
             return False

@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
+from kriya.foundation.human_wait import human_wait
 from kriya.policy.approval import await_if_awaitable, resolve_approval_result
 from kriya.policy.egress import web_lookup_allowed
 from kriya.workflow.evidence import EvidenceRecord
@@ -260,7 +261,8 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
             if found and web_lookup_callback:
                 try:
                     # a review of externally fetched references: resolved by the approval owner, so an unresolved Task or an unrecognized answer never adopts them
-                    proceed = (await resolve_approval_result(web_lookup_callback(found))).approved
+                    with human_wait():  # W3-7: the generation budget does not run while a human decides
+                        proceed = (await resolve_approval_result(web_lookup_callback(found))).approved
                 except Exception as ex:
                     logger.warning(f"web_lookup_callback failed, discarding auto-found references: {ex}")
                     proceed = False
@@ -298,7 +300,8 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
         supplied = None
         if remaining_unverified or remaining_missing:
             try:
-                supplied = await await_if_awaitable(skill_gap_callback(gap_reason, [s.name for s in remaining_unverified] + remaining_missing))  # supplied CONTENT, not a decision
+                with human_wait():  # W3-7: the generation budget does not run while a human decides
+                    supplied = await await_if_awaitable(skill_gap_callback(gap_reason, [s.name for s in remaining_unverified] + remaining_missing))  # supplied CONTENT, not a decision
             except Exception as ex:
                 logger.warning(f"skill_gap_callback failed, proceeding without it: {ex}")
                 supplied = None
@@ -431,7 +434,8 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
                     resolution = find_conflict_resolution(skills_dir, name_a, rule_a, name_b, rule_b)
                     if resolution is None:
                         try:
-                            raw = await await_if_awaitable(skill_conflict_callback(name_a, rule_a, name_b, rule_b, conflict.get("explanation", "")))
+                            with human_wait():  # W3-7: the generation budget does not run while a human decides
+                                raw = await await_if_awaitable(skill_conflict_callback(name_a, rule_a, name_b, rule_b, conflict.get("explanation", "")))
                         except Exception as ex:
                             logger.warning(f"skill_conflict_callback failed, proceeding without resolving: {ex}")
                             raw = None

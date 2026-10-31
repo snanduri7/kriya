@@ -20,7 +20,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence
 
-from kriya.control.run_coordinator import claim_run_generation_clock
+from kriya.control.run_coordinator import claim_run_generation_clock, follow_run_generation_clock
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.state_paths import trace_db_path
 from kriya.workflow.run_events import EventAuthority, RunEvent
@@ -77,6 +77,7 @@ async def open_run_state(
     )
     if run_clock is not None:
         state.budget_started_monotonic = run_clock
+        follow_run_generation_clock(state)   # W3-7: a human wait's credit reaches this copy
     # PRD-012: every outbound channel's configured authority (capability
     # class, destinations, the trusted field they come from, the
     # containment they run under) is persisted with the run. Telemetry

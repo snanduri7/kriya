@@ -316,6 +316,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_w204_replay_containment_docker.py': ('N', 'C'),
  'tests/test_w35_typed_boundaries.py': ('S', 'M'),
  'tests/test_w36_terminal_result_truth.py': ('S', 'M'),
+ 'tests/test_w37_human_wait_clock.py': ('S', 'M'),
  'tests/test_workflow.py': ('S', 'M'),
  'tests/test_workflow_authorize_action.py': ('S', 'M'),
  'tests/test_workflow_execution_policy_config_wiring.py': ('S', 'M'),

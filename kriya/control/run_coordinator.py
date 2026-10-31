@@ -15,6 +15,7 @@ import logging
 import os
 import subprocess
 import time
+import weakref
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
@@ -35,6 +36,7 @@ from kriya.control.run_ownership import acquire_run_lock
 from kriya.control.run_record import IllegalRunTransitionError, RunLifecycle, RunRecord
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.logging_setup import run_log
+from kriya.foundation.human_wait import register_human_wait_scope
 from kriya.platform import git_argv, git_environment
 from kriya.repository.atomic_write import (
     DurableWriteError as DurableWriteError,  # re-exported: what a durable transition raises (kriya.cli handles it without importing the repository layer)
@@ -61,6 +63,12 @@ class _RunLease:
     # PROVIDER-CONTRACT-001A: the monotonic start of this run's generation
     # budget (claim_run_generation_clock).
     generation_clock: Optional[float] = None
+    # W3-7: while a human approval is awaited (generation_clock_paused) the budget does not run. ``human_wait_started`` is the monotonic moment the outermost wait
+    # began; ``human_wait_depth`` makes overlapping waits one wait.
+    human_wait_started: Optional[float] = None
+    human_wait_depth: int = 0
+    # W3-7: the states that copied the run clock at their start (``follow_run_generation_clock``); a resume sets each to the lease's credited value, so the lease stays the one truth.
+    clock_followers: list = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -200,19 +208,75 @@ def record_model_runtime_use(fingerprint_id: str) -> None:
         logger.warning("Run %s: model runtime fingerprint not persisted: %s", context.run_id, error)
 
 
+def _now() -> float:
+    """The one read of the clock the run's generation budget is measured on (``time.monotonic``). A module-level indirection so the pause arithmetic is tested with injected,
+    deterministic time instead of real sleeps."""
+    return time.monotonic()
+
+
 def claim_run_generation_clock() -> Optional[float]:
     """PROVIDER-CONTRACT-001A: the monotonic start of the active run's
     generation budget (``autonomy.generation_time_budget_seconds``). The
     first claim - the run's first model call or generation pass - starts it;
     every later work unit, retry and role reads the same value, so nothing
-    inside a run resets the budget. None outside a run."""
+    inside a run resets the budget. None outside a run.
+
+    W3-7: while a human approval is being awaited (``generation_clock_paused``)
+    the start moves forward with the clock, so every reader (the model
+    deadline, embeddings, the validator and runtime deadlines, the attempt
+    budget check) sees the remaining budget frozen; on resume the wait is
+    credited exactly once."""
     context = current_run_context()
     if context is None:
         return None
     lease = context._lease
+    paused_since = lease.human_wait_started
     if lease.generation_clock is None:
-        lease.generation_clock = time.monotonic()
+        # a claim inside a wait starts a clock that is frozen until the wait ends (effective start == now, see below)
+        lease.generation_clock = paused_since if paused_since is not None else _now()
+    if paused_since is not None:
+        return lease.generation_clock + (_now() - paused_since)
     return lease.generation_clock
+
+
+@contextmanager
+def generation_clock_paused() -> Iterator[None]:
+    """W3-7 (GENERATION-BUDGET-COUNTS-HUMAN-WAIT-001, owner decision 2026-10-30): the run's generation deadline does not run while Kriya waits on a human approval.
+    Only that wait is excluded - model inference, tool execution, dependency acquisition and internal computation keep consuming the budget, and no timeout is raised.
+    The exit credits the wait exactly once (``finally``: a failing or cancelled callback never leaves the clock paused); overlapping waits count as one; repeated
+    pause/resume adds only the real time spent waiting, never budget. A wait before the first claim changes nothing (the clock starts at the first model call). A no-op
+    outside a run."""
+    context = current_run_context()
+    if context is None:
+        yield
+        return
+    lease = context._lease
+    lease.human_wait_depth += 1
+    if lease.human_wait_depth == 1:
+        lease.human_wait_started = _now()
+    try:
+        yield
+    finally:
+        lease.human_wait_depth -= 1
+        if lease.human_wait_depth == 0:
+            started, lease.human_wait_started = lease.human_wait_started, None
+            if lease.generation_clock is not None and started is not None:
+                lease.generation_clock += max(0.0, _now() - started)
+                for reference in lease.clock_followers:
+                    follower = reference()
+                    if follower is not None:
+                        follower.budget_started_monotonic = lease.generation_clock
+
+
+register_human_wait_scope(generation_clock_paused)   # W3-7: the foundation hook human_wait() enters this scope
+
+
+def follow_run_generation_clock(state: Any) -> None:
+    """W3-7: ``state.budget_started_monotonic`` is a copy of the run clock taken at the start of one invocation (run_lifecycle.open_run_state); the attempt budget check reads
+    only that copy. Register it so that a human wait's credit reaches it: on resume it is set to the run lease's (credited) clock. A no-op outside a run."""
+    context = current_run_context()
+    if context is not None:
+        context._lease.clock_followers.append(weakref.ref(state))
 
 
 def owning_run_committed_work_units(workspace_path: str) -> Optional[List[str]]:

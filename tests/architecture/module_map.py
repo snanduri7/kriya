@@ -51,7 +51,7 @@ MODULES: Dict[str, Module] = {
         owner_paths=("kriya/foundation/", "kriya/__init__.py", "kriya/build_info.py", "kriya/core/tomlcompat.py",
                      "kriya/core/db.py", "kriya/core/file_stamp.py"),
         public=("kriya.foundation", "kriya.foundation.ids", "kriya.foundation.errors", "kriya.foundation.clock",
-                "kriya.foundation.cancellation", "kriya.foundation.values", "kriya.foundation.build_info",
+                "kriya.foundation.cancellation", "kriya.foundation.human_wait", "kriya.foundation.values", "kriya.foundation.build_info",
                 "kriya.foundation.tomlcompat", "kriya.foundation.redaction"),
         layer=0),
     "PLATFORM": Module(
