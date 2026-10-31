@@ -13644,6 +13644,7 @@ async def test_no_op_edit_redirects_to_different_file_named_by_own_analysis(tmp_
             "The XML is already valid. The lifecycle defect is in Application.java, "
             "where the main thread joins itself and prevents context shutdown."
         ),
+        "redirect_to": ["Application.java"],  # W3-4: typed signal
     }])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -13684,6 +13685,7 @@ async def test_targeted_no_change_redirects_before_rerunning_quality_gates(tmp_p
             "applicationContext.xml is correct. Fix Application.java so its main method "
             "exits and closes the Spring context."
         ),
+        "redirect_to": ["Application.java"],  # W3-4: typed signal
     }])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -15377,6 +15379,31 @@ async def test_self_diagnosis_still_wins_for_the_attempt_that_produced_it(tmp_pa
     await handle_attempt_failure(state, ctx, exc)
 
     assert state.last_implicated_files == ["src/main/java/com/example/JsonService.java"]
+
+
+@pytest.mark.asyncio
+async def test_a_typed_redirect_captured_for_a_different_failure_signature_is_not_reused(tmp_path):
+    """W3-4 freshness, signature half: the attempt number matches but the diagnosis was captured
+    responding to a DIFFERENT failure, so it must not retarget this one (the attempt-number half is
+    test_stale_self_diagnosis_not_replayed_across_later_attempts)."""
+    from kriya.workflow.failure_grounding import build_failure_signature
+
+    raw_output = "COMPILATION FAILURE: cannot find symbol: class Gson"
+    other_signature = build_failure_signature("compile", "COMPILATION FAILURE: an entirely different error")
+    assert other_signature != build_failure_signature("compile", raw_output)
+    state = GenerationState()
+    state.attempt_number = 4
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {"pom.xml", "src/main/java/com/example/JsonService.java"}
+    state.last_self_diagnosis = (other_signature, ["src/main/java/com/example/JsonService.java"], 4)
+    ctx = _minimal_attempt_ctx(tmp_path)
+    exc = QualityGateFailure(Failure(
+        type="compile", message=raw_output, raw_output=raw_output, likely_files=["pom.xml"],
+    ))
+
+    await handle_attempt_failure(state, ctx, exc)
+
+    assert state.last_implicated_files == ["pom.xml"]
 
 
 # --- PRV-11 (2026-08-31): scope_conflict_is_grounded must gate on
@@ -24278,6 +24305,7 @@ async def test_workflow_self_diagnosis_redirects_after_confirmed_repeat_failure(
         [{
             "filepath": "A.java", "content": "class A {\n  Object x2;\n}",
             "analysis": "A.java itself is fine - the real problem is in B.java's own field type.",
+            "redirect_to": ["B.java"],  # W3-4: the typed REDIRECT signal; the prose alone no longer redirects
         }],
         # Attempt 3 - should now be targeted at B.java via self_diagnosis,
         # not another blind re-try of A.java.
@@ -24306,6 +24334,62 @@ async def test_workflow_self_diagnosis_redirects_after_confirmed_repeat_failure(
     second_failure = [g for g in gate_outcomes if g["type"] == "compile" and g["success"] is False][1]
     assert second_failure["attribution_tier"] == "self_diagnosis"
     assert second_failure["likely_files"] == ["B.java"]
+
+
+@pytest.mark.asyncio
+async def test_workflow_prose_naming_another_file_never_redirects_after_confirmed_repeat_failure(tmp_path):
+    """W3-4 negative twin of the redirect test above: the SAME responses, but the analysis only
+    MENTIONS B.java (no typed REDIRECT). Prose is advisory evidence, so the confirmed repeat keeps the
+    deterministic locator tier and the next attempt is NOT retargeted to B.java."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write A.java and B.java",
+        "Review: Approved",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    we.developer.run_generation = AsyncMock(side_effect=[
+        # Attempt 1 (full-set): writes both files.
+        [
+            {"filepath": "A.java", "content": "class A {\n  Object x;\n}"},
+            {"filepath": "B.java", "content": "class B {}"},
+        ],
+        # Attempt 2 (targeted retry of A.java, driven by the locator below) -
+        # the model's own analysis says the real cause is in B.java.
+        [{
+            "filepath": "A.java", "content": "class A {\n  Object x2;\n}",
+            "analysis": "A.java itself is fine - the real problem is in B.java's own field type.",
+        }],
+        # Attempt 3 - should now be targeted at B.java via self_diagnosis,
+        # not another blind re-try of A.java.
+        [{"filepath": "B.java", "content": "class B { int y; }"}],
+    ])
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
+        mock_compile.side_effect = [
+            {"success": False, "output": "[ERROR] .../A.java:[2,3] cannot find symbol"},
+            {"success": False, "output": "[ERROR] .../A.java:[2,3] cannot find symbol"},  # identical - same signature
+            {"success": True, "output": ""},
+        ]
+        await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
+
+    third_call_kwargs = we.developer.run_generation.call_args_list[2].kwargs
+    assert third_call_kwargs["known_target_files"] != ["B.java"]
+
+    db_path = trace_db_path(cfg)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    gate_outcomes = json.loads(row["gate_outcomes"])
+    second_failure = [g for g in gate_outcomes if g["type"] == "compile" and g["success"] is False][1]
+    assert second_failure["attribution_tier"] == "locator"
+    assert second_failure["likely_files"] == ["A.java"]
 
 
 @pytest.mark.asyncio
@@ -24351,6 +24435,7 @@ async def test_workflow_self_diagnosis_redirects_to_an_established_file_this_run
         [{
             "filepath": "A.java", "content": "class A {\n  Object x2;\n}",
             "analysis": "A.java itself is fine - the real problem is in B.java's own field type.",
+            "redirect_to": ["B.java"],  # W3-4: the typed REDIRECT signal; the prose alone no longer redirects
         }],
         # Attempt 3 - should now be targeted at B.java via self_diagnosis,
         # even though B.java was never written by this run.

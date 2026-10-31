@@ -774,7 +774,7 @@ measured corrupting legitimate files (`handover/FILE_INTEGRITY_CONTRACT_001.md`)
   - *Commit binding*: the committed destination is re-read against the verified bytes.
   Worktree sync is NUL-delimited, byte-checked and fails closed with a typed reason in direct and enforce runs. A new
   filesystem write site fails the audit tripwire until it is classified.
-- **Production protocol.** The structured sentinel protocol (`kriya_sentinel_v1`) has explicit payload terminators and
+- **Production protocol.** The structured sentinel protocol (`kriya_sentinel_v2`) has explicit payload terminators and
   is the production protocol; the legacy markers (`strict_legacy_v1`) are compatibility-only. Qualification is bound
   to the protocol identity (policy `/7`).
 

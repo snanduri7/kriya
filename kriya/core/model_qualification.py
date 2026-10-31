@@ -111,7 +111,7 @@ from kriya.platform.filesystem_semantics import PathRelation, path_relation
 # no substring/whitespace-collapsing anchors). A /4 PASS was judged under the
 # old parsing, so every /4 record is STALE.
 # /6 (FILE-INTEGRITY-CONTRACT-001 closure): a record binds the model-facing
-# Developer response protocol identity (strict_legacy_v1 | kriya_sentinel_v1,
+# Developer response protocol identity (strict_legacy_v1 | kriya_sentinel_v2 - v1 until W3-4 added the REDIRECT line; v1 records are STALE -,
 # in the policy digest and the record), and both protocol cases run the
 # configured protocol (full-file content now carries a fenced docstring
 # example). Every /5 record is STALE.

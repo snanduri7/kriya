@@ -348,7 +348,7 @@ PROMPT_DIGESTS = {
     'self_consistency_nudge': 'c341c332e56ca2e7',
     'skill_gap': '3979e4547ddfda56',
     'spec_compliance': 'd98fa75854e867b4',
-}  # sha256[:16] at 886a46d
+}  # sha256[:16] at 886a46d; W3-4: the two STRUCTURED repair SYSTEM digests changed deliberately (the REDIRECT paragraph), no user prompt and no legacy/create shape moved
 
 
 def test_every_agent_prompt_text_is_byte_identical_to_the_base():
@@ -911,11 +911,11 @@ DEVELOPER_REQUEST_DIGESTS: Dict[str, List[str]] = {
     'first_attempt_patch_legacy': ['0f9d15e75e160c21:52eeaac7154011fd'],
     'not_implicated_legacy': ['0e60a4b795768fb4:eb490c7e51286855'],
     'patch_only_legacy': ['4571cf2455edeac9:ad3f2fb4d88f9b1d'],
-    'patch_only_structured': ['df3aea2e7b0221f3:f30a2e3f0e399e01'],
+    'patch_only_structured': ['4a9c8489c8c0179b:f30a2e3f0e399e01'],
     'repair_full_no_failure_legacy': ['e56adf18557e36c4:73237869722b251b'],
     'repair_full_no_failure_structured': ['f1ea42ad48a97231:f30a2e3f0e399e01'],
     'retry_anchored_legacy': ['2fbf142e38f98e8c:5e8a2c253ad9ecf9'],
-    'retry_anchored_structured': ['fc6420ae08fe441f:e0a4e171a56d6dda'],
+    'retry_anchored_structured': ['55cb45b80be86984:e0a4e171a56d6dda'],
     'retry_current_content_legacy': ['2fbf142e38f98e8c:d25a0ebb468a7a27'],
     'retry_full_legacy': ['e83ed54ca16a44f5:b2f79ad7e3d4950c'],
     'siblings_legacy': ['0e60a4b795768fb4:04c7fc9da870ddb2', '0e60a4b795768fb4:e8af1374aaa762cd', '0e60a4b795768fb4:a6c6294f6b795010'],

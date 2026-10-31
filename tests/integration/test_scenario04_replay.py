@@ -199,25 +199,29 @@ def test_fixtures_are_the_recorded_evidence():
 
 def test_attribution_characterization():
     """Recorded Developer analyses (attached to the parser, as in the run)
-    through the real ``extract_self_diagnosed_files``. A filename mention is
-    read as a diagnosis: the model's prose "the private fields of the
-    Protocol class" retargets the repair to Protocol.java, which already had
-    every accessor (SCENARIO-04 §2, first wrong decision)."""
+    through the real ``extract_self_diagnosed_files``. W3-4 FLIPPED this
+    (was: ``== [PROTOCOL]`` for all five recorded analyses and the quoted
+    compiler message, SCENARIO-04 §2 first wrong decision): prose that merely
+    mentions Protocol is advisory evidence and no longer retargets the
+    repair; only the typed REDIRECT signal does."""
     for number in RECORDED_ANALYSES:
         analysis = fixture_text(f"analysis-{number}.txt")
         found = extract_self_diagnosed_files([{"filepath": PARSER, "analysis": analysis}], KNOWN)
-        assert found == [PROTOCOL], number  # CHARACTERIZATION: flips in F4
+        assert found == [], number  # the recorded prose no longer redirects
+        # the same recorded prose WITH an explicit typed redirect still does (the intended behaviour)
+        typed = extract_self_diagnosed_files(
+            [{"filepath": PARSER, "analysis": analysis, "redirect_to": [PROTOCOL]}], KNOWN)
+        assert typed == [PROTOCOL], number
 
     quoted = ("The compiler says: body has private access in Protocol. "
               "The parser must use getBody() instead of the field.")
-    assert extract_self_diagnosed_files([{"filepath": PARSER, "analysis": quoted}], KNOWN) \
-        == [PROTOCOL]  # CHARACTERIZATION: flips in F4
+    assert extract_self_diagnosed_files([{"filepath": PARSER, "analysis": quoted}], KNOWN) == []
     assert extract_self_diagnosed_files(
         [{"filepath": PARSER, "analysis": "Use the getter methods instead of direct field access."}], KNOWN) == []
     redirect = "The real defect is in Protocol.java: its fields need accessors."
-    # CHARACTERIZATION: flips in F4 (prose stops redirecting; F4's typed RedirectSignal decides the exact outcome;
-    # the PRV-05 corroborated-redirect case is a different, locator-exhausted case)
-    assert extract_self_diagnosed_files([{"filepath": PARSER, "analysis": redirect}], KNOWN) == [PROTOCOL]
+    assert extract_self_diagnosed_files([{"filepath": PARSER, "analysis": redirect}], KNOWN) == []
+    assert extract_self_diagnosed_files(
+        [{"filepath": PARSER, "analysis": redirect, "redirect_to": [PROTOCOL]}], KNOWN) == [PROTOCOL]
 
 
 # ----------------------------------------------------- candidate transaction

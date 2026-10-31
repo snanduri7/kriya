@@ -675,7 +675,7 @@ class AutonomyConfig(BaseModel):
 
     # FILE-INTEGRITY-CONTRACT-001 (kriya/agents/response_protocol.py): the
     # protocol the Developer is asked to answer in. "structured"
-    # (kriya_sentinel_v1, the production protocol) asks for path-named
+    # (kriya_sentinel_v2, the production protocol) asks for path-named
     # <<<KRIYA:...>>> blocks with explicit terminators. "legacy_strict"
     # (strict_legacy_v1) keeps the historical FIX ANALYSIS/SEARCH/REPLACE/
     # FILE CONTENT/NO CHANGE NEEDED markers as exact lines; it has no payload

@@ -324,7 +324,7 @@ def test_structured_protocol_is_the_default_and_the_selection_is_security_author
     from kriya.config.authority import _SECURITY_AUTHORITY_FIELDS
 
     assert AppConfig().autonomy.developer_response_protocol == "structured" == DEFAULT_RESPONSE_PROTOCOL
-    assert response_protocol_identity(AppConfig()) == "kriya_sentinel_v1"
+    assert response_protocol_identity(AppConfig()) == "kriya_sentinel_v2"
     assert ("autonomy", "developer_response_protocol") in _SECURITY_AUTHORITY_FIELDS
     cfg = AppConfig()
     cfg.autonomy.developer_response_protocol = "legacy_strict"
@@ -1150,8 +1150,8 @@ def test_qualification_binds_the_response_protocol_and_v6_records_are_stale():
     legacy.autonomy.developer_response_protocol = "legacy_strict"
     assert mq.policy_digest_for(structured) != mq.policy_digest_for(legacy)
     record = mq.build_record(_qual_fp(), [mq.CaseResult("plain_completion", mq.PASS)], settings=_qual_settings(),
-                             response_protocol="kriya_sentinel_v1")
-    assert record["developer_response_protocol"] == "kriya_sentinel_v1"
+                             response_protocol="kriya_sentinel_v2")
+    assert record["developer_response_protocol"] == "kriya_sentinel_v2"
     ok = mq.assess(_qual_fp(), ("plain_completion",), settings=_qual_settings(), record=record,
                    policy_digest=mq.policy_digest_for(structured))
     other = mq.assess(_qual_fp(), ("plain_completion",), settings=_qual_settings(), record=record,
@@ -1184,7 +1184,7 @@ def test_doctor_requires_the_structured_protocol(protocol, status):
     cfg.autonomy.developer_response_protocol = protocol
     check = _check_response_protocol(SimpleNamespace(cfg=cfg))
     assert check.status.value == status and check.required is True
-    assert check.evidence["identity"] == ("kriya_sentinel_v1" if protocol == "structured" else "strict_legacy_v1")
+    assert check.evidence["identity"] == ("kriya_sentinel_v2" if protocol == "structured" else "strict_legacy_v1")
 
 
 def test_production_runs_refuse_the_legacy_protocol():

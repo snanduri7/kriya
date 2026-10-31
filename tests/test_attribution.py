@@ -705,37 +705,47 @@ async def test_triage_ignores_files_the_model_hallucinates_outside_known_files()
     assert result.files == []
 
 
-# --- extract_self_diagnosed_files(): reading the model's own analysis text ---
+# --- extract_self_diagnosed_files(): only the TYPED redirect counts (W3-4) ---
 
-def test_extract_self_diagnosed_files_finds_a_different_named_file():
+def test_extract_self_diagnosed_files_finds_a_typed_redirect_to_a_different_file():
     files = [{
         "filepath": "ProtocolApp.java",
         "content": None,
         "analysis": "the fix belongs entirely in ProtocolParser.java, not here.",
+        "redirect_to": ["ProtocolParser.java"],
     }]
     result = extract_self_diagnosed_files(files, ["ProtocolApp.java", "ProtocolParser.java", "pom.xml"])
     assert result == ["ProtocolParser.java"]
 
 
-def test_extract_self_diagnosed_files_excludes_self_mention():
-    # The analysis for ProtocolApp.java happening to also say "ProtocolApp.java"
-    # isn't signal - only a mention of a DIFFERENT known file counts.
+def test_extract_self_diagnosed_files_prose_naming_a_file_is_not_a_redirect():
+    # The same analysis WITHOUT the typed signal: prose is advisory evidence only.
     files = [{
         "filepath": "ProtocolApp.java",
         "content": None,
-        "analysis": "ProtocolApp.java itself looks correct, the real issue is in Config.json.",
+        "analysis": "the fix belongs entirely in ProtocolParser.java, not here.",
     }]
-    result = extract_self_diagnosed_files(files, ["ProtocolApp.java", "Config.json"])
-    assert result == ["Config.json"]
+    assert extract_self_diagnosed_files(files, ["ProtocolApp.java", "ProtocolParser.java", "pom.xml"]) == []
 
 
-def test_extract_self_diagnosed_files_unions_across_multiple_files():
+def test_extract_self_diagnosed_files_ignores_self_unknown_and_malformed_redirects():
     files = [
-        {"filepath": "A.java", "content": None, "analysis": "the real cause is in B.java."},
-        {"filepath": "C.java", "content": None, "analysis": "actually this needs a change in D.java too."},
+        {"filepath": "ProtocolApp.java", "redirect_to": ["ProtocolApp.java"]},          # itself: says nothing
+        {"filepath": "ProtocolApp.java", "redirect_to": ["Unknown.java"]},              # not a known file
+        {"filepath": "ProtocolApp.java", "redirect_to": "Config.json"},                 # malformed carrier (a str, not a list)
+        {"filepath": "ProtocolApp.java", "redirect_to": [None, 7, "", "../Config.json"]},
+        {"filepath": "ProtocolApp.java", "redirect_to": None},
+    ]
+    assert extract_self_diagnosed_files(files, ["ProtocolApp.java", "Config.json"]) == []
+
+
+def test_extract_self_diagnosed_files_unions_across_multiple_files_in_order_without_duplicates():
+    files = [
+        {"filepath": "A.java", "content": None, "redirect_to": ["B.java"]},
+        {"filepath": "C.java", "content": None, "redirect_to": ["D.java", "B.java"]},
     ]
     result = extract_self_diagnosed_files(files, ["A.java", "B.java", "C.java", "D.java"])
-    assert set(result) == {"B.java", "D.java"}
+    assert result == ["B.java", "D.java"]
 
 
 def test_extract_self_diagnosed_files_handles_missing_or_empty_analysis():
@@ -748,9 +758,53 @@ def test_extract_self_diagnosed_files_handles_missing_or_empty_analysis():
 
 
 def test_extract_self_diagnosed_files_no_divergence_returns_empty():
-    # The analysis doesn't name any OTHER known file - nothing to redirect to.
     files = [{"filepath": "A.java", "content": None, "analysis": "the null check was missing here."}]
     assert extract_self_diagnosed_files(files, ["A.java", "B.java"]) == []
+
+
+_W34_PARSER = "src/main/java/p/ProtocolParser.java"
+_W34_PROTOCOL = "src/main/java/p/Protocol.java"
+_W34_KNOWN = [_W34_PARSER, _W34_PROTOCOL]
+_W34_RAW = "[ERROR] /w/src/main/java/p/ProtocolParser.java:[12,20] error: body has private access in Protocol"
+
+
+async def _w34_attribute(analysis, redirect_to=None):
+    """SCENARIO-04 shape: a javac locator in the parser; the parser's own response carries ``analysis``."""
+    failure = Failure(type="compile", message="COMPILATION FAILURE", raw_output=_W34_RAW, likely_files=[_W34_PARSER])
+    entry = {"filepath": _W34_PARSER, "analysis": analysis}
+    if redirect_to is not None:
+        entry["redirect_to"] = redirect_to
+    diagnosed = extract_self_diagnosed_files([entry], _W34_KNOWN)
+    return await attribute_failure(failure, _W34_KNOWN, 2, [], MagicMock(), lambda fp: None,
+                                   self_diagnosed_files=diagnosed or None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("analysis", [
+    # 1. a quotation of the compiler message
+    "The compiler says: body has private access in Protocol. The parser must use getBody() instead of the field.",
+    # 2. a negation
+    "Protocol.java is fine and needs no change; the bug is in this parser.",
+    # 3. a positive CLAIM in prose, with no typed signal
+    "The real defect is in Protocol.java: its fields need accessors.",
+])
+async def test_w34_prose_mentions_never_outrank_the_compiler_locator(analysis):
+    result = await _w34_attribute(analysis)
+    assert (result.tier, result.files) == ("locator", [_W34_PARSER])
+
+
+@pytest.mark.asyncio
+async def test_w34_a_typed_redirect_still_outranks_the_symptom_locator():
+    # The legitimate behaviour the tier exists for is preserved: locator = where it surfaced, fix elsewhere.
+    result = await _w34_attribute("The real defect is in Protocol.java: its fields need accessors.", [_W34_PROTOCOL])
+    assert (result.tier, result.files, result.confidence) == ("self_diagnosis", [_W34_PROTOCOL], "high")
+
+
+@pytest.mark.asyncio
+async def test_w34_a_malformed_or_unknown_typed_redirect_falls_back_to_the_locator():
+    for bad in (["src/main/java/p/Missing.java"], "src/main/java/p/Protocol.java", [_W34_PARSER], [], [None]):
+        result = await _w34_attribute("anything", bad)
+        assert (result.tier, result.files) == ("locator", [_W34_PARSER]), bad
 
 
 # --- attribute_failure(): self_diagnosis tier outranks a fresh locator ---
@@ -834,14 +888,19 @@ VALIDATION_2_RAW_OUTPUT = (
 )
 
 
-def test_validation_2_regression_extracts_qpid_config_from_real_analysis_text():
+def test_validation_2_regression_extracts_qpid_config_from_the_typed_redirect():
+    # W3-4: the real analysis text is kept as evidence; the redirect is the explicit signal, not the prose.
     files = [{
         "filepath": "src/main/java/com/example/ProtocolApp.java",
         "content": None,
         "analysis": VALIDATION_2_FIX_ANALYSIS,
+        "redirect_to": ["src/main/resources/qpid-initial-config.json"],
     }]
     result = extract_self_diagnosed_files(files, VALIDATION_2_KNOWN_FILES)
     assert result == ["src/main/resources/qpid-initial-config.json"]
+    # ... and the very same real analysis text WITHOUT the typed signal no longer redirects anything.
+    prose_only = [{k: v for k, v in files[0].items() if k != "redirect_to"}]
+    assert extract_self_diagnosed_files(prose_only, VALIDATION_2_KNOWN_FILES) == []
 
 
 @pytest.mark.asyncio
@@ -863,6 +922,7 @@ async def test_validation_2_regression_attribution_redirects_away_from_the_throw
         "filepath": "src/main/java/com/example/ProtocolApp.java",
         "content": None,
         "analysis": VALIDATION_2_FIX_ANALYSIS,
+        "redirect_to": ["src/main/resources/qpid-initial-config.json"],
     }]
     self_diagnosed = extract_self_diagnosed_files(prior_files, VALIDATION_2_KNOWN_FILES)
 

@@ -1889,6 +1889,7 @@ class DeveloperAgent(BaseAgent):
                         filepath, analysis_required=repair_outcomes, allow_edit=prefer_anchored_edit,
                         allow_file=(not prefer_anchored_edit) or full_file_offered,
                         allow_no_change=repair_outcomes,
+                        allow_redirect=repair_outcomes,
                     )
                 )
                 generation_directive = (
@@ -2073,6 +2074,10 @@ class DeveloperAgent(BaseAgent):
                 file_entry = {"filepath": filepath, "content": sanitized}
             if analysis:
                 file_entry["analysis"] = analysis
+            # W3-4: the ONLY carrier of a redirect. Only a valid structured REDIRECT line from a
+            # repair response that was accepted as a response; the analysis prose never becomes one.
+            if repair_protocol and parsed.redirect is not None and not protocol_error:
+                file_entry["redirect_to"] = [parsed.redirect.to_file]
             if protocol_error:
                 file_entry["protocol_error"] = protocol_error
             if protocol_reason_code:

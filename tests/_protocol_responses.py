@@ -33,9 +33,13 @@ def wants_structured(system_prompt: str) -> bool:
     return "<<<KRIYA:" in (system_prompt or "")
 
 
-def sentinel(filepath: str, *, analysis: str = "", content=None, edits=(), no_change: bool = False) -> str:
-    """Render one intent as a structured-protocol response."""
+def sentinel(filepath: str, *, analysis: str = "", content=None, edits=(), no_change: bool = False,
+             redirect_to: str = None) -> str:
+    """Render one intent as a structured-protocol response (``redirect_to``: the typed
+    W3-4 REDIRECT line, placed after the analysis and before the outcome block)."""
     parts = [analysis] if analysis else []
+    if redirect_to is not None:
+        parts.append(f'<<<KRIYA:REDIRECT to="{redirect_to}">>>')
     if no_change:
         parts.append(f'<<<KRIYA:NO_CHANGE path="{filepath}">>>')
     elif content is not None:

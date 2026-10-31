@@ -15,7 +15,7 @@ Two protocols emit the same ``DeveloperResponse``:
   one outcome - ``SEARCH:``/``REPLACE:`` pairs, one ``FILE CONTENT:``, or
   ``NO CHANGE NEEDED`` (text may follow). A marker line inside a payload is
   ambiguous and refused.
-* ``structured`` (``kriya_sentinel_v1``, the production protocol) - the
+* ``structured`` (``kriya_sentinel_v2``, the production protocol) - the
   grammar is: an optional free-text analysis section, then outcome blocks,
   then nothing but blank lines. Every block is opened and closed by exact
   sentinel lines naming the target path::
@@ -25,6 +25,19 @@ Two protocols emit the same ``DeveloperResponse``:
       <<<KRIYA:EDIT path="p">>>        <<<KRIYA:SEARCH>>> ... <<<KRIYA:REPLACE>>> ...
                                        (pairs repeat)  <<<KRIYA:END_EDIT>>>
       <<<KRIYA:NO_CHANGE path="p">>>
+
+  A repair response may also carry ONE redirect line in its analysis section,
+  before the outcome block (W3-4, ATTRIBUTION-SELF-DIAGNOSIS-MENTION-001)::
+
+      <<<KRIYA:REDIRECT to="other/path">>>
+
+  It is the only way a response can say "the defect is in that other file":
+  a filename in the analysis prose is evidence, never a redirect. The line is
+  syntax-checked here (a malformed line, a second line or a line after the
+  outcome is INVALID_EDIT_PROTOCOL); whether the target is a file the run may
+  redirect to is decided downstream (attribution.extract_self_diagnosed_files
+  and the stage write scope), never here. ``legacy_strict`` has no redirect
+  marker, so it never redirects.
 
   A payload ends only at its own end marker; any text after the last block
   is INVALID_EDIT_PROTOCOL and never reaches a file. Payload lines are
@@ -67,7 +80,10 @@ RESPONSE_PROTOCOLS = (LEGACY_STRICT, STRUCTURED)
 # The versioned, model-facing identity of each protocol: bound into
 # qualification (model_qualification.policy_digest_for) - a record qualified
 # under one protocol is STALE under another.
-PROTOCOL_IDENTITIES = {LEGACY_STRICT: "strict_legacy_v1", STRUCTURED: "kriya_sentinel_v1"}
+# v2 (W3-4): the structured grammar gained the optional REDIRECT line, so every
+# record qualified under kriya_sentinel_v1 is STALE (exact-runtime qualification
+# of v2 is a Wave-4 concern).
+PROTOCOL_IDENTITIES = {LEGACY_STRICT: "strict_legacy_v1", STRUCTURED: "kriya_sentinel_v2"}
 # Must equal AutonomyConfig.developer_response_protocol's default (tested).
 DEFAULT_RESPONSE_PROTOCOL = STRUCTURED
 
@@ -95,10 +111,26 @@ _NO_CHANGE = "NO CHANGE NEEDED"
 
 SENTINEL_PREFIX = "<<<KRIYA:"
 _STRUCTURED_OPEN_RE = re.compile(r'^<<<KRIYA:(FILE|EDIT|NO_CHANGE) path="([^"]+)">>>$')
+_STRUCTURED_REDIRECT_RE = re.compile(r'^<<<KRIYA:REDIRECT to="([^"]+)">>>$')
 _STRUCTURED_SEARCH = "<<<KRIYA:SEARCH>>>"
 _STRUCTURED_REPLACE = "<<<KRIYA:REPLACE>>>"
 _STRUCTURED_END = {"FILE": "<<<KRIYA:END_FILE>>>", "EDIT": "<<<KRIYA:END_EDIT>>>"}
 _END_FILE_NO_FINAL_NEWLINE = "<<<KRIYA:END_FILE no_final_newline>>>"
+
+
+@dataclass(frozen=True)
+class RedirectSignal:
+    """The typed "the defect is in ``to_file``, not in ``from_file``" statement
+    of one structured repair response (OI-75 / MODULE-CONTRACTS ``RedirectSignal``).
+    ``to_file`` is a safe repository-relative POSIX path that is not
+    ``from_file``; it is a CLAIM, validated downstream against the run's known
+    files and the stage write scope before it can influence a retry target.
+    ``statement`` is the response's analysis text (the model's claim, kept as
+    evidence)."""
+
+    from_file: str
+    to_file: str
+    statement: str = ""
 
 
 @dataclass(frozen=True)
@@ -114,6 +146,9 @@ class DeveloperResponse:
     detail: Optional[str] = None
     # Structured FILE only: the payload's declared final-newline state.
     final_newline: Optional[bool] = None
+    # Structured only: the explicit REDIRECT line, when the response carried a
+    # valid one (None otherwise - never derived from analysis prose).
+    redirect: Optional[RedirectSignal] = None
 
     @property
     def error(self) -> Optional[str]:
@@ -139,7 +174,7 @@ def developer_response_protocol(config) -> str:
 
 
 def response_protocol_identity(config) -> str:
-    """The versioned protocol identity (``kriya_sentinel_v1``...) of ``config``."""
+    """The versioned protocol identity (``kriya_sentinel_v2``...) of ``config``."""
     return PROTOCOL_IDENTITIES[developer_response_protocol(config)]
 
 
@@ -353,6 +388,7 @@ def parse_structured(text: str, filepath: str, *, patch_allowed: bool = True,
     content: Optional[str] = None
     final_file_newline: Optional[bool] = None
     edits: List[Tuple[str, str]] = []
+    redirect_target: Optional[str] = None
     index = 0
 
     def _fail(code: str, detail: str) -> DeveloperResponse:
@@ -360,6 +396,20 @@ def parse_structured(text: str, filepath: str, *, patch_allowed: bool = True,
 
     while index < len(lines):
         line = lines[index].rstrip(" \t\r")
+        if line.startswith("<<<KRIYA:REDIRECT"):
+            # W3-4: the one typed redirect. Syntax only - no prose is ever read as a redirect.
+            if outcome is not None:
+                return _fail(INVALID_EDIT_PROTOCOL, "a REDIRECT line after the outcome block (it belongs in the analysis section)")
+            if redirect_target is not None:
+                return _fail(INVALID_EDIT_PROTOCOL, "more than one REDIRECT line")
+            matched = _STRUCTURED_REDIRECT_RE.match(line)
+            target = normalize_protocol_path(matched.group(1)) if matched else None
+            if target is None:
+                return _fail(INVALID_EDIT_PROTOCOL,
+                             f"malformed REDIRECT line {line!r} - expected <<<KRIYA:REDIRECT to=\"<safe repository-relative path>\">>>")
+            redirect_target = target
+            index += 1
+            continue
         if not line.startswith(SENTINEL_PREFIX):
             if outcome is None:
                 analysis.append(lines[index])
@@ -421,9 +471,14 @@ def parse_structured(text: str, filepath: str, *, patch_allowed: bool = True,
         return _fail(INVALID_EDIT_PROTOCOL, "EDIT blocks were not offered for this file")
     if outcome == FILE and not file_allowed:
         return _fail(INVALID_EDIT_PROTOCOL, "a whole-file replacement was not offered for this file")
+    # A redirect to the requested file itself says nothing (no signal), never an error.
+    redirect = (RedirectSignal(from_file=normalize_protocol_path(filepath) or filepath, to_file=redirect_target,
+                               statement=analysis_text or "")
+                if redirect_target is not None and redirect_target != normalize_protocol_path(filepath) else None)
     return DeveloperResponse(kind=outcome, protocol=STRUCTURED, analysis=analysis_text,
                              content=content, edits=tuple(edits),
-                             final_newline=final_file_newline if outcome == FILE else None)
+                             final_newline=final_file_newline if outcome == FILE else None,
+                             redirect=redirect)
 
 
 def _structured_edit_pairs(body: List[str]):
@@ -459,8 +514,9 @@ def _structured_edit_pairs(body: List[str]):
 
 
 def structured_contract(filepath: str, *, analysis_required: bool, allow_edit: bool, allow_file: bool,
-                        allow_no_change: bool) -> str:
-    """The prompt text that defines the structured protocol for one file."""
+                        allow_no_change: bool, allow_redirect: bool = False) -> str:
+    """The prompt text that defines the structured protocol for one file.
+    ``allow_redirect`` (repair requests only) adds the optional REDIRECT line."""
     parts = [
         "RESPONSE PROTOCOL (exact lines, each on its own line, at column 0):",
     ]
@@ -480,6 +536,13 @@ def structured_contract(filepath: str, *, analysis_required: bool, allow_edit: b
                      "(every line you write ends with a newline in the file)")
     if allow_no_change:
         parts.append(f'<<<KRIYA:NO_CHANGE path="{filepath}">>>   (only if this file needs no change)')
+    if allow_redirect:
+        parts.append(
+            f'ONLY IF the real defect is in a DIFFERENT file than "{filepath}", add exactly one line '
+            '<<<KRIYA:REDIRECT to="<that other file\'s path>">>> after your analysis and before the outcome. '
+            "Naming a file in your analysis, or quoting an error message that names one, does NOT redirect the "
+            "repair; only this line does. Omit it otherwise."
+        )
     parts.append(
         "Everything between the protocol lines is copied into the file byte for byte - no markdown "
         "fences, no line numbers. Never combine outcomes. Nothing may follow the last protocol line."

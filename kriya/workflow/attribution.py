@@ -27,10 +27,13 @@ devstral-small-2:24b, some single completions took 90s-6min).
 Four tiers, most-trusted first, deliberately reusing rather than
 reimplementing the middle two (both already evidenced-reliable):
 
-  0. "self_diagnosis" - NEW (2026-08-13). The model's own FIX ANALYSIS text
-     from the immediately-preceding attempt, when it names a DIFFERENT known
-     file than the one it was attached to (extract_self_diagnosed_files(),
-     below), on a CONFIRMED repeat of the same failure. Ranked above
+  0. "self_diagnosis" - NEW (2026-08-13); W3-4: ONLY an explicit typed
+     redirect. The Developer's REDIRECT line (response_protocol.RedirectSignal)
+     from the immediately-preceding attempt, naming a DIFFERENT known file
+     than the one it was attached to (extract_self_diagnosed_files(),
+     below), on a CONFIRMED repeat of the same failure. A file name merely
+     MENTIONED in the FIX ANALYSIS prose (a quote, a negation, a claim) is
+     advisory evidence and never reaches this tier. Ranked above
      locator/judge: found live (spikes/eval_harness/runs/
      attribution-fix-validation-2) that a precise stack-trace locator kept
      routing every retry to the file where an exception was THROWN
@@ -352,37 +355,40 @@ def resolve_fallback_model(retry_count: int, chain: list, skip: Collection[str] 
 
 
 def extract_self_diagnosed_files(files: List[dict], known_files: List[str]) -> List[str]:
-    """Reads the model's own FIX ANALYSIS text (threaded out of
-    DeveloperAgent.run_generation() as an optional "analysis" key on each
-    file dict, kriya/agents/agent.py's `_fill_missing_content()`) and checks
-    whether it names a DIFFERENT known file than the one it's attached to -
-    reusing extract_implicated_files(), the exact same basename-matching
-    primitive the locator/judge tier already uses, just pointed at a new
-    input. A self-mention (the analysis for App.java happening to say
-    "App.java") isn't signal - only union results EXCLUDING the file the
-    analysis is attached to.
+    """The files the Developer EXPLICITLY redirected the repair to.
 
-    Found live, 2026-08-13 (ignite_qpid_protocol validation-2): a stack-trace
-    locator confidently routed every retry to ProtocolApp.java (the file
-    where a JMS connection exception was thrown), but the model's own fix-
-    analysis on that same file correctly named qpid-initial-config.json's
-    missing defaultAlias entry as the real cause - already documented
-    verbatim in the active qpid skill. Nothing read that text again after
-    logging it, so the next retry re-derived the same wrong locator forever.
-    Generalizes beyond this one case: in a full-set attempt with no
-    narrowing at all, every implicated file gets its own analysis - if any
-    one of them names a different real cause, this catches it too."""
-    implicated: List[str] = []
+    W3-4 (ATTRIBUTION-SELF-DIAGNOSIS-MENTION-001): only the typed redirect a
+    structured repair response carried - its REDIRECT line, threaded out of
+    DeveloperAgent.run_generation() as each file dict's ``redirect_to`` list
+    (kriya/agents/response_protocol.py ``RedirectSignal``) - can name a file
+    here. The response's FIX ANALYSIS prose (the file dict's ``analysis``) is
+    evidence and is NEVER read for file names: a quoted compiler message
+    ("... private access in Protocol"), a negation ("Protocol.java needs no
+    change") and a genuine claim are indistinguishable as text, which used to
+    promote all three into a high-confidence ``self_diagnosis`` that outranked
+    the deterministic locator (SCENARIO-04; the earlier substring scan reused
+    extract_implicated_files()). The legitimate behaviour the tier exists for
+    (2026-08-13 ignite_qpid_protocol validation-2; 2026-08-21
+    protocol_encoder_java: the locator names where a failure SURFACED, the fix
+    belongs elsewhere) is preserved, now through the explicit signal.
+
+    A redirect counts only when its target is a known file of this run
+    (``known_files``) other than the file the response is for; anything else
+    (unknown, self, malformed, not a string) is ignored, so the caller falls
+    back to deterministic attribution. This is a JUDGMENT input, not
+    authority: the stage write scope is applied by the caller
+    (retry_strategy.py) and the writer, never widened here."""
+    known = set(known_files)
+    redirected: List[str] = []
     for file_entry in files:
-        analysis = file_entry.get("analysis")
-        if not analysis:
-            continue
         own_path = file_entry.get("filepath")
-        candidates = [f for f in known_files if f != own_path]
-        for f in extract_implicated_files(analysis, candidates):
-            if f not in implicated:
-                implicated.append(f)
-    return implicated
+        targets = file_entry.get("redirect_to")
+        if not isinstance(targets, (list, tuple)):
+            continue
+        for target in targets:
+            if isinstance(target, str) and target in known and target != own_path and target not in redirected:
+                redirected.append(target)
+    return redirected
 
 
 # PRV-11 (2026-08-30): a JUnit5/Jupiter assertion mismatch (assertEquals,
@@ -1087,7 +1093,8 @@ async def attribute_failure(
     IDENTICAL behavior to before this parameter existed, matching plan's
     own opt-in convention above.
 
-    self_diagnosed_files, when passed, MUST already be gated by the caller
+    self_diagnosed_files (W3-4: the typed REDIRECT targets of the preceding
+    repair response, never prose mentions), when passed, MUST already be gated by the caller
     to only the case where the CURRENT failure is a confirmed repeat of the
     exact failure the self-diagnosis was generated in response to (see
     kriya/workflow/retry_strategy.py's signature-matching against
