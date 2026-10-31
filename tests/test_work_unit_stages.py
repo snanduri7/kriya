@@ -138,7 +138,7 @@ def test_the_knowledge_gap_stops_the_unit_unless_confirmed(tmp_path, fields, sto
     assert ctx.guard is None   # a stopped unit hands nothing on: its result is the run's result
     report = GapReport()
     report.gaps = [GAP]
-    assert result == {"status": "knowledge_gap", "gap_report": report.to_dict(), "goal": ctx.goal,
+    assert result == {"status": "knowledge_gap", "failure_category": "knowledge_gap", "gap_report": report.to_dict(), "goal": ctx.goal,     # W3-6: the category its trace row records
                       "workspace_path": ctx.workspace_path, "run_id": "trace-1"}
     assert steps == ["knowledge_gap"]
     row = log_run.call_args.kwargs
@@ -290,8 +290,8 @@ def test_an_empty_plan_stops_the_unit_before_the_architect(tmp_path):
                step_callback=lambda name, text: steps.append(name), record_requirement_lineage=lambda *a: None)
     with _log_run() as log_run:
         result = asyncio.run(plan_work_unit(ctx, _planning_deps(engine, _Planner([""]))))
-    assert result == {"status": "planner_output_incomplete", "reason": result["reason"], "plan": "", "goal": ctx.goal,
-                      "workspace_path": ctx.workspace_path, "run_id": "trace-1"}
+    assert result == {"status": "planner_output_incomplete", "failure_category": "planner_output_incomplete", "reason": result["reason"], "plan": "", "goal": ctx.goal,
+                      "workspace_path": ctx.workspace_path, "run_id": "trace-1"}      # W3-6: + failure_category
     assert result["reason"].startswith("plan is empty")
     assert saved == [("plan", {"plan": ""})] and steps == ["planner_output_incomplete"]
     assert ctx.state.planner_calls == 1
@@ -356,7 +356,7 @@ def test_an_all_escaping_architect_file_list_stops_the_unit(tmp_path):
     with _log_run() as log_run:
         result = asyncio.run(design_work_unit(ctx, _deps(engine, architect=_Architect(design, None),
                                                          CandidatePrompts=_Prompts)))
-    assert result == {"status": "architect_file_list_rejected", "reason": result["reason"], "plan": ctx.plan,
+    assert result == {"status": "architect_file_list_rejected", "failure_category": "architect_file_list_rejected", "reason": result["reason"], "plan": ctx.plan,   # W3-6: + failure_category
                       "design": design, "goal": ctx.goal, "workspace_path": ctx.workspace_path, "run_id": "trace-1",
                       "rejected_file_list_entries": ["../outside/evil.py"]}
     assert saved == ["design"] and ctx.state.architect_calls == 1
@@ -721,8 +721,9 @@ def test_human_in_the_loop_without_a_callback_aborts_without_applying(tmp_path, 
     with patch("kriya.control.trace.TraceLogger.log_run") as log_run:
         stop, required = asyncio.run(stage_apply.approval_gate(ctx, deps, attempt_ctx=_NO_HELD_GATES))
     assert required is True
-    assert sorted(stop) == ["accepted_risk", "accepted_risks", "design", "files", "plan", "quality_gates_passed", "review",
+    assert sorted(stop) == ["accepted_risk", "accepted_risks", "design", "failure_category", "files", "plan", "quality_gates_passed", "review",     # W3-6: + failure_category
                             "review_included_in_approval", "run_id", "static_analysis"]
+    assert stop["failure_category"] == "approval_required"
     assert stop["review"].startswith("Not applied: human approval was required (Human-in-the-loop review policy")
     assert (stop["quality_gates_passed"], stop["files"], stop["run_id"], stop["review_included_in_approval"]) == (
         False, [], "run-1", False)
