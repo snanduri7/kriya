@@ -187,7 +187,7 @@ Rows: DIRECTORY-NAME-PRUNING-SOURCE-MEMBERSHIP-RESULT-TRUTH-001 (parent, stays O
 - Error contract: `compile_run_contract` re-raises `BoundTreeError` ahead of its generic `except Exception` (previously a silently recorded `EXAMPLE_COMPILER_ERROR`); `run_generation_workflow` (contract stage, before `run_trace` exists) and the enforce controller convert it to the existing `AUTHORITY_EXECUTION_UNAVAILABLE` / `verification_authority_unavailable` result. No new terminal code; `BoundTreeError` stays internal. Callers of the example derivation inside `run_development` are already under the typed handler.
 - Original symptom re-measured (probe `probes/probe_b_git_backed_java_types.py`; `prefix_outputs/b_git_backed_java_types_PREFIX_HEAD_3d6cac9.txt` -> `..._POSTFIX_working_tree.txt`): duplicate under build/target pre-fix -> confident wrong unique `com.acme.core.Gen`, post-fix -> ambiguity refusal; sole `Gen` under build/target pre-fix -> None, post-fix -> found with the correct path; util/dist controls unchanged.
 - Verification: 29 tests (`tests/test_w33_b_java_example_membership.py`); 14/14 mutants killed (baseline 29, no-op 29); adjacent targeted run 166 files: 6639 passed, 7 failed -> 2 pre-existing stale fixtures (FAIL at 3d6cac9; repaired in 47d60aa: a non-Git PRV-17 fixture and a repository_content_paths patch that now also hit the sandbox creation), 3 architecture pins updated in a5eb993 (direct-access allowlist 3 -> 1, one import edge, one patch site), `test_lr_r1_m1_t6_fixes::test_e_...` passes in isolation (load flake). ruff + pylint rc=0.
-- Known residual (recorded, not widened): `_tracked_workspace_paths` returns `[]` when git fails (language detection) - outside B.
+- Known residual (recorded, not widened): `_tracked_workspace_paths` returns `[]` when git fails - outside B. [CORRECTED in section 22: this was written as "language detection"; the trace in section 19 found five consumers, two of which SEAL the run's verification contract (project language, file-immutability and API-preservation bindings, the documentation request), so it was a result-truth defect, fixed by U2 (Git-backed) and U4 (non-Git).]
 - PARKED unchanged: pre-git `compile_run_contract` -> `derive_java_example_artifact` on a NO_GIT root; scoped-snapshot sandbox (C2); pre-git Architect root.
 - Fingerprint trail: caf2d3fef2f392de (ffc8421) -> e37c33cf40f90b27 (a5eb993). `refs/kriya/verified` unmoved at 7eddc5d6e255; nothing pushed or tagged. FOCUSED/ADJACENT ONLY; the full suite is NOT run.
 - Not started: C1, C2, pre-git Architect root, P3-siblings row, GIT-ICASE-PATHSPECS-UNQUALIFIED-001, the wrong-date comment. W3-3 is NOT closed.
@@ -198,7 +198,7 @@ Rows: DIRECTORY-NAME-PRUNING-SOURCE-MEMBERSHIP-RESULT-TRUTH-001 (parent, stays O
 - Fix: `worktree.candidate_member_paths` (bound-tree members on GIT_BACKED roots, caller's legacy walk on parked classes); both scans consume it; `BoundTreeError` re-raised ahead of the three broad catches and reaches the existing `AUTHORITY_EXECUTION_UNAVAILABLE` stop. `_reference_scan` TRACED as a membership decision (gates `CONTRACT_CONSUMER_VERIFICATION_MISSING`), so FIXED rather than retained as intentional.
 - Original symptom re-measured (probe `probes/probe_c1_git_backed_migration_scans.py`; `prefix_outputs/c1_git_backed_scans_PREFIX_HEAD_3fd1641.txt` -> `..._POSTFIX_working_tree.txt`).
 - Verification: 41 tests (`tests/test_w33_c1_migration_membership.py`); 14/14 mutants killed (baseline/no-op green; two e2e tests added afterwards); adjacent targeted run 208 files: 7717 passed, 9 failed -> all 9 pre-existing (identical at detached 3fd1641; stale non-Git fixtures in test_full_file_final_newline, test_d2_validator_attribution_authority, test_s18_planned_tool_governance), repaired in 40f6ead; ruff + pylint rc=0.
-- Known residual (unchanged, not widened): `_tracked_workspace_paths` returns `[]` when git fails (language detection).
+- Known residual (unchanged, not widened): `_tracked_workspace_paths` returns `[]` when git fails. [CORRECTED in section 22: not "language detection" only - five consumers, two of which seal the contract; fixed by U2 and U4, see section 19.]
 - PARKED unchanged: NO_GIT_REPOSITORY roots; scoped-snapshot sandbox (C2); pre-git Architect root; pre-git example compile.
 - Fingerprint trail: e37c33cf40f90b27 (a5eb993) -> 11c2ffcd9c1c36f5 (4c21fbf). `refs/kriya/verified` unmoved at 7eddc5d6e255; nothing pushed or tagged. FOCUSED/ADJACENT ONLY; the full suite is NOT run.
 - Not started: C2, pre-git Architect root, P3-siblings row, GIT-ICASE-PATHSPECS-UNQUALIFIED-001, the wrong-date comment. W3-3 is NOT closed.
@@ -250,3 +250,64 @@ Rows: DIRECTORY-NAME-PRUNING-SOURCE-MEMBERSHIP-RESULT-TRUTH-001 (parent, stays O
 - Evidence (outside the repo): `WAVE3_W33_2026-10-30/probes/mutants_u4.py`; `prefix_outputs/u4_tests_at_PREFIX_HEAD_541f493.txt`, `u4_mutants.txt`, `u4_mutants_FINAL.txt`, `u4_fallout_357files_PRE_REPAIR.txt`, `u4_failed_ids_PRE_REPAIR.txt`, `u4_failed_rerun_POST_REPAIR.txt`, `u4_POSTFIX_architecture_and_u4.txt`.
 - Fingerprint trail (script `WAVE2_SLICE_A_R1_2026-10-28/fingerprint.py`, from `git archive`): d69f62b482eb5ca8 (28c3519, 1742 files) -> 4e2144856c3c684b (90e4591, 1743 files). `refs/kriya/verified` unmoved at 7eddc5d6e255; nothing pushed or tagged. No Co-Authored-By. The full suite is NOT run (fallout and adjacent runs only).
 - Not started: the final W3-3 reconciliation. W3-3 is NOT closed.
+
+## 22. W3-3 final reconciliation (bookkeeping only; executable unchanged at 90e4591, fingerprint 4e2144856c3c684b) - owner order 2026-10-31
+Every one of the 37 numbered T1 sites (site map `handover/WAVE3_W33_SITE_MAP_2026-10-30.md`, numbering kept) and every W3-3 registry row has EXACTLY ONE disposition. Vocabulary: FIXED + VERIFIED / DISPROVED WITH EVIDENCE / INTENTIONAL CONTRACT / OUTSIDE W3-3 with an explicit `target_scope`. DISPROVED: none.
+
+### Root classes after U1-U4 (the reason the dispositions hold)
+| Operating root | Membership authority | Section |
+|---|---|---|
+| Git-backed (incl. a subdirectory of the project repository) | the bound tree, projected to the operating root | 15 (D-001 R1) |
+| Scoped snapshot sandbox (operating root inside an enclosing repository) | the projection captured at construction + path-exact candidate writes; ignored operating root refused typed | 20 (U3/C2) |
+| Operating root excluded by the authority repository | typed `BOUND_TREE_OPERATING_SCOPE_EXCLUDED` | 20 |
+| Non-Git, EMPTY | a greenfield: nothing to decide; the existing bootstrap makes it a repository | 21 (U4) |
+| Non-Git, POPULATED | typed `BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY` before the contract and any membership decision | 21 (U4) |
+| Git cannot answer / disagrees with D-001 | typed `BOUND_TREE_UNAVAILABLE` | 12, 15 |
+All three typed causes end as `AUTHORITY_EXECUTION_UNAVAILABLE` with `membership_authority.reason_code`. The A0 open questions are closed: Q1 (scoped sandbox lists ignored output) by U3/C2; Q2 (callers swallow `BoundTreeError`) by the re-raises in A1/U1/U3/U4 (AST-pinned); Q3 (pre-git design stage) by U4; Q4 (row 20) by the owner decision in section 11 (A0.4).
+
+### The 37 sites
+| # | Site | Disposition | Evidence |
+|---|---|---|---|
+| 1 | `resolve_planned_artifact_owners` / `prefer_existing_artifact_owners` | FIXED + VERIFIED | A2 1342c48 + follow-on 384cf2d (sections 13, 14), D-001 R1 (15), U4 (21) |
+| 2 | `discover_response_construction_owners` | FIXED + VERIFIED | A2 (same walker as row 1) |
+| 3, 4, 5 | `find_brownfield_test_redirections`, `find_brownfield_public_api_changes`, `find_unrequested_architectural_surfaces` | FIXED + VERIFIED | A1 e4404d2 (11), amended A2-0 (12) / D-001 R1 (15) |
+| 6 | `failure_grounding.resolve_repository_locator_files` | FIXED + VERIFIED | U1 2368993 (18); scoped sandbox U3/C2 (20) |
+| 7 | `compile_regression._tree_index` | FIXED + VERIFIED | U1; U3/C2 |
+| 8, 9 | `example_oracle_java.resolve_java_type`, `main_source_path` | FIXED + VERIFIED | B a5eb993 (16); U3/C2; U4 |
+| 10 | `repository_license_header` | FIXED + VERIFIED | B (same module) |
+| 11 | `contract_lifecycle._reference_scan` | FIXED + VERIFIED | C1 4c21fbf (17) |
+| 12 | `migration._scan_java_files` (+ `_migration_identities` fail-open) | FIXED + VERIFIED | C1 (17) |
+| 13 | `requirement_closers._candidate_test_files` | OUTSIDE W3-3 | `DIRECTORY-NAME-PRUNING-P3-SIBLING-SITES-001` |
+| 14 | `requirement_closers` documentation referent | INTENTIONAL CONTRACT | over-inclusion only, fails closed (retained) |
+| 15 | `baseline_policy._existing_tests` | OUTSIDE W3-3 | siblings row |
+| 16a, 16b | `repository_topology._find_java_main_entrypoints`, `_discover_child_build_roots` | OUTSIDE W3-3 | siblings row |
+| 17 | `retry_strategy.compute_effective_workspace_hash` walk branch | INTENTIONAL CONTRACT | near-unreachable (INFERRED), retained |
+| 18 | `runtime_verification` Python runtime grounding facts | FIXED + VERIFIED | U1 (declared-only target selection); U3/C2 |
+| 19 | `control/persistence.nested_control_state` | OUTSIDE W3-3 | siblings row (Git is the wrong owner) |
+| 20 | `milestone_completion.workspace_evidence_hash` | INTENTIONAL CONTRACT | owner decision, section 11 A0.4; negative control kept |
+| 21 | `analyzer` analyze / index_repository / is_ignored | OUTSIDE W3-3 | siblings row |
+| 22 | `static_analysis/scope._walk_sources` | OUTSIDE W3-3 | siblings row |
+| 23, 24 | `capabilities/java.py`, `python.py` `has_sources` | OUTSIDE W3-3 | siblings row (24b unreachable) |
+| 25 | `validate._project_dirs`, `gradle_project_dirs` | INTENTIONAL CONTRACT | generated-output layout; the edge case is hygiene item (a) of the siblings row |
+| 26 | `validate._compiled_class_exists` | INTENTIONAL CONTRACT | locates generated output; MUST NOT change |
+| 27 | `cli review / ask` | INTENTIONAL CONTRACT | display only, not result truth |
+| 28, 29, 30 | MCP `search_code` / `SearchTool`, `planning_request` candidates, `triage._workspace_appears_empty` | OUTSIDE W3-3 | siblings row |
+| 31, 32, 33, 34 | `milestones._list_workspace_files`, `goal_facts.manifest_files`, `review_context`, doctors | INTENTIONAL CONTRACT | display / context / performance |
+| 35 | `code_intel.discover_source_files` | INTENTIONAL CONTRACT | the precedent (Git first, fallback) |
+| 36 | `worktree._snapshot_all_files_without_git` | INTENTIONAL CONTRACT | cleanup only; MUST NOT change |
+| 37 | `named_test_oracle._candidate_files` | INTENTIONAL CONTRACT | trust surface (MEASURED p5 C); MUST NOT become Git membership |
+Count by site number (37): FIXED + VERIFIED 13 (1-12, 18), INTENTIONAL CONTRACT 13 (14, 17, 20, 25, 26, 27, 31-37 less 28-30 = 31, 32, 33, 34, 35, 36, 37), OUTSIDE W3-3 11 (13, 15, 16, 19, 21, 22, 23, 24, 28, 29, 30), DISPROVED 0; 13 + 13 + 11 = 37.
+
+### Registry rows
+| Row | Disposition |
+|---|---|
+| `DIRECTORY-NAME-PRUNING-SOURCE-MEMBERSHIP-RESULT-TRUTH-001` (parent) | FIXED + VERIFIED for every FIX site; stays OPEN until the owner signs W3-3 closed; stale REMAINING lists tagged HISTORICAL and replaced by a FINAL RECONCILIATION segment |
+| `JVM-TYPE-RESOLUTION-OUTPUT-DIR-NAMES-001` | FIXED + VERIFIED (B + U3/C2 + U4); closes with the parent |
+| `NESTED-RAW-WORKSPACE-BOUND-TREE-AUTHORITY-OWNER-001` | FIXED + VERIFIED (D-001 R1 + U3/C2 + U4); `blocking` cleared; closes with the parent |
+| `UNTRACKED-DEPENDENCY-DIRECTORY-OWNER-SELECTION-001`, `SUBDIRECTORY-OF-OWN-REPOSITORY-BOUND-TREE-REGRESSION-001` | already CLOSED (FIXED + VERIFIED) |
+| `CLI-ADMISSION-REFUSAL-TEXT-MIDRUN-AUTHORITY-UNAVAILABLE-001` | OUTSIDE W3-3: `target_scope` rewritten to the next CLI message pass (display text only) |
+| `DIRECTORY-NAME-PRUNING-P3-SIBLING-SITES-001` (NEW, P3) | OUTSIDE W3-3: `target_scope` W3-9+ hygiene pass; carries sites 13, 15, 16, 19, 21, 22, 23/24, 28, 29, 30 and hygiene items (a) site-25 edge case, (b) retire the legacy parked walks and stale PARKED comments (7 modules; reachable only for an EMPTY non-Git folder), (c) the two `_workspace_head` None-on-failure answers |
+Not implemented here, by order: `GIT-ICASE-PATHSPECS-UNQUALIFIED-001`, the wrong-date comment in `kriya/platform/__init__.py` (ledger sections 8, 9), any unrelated P3.
+
+### Is W3-3 closable?
+Executable scope: YES. Every authoritative membership decision in a root class W3-3 admits consumes its canonical authority or ends in a typed `AUTHORITY_EXECUTION_UNAVAILABLE`; no basename list decides a result there. Two items need the owner, neither is a defect: (1) a folder holding only `kriya.yaml` is not "empty" under the U4 definition (implemented as specified; `docs/user_guide.md` says so); (2) sign-off to close the parent row and the two rows that close with it. Evidence state: focused, adjacent (288 files / 9486 passed; 357 files / 10793 with the U4 fallout classified and repaired) and mutation runs only. The FULL SUITE has NOT been run at 90e4591; ENGINEERING_RULES level 3 puts it at the batch boundary, i.e. before W3-3 is declared closed or W3-4 starts. Nothing pushed or tagged; `refs/kriya/verified` unmoved at 7eddc5d6e255. Next work after sign-off: W3-4, not another W3-3 sweep.
