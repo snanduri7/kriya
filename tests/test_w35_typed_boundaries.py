@@ -106,7 +106,10 @@ from kriya.core.state_paths import ENV_STATE_DIR  # noqa: E402
 _FILES = {"calc.py": CALC, "test_calc.py": TEST_SUB}
 
 
-def _slow_role_run(tmp_path, monkeypatch, slow_role, budget_seconds=4):
+# The budget must be spent INSIDE the slow role's own call (INFERENCE_DEADLINE_EXCEEDED), never before it (INFERENCE_DEADLINE_EXHAUSTED, llm.py:290/298). The first
+# gate at c06596a measured the 4 s budget already spent before the Architect dispatch under -n 8 load (24 s test time), so the stricter pin failed on a wall-clock race.
+# 15 s keeps a wide margin over the fast roles and stays under the 30 s sleep, so the slow role is still cut mid-call.
+def _slow_role_run(tmp_path, monkeypatch, slow_role, budget_seconds=15):
     class Slow(ChaosRuntime):
         async def complete(self, client, request):
             role = role_of(request)
@@ -142,6 +145,8 @@ def test_a_deadline_spent_in_the_planner_or_architect_is_a_typed_failed_result(s
     # no invented retry, no candidate: exactly one call of the slow role, and nothing reached the Developer
     roles = runtime.seen_roles
     assert roles.count(slow_role) == 1 and "developer" not in roles
+    if slow_role == "architect":
+        assert roles.count("planner") == 1 and roles.index("planner") < roles.index("architect")     # the Planner finished: the stop is genuinely the Architect boundary
     # the run record settles FAILURE exactly as the raising path did, and the workspace is untouched (only Kriya's own state directory)
     assert [(r.lifecycle_state.value, r.terminal) for r in list_run_records(str(workspace))] == [("FAILURE", True)]
     status = subprocess.run(["git", "status", "--short"], cwd=workspace, capture_output=True, text=True, check=True).stdout.strip().splitlines()
