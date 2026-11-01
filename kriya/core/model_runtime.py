@@ -1041,7 +1041,11 @@ register_runtime_adapter(OllamaRuntimeAdapter(), default=True)
 # /2 (PROVIDER-CONTRACT-001A): an over-context refusal carries the
 # provider's exact prompt count, and an answer carrying tool calls reports
 # finish_reason "tool_calls" (Ollama's done_reason says "stop"; measured).
-NATIVE_PROTOCOL_ADAPTER_VERSION = "kriya-ollama-native/2"
+# /3 (WAVE4-OLLAMA-0.40-OVERCONTEXT-001): Ollama 0.40.13 answers the same
+# refusal as a bare string, no ``type`` and no count keys (measured), which
+# /2 did not recognise: it surfaced as an untyped backend error. A /2 record
+# must not vouch for this behaviour, so the version moves.
+NATIVE_PROTOCOL_ADAPTER_VERSION = "kriya-ollama-native/3"
 NATIVE_RUNTIME_NAME = "ollama_native"
 
 OLLAMA_NATIVE_CAPABILITIES = ProviderCapabilities(
@@ -1068,19 +1072,29 @@ _NATIVE_OPTION_NAMES = {
 # Reasoning effort -> native ``think`` (None: not sent, the model's default).
 _NATIVE_THINK = {"none": False, "low": "low", "medium": "medium", "high": "high", REASONING_MODEL_DEFAULT: None}
 # An over-window prompt refused under truncate:false (measured error text).
-_CONTEXT_EXCEEDED_MARKERS = ("exceed_context_size", "exceeds the context", "context length")
+# 0.34.4 nests a typed JSON object; 0.40.13 answers a bare string whose phrase
+# is the one below (both measured); the phrase is also inside the 0.34.4 text.
+_CONTEXT_EXCEEDED_MARKERS = ("exceed_context_size", "exceeds the context", "context length",
+                             "exceeds the available context size")
+_CONTEXT_EXCEEDED_TEXT = re.compile(
+    r"request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)")
 
 
 def _context_exceeded_counts(message: str) -> Dict[str, int]:
     """The provider's exact prompt token count and context size from an
     over-context refusal (Ollama 0.34.4 nests a JSON error object carrying
-    ``n_prompt_tokens`` and ``n_ctx`` inside the error string, measured);
-    empty when the answer carries none."""
+    ``n_prompt_tokens`` and ``n_ctx`` inside the error string; 0.40.13 sends
+    only "request (N tokens) exceeds the available context size (M tokens)",
+    both measured); empty when the answer carries none."""
     counts: Dict[str, int] = {}
     for key, name in (("n_prompt_tokens", "provider_prompt_tokens"), ("n_ctx", "provider_context_window")):
         match = re.search(rf'"{key}"\s*:\s*(\d+)', message)
         if match:
             counts[name] = int(match.group(1))
+    if not counts:
+        text = _CONTEXT_EXCEEDED_TEXT.search(message)
+        if text:
+            counts = {"provider_prompt_tokens": int(text.group(1)), "provider_context_window": int(text.group(2))}
     return counts
 
 

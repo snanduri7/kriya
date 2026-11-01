@@ -143,6 +143,7 @@ class _NativeServer:
         self.status = 200
         self.error = None
         self.delay = 0.0  # seconds before answering (a slow provider)
+        self.responder = None  # optional: request body -> (status, payload dict), overrides the static answers
         self.reply = {"message": {"role": "assistant", "content": "ok", "thinking": ""},
                       "done": True, "done_reason": "stop", "prompt_eval_count": 0, "eval_count": 1,
                       "model": "m:1"}
@@ -158,7 +159,10 @@ class _NativeServer:
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 server.requests.append((self.path, body))
                 time.sleep(server.delay)
-                if server.status != 200:
+                if server.responder is not None:
+                    status, payload = server.responder(body)
+                    self._send(status, json.dumps(payload).encode())
+                elif server.status != 200:
                     self._send(server.status, json.dumps({"error": server.error}).encode())
                 elif body.get("stream"):
                     lines = [{"message": {"content": "o"}, "done": False, "model": "m:1"},
@@ -320,6 +324,62 @@ def test_a_refusal_without_counts_is_still_typed_and_names_no_invented_count(nat
     assert result.error.reason_code == PROVIDER_PROMPT_TRUNCATED
     assert "provider_prompt_tokens" not in result.error.details
     assert result.protocol["provider_contract"]["admission_miss"]["provider_prompt_tokens"] is None
+
+
+# WAVE4-OLLAMA-0.40-OVERCONTEXT-001. The raw body Ollama 0.40.13 returned for a 40,013-token prompt in a
+# 32,768 window (evidence WAVE4_2026-11-01/raw/ollama_0.40.13_over_context_native_chat.body): a BARE string,
+# no "type", no n_prompt_tokens / n_ctx. Adapter /2 did not recognise it (an untyped backend error).
+MEASURED_OVER_CONTEXT_ERROR_0_40 = (
+    "request (40013 tokens) exceeds the available context size (32768 tokens), try increasing it")
+
+
+def test_ollama_0_40_bare_string_refusal_is_typed_with_its_exact_counts(native_server):
+    native_server.status, native_server.error = 400, MEASURED_OVER_CONTEXT_ERROR_0_40
+    result = asyncio.run(_call(_config(native_server.url)))
+    assert isinstance(result.error, ProviderContractError)
+    assert result.error.reason_code == PROVIDER_PROMPT_TRUNCATED
+    assert result.error.details["provider_prompt_tokens"] == 40013
+    assert result.error.details["provider_context_window"] == 32768
+    assert result.protocol["provider_contract"]["admission_miss"]["provider_prompt_tokens"] == 40013
+    assert len(native_server.requests) == 1
+
+
+def test_a_400_with_unrelated_text_stays_an_untyped_backend_error(native_server):
+    for text in ("invalid option: num_ctx must be positive", "model 'm:1' not found", "request (5 tokens) is fine"):
+        native_server.status, native_server.error = 400, text
+        result = asyncio.run(_call(_config(native_server.url)))
+        assert not isinstance(result.error, ProviderContractError), text
+        assert result.status is CompletionStatus.BACKEND_ERROR, text
+
+
+def test_the_over_context_qualification_case_passes_against_the_real_adapter_and_the_0_40_body(native_server):
+    """The case's own tests use a fake adapter that raises the typed error, so they could not see the real
+    adapter failing to type Ollama 0.40.13's refusal. This one runs the case through the real native adapter."""
+    from kriya.core import model_qualification as mq
+
+    def respond(body):
+        text = body["messages"][-1]["content"]
+        tokens = 10 * text.count("kappa.") + 7
+        if tokens > 8192:
+            return 400, {"error": f"request ({tokens} tokens) exceeds the available context size (8192 tokens), "
+                                  "try increasing it"}
+        return 200, {"message": {"role": "assistant", "content": "yes"}, "done": True, "done_reason": "stop",
+                     "prompt_eval_count": tokens, "eval_count": 1, "model": "m:1"}
+
+    native_server.responder = respond
+
+    async def run():
+        llm = LLMClient(_config(native_server.url))
+        try:
+            ctx = {"policy": mq.ModelQualificationConfig(), "context_window": 8192, "runtime": NATIVE}
+            return await mq.case_over_context_refusal(llm, "m:1", ctx)
+        finally:
+            await llm.aclose()
+
+    result = asyncio.run(run())
+    assert result.status == mq.PASS, result.evidence
+    assert result.evidence["refused"] is True and result.evidence["reason_code"] == PROVIDER_PROMPT_TRUNCATED
+    assert result.evidence["provider_prompt_tokens"] > 8192 and result.evidence["provider_context_window"] == 8192
 
 
 def test_an_ordinary_backend_error_is_not_an_admission_miss(native_server):
