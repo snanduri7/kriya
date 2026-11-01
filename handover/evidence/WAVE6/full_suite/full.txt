@@ -1,0 +1,536 @@
+bringing up nodes...
+bringing up nodes...
+
+........................................................................ [  0%]
+..............................................F......F.................. [  0%]
+........................................................................ [  1%]
+F....................................................................... [  1%]
+........................................................................ [  1%]
+........................................................................ [  2%]
+........................................................................ [  2%]
+........................................................................ [  2%]
+........................................................................ [  3%]
+........................................................................ [  3%]
+........................................................................ [  4%]
+........................................................................ [  4%]
+........................................................................ [  4%]
+........................................................................ [  5%]
+........................................................................ [  5%]
+........................................................................ [  5%]
+........................................................................ [  6%]
+........................................................................ [  6%]
+........................................................................ [  6%]
+........................................................................ [  7%]
+........................................................................ [  7%]
+........................................................................ [  8%]
+........................................................................ [  8%]
+........................................................................ [  8%]
+........................................................................ [  9%]
+........................................................................ [  9%]
+........................................................................ [  9%]
+........................................................................ [ 10%]
+........................................................................ [ 10%]
+........................................................................ [ 11%]
+........................................................................ [ 11%]
+........................................................................ [ 11%]
+........................................................................ [ 12%]
+........................................................................ [ 12%]
+........................................................................ [ 12%]
+........................................................................ [ 13%]
+........................................................................ [ 13%]
+........................................................................ [ 13%]
+........................................................................ [ 14%]
+........................................................................ [ 14%]
+........................................................................ [ 15%]
+........................................................................ [ 15%]
+..........................s............................................. [ 15%]
+........................................................................ [ 16%]
+........................................................................ [ 16%]
+........................................................................ [ 16%]
+........................................................................ [ 17%]
+........................................................................ [ 17%]
+........................................................................ [ 18%]
+........................................................................ [ 18%]
+........................................................................ [ 18%]
+........................................................................ [ 19%]
+........................................................................ [ 19%]
+........................................................................ [ 19%]
+........................................................................ [ 20%]
+........................................................................ [ 20%]
+........................................................................ [ 20%]
+........................................................................ [ 21%]
+........................................................................ [ 21%]
+........................................................................ [ 22%]
+........................................................................ [ 22%]
+........................................................................ [ 22%]
+........................................................................ [ 23%]
+........................................................................ [ 23%]
+........................................................................ [ 23%]
+........................................................................ [ 24%]
+........................................................................ [ 24%]
+........................................................................ [ 25%]
+........................................................................ [ 25%]
+........................................................................ [ 25%]
+........................................................................ [ 26%]
+........................................................................ [ 26%]
+........................................................................ [ 26%]
+........................................................................ [ 27%]
+........................................................................ [ 27%]
+........................................................................ [ 27%]
+........................................................................ [ 28%]
+........................................................................ [ 28%]
+........................................................................ [ 29%]
+........................................................................ [ 29%]
+........................................................................ [ 29%]
+........................................................................ [ 30%]
+........................................................................ [ 30%]
+........................................................................ [ 30%]
+........................................................................ [ 31%]
+........................................................................ [ 31%]
+........................................................................ [ 31%]
+........................................................................ [ 32%]
+........................................................................ [ 32%]
+........................................................................ [ 33%]
+........................................................................ [ 33%]
+........................................................................ [ 33%]
+........................................................................ [ 34%]
+........................................................................ [ 34%]
+........................................................................ [ 34%]
+........................................................................ [ 35%]
+........................................................................ [ 35%]
+........................................................................ [ 36%]
+........................................................................ [ 36%]
+........................................................................ [ 36%]
+.......F................................................................ [ 37%]
+........................................................................ [ 37%]
+........................................................................ [ 37%]
+..............F......................................................... [ 38%]
+........................................................................ [ 38%]
+........................................................................ [ 38%]
+........................................................................ [ 39%]
+........................................................................ [ 39%]
+........................................................................ [ 40%]
+........................................................................ [ 40%]
+........................................................................ [ 40%]
+........................................................................ [ 41%]
+........................................................................ [ 41%]
+........................................................................ [ 41%]
+........................................................................ [ 42%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 43%]
+........................................................................ [ 43%]
+........................................................................ [ 44%]
+........................................................................ [ 44%]
+........................................................................ [ 44%]
+........................................................................ [ 45%]
+........................................................................ [ 45%]
+........................................................................ [ 45%]
+........................................................................ [ 46%]
+........................................................................ [ 46%]
+........................................................................ [ 47%]
+........................................................................ [ 47%]
+........................................................................ [ 47%]
+........................................................................ [ 48%]
+........................................................................ [ 48%]
+........................................................................ [ 48%]
+........................................................................ [ 49%]
+........................................................................ [ 49%]
+........................................................................ [ 50%]
+........................................................................ [ 50%]
+........................................................................ [ 50%]
+........................................................................ [ 51%]
+........................................................................ [ 51%]
+........................................................................ [ 51%]
+........................................................................ [ 52%]
+........................................................................ [ 52%]
+........................................................................ [ 52%]
+........................................................................ [ 53%]
+........................................................................ [ 53%]
+........................................................................ [ 54%]
+........................................................................ [ 54%]
+........................................................................ [ 54%]
+........................................................................ [ 55%]
+........................................................................ [ 55%]
+........................................................................ [ 55%]
+........................................................................ [ 56%]
+........................................................................ [ 56%]
+........................................................................ [ 56%]
+........................................................................ [ 57%]
+........................................................................ [ 57%]
+........................................................................ [ 58%]
+........................................................................ [ 58%]
+........................................................................ [ 58%]
+......................................F................................. [ 59%]
+....F................................................................... [ 59%]
+........................................................................ [ 59%]
+........................F............................................... [ 60%]
+........................................................................ [ 60%]
+........................................................................ [ 61%]
+........................................................................ [ 61%]
+........................................................................ [ 61%]
+........................................................................ [ 62%]
+........................................................................ [ 62%]
+........................................................................ [ 62%]
+........................................................................ [ 63%]
+........................................................................ [ 63%]
+........................................................................ [ 63%]
+........................................................................ [ 64%]
+........................................................................ [ 64%]
+........................................................................ [ 65%]
+........................................................................ [ 65%]
+........................................................................ [ 65%]
+........................................................................ [ 66%]
+........................................................................ [ 66%]
+........................................................................ [ 66%]
+........................................................................ [ 67%]
+........................................................................ [ 67%]
+........................................................................ [ 68%]
+........................................................................ [ 68%]
+........................................................................ [ 68%]
+........................................................................ [ 69%]
+........................................................................ [ 69%]
+........................................................................ [ 69%]
+........................................................................ [ 70%]
+........................................................................ [ 70%]
+........................................................................ [ 70%]
+........................................................................ [ 71%]
+........................................................................ [ 71%]
+........................................................................ [ 72%]
+........................................................................ [ 72%]
+........................................................................ [ 72%]
+........................................................................ [ 73%]
+........................................................................ [ 73%]
+........................................................................ [ 73%]
+........................................................................ [ 74%]
+........................................................................ [ 74%]
+........................................................................ [ 75%]
+........................................................................ [ 75%]
+........................................................................ [ 75%]
+........................................................................ [ 76%]
+........................................................................ [ 76%]
+........................................................................ [ 76%]
+........................................................................ [ 77%]
+........................................................................ [ 77%]
+........................................................................ [ 77%]
+........................................................................ [ 78%]
+........................................................................ [ 78%]
+........................................................................ [ 79%]
+........................................................................ [ 79%]
+........................................................................ [ 79%]
+........................................................................ [ 80%]
+........................................................................ [ 80%]
+........................................................................ [ 80%]
+........................................................................ [ 81%]
+........................................................................ [ 81%]
+........................................................................ [ 82%]
+........................................................................ [ 82%]
+........................................................................ [ 82%]
+........................................................................ [ 83%]
+........................................................................ [ 83%]
+........................................................................ [ 83%]
+........................................................................ [ 84%]
+........................................................................ [ 84%]
+........................................................................ [ 84%]
+........................................................................ [ 85%]
+........................................F............................... [ 85%]
+........................................................................ [ 86%]
+........................................................................ [ 86%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 87%]
+........................................................................ [ 87%]
+........................................................................ [ 88%]
+........................................................................ [ 88%]
+........................................................................ [ 88%]
+........................................................................ [ 89%]
+........................................................................ [ 89%]
+........................................................................ [ 90%]
+........................................................................ [ 90%]
+........................................................................ [ 90%]
+........................................................................ [ 91%]
+........................................................................ [ 91%]
+........................................................................ [ 91%]
+........................................................................ [ 92%]
+........................................................................ [ 92%]
+........................................................................ [ 93%]
+........................................................................ [ 93%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 94%]
+........................................................................ [ 94%]
+........................................................................ [ 95%]
+........................................................................ [ 95%]
+........................................................................ [ 95%]
+........................................................................ [ 96%]
+........................................................................ [ 96%]
+........................................................................ [ 97%]
+........................................................................ [ 97%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+........................................................................ [ 98%]
+........................................................................ [ 98%]
+........................................................................ [ 99%]
+........................................................................ [ 99%]
+....................................................................     [100%]
+=================================== FAILURES ===================================
+_ test_no_import_breaks_the_direction_matrix_or_a_public_contract_outside_the_allowlist _
+[gw1] darwin -- Python 3.14.6 /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/.venv/bin/python3.14
+
+current = {('kriya.agents.agent', 'kriya.core.completion'): 'non-public PROVIDER module', ('kriya.agents.agent', 'kriya.core.mod...'): 'non-public PROVIDER module', ('kriya.agents.agent', 'kriya.core.role_metrics'): 'non-public PROVIDER module', ...}
+
+    def test_no_import_breaks_the_direction_matrix_or_a_public_contract_outside_the_allowlist(current):
+        unlisted = {pair: why for pair, why in current.items() if pair not in ALLOWLIST}
+>       assert unlisted == {}, (
+            "import through the target module's public contract and in the DEPENDENCY-RULES direction "
+            f"(tests/architecture/module_map.py): {unlisted}")
+E       AssertionError: import through the target module's public contract and in the DEPENDENCY-RULES direction (tests/architecture/module_map.py): {('kriya.workflow.milestones', 'kriya.control.artifacts'): 'non-public STATE module', ('kriya.workflow.stage_apply', 'kriya.control.artifacts'): 'non-public STATE module'}
+E       assert {('kriya.work...STATE module'} == {}
+E         
+E         Left contains 2 more items:
+E         {('kriya.workflow.milestones', 'kriya.control.artifacts'): 'non-public STATE '
+E                                                                    'module',
+E          ('kriya.workflow.stage_apply', 'kriya.control.artifacts'): 'non-public STATE '
+E                                                                     'module'}
+E         Use -v to get more diff
+
+tests/architecture/test_import_direction.py:522: AssertionError
+______________ test_a_removed_allowlist_entry_or_a_new_edge_fails ______________
+[gw1] darwin -- Python 3.14.6 /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/.venv/bin/python3.14
+
+    def test_a_removed_allowlist_entry_or_a_new_edge_fails():
+        pair = next(iter(ALLOWLIST))
+        reduced = {key: value for key, value in ALLOWLIST.items() if key != pair}
+        current = violations(mm.scan(), mm.owner_table())
+>       assert [key for key in current if key not in reduced] == [pair]
+E       AssertionError: assert [('kriya.agen...l.artifacts')] == [('kriya.agen....completion')]
+E         
+E         Left contains 2 more items, first extra item: ('kriya.workflow.milestones', 'kriya.control.artifacts')
+E         Use -v to get more diff
+
+tests/architecture/test_import_direction.py:606: AssertionError
+__ test_every_kernel_patch_target_is_pinned_and_still_reaches_what_it_patched __
+[gw3] darwin -- Python 3.14.6 /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/.venv/bin/python3.14
+
+measured_sites = [PatchSite(file='tests/_chaos_harness.py', line=515, module='kriya.workflow.workflow', target='_run_static_analysis_ga...line=112, module='kriya.workflow.workflow', target='WorkflowEngine.run_generation_workflow', form='patch.object'), ...]
+index = <architecture.patch_sites.LookupIndex object at 0x11e9b3cb0>
+
+    def test_every_kernel_patch_target_is_pinned_and_still_reaches_what_it_patched(measured_sites, index):
+        problems = patch_point_problems(PATCH_POINTS, measured_sites, _resolve, index.lookups)
+>       assert problems == [], "\n".join(problems)
+E       AssertionError: kriya.workflow.workflow.commit_terminal_candidate: 3 patch sites, table says 2: ['tests/test_enforce_verified_no_change.py:435', 'tests/test_gate_f_milestone_artifact_registry.py:187', 'tests/test_prd007_run_lifecycle.py:584']
+E       assert ["kriya.workf...cle.py:584']"] == []
+E         
+E         Left contains one more item: "kriya.workflow.workflow.commit_terminal_candidate: 3 patch sites, table says 2: ['tests/test_enforce_verified_no_change.py:435', 'tests/test_gate_f_milestone_artifact_registry.py:187', 'tests/test_prd007_run_lifecycle.py:584']"
+E         Use -v to get more diff
+
+tests/architecture/test_patch_points.py:418: AssertionError
+__________________ test_inventory_counts_the_design_relies_on __________________
+[gw2] darwin -- Python 3.14.6 /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/.venv/bin/python3.14
+
+    def test_inventory_counts_the_design_relies_on():
+        """Pins the M1.0 inventory (design §5.2, notes §1/§4) so a drift is seen."""
+        appends = {}
+        # E4: the pre-apply static-analysis and semantic-safety gates moved to stage_apply.py (2 record sites, count-neutral);
+        # E5: the Developer loop moved to development_loop.py (9 record sites, count-neutral); E8: the candidate gates moved
+        # to gate_orchestrator.py (count-neutral); E9: the runtime verification moved to runtime_verification.py (count-neutral);
+        # E10: the per-file candidate staging moved to candidate_transaction.py (11 record sites, count-neutral)
+        for rel in ("kriya/workflow/attempt.py", "kriya/workflow/workflow.py", "kriya/workflow/retry_strategy.py",
+                    "kriya/workflow/stage_apply.py", "kriya/workflow/development_loop.py", "kriya/workflow/gate_orchestrator.py",
+                    "kriya/workflow/runtime_verification.py", "kriya/workflow/candidate_transaction.py"):
+            appends[rel] = (ROOT / rel).read_text(encoding="utf-8").count("state.gate_outcomes.append(")
+        # M1.3b converted all 85; the tripwire (test_lr_r1_m1_mirroring.py) keeps it at 0.
+        assert sum(appends.values()) == 0, appends
+        records = sum((ROOT / rel).read_text(encoding="utf-8").count("state.record_gate_outcome(") for rel in appends)
+        # 85 at M1.3b; FS-1A added three (the test-delta verdict and its two failures); GR-R1B removed two (the
+        # model-only goal_spec_compliance and spec_compliance_indeterminate failures, now advisory);
+        # GRADLE-WRAPPER-CONTAINMENT-001 added one (attempt._stop_on_environment_gate_result: the typed
+        # verification_infrastructure_failure for a gate whose tool could not start); ENFORCE-IDENTICAL-WRITE-COMPLETION-001
+        # (second repair cycle) added two typed stops: the direct goal's NO_CHANGE_UNVERIFIED (workflow.py, after the gates)
+        # and the reopened owner's VERIFICATION_RETRY_NO_CHANGE_POSSIBLE refusal (workflow.py no-change settlement);
+        # BACKEND-READINESS-V2 added one (attempt._reject_exception_masking: the typed unsafe_exception_masking stop) and one
+        # (workflow._run_semantic_safety_gate: the same typed stop on the final direct batch); slot 3 added one
+        # (attempt._run_contract_feedback_gate: the typed, retriable deterministic_contract_violation); Demo V2 added one
+        # (attempt._managed_service_blocked_without_approval_subject: the typed MANAGED_SERVICE_APPROVAL_UNSUPPORTED stop) and,
+        # with the direct-plan correctness closure, a net one: two new typed stops (attempt._raise_if_required_runtime_verification_declined,
+        # REQUIRED_RUNTIME_VERIFICATION_DECLINED; attempt.assert_candidate_unchanged_since_source_review, CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW)
+        # and the rest of the movement is the extraction of the executing gates out of run_attempt (_run_executing_candidate_gates,
+        # _run_pom_validation_gate, _approve_and_execute_runtime_verification) - every site still records through state.record_gate_outcome.
+        # D2 rebuild S4.1: one more typed stop (runtime_verification: a managed-service command naming the shared worktree is refused
+        # MANAGED_SERVICE_CONTRACT_INVALID, as a verification_infrastructure_failure, before the service runs).
+>       assert records == 95, records
+E       AssertionError: 96
+E       assert 96 == 95
+
+tests/test_lr_r1_m1_0_inventory.py:175: AssertionError
+_________ test_e_an_attempt_that_made_no_model_call_is_not_applicable __________
+[gw6] darwin -- Python 3.14.6 /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/.venv/bin/python3.14
+
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-4873/popen-gw6/test_e_an_attempt_that_made_no0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x122a5a890>
+
+    def test_e_an_attempt_that_made_no_model_call_is_not_applicable(tmp_path, monkeypatch):
+        """The generation budget admission stops the attempt before any call."""
+        cfg = chaos_config()
+        cfg.autonomy.generation_time_budget_seconds = 2
+        from _chaos_harness import CALC_WITH_SUB
+    
+        observed = direct_run(tmp_path, monkeypatch, _always(CALC_WITH_SUB), FILES, cfg=cfg)
+>       answers = observed.attempt(1)
+                  ^^^^^^^^^^^^^^^^^^^
+
+tests/test_lr_r1_m1_t6_fixes.py:364: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Observed(result={'status': 'failure', 'quality_gates_passed': False, 'files': [], 'failure_category': 'generation_budg..._e_an_attempt_that_made_no0/ws'), run=<kriya.core.attempt_evidence.reader.EvidenceRun object at 0x1245b2810>, extra={})
+number = 1, unit = None
+
+    def attempt(self, number: int, unit: Optional[str] = None) -> Dict[str, Any]:
+        found = [a for a in self.attempts() if a["attempt"] == number and (unit is None or a["unit_id"] == unit)]
+>       assert len(found) == 1, (number, unit, [(a["unit_id"], a["attempt"]) for a in self.attempts()])
+               ^^^^^^^^^^^^^^^
+E       AssertionError: (1, None, [])
+
+tests/_t6_harness.py:40: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  kriya.workflow.workflow:stage_analysis.py:84 This project's config doesn't set paths.skills, so any skill writes this run makes (auto-bootstrapped conventions, skill-gap extraction, staged lesson rules) will land in Kriya's own SHARED install skills directory (/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/skills) instead of a project-local one - every other project using Kriya would inherit them. If that's not intended, stop this run and set paths.skills in this project's kriya.yaml, e.g. "./skills".
+ERROR    kriya.workflow.workflow:workflow.py:2190 GENERATION TIME BUDGET EXHAUSTED: INFERENCE_DEADLINE_EXHAUSTED: the run_generation_budget deadline left 0 ms for this model call
+____________ test_a_smaller_remaining_budget_is_the_request_timeout ____________
+[gw6] darwin -- Python 3.14.6 /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/.venv/bin/python3.14
+
+fake = <test_provider_contract_001a._SlowRuntime object at 0x123d74c20>
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-4873/popen-gw6/test_a_smaller_remaining_budge0')
+
+    @pytest.mark.usefixtures("bound_workspace")
+    def test_a_smaller_remaining_budget_is_the_request_timeout(fake, tmp_path):
+        llm = LLMClient(_config(budget=600, read=600.0))
+        _in_run(tmp_path, lambda: llm.complete_result("s", "u"), already_used=575)
+>       assert 24.0 < fake.requests[0].timeout.read <= 25.0
+E       AssertionError: assert 24.0 < 23.933
+E        +  where 23.933 = Timeout(connect=10.0, read=23.933, write=60.0, pool=10.0).read
+E        +    where Timeout(connect=10.0, read=23.933, write=60.0, pool=10.0) = ChatRequest(model='primary:1', messages=[{'role': 'system', 'content': 's'}, {'role': 'user', 'content': 'u'}], temper...ponse_format=None, stream_callback=None, tools=None, timeout=Timeout(connect=10.0, read=23.933, write=60.0, pool=10.0)).timeout
+
+/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/tests/test_provider_contract_001a.py:113: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+[Usage: 1 input tokens, 3 output tokens | Time: 0.00s | Finish: stop]
+_________ test_a_request_outliving_the_budget_is_a_typed_deadline_stop _________
+[gw6] darwin -- Python 3.14.6 /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/.venv/bin/python3.14
+
+fake = <test_provider_contract_001a._SlowRuntime object at 0x1241e6e90>
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-4873/popen-gw6/test_a_request_outliving_the_b0')
+
+    def test_a_request_outliving_the_budget_is_a_typed_deadline_stop(fake, tmp_path):
+        fake.delay = 30.0  # far beyond the 2.5 s left; the fake ignores its read timeout
+        llm = LLMClient(_config(budget=600))
+        started = time.monotonic()
+        with pytest.raises(InferenceDeadlineError) as stopped:
+            _in_run(tmp_path, lambda: llm.complete_result("s", "u"), already_used=597.5)  # 2.5 s left: a loaded 8-worker run can spend 0.5 s before dispatch (the full suite did: EXHAUSTED, never reaching the in-flight EXCEEDED path)
+>       assert time.monotonic() - started < 5.0
+E       assert (795453.500850666 - 795446.508250541) < 5.0
+E        +  where 795453.500850666 = <built-in function monotonic>()
+E        +    where <built-in function monotonic> = time.monotonic
+
+/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/tests/test_provider_contract_001a.py:151: AssertionError
+_______ test_the_run_deadline_cuts_a_slow_native_request_as_one_request ________
+[gw3] darwin -- Python 3.14.6 /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/.venv/bin/python3.14
+
+native_server = <test_provider_contract_native._NativeServer object at 0x12339e210>
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-4873/popen-gw3/test_the_run_deadline_cuts_a_s0')
+
+    def test_the_run_deadline_cuts_a_slow_native_request_as_one_request(native_server, tmp_path):
+        from kriya.control.run_coordinator import begin_mutating_run, current_run_context
+        from kriya.core.llm import INFERENCE_DEADLINE_EXCEEDED, InferenceDeadlineError
+    
+        native_server.delay = 3.0
+        config = _config(native_server.url)
+        config.autonomy.generation_time_budget_seconds = 600
+        started = time.monotonic()
+        with begin_mutating_run(str(tmp_path)):
+            current_run_context()._lease.generation_clock = time.monotonic() - 599.5  # pylint: disable=protected-access
+            with pytest.raises(InferenceDeadlineError) as stopped:
+                asyncio.run(_call(config))
+        assert stopped.value.reason_code == INFERENCE_DEADLINE_EXCEEDED
+>       assert time.monotonic() - started < 2.5 and len(native_server.requests) == 1
+E       assert ((795465.800584791 - 795460.397059375) < 2.5)
+E        +  where 795465.800584791 = <built-in function monotonic>()
+E        +    where <built-in function monotonic> = time.monotonic
+
+tests/test_provider_contract_native.py:450: AssertionError
+___________ test_tools_execute_works_despite_unrelated_broken_plugin ___________
+[gw2] darwin -- Python 3.14.6 /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/.venv/bin/python3.14
+
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-4873/popen-gw2/test_tools_execute_works_despi0')
+
+    def test_tools_execute_works_despite_unrelated_broken_plugin(tmp_path):
+        """Same bug, execute path: a specific, working, explicitly-named tool must
+        be executable even when an unrelated plugin fails to initialize."""
+        plugin_dir = tmp_path / "plugins"
+        plugin_dir.mkdir()
+        _write_plugin(plugin_dir, "badplugin2", _bad_plugin_source("BadPlugin2", "bad_plugin_2"))
+        _write_plugin(plugin_dir, "goodplugin2", _good_tool_plugin_source("GoodPlugin2", "good_plugin_2", "good_tool_2"))
+        sys.modules.pop("badplugin2", None)
+        sys.modules.pop("goodplugin2", None)
+    
+        cfg = _cfg(plugin_dir)
+        runner = CliRunner()
+        with patch("kriya.cli.load_config", return_value=cfg):
+            res = runner.invoke(main, ["tools", "execute", "good_tool_2", "{}"])
+    
+>       assert res.exit_code == 0
+E       assert 1 == 0
+E        +  where 1 = <Result SystemExit(1)>.exit_code
+
+tests/test_tools_command.py:110: AssertionError
+------------------------------ Captured log call -------------------------------
+ERROR    kriya.cli:cli.py:118 Plugin 'bad_plugin_2' failed to initialize, its tools will be unavailable: missing required dependency 'foo-sdk'
+=============================== warnings summary ===============================
+tests/test_prd007_run_lifecycle.py::test_crash_between_intent_and_result_is_recognized_and_blocks_enforce
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=32029) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/test_run_ownership.py::test_relative_path_alias_contends_with_absolute_path
+tests/test_run_ownership.py::test_contention_fails_promptly_not_blocking
+tests/test_run_ownership.py::test_two_git_worktrees_do_not_contend
+tests/test_run_ownership.py::test_milestone_execution_holds_lock_across_the_whole_command
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=32027) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/test_run_ownership.py::test_symlink_alias_contends_with_real_path
+tests/test_run_ownership.py::test_pid_reuse_is_never_consulted_for_the_ownership_decision
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=32026) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/test_run_ownership.py::test_real_two_process_contention_second_process_rejected
+tests/test_run_ownership.py::test_owner_sigkill_releases_lock_for_next_acquirer
+tests/test_run_ownership.py::test_resume_flag_contends_the_same_as_a_fresh_run
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=32023) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/test_run_ownership.py::test_generate_vs_generate_real_cross_process_contention
+tests/test_run_ownership.py::test_losing_process_makes_zero_source_mutation
+tests/test_run_record.py::test_process_crash_preserves_last_durable_lifecycle_state
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=32025) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/test_run_ownership.py::test_proposal_execute_vs_generate_real_cross_process_contention
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=32022) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/test_worktree_pollution_001.py::test_no_exec_prefix_is_a_real_executable_that_ignores_its_arguments
+  <frozen os>:898: DeprecationWarning: This process (pid=32027) is multi-threaded, use of fork() may lead to deadlocks in the child.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_d2_m2_fd_inheritance.py:95: MANDATORY LINUX-HOST MEASUREMENT (owner 2026-10-23): /proc/<pid>/fd access to the review socket is INFERRED, not measured, on this platform; run this test on a Linux host before final production qualification
+FAILED tests/architecture/test_import_direction.py::test_no_import_breaks_the_direction_matrix_or_a_public_contract_outside_the_allowlist
+FAILED tests/architecture/test_import_direction.py::test_a_removed_allowlist_entry_or_a_new_edge_fails
+FAILED tests/architecture/test_patch_points.py::test_every_kernel_patch_target_is_pinned_and_still_reaches_what_it_patched
+FAILED tests/test_lr_r1_m1_0_inventory.py::test_inventory_counts_the_design_relies_on
+FAILED tests/test_lr_r1_m1_t6_fixes.py::test_e_an_attempt_that_made_no_model_call_is_not_applicable
+FAILED tests/test_provider_contract_001a.py::test_a_smaller_remaining_budget_is_the_request_timeout
+FAILED tests/test_provider_contract_001a.py::test_a_request_outliving_the_budget_is_a_typed_deadline_stop
+FAILED tests/test_provider_contract_native.py::test_the_run_deadline_cuts_a_slow_native_request_as_one_request
+FAILED tests/test_tools_command.py::test_tools_execute_works_despite_unrelated_broken_plugin
+9 failed, 19570 passed, 1 skipped, 15 warnings in 9549.59s (2:39:09)
+exit=1

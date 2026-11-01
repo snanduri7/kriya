@@ -1,0 +1,4 @@
+2b3f1d9fe21e898a962af7ed4a0547279dfc0767
+Python 3.14.6
+pytest 9.1.1
+cmd: ulimit -n 256; .venv/bin/pytest -q -n 8 --dist loadgroup --junitxml=full.xml
