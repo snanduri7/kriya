@@ -132,7 +132,15 @@ from kriya.platform.filesystem_semantics import PathRelation, path_relation
 # Ollama 0.34.4 /v1: every over-window prompt is answered from window/2+2
 # tokens; the native API with truncate:false refuses). Every /7 record is
 # STALE; /7 records stay as historical evidence.
-QUALIFICATION_POLICY_VERSION = "kriya-qualification/8"
+# /9 (W4, ATTRIBUTION-SELF-DIAGNOSIS-MENTION-001 closure): the structured
+# Developer protocol gained the explicit REDIRECT line (kriya_sentinel_v2), and
+# no case measured whether an exact runtime can emit it. ``structured_redirect``
+# is INFORMATIONAL: it is in no role's requirement set, so a model that fails
+# it stays as qualified as before and Kriya's safety behaviour (the
+# deterministic locator, INVALID_EDIT_PROTOCOL for a malformed explicit line) is
+# unchanged; the record states whether the capability was DEMONSTRATED. Every
+# /8 record is STALE; /8 records stay as historical evidence.
+QUALIFICATION_POLICY_VERSION = "kriya-qualification/9"
 QUALIFICATION_SCHEMA_VERSION = 2
 QUALIFICATION_HOME_ENV = "KRIYA_QUALIFICATION_HOME"
 
@@ -209,6 +217,7 @@ CAPABILITIES: Tuple[str, ...] = (
     "reasoning_behavior",
     "full_file_raw_content",
     "anchored_edit_protocol",
+    "structured_redirect",
     "malformed_output_recovery",
     "timeout_semantics",
     "cancellation_semantics",
@@ -780,16 +789,19 @@ def _note_policy(ctx: Dict[str, Any], capability: str, **values: Any) -> None:
     ctx.setdefault("_policy_used", {}).setdefault(capability, {}).update(values)
 
 
-def _case_budget(ctx: Dict[str, Any], capability: str) -> int:
+def _case_budget(ctx: Dict[str, Any], capability: str, *, budget_of: Optional[str] = None) -> int:
     """The output budget ``capability`` is sent with: its configured
     ``max_tokens``, or ``reasoning_max_tokens`` when set and the identity
     qualified sends ``reasoning: true`` (ctx["reasoning"]). Recorded, with
-    its configuration path, in the case evidence."""
-    entry = getattr(_policy(ctx).cases, capability)
+    its configuration path, in the case evidence. ``budget_of`` names another
+    case whose configured budget this one shares (a case with no knob of its
+    own: adding a config field would change every configuration's fingerprint)."""
+    source = budget_of or capability
+    entry = getattr(_policy(ctx).cases, source)
     reasoning = bool(ctx.get("reasoning")) and entry.reasoning_max_tokens is not None
     name = "reasoning_max_tokens" if reasoning else "max_tokens"
     tokens = entry.reasoning_max_tokens if reasoning else entry.max_tokens
-    _note_policy(ctx, capability, max_tokens=tokens, source=f"model_qualification.cases.{capability}.{name}")
+    _note_policy(ctx, capability, max_tokens=tokens, source=f"model_qualification.cases.{source}.{name}")
     return tokens
 
 
@@ -1108,6 +1120,70 @@ async def case_anchored_edit_protocol(llm, model, ctx):
                        "response_protocol": protocol, "protocol_reason_code": parsed.reason_code,
                        "convention_kept": convention_kept,
                        "applied_parses_and_changed": changed, **_completion_evidence(r)})
+
+
+_REDIRECT_TARGET = "src/report.py"
+_REDIRECT_OTHER = "src/pricing.py"
+# Probe A: the failing traceback locates the defect in a file that is NOT the one being repaired and is not shown.
+_REDIRECT_ELSEWHERE = (
+    f"=== {_REDIRECT_TARGET} ===\ndef render(total):\n    return \"Total: %.2f\" % total\n=== end of {_REDIRECT_TARGET} ===\n"
+    "=== failing test output ===\n"
+    "tests/test_pricing.py::test_discount FAILED\n"
+    "E   AssertionError: assert 90.0 == 80.0\n"
+    "E    +  where 90.0 = apply_discount(100.0, 0.2)\n"
+    f"{_REDIRECT_OTHER}:3: in apply_discount\n"
+    "    return price - rate\n"
+    "=== end of failing test output ===\n"
+    f"You are repairing '{_REDIRECT_TARGET}'.\n")
+# Probe B: the defect IS in the file being repaired; a redirect here would be wrong.
+_REDIRECT_HERE = (
+    f"=== {_REDIRECT_TARGET} ===\ndef render(total):\n    return \"Total: %d\" % total\n=== end of {_REDIRECT_TARGET} ===\n"
+    "=== failing test output ===\n"
+    "tests/test_report.py::test_render FAILED\n"
+    "E   AssertionError: assert 'Total: 12' == 'Total: 12.50'\n"
+    f"{_REDIRECT_TARGET}:2: in render\n"
+    "    return \"Total: %d\" % total\n"
+    "=== end of failing test output ===\n"
+    f"You are repairing '{_REDIRECT_TARGET}'.\n")
+
+
+@_case("structured_redirect")
+async def case_structured_redirect(llm, model, ctx):
+    """ONE informational capability: the explicit REDIRECT line of the structured
+    protocol (kriya_sentinel_v2). Two probes through the real contract and the
+    real parser: (A) the failing output locates the defect in another file ->
+    the response must carry exactly one valid REDIRECT line naming that file;
+    (B) the defect is in the file being repaired -> the response must carry no
+    REDIRECT. A filename in the analysis is never a redirect (the parser reads
+    the line only). The legacy protocol has no redirect marker, so the case is
+    UNAVAILABLE there, never PASS. Informational: no role requires it, so a FAIL
+    records 'not demonstrated' and changes no routing or safety behaviour."""
+    from kriya.agents.response_protocol import STRUCTURED, parse_structured, structured_contract
+
+    if ctx.get("response_protocol") != STRUCTURED:
+        return CaseResult("", UNAVAILABLE, {"reason": "the configured Developer response protocol has no REDIRECT marker; not measured",
+                                            "response_protocol": ctx.get("response_protocol")})
+    system = ("You are a senior software engineer.\n"
+              + structured_contract(_REDIRECT_TARGET, analysis_required=True, allow_edit=True, allow_file=False,
+                                    allow_no_change=True, allow_redirect=True))
+    budget = _case_budget(ctx, "structured_redirect", budget_of="anchored_edit_protocol")     # same family: analysis + one short structured block
+    probes: Dict[str, Any] = {}
+    for name, task in (("elsewhere", _REDIRECT_ELSEWHERE), ("here", _REDIRECT_HERE)):
+        r = await llm.complete_result(system, task + "Answer using the RESPONSE PROTOCOL.", model_override=model,
+                                      max_tokens_override=budget)
+        parsed = parse_structured(r.content or "", _REDIRECT_TARGET, file_allowed=False)
+        probes[name] = {"status": r.status.value, "protocol_valid": parsed.kind != "invalid",
+                        "protocol_reason_code": parsed.reason_code, "outcome_kind": parsed.kind,
+                        "redirect_to": parsed.redirect.to_file if parsed.redirect else None,
+                        "redirect_from": parsed.redirect.from_file if parsed.redirect else None,
+                        "completion": _completion_evidence(r)}
+    elsewhere, here = probes["elsewhere"], probes["here"]
+    redirected = (elsewhere["status"] == "OK" and elsewhere["protocol_valid"]
+                  and elsewhere["redirect_to"] == _REDIRECT_OTHER and elsewhere["redirect_from"] == _REDIRECT_TARGET)
+    restrained = here["status"] == "OK" and here["protocol_valid"] and here["redirect_to"] is None
+    return CaseResult("", PASS if redirected and restrained else FAIL,
+                      {"redirects_when_the_defect_is_elsewhere": redirected, "no_redirect_when_the_defect_is_here": restrained,
+                       "probes": probes, "response_protocol": STRUCTURED})
 
 
 @_case("malformed_output_recovery")
@@ -1447,7 +1523,7 @@ ALL_CASES: Tuple[CaseFn, ...] = (
     case_plain_completion, case_finish_reason_stop, case_structured_json, case_multiline_json,
     case_native_tool_calls, case_multiple_tool_calls, case_tool_argument_integrity, case_streaming_assembly,
     case_output_truncation, case_reasoning_behavior, case_full_file_raw_content, case_anchored_edit_protocol,
-    case_malformed_output_recovery, case_timeout_semantics, case_cancellation_semantics,
+    case_structured_redirect, case_malformed_output_recovery, case_timeout_semantics, case_cancellation_semantics,
     case_endpoint_error_semantics, case_endpoint_restart_semantics, case_tokenizer_measurement,
     case_context_capacity, case_over_context_refusal,
 )
