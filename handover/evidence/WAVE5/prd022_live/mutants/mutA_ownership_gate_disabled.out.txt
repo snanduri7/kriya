@@ -1,0 +1,42 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ test_prd022_a_real_redirect_is_followed_by_the_owner_scoped_corrective_retry _
+
+cfg = AppConfig(llm=LLMConfig(provider='openai', model='qwen3-coder:30b-kriya-e52213655394', api_key='local-key', base_url='...isibility='off', retention=AttemptEvidenceRetentionConfig(keep_runs=200, max_bytes=5368709120))), runtime_profile=None)
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-4840/test_prd022_a_real_redirect_is0')
+
+    def test_prd022_a_real_redirect_is_followed_by_the_owner_scoped_corrective_retry(cfg, tmp_path):
+        ws = tmp_path / "ws"
+        _seed_repo(str(ws))
+        evidence = {"retry_mode": RETRY_MODE, "goal": GOAL,
+                    "scripted_inputs": ["planner", "architect", "developer_call_1"],
+                    "live_inputs": ["developer_call_2+", "reviewer", "all gates", "ownership gate", "restore", "commit"]
+                    if RETRY_MODE == "live" else ["all gates", "ownership gate", "restore", "commit (retry also scripted)"]}
+        try:
+            result, calls = _run_chain(cfg, ws)
+            events = _trace_events(cfg)
+            restored = [e for e in events if e["kind"] == "ownership.redirect_restored"]
+            after = {path: text for path, text in _workspace_files(ws).items() if not path.startswith(".kriya/")}
+            evidence.update({
+                "developer_call_count": len(calls), "retry_request": {
+                    key: calls[1].get(key) for key in ("known_target_files", "implicated_files", "operation_by_file",
+                                                       "prior_error_context")} if len(calls) > 1 else None,
+                "retry_files_with_current_content": sorted((calls[1].get("files_with_current_content") or {}))
+                if len(calls) > 1 else None,
+                "redirect_restored_events": restored, "event_kinds": sorted({e["kind"] for e in events}),
+                "quality_gates_passed": result.get("quality_gates_passed"), "failure_category": result.get("failure_category"),
+                "files": result.get("files"), "workspace_after": sorted(after)})
+    
+            # 1. A REAL redirect happened (the first Developer answer was rejected by the production ownership gate).
+>           assert len(calls) >= 2, "no corrective retry request was made: the redirect did not fire (fixture/trigger failure)"
+E           AssertionError: no corrective retry request was made: the redirect did not fire (fixture/trigger failure)
+E           assert 1 >= 2
+E            +  where 1 = len([{'task_description': 'Goal: Apply a 10% discount to price() for quantities over 10\nPlan: Step 1: implement the chang...on/path detail - do not assume it matches the code above) ===\nsrc/discount_pricing.py', 'stream_callback': None, ...}])
+
+tests/test_live_prd022_redirect_chain.py:232: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+[Usage: 1064 input tokens, 159 output tokens | Time: 2.43s | Finish: stop]
+=========================== short test summary info ============================
+FAILED tests/test_live_prd022_redirect_chain.py::test_prd022_a_real_redirect_is_followed_by_the_owner_scoped_corrective_retry
+1 failed in 37.47s

@@ -1,0 +1,113 @@
+{
+  "developer_call_count": 3,
+  "event_kinds": [
+    "attempt.failed",
+    "attempt.started",
+    "candidate_gates.passed",
+    "context.edit_capability",
+    "context.known_target_package",
+    "context.retry_target_source",
+    "developer.prompt_composition",
+    "egress.authority",
+    "evidence.attempt_store",
+    "failure.recorded",
+    "generation.completed",
+    "model.role_independence",
+    "model.role_metrics",
+    "model.runtime",
+    "model.transition",
+    "ownership.redirect_restored",
+    "requirement.derived",
+    "requirement.lineage",
+    "requirement.verdicts",
+    "retry.progress_decision",
+    "retry.progress_vector",
+    "retry.sampling_resample",
+    "spec_compliance.model_advisory",
+    "static_analysis.result",
+    "validation.invalidated",
+    "validation_baseline.policy",
+    "verification_contract.compiled",
+    "verification_contract.sealed"
+  ],
+  "failure_category": "requirements_unresolved",
+  "files": [
+    "src/pricing.py"
+  ],
+  "goal": "Apply a 10% discount to price() for quantities over 10",
+  "live_inputs": [
+    "developer_call_2+",
+    "reviewer",
+    "all gates",
+    "ownership gate",
+    "restore",
+    "commit"
+  ],
+  "quality_gates_passed": false,
+  "recorded_failure_types": [
+    [
+      "brownfield_ownership_redirect",
+      "ownership_gate"
+    ],
+    [
+      "operation_contract",
+      "quality_gate"
+    ],
+    [
+      "requirements_unresolved",
+      "orchestrator"
+    ]
+  ],
+  "redirect_restored_events": [
+    {
+      "attempt": 3,
+      "authority": "auxiliary",
+      "created_at": 1793550138.955086,
+      "details": {
+        "owners": [
+          "src/pricing.py"
+        ],
+        "removed_candidates": [
+          "src/discount_pricing.py"
+        ],
+        "restored_tests": [
+          "tests/test_pricing.py"
+        ]
+      },
+      "failure_type": null,
+      "kind": "ownership.redirect_restored",
+      "message": "restored redirected tests ['tests/test_pricing.py']; removed abandoned parallel files ['src/discount_pricing.py']",
+      "operation": null,
+      "source": "attempt.staged_writes"
+    }
+  ],
+  "retry_files_with_current_content": [
+    "src/pricing.py"
+  ],
+  "retry_mode": "live",
+  "retry_request": {
+    "implicated_files": [
+      "src/pricing.py"
+    ],
+    "known_target_files": [
+      "src/pricing.py"
+    ],
+    "operation_by_file": {
+      "src/pricing.py": "repair_with_patch"
+    },
+    "prior_error_context": "owner=src/pricing.py, candidate=src/discount_pricing.py, test=tests/test_pricing.py"
+  },
+  "scripted_inputs": [
+    "planner",
+    "architect",
+    "developer_call_1"
+  ],
+  "status": "LIVE_EXERCISED",
+  "terminal_branch": "b_fail_closed",
+  "workspace_after": [
+    "src/__init__.py",
+    "src/pricing.py",
+    "src/shipping.py",
+    "tests/test_pricing.py"
+  ]
+}

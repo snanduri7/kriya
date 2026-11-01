@@ -1,0 +1,22 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2
+configfile: pyproject.toml
+plugins: xdist-3.8.0, asyncio-1.4.0, anyio-4.14.2, testmon-2.2.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 1 item
+
+tests/test_live_prd022_redirect_chain.py 
+[Usage: 1064 input tokens, 156 output tokens | Time: 2.17s | Finish: stop]
+
+[Usage: 1446 input tokens, 298 output tokens | Time: 5.88s | Finish: stop]
+
+[Usage: 1438 input tokens, 167 output tokens | Time: 2.64s | Finish: stop]
+
+[Usage: 1019 input tokens, 177 output tokens | Time: 2.64s | Finish: stop]
+
+[Usage: 1916 input tokens, 300 output tokens | Time: 6.54s | Finish: stop]
+.
+
+- generated xml file: /Users/sriramnanduri/kriya-gate-e-2026-11-01/evidence/w5_prd022/live/junit.xml -
+============================== 1 passed in 55.88s ==============================

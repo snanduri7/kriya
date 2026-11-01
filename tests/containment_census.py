@@ -267,6 +267,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_live_prd013_016_model_runtime.py': ('N', 'M'),
  'tests/test_live_prd017_019_model_roles.py': ('N', 'M'),
  'tests/test_live_prd020_024_batch5.py': ('N', 'M'),
+ 'tests/test_live_prd022_redirect_chain.py': ('N', 'M'),
  'tests/test_live_prd025_029_batch6.py': ('N', 'M'),
  'tests/test_live_prd032_chaos.py': ('N', 'M'),
  'tests/test_live_prd033_metrics.py': ('N', 'M'),

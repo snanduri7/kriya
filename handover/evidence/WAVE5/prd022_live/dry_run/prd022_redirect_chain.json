@@ -1,0 +1,104 @@
+{
+  "developer_call_count": 2,
+  "event_kinds": [
+    "attempt.failed",
+    "attempt.passed",
+    "attempt.started",
+    "candidate_gates.passed",
+    "context.edit_capability",
+    "context.known_target_package",
+    "context.retry_target_source",
+    "developer.prompt_composition",
+    "egress.authority",
+    "evidence.attempt_store",
+    "failure.recorded",
+    "generation.completed",
+    "model.role_independence",
+    "model.role_metrics",
+    "model.runtime",
+    "model.transition",
+    "operation.fallback",
+    "ownership.redirect_restored",
+    "requirement.derived",
+    "requirement.lineage",
+    "requirement.verdicts",
+    "retry.progress_decision",
+    "retry.progress_vector",
+    "static_analysis.result",
+    "terminal_regression.passed",
+    "validation.invalidated",
+    "validation_baseline.policy",
+    "verification_contract.compiled",
+    "verification_contract.sealed"
+  ],
+  "failure_category": null,
+  "files": [
+    "src/pricing.py"
+  ],
+  "goal": "Apply a 10% discount to price() for quantities over 10",
+  "live_inputs": [
+    "all gates",
+    "ownership gate",
+    "restore",
+    "commit (retry also scripted)"
+  ],
+  "quality_gates_passed": true,
+  "recorded_failure_types": [
+    [
+      "brownfield_ownership_redirect",
+      "ownership_gate"
+    ]
+  ],
+  "redirect_restored_events": [
+    {
+      "attempt": 2,
+      "authority": "auxiliary",
+      "created_at": 1793549789.360767,
+      "details": {
+        "owners": [
+          "src/pricing.py"
+        ],
+        "removed_candidates": [
+          "src/discount_pricing.py"
+        ],
+        "restored_tests": [
+          "tests/test_pricing.py"
+        ]
+      },
+      "failure_type": null,
+      "kind": "ownership.redirect_restored",
+      "message": "restored redirected tests ['tests/test_pricing.py']; removed abandoned parallel files ['src/discount_pricing.py']",
+      "operation": null,
+      "source": "attempt.staged_writes"
+    }
+  ],
+  "retry_files_with_current_content": [
+    "src/pricing.py"
+  ],
+  "retry_mode": "scripted",
+  "retry_request": {
+    "implicated_files": [
+      "src/pricing.py"
+    ],
+    "known_target_files": [
+      "src/pricing.py"
+    ],
+    "operation_by_file": {
+      "src/pricing.py": "repair_with_patch"
+    },
+    "prior_error_context": "owner=src/pricing.py, candidate=src/discount_pricing.py, test=tests/test_pricing.py"
+  },
+  "scripted_inputs": [
+    "planner",
+    "architect",
+    "developer_call_1"
+  ],
+  "status": "LIVE_EXERCISED",
+  "terminal_branch": "a_success",
+  "workspace_after": [
+    "src/__init__.py",
+    "src/pricing.py",
+    "src/shipping.py",
+    "tests/test_pricing.py"
+  ]
+}

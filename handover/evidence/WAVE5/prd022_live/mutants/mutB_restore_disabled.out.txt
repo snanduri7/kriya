@@ -1,0 +1,400 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ test_prd022_a_real_redirect_is_followed_by_the_owner_scoped_corrective_retry _
+
+cfg = AppConfig(llm=LLMConfig(provider='openai', model='qwen3-coder:30b-kriya-e52213655394', api_key='local-key', base_url='...isibility='off', retention=AttemptEvidenceRetentionConfig(keep_runs=200, max_bytes=5368709120))), runtime_profile=None)
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-4841/test_prd022_a_real_redirect_is0')
+
+    def test_prd022_a_real_redirect_is_followed_by_the_owner_scoped_corrective_retry(cfg, tmp_path):
+        ws = tmp_path / "ws"
+        _seed_repo(str(ws))
+        evidence = {"retry_mode": RETRY_MODE, "goal": GOAL,
+                    "scripted_inputs": ["planner", "architect", "developer_call_1"],
+                    "live_inputs": ["developer_call_2+", "reviewer", "all gates", "ownership gate", "restore", "commit"]
+                    if RETRY_MODE == "live" else ["all gates", "ownership gate", "restore", "commit (retry also scripted)"]}
+        try:
+            result, calls = _run_chain(cfg, ws)
+            events = _trace_events(cfg)
+            restored = [e for e in events if e["kind"] == "ownership.redirect_restored"]
+            after = {path: text for path, text in _workspace_files(ws).items() if not path.startswith(".kriya/")}
+            evidence.update({
+                "developer_call_count": len(calls), "retry_request": {
+                    key: calls[1].get(key) for key in ("known_target_files", "implicated_files", "operation_by_file",
+                                                       "prior_error_context")} if len(calls) > 1 else None,
+                "retry_files_with_current_content": sorted((calls[1].get("files_with_current_content") or {}))
+                if len(calls) > 1 else None,
+                "redirect_restored_events": restored, "event_kinds": sorted({e["kind"] for e in events}),
+                "quality_gates_passed": result.get("quality_gates_passed"), "failure_category": result.get("failure_category"),
+                "files": result.get("files"), "workspace_after": sorted(after)})
+    
+            # 1. A REAL redirect happened (the first Developer answer was rejected by the production ownership gate).
+            assert len(calls) >= 2, "no corrective retry request was made: the redirect did not fire (fixture/trigger failure)"
+            assert calls[1].get("prior_error_context") == (
+                f"owner=src/pricing.py, candidate={PARALLEL_FILE}, test=tests/test_pricing.py"), calls[1].get("prior_error_context")
+            recorded = [e for e in events if e["kind"] == "failure.recorded"]
+            evidence["recorded_failure_types"] = [(e.get("failure_type"), e.get("source")) for e in recorded]
+            assert any(e.get("failure_type") == "brownfield_ownership_redirect" for e in recorded), recorded
+    
+            # 2. The immediately following request: the exact grounded owner, narrow authority, nothing unrelated.
+            retry = calls[1]
+            assert retry["known_target_files"] == ["src/pricing.py"]
+            assert retry["implicated_files"] == ["src/pricing.py"]
+            assert {path: op.value for path, op in retry["operation_by_file"].items()} == {"src/pricing.py": "repair_with_patch"}
+            assert "src/pricing.py" in retry["files_with_current_content"]
+            blob = json.dumps(retry, default=str)
+            assert json.dumps(OWNER)[1:-1] in blob  # the exact current owner source reached the request
+            assert "def ship" not in blob and "src/shipping.py" not in blob  # no unrelated full-file authority or content
+    
+            # 3. Persisted evidence records the redirect -> recovery chain.
+            assert restored, "no ownership.redirect_restored event was persisted"
+            details = restored[0]["details"]
+>           assert details["restored_tests"] == ["tests/test_pricing.py"]
+E           AssertionError: assert [] == ['tests/test_pricing.py']
+E             
+E             Right contains one more item: 'tests/test_pricing.py'
+E             Use -v to get more diff
+
+tests/test_live_prd022_redirect_chain.py:252: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+[Usage: 1064 input tokens, 155 output tokens | Time: 2.17s | Finish: stop]
+------------------------------ Captured log call -------------------------------
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 1: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 0/4 + targeted 0/3: BROWNFIELD OWNERSHIP REJECTED: existing behavioral ownership cannot be transferred to a newly created parallel implementation by redirecting established tests. Modify the existing owner and retain its API; update tests only to extend expectations or coverage.
+WARNING  kriya.workflow.attempt:gate_orchestrator.py:797 Quality Gates: Targeted test selection collected zero tests for tests/test_pricing.py; retrying the full suite before attributing a code failure.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 2: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 0/3: TEST FAILURE:
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.2.0, pluggy-1.7.0
+rootdir: /kriya/workspace
+collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+____________________ ERROR collecting tests/test_pricing.py ____________________
+ImportError while importing test module '/kriya/workspace/tests/test_pricing.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_pricing.py:1: in <module>
+    from src.discount_pricing import discounted_price
+E   ModuleNotFoundError: No module named 'src.discount_pricing'
+=========================== short test summary info ============================
+ERROR tests/test_pricing.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.07s ===============================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 2: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 0/3: TEST FAILURE:
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.2.0, pluggy-1.7.0
+rootdir: /kriya/workspace
+collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+____________________ ERROR collecting tests/test_pricing.py ____________________
+ImportError while importing test module '/kriya/workspace/tests/test_pricing.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_pricing.py:1: in <module>
+    from src.discount_pricing import discounted_price
+E   ModuleNotFoundError: No module named 'src.discount_pricing'
+=========================== short test summary info ============================
+ERROR tests/test_pricing.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.07s ===============================
+
+
+WARNING  kriya.workflow.attempt:gate_orchestrator.py:797 Quality Gates: Targeted test selection collected zero tests for tests/test_pricing.py; retrying the full suite before attributing a code failure.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 3: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 0/3: TEST FAILURE:
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.2.0, pluggy-1.7.0
+rootdir: /kriya/workspace
+collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+____________________ ERROR collecting tests/test_pricing.py ____________________
+ImportError while importing test module '/kriya/workspace/tests/test_pricing.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_pricing.py:1: in <module>
+    from src.discount_pricing import discounted_price
+E   ModuleNotFoundError: No module named 'src.discount_pricing'
+=========================== short test summary info ============================
+ERROR tests/test_pricing.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.07s ===============================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 3: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 0/3: TEST FAILURE:
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.2.0, pluggy-1.7.0
+rootdir: /kriya/workspace
+collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+____________________ ERROR collecting tests/test_pricing.py ____________________
+ImportError while importing test module '/kriya/workspace/tests/test_pricing.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_pricing.py:1: in <module>
+    from src.discount_pricing import discounted_price
+E   ModuleNotFoundError: No module named 'src.discount_pricing'
+=========================== short test summary info ============================
+ERROR tests/test_pricing.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.07s ===============================
+
+
+WARNING  kriya.workflow.attempt:gate_orchestrator.py:797 Quality Gates: Targeted test selection collected zero tests for tests/test_pricing.py; retrying the full suite before attributing a code failure.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 4: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 1/3: TEST FAILURE:
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.2.0, pluggy-1.7.0
+rootdir: /kriya/workspace
+collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+____________________ ERROR collecting tests/test_pricing.py ____________________
+ImportError while importing test module '/kriya/workspace/tests/test_pricing.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_pricing.py:1: in <module>
+    from src.discount_pricing import discounted_price
+E   ModuleNotFoundError: No module named 'src.discount_pricing'
+=========================== short test summary info ============================
+ERROR tests/test_pricing.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.06s ===============================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 4: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 1/3: TEST FAILURE:
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.2.0, pluggy-1.7.0
+rootdir: /kriya/workspace
+collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+____________________ ERROR collecting tests/test_pricing.py ____________________
+ImportError while importing test module '/kriya/workspace/tests/test_pricing.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_pricing.py:1: in <module>
+    from src.discount_pricing import discounted_price
+E   ModuleNotFoundError: No module named 'src.discount_pricing'
+=========================== short test summary info ============================
+ERROR tests/test_pricing.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.06s ===============================
+
+
+WARNING  kriya.workflow.attempt:gate_orchestrator.py:797 Quality Gates: Targeted test selection collected zero tests for tests/test_pricing.py; retrying the full suite before attributing a code failure.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 5: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 1/4 + targeted 4/3: TEST FAILURE:
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.2.0, pluggy-1.7.0
+rootdir: /kriya/workspace
+collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+____________________ ERROR collecting tests/test_pricing.py ____________________
+ImportError while importing test module '/kriya/workspace/tests/test_pricing.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_pricing.py:1: in <module>
+    from src.discount_pricing import discounted_price
+E   ModuleNotFoundError: No module named 'src.discount_pricing'
+=========================== short test summary info ============================
+ERROR tests/test_pricing.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.07s ===============================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 5: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 1/4 + targeted 4/3: TEST FAILURE:
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.2.0, pluggy-1.7.0
+rootdir: /kriya/workspace
+collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+____________________ ERROR collecting tests/test_pricing.py ____________________
+ImportError while importing test module '/kriya/workspace/tests/test_pricing.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_pricing.py:1: in <module>
+    from src.discount_pricing import discounted_price
+E   ModuleNotFoundError: No module named 'src.discount_pricing'
+=========================== short test summary info ============================
+ERROR tests/test_pricing.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.07s ===============================
+
+
+WARNING  kriya.workflow.attempt:gate_orchestrator.py:797 Quality Gates: Targeted test selection collected zero tests for tests/test_pricing.py; retrying the full suite before attributing a code failure.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 6: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 2/4 + targeted 4/3: TEST FAILURE:
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.2.0, pluggy-1.7.0
+rootdir: /kriya/workspace
+collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+____________________ ERROR collecting tests/test_pricing.py ____________________
+ImportError while importing test module '/kriya/workspace/tests/test_pricing.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_pricing.py:1: in <module>
+    from src.discount_pricing import discounted_price
+E   ModuleNotFoundError: No module named 'src.discount_pricing'
+=========================== short test summary info ============================
+ERROR tests/test_pricing.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.07s ===============================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 6: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 2/4 + targeted 4/3: TEST FAILURE:
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.2.0, pluggy-1.7.0
+rootdir: /kriya/workspace
+collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+____________________ ERROR collecting tests/test_pricing.py ____________________
+ImportError while importing test module '/kriya/workspace/tests/test_pricing.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_pricing.py:1: in <module>
+    from src.discount_pricing import discounted_price
+E   ModuleNotFoundError: No module named 'src.discount_pricing'
+=========================== short test summary info ============================
+ERROR tests/test_pricing.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.07s ===============================
+
+
+WARNING  kriya.workflow.attempt:gate_orchestrator.py:797 Quality Gates: Targeted test selection collected zero tests for tests/test_pricing.py; retrying the full suite before attributing a code failure.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 7: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 3/4 + targeted 4/3: TEST FAILURE:
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.2.0, pluggy-1.7.0
+rootdir: /kriya/workspace
+collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+____________________ ERROR collecting tests/test_pricing.py ____________________
+ImportError while importing test module '/kriya/workspace/tests/test_pricing.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_pricing.py:1: in <module>
+    from src.discount_pricing import discounted_price
+E   ModuleNotFoundError: No module named 'src.discount_pricing'
+=========================== short test summary info ============================
+ERROR tests/test_pricing.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.07s ===============================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 7: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 3/4 + targeted 4/3: TEST FAILURE:
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.2.0, pluggy-1.7.0
+rootdir: /kriya/workspace
+collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+____________________ ERROR collecting tests/test_pricing.py ____________________
+ImportError while importing test module '/kriya/workspace/tests/test_pricing.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_pricing.py:1: in <module>
+    from src.discount_pricing import discounted_price
+E   ModuleNotFoundError: No module named 'src.discount_pricing'
+=========================== short test summary info ============================
+ERROR tests/test_pricing.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.07s ===============================
+
+
+ERROR    kriya.workflow.recovery_coordinator:recovery_coordinator.py:274 Quality Gates stopped - all applicable retry budgets are exhausted. Continuing to review with errors.
+=========================== short test summary info ============================
+FAILED tests/test_live_prd022_redirect_chain.py::test_prd022_a_real_redirect_is_followed_by_the_owner_scoped_corrective_retry
+1 failed in 204.45s (0:03:24)
