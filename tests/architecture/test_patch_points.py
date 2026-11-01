@@ -181,7 +181,7 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (W, 'close_requirements_by_mutation_scope'): P(3, W, (('kriya.workflow.terminal_gate_service', 1), (W, 1)), ()),
     (W, 'close_requirements_with_derived_examples'): P(1, W, (('kriya.workflow.terminal_gate_service', 1), (W, 1)), ()),
     (W, 'close_requirements_with_named_tests'): P(1, W, (('kriya.workflow.terminal_gate_service', 1), (W, 1)), ()),
-    (W, 'commit_terminal_candidate'): P(2, 'kriya.workflow.terminal_commit', ((W, 1),), ()),
+    (W, 'commit_terminal_candidate'): P(3, 'kriya.workflow.terminal_commit', ((W, 1),), ()),   # Gate F: +1 (tests/test_gate_f_milestone_artifact_registry.py: a refused real-workspace commit must leave no registry state)
     # E5: 5 -> 3 lookups: the loop's three loads (auto baseline revision, the baseline capture's revision, the
     # targeted POST replay) moved to development_loop and bind StageDeps.compute_workspace_content_hash (+1 load in
     # _development_deps); the checkpoint opening and the run-contract baseline keep theirs.
@@ -450,7 +450,7 @@ def test_the_table_totals_are_the_measured_e1_baseline():
     # P-B skill-verification deferral (tests/test_skill_verification_deferral.py): +1 W site (final_review: the stage-5 closer seeded
     # with a held verification on a failed run) and +1 C site (commit_verified_candidate: the enforce terminal commit it defers behind)
     # Step 6 (artifact registry): +1 C site (commit_verified_candidate: tests/test_artifact_registry_strict_read.py, the registry corrupted right after the source commit)
-    assert totals == {A: 113, W: 99, C: 387}  # W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
+    assert totals == {A: 113, W: 100, C: 387}  # Gate F: W 99 -> 100 (commit_terminal_candidate: a refused real-workspace commit in tests/test_gate_f_milestone_artifact_registry.py); W3-5: C 386 -> 387 (STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS, tests/test_e14_pre_characterization.py); W3-3 B: W 98 -> 99 (compile_run_contract: the contract-stage membership stop); D2 M4: 386 -> 383 (the three retired migration patch sites); P-B: +1 W, +1 C; S8: A 114 -> 113 (one deleted host test patched _resolve_java_home_override); D1: C +1 (the ER10 patch of subtask_executor.revalidate_tool_subtask_authority)
     assert len(PATCH_POINTS) == 135  # W3-5: +1 row (C.STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS); P-B: +1 row (W.final_review); D1: +1 row (C.subtask_executor.revalidate_tool_subtask_authority)
 
 

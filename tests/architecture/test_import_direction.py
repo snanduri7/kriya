@@ -367,6 +367,7 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.workflow.localization_decision", "kriya.core.role_metrics"): ("P2", _P2),  # non-public PROVIDER module
     ("kriya.workflow.localization_decision", "kriya.core.token_budget"): ("P2", _P2),  # non-public PROVIDER module
     ("kriya.workflow.lsp_integration", "kriya.tools.lsp"): ("P2", _P2),  # non-public EXECUTION module
+    ("kriya.workflow.milestones", "kriya.control.artifacts"): ("P2", _P2),  # non-public STATE module (Gate F: the milestone settlement binds the registry)
     ("kriya.workflow.milestones", "kriya.control.contracts"): ("P2", _P2),  # non-public STATE module
     ("kriya.workflow.model_transition", "kriya.core.inference_settings"): ("P2", _P2),  # non-public PROVIDER module
     ("kriya.workflow.model_transition", "kriya.core.model_capabilities"): ("P2", _P2),  # non-public PROVIDER module
@@ -400,6 +401,7 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.workflow.semantic_scope_derivation", "kriya.analyzer.java_members"): ("P2", _P2),  # non-public RETRIEVAL module
     ("kriya.workflow.skill_extraction", "kriya.skills.skill"): ("P2", _P2),  # non-public SKILLS module
     ("kriya.workflow.skill_extraction", "kriya.tools.knowledge"): ("P2", _P2),  # non-public KNOWLEDGE module
+    ("kriya.workflow.stage_apply", "kriya.control.artifacts"): ("P2", _P2),  # non-public STATE module (Gate F: the pre-commit candidate derivation)
     ("kriya.workflow.state", "kriya.core.role_metrics"): ("P2", _P2),  # non-public PROVIDER module
     ("kriya.workflow.subtask_executor", "kriya.core.registry"): ("P2", _P2),  # non-public TOOLBOX module
     ("kriya.workflow.subtask_executor", "kriya.policy.errors"): ("P2", _P2),  # non-public AUTHORITY module

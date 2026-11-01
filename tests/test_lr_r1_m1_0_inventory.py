@@ -172,5 +172,7 @@ def test_inventory_counts_the_design_relies_on():
     # _run_pom_validation_gate, _approve_and_execute_runtime_verification) - every site still records through state.record_gate_outcome.
     # D2 rebuild S4.1: one more typed stop (runtime_verification: a managed-service command naming the shared worktree is refused
     # MANAGED_SERVICE_CONTRACT_INVALID, as a verification_infrastructure_failure, before the service runs).
-    assert records == 95, records
+    # Gate F (Wave 6): one more typed stop (stage_apply.run_artifact_registry_gate: the milestone's candidate artifact-registry
+    # derivation failed before the commit, ARTIFACT_REGISTRY_CANDIDATE_DERIVATION_FAILED, a deterministic quality-gate stop).
+    assert records == 96, records
     assert os.path.exists(ROOT / "kriya/workflow/context_budget.py")
