@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="2" time="28.948" timestamp="2026-11-01T21:20:47.670528+05:30" hostname="macbookpro.lan"><testcase classname="" name="test_live_prd026_ineffective_repair_terminates" time="27.089" /><testcase classname="" name="test_live_prd028_member_authority_is_revision_bound_and_in_scope" time="1.352"><failure message="sqlite3.OperationalError: no such table: runs">cfg = AppConfig(llm=LLMConfig(provider='openai', model='qwen3-coder:30b-kriya-e52213655394', api_key='local-key', base_url='...isibility='off', retention=AttemptEvidenceRetentionConfig(keep_runs=200, max_bytes=5368709120))), runtime_profile=None)
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-4830/test_live_prd028_member_author0')
+
+    @pytest.mark.asyncio
+    async def test_live_prd028_member_authority_is_revision_bound_and_in_scope(cfg, tmp_path):
+        with _verdict("prd028_expansions.json") as evidence:
+            import sqlite3
+            from unittest.mock import patch
+    
+            from kriya.core.kernel import Kernel
+            from kriya.core.state_paths import trace_db_path
+            from kriya.tools.validate import PolymorphicValidator
+            from kriya.workflow.workflow import WorkflowEngine
+    
+            cfg.autonomy.mode = "guardrails"
+            cfg.autonomy.run_verification_enabled = False
+            cfg.autonomy.developer_investigation_enabled = True
+            cfg.paths.skills = str(tmp_path / "skills")
+            repo = tmp_path / "repo"
+            repo.mkdir()
+            source = _large_module()
+            (repo / "ledger.py").write_text(source, encoding="utf-8")
+            fee_line = source.splitlines().index("        return amount - 5") + 1
+            # Deterministic trigger, independent of what the model writes: the
+            # first compile of a CHANGED ledger.py fails once at apply_fee's line
+            # (PolymorphicValidator's own Python error shape). The retry must then
+            # request member authority for that member against the real candidate.
+            real_compile = PolymorphicValidator.run_compile_check
+            injected = {"done": False}
+    
+            def compile_failing_once(validator, files):
+                written = os.path.join(validator.workspace_path, "ledger.py")
+                if not injected["done"] and "ledger.py" in files and os.path.exists(written):
+                    with open(written, encoding="utf-8") as stream:
+                        changed = stream.read() != source
+                    if changed:
+                        injected["done"] = True
+                        return {"success": False,
+                                "output": f"Syntax error in ledger.py line {fee_line}: return amount (injected)"}
+                return real_compile(validator, files)
+    
+            engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+            with patch.object(PolymorphicValidator, "run_compile_check", autospec=True,
+                              side_effect=compile_failing_once):
+                await engine.run_generation_workflow(
+                    goal="In ledger.py, change Ledger.apply_fee so the fee is 7 instead of 5.",
+                    workspace_path=str(repo),
+                )
+            with sqlite3.connect(trace_db_path(cfg)) as db:
+&gt;               (events_json,) = db.execute("SELECT run_events FROM runs ORDER BY rowid DESC").fetchone()
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E               sqlite3.OperationalError: no such table: runs
+
+../../../../WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/tests/test_live_prd025_029_batch6.py:425: OperationalError</failure></testcase></testsuite></testsuites>

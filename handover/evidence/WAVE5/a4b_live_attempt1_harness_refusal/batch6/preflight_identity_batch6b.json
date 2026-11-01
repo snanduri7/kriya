@@ -1,0 +1,9 @@
+{
+  "adapter": "kriya-ollama-native/3",
+  "effective_context_window": 32768,
+  "model": "qwen3-coder:30b-kriya-e52213655394",
+  "problems": [],
+  "qualification": "QUALIFIED",
+  "runtime_digest": "7a02e748b2c53a8e02ef3174149a8dc076797e00e1f9d63b0d8fe4974bdbab3c",
+  "runtime_exact": true
+}

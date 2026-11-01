@@ -1,0 +1,230 @@
+{
+ "test_agents": {
+  "pass": 178
+ },
+ "test_production_doctor": {
+  "pass": 62
+ },
+ "test_analyzer": {
+  "pass": 8
+ },
+ "test_auth_goal_contamination_001": {
+  "pass": 28
+ },
+ "test_ask_command_context": {
+  "pass": 1
+ },
+ "test_batch6_live_evidence_status": {
+  "pass": 6
+ },
+ "test_bootstrap_contract": {
+  "pass": 18
+ },
+ "test_checkpoint_control_plane_hashes": {
+  "pass": 14
+ },
+ "test_cli_smoke": {
+  "pass": 65
+ },
+ "test_context_package": {
+  "pass": 20
+ },
+ "test_context_source": {
+  "pass": 57
+ },
+ "test_control_contracts": {
+  "pass": 40
+ },
+ "test_corr016_planner_authority_gate": {
+  "pass": 9
+ },
+ "test_d1_operation_mode_authority": {
+  "pass": 23
+ },
+ "test_dependency_graph": {
+  "pass": 42
+ },
+ "test_deterministic_failure_diagnostic": {
+  "pass": 19
+ },
+ "test_dev_inv_001_investigation": {
+  "pass": 87
+ },
+ "test_dispatch_generation": {
+  "pass": 5
+ },
+ "test_distribution_integrity": {
+  "pass": 30
+ },
+ "test_failure_reporting": {
+  "pass": 51
+ },
+ "test_file_goal": {
+  "pass": 7
+ },
+ "test_generate_json_contract": {
+  "pass": 29
+ },
+ "test_indexing": {
+  "pass": 5
+ },
+ "test_java_members": {
+  "pass": 31
+ },
+ "test_milestone2": {
+  "pass": 3
+ },
+ "test_milestones": {
+  "pass": 69
+ },
+ "test_model_evidence_hardening_001": {
+  "pass": 46
+ },
+ "test_model_evidence_hardening_final": {
+  "pass": 16
+ },
+ "test_performance_telemetry": {
+  "pass": 9
+ },
+ "test_polymorphic_validation": {
+  "pass": 75
+ },
+ "test_prd004_commit_failure": {
+  "pass": 4
+ },
+ "test_prd005_commit_transactions": {
+  "pass": 26
+ },
+ "test_prd007_run_lifecycle": {
+  "pass": 28
+ },
+ "test_prd008_commit_state_gate": {
+  "pass": 26
+ },
+ "test_prd008_recovery": {
+  "pass": 24
+ },
+ "test_prd008_resume_fingerprints": {
+  "pass": 102
+ },
+ "test_prd008_s4b_milestone_completion": {
+  "pass": 29
+ },
+ "test_prd008_s4c_milestone_resume": {
+  "pass": 47
+ },
+ "test_prd008a_cross_path": {
+  "pass": 19
+ },
+ "test_prd008a_execution_plan": {
+  "pass": 29
+ },
+ "test_prd008a_plan_adapters": {
+  "pass": 15
+ },
+ "test_prd008a_plan_executor": {
+  "pass": 18
+ },
+ "test_prd008a_resume_convergence": {
+  "pass": 13
+ },
+ "test_prd011_toolchain_migration": {
+  "pass": 11
+ },
+ "test_prd020_milestone_requirements": {
+  "pass": 5
+ },
+ "test_prd020_mutation_scope": {
+  "pass": 34
+ },
+ "test_prd020_requirement_lineage": {
+  "pass": 42
+ },
+ "test_prd021_grounded_ownership": {
+  "pass": 11
+ },
+ "test_prd022_ownership_recovery": {
+  "pass": 6
+ },
+ "test_prd023_contract_classification": {
+  "pass": 38
+ },
+ "test_prd024_baseline_auto_policy": {
+  "pass": 35
+ },
+ "test_prd025_verifier_evidence": {
+  "pass": 56
+ },
+ "test_prd026_retry_progress": {
+  "pass": 37
+ },
+ "test_prd027_context_certification": {
+  "pass": 36
+ },
+ "test_prd027_precision_expansion_seeds": {
+  "pass": 10
+ },
+ "test_prd027_retrieval_defects": {
+  "pass": 8
+ },
+ "test_prd028_authority_escalation": {
+  "pass": 21
+ },
+ "test_prd029_contract_lifecycle": {
+  "pass": 38
+ },
+ "test_prd029_registry_integrity": {
+  "pass": 9
+ },
+ "test_process_controller": {
+  "pass": 6
+ },
+ "test_prompt_budget_fit_001c": {
+  "pass": 6
+ },
+ "test_rag_queries": {
+  "pass": 1
+ },
+ "test_resume_integrity": {
+  "pass": 21
+ },
+ "test_retry_policy": {
+  "pass": 23
+ },
+ "test_review_context": {
+  "pass": 69
+ },
+ "test_run_ownership": {
+  "pass": 33
+ },
+ "test_run_record": {
+  "pass": 9
+ },
+ "test_strict_doubles": {
+  "pass": 29
+ },
+ "test_traces_command": {
+  "pass": 7
+ },
+ "test_val001_g1r3_retry_context": {
+  "pass": 23
+ },
+ "test_validation_baseline": {
+  "pass": 55
+ },
+ "test_vector": {
+  "pass": 5
+ },
+ "test_ver006_distrust_containment": {
+  "pass": 19
+ },
+ "test_workflow": {
+  "pass": 871
+ },
+ "test_workflow_controller": {
+  "pass": 32
+ },
+ "test_workflow_controller_enforce": {
+  "pass": 276
+ }
+}
