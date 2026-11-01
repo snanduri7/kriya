@@ -83,6 +83,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_direct_closer_failure_truth.py': ('S', 'M'),
  'tests/test_docker_image_inspection.py': ('N', 'C'),
  'tests/test_e11_milestones_real_engine.py': ('S', 'M'),
+ 'tests/test_gate_f_milestone_artifact_registry.py': ('S', 'M'),
  'tests/test_e11_owner_modules.py': ('S', 'M'),
  'tests/test_e14_pre_characterization.py': ('S', 'M'),
  'tests/test_early_exit_traces.py': ('F2', 'F'),

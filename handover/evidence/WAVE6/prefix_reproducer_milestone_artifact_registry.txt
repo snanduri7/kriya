@@ -1,0 +1,9 @@
+>       assert (workspace / "calc.py").read_text() == CALC, "PRE-FIX: the real calc.py CHANGED although the registry derivation failed"
+E       AssertionError: PRE-FIX: the real calc.py CHANGED although the registry derivation failed
+E       assert 'def add(a, b...ation raise\n' == 'def add(a, b...eturn a + b\n'
+E         
+E           def add(a, b):
+E               return a + b
+E         + 
+E         + 
+code under test: HEAD 89c7991, kriya/ unchanged since dd9ba00 (the OLD milestone path). Test = tests/test_gate_f_milestone_artifact_registry.py::test_a_derivation_failure_on_the_candidate_prevents_the_commit_and_the_real_workspace_is_byte_identical (scratch copy without the new imports, assertion order: workspace bytes first). Run on 2026-11-01 before any production change.

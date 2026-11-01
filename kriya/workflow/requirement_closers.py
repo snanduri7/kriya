@@ -18,9 +18,10 @@ module or the CLI.
 """
 from __future__ import annotations
 
+import asyncio
 import os
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.acceptance_oracle import bound_acceptance
@@ -793,3 +794,72 @@ __all__ = ["CloserDeps", "SCOPE_SUITE_PRESERVATION", "SUITE_BASELINE_FROM_RUN", 
            "close_requirements_with_authority_bundle_evidence", "close_requirements_with_derived_examples",
            "close_requirements_with_named_tests", "documentation_referent_paths", "frozen_file_paths",
            "immutable_test_files", "mutation_scope_evidence", "named_preserved_test_files"]
+
+
+# --- Gate F (Wave 6): the one owner of the original-requirement closer SEQUENCE -------------------------------------
+# The leaf closers above were always shared. The sequence they run in, and the order their results concatenate, used to be
+# assembled twice (the direct/enforce-unit gate in development_loop and the enforce TerminalGateService). Each site still
+# supplies its own scope-specific arguments and its own closer callables (so the facade/lazy patch seams are unchanged) and
+# keeps its own blocking decision and result contract; only the sequence is owned here.
+
+CLOSER_SEQUENCE: Tuple[str, ...] = (
+    "mutation_scope", "acceptance", "authority_bundle", "derived_examples", "api_preservation", "test_addition",
+    "documentation", "named_tests", "test_immutability", "file_immutability", "suite_preservation",
+)
+CONTRACT_CLOSERS: Tuple[str, ...] = (
+    "authority_bundle", "derived_examples", "api_preservation", "test_addition", "documentation",
+)
+
+
+@dataclass(frozen=True)
+class CloserCall:
+    """One closer invocation: the callable and the arguments read for it."""
+
+    fn: Callable[..., List[Dict[str, Any]]]
+    args: Tuple[Any, ...] = ()
+    kwargs: Dict[str, Any] = field(default_factory=dict)
+
+
+def closer_call(fn: Callable[..., List[Dict[str, Any]]], *args: Any, **kwargs: Any) -> CloserCall:
+    return CloserCall(fn, args, kwargs)
+
+
+def no_closures() -> List[Dict[str, Any]]:
+    """A group a site skips (e.g. the contract closers of a run without a sealed contract): no closer call at all."""
+    return []
+
+
+@dataclass(frozen=True)
+class RequirementClosureRun:
+    by_closer: Mapping[str, List[Dict[str, Any]]]
+
+    @property
+    def attempts(self) -> List[Dict[str, Any]]:
+        """Every closure attempt, concatenated in CLOSER_SEQUENCE order."""
+        return [attempt for name in CLOSER_SEQUENCE for attempt in self.by_closer[name]]
+
+
+async def run_requirement_closers(
+    bindings: Mapping[str, Callable[[], CloserCall]],
+    *,
+    on_closed: Optional[Callable[[str, List[Dict[str, Any]]], None]] = None,
+) -> RequirementClosureRun:
+    """Run every closer in CLOSER_SEQUENCE order and return the results.
+
+    ``bindings`` maps each closer name to a thunk that builds that closer's ``CloserCall``. The thunk is evaluated on the
+    calling thread immediately before the closer runs (after the previous closer finished), because a closer's arguments
+    can depend on state an earlier one changed (the lazy suite-baseline capture). The closer itself runs in a worker
+    thread. A missing or unknown name is a ValueError: a site that forgets a closer must fail loudly, never skip a
+    verification. Exceptions from a closer reach the caller unchanged and stop the sequence (Q5: nothing is absorbed)."""
+    missing = [name for name in CLOSER_SEQUENCE if name not in bindings]
+    unknown = sorted(set(bindings) - set(CLOSER_SEQUENCE))
+    if missing or unknown:
+        raise ValueError(f"requirement closer bindings must be exactly CLOSER_SEQUENCE; missing={missing} unknown={unknown}")
+    by_closer: Dict[str, List[Dict[str, Any]]] = {}
+    for name in CLOSER_SEQUENCE:
+        call = bindings[name]()
+        by_closer[name] = list(await asyncio.to_thread(call.fn, *call.args, **call.kwargs))
+        if on_closed is not None:
+            on_closed(name, by_closer[name])
+    return RequirementClosureRun(by_closer)
+

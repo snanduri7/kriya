@@ -320,6 +320,8 @@ def completed_result(
         "review_included_in_approval": state.pre_approval_review is not None,
         # PRD-031A: the static-analysis outcome (ACCEPTED_RISK is never PASS).
         **deps.static_analysis_fields(state.static_analysis_result),
+        **({"artifact_registry_candidate_digest": state.candidate_artifact_registry_digest}
+           if state.candidate_artifact_registry_digest else {}),
         **({"final_review_refusal": final_review_refusal_payload(state, workspace_path, logger=deps.logger)}
            if state.final_review_refusal is not None else {}),
         "run_id": run_id,

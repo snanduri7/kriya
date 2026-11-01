@@ -42,7 +42,6 @@ without a WorkflowEngine.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from dataclasses import dataclass
@@ -557,116 +556,127 @@ class TerminalGateService:
             )
             contract = request.verification_contract
 
-            scope_closures = await asyncio.to_thread(
-                close_requirements_by_mutation_scope, ledger, requirement_set,
-                request.candidate_root, request.workspace_path,
-                candidate_paths=[planned.path for subtask in request.plan.subtasks
-                                 for planned in subtask.planned_files],
-                revision="terminal",
-            )
-            if scope_closures:
-                logger.info("Original requirement mutation-scope evidence: %s", scope_closures)
-            # An UNVERIFIED requirement naming existing tests: run
-            # exactly those on this candidate (never a model citation).
+            # Gate F: the closer SEQUENCE, its order and the concatenation are requirement_closers.run_requirement_closers's
+            # (shared with the direct/enforce-unit gate in development_loop). This site supplies the terminal scope's
+            # arguments - each thunk is read right before its closer runs - and the facade names imported above.
             from kriya.workflow.file_integrity import VerificationTreeBinding
+            from kriya.workflow.requirement_closers import (
+                CONTRACT_CLOSERS,
+                closer_call,
+                no_closures,
+                run_requirement_closers,
+            )
             from kriya.workflow.worktree import repository_content_paths
 
-            # FILE-INTEGRITY-CONTRACT-001: the named tests run repository
-            # code on the candidate; a tracked-content change fails this gate.
-            tree_binding = VerificationTreeBinding(
-                request.candidate_root, repository_content_paths(request.workspace_path),
-                _terminal_candidate_paths(request.plan),
-            )
-            # FS-1C2 B2-a: the operator's acceptance file judges the
-            # behaviour claims it covers on this final candidate.
-            acceptance_closures = await asyncio.to_thread(
-                close_requirements_with_acceptance_tests, autonomy, ledger,
-                requirement_set, request.candidate_root, request.workspace_path,
-                acceptance=request.acceptance, approval=request.acceptance_approval,
-                modified=_terminal_candidate_paths(request.plan),
-                revision="terminal",
-                toolchain_declaration_mutable=toolchain_declaration_mutable(
-                    WriteScopeMode.DENY_ALL, (), request.plan,
+            bound_tree: List[Any] = []
+
+            def tree_binding() -> Any:
+                # FILE-INTEGRITY-CONTRACT-001: the named tests run repository code on the candidate; a tracked-content
+                # change fails this gate. Built when the first closer that needs it is about to run (as before: after
+                # the mutation-scope closer, before the acceptance closer), then shared by the later ones.
+                if not bound_tree:
+                    bound_tree.append(VerificationTreeBinding(
+                        request.candidate_root, repository_content_paths(request.workspace_path),
+                        _terminal_candidate_paths(request.plan),
+                    ))
+                return bound_tree[0]
+
+            def contract_group(thunk: Callable[[], Any]) -> Callable[[], Any]:
+                # VERIFICATION-CONTRACT-003: the contract's other closers run on this final candidate - only for a run
+                # that carries a sealed contract; otherwise no closer is called at all.
+                return thunk if contract is not None else (lambda: closer_call(no_closures))
+
+            closed: Dict[str, List[Dict[str, Any]]] = {}
+            evidence_logs = {
+                "mutation_scope": "Original requirement mutation-scope evidence: %s",
+                "acceptance": "Original requirement acceptance evidence: %s",
+                "named_tests": "Original requirement closure by named tests: %s",
+                "test_immutability": "Original requirement test-immutability evidence: %s",
+                "file_immutability": "Original requirement file-immutability evidence: %s",
+                "suite_preservation": "Original requirement suite-preservation evidence: %s",
+            }
+
+            def log_closed(name: str, closures: List[Dict[str, Any]]) -> None:
+                closed[name] = closures
+                if name in evidence_logs and closures:
+                    logger.info(evidence_logs[name], closures)
+                if name == CONTRACT_CLOSERS[-1] and contract is not None:
+                    contract_closures = [attempt for member in CONTRACT_CLOSERS for attempt in closed[member]]
+                    if contract_closures:
+                        logger.info("Original requirement contract closures: %s", contract_closures)
+
+            closure_run = await run_requirement_closers({
+                "mutation_scope": lambda: closer_call(
+                    close_requirements_by_mutation_scope, ledger, requirement_set,
+                    request.candidate_root, request.workspace_path,
+                    candidate_paths=[planned.path for subtask in request.plan.subtasks
+                                     for planned in subtask.planned_files],
+                    revision="terminal",
                 ),
-                tree_binding=tree_binding, contract=contract,
-            )
-            if acceptance_closures:
-                logger.info("Original requirement acceptance evidence: %s", acceptance_closures)
-            # VERIFICATION-CONTRACT-003: the contract's other closers on this final candidate.
-            contract_closures: List[Dict[str, Any]] = []
-            if contract is not None:
-                contract_closures += await asyncio.to_thread(
+                # FS-1C2 B2-a: the operator's acceptance file judges the behaviour claims it covers on this final candidate.
+                "acceptance": lambda: closer_call(
+                    close_requirements_with_acceptance_tests, autonomy, ledger,
+                    requirement_set, request.candidate_root, request.workspace_path,
+                    acceptance=request.acceptance, approval=request.acceptance_approval,
+                    modified=_terminal_candidate_paths(request.plan), revision="terminal",
+                    toolchain_declaration_mutable=toolchain_declaration_mutable(WriteScopeMode.DENY_ALL, (), request.plan),
+                    tree_binding=tree_binding(), contract=contract,
+                ),
+                "authority_bundle": contract_group(lambda: closer_call(
                     close_requirements_with_authority_bundle_evidence, autonomy, ledger, requirement_set, contract,
                     request.candidate_root, request.workspace_path, engine=request.engine, revision="terminal",
-                    toolchain_declaration_mutable=toolchain_declaration_mutable(WriteScopeMode.DENY_ALL, (), request.plan),
-                    tree_binding=tree_binding,
-                )
-                contract_closures += await asyncio.to_thread(
+                    toolchain_declaration_mutable=toolchain_declaration_mutable(WriteScopeMode.DENY_ALL, (), request.plan), tree_binding=tree_binding(),
+                )),
+                "derived_examples": contract_group(lambda: closer_call(
                     close_requirements_with_derived_examples, autonomy, ledger, requirement_set,
                     request.candidate_root, request.workspace_path, engine=request.engine,
                     modified=_terminal_candidate_paths(request.plan), revision="terminal",
-                    toolchain_declaration_mutable=toolchain_declaration_mutable(WriteScopeMode.DENY_ALL, (), request.plan),
-                    tree_binding=tree_binding, contract=contract,
-                )
-                contract_closures += await asyncio.to_thread(
+                    toolchain_declaration_mutable=toolchain_declaration_mutable(WriteScopeMode.DENY_ALL, (), request.plan), tree_binding=tree_binding(), contract=contract,
+                )),
+                "api_preservation": contract_group(lambda: closer_call(
                     close_requirements_by_api_preservation, ledger, requirement_set, contract,
                     request.candidate_root, request.workspace_path,
                     candidate_paths=_terminal_candidate_paths(request.plan), revision="terminal",
-                )
-                contract_closures += await asyncio.to_thread(
+                )),
+                "test_addition": contract_group(lambda: closer_call(
                     close_requirements_by_test_addition, ledger, requirement_set, contract,
                     request.candidate_root, request.workspace_path, revision="terminal",
-                )
-                contract_closures += await asyncio.to_thread(
+                )),
+                "documentation": contract_group(lambda: closer_call(
                     close_requirements_by_documentation, ledger, requirement_set, contract,
                     request.candidate_root, revision="terminal",
-                )
-                if contract_closures:
-                    logger.info("Original requirement contract closures: %s", contract_closures)
-            # D8: the terminal writes nothing; the toolchain authority is
-            # the approved plan's (the same derivation its units used).
-            closures = await asyncio.to_thread(
-                close_requirements_with_named_tests, autonomy, ledger,
-                requirement_set, request.candidate_root, request.workspace_path,
-                modified=_terminal_candidate_paths(request.plan), revision="terminal",
-                toolchain_declaration_mutable=toolchain_declaration_mutable(
-                    WriteScopeMode.DENY_ALL, (), request.plan,
+                )),
+                # D8: the terminal writes nothing; the toolchain authority is the approved plan's (the same derivation
+                # its units used).
+                "named_tests": lambda: closer_call(
+                    close_requirements_with_named_tests, autonomy, ledger,
+                    requirement_set, request.candidate_root, request.workspace_path,
+                    modified=_terminal_candidate_paths(request.plan), revision="terminal",
+                    toolchain_declaration_mutable=toolchain_declaration_mutable(WriteScopeMode.DENY_ALL, (), request.plan),
+                    tree_binding=tree_binding(), contract=contract,
                 ),
-                tree_binding=tree_binding, contract=contract,
-            )
-            if closures:
-                logger.info("Original requirement closure by named tests: %s", closures)
-            # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: the final candidate's
-            # mutation record and its own complete, green full suite.
-            immutability_closures = await asyncio.to_thread(
-                close_requirements_by_test_immutability, ledger, requirement_set,
-                request.candidate_root, request.workspace_path,
-                candidate_paths=_terminal_candidate_paths(request.plan), revision="terminal", contract=contract,
-            )
-            if immutability_closures:
-                logger.info("Original requirement test-immutability evidence: %s", immutability_closures)
-            # OD-3: the files the goal froze by name, from the final candidate's mutation record.
-            frozen_closures = await asyncio.to_thread(
-                close_requirements_by_file_immutability, ledger, requirement_set,
-                request.candidate_root, request.workspace_path,
-                candidate_paths=_terminal_candidate_paths(request.plan), revision="terminal", contract=contract,
-            )
-            if frozen_closures:
-                logger.info("Original requirement file-immutability evidence: %s", frozen_closures)
-            suite_closures = await asyncio.to_thread(
-                close_requirements_by_suite_preservation, autonomy, ledger,
-                requirement_set, request.candidate_root, request.workspace_path,
-                revision="terminal", candidate_paths=_terminal_candidate_paths(request.plan),
-                toolchain_declaration_mutable=toolchain_declaration_mutable(
-                    WriteScopeMode.DENY_ALL, (), request.plan,
+                # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: the final candidate's mutation record and its own complete, green
+                # full suite. OD-3: the files the goal froze by name, from the final candidate's mutation record.
+                "test_immutability": lambda: closer_call(
+                    close_requirements_by_test_immutability, ledger, requirement_set,
+                    request.candidate_root, request.workspace_path,
+                    candidate_paths=_terminal_candidate_paths(request.plan), revision="terminal", contract=contract,
                 ),
-                tree_binding=tree_binding, contract=contract,
-                baseline_source=SUITE_BASELINE_LAZY_CAPTURE,  # the enforce gate owns the lazy capture (13.2)
-            )
-            if suite_closures:
-                logger.info("Original requirement suite-preservation evidence: %s", suite_closures)
-            closure_attempts = (scope_closures + acceptance_closures + contract_closures + closures
-                                + immutability_closures + frozen_closures + suite_closures)
+                "file_immutability": lambda: closer_call(
+                    close_requirements_by_file_immutability, ledger, requirement_set,
+                    request.candidate_root, request.workspace_path,
+                    candidate_paths=_terminal_candidate_paths(request.plan), revision="terminal", contract=contract,
+                ),
+                "suite_preservation": lambda: closer_call(
+                    close_requirements_by_suite_preservation, autonomy, ledger,
+                    requirement_set, request.candidate_root, request.workspace_path,
+                    revision="terminal", candidate_paths=_terminal_candidate_paths(request.plan),
+                    toolchain_declaration_mutable=toolchain_declaration_mutable(WriteScopeMode.DENY_ALL, (), request.plan),
+                    tree_binding=tree_binding(), contract=contract,
+                    baseline_source=SUITE_BASELINE_LAZY_CAPTURE,  # the enforce gate owns the lazy capture (13.2)
+                ),
+            }, on_closed=log_closed)
+            closure_attempts = closure_run.attempts
             # The terminal migration gate just judged this same final
             # candidate; a requirement stating the migration itself
             # is closed by it (attempt._close_requirements_by_migration_gate).

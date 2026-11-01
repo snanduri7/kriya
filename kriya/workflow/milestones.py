@@ -105,7 +105,9 @@ from kriya.workflow.verified_no_change import NO_CHANGE_UNVERIFIED
 from kriya.workflow.workflow import _log_phase_banner
 
 # Typed codes of a milestone completion step that did not complete (MILESTONE-ZERO-COMMIT-COMPLETION-001).
-ARTIFACT_REGISTRY_FAILED = "ARTIFACT_REGISTRY_FAILED"
+# Gate F (owner ruling 2026-11-01): the source IS committed but the artifact registry is not settled. Never a clean failure:
+# the milestone is not complete, its dependents do not run, and the S4c reconstruction completes it on resume.
+ARTIFACT_REGISTRY_SETTLEMENT_UNCERTAIN = "ARTIFACT_REGISTRY_SETTLEMENT_UNCERTAIN"
 REPORTED_OUTPUT_UNCOMMITTED = "REPORTED_OUTPUT_UNCOMMITTED"  # files reported, no committed cycle, no no-change proof (distinct from milestone_completion.COMMIT_EVIDENCE_MISSING, a reuse reason)
 
 logger = logging.getLogger(__name__)
@@ -636,6 +638,47 @@ def _reconstruct_completions(
     return events, refused
 
 
+def settle_artifact_registry(
+    workspace_path: str, milestone_id: str, transaction_id: Optional[str], candidate_digest: Optional[str],
+    artifact_registry: Any,
+) -> Optional[Dict[str, Any]]:
+    """Gate F: publish a milestone's artifact registry as authoritative state, after its source commit.
+
+    Derives from the COMMITTED workspace with the canonical ``ArtifactRegistry.derive_from_workspace`` (no second
+    implementation), binds every record to the committing transaction (``resolved_at_commit``), and - when the pre-commit
+    gate validated a candidate (``candidate_digest``) - requires the committed derivation to equal it. Only then is the
+    registry recorded and saved. Any failure is the typed ``ARTIFACT_REGISTRY_SETTLEMENT_UNCERTAIN`` error with nothing
+    published and the in-memory registry restored; the caller reports the milestone as committed-but-unsettled, never complete.
+    Idempotent: a retried settlement replaces the milestone's records instead of appending duplicates. Returns None on success."""
+    from kriya.control.artifacts import registry_digest
+
+    def unsettled(detail: str) -> Dict[str, Any]:
+        return {"code": ARTIFACT_REGISTRY_SETTLEMENT_UNCERTAIN, "detail": f"artifact registry settlement: {detail}"}
+
+    try:
+        derived = artifact_registry.derive_from_workspace(workspace_path, milestone_id, resolved_at_commit=transaction_id)
+    except Exception as error:
+        logger.error(f"Could not derive the artifact registry of the committed milestone '{milestone_id}': {error}")
+        return unsettled(f"derivation from the committed workspace failed: {type(error).__name__}: {error}")
+    if candidate_digest is not None and registry_digest(derived) != candidate_digest:
+        return unsettled("the committed workspace derives a different registry than the candidate validated before the commit")
+    previous = artifact_registry.resolve_for_milestone(milestone_id)
+    artifact_registry.invalidate(milestone_id)
+    for record in derived:
+        artifact_registry.record(record)
+    if not (derived or previous):
+        return None
+    try:
+        save_artifact_registry(workspace_path, artifact_registry)
+    except Exception as error:
+        artifact_registry.invalidate(milestone_id)
+        for record in previous:
+            artifact_registry.record(record)
+        logger.error(f"Could not publish the artifact registry of the committed milestone '{milestone_id}': {error}")
+        return unsettled(f"publication failed: {type(error).__name__}: {error}")
+    return None
+
+
 def _complete_milestone(
     workspace_path: str,
     run_state: MilestoneRunState,
@@ -712,15 +755,14 @@ def _complete_milestone(
         )
         run_state.established_file_context[path] = projection.content
 
-    try:
-        derived = artifact_registry.derive_from_workspace(workspace_path, milestone.id)
-        for record in derived:
-            artifact_registry.record(record)
-        if derived:
-            save_artifact_registry(workspace_path, artifact_registry)
-    except Exception as e:
-        logger.error(f"Could not derive/persist real artifacts for milestone '{milestone.id}': {e}")
-        return {"code": ARTIFACT_REGISTRY_FAILED, "detail": f"artifact registry: {e}"}
+    # Gate F: the registry becomes authoritative only here, after the source commit, bound to the committing transaction
+    # and equal to the derivation the pre-commit gate validated on the candidate.
+    settlement_error = settle_artifact_registry(
+        workspace_path, milestone.id, entries[-1].transaction_id if entries else None,
+        (result or {}).get("artifact_registry_candidate_digest"), artifact_registry,
+    )
+    if settlement_error is not None:
+        return settlement_error
 
     run_state.completion_proofs[milestone.id] = completion_proof_for(
         milestone, entries, run_id, verification=verification, reconstructed_from=reconstructed_from,
@@ -1611,11 +1653,16 @@ class _MilestonePlanDriver(PlanDriver):
                     "no_change_refusal": completion_error.get("no_change_refusal"),
                 }
             return {
-                "status": "artifact_registry_failed",
+                "status": "artifact_registry_settlement_uncertain",
                 "group_id": self.run_state.group_id,
                 "milestone_id": milestone.id,
                 "quality_gates_passed": False,
+                "reason_codes": [completion_error["code"]],
+                # The source commit happened; the registry did not settle. Explicit, never a clean failure.
+                "workspace_state": "COMMITTED_REGISTRY_UNSETTLED",
                 "artifact_error": completion_error["detail"],
+                "recovery": "rerun --from-milestones: the committed milestone is completed from its durable commit "
+                            "evidence once its artifact registry settles",
             }
         _update_milestone_control_state(
             self.workspace_path,

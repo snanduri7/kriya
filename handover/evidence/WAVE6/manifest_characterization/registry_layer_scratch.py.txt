@@ -1,0 +1,50 @@
+"""SCRATCH (never committed): registry-layer-only measurement (gates faked) of what a COMMITTED malformed canonical manifest does."""
+import asyncio, json, os, tempfile
+from unittest.mock import AsyncMock, MagicMock
+from _strict_doubles import strict_engine
+from test_milestones import _committing, mkv2
+from kriya.control.persistence import load_artifact_registry
+from kriya.workflow.milestones import MilestoneRunState, run_milestones
+
+GOOD = b'[project]\nname = "myapp"\nversion = "0.1.0"\n'
+BAD = b'[project\nname = "myapp"\nversion = \n'
+OUT = os.environ["MANIFEST_CHAR_OUT"]
+
+
+def _go(name, results, milestones, seed=None):
+    with tempfile.TemporaryDirectory() as tmp:
+        if seed:
+            open(os.path.join(tmp, "pyproject.toml"), "wb").write(seed)
+        state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
+        we = strict_engine()
+        we.run_generation_workflow = AsyncMock(side_effect=_committing(*results))
+        we.run_verifier = MagicMock()
+        we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
+        raised = None
+        try:
+            result = asyncio.run(run_milestones(we, state, tmp))
+        except Exception as error:
+            result, raised = {}, f'{type(error).__name__}: {str(error)[:140]}'
+        reg = load_artifact_registry(tmp)
+        payload = {"raised_out_of_run_milestones": raised, "units_started": we.run_generation_workflow.await_count, "status": result.get("status"), "completed": list(state.completed_milestone_ids),
+                   "records": {m.id: [r.coordinates for r in reg.resolve_for_milestone(m.id)] for m in milestones},
+                   "drift": {m.id: [(v.reason_code, v.drifted) for v in reg.validate(tmp, m.id)] for m in milestones},
+                   "manifest_bytes_on_disk": open(os.path.join(tmp, "pyproject.toml"), "rb").read().decode() if os.path.exists(os.path.join(tmp, "pyproject.toml")) else None}
+        data = json.load(open(OUT)) if os.path.exists(OUT) else {}
+        data[name] = payload
+        json.dump(data, open(OUT, "w"), indent=2, sort_keys=True)
+
+
+def r(files, content=None):
+    return {"quality_gates_passed": True, "design": "d", "files": files, **({"_content": content} if content else {})}
+
+
+def test_a_milestone_commits_a_malformed_manifest_where_none_existed():
+    _go("fake_M1_commits_malformed_manifest_new", [r(["pyproject.toml"], {"pyproject.toml": BAD}), r(["a.py"])],
+        [mkv2("M1"), mkv2("M2", depends_on=["M1"])])
+
+
+def test_a_later_milestone_turns_a_recorded_valid_manifest_malformed():
+    _go("fake_M2_breaks_a_recorded_manifest", [r(["pyproject.toml"], {"pyproject.toml": GOOD}),
+                                              r(["pyproject.toml"], {"pyproject.toml": BAD}), r(["a.py"])],
+        [mkv2("M1"), mkv2("M2", depends_on=["M1"]), mkv2("M3", depends_on=["M2"])])

@@ -1,0 +1,76 @@
+{
+  "case1_no_manifest": {
+    "completed": [
+      "M1",
+      "M2"
+    ],
+    "drift_if_M1_were_consumed_now": [],
+    "drift_if_M2_were_consumed_now": [],
+    "pyproject_on_disk_is_valid_toml": null,
+    "reason_codes": null,
+    "records": {
+      "M1": [],
+      "M2": []
+    },
+    "status": "success",
+    "units_run": [
+      1,
+      2,
+      3
+    ]
+  },
+  "case2a_malformed_from_start": {
+    "completed": [],
+    "drift_if_M1_were_consumed_now": [],
+    "drift_if_M2_were_consumed_now": [],
+    "pyproject_on_disk_is_valid_toml": false,
+    "reason_codes": null,
+    "records": {
+      "M1": [],
+      "M2": []
+    },
+    "status": "milestone_failed",
+    "units_run": [
+      1
+    ]
+  },
+  "case2b_turned_malformed_by_M2": {
+    "completed": [
+      "M1"
+    ],
+    "drift_if_M1_were_consumed_now": [
+      [
+        null,
+        false
+      ]
+    ],
+    "drift_if_M2_were_consumed_now": [],
+    "pyproject_on_disk_is_valid_toml": true,
+    "reason_codes": null,
+    "records": {
+      "M1": [
+        {
+          "content_hash": null,
+          "coordinates": {
+            "name": "myapp",
+            "version": "0.1.0"
+          },
+          "ecosystem": "python",
+          "entrypoints": [],
+          "kind": "library",
+          "milestone_id": "M1",
+          "module_path": "",
+          "packaging": "wheel",
+          "resolved_at_commit": "b62525bd3413466eba45faa91e73ae11",
+          "resource_roots": []
+        }
+      ],
+      "M2": []
+    },
+    "status": "milestone_failed",
+    "units_run": [
+      1,
+      2
+    ]
+  }
+}

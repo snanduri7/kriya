@@ -1,0 +1,79 @@
+"""SCRATCH (never committed): measures what the milestone path does when the canonical manifest is absent / malformed.
+Records outcomes to $MANIFEST_CHAR_OUT; asserts nothing about them (a passing assertion would bless the behaviour)."""
+import json
+import os
+import subprocess
+from pathlib import Path
+
+import test_gate_f_milestone_artifact_registry as base
+from kriya.control.persistence import load_artifact_registry
+
+GOOD = base.PYPROJECT
+BAD = '[project\nname = "myapp"\nversion = \n'          # not valid TOML
+OUT = os.environ["MANIFEST_CHAR_OUT"]
+
+
+class ManifestRun(base.Run):
+    """Unit 2's Developer rewrites pyproject.toml (``m2_manifest``) instead of calc.py."""
+    m2_manifest = None
+
+    async def _complete(self, system_prompt, *args, **kwargs):
+        first = (system_prompt or "").splitlines()[0] if system_prompt else ""
+        unit = self.units[-1] if self.units else None
+        if self.m2_manifest is not None and unit == 2:
+            if "Developer Agent" in first:
+                self.developer_units.append(unit)
+                return json.dumps([{"filepath": "pyproject.toml", "content": self.m2_manifest}])
+            if "File List Planner" in first:
+                return '["pyproject.toml"]'
+        return await super()._complete(system_prompt, *args, **kwargs)
+
+
+def _seed(root: Path, manifest):
+    root.mkdir()
+    (root / "calc.py").write_text(base.CALC)
+    files = ["calc.py"]
+    if manifest is not None:
+        (root / "pyproject.toml").write_text(manifest)
+        files.append("pyproject.toml")
+    for argv in (["init", "-q"], ["config", "user.email", "t@e.invalid"], ["config", "user.name", "T"],
+                 ["add", *files], ["commit", "-qm", "seed"]):
+        subprocess.run(["git", *argv], cwd=root, check=True)
+
+
+def _record(name, tmp_path, manifest, m2_manifest=None):
+    ws = tmp_path / name
+    _seed(ws, manifest)
+    run = ManifestRun(tmp_path / f"{name}-cfg", {1: base.WITH_MUL, 2: base.WITH_DIV, base.INTEGRATION: base.WITH_DIV})
+    run.m2_manifest = m2_manifest
+    result, state = run.execute(ws)
+    registry = load_artifact_registry(str(ws))
+    payload = {
+        "status": result.legacy_result.get("status"), "completed": list(state.completed_milestone_ids),
+        "units_run": run.units, "reason_codes": result.legacy_result.get("reason_codes"),
+        "records": {m: [r.to_dict() for r in registry.resolve_for_milestone(m)] for m in ("M1", "M2")},
+        "drift_if_M1_were_consumed_now": [(v.reason_code, v.drifted) for v in registry.validate(str(ws), "M1")],
+        "drift_if_M2_were_consumed_now": [(v.reason_code, v.drifted) for v in registry.validate(str(ws), "M2")],
+        "pyproject_on_disk_is_valid_toml": None,
+    }
+    try:
+        from kriya.core.tomlcompat import tomllib
+        tomllib.loads((ws / "pyproject.toml").read_text()) if (ws / "pyproject.toml").exists() else None
+        payload["pyproject_on_disk_is_valid_toml"] = (ws / "pyproject.toml").exists() or None
+    except Exception:
+        payload["pyproject_on_disk_is_valid_toml"] = False
+    existing = json.load(open(OUT)) if os.path.exists(OUT) else {}
+    existing[name] = payload
+    json.dump(existing, open(OUT, "w"), indent=2, sort_keys=True)
+
+
+def test_case1_no_manifest_at_all(tmp_path):
+    _record("case1_no_manifest", tmp_path, None)
+
+
+def test_case2a_manifest_malformed_from_the_start(tmp_path):
+    _record("case2a_malformed_from_start", tmp_path, BAD)
+
+
+def test_case2b_a_later_milestone_turns_a_valid_manifest_malformed(tmp_path):
+    _record("case2b_turned_malformed_by_M2", tmp_path, GOOD, m2_manifest=BAD)

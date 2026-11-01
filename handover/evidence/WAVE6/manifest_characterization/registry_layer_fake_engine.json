@@ -1,0 +1,51 @@
+{
+  "fake_M1_commits_malformed_manifest_new": {
+    "completed": [
+      "M1",
+      "M2"
+    ],
+    "drift": {
+      "M1": [],
+      "M2": []
+    },
+    "manifest_bytes_on_disk": "[project\nname = \"myapp\"\nversion = \n",
+    "raised_out_of_run_milestones": "ToolchainResolutionError: Cannot resolve Python toolchain from pyproject.toml: Expected ']' at the end of a table declaration (at line 1, column 9)",
+    "records": {
+      "M1": [],
+      "M2": []
+    },
+    "status": null,
+    "units_started": 2
+  },
+  "fake_M2_breaks_a_recorded_manifest": {
+    "completed": [
+      "M1",
+      "M2",
+      "M3"
+    ],
+    "drift": {
+      "M1": [
+        [
+          "ARTIFACT_DRIFT",
+          true
+        ]
+      ],
+      "M2": [],
+      "M3": []
+    },
+    "manifest_bytes_on_disk": "[project\nname = \"myapp\"\nversion = \n",
+    "raised_out_of_run_milestones": "ToolchainResolutionError: Cannot resolve Python toolchain from pyproject.toml: Expected ']' at the end of a table declaration (at line 1, column 9)",
+    "records": {
+      "M1": [
+        {
+          "name": "myapp",
+          "version": "0.1.0"
+        }
+      ],
+      "M2": [],
+      "M3": []
+    },
+    "status": null,
+    "units_started": 3
+  }
+}

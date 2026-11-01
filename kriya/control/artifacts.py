@@ -27,6 +27,7 @@ to reading its <parent>'s real, declared groupId/version - the actual
 inherited value, not a guess at what it might be.
 """
 
+import hashlib
 import json
 import os
 import xml.etree.ElementTree as ET
@@ -290,6 +291,18 @@ def _find_pom_files(workspace_path: str) -> List[str]:
                 found.append(child_pom)
                 worklist.append(child_pom)
     return found
+
+
+def registry_digest(records: Any) -> str:
+    """Canonical digest of one derivation result: independent of record order and of ``resolved_at_commit`` (the revision
+    binding is added AFTER a commit, so the same derivation has the same digest before and after it). Gate F: the milestone
+    pre-commit gate validates a candidate derivation, and settlement requires the committed workspace to derive the same
+    thing."""
+    rows = sorted(
+        json.dumps({**record.to_dict(), "resolved_at_commit": None}, sort_keys=True, separators=(",", ":"))
+        for record in records
+    )
+    return hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest()
 
 
 class ArtifactRegistry:

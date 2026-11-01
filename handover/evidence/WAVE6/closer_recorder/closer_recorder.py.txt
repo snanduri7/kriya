@@ -1,0 +1,48 @@
+"""Scratch pytest plugin (NOT part of the repo): records every requirement-closer call a test makes - closer name, positional
+and keyword argument shapes with scalar values - to a per-process jsonl, so a before/after diff proves call-for-call equivalence."""
+import json
+import os
+import re
+
+import pytest
+
+OUT = os.environ["CLOSER_RECORD_OUT"]
+_ADDR = re.compile(r"0x[0-9a-f]+")
+_TMP = re.compile(r"/(?:private/)?(?:var/folders|tmp)/[^\s'\",)\]]*")
+
+
+def _norm(value, depth=0):
+    if isinstance(value, (bool, int, float, type(None))):
+        return value
+    if isinstance(value, str):
+        return _TMP.sub("<TMP>", _ADDR.sub("0x?", value))
+    if isinstance(value, (list, tuple)) and depth < 3:
+        return [_norm(v, depth + 1) for v in value]
+    if isinstance(value, (set, frozenset)) and depth < 3:
+        return sorted(_norm(v, depth + 1) for v in value)
+    if isinstance(value, dict) and depth < 3:
+        return {str(k): _norm(v, depth + 1) for k, v in sorted(value.items(), key=lambda kv: str(kv[0]))}
+    if callable(value):
+        return f"<callable {getattr(value, '__name__', type(value).__name__)}>"
+    return f"<{type(value).__name__}>"
+
+
+@pytest.fixture(autouse=True)
+def _record_closer_calls(request, monkeypatch):
+    from kriya.workflow import requirement_closers as rc
+
+    calls = []
+
+    def wrap(name, fn):
+        def recorded(*args, **kwargs):
+            calls.append({"closer": name, "args": [_norm(a) for a in args],
+                          "kwargs": {k: _norm(v) for k, v in sorted(kwargs.items())}})
+            return fn(*args, **kwargs)
+        return recorded
+
+    for name in [n for n in dir(rc) if n.startswith("close_requirements_")]:
+        monkeypatch.setattr(rc, name, wrap(name, getattr(rc, name)))
+    yield
+    if calls:
+        with open(f"{OUT}.{os.getpid()}.jsonl", "a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"test": request.node.nodeid, "calls": calls}, sort_keys=True) + "\n")

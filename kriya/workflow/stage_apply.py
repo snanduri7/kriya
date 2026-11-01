@@ -117,6 +117,52 @@ def run_semantic_safety_gate(
     raise QualityGateFailure(failure)
 
 
+ARTIFACT_REGISTRY_CANDIDATE_DERIVATION_FAILED = "ARTIFACT_REGISTRY_CANDIDATE_DERIVATION_FAILED"
+
+
+def milestone_registry_unit(work_unit: Any) -> Optional[str]:
+    """The milestone id whose artifact registry this unit must be able to publish, else None. Only a MILESTONE unit that is
+    not the plan-level integration unit has one; an enforce subtask keeps the TerminalGateService's own artifact_registry
+    gate, and a direct run has no registry."""
+    from kriya.workflow.execution_plan import PlanSourceKind
+
+    if work_unit is None or work_unit.source_kind is not PlanSourceKind.MILESTONE or work_unit.requirement_goal is not None:
+        return None
+    return work_unit.work_unit_id
+
+
+def run_artifact_registry_gate(state: RunState, *, worktree_path: str, work_unit: Any) -> None:
+    """Gate F (owner ruling 2026-11-01), at the milestone pre-apply boundary: the canonical
+    ``ArtifactRegistry.derive_from_workspace`` runs on the CANDIDATE before the terminal apply, exactly as the enforce
+    terminal derives from its candidate before its commit. A failure is a deterministic stop (never a Developer retry: the
+    derivers are fail-soft for malformed manifests, so a raise is an environment fault) and the real workspace is untouched.
+    Validation only: nothing is persisted here; the registry becomes authoritative only through
+    ``milestones.settle_artifact_registry`` after the source commit, bound to it."""
+    milestone_id = milestone_registry_unit(work_unit)
+    if milestone_id is None:
+        return
+    from kriya.control.artifacts import ArtifactRegistry, registry_digest
+
+    try:
+        derived = ArtifactRegistry().derive_from_workspace(worktree_path, milestone_id)
+    except Exception as error:
+        message = f"{ARTIFACT_REGISTRY_CANDIDATE_DERIVATION_FAILED}: {type(error).__name__}: {error}"
+        state.environment_failure = message
+        failure = Failure(
+            type="artifact_registry", message=message, raw_output=message, source="artifact_registry_gate",
+            authority="deterministic", attempt=state.attempt_number,
+            diagnostics={"reason_code": ARTIFACT_REGISTRY_CANDIDATE_DERIVATION_FAILED, "milestone_id": milestone_id},
+        )
+        state.record_gate_outcome(failure.to_gate_outcome())
+        raise QualityGateFailure(failure) from error
+    state.candidate_artifact_registry_digest = registry_digest(derived)
+    state.record_event(RunEvent(
+        kind="artifact_registry.candidate_validated", attempt=state.attempt_number, source="artifact_registry_gate",
+        authority=EventAuthority.AUTHORITATIVE, message=f"the candidate derives {len(derived)} artifact record(s)",
+        details={"milestone_id": milestone_id, "records": len(derived), "digest": state.candidate_artifact_registry_digest},
+    ))
+
+
 async def approval_gate(
     ctx: StageContext, deps: StageDeps, *, attempt_ctx: Any,
 ) -> Tuple[Optional[Dict[str, Any]], bool]:

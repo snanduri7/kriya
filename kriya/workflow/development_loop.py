@@ -58,12 +58,18 @@ from kriya.workflow.obligations import ObligationLedger
 from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS
 from kriya.workflow.pytest_stability import classify_with_baseline_stability, record_regression_decision
 from kriya.workflow.pytest_stability import decision_summary as pytest_decision_summary
-from kriya.workflow.requirement_closers import SUITE_BASELINE_FROM_RUN
+from kriya.workflow.requirement_closers import SUITE_BASELINE_FROM_RUN, closer_call, run_requirement_closers
 from kriya.workflow.requirements import REQUIREMENTS_UNRESOLVED, blocking_requirements, seed_requirement_obligations
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.run_lifecycle import persist_early_exit_trace, stage_run_trace
 from kriya.workflow.semantic_region_authority import find_unauthorized_semantic_changes
-from kriya.workflow.stage_apply import apply_terminal_candidate, approval_gate, extract_lessons, prepare_lessons
+from kriya.workflow.stage_apply import (
+    apply_terminal_candidate,
+    approval_gate,
+    extract_lessons,
+    prepare_lessons,
+    run_artifact_registry_gate,
+)
 from kriya.workflow.stage_context import StageContext, StageDeps
 from kriya.workflow.toolchain import (
     _check_java_toolchain_mismatch,
@@ -690,95 +696,100 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
             # "Do not modify any other file": decided from what the run
             # actually changed (this candidate plus the run's committed
             # history) against the files the goal itself names.
-            scope_closures = await asyncio.to_thread(
-                deps.close_requirements_by_mutation_scope, resolved_obligation_ledger, requirement_set,
-                worktree_path, workspace_path, candidate_paths=state.all_files_written,
-                revision=state.attempt_number,
-            )
-            # FS-1C2 B2-a: the operator's acceptance file judges the
-            # behaviour claims it covers on this candidate.
-            acceptance_closures = await asyncio.to_thread(
-                deps.close_requirements_with_acceptance_tests, deps.config.autonomy,
-                resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
-                acceptance=deps.bound_acceptance(deps.engine), approval=deps.bound_approval(deps.engine),
-                modified=state.all_files_written, revision=state.attempt_number,
-                toolchain_declaration_mutable=toolchain_declaration_mutable(
-                    write_scope_mode, allowed_write_relpaths, structured_plan,
+            # Gate F: the closer SEQUENCE, its order and the concatenation are requirement_closers.run_requirement_closers's
+            # (shared with the enforce TerminalGateService). This site supplies its own scope's arguments - each thunk is
+            # read right before its closer runs - and the deps.* closer names, so the patch seams are unchanged.
+            # "Do not modify any other file": decided from what the run actually changed (this candidate plus the run's
+            # committed history) against the files the goal itself names. FS-1C2 B2-a: the operator's acceptance file
+            # judges the behaviour claims it covers on this candidate. VERIFICATION-CONTRACT-003: the goal's compiled
+            # examples, the API predicate, the test-addition record and the documentation referent - each closer bound
+            # by the sealed contract. An UNVERIFIED (cannot confirm from code) requirement whose own text names existing
+            # tests is closed only by running exactly those tests on this candidate. REQUIREMENT-CLOSURE-PLAIN-GOAL-001:
+            # the run's mutation record decides "do not change any existing test"; the candidate's own complete, green
+            # full suite closes "every existing test must keep passing". OD-3: the files the goal froze by name, judged
+            # from the same mutation record. SUITE-PRESERVATION-CLOSURE-BASELINE-ATTRIBUTION-001: the run's own captured
+            # baseline, stability cache and replay - no second baseline run on this path.
+            closure_run = await run_requirement_closers({
+                "mutation_scope": lambda: closer_call(
+                    deps.close_requirements_by_mutation_scope, resolved_obligation_ledger, requirement_set,
+                    worktree_path, workspace_path, candidate_paths=state.all_files_written,
+                    revision=state.attempt_number,
                 ),
-                contract=verification_contract,
-            )
-            # VERIFICATION-CONTRACT-003: the goal's compiled examples, the
-            # API predicate, the test-addition record and the documentation
-            # referent - each closer bound by the sealed contract.
-            contract_closures: List[Dict[str, Any]] = []
-            for _closer, closer_call in (
-                ("external authority", lambda: deps.close_requirements_with_authority_bundle_evidence(
+                "acceptance": lambda: closer_call(
+                    deps.close_requirements_with_acceptance_tests, deps.config.autonomy,
+                    resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
+                    acceptance=deps.bound_acceptance(deps.engine), approval=deps.bound_approval(deps.engine),
+                    modified=state.all_files_written, revision=state.attempt_number,
+                    toolchain_declaration_mutable=toolchain_declaration_mutable(
+                        write_scope_mode, allowed_write_relpaths, structured_plan,
+                    ),
+                    contract=verification_contract,
+                ),
+                "authority_bundle": lambda: closer_call(
+                    deps.close_requirements_with_authority_bundle_evidence,
                     deps.config.autonomy, resolved_obligation_ledger, requirement_set,
                     verification_contract, worktree_path, workspace_path, engine=deps.engine,
                     revision=state.attempt_number,
                     toolchain_declaration_mutable=toolchain_declaration_mutable(
-                        write_scope_mode, allowed_write_relpaths, structured_plan))),
-                ("derived examples", lambda: deps.close_requirements_with_derived_examples(
+                        write_scope_mode, allowed_write_relpaths, structured_plan),
+                ),
+                "derived_examples": lambda: closer_call(
+                    deps.close_requirements_with_derived_examples,
                     deps.config.autonomy, resolved_obligation_ledger, requirement_set, worktree_path,
                     workspace_path, engine=deps.engine, modified=state.all_files_written,
                     revision=state.attempt_number, contract=verification_contract,
                     toolchain_declaration_mutable=toolchain_declaration_mutable(
-                        write_scope_mode, allowed_write_relpaths, structured_plan))),
-                ("API preservation", lambda: deps.close_requirements_by_api_preservation(
-                    resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
-                    workspace_path, candidate_paths=state.all_files_written, revision=state.attempt_number)),
-                ("test addition", lambda: deps.close_requirements_by_test_addition(
-                    resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
-                    workspace_path, revision=state.attempt_number)),
-                ("documentation", lambda: deps.close_requirements_by_documentation(
-                    resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
-                    revision=state.attempt_number)),
-            ):
-                contract_closures += await asyncio.to_thread(closer_call)
-            # An UNVERIFIED (cannot confirm from code) requirement whose
-            # own text names existing tests is closed only by running
-            # exactly those tests on this candidate.
-            closures = await asyncio.to_thread(
-                deps.close_requirements_with_named_tests, deps.config.autonomy,
-                resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
-                modified=state.all_files_written, revision=state.attempt_number,
-                toolchain_declaration_mutable=toolchain_declaration_mutable(
-                    write_scope_mode, allowed_write_relpaths, structured_plan,
+                        write_scope_mode, allowed_write_relpaths, structured_plan),
                 ),
-                java_home_override=state.java_home_override, contract=verification_contract,
-            )
-            # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: the run's mutation
-            # record decides "do not change any existing test"; the
-            # candidate's own complete, green full suite closes
-            # "every existing test must keep passing".
-            immutability_closures = await asyncio.to_thread(
-                deps.close_requirements_by_test_immutability, resolved_obligation_ledger, requirement_set,
-                worktree_path, workspace_path, candidate_paths=state.all_files_written,
-                revision=state.attempt_number, contract=verification_contract,
-            )
-            # OD-3: the files the goal froze by name, judged from the same mutation record.
-            frozen_closures = await asyncio.to_thread(
-                deps.close_requirements_by_file_immutability, resolved_obligation_ledger, requirement_set,
-                worktree_path, workspace_path, candidate_paths=state.all_files_written,
-                revision=state.attempt_number, contract=verification_contract,
-            )
-            suite_closures = await asyncio.to_thread(
-                deps.close_requirements_by_suite_preservation, deps.config.autonomy,
-                resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
-                revision=state.attempt_number, candidate_paths=state.all_files_written,
-                toolchain_declaration_mutable=toolchain_declaration_mutable(
-                    write_scope_mode, allowed_write_relpaths, structured_plan,
+                "api_preservation": lambda: closer_call(
+                    deps.close_requirements_by_api_preservation,
+                    resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
+                    workspace_path, candidate_paths=state.all_files_written, revision=state.attempt_number,
                 ),
-                java_home_override=state.java_home_override, contract=verification_contract,
-                # SUITE-PRESERVATION-CLOSURE-BASELINE-ATTRIBUTION-001: the run's own captured
-                # baseline, stability cache and replay - no second baseline run on this path.
-                goal=goal, suite_baseline=state.validation_baseline_full_regression,
-                stability_cache=state.pytest_stability_cache, baseline_suite_run=baseline_suite_run,
-                baseline_source=SUITE_BASELINE_FROM_RUN,
-                run_baseline_policy=state.validation_baseline_policy,
-            )
-            closures = (scope_closures + acceptance_closures + contract_closures + closures
-                        + immutability_closures + frozen_closures + suite_closures)
+                "test_addition": lambda: closer_call(
+                    deps.close_requirements_by_test_addition,
+                    resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
+                    workspace_path, revision=state.attempt_number,
+                ),
+                "documentation": lambda: closer_call(
+                    deps.close_requirements_by_documentation,
+                    resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
+                    revision=state.attempt_number,
+                ),
+                "named_tests": lambda: closer_call(
+                    deps.close_requirements_with_named_tests, deps.config.autonomy,
+                    resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
+                    modified=state.all_files_written, revision=state.attempt_number,
+                    toolchain_declaration_mutable=toolchain_declaration_mutable(
+                        write_scope_mode, allowed_write_relpaths, structured_plan,
+                    ),
+                    java_home_override=state.java_home_override, contract=verification_contract,
+                ),
+                "test_immutability": lambda: closer_call(
+                    deps.close_requirements_by_test_immutability, resolved_obligation_ledger, requirement_set,
+                    worktree_path, workspace_path, candidate_paths=state.all_files_written,
+                    revision=state.attempt_number, contract=verification_contract,
+                ),
+                "file_immutability": lambda: closer_call(
+                    deps.close_requirements_by_file_immutability, resolved_obligation_ledger, requirement_set,
+                    worktree_path, workspace_path, candidate_paths=state.all_files_written,
+                    revision=state.attempt_number, contract=verification_contract,
+                ),
+                "suite_preservation": lambda: closer_call(
+                    deps.close_requirements_by_suite_preservation, deps.config.autonomy,
+                    resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
+                    revision=state.attempt_number, candidate_paths=state.all_files_written,
+                    toolchain_declaration_mutable=toolchain_declaration_mutable(
+                        write_scope_mode, allowed_write_relpaths, structured_plan,
+                    ),
+                    java_home_override=state.java_home_override, contract=verification_contract,
+                    goal=goal, suite_baseline=state.validation_baseline_full_regression,
+                    stability_cache=state.pytest_stability_cache, baseline_suite_run=baseline_suite_run,
+                    baseline_source=SUITE_BASELINE_FROM_RUN,
+                    run_baseline_policy=state.validation_baseline_policy,
+                ),
+            })
+            closures = closure_run.attempts
             if closures:
                 state.record_event(RunEvent(
                     kind="requirement.closure", attempt=state.attempt_number,
@@ -829,6 +840,9 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
 
     # BACKEND-READINESS-V2: the exception-masking rule on the same final batch.
     deps._run_semantic_safety_gate(state, worktree_path=worktree_path, workspace_path=workspace_path)
+
+    # Gate F: a milestone unit's candidate must derive its artifact registry before anything reaches the real workspace.
+    run_artifact_registry_gate(state, worktree_path=worktree_path, work_unit=work_unit)
 
     # Candidate-only checkpoint: generation and inner gates passed, but
     # terminal regression and application have not. Its name and payload

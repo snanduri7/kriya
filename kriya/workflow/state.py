@@ -746,6 +746,9 @@ class GenerationState:
     # (kriya/static_analysis/service.py). The terminal commit's guard reads
     # it; None when the gate has not run.
     static_analysis_result: Optional[Any] = None
+    # Gate F: the digest of the artifact-registry derivation the milestone pre-commit gate validated on the candidate
+    # (kriya.control.artifacts.registry_digest); None when the unit is not a milestone unit or the gate did not run.
+    candidate_artifact_registry_digest: Optional[str] = None
     # CANDIDATE-VERIFIED-DIGEST-BINDING-001: the binding of the terminal batch
     # taken when the current attempt's candidate gates passed
     # (kriya/workflow/verification_binding.py). The terminal commit refuses
