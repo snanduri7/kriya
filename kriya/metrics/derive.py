@@ -116,6 +116,9 @@ def outcome_block(runs: Sequence[TraceRun]) -> Dict[str, Any]:
 
     approvals = [details.get("outcome") for run in runs for details in run.events_of("approval.decision")]
     expansions = [details.get("outcome") for run in runs for details in run.events_of("authority.expansion")]
+    developer_attempts = sum(int(row.get("attempts") or 0) for run in runs for row in run.role_rows if row.get("role") == "developer")
+    runs_with_attempts = sum(1 for run in runs if any(
+        row.get("role") == "developer" and int(row.get("attempts") or 0) > 0 for row in run.role_rows))
     return {
         "runs": total,
         "final_verified_success": ratio(successes, total, "no runs"),
@@ -126,6 +129,8 @@ def outcome_block(runs: Sequence[TraceRun]) -> Dict[str, Any]:
             "full_set": count(sum(run.full_set_retries for run in runs)),
             "targeted": count(sum(run.targeted_retries for run in runs)),
         },
+        # Retry amplification: Developer attempts charged per run that made any (1.0 = every run passed its first attempt).
+        "developer_attempts_per_run": ratio(developer_attempts, runs_with_attempts, "no run charged a Developer attempt"),
         "context_insufficiency": count(sum(
             1 for run in runs if CONTEXT_INSUFFICIENCY_TYPES & set(run.failure_types))),
         "context_request_fit_reductions": count(events("context.request_fit")),
@@ -239,6 +244,54 @@ def adjudication_block(runs: Sequence[TraceRun], store: Optional[AdjudicationSto
     }
 
 
+def evidence_statement(runs: Sequence[TraceRun], adjudication: Mapping[str, Any]) -> Dict[str, Any]:
+    """What this report's evidence is, and what claim it does and does NOT support (owner rule: every metrics/certification
+    report states the number of runs, the exact runtime identities, the observed incidents, and the supported / unsupported
+    statistical claim). Pure and deterministic; it never turns "no incident observed" into "no incident possible"."""
+    identities: Dict[Tuple[str, str], bool] = {}
+    for run in runs:
+        for row in run.role_rows:
+            key = (str(row.get("runtime_digest") or "unavailable"), str(row.get("inference_settings_digest") or "unavailable"))
+            identities[key] = identities.get(key, True) and bool(row.get("runtime_exact"))
+    statement: Dict[str, Any] = {
+        "runs": {"generation": sum(run.kind in (KIND_GENERATION, KIND_EXCEPTION) for run in runs),
+                 "enforce": sum(run.kind == KIND_ENFORCE for run in runs)},
+        "runtime_identities": [{"runtime_digest": key[0], "inference_settings_digest": key[1], "exact": exact}
+                               for key, exact in sorted(identities.items())],
+        "inexact_or_unavailable_identities": sum(1 for key, exact in identities.items() if not exact or "unavailable" in key),
+    }
+    unsupported = [
+        "a zero underlying incident rate (a bound below is the most this population can say)",
+        "any claim about a runtime identity, inference setting, task class or workload that is not in this population",
+        "independence of the runs: repeated trials on one runtime identity and one task set are not independent samples of production",
+    ]
+    if adjudication.get("status") != MEASURED:
+        statement.update(
+            incidents=unavailable("no adjudication store was provided or it is invalid"),
+            supported=["no false-success or regression-escape claim of any kind"], not_supported=unsupported)
+        return statement
+    judged = int(adjudication["adjudicated_successes"])
+    unjudged = int(adjudication["successful_runs"]) - judged
+    verdicts = adjudication["verdicts"]
+    false_success, escapes = int(verdicts[VERDICT_FALSE_SUCCESS]), int(verdicts[VERDICT_REGRESSION_ESCAPE])
+    statement["incidents"] = {"status": MEASURED, "adjudicated_successful_runs": judged, "false_success": false_success,
+                              "regression_escape": escapes, "unadjudicated_successful_runs": unjudged}
+    if unjudged:
+        unsupported.insert(1, f"any claim about the {unjudged} unadjudicated successful run(s): their false success and regression escape are UNKNOWN")
+    if judged == 0:
+        supported = ["no false-success or regression-escape claim: no successful run is adjudicated"]
+    elif false_success == 0 and escapes == 0:
+        # exact one-sided 95% Clopper-Pearson upper bound for zero events in `judged` trials
+        bound = round(1 - 0.05 ** (1 / judged), 4)
+        statement["upper_bound_95_percent_incident_rate"] = bound
+        supported = [f"no false success and no regression escape was OBSERVED in {judged} adjudicated successful run(s)",
+                     f"if the runs were independent, the underlying incident rate is at most {bound} with 95% confidence"]
+    else:
+        supported = [f"{false_success} false success(es) and {escapes} regression escape(s) were OBSERVED in {judged} adjudicated successful run(s)"]
+    statement.update(supported=supported, not_supported=unsupported)
+    return statement
+
+
 def chaos_block(chaos: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     if chaos is None:
         return {"status": NOT_PROVIDED}
@@ -278,6 +331,7 @@ def derive_metrics(
     generation = [run for run in runs if run.kind in (KIND_GENERATION, KIND_EXCEPTION)]
     enforce = [run for run in runs if run.kind == KIND_ENFORCE]
     plans = [run for run in runs if run.kind == KIND_MILESTONE_PLAN]
+    adjudication = adjudication_block(runs, adjudications)
     return {
         "schema": REPORT_SCHEMA,
         "window": {
@@ -297,7 +351,8 @@ def derive_metrics(
         "by_developer_identity": _grouped(generation, lambda run: run.developer_identity or NO_DEVELOPER),
         "model_protocol": model_protocol_rows(runs),
         "static_analysis": static_analysis_block(generation),
-        "adjudication": adjudication_block(runs, adjudications),
+        "adjudication": adjudication,
+        "evidence_statement": evidence_statement(runs, adjudication),
         "chaos": chaos_block(chaos),
         "run_records": run_record_block(run_records),
     }

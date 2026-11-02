@@ -54,7 +54,7 @@ _OUTCOME_ROWS = (
     ("context_request_fit_reductions", "Prompt-fit reductions"), ("authority_rejections", "Authority/D1 rejections"),
     ("containment_failures", "Containment failures"), ("fallback_transitions", "Fallback transitions"),
     ("fallback_selection_skips", "Fallback skips (incompatible)"),
-    ("human_escalations", "Human escalations"), ("pre_approval_review_unattached", "Unattached pre-approval reviews"),
+    ("developer_attempts_per_run", "Developer attempts per run (retry amplification)"), ("human_escalations", "Human escalations"), ("pre_approval_review_unattached", "Unattached pre-approval reviews"),
     ("workspace_commit_failures", "Commit failures (reason)"), ("llm_calls", "LLM calls"),
     ("wall_time_seconds", "Wall time (s)"), ("verification_share", "Verification share (compile + runtime verification timings; tests untimed)"),
 )
@@ -109,6 +109,13 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             f"{row['task_class']} | {row['calls']} | {_value(row['protocol_failure_rate'])} | "
             f"{_value(row['structured_output_failure_rate'])} | {row['prompt_tokens']}/{row['completion_tokens']} | "
             f"{_value(row['first_pass_success'])} |")
+    statement = content["evidence_statement"]
+    lines += ["", "## What this evidence supports", "",
+              f"- Runs: {statement['runs']['generation']} generation, {statement['runs']['enforce']} enforce terminal.",
+              f"- Exact runtime identities in the window: {len(statement['runtime_identities'])} "
+              f"({statement['inexact_or_unavailable_identities']} inexact or unavailable)."]
+    lines += [f"- SUPPORTED: {text}" for text in statement["supported"]]
+    lines += [f"- NOT SUPPORTED: {text}" for text in statement["not_supported"]]
     for section, title in (("static_analysis", "Static analysis"), ("adjudication", "Adjudicated outcomes"),
                            ("chaos", "Chaos invariants"), ("run_records", "RunRecords"), ("thresholds", "Thresholds")):
         lines += ["", f"## {title}", "", "```json", json.dumps(content[section], indent=2, sort_keys=True), "```"]

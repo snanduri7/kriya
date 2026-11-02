@@ -61,7 +61,8 @@ Invariant (owner, Wave-1 closure delta): `no trustworthy validator verdict -> no
 - **Content-free.** Projections never read the goal, prompts, gate output or event messages (canary test). A new metric reads only a typed field or event.
 - **No fake zeros.** A missing metric is UNAVAILABLE, never 0.
 - **Adjudication.** False success and regression escape come only from `kriya metrics adjudicate`, its store's only writer (structural test).
-- **Thresholds.** None ship; they are the operator's.
+- **Thresholds.** None ship in the repo; they are the operator's, outside every workspace. Owner-approved Wave-7 values (false-success = 0, regression-escape = 0 observed incidents over the executed population) live in `~/.kriya/operator/release-thresholds-wave7.yaml`; a PASS means no incident was OBSERVED among the adjudicated runs, not a zero underlying rate.
+- **Evidence statement.** Every report carries `content.evidence_statement` (runs, exact runtime identities, observed incidents, unadjudicated successes, and what the evidence does and does NOT support, with an exact one-sided 95% upper bound only when zero incidents were observed in >= 1 adjudicated runs) and `outcomes.*.developer_attempts_per_run` (retry amplification). Tests: `tests/test_prd033_metrics.py` (Wave 7 section), `tests/test_prd033_current_lineage.py` (a real-engine run derived through the production TraceLogger).
 - **New decisions.** Add a typed event (e.g. `approval.decision`) rather than parsing text.
 
 ### Attempt evidence recorder (`kriya/core/attempt_evidence/`) — LR-R1-M1

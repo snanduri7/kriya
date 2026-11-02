@@ -88,6 +88,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_prd032_chaos_milestone.py': ('S', 'M'),
  'tests/test_prd032_chaos_requirements.py': ('S', 'M'),
  'tests/test_prd032_chaos_recovery.py': ('S', 'M'),
+ 'tests/test_prd033_current_lineage.py': ('S', 'M'),
  'tests/test_e11_owner_modules.py': ('S', 'M'),
  'tests/test_e14_pre_characterization.py': ('S', 'M'),
  'tests/test_early_exit_traces.py': ('F2', 'F'),

@@ -358,3 +358,101 @@ def test_a_row_with_unparseable_json_projects_safely():
     run = project_trace_row({"run_id": "r", "status": "success", "generation_metrics": "{not json",
                              "run_events": "[", "gate_outcomes": None, "failure_report": "{}"})
     assert run.kind == "generation" and run.gates == () and run.role_rows == () and run.llm_calls == 0
+
+
+# --- Wave 7 (PRD-033 delta): the evidence statement, retry amplification and the owner's 0/0 release thresholds ------------
+
+DEV_B = {**DEV_A, "runtime_digest": "rt-b", "runtime_exact": False}
+
+
+def _judge(run_id, verdict):
+    adj.record_adjudication(run_id=run_id, verdict=verdict, adjudicator="qa", evidence="checked", run_status="success")
+
+
+def _statement(db, store=None):
+    return derive_metrics(_runs(db), adjudications=store)["evidence_statement"]
+
+
+def test_the_statement_names_runs_identities_incidents_and_what_is_not_supported(db, store_home):
+    for run_id in ("s1", "s2", "s3"):
+        _log(db, run_id, events=[_event("model.role_metrics", rows=[DEV_A, DEV_B])])
+    _log(db, "f1", status="failure", category="no_progress")
+    _judge("s1", adj.VERDICT_CONFIRMED_SUCCESS)
+    _judge("s2", adj.VERDICT_CONFIRMED_SUCCESS)
+    statement = _statement(db, adj.load_adjudications())
+    assert statement["runs"] == {"generation": 4, "enforce": 0}
+    assert statement["runtime_identities"] == [
+        {"runtime_digest": "rt-a", "inference_settings_digest": "set-1", "exact": True},
+        {"runtime_digest": "rt-b", "inference_settings_digest": "set-1", "exact": False}]
+    assert statement["inexact_or_unavailable_identities"] == 1
+    assert statement["incidents"] == {"status": "MEASURED", "adjudicated_successful_runs": 2, "false_success": 0,
+                                      "regression_escape": 0, "unadjudicated_successful_runs": 1}
+    assert statement["upper_bound_95_percent_incident_rate"] == round(1 - 0.05 ** (1 / 2), 4) == 0.7764
+    supported = " ".join(statement["supported"])
+    assert "OBSERVED in 2 adjudicated" in supported and "at most 0.7764" in supported
+    unsupported = " ".join(statement["not_supported"])
+    assert "zero underlying incident rate" in unsupported and "1 unadjudicated successful run(s)" in unsupported
+    assert "independence" in unsupported and "not in this population" in unsupported
+    markdown = render_markdown(build_report(_runs(db), adjudications=adj.load_adjudications(), generated={"at": "t"}))
+    assert "SUPPORTED: no false success" in markdown and "NOT SUPPORTED: a zero underlying incident rate" in markdown
+
+
+def test_the_statement_never_turns_missing_adjudication_into_a_claim(db, store_home):
+    _log(db, "s1")
+    for store in (None, adj.load_adjudications()):               # no store provided / a valid empty store: no run adjudicated
+        statement = _statement(db, store)
+        assert "upper_bound_95_percent_incident_rate" not in statement
+        assert statement["incidents"]["status"] in ("UNAVAILABLE", "MEASURED")
+        assert statement["supported"] == [
+            "no false-success or regression-escape claim of any kind" if store is None
+            else "no false-success or regression-escape claim: no successful run is adjudicated"]
+        assert any("zero underlying incident rate" in text for text in statement["not_supported"])
+
+
+def test_the_statement_reports_observed_incidents_without_a_bound(db, store_home):
+    for run_id in ("s1", "s2"):
+        _log(db, run_id)
+    _judge("s1", adj.VERDICT_FALSE_SUCCESS)
+    _judge("s2", adj.VERDICT_REGRESSION_ESCAPE)
+    statement = _statement(db, adj.load_adjudications())
+    assert statement["incidents"]["false_success"] == 1 and statement["incidents"]["regression_escape"] == 1
+    assert statement["supported"] == ["1 false success(es) and 1 regression escape(s) were OBSERVED in 2 adjudicated successful run(s)"]
+    assert "upper_bound_95_percent_incident_rate" not in statement
+
+
+def test_retry_amplification_is_developer_attempts_per_run_that_made_any(db):
+    _log(db, "a", events=[_event("model.role_metrics", rows=[DEV_A])])                              # 2 attempts
+    _log(db, "b", events=[_event("model.role_metrics", rows=[{**DEV_A, "attempts": 1}])])           # 1 attempt
+    _log(db, "c")                                                                                   # no Developer evidence: excluded
+    block = derive_metrics(_runs(db))["outcomes"]["generation"]
+    assert block["developer_attempts_per_run"] == {"status": "MEASURED", "value": 1.5, "numerator": 3, "denominator": 2}
+    assert derive_metrics(_runs(db)[2:])["outcomes"]["generation"]["developer_attempts_per_run"]["status"] == "UNAVAILABLE"
+
+
+def test_the_owner_zero_zero_release_thresholds_pass_only_on_adjudicated_zero_and_fail_on_one(db, store_home, tmp_path):
+    """Owner-approved: false-success tolerance = 0 and regression-escape tolerance = 0 observed incidents over the executed population."""
+    entries = [{"metric": "adjudication.false_success_rate", "comparator": "max", "value": 0, "min_samples": 1},
+               {"metric": "adjudication.regression_escape_rate", "comparator": "max", "value": 0, "min_samples": 1}]
+    thresholds, digest = load_thresholds(_thresholds(tmp_path, entries), workspace_root=str(tmp_path / "ws"))
+    for run_id in ("s1", "s2"):
+        _log(db, run_id)
+    # nothing adjudicated: UNAVAILABLE -> INCONCLUSIVE, never PASS
+    unjudged = derive_metrics(_runs(db), adjudications=adj.load_adjudications())
+    assert evaluate_thresholds(unjudged, thresholds, digest)["status"] == "INCONCLUSIVE"
+    _judge("s1", adj.VERDICT_CONFIRMED_SUCCESS)
+    _judge("s2", adj.VERDICT_CONFIRMED_SUCCESS)
+    clean = evaluate_thresholds(derive_metrics(_runs(db), adjudications=adj.load_adjudications()), thresholds, digest)
+    assert clean["status"] == "PASS" and [row["status"] for row in clean["results"]] == ["PASS", "PASS"]
+    _judge("s2", adj.VERDICT_FALSE_SUCCESS)                                  # supersedes: one false success in two
+    dirty = evaluate_thresholds(derive_metrics(_runs(db), adjudications=adj.load_adjudications()), thresholds, digest)
+    assert dirty["status"] == "FAIL" and [row["status"] for row in dirty["results"]] == ["FAIL", "PASS"]
+
+
+def test_containment_failures_count_exactly_the_typed_containment_setup_failures(db):
+    _log(db, "ok")
+    _log(db, "c1", status="failure", category="containment_setup_failed")
+    _log(db, "c2", status="failure", category="containment_setup_failed")
+    _log(db, "other", status="failure", category="quality_gates_exhausted")
+    block = derive_metrics(_runs(db))["outcomes"]["generation"]
+    assert block["containment_failures"] == {"status": "MEASURED", "value": 2}
+    assert block["failure_categories"] == {"containment_setup_failed": 2, "quality_gates_exhausted": 1}
