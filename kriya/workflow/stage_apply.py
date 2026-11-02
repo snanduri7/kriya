@@ -134,24 +134,32 @@ def milestone_registry_unit(work_unit: Any) -> Optional[str]:
 def run_artifact_registry_gate(state: RunState, *, worktree_path: str, work_unit: Any) -> None:
     """Gate F (owner ruling 2026-11-01), at the milestone pre-apply boundary: the canonical
     ``ArtifactRegistry.derive_from_workspace`` runs on the CANDIDATE before the terminal apply, exactly as the enforce
-    terminal derives from its candidate before its commit. A failure is a deterministic stop (never a Developer retry: the
-    derivers are fail-soft for malformed manifests, so a raise is an environment fault) and the real workspace is untouched.
+    terminal derives from its candidate before its commit. A failure is a deterministic stop (an I/O-class exception is an environment fault; an
+    indeterminate present manifest is a bounded Developer retry, never a commit) and the real workspace is untouched.
     Validation only: nothing is persisted here; the registry becomes authoritative only through
     ``milestones.settle_artifact_registry`` after the source commit, bound to it."""
     milestone_id = milestone_registry_unit(work_unit)
     if milestone_id is None:
         return
-    from kriya.control.artifacts import ArtifactRegistry, registry_digest
+    from kriya.control.artifacts import ArtifactDerivationIndeterminate, ArtifactRegistry, registry_digest
 
     try:
         derived = ArtifactRegistry().derive_from_workspace(worktree_path, milestone_id)
     except Exception as error:
-        message = f"{ARTIFACT_REGISTRY_CANDIDATE_DERIVATION_FAILED}: {type(error).__name__}: {error}"
-        state.environment_failure = message
+        # ARTIFACT-DERIVATION-INDETERMINATE-MANIFEST-001: a present canonical manifest whose artifact cannot be derived is NOT
+        # an environment fault: the candidate (or the repository it extends) carries the unusable manifest, so the Developer is
+        # told exactly which one and the ordinary bounded retry applies. Any other exception is an environment fault.
+        indeterminate = isinstance(error, ArtifactDerivationIndeterminate)
+        if indeterminate:
+            message, reason_code = str(error), error.reason_code
+        else:
+            message, reason_code = f"{ARTIFACT_REGISTRY_CANDIDATE_DERIVATION_FAILED}: {type(error).__name__}: {error}", ARTIFACT_REGISTRY_CANDIDATE_DERIVATION_FAILED
+            state.environment_failure = message
         failure = Failure(
             type="artifact_registry", message=message, raw_output=message, source="artifact_registry_gate",
             authority="deterministic", attempt=state.attempt_number,
-            diagnostics={"reason_code": ARTIFACT_REGISTRY_CANDIDATE_DERIVATION_FAILED, "milestone_id": milestone_id},
+            diagnostics={"reason_code": reason_code, "milestone_id": milestone_id,
+                         **({"problems": list(error.problems)} if indeterminate else {})},
         )
         state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure) from error

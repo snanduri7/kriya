@@ -1,0 +1,2086 @@
+{
+  "A_no_manifest": {
+    "commits_dir": [
+      "445e27b82f734839a2ace3b40b64afb0.json",
+      "ac4a915f04da472dad48d3cf018a1402.json"
+    ],
+    "completed": [
+      "M1",
+      "M2"
+    ],
+    "files_seed": [],
+    "legacy_result": {
+      "group_id": "grp-gatef",
+      "integration_result": {
+        "accepted_risk": false,
+        "accepted_risks": [],
+        "active_skill_manifest": [],
+        "candidate_gates_passed": true,
+        "completion_kind": null,
+        "contract_registry": null,
+        "design": "Design: edit calc.py",
+        "deterministic_gate_evidence": [
+          {
+            "attempt": 1,
+            "passed": true,
+            "status": "PASSED",
+            "type": "compile"
+          },
+          {
+            "attempt": 1,
+            "passed": null,
+            "status": "NO_TESTS_EXECUTED",
+            "type": "regression_test"
+          }
+        ],
+        "environment_failure": null,
+        "failure_category": null,
+        "failure_report": [
+          {
+            "attribution_tier": null,
+            "category": "build",
+            "failure_type": "compile"
+          },
+          {
+            "attribution_tier": null,
+            "category": "verification",
+            "failure_type": "regression_test"
+          }
+        ],
+        "files": [],
+        "generation_metrics": {
+          "calls": 1,
+          "duration_seconds": 0.0007110419683158398,
+          "files_requested": 1,
+          "llm": {
+            "architect_calls": 1,
+            "architect_wall_seconds": 0.00034900009632110596,
+            "calls": 3,
+            "developer_calls": 1,
+            "developer_completion_tokens": 0,
+            "developer_prompt_tokens": 0,
+            "developer_tokens_available_for": 0,
+            "developer_wall_seconds": 0.0007110419683158398,
+            "planner_calls": 1,
+            "planner_wall_seconds": 0.0005888750310987234,
+            "reviewer_calls": 0,
+            "reviewer_wall_seconds": 0.0,
+            "wall_seconds": 0.0016489170957356691
+          },
+          "operation_fallbacks": 0,
+          "retry": {
+            "attempts_by_mode": {
+              "full_set": 1
+            },
+            "baseline_replay_count": 0,
+            "candidate_independent_diagnostic_invocations": 0,
+            "full_set_attempts": 0,
+            "targeted_attempts": 0,
+            "unrecoverable_scope_denials": 0
+          },
+          "successful_calls": 1,
+          "terminal_status": "success",
+          "total_wall_seconds": 5.607446874957532,
+          "validated_files": 0,
+          "validation_invalidations": 0,
+          "validators": {
+            "by_kind": {
+              "compile": 1
+            },
+            "invocations": 1,
+            "wall_seconds": 0.2708147499943152
+          }
+        },
+        "last_failure": null,
+        "lsp_warning": null,
+        "no_progress_reason": null,
+        "overall_attempt_passed": true,
+        "plan": "Step 1: edit calc.py",
+        "plan_scope_conflict": null,
+        "quality_gates_passed": true,
+        "requirements": {
+          "digest": "4bd665d07bcc1442343907dd88627a8c5cc9cca4102cc58125c4f65673a0d27b",
+          "evidence": {},
+          "goal_digest": "ab87f485fb1dd67d1893dfc9cd326e599591fd5f97271f3f13bb90dd7812a65b",
+          "outcomes": {
+            "REQ-1": "pending"
+          },
+          "requirements": [
+            {
+              "id": "REQ-1",
+              "kind": "requirement",
+              "ordinal": 1,
+              "source": "goal",
+              "text": "Add mul and div to calc.py."
+            }
+          ],
+          "verdicts": {
+            "REQ-1": {
+              "detail": "",
+              "evidence_class": null,
+              "evidence_id": null,
+              "model_outcome": "pending",
+              "outcome": "pending",
+              "reason_code": "NOT_YET_VERIFIED",
+              "revision": 0,
+              "source": "requirements.derive_requirements",
+              "verifier": {}
+            }
+          },
+          "version": 1
+        },
+        "retry_progress": {
+          "classification": null,
+          "consecutive_no_progress_attempts": 0,
+          "distinct_vectors": 0,
+          "last_vector_digest": null,
+          "no_progress_terminated": false,
+          "sampling_resamples": 0,
+          "terminal_reason": null
+        },
+        "review": "",
+        "review_included_in_approval": false,
+        "run_id": "20261102T071923-a9bdb1f8",
+        "skill_staleness_warnings": null,
+        "static_analysis": {
+          "accepted_risk": false,
+          "banner": "STATIC ANALYSIS: DISABLED (STATIC_ANALYSIS_NOT_CONFIGURED)",
+          "coverage": null,
+          "evidence_digest": "eff54be508cf0a561e30563264cdfb34206a0b54f037d0ccaf45d2d2a21a6c18",
+          "evidence_path": null,
+          "outcome": "DISABLED",
+          "permits_commit": true,
+          "provider": null,
+          "reason_codes": [
+            "STATIC_ANALYSIS_NOT_CONFIGURED"
+          ],
+          "requirement": "optional",
+          "summary": null,
+          "waiver_ids": []
+        },
+        "terminal_regression_passed": true,
+        "toolchain_warning": null,
+        "unchanged_files": [
+          "calc.py"
+        ],
+        "unresolved_skill_gaps": null,
+        "verification_results": [],
+        "workspace_commit_failure": null
+      },
+      "milestone_reuse": {
+        "assessed_at": "2026-11-02T01:49:08.403693+00:00",
+        "decisions": [],
+        "events": [],
+        "run_id": "20261102T071907-39c57d39",
+        "schema_version": 1
+      },
+      "milestone_total": 2,
+      "replay": {
+        "milestones": [],
+        "not_evaluable": [],
+        "not_executed": [],
+        "passed": [],
+        "regressed": [],
+        "state": "nothing_to_replay"
+      },
+      "status": "success",
+      "work_unit_states": {
+        "M1": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "M1"
+        },
+        "M2": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "M2"
+        },
+        "__integration__": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "__integration__"
+        }
+      }
+    },
+    "m2": null,
+    "records": {
+      "M1": [],
+      "M2": []
+    },
+    "units_run": [
+      1,
+      2,
+      3
+    ],
+    "workspace_changed_files": [
+      "calc.py"
+    ]
+  },
+  "B1_py_bad_from_start": {
+    "commits_dir": [],
+    "completed": [],
+    "files_seed": [
+      "pyproject.toml"
+    ],
+    "legacy_result": {
+      "committed_changes_retained": false,
+      "committed_work_units": [],
+      "group_id": "grp-gatef",
+      "milestone_id": "M1",
+      "milestone_index": 1,
+      "milestone_reuse": {
+        "assessed_at": "2026-11-02T01:50:25.256506+00:00",
+        "decisions": [],
+        "events": [],
+        "run_id": "20261102T072024-889fbe77",
+        "schema_version": 1
+      },
+      "milestone_total": 2,
+      "result": {
+        "accepted_risk": false,
+        "accepted_risks": [],
+        "active_skill_manifest": [],
+        "candidate_gates_passed": false,
+        "completion_kind": null,
+        "contract_registry": null,
+        "design": "Design: edit calc.py",
+        "deterministic_gate_evidence": [],
+        "environment_failure": "CONTAINMENT_SETUP_FAILED: Cannot resolve Python toolchain from pyproject.toml: Expected ']' at the end of a table declaration (at line 1, column 9)",
+        "failure_category": "containment_setup_failed",
+        "failure_report": [
+          {
+            "attribution_tier": "full_set",
+            "category": "unclassified",
+            "failure_type": "containment_setup_failed"
+          }
+        ],
+        "files": [
+          "calc.py"
+        ],
+        "generation_metrics": {
+          "calls": 1,
+          "duration_seconds": 0.0007410830585286021,
+          "files_requested": 1,
+          "llm": {
+            "architect_calls": 1,
+            "architect_wall_seconds": 0.0003282909747213125,
+            "calls": 4,
+            "developer_calls": 1,
+            "developer_completion_tokens": 0,
+            "developer_prompt_tokens": 0,
+            "developer_tokens_available_for": 0,
+            "developer_wall_seconds": 0.0007410830585286021,
+            "planner_calls": 1,
+            "planner_wall_seconds": 0.000502042006701231,
+            "reviewer_calls": 1,
+            "reviewer_wall_seconds": 0.0004652090137824416,
+            "wall_seconds": 0.0020366250537335873
+          },
+          "operation_fallbacks": 0,
+          "retry": {
+            "attempts_by_mode": {
+              "full_set": 1
+            },
+            "baseline_replay_count": 0,
+            "candidate_independent_diagnostic_invocations": 0,
+            "full_set_attempts": 1,
+            "targeted_attempts": 0,
+            "unrecoverable_scope_denials": 0
+          },
+          "successful_calls": 1,
+          "terminal_status": "environment_failure",
+          "total_wall_seconds": 2.3870768749620765,
+          "validated_files": 0,
+          "validation_invalidations": 0,
+          "validators": {
+            "by_kind": {},
+            "invocations": 0,
+            "wall_seconds": 0
+          }
+        },
+        "last_failure": {
+          "message": "CONTAINMENT_SETUP_FAILED: Cannot resolve Python toolchain from pyproject.toml: Expected ']' at the end of a table declaration (at line 1, column 9)",
+          "raw_output": "Cannot resolve Python toolchain from pyproject.toml: Expected ']' at the end of a table declaration (at line 1, column 9)",
+          "type": "containment_setup_failed"
+        },
+        "lsp_warning": null,
+        "no_progress_reason": null,
+        "overall_attempt_passed": false,
+        "plan": "Step 1: edit calc.py",
+        "plan_scope_conflict": null,
+        "quality_gates_passed": false,
+        "retry_progress": {
+          "classification": "PROGRESS",
+          "consecutive_no_progress_attempts": 0,
+          "distinct_vectors": 1,
+          "last_vector_digest": "23e80e583c4022ced47a828cabf5045ff3c2d834427e20c387b0cec111d61b28",
+          "no_progress_terminated": false,
+          "sampling_resamples": 0,
+          "terminal_reason": null
+        },
+        "review": "[Reviewer output did not follow the required rejected-candidate report structure (missing or misordered DIAGNOSTIC FINDINGS markers) - the raw reviewer text is withheld rather than risk exposing unverified, deliverable-style content for a candidate that Quality Gates rejected and that was never applied to the workspace.]",
+        "review_included_in_approval": false,
+        "run_id": "20261102T072026-53818e60",
+        "skill_staleness_warnings": null,
+        "static_analysis": null,
+        "terminal_regression_passed": false,
+        "toolchain_warning": null,
+        "unchanged_files": [],
+        "unresolved_skill_gaps": null,
+        "verification_results": [],
+        "workspace_commit_failure": null
+      },
+      "status": "milestone_failed",
+      "work_unit_states": {
+        "M1": {
+          "blocked_by": [],
+          "reason_codes": [
+            "WORK_UNIT_FAILED",
+            "STATUS:failed"
+          ],
+          "status": "FAILED",
+          "work_unit_id": "M1"
+        },
+        "M2": {
+          "blocked_by": [
+            "M1"
+          ],
+          "reason_codes": [
+            "DEPENDENCY_FAILED"
+          ],
+          "status": "BLOCKED",
+          "work_unit_id": "M2"
+        },
+        "__integration__": {
+          "blocked_by": [
+            "M1"
+          ],
+          "reason_codes": [
+            "DEPENDENCY_FAILED"
+          ],
+          "status": "BLOCKED",
+          "work_unit_id": "__integration__"
+        }
+      }
+    },
+    "m2": null,
+    "records": {
+      "M1": [],
+      "M2": []
+    },
+    "units_run": [
+      1
+    ],
+    "workspace_changed_files": []
+  },
+  "B2_py_m2_turns_bad": {
+    "commits_dir": [
+      "4671c001d2aa4abba433ad0462b75ef0.json",
+      "e8ada7131e6f4da098b962e59b33b3ce.json"
+    ],
+    "completed": [
+      "M1",
+      "M2"
+    ],
+    "files_seed": [
+      "pyproject.toml"
+    ],
+    "legacy_result": {
+      "group_id": "grp-gatef",
+      "integration_result": {
+        "accepted_risk": false,
+        "accepted_risks": [],
+        "active_skill_manifest": [],
+        "candidate_gates_passed": true,
+        "completion_kind": null,
+        "contract_registry": null,
+        "design": "Design: edit calc.py",
+        "deterministic_gate_evidence": [
+          {
+            "attempt": 1,
+            "passed": true,
+            "status": "PASSED",
+            "type": "compile"
+          },
+          {
+            "attempt": 1,
+            "passed": null,
+            "status": "NO_TESTS_EXECUTED",
+            "type": "regression_test"
+          }
+        ],
+        "environment_failure": null,
+        "failure_category": null,
+        "failure_report": [
+          {
+            "attribution_tier": null,
+            "category": "build",
+            "failure_type": "compile"
+          },
+          {
+            "attribution_tier": null,
+            "category": "verification",
+            "failure_type": "regression_test"
+          }
+        ],
+        "files": [],
+        "generation_metrics": {
+          "calls": 1,
+          "duration_seconds": 0.0007078340277075768,
+          "files_requested": 1,
+          "llm": {
+            "architect_calls": 1,
+            "architect_wall_seconds": 0.00031520798802375793,
+            "calls": 3,
+            "developer_calls": 1,
+            "developer_completion_tokens": 0,
+            "developer_prompt_tokens": 0,
+            "developer_tokens_available_for": 0,
+            "developer_wall_seconds": 0.0007078340277075768,
+            "planner_calls": 1,
+            "planner_wall_seconds": 0.0005184169858694077,
+            "reviewer_calls": 0,
+            "reviewer_wall_seconds": 0.0,
+            "wall_seconds": 0.0015414590016007423
+          },
+          "operation_fallbacks": 0,
+          "retry": {
+            "attempts_by_mode": {
+              "full_set": 1
+            },
+            "baseline_replay_count": 0,
+            "candidate_independent_diagnostic_invocations": 0,
+            "full_set_attempts": 0,
+            "targeted_attempts": 0,
+            "unrecoverable_scope_denials": 0
+          },
+          "successful_calls": 1,
+          "terminal_status": "success",
+          "total_wall_seconds": 5.67003354197368,
+          "validated_files": 0,
+          "validation_invalidations": 0,
+          "validators": {
+            "by_kind": {
+              "compile": 1
+            },
+            "invocations": 1,
+            "wall_seconds": 0.2729586249915883
+          }
+        },
+        "last_failure": null,
+        "lsp_warning": null,
+        "no_progress_reason": null,
+        "overall_attempt_passed": true,
+        "plan": "Step 1: edit calc.py",
+        "plan_scope_conflict": null,
+        "quality_gates_passed": true,
+        "requirements": {
+          "digest": "4bd665d07bcc1442343907dd88627a8c5cc9cca4102cc58125c4f65673a0d27b",
+          "evidence": {},
+          "goal_digest": "ab87f485fb1dd67d1893dfc9cd326e599591fd5f97271f3f13bb90dd7812a65b",
+          "outcomes": {
+            "REQ-1": "pending"
+          },
+          "requirements": [
+            {
+              "id": "REQ-1",
+              "kind": "requirement",
+              "ordinal": 1,
+              "source": "goal",
+              "text": "Add mul and div to calc.py."
+            }
+          ],
+          "verdicts": {
+            "REQ-1": {
+              "detail": "",
+              "evidence_class": null,
+              "evidence_id": null,
+              "model_outcome": "pending",
+              "outcome": "pending",
+              "reason_code": "NOT_YET_VERIFIED",
+              "revision": 0,
+              "source": "requirements.derive_requirements",
+              "verifier": {}
+            }
+          },
+          "version": 1
+        },
+        "retry_progress": {
+          "classification": null,
+          "consecutive_no_progress_attempts": 0,
+          "distinct_vectors": 0,
+          "last_vector_digest": null,
+          "no_progress_terminated": false,
+          "sampling_resamples": 0,
+          "terminal_reason": null
+        },
+        "review": "",
+        "review_included_in_approval": false,
+        "run_id": "20261102T072045-016100bf",
+        "skill_staleness_warnings": null,
+        "static_analysis": {
+          "accepted_risk": false,
+          "banner": "STATIC ANALYSIS: DISABLED (STATIC_ANALYSIS_NOT_CONFIGURED)",
+          "coverage": null,
+          "evidence_digest": "eff54be508cf0a561e30563264cdfb34206a0b54f037d0ccaf45d2d2a21a6c18",
+          "evidence_path": null,
+          "outcome": "DISABLED",
+          "permits_commit": true,
+          "provider": null,
+          "reason_codes": [
+            "STATIC_ANALYSIS_NOT_CONFIGURED"
+          ],
+          "requirement": "optional",
+          "summary": null,
+          "waiver_ids": []
+        },
+        "terminal_regression_passed": true,
+        "toolchain_warning": null,
+        "unchanged_files": [
+          "calc.py"
+        ],
+        "unresolved_skill_gaps": null,
+        "verification_results": [],
+        "workspace_commit_failure": null
+      },
+      "milestone_reuse": {
+        "assessed_at": "2026-11-02T01:50:30.358863+00:00",
+        "decisions": [],
+        "events": [],
+        "run_id": "20261102T072029-0610116a",
+        "schema_version": 1
+      },
+      "milestone_total": 2,
+      "replay": {
+        "milestones": [],
+        "not_evaluable": [],
+        "not_executed": [],
+        "passed": [],
+        "regressed": [],
+        "state": "nothing_to_replay"
+      },
+      "status": "success",
+      "work_unit_states": {
+        "M1": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "M1"
+        },
+        "M2": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "M2"
+        },
+        "__integration__": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "__integration__"
+        }
+      }
+    },
+    "m2": [
+      "pyproject.toml",
+      "[project\nname = \"myapp\"\nversion = \n"
+    ],
+    "records": {
+      "M1": [
+        {
+          "content_hash": null,
+          "coordinates": {
+            "name": "myapp",
+            "version": "0.1.0"
+          },
+          "ecosystem": "python",
+          "entrypoints": [],
+          "kind": "library",
+          "milestone_id": "M1",
+          "module_path": "",
+          "packaging": "wheel",
+          "resolved_at_commit": "4671c001d2aa4abba433ad0462b75ef0",
+          "resource_roots": []
+        }
+      ],
+      "M2": [
+        {
+          "content_hash": null,
+          "coordinates": {
+            "name": "myapp",
+            "version": "0.1.0"
+          },
+          "ecosystem": "python",
+          "entrypoints": [],
+          "kind": "library",
+          "milestone_id": "M2",
+          "module_path": "",
+          "packaging": "wheel",
+          "resolved_at_commit": "e8ada7131e6f4da098b962e59b33b3ce",
+          "resource_roots": []
+        }
+      ]
+    },
+    "units_run": [
+      1,
+      2,
+      3
+    ],
+    "workspace_changed_files": [
+      "calc.py"
+    ]
+  },
+  "B3_npm_bad_from_start": {
+    "commits_dir": [
+      "862135f005414003993ebb0c7ed5a938.json",
+      "a4db01ff23bb4d898ac449d09e4d84a8.json"
+    ],
+    "completed": [
+      "M1",
+      "M2"
+    ],
+    "files_seed": [
+      "package.json"
+    ],
+    "legacy_result": {
+      "group_id": "grp-gatef",
+      "integration_result": {
+        "accepted_risk": false,
+        "accepted_risks": [],
+        "active_skill_manifest": [],
+        "candidate_gates_passed": true,
+        "completion_kind": null,
+        "contract_registry": null,
+        "design": "Design: edit calc.py",
+        "deterministic_gate_evidence": [
+          {
+            "attempt": 1,
+            "passed": true,
+            "status": "PASSED",
+            "type": "compile"
+          },
+          {
+            "attempt": 1,
+            "passed": null,
+            "status": "NO_TESTS_EXECUTED",
+            "type": "regression_test"
+          }
+        ],
+        "environment_failure": null,
+        "failure_category": null,
+        "failure_report": [
+          {
+            "attribution_tier": null,
+            "category": "build",
+            "failure_type": "compile"
+          },
+          {
+            "attribution_tier": null,
+            "category": "verification",
+            "failure_type": "regression_test"
+          }
+        ],
+        "files": [],
+        "generation_metrics": {
+          "calls": 1,
+          "duration_seconds": 0.000789790996350348,
+          "files_requested": 1,
+          "llm": {
+            "architect_calls": 1,
+            "architect_wall_seconds": 0.00031345896422863007,
+            "calls": 3,
+            "developer_calls": 1,
+            "developer_completion_tokens": 0,
+            "developer_prompt_tokens": 0,
+            "developer_tokens_available_for": 0,
+            "developer_wall_seconds": 0.000789790996350348,
+            "planner_calls": 1,
+            "planner_wall_seconds": 0.0005567499902099371,
+            "reviewer_calls": 0,
+            "reviewer_wall_seconds": 0.0,
+            "wall_seconds": 0.0016599999507889152
+          },
+          "operation_fallbacks": 0,
+          "retry": {
+            "attempts_by_mode": {
+              "full_set": 1
+            },
+            "baseline_replay_count": 0,
+            "candidate_independent_diagnostic_invocations": 0,
+            "full_set_attempts": 0,
+            "targeted_attempts": 0,
+            "unrecoverable_scope_denials": 0
+          },
+          "successful_calls": 1,
+          "terminal_status": "success",
+          "total_wall_seconds": 5.6230840410571545,
+          "validated_files": 0,
+          "validation_invalidations": 0,
+          "validators": {
+            "by_kind": {
+              "compile": 1
+            },
+            "invocations": 1,
+            "wall_seconds": 0.2652585410978645
+          }
+        },
+        "last_failure": null,
+        "lsp_warning": null,
+        "no_progress_reason": null,
+        "overall_attempt_passed": true,
+        "plan": "Step 1: edit calc.py",
+        "plan_scope_conflict": null,
+        "quality_gates_passed": true,
+        "requirements": {
+          "digest": "4bd665d07bcc1442343907dd88627a8c5cc9cca4102cc58125c4f65673a0d27b",
+          "evidence": {},
+          "goal_digest": "ab87f485fb1dd67d1893dfc9cd326e599591fd5f97271f3f13bb90dd7812a65b",
+          "outcomes": {
+            "REQ-1": "pending"
+          },
+          "requirements": [
+            {
+              "id": "REQ-1",
+              "kind": "requirement",
+              "ordinal": 1,
+              "source": "goal",
+              "text": "Add mul and div to calc.py."
+            }
+          ],
+          "verdicts": {
+            "REQ-1": {
+              "detail": "",
+              "evidence_class": null,
+              "evidence_id": null,
+              "model_outcome": "pending",
+              "outcome": "pending",
+              "reason_code": "NOT_YET_VERIFIED",
+              "revision": 0,
+              "source": "requirements.derive_requirements",
+              "verifier": {}
+            }
+          },
+          "version": 1
+        },
+        "retry_progress": {
+          "classification": null,
+          "consecutive_no_progress_attempts": 0,
+          "distinct_vectors": 0,
+          "last_vector_digest": null,
+          "no_progress_terminated": false,
+          "sampling_resamples": 0,
+          "terminal_reason": null
+        },
+        "review": "",
+        "review_included_in_approval": false,
+        "run_id": "20261102T072109-789ec855",
+        "skill_staleness_warnings": null,
+        "static_analysis": {
+          "accepted_risk": false,
+          "banner": "STATIC ANALYSIS: DISABLED (STATIC_ANALYSIS_NOT_CONFIGURED)",
+          "coverage": null,
+          "evidence_digest": "eff54be508cf0a561e30563264cdfb34206a0b54f037d0ccaf45d2d2a21a6c18",
+          "evidence_path": null,
+          "outcome": "DISABLED",
+          "permits_commit": true,
+          "provider": null,
+          "reason_codes": [
+            "STATIC_ANALYSIS_NOT_CONFIGURED"
+          ],
+          "requirement": "optional",
+          "summary": null,
+          "waiver_ids": []
+        },
+        "terminal_regression_passed": true,
+        "toolchain_warning": null,
+        "unchanged_files": [
+          "calc.py"
+        ],
+        "unresolved_skill_gaps": null,
+        "verification_results": [],
+        "workspace_commit_failure": null
+      },
+      "milestone_reuse": {
+        "assessed_at": "2026-11-02T01:50:53.308654+00:00",
+        "decisions": [],
+        "events": [],
+        "run_id": "20261102T072052-e40d95f2",
+        "schema_version": 1
+      },
+      "milestone_total": 2,
+      "replay": {
+        "milestones": [],
+        "not_evaluable": [],
+        "not_executed": [],
+        "passed": [],
+        "regressed": [],
+        "state": "nothing_to_replay"
+      },
+      "status": "success",
+      "work_unit_states": {
+        "M1": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "M1"
+        },
+        "M2": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "M2"
+        },
+        "__integration__": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "__integration__"
+        }
+      }
+    },
+    "m2": null,
+    "records": {
+      "M1": [],
+      "M2": []
+    },
+    "units_run": [
+      1,
+      2,
+      3
+    ],
+    "workspace_changed_files": [
+      "calc.py"
+    ]
+  },
+  "B4_npm_m2_turns_bad": {
+    "commits_dir": [
+      "3fec99232f944783abd0938ee52ba1de.json",
+      "63271712253040309c65536186706533.json"
+    ],
+    "completed": [
+      "M1",
+      "M2"
+    ],
+    "files_seed": [
+      "package.json"
+    ],
+    "legacy_result": {
+      "group_id": "grp-gatef",
+      "integration_result": {
+        "accepted_risk": false,
+        "accepted_risks": [],
+        "active_skill_manifest": [],
+        "candidate_gates_passed": true,
+        "completion_kind": null,
+        "contract_registry": null,
+        "design": "Design: edit calc.py",
+        "deterministic_gate_evidence": [
+          {
+            "attempt": 1,
+            "passed": true,
+            "status": "PASSED",
+            "type": "compile"
+          },
+          {
+            "attempt": 1,
+            "passed": null,
+            "status": "NO_TESTS_EXECUTED",
+            "type": "regression_test"
+          }
+        ],
+        "environment_failure": null,
+        "failure_category": null,
+        "failure_report": [
+          {
+            "attribution_tier": null,
+            "category": "build",
+            "failure_type": "compile"
+          },
+          {
+            "attribution_tier": null,
+            "category": "verification",
+            "failure_type": "regression_test"
+          }
+        ],
+        "files": [],
+        "generation_metrics": {
+          "calls": 1,
+          "duration_seconds": 0.0007271249778568745,
+          "files_requested": 1,
+          "llm": {
+            "architect_calls": 1,
+            "architect_wall_seconds": 0.00034170900471508503,
+            "calls": 3,
+            "developer_calls": 1,
+            "developer_completion_tokens": 0,
+            "developer_prompt_tokens": 0,
+            "developer_tokens_available_for": 0,
+            "developer_wall_seconds": 0.0007271249778568745,
+            "planner_calls": 1,
+            "planner_wall_seconds": 0.00047279102727770805,
+            "reviewer_calls": 0,
+            "reviewer_wall_seconds": 0.0,
+            "wall_seconds": 0.0015416250098496675
+          },
+          "operation_fallbacks": 0,
+          "retry": {
+            "attempts_by_mode": {
+              "full_set": 1
+            },
+            "baseline_replay_count": 0,
+            "candidate_independent_diagnostic_invocations": 0,
+            "full_set_attempts": 0,
+            "targeted_attempts": 0,
+            "unrecoverable_scope_denials": 0
+          },
+          "successful_calls": 1,
+          "terminal_status": "success",
+          "total_wall_seconds": 5.381307041971013,
+          "validated_files": 0,
+          "validation_invalidations": 0,
+          "validators": {
+            "by_kind": {
+              "compile": 1
+            },
+            "invocations": 1,
+            "wall_seconds": 0.2700702919391915
+          }
+        },
+        "last_failure": null,
+        "lsp_warning": null,
+        "no_progress_reason": null,
+        "overall_attempt_passed": true,
+        "plan": "Step 1: edit calc.py",
+        "plan_scope_conflict": null,
+        "quality_gates_passed": true,
+        "requirements": {
+          "digest": "4bd665d07bcc1442343907dd88627a8c5cc9cca4102cc58125c4f65673a0d27b",
+          "evidence": {},
+          "goal_digest": "ab87f485fb1dd67d1893dfc9cd326e599591fd5f97271f3f13bb90dd7812a65b",
+          "outcomes": {
+            "REQ-1": "pending"
+          },
+          "requirements": [
+            {
+              "id": "REQ-1",
+              "kind": "requirement",
+              "ordinal": 1,
+              "source": "goal",
+              "text": "Add mul and div to calc.py."
+            }
+          ],
+          "verdicts": {
+            "REQ-1": {
+              "detail": "",
+              "evidence_class": null,
+              "evidence_id": null,
+              "model_outcome": "pending",
+              "outcome": "pending",
+              "reason_code": "NOT_YET_VERIFIED",
+              "revision": 0,
+              "source": "requirements.derive_requirements",
+              "verifier": {}
+            }
+          },
+          "version": 1
+        },
+        "retry_progress": {
+          "classification": null,
+          "consecutive_no_progress_attempts": 0,
+          "distinct_vectors": 0,
+          "last_vector_digest": null,
+          "no_progress_terminated": false,
+          "sampling_resamples": 0,
+          "terminal_reason": null
+        },
+        "review": "",
+        "review_included_in_approval": false,
+        "run_id": "20261102T072132-b0fe7214",
+        "skill_staleness_warnings": null,
+        "static_analysis": {
+          "accepted_risk": false,
+          "banner": "STATIC ANALYSIS: DISABLED (STATIC_ANALYSIS_NOT_CONFIGURED)",
+          "coverage": null,
+          "evidence_digest": "eff54be508cf0a561e30563264cdfb34206a0b54f037d0ccaf45d2d2a21a6c18",
+          "evidence_path": null,
+          "outcome": "DISABLED",
+          "permits_commit": true,
+          "provider": null,
+          "reason_codes": [
+            "STATIC_ANALYSIS_NOT_CONFIGURED"
+          ],
+          "requirement": "optional",
+          "summary": null,
+          "waiver_ids": []
+        },
+        "terminal_regression_passed": true,
+        "toolchain_warning": null,
+        "unchanged_files": [
+          "calc.py"
+        ],
+        "unresolved_skill_gaps": null,
+        "verification_results": [],
+        "workspace_commit_failure": null
+      },
+      "milestone_reuse": {
+        "assessed_at": "2026-11-02T01:51:16.989369+00:00",
+        "decisions": [],
+        "events": [],
+        "run_id": "20261102T072116-fc3baef8",
+        "schema_version": 1
+      },
+      "milestone_total": 2,
+      "replay": {
+        "milestones": [],
+        "not_evaluable": [],
+        "not_executed": [],
+        "passed": [],
+        "regressed": [],
+        "state": "nothing_to_replay"
+      },
+      "status": "success",
+      "work_unit_states": {
+        "M1": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "M1"
+        },
+        "M2": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "M2"
+        },
+        "__integration__": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "__integration__"
+        }
+      }
+    },
+    "m2": [
+      "package.json",
+      "{\"name\": \"myapp\", \"version\": "
+    ],
+    "records": {
+      "M1": [
+        {
+          "content_hash": null,
+          "coordinates": {
+            "name": "myapp",
+            "version": "0.1.0"
+          },
+          "ecosystem": "npm",
+          "entrypoints": [],
+          "kind": "library",
+          "milestone_id": "M1",
+          "module_path": "",
+          "packaging": "npm-package",
+          "resolved_at_commit": "3fec99232f944783abd0938ee52ba1de",
+          "resource_roots": []
+        }
+      ],
+      "M2": [
+        {
+          "content_hash": null,
+          "coordinates": {
+            "name": "myapp",
+            "version": "0.1.0"
+          },
+          "ecosystem": "npm",
+          "entrypoints": [],
+          "kind": "library",
+          "milestone_id": "M2",
+          "module_path": "",
+          "packaging": "npm-package",
+          "resolved_at_commit": "63271712253040309c65536186706533",
+          "resource_roots": []
+        }
+      ]
+    },
+    "units_run": [
+      1,
+      2,
+      3
+    ],
+    "workspace_changed_files": [
+      "calc.py"
+    ]
+  },
+  "B5_maven_bad_from_start": {
+    "commits_dir": [],
+    "completed": [],
+    "files_seed": [
+      "pom.xml"
+    ],
+    "legacy_result": {
+      "committed_changes_retained": false,
+      "committed_work_units": [],
+      "group_id": "grp-gatef",
+      "milestone_id": "M1",
+      "milestone_index": 1,
+      "milestone_reuse": {
+        "assessed_at": "2026-11-02T01:51:39.870103+00:00",
+        "decisions": [],
+        "events": [],
+        "run_id": "20261102T072139-8100d60e",
+        "schema_version": 1
+      },
+      "milestone_total": 2,
+      "result": {
+        "accepted_risk": false,
+        "accepted_risks": [],
+        "active_skill_manifest": [],
+        "candidate_gates_passed": false,
+        "completion_kind": null,
+        "contract_registry": null,
+        "design": "Design: edit calc.py",
+        "deterministic_gate_evidence": [],
+        "environment_failure": "CONTAINMENT_SETUP_FAILED: Cannot resolve Java toolchain from pom.xml: no element found: line 1, column 39",
+        "failure_category": "containment_setup_failed",
+        "failure_report": [
+          {
+            "attribution_tier": "full_set",
+            "category": "unclassified",
+            "failure_type": "containment_setup_failed"
+          }
+        ],
+        "files": [
+          "calc.py"
+        ],
+        "generation_metrics": {
+          "calls": 1,
+          "duration_seconds": 0.0006695830961689353,
+          "files_requested": 1,
+          "llm": {
+            "architect_calls": 1,
+            "architect_wall_seconds": 0.0003269169246777892,
+            "calls": 4,
+            "developer_calls": 1,
+            "developer_completion_tokens": 0,
+            "developer_prompt_tokens": 0,
+            "developer_tokens_available_for": 0,
+            "developer_wall_seconds": 0.0006695830961689353,
+            "planner_calls": 1,
+            "planner_wall_seconds": 0.0005173750687390566,
+            "reviewer_calls": 1,
+            "reviewer_wall_seconds": 0.00045662501361221075,
+            "wall_seconds": 0.001970500103197992
+          },
+          "operation_fallbacks": 0,
+          "retry": {
+            "attempts_by_mode": {
+              "full_set": 1
+            },
+            "baseline_replay_count": 0,
+            "candidate_independent_diagnostic_invocations": 0,
+            "full_set_attempts": 1,
+            "targeted_attempts": 0,
+            "unrecoverable_scope_denials": 0
+          },
+          "successful_calls": 1,
+          "terminal_status": "environment_failure",
+          "total_wall_seconds": 2.689774875063449,
+          "validated_files": 0,
+          "validation_invalidations": 0,
+          "validators": {
+            "by_kind": {},
+            "invocations": 0,
+            "wall_seconds": 0
+          }
+        },
+        "last_failure": {
+          "message": "CONTAINMENT_SETUP_FAILED: Cannot resolve Java toolchain from pom.xml: no element found: line 1, column 39",
+          "raw_output": "Cannot resolve Java toolchain from pom.xml: no element found: line 1, column 39",
+          "type": "containment_setup_failed"
+        },
+        "lsp_warning": "jdtls was found on PATH but failed to start - LSP grounding was unavailable for the rest of this run (see logs for the startup error).",
+        "no_progress_reason": null,
+        "overall_attempt_passed": false,
+        "plan": "Step 1: edit calc.py",
+        "plan_scope_conflict": null,
+        "quality_gates_passed": false,
+        "retry_progress": {
+          "classification": "PROGRESS",
+          "consecutive_no_progress_attempts": 0,
+          "distinct_vectors": 1,
+          "last_vector_digest": "59751c35dd51e2547b3702d6807c17fd741cd41f9d6a4ef7513e44ee55b3ea0b",
+          "no_progress_terminated": false,
+          "sampling_resamples": 0,
+          "terminal_reason": null
+        },
+        "review": "[Reviewer output did not follow the required rejected-candidate report structure (missing or misordered DIAGNOSTIC FINDINGS markers) - the raw reviewer text is withheld rather than risk exposing unverified, deliverable-style content for a candidate that Quality Gates rejected and that was never applied to the workspace.]",
+        "review_included_in_approval": false,
+        "run_id": "20261102T072140-dc2fde33",
+        "skill_staleness_warnings": null,
+        "static_analysis": null,
+        "terminal_regression_passed": false,
+        "toolchain_warning": null,
+        "unchanged_files": [],
+        "unresolved_skill_gaps": null,
+        "verification_results": [],
+        "workspace_commit_failure": null
+      },
+      "status": "milestone_failed",
+      "work_unit_states": {
+        "M1": {
+          "blocked_by": [],
+          "reason_codes": [
+            "WORK_UNIT_FAILED",
+            "STATUS:failed"
+          ],
+          "status": "FAILED",
+          "work_unit_id": "M1"
+        },
+        "M2": {
+          "blocked_by": [
+            "M1"
+          ],
+          "reason_codes": [
+            "DEPENDENCY_FAILED"
+          ],
+          "status": "BLOCKED",
+          "work_unit_id": "M2"
+        },
+        "__integration__": {
+          "blocked_by": [
+            "M1"
+          ],
+          "reason_codes": [
+            "DEPENDENCY_FAILED"
+          ],
+          "status": "BLOCKED",
+          "work_unit_id": "__integration__"
+        }
+      }
+    },
+    "m2": null,
+    "records": {
+      "M1": [],
+      "M2": []
+    },
+    "units_run": [
+      1
+    ],
+    "workspace_changed_files": []
+  },
+  "B6_maven_m2_turns_bad": {
+    "commits_dir": [],
+    "completed": [],
+    "files_seed": [
+      "pom.xml"
+    ],
+    "legacy_result": {
+      "committed_changes_retained": false,
+      "committed_work_units": [],
+      "group_id": "grp-gatef",
+      "milestone_id": "M1",
+      "milestone_index": 1,
+      "milestone_reuse": {
+        "assessed_at": "2026-11-02T01:51:45.036544+00:00",
+        "decisions": [],
+        "events": [],
+        "run_id": "20261102T072144-936e23cb",
+        "schema_version": 1
+      },
+      "milestone_total": 2,
+      "result": {
+        "accepted_risk": false,
+        "accepted_risks": [],
+        "active_skill_manifest": [],
+        "candidate_gates_passed": false,
+        "completion_kind": null,
+        "contract_registry": null,
+        "design": "Design: edit calc.py",
+        "deterministic_gate_evidence": [],
+        "environment_failure": "VERIFICATION_INFRASTRUCTURE_FAILURE: the compile gate's verification tool returned no trustworthy verdict (MAVEN_COMPILE_NO_DIAGNOSTICS); nothing about the candidate was observed, so this is not a code failure.\nMaven returned no trustworthy compilation verdict (MAVEN_COMPILE_NO_DIAGNOSTICS); nothing about the candidate source was judged:\n[ERROR] Could not create local repository at /kriya/cache/m2 -> [Help 1]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/LocalRepositoryNotAccessibleException\n\n",
+        "failure_category": "environment_failure",
+        "failure_report": [
+          {
+            "attribution_tier": "full_set",
+            "category": "unclassified",
+            "failure_type": "verification_infrastructure_failure"
+          }
+        ],
+        "files": [
+          "calc.py"
+        ],
+        "generation_metrics": {
+          "calls": 1,
+          "duration_seconds": 0.0007163749542087317,
+          "files_requested": 1,
+          "llm": {
+            "architect_calls": 1,
+            "architect_wall_seconds": 0.0006329580210149288,
+            "calls": 4,
+            "developer_calls": 1,
+            "developer_completion_tokens": 0,
+            "developer_prompt_tokens": 0,
+            "developer_tokens_available_for": 0,
+            "developer_wall_seconds": 0.0007163749542087317,
+            "planner_calls": 1,
+            "planner_wall_seconds": 0.0005135410465300083,
+            "reviewer_calls": 1,
+            "reviewer_wall_seconds": 0.0005169999785721302,
+            "wall_seconds": 0.002379874000325799
+          },
+          "operation_fallbacks": 0,
+          "retry": {
+            "attempts_by_mode": {
+              "full_set": 1
+            },
+            "baseline_replay_count": 0,
+            "candidate_independent_diagnostic_invocations": 0,
+            "full_set_attempts": 1,
+            "targeted_attempts": 0,
+            "unrecoverable_scope_denials": 0
+          },
+          "successful_calls": 1,
+          "terminal_status": "environment_failure",
+          "total_wall_seconds": 5.981004292028956,
+          "validated_files": 0,
+          "validation_invalidations": 0,
+          "validators": {
+            "by_kind": {},
+            "invocations": 0,
+            "wall_seconds": 0
+          }
+        },
+        "last_failure": {
+          "message": "VERIFICATION_INFRASTRUCTURE_FAILURE: the compile gate's verification tool returned no trustworthy verdict (MAVEN_COMPILE_NO_DIAGNOSTICS); nothing about the candidate was observed, so this is not a code failure.\nMaven returned no trustworthy compilation verdict (MAVEN_COMPILE_NO_DIAGNOSTICS); nothing about the candidate source was judged:\n[ERROR] Could not create local repository at /kriya/cache/m2 -> [Help 1]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/LocalRepositoryNotAccessibleException\n\n",
+          "raw_output": "Maven returned no trustworthy compilation verdict (MAVEN_COMPILE_NO_DIAGNOSTICS); nothing about the candidate source was judged:\n[ERROR] Could not create local repository at /kriya/cache/m2 -> [Help 1]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/LocalRepositoryNotAccessibleException\n\n",
+          "type": "verification_infrastructure_failure"
+        },
+        "lsp_warning": "jdtls was found on PATH but failed to start - LSP grounding was unavailable for the rest of this run (see logs for the startup error).",
+        "no_progress_reason": null,
+        "overall_attempt_passed": false,
+        "plan": "Step 1: edit calc.py",
+        "plan_scope_conflict": null,
+        "quality_gates_passed": false,
+        "retry_progress": {
+          "classification": "PROGRESS",
+          "consecutive_no_progress_attempts": 0,
+          "distinct_vectors": 1,
+          "last_vector_digest": "797a33510558807ee9b01bc3aeb43606ddfcbeab0dca9c7f342ef3038e61855f",
+          "no_progress_terminated": false,
+          "sampling_resamples": 0,
+          "terminal_reason": null
+        },
+        "review": "[Reviewer output did not follow the required rejected-candidate report structure (missing or misordered DIAGNOSTIC FINDINGS markers) - the raw reviewer text is withheld rather than risk exposing unverified, deliverable-style content for a candidate that Quality Gates rejected and that was never applied to the workspace.]",
+        "review_included_in_approval": false,
+        "run_id": "20261102T072145-269404ea",
+        "skill_staleness_warnings": null,
+        "static_analysis": null,
+        "terminal_regression_passed": false,
+        "toolchain_warning": null,
+        "unchanged_files": [],
+        "unresolved_skill_gaps": null,
+        "verification_results": [],
+        "workspace_commit_failure": null
+      },
+      "status": "milestone_failed",
+      "work_unit_states": {
+        "M1": {
+          "blocked_by": [],
+          "reason_codes": [
+            "WORK_UNIT_FAILED",
+            "STATUS:failed"
+          ],
+          "status": "FAILED",
+          "work_unit_id": "M1"
+        },
+        "M2": {
+          "blocked_by": [
+            "M1"
+          ],
+          "reason_codes": [
+            "DEPENDENCY_FAILED"
+          ],
+          "status": "BLOCKED",
+          "work_unit_id": "M2"
+        },
+        "__integration__": {
+          "blocked_by": [
+            "M1"
+          ],
+          "reason_codes": [
+            "DEPENDENCY_FAILED"
+          ],
+          "status": "BLOCKED",
+          "work_unit_id": "__integration__"
+        }
+      }
+    },
+    "m2": [
+      "pom.xml",
+      "<project><artifactId>myapp</artifactId>"
+    ],
+    "records": {
+      "M1": [],
+      "M2": []
+    },
+    "units_run": [
+      1
+    ],
+    "workspace_changed_files": []
+  },
+  "B7_py_valid_no_project_table": {
+    "commits_dir": [
+      "860c5bc7245a4b09b47df3a0d9c12268.json",
+      "b2888aef38604cad97117659a5e9f2f7.json"
+    ],
+    "completed": [
+      "M1",
+      "M2"
+    ],
+    "files_seed": [
+      "pyproject.toml"
+    ],
+    "legacy_result": {
+      "group_id": "grp-gatef",
+      "integration_result": {
+        "accepted_risk": false,
+        "accepted_risks": [],
+        "active_skill_manifest": [],
+        "candidate_gates_passed": true,
+        "completion_kind": null,
+        "contract_registry": null,
+        "design": "Design: edit calc.py",
+        "deterministic_gate_evidence": [
+          {
+            "attempt": 1,
+            "passed": true,
+            "status": "PASSED",
+            "type": "compile"
+          },
+          {
+            "attempt": 1,
+            "passed": null,
+            "status": "NO_TESTS_EXECUTED",
+            "type": "regression_test"
+          }
+        ],
+        "environment_failure": null,
+        "failure_category": null,
+        "failure_report": [
+          {
+            "attribution_tier": null,
+            "category": "build",
+            "failure_type": "compile"
+          },
+          {
+            "attribution_tier": null,
+            "category": "verification",
+            "failure_type": "regression_test"
+          }
+        ],
+        "files": [],
+        "generation_metrics": {
+          "calls": 1,
+          "duration_seconds": 0.0007604160346090794,
+          "files_requested": 1,
+          "llm": {
+            "architect_calls": 1,
+            "architect_wall_seconds": 0.00031341705471277237,
+            "calls": 3,
+            "developer_calls": 1,
+            "developer_completion_tokens": 0,
+            "developer_prompt_tokens": 0,
+            "developer_tokens_available_for": 0,
+            "developer_wall_seconds": 0.0007604160346090794,
+            "planner_calls": 1,
+            "planner_wall_seconds": 0.0005299169570207596,
+            "reviewer_calls": 0,
+            "reviewer_wall_seconds": 0.0,
+            "wall_seconds": 0.0016037500463426113
+          },
+          "operation_fallbacks": 0,
+          "retry": {
+            "attempts_by_mode": {
+              "full_set": 1
+            },
+            "baseline_replay_count": 0,
+            "candidate_independent_diagnostic_invocations": 0,
+            "full_set_attempts": 0,
+            "targeted_attempts": 0,
+            "unrecoverable_scope_denials": 0
+          },
+          "successful_calls": 1,
+          "terminal_status": "success",
+          "total_wall_seconds": 5.63469645800069,
+          "validated_files": 0,
+          "validation_invalidations": 0,
+          "validators": {
+            "by_kind": {
+              "compile": 1
+            },
+            "invocations": 1,
+            "wall_seconds": 0.25764454097952694
+          }
+        },
+        "last_failure": null,
+        "lsp_warning": null,
+        "no_progress_reason": null,
+        "overall_attempt_passed": true,
+        "plan": "Step 1: edit calc.py",
+        "plan_scope_conflict": null,
+        "quality_gates_passed": true,
+        "requirements": {
+          "digest": "4bd665d07bcc1442343907dd88627a8c5cc9cca4102cc58125c4f65673a0d27b",
+          "evidence": {},
+          "goal_digest": "ab87f485fb1dd67d1893dfc9cd326e599591fd5f97271f3f13bb90dd7812a65b",
+          "outcomes": {
+            "REQ-1": "pending"
+          },
+          "requirements": [
+            {
+              "id": "REQ-1",
+              "kind": "requirement",
+              "ordinal": 1,
+              "source": "goal",
+              "text": "Add mul and div to calc.py."
+            }
+          ],
+          "verdicts": {
+            "REQ-1": {
+              "detail": "",
+              "evidence_class": null,
+              "evidence_id": null,
+              "model_outcome": "pending",
+              "outcome": "pending",
+              "reason_code": "NOT_YET_VERIFIED",
+              "revision": 0,
+              "source": "requirements.derive_requirements",
+              "verifier": {}
+            }
+          },
+          "version": 1
+        },
+        "retry_progress": {
+          "classification": null,
+          "consecutive_no_progress_attempts": 0,
+          "distinct_vectors": 0,
+          "last_vector_digest": null,
+          "no_progress_terminated": false,
+          "sampling_resamples": 0,
+          "terminal_reason": null
+        },
+        "review": "",
+        "review_included_in_approval": false,
+        "run_id": "20261102T071947-eaadda77",
+        "skill_staleness_warnings": null,
+        "static_analysis": {
+          "accepted_risk": false,
+          "banner": "STATIC ANALYSIS: DISABLED (STATIC_ANALYSIS_NOT_CONFIGURED)",
+          "coverage": null,
+          "evidence_digest": "eff54be508cf0a561e30563264cdfb34206a0b54f037d0ccaf45d2d2a21a6c18",
+          "evidence_path": null,
+          "outcome": "DISABLED",
+          "permits_commit": true,
+          "provider": null,
+          "reason_codes": [
+            "STATIC_ANALYSIS_NOT_CONFIGURED"
+          ],
+          "requirement": "optional",
+          "summary": null,
+          "waiver_ids": []
+        },
+        "terminal_regression_passed": true,
+        "toolchain_warning": null,
+        "unchanged_files": [
+          "calc.py"
+        ],
+        "unresolved_skill_gaps": null,
+        "verification_results": [],
+        "workspace_commit_failure": null
+      },
+      "milestone_reuse": {
+        "assessed_at": "2026-11-02T01:49:31.294144+00:00",
+        "decisions": [],
+        "events": [],
+        "run_id": "20261102T071930-41f9a174",
+        "schema_version": 1
+      },
+      "milestone_total": 2,
+      "replay": {
+        "milestones": [],
+        "not_evaluable": [],
+        "not_executed": [],
+        "passed": [],
+        "regressed": [],
+        "state": "nothing_to_replay"
+      },
+      "status": "success",
+      "work_unit_states": {
+        "M1": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "M1"
+        },
+        "M2": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "M2"
+        },
+        "__integration__": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "__integration__"
+        }
+      }
+    },
+    "m2": null,
+    "records": {
+      "M1": [],
+      "M2": []
+    },
+    "units_run": [
+      1,
+      2,
+      3
+    ],
+    "workspace_changed_files": [
+      "calc.py"
+    ]
+  },
+  "B8_npm_valid_no_name": {
+    "commits_dir": [
+      "27bf181402ff431e8966c4f4470f40a7.json",
+      "2f87af7b2d3547af8671ebc356744092.json"
+    ],
+    "completed": [
+      "M1",
+      "M2"
+    ],
+    "files_seed": [
+      "package.json"
+    ],
+    "legacy_result": {
+      "group_id": "grp-gatef",
+      "integration_result": {
+        "accepted_risk": false,
+        "accepted_risks": [],
+        "active_skill_manifest": [],
+        "candidate_gates_passed": true,
+        "completion_kind": null,
+        "contract_registry": null,
+        "design": "Design: edit calc.py",
+        "deterministic_gate_evidence": [
+          {
+            "attempt": 1,
+            "passed": true,
+            "status": "PASSED",
+            "type": "compile"
+          },
+          {
+            "attempt": 1,
+            "passed": null,
+            "status": "NO_TESTS_EXECUTED",
+            "type": "regression_test"
+          }
+        ],
+        "environment_failure": null,
+        "failure_category": null,
+        "failure_report": [
+          {
+            "attribution_tier": null,
+            "category": "build",
+            "failure_type": "compile"
+          },
+          {
+            "attribution_tier": null,
+            "category": "verification",
+            "failure_type": "regression_test"
+          }
+        ],
+        "files": [],
+        "generation_metrics": {
+          "calls": 1,
+          "duration_seconds": 0.0007165840361267328,
+          "files_requested": 1,
+          "llm": {
+            "architect_calls": 1,
+            "architect_wall_seconds": 0.0003161670174449682,
+            "calls": 3,
+            "developer_calls": 1,
+            "developer_completion_tokens": 0,
+            "developer_prompt_tokens": 0,
+            "developer_tokens_available_for": 0,
+            "developer_wall_seconds": 0.0007165840361267328,
+            "planner_calls": 1,
+            "planner_wall_seconds": 0.0005254170391708612,
+            "reviewer_calls": 0,
+            "reviewer_wall_seconds": 0.0,
+            "wall_seconds": 0.0015581680927425623
+          },
+          "operation_fallbacks": 0,
+          "retry": {
+            "attempts_by_mode": {
+              "full_set": 1
+            },
+            "baseline_replay_count": 0,
+            "candidate_independent_diagnostic_invocations": 0,
+            "full_set_attempts": 0,
+            "targeted_attempts": 0,
+            "unrecoverable_scope_denials": 0
+          },
+          "successful_calls": 1,
+          "terminal_status": "success",
+          "total_wall_seconds": 5.642238792032003,
+          "validated_files": 0,
+          "validation_invalidations": 0,
+          "validators": {
+            "by_kind": {
+              "compile": 1
+            },
+            "invocations": 1,
+            "wall_seconds": 0.26543991710059345
+          }
+        },
+        "last_failure": null,
+        "lsp_warning": null,
+        "no_progress_reason": null,
+        "overall_attempt_passed": true,
+        "plan": "Step 1: edit calc.py",
+        "plan_scope_conflict": null,
+        "quality_gates_passed": true,
+        "requirements": {
+          "digest": "4bd665d07bcc1442343907dd88627a8c5cc9cca4102cc58125c4f65673a0d27b",
+          "evidence": {},
+          "goal_digest": "ab87f485fb1dd67d1893dfc9cd326e599591fd5f97271f3f13bb90dd7812a65b",
+          "outcomes": {
+            "REQ-1": "pending"
+          },
+          "requirements": [
+            {
+              "id": "REQ-1",
+              "kind": "requirement",
+              "ordinal": 1,
+              "source": "goal",
+              "text": "Add mul and div to calc.py."
+            }
+          ],
+          "verdicts": {
+            "REQ-1": {
+              "detail": "",
+              "evidence_class": null,
+              "evidence_id": null,
+              "model_outcome": "pending",
+              "outcome": "pending",
+              "reason_code": "NOT_YET_VERIFIED",
+              "revision": 0,
+              "source": "requirements.derive_requirements",
+              "verifier": {}
+            }
+          },
+          "version": 1
+        },
+        "retry_progress": {
+          "classification": null,
+          "consecutive_no_progress_attempts": 0,
+          "distinct_vectors": 0,
+          "last_vector_digest": null,
+          "no_progress_terminated": false,
+          "sampling_resamples": 0,
+          "terminal_reason": null
+        },
+        "review": "",
+        "review_included_in_approval": false,
+        "run_id": "20261102T072010-ba7a4f45",
+        "skill_staleness_warnings": null,
+        "static_analysis": {
+          "accepted_risk": false,
+          "banner": "STATIC ANALYSIS: DISABLED (STATIC_ANALYSIS_NOT_CONFIGURED)",
+          "coverage": null,
+          "evidence_digest": "eff54be508cf0a561e30563264cdfb34206a0b54f037d0ccaf45d2d2a21a6c18",
+          "evidence_path": null,
+          "outcome": "DISABLED",
+          "permits_commit": true,
+          "provider": null,
+          "reason_codes": [
+            "STATIC_ANALYSIS_NOT_CONFIGURED"
+          ],
+          "requirement": "optional",
+          "summary": null,
+          "waiver_ids": []
+        },
+        "terminal_regression_passed": true,
+        "toolchain_warning": null,
+        "unchanged_files": [
+          "calc.py"
+        ],
+        "unresolved_skill_gaps": null,
+        "verification_results": [],
+        "workspace_commit_failure": null
+      },
+      "milestone_reuse": {
+        "assessed_at": "2026-11-02T01:49:54.995217+00:00",
+        "decisions": [],
+        "events": [],
+        "run_id": "20261102T071954-4bafbd52",
+        "schema_version": 1
+      },
+      "milestone_total": 2,
+      "replay": {
+        "milestones": [],
+        "not_evaluable": [],
+        "not_executed": [],
+        "passed": [],
+        "regressed": [],
+        "state": "nothing_to_replay"
+      },
+      "status": "success",
+      "work_unit_states": {
+        "M1": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "M1"
+        },
+        "M2": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "M2"
+        },
+        "__integration__": {
+          "blocked_by": [],
+          "reason_codes": [],
+          "status": "VERIFIED",
+          "work_unit_id": "__integration__"
+        }
+      }
+    },
+    "m2": null,
+    "records": {
+      "M1": [],
+      "M2": []
+    },
+    "units_run": [
+      1,
+      2,
+      3
+    ],
+    "workspace_changed_files": [
+      "calc.py"
+    ]
+  },
+  "B9_npm_json_array": {
+    "commits_dir": [],
+    "completed": [],
+    "files_seed": [
+      "package.json"
+    ],
+    "legacy_result": {
+      "committed_changes_retained": false,
+      "committed_work_units": [],
+      "group_id": "grp-gatef",
+      "milestone_id": "M1",
+      "milestone_index": 1,
+      "milestone_reuse": {
+        "assessed_at": "2026-11-02T01:50:18.464161+00:00",
+        "decisions": [],
+        "events": [],
+        "run_id": "20261102T072017-7624c09f",
+        "schema_version": 1
+      },
+      "milestone_total": 2,
+      "result": {
+        "accepted_risk": false,
+        "accepted_risks": [],
+        "active_skill_manifest": [],
+        "candidate_gates_passed": false,
+        "completion_kind": null,
+        "contract_registry": null,
+        "design": "Design: edit calc.py",
+        "deterministic_gate_evidence": [],
+        "environment_failure": null,
+        "failure_category": "quality_gates_exhausted",
+        "failure_report": [
+          {
+            "attribution_tier": null,
+            "category": "build",
+            "failure_type": "compile"
+          },
+          {
+            "attribution_tier": "full_set",
+            "category": "unclassified",
+            "failure_type": "artifact_registry"
+          },
+          {
+            "attribution_tier": "judge",
+            "category": "generation_completeness",
+            "failure_type": "operation_contract"
+          },
+          {
+            "attribution_tier": "judge",
+            "category": "generation_completeness",
+            "failure_type": "operation_contract"
+          },
+          {
+            "attribution_tier": "judge",
+            "category": "generation_completeness",
+            "failure_type": "operation_contract"
+          },
+          {
+            "attribution_tier": "judge",
+            "category": "generation_completeness",
+            "failure_type": "operation_contract"
+          },
+          {
+            "attribution_tier": "judge",
+            "category": "generation_completeness",
+            "failure_type": "operation_contract"
+          },
+          {
+            "attribution_tier": "judge",
+            "category": "generation_completeness",
+            "failure_type": "operation_contract"
+          }
+        ],
+        "files": [
+          "calc.py"
+        ],
+        "generation_metrics": {
+          "calls": 7,
+          "duration_seconds": 0.0061947922222316265,
+          "files_requested": 7,
+          "llm": {
+            "architect_calls": 1,
+            "architect_wall_seconds": 0.0003361250273883343,
+            "calls": 10,
+            "developer_calls": 7,
+            "developer_completion_tokens": 0,
+            "developer_prompt_tokens": 0,
+            "developer_tokens_available_for": 0,
+            "developer_wall_seconds": 0.0061947922222316265,
+            "planner_calls": 1,
+            "planner_wall_seconds": 0.0005072080530226231,
+            "reviewer_calls": 1,
+            "reviewer_wall_seconds": 0.0004624580033123493,
+            "wall_seconds": 0.007500583305954933
+          },
+          "operation_fallbacks": 0,
+          "retry": {
+            "attempts_by_mode": {
+              "full_set": 4,
+              "targeted": 3
+            },
+            "baseline_replay_count": 0,
+            "candidate_independent_diagnostic_invocations": 7,
+            "full_set_attempts": 4,
+            "targeted_attempts": 3,
+            "unrecoverable_scope_denials": 0
+          },
+          "successful_calls": 7,
+          "terminal_status": "failed",
+          "total_wall_seconds": 3.389032542007044,
+          "validated_files": 1,
+          "validation_invalidations": 0,
+          "validators": {
+            "by_kind": {
+              "compile": 1
+            },
+            "invocations": 1,
+            "wall_seconds": 0.38790512492414564
+          }
+        },
+        "last_failure": {
+          "message": "OPERATION CONTRACT FAILURE in calc.py: malformed repair response: MODEL_EDIT_PROTOCOL_INVALID: no <<<KRIYA:...>>> outcome block. Return exactly the repair_with_full_file response shape requested.",
+          "raw_output": "malformed repair response: MODEL_EDIT_PROTOCOL_INVALID: no <<<KRIYA:...>>> outcome block",
+          "type": "operation_contract"
+        },
+        "lsp_warning": null,
+        "no_progress_reason": null,
+        "overall_attempt_passed": false,
+        "plan": "Step 1: edit calc.py",
+        "plan_scope_conflict": null,
+        "quality_gates_passed": false,
+        "retry_progress": {
+          "classification": "REPEATED_VECTOR",
+          "consecutive_no_progress_attempts": 1,
+          "distinct_vectors": 4,
+          "last_vector_digest": "e4780a5c23520501bac3bdcdc964e24e417e4c4169bd0bdefbd81ed4949c5498",
+          "no_progress_terminated": false,
+          "sampling_resamples": 3,
+          "terminal_reason": null
+        },
+        "review": "[Reviewer output did not follow the required rejected-candidate report structure (missing or misordered DIAGNOSTIC FINDINGS markers) - the raw reviewer text is withheld rather than risk exposing unverified, deliverable-style content for a candidate that Quality Gates rejected and that was never applied to the workspace.]",
+        "review_included_in_approval": false,
+        "run_id": "20261102T072019-9b8d0f00",
+        "skill_staleness_warnings": null,
+        "static_analysis": {
+          "accepted_risk": false,
+          "banner": "STATIC ANALYSIS: DISABLED (STATIC_ANALYSIS_NOT_CONFIGURED)",
+          "coverage": null,
+          "evidence_digest": "eff54be508cf0a561e30563264cdfb34206a0b54f037d0ccaf45d2d2a21a6c18",
+          "evidence_path": null,
+          "outcome": "DISABLED",
+          "permits_commit": true,
+          "provider": null,
+          "reason_codes": [
+            "STATIC_ANALYSIS_NOT_CONFIGURED"
+          ],
+          "requirement": "optional",
+          "summary": null,
+          "waiver_ids": []
+        },
+        "terminal_regression_passed": false,
+        "toolchain_warning": null,
+        "unchanged_files": [],
+        "unresolved_skill_gaps": null,
+        "verification_results": [],
+        "workspace_commit_failure": null
+      },
+      "status": "milestone_failed",
+      "work_unit_states": {
+        "M1": {
+          "blocked_by": [],
+          "reason_codes": [
+            "WORK_UNIT_FAILED",
+            "STATUS:failed"
+          ],
+          "status": "FAILED",
+          "work_unit_id": "M1"
+        },
+        "M2": {
+          "blocked_by": [
+            "M1"
+          ],
+          "reason_codes": [
+            "DEPENDENCY_FAILED"
+          ],
+          "status": "BLOCKED",
+          "work_unit_id": "M2"
+        },
+        "__integration__": {
+          "blocked_by": [
+            "M1"
+          ],
+          "reason_codes": [
+            "DEPENDENCY_FAILED"
+          ],
+          "status": "BLOCKED",
+          "work_unit_id": "__integration__"
+        }
+      }
+    },
+    "m2": null,
+    "records": {
+      "M1": [],
+      "M2": []
+    },
+    "units_run": [
+      1
+    ],
+    "workspace_changed_files": []
+  }
+}

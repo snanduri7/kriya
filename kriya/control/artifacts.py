@@ -49,6 +49,24 @@ class ArtifactRegistryCorruptError(RuntimeError):
         self.detail = detail
 
 
+ARTIFACT_EXPECTED_BUT_DERIVATION_INDETERMINATE = "ARTIFACT_EXPECTED_BUT_DERIVATION_INDETERMINATE"
+
+
+class ArtifactDerivationIndeterminate(RuntimeError):
+    """ARTIFACT-DERIVATION-INDETERMINATE-MANIFEST-001: a canonical manifest IS present (so a physical artifact is expected) but
+    its artifact identity cannot be derived: it is unreadable, does not parse (XML / TOML / JSON), is not the expected top-level
+    shape, or (pyproject.toml only) declares a ``[project]`` table without the ``name`` PEP 621 requires. Never a successful
+    empty derivation. Distinct from NOT APPLICABLE, which stays an honest empty derivation: the marker file is absent, or it
+    parses and carries no artifact identity (no ``[project]`` table, a package.json without ``name``, a pom without
+    ``artifactId``: a well-formed skeleton marker that the build itself, not this registry, will reject)."""
+
+    reason_code = ARTIFACT_EXPECTED_BUT_DERIVATION_INDETERMINATE
+
+    def __init__(self, problems: Tuple[str, ...]):
+        super().__init__(f"{ARTIFACT_EXPECTED_BUT_DERIVATION_INDETERMINATE}: " + "; ".join(problems))
+        self.problems = tuple(problems)
+
+
 _MAVEN_RESOURCE_CANDIDATES: Tuple[str, ...] = (
     os.path.join("src", "main", "java"),
     os.path.join("src", "main", "resources"),
@@ -142,14 +160,22 @@ def derive_maven_artifact(workspace_path: str, pom_path: str, milestone_id: str)
     partially-fabricated record) if the file is missing/unparsable, or if
     even the parent-resolved groupId/artifactId can't be determined -
     section 16's "do not ask an LLM" cuts both ways: this function also
-    never guesses when real data is unavailable."""
+    never guesses when real data is unavailable. ``ArtifactRegistry.derive_from_workspace`` is the authority that tells a
+    missing pom (not applicable) from an unparseable one (indeterminate)."""
+
+    return _derive_maven(workspace_path, pom_path, milestone_id)[0]
+
+
+def _derive_maven(workspace_path: str, pom_path: str, milestone_id: str) -> Tuple[Optional[ArtifactRecord], Optional[str]]:
+    """(record, problem): ``problem`` is set exactly when the pom is present but is not well-formed XML."""
 
     if not os.path.isfile(pom_path):
-        return None
+        return None, None
+    rel = os.path.relpath(pom_path, workspace_path)
     try:
         root = ET.parse(pom_path).getroot()
-    except ET.ParseError:
-        return None
+    except ET.ParseError as error:
+        return None, f"{rel}: not well-formed XML ({error})"
 
     parent_elem = _find_direct_child(root, "parent")
 
@@ -164,7 +190,9 @@ def derive_maven_artifact(workspace_path: str, pom_path: str, milestone_id: str)
         version = _text(_find_direct_child(parent_elem, "version"))
 
     if not artifact_id:
-        return None
+        # Parses, but carries no artifact identity: not applicable (a skeleton ``<project/>`` marker is a valid document and
+        # Maven's own build reports the missing artifactId). Only an UNPARSEABLE pom is indeterminate.
+        return None, None
 
     # Maven's own documented default when <packaging> is absent - a real
     # spec default, not a guess (https://maven.apache.org/pom.html).
@@ -194,7 +222,7 @@ def derive_maven_artifact(workspace_path: str, pom_path: str, milestone_id: str)
         coordinates=coordinates,
         packaging=packaging,
         resource_roots=resource_roots,
-    )
+    ), None
 
 
 def derive_python_artifact(workspace_path: str, milestone_id: str) -> Optional[ArtifactRecord]:
@@ -202,20 +230,32 @@ def derive_python_artifact(workspace_path: str, milestone_id: str) -> Optional[A
     setup.py execution (running arbitrary setup.py code to introspect it
     would be its own security/reliability problem, not a parsing one)."""
 
+    return _derive_python(workspace_path, milestone_id)[0]
+
+
+def _derive_python(workspace_path: str, milestone_id: str) -> Tuple[Optional[ArtifactRecord], Optional[str]]:
+    """(record, problem). NOT APPLICABLE (no problem, no record): no pyproject.toml, or one that parses and has no ``[project]``
+    table (a tool-config-only file). INDETERMINATE (problem): unreadable/unparseable, ``project`` not a table, or no ``name``
+    (PEP 621: ``name`` is required whenever ``[project]`` is present)."""
+
     pyproject_path = os.path.join(workspace_path, "pyproject.toml")
     if not os.path.isfile(pyproject_path):
-        return None
+        return None, None
     from kriya.core.tomlcompat import tomllib
 
     try:
         with open(pyproject_path, "rb") as f:
             data = tomllib.load(f)
-    except Exception:
-        return None
+    except Exception as error:
+        return None, f"pyproject.toml: unreadable or not valid TOML ({type(error).__name__}: {error})"
 
-    project = data.get("project")
-    if not isinstance(project, dict) or not project.get("name"):
-        return None
+    if "project" not in data:
+        return None, None
+    project = data["project"]
+    if not isinstance(project, dict):
+        return None, "pyproject.toml: [project] is not a table"
+    if not project.get("name"):
+        return None, "pyproject.toml: [project] has no name"
 
     coordinates = {"name": str(project["name"])}
     if project.get("version"):
@@ -228,22 +268,31 @@ def derive_python_artifact(workspace_path: str, milestone_id: str) -> Optional[A
         module_path="",
         coordinates=coordinates,
         packaging="wheel",
-    )
+    ), None
 
 
 def derive_npm_artifact(workspace_path: str, milestone_id: str) -> Optional[ArtifactRecord]:
+    return _derive_npm(workspace_path, milestone_id)[0]
+
+
+def _derive_npm(workspace_path: str, milestone_id: str) -> Tuple[Optional[ArtifactRecord], Optional[str]]:
+    """(record, problem). NOT APPLICABLE: no package.json, or a valid JSON object without a ``name`` (an unnamed/private
+    package has no artifact identity). INDETERMINATE: unreadable, not valid JSON, or not a JSON object."""
+
     package_json_path = os.path.join(workspace_path, "package.json")
     if not os.path.isfile(package_json_path):
-        return None
+        return None, None
     try:
         with open(package_json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except Exception:
-        return None
+    except Exception as error:
+        return None, f"package.json: unreadable or not valid JSON ({type(error).__name__}: {error})"
+    if not isinstance(data, dict):
+        return None, "package.json: not a JSON object"
 
     name = data.get("name")
     if not name:
-        return None
+        return None, None
 
     coordinates = {"name": str(name)}
     if data.get("version"):
@@ -256,7 +305,7 @@ def derive_npm_artifact(workspace_path: str, milestone_id: str) -> Optional[Arti
         module_path="",
         coordinates=coordinates,
         packaging="npm-package",
-    )
+    ), None
 
 
 def _find_pom_files(workspace_path: str) -> List[str]:
@@ -320,26 +369,47 @@ class ArtifactRegistry:
         """Real, marker-gated derivation across every ecosystem this module
         implements - never fabricates a record for an ecosystem with no
         derivation logic here. A workspace can legitimately yield MULTIPLE
-        records (a Maven multi-module build produces one per pom.xml)."""
+        records (a Maven multi-module build produces one per pom.xml).
+
+        An ABSENT marker (or a manifest that parses and carries no artifact identity) is an honest empty derivation. A
+        PRESENT canonical manifest whose identity cannot be derived raises ``ArtifactDerivationIndeterminate``: it is never a
+        successful empty derivation (ARTIFACT-DERIVATION-INDETERMINATE-MANIFEST-001). Every terminal gate that publishes or
+        validates a registry (enforce terminal, milestone pre-commit gate, settlement) derives through here."""
+
+        derived, problems = self._derive_collect(workspace_path, milestone_id, resolved_at_commit)
+        if problems:
+            raise ArtifactDerivationIndeterminate(problems)
+        return derived
+
+    @staticmethod
+    def _derive_collect(
+        workspace_path: str, milestone_id: str, resolved_at_commit: Optional[str] = None,
+    ) -> Tuple[Tuple[ArtifactRecord, ...], Tuple[str, ...]]:
+        """(records, problems): the tolerant derivation. ``problems`` names every present manifest that could not be derived."""
 
         derived: List[ArtifactRecord] = []
-        for pom_path in _find_pom_files(workspace_path):
-            record = derive_maven_artifact(workspace_path, pom_path, milestone_id)
+        problems: List[str] = []
+
+        def take(record: Optional[ArtifactRecord], why_none: Any) -> None:
+            # The public ``derive_*_artifact`` calls stay the seams (documented patch points); only when one yields no record
+            # is the (same-implementation) reason asked for: a present-but-underivable manifest is a problem, never silence.
             if record is not None:
                 derived.append(record)
+                return
+            problem = why_none()
+            if problem is not None:
+                problems.append(problem)
 
-        python_record = derive_python_artifact(workspace_path, milestone_id)
-        if python_record is not None:
-            derived.append(python_record)
-
-        npm_record = derive_npm_artifact(workspace_path, milestone_id)
-        if npm_record is not None:
-            derived.append(npm_record)
+        for pom_path in _find_pom_files(workspace_path):
+            take(derive_maven_artifact(workspace_path, pom_path, milestone_id),
+                 lambda pom_path=pom_path: _derive_maven(workspace_path, pom_path, milestone_id)[1])
+        take(derive_python_artifact(workspace_path, milestone_id), lambda: _derive_python(workspace_path, milestone_id)[1])
+        take(derive_npm_artifact(workspace_path, milestone_id), lambda: _derive_npm(workspace_path, milestone_id)[1])
 
         if resolved_at_commit is not None:
             derived = [replace(r, resolved_at_commit=resolved_at_commit) for r in derived]
 
-        return tuple(derived)
+        return tuple(derived), tuple(problems)
 
     def record(self, artifact: ArtifactRecord) -> None:
         self._records.setdefault(artifact.milestone_id, []).append(artifact)
@@ -361,7 +431,9 @@ class ArtifactRegistry:
         as a coordinate mismatch."""
 
         recorded = self.resolve_for_milestone(milestone_id)
-        current = self.derive_from_workspace(workspace_path, milestone_id)
+        # Tolerant on purpose: validate() reports a recorded artifact whose manifest is now underivable as ARTIFACT_DRIFT (the
+        # recorded artifact is not among the current derivation); it must not start raising.
+        current, _indeterminate = self._derive_collect(workspace_path, milestone_id)
         current_by_module = {(r.ecosystem, r.module_path): r for r in current}
 
         results = []

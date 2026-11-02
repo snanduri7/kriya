@@ -1,0 +1,66 @@
+"""SCRATCH (deleted after capture): real-engine capture of the indeterminate-manifest behaviour, pre-fix."""
+import json, os, subprocess
+from pathlib import Path
+import test_gate_f_milestone_artifact_registry as base
+from kriya.control.persistence import load_artifact_registry
+
+OUT = os.environ["MANIFEST_CHAR_OUT"]
+BAD_TOML = '[project\nname = "myapp"\nversion = \n'
+BAD_JSON = '{"name": "myapp", "version": '
+BAD_POM = '<project><artifactId>myapp</artifactId>'
+GOOD_JSON = '{"name": "myapp", "version": "0.1.0"}\n'
+GOOD_POM = '<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>myapp</artifactId><version>1</version></project>\n'
+
+class MRun(base.Run):
+    m2 = None  # (filename, content) unit 2 writes instead of calc.py
+    async def _complete(self, system_prompt, *a, **k):
+        first = (system_prompt or "").splitlines()[0] if system_prompt else ""
+        unit = self.units[-1] if self.units else None
+        if self.m2 is not None and unit == 2:
+            if "Developer Agent" in first:
+                self.developer_units.append(unit)
+                return json.dumps([{"filepath": "calc.py", "content": base.WITH_DIV}, {"filepath": self.m2[0], "content": self.m2[1]}])
+            if "Architect Agent" in first:
+                return "Design: edit calc.py and " + self.m2[0]
+            if "Planner Agent" in first:
+                return "Step 1: edit calc.py and " + self.m2[0]
+            if "File List Planner" in first:
+                return json.dumps(["calc.py", self.m2[0]])
+        return await super()._complete(system_prompt, *a, **k)
+
+def _seed(root, files):
+    root.mkdir()
+    (root / "calc.py").write_text(base.CALC)
+    for n, c in files.items():
+        (root / n).write_text(c)
+    for argv in (["init","-q"],["config","user.email","t@e.invalid"],["config","user.name","T"],["add","."],["commit","-qm","seed"]):
+        subprocess.run(["git", *argv], cwd=root, check=True)
+
+def _rec(name, tmp_path, files, m2=None):
+    ws = tmp_path / name
+    _seed(ws, files)
+    before = {p.name: p.read_text() for p in ws.iterdir() if p.is_file()}
+    run = MRun(tmp_path / f"{name}-cfg", {1: base.WITH_MUL, 2: base.WITH_DIV, base.INTEGRATION: base.WITH_DIV})
+    run.m2 = m2
+    result, state = run.execute(ws)
+    reg = load_artifact_registry(str(ws))
+    after = {p.name: p.read_text() for p in ws.iterdir() if p.is_file()}
+    payload = {"files_seed": sorted(files), "m2": m2, "legacy_result": result.legacy_result,
+               "completed": list(state.completed_milestone_ids), "units_run": run.units,
+               "records": {m: [r.to_dict() for r in reg.resolve_for_milestone(m)] for m in ("M1","M2")},
+               "workspace_changed_files": sorted(k for k in after if before.get(k) != after[k]),
+               "commits_dir": sorted(p.name for p in (ws/".kriya"/"control"/"commits").glob("*")) if (ws/".kriya"/"control"/"commits").is_dir() else []}
+    ex = json.load(open(OUT)) if os.path.exists(OUT) else {}
+    ex[name] = payload
+    json.dump(ex, open(OUT, "w"), indent=2, sort_keys=True, default=str)
+
+def test_A_no_manifest(tmp_path): _rec("A_no_manifest", tmp_path, {})
+def test_B7_py_valid_toml_no_project(tmp_path): _rec("B7_py_valid_no_project_table", tmp_path, {"pyproject.toml": "[tool.ruff]\nline-length = 100\n"})
+def test_B8_npm_valid_json_no_name(tmp_path): _rec("B8_npm_valid_no_name", tmp_path, {"package.json": "{\"private\": true}\n"})
+def test_B9_npm_json_array(tmp_path): _rec("B9_npm_json_array", tmp_path, {"package.json": "[]\n"})
+def test_B1_py_bad_from_start(tmp_path): _rec("B1_py_bad_from_start", tmp_path, {"pyproject.toml": BAD_TOML})
+def test_B2_py_m2_turns_bad(tmp_path): _rec("B2_py_m2_turns_bad", tmp_path, {"pyproject.toml": base.PYPROJECT}, ("pyproject.toml", BAD_TOML))
+def test_B3_npm_bad_from_start(tmp_path): _rec("B3_npm_bad_from_start", tmp_path, {"package.json": BAD_JSON})
+def test_B4_npm_m2_turns_bad(tmp_path): _rec("B4_npm_m2_turns_bad", tmp_path, {"package.json": GOOD_JSON}, ("package.json", BAD_JSON))
+def test_B5_maven_bad_from_start(tmp_path): _rec("B5_maven_bad_from_start", tmp_path, {"pom.xml": BAD_POM})
+def test_B6_maven_m2_turns_bad(tmp_path): _rec("B6_maven_m2_turns_bad", tmp_path, {"pom.xml": GOOD_POM}, ("pom.xml", BAD_POM))
