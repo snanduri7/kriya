@@ -1,0 +1,25 @@
+        from _chaos_harness import CALC_WITH_SUB
+    
+        observed = direct_run(tmp_path, monkeypatch, _always(CALC_WITH_SUB), FILES, cfg=cfg)
+>       answers = observed.attempt(1)
+                  ^^^^^^^^^^^^^^^^^^^
+
+tests/test_lr_r1_m1_t6_fixes.py:364: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Observed(result={'status': 'failure', 'quality_gates_passed': False, 'files': [], 'failure_category': 'generation_budg..._e_an_attempt_that_made_no0/ws'), run=<kriya.core.attempt_evidence.reader.EvidenceRun object at 0x10ed8dbe0>, extra={})
+number = 1, unit = None
+
+    def attempt(self, number: int, unit: Optional[str] = None) -> Dict[str, Any]:
+        found = [a for a in self.attempts() if a["attempt"] == number and (unit is None or a["unit_id"] == unit)]
+>       assert len(found) == 1, (number, unit, [(a["unit_id"], a["attempt"]) for a in self.attempts()])
+               ^^^^^^^^^^^^^^^
+E       AssertionError: (1, None, [])
+
+tests/_t6_harness.py:40: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  kriya.workflow.workflow:stage_analysis.py:84 This project's config doesn't set paths.skills, so any skill writes this run makes (auto-bootstrapped conventions, skill-gap extraction, staged lesson rules) will land in Kriya's own SHARED install skills directory (/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/skills) instead of a project-local one - every other project using Kriya would inherit them. If that's not intended, stop this run and set paths.skills in this project's kriya.yaml, e.g. "./skills".
+ERROR    kriya.workflow.workflow:workflow.py:2190 GENERATION TIME BUDGET EXHAUSTED: INFERENCE_DEADLINE_EXHAUSTED: the run_generation_budget deadline left 0 ms for this model call
+=========================== short test summary info ============================
+FAILED tests/test_lr_r1_m1_t6_fixes.py::test_e_an_attempt_that_made_no_model_call_is_not_applicable
+1 failed, 8 passed in 20.08s

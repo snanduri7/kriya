@@ -1,0 +1,17 @@
+import os, sys, tempfile, pathlib, subprocess
+sys.path.insert(0, "tests")
+from unittest.mock import patch
+from click.testing import CliRunner
+import test_tools_command as t
+from kriya.cli import main
+where = sys.argv[1]
+tmp = pathlib.Path(tempfile.mkdtemp())
+pd = tmp / "plugins"; pd.mkdir()
+t._write_plugin(pd, "badplugin2", t._bad_plugin_source("BadPlugin2", "bad_plugin_2"))
+t._write_plugin(pd, "goodplugin2", t._good_tool_plugin_source("GoodPlugin2", "good_plugin_2", "good_tool_2"))
+if where == "tmp":
+    ws = tmp / "ws"; ws.mkdir(); subprocess.run(["git", "init", "-q"], cwd=ws, check=True); os.chdir(ws)
+cfg = t._cfg(pd)
+with patch("kriya.cli.load_config", return_value=cfg):
+    res = CliRunner().invoke(main, ["tools", "execute", "good_tool_2", "{}"])
+print(where, "exit", res.exit_code); print("\n".join(l for l in res.output.splitlines() if " INFO " not in l))
