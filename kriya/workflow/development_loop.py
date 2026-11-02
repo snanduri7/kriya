@@ -842,7 +842,7 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
     deps._run_semantic_safety_gate(state, worktree_path=worktree_path, workspace_path=workspace_path)
 
     # Gate F: a milestone unit's candidate must derive its artifact registry before anything reaches the real workspace.
-    run_artifact_registry_gate(state, worktree_path=worktree_path, work_unit=work_unit)
+    run_artifact_registry_gate(state, worktree_path=worktree_path, work_unit=work_unit, workspace_path=workspace_path)
 
     # Candidate-only checkpoint: generation and inner gates passed, but
     # terminal regression and application have not. Its name and payload

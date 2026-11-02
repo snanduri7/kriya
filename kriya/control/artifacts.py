@@ -51,14 +51,17 @@ class ArtifactRegistryCorruptError(RuntimeError):
 
 ARTIFACT_EXPECTED_BUT_DERIVATION_INDETERMINATE = "ARTIFACT_EXPECTED_BUT_DERIVATION_INDETERMINATE"
 
+# The descriptor file each derivable ecosystem keys its artifact on (relative to the artifact's module path).
+_DESCRIPTOR_NAMES = {"maven": "pom.xml", "python": "pyproject.toml", "npm": "package.json"}
+
 
 class ArtifactDerivationIndeterminate(RuntimeError):
-    """ARTIFACT-DERIVATION-INDETERMINATE-MANIFEST-001: a canonical manifest IS present (so a physical artifact is expected) but
+    """ARTIFACT-DERIVATION-INDETERMINATE-MANIFEST-001: a canonical manifest IS present (so a physical artifact may be expected) but
     its artifact identity cannot be derived: it is unreadable, does not parse (XML / TOML / JSON), is not the expected top-level
-    shape, or (pyproject.toml only) declares a ``[project]`` table without the ``name`` PEP 621 requires. Never a successful
-    empty derivation. Distinct from NOT APPLICABLE, which stays an honest empty derivation: the marker file is absent, or it
-    parses and carries no artifact identity (no ``[project]`` table, a package.json without ``name``, a pom without
-    ``artifactId``: a well-formed skeleton marker that the build itself, not this registry, will reject)."""
+    shape, or it is a descriptor of an artifact the registry already RECORDS that no longer derives it. Never a successful empty
+    derivation. Distinct from NOT APPLICABLE, which stays an honest empty derivation: the marker file is absent, or it parses and
+    carries no artifact identity (no ``[project]`` table or one without a ``name``, a package.json without ``name``, a pom without
+    ``artifactId``: well-formed skeleton markers) and nothing recorded expects it."""
 
     reason_code = ARTIFACT_EXPECTED_BUT_DERIVATION_INDETERMINATE
 
@@ -234,9 +237,10 @@ def derive_python_artifact(workspace_path: str, milestone_id: str) -> Optional[A
 
 
 def _derive_python(workspace_path: str, milestone_id: str) -> Tuple[Optional[ArtifactRecord], Optional[str]]:
-    """(record, problem). NOT APPLICABLE (no problem, no record): no pyproject.toml, or one that parses and has no ``[project]``
-    table (a tool-config-only file). INDETERMINATE (problem): unreadable/unparseable, ``project`` not a table, or no ``name``
-    (PEP 621: ``name`` is required whenever ``[project]`` is present)."""
+    """(record, problem). NOT APPLICABLE (no problem, no record): no pyproject.toml, or one that parses and carries no artifact
+    identity (no ``[project]`` table, or one without a ``name``: a skeleton marker). INDETERMINATE (problem): unreadable or
+    unparseable, or ``project`` present but not a table. A recorded artifact lost from a present descriptor is the registry's
+    (``ArtifactRegistry._lost_recorded_artifacts``)."""
 
     pyproject_path = os.path.join(workspace_path, "pyproject.toml")
     if not os.path.isfile(pyproject_path):
@@ -255,7 +259,7 @@ def _derive_python(workspace_path: str, milestone_id: str) -> Tuple[Optional[Art
     if not isinstance(project, dict):
         return None, "pyproject.toml: [project] is not a table"
     if not project.get("name"):
-        return None, "pyproject.toml: [project] has no name"
+        return None, None       # parses, carries no identity: not applicable unless a recorded artifact makes it expected
 
     coordinates = {"name": str(project["name"])}
     if project.get("version"):
@@ -377,9 +381,30 @@ class ArtifactRegistry:
         validates a registry (enforce terminal, milestone pre-commit gate, settlement) derives through here."""
 
         derived, problems = self._derive_collect(workspace_path, milestone_id, resolved_at_commit)
+        problems = problems + self._lost_recorded_artifacts(workspace_path, derived)
         if problems:
             raise ArtifactDerivationIndeterminate(problems)
         return derived
+
+    def _lost_recorded_artifacts(self, workspace_path: str, derived: Tuple[ArtifactRecord, ...]) -> Tuple[str, ...]:
+        """An artifact is EXPECTED when this registry already records it (an earlier derivation of the same ecosystem and module):
+        if its descriptor is still PRESENT but now derives no such artifact (a parseable pom that lost its ``artifactId``, a
+        package.json that lost its ``name``, a pyproject that lost ``[project]``), that is indeterminate, never an empty success.
+        A descriptor that is gone is not flagged here (removal is drift, reported to consumers by ``validate``), and with no
+        recorded artifact nothing is expected, so an incomplete descriptor stays a valid empty derivation."""
+
+        present = {(record.ecosystem, record.module_path) for record in derived}
+        problems = []
+        for recorded in self.all_records():
+            key = (recorded.ecosystem, recorded.module_path)
+            descriptor = _DESCRIPTOR_NAMES.get(recorded.ecosystem)
+            if key in present or descriptor is None:
+                continue
+            relative = os.path.join(recorded.module_path, descriptor)
+            if os.path.isfile(os.path.join(workspace_path, relative)):
+                problems.append(f"{relative}: the {recorded.ecosystem} artifact recorded for {recorded.milestone_id} "
+                                "can no longer be derived from its present descriptor")
+        return tuple(dict.fromkeys(problems))
 
     @staticmethod
     def _derive_collect(

@@ -16,9 +16,12 @@ The contract pinned here:
   (all of which derive through it) stop; the milestone never commits from it and its dependents never run.
 * ``ArtifactRegistry.validate`` stays tolerant: a recorded artifact whose manifest later became underivable is still reported
   as ``ARTIFACT_DRIFT`` (never a raise, never "no drift").
-* Documented limit: a manifest that PARSES but carries no identity stays NOT APPLICABLE for Maven (a well-formed pom without
-  ``artifactId``, a skeleton ``<project/>`` marker used throughout the suite) and for npm (no ``name``); only an unparseable
-  pom is Maven-indeterminate. Strictening that is a separate owner choice (a measured fixture radius of ~30 test files).
+* A manifest that PARSES but carries no identity is NOT APPLICABLE (a well-formed pom without ``artifactId``, a skeleton
+  ``<project/>`` marker used throughout the suite, a package.json without ``name``) - UNLESS an artifact is EXPECTED: the registry
+  already records it (an earlier derivation of the same ecosystem and module) and the descriptor is still present but no longer
+  derives it. That is indeterminate too (PRD-032 final review: measured silent completion when M2 committed a pom without
+  ``artifactId`` after M1 recorded the Maven artifact). A milestone's ``provides`` is a LOGICAL capability, so the recorded registry
+  entry is the only existing authoritative "artifact expected" signal. Strictening beyond that is a separate owner choice.
 * Python/Maven from-start manifests were already stopped by the containment toolchain resolver (CONTAINMENT_SETUP_FAILED),
   a different owner that runs first under these tests' configuration; those branches of the new code are covered at the
   derivation level here, not through the real engine (said so, not hidden).
@@ -71,13 +74,14 @@ NOT_APPLICABLE = [
     pytest.param({"pom.xml": "<project xmlns='http://maven.apache.org/POM/4.0.0'><groupId>g</groupId></project>"},
                  id="well-formed-pom-without-artifactid"),
     pytest.param({"pom.xml": "<project></project>"}, id="skeleton-pom-marker"),
+    pytest.param({"pyproject.toml": "[project]\n"}, id="skeleton-pyproject-marker"),
+    pytest.param({"pyproject.toml": '[project]\nversion = "1"\n'}, id="pyproject-project-without-name"),
 ]
 
 INDETERMINATE = [
     pytest.param({"package.json": BAD_JSON}, "package.json", id="npm-not-json"),
     pytest.param({"package.json": "[]\n"}, "package.json", id="npm-not-an-object"),
     pytest.param({"pyproject.toml": '[project\nname = "x"\n'}, "pyproject.toml", id="python-not-toml"),
-    pytest.param({"pyproject.toml": '[project]\nversion = "1"\n'}, "pyproject.toml", id="python-project-without-name"),
     pytest.param({"pyproject.toml": 'project = "x"\n'}, "pyproject.toml", id="python-project-not-a-table"),
     pytest.param({"pom.xml": "<project><artifactId>x</artifactId>"}, "pom.xml", id="maven-not-xml"),
 ]
@@ -283,3 +287,92 @@ def test_defect_b_a_milestone_that_commits_an_indeterminate_manifest_is_refused_
     assert [(v.reason_code, v.drifted) for v in registry.validate(str(workspace), "M1")] == [(None, False)]
     assert gate_failures.failures and all(
         failure.diagnostics["reason_code"] == ARTIFACT_EXPECTED_BUT_DERIVATION_INDETERMINATE for failure in gate_failures.failures)
+
+
+# --- an artifact is EXPECTED when the registry already records it ----------------------------------------------------------
+
+LOST_IDENTITY = [
+    pytest.param("maven", {"pom.xml": GOOD_POM}, ("pom.xml", "<project xmlns='http://maven.apache.org/POM/4.0.0'><groupId>g</groupId></project>"),
+                 "pom.xml", id="maven-pom-loses-artifactid"),
+    pytest.param("npm", {"package.json": GOOD_JSON}, ("package.json", '{"private": true}\n'), "package.json", id="npm-loses-name"),
+    pytest.param("python", {"pyproject.toml": PYPROJECT}, ("pyproject.toml", "[tool.ruff]\nline-length = 100\n"), "pyproject.toml",
+                 id="python-loses-project-table"),
+]
+
+
+def _recorded(tmp_path, files):
+    for name, text in files.items():
+        _write(tmp_path, name, text)
+    registry = ArtifactRegistry()
+    for record in registry.derive_from_workspace(str(tmp_path), "M1"):
+        registry.record(record)
+    assert len(registry.all_records()) == 1
+    return registry
+
+
+@pytest.mark.parametrize("ecosystem, files, lost, named", LOST_IDENTITY)
+def test_a_recorded_artifact_whose_present_descriptor_stops_deriving_it_is_indeterminate(tmp_path, ecosystem, files, lost, named):
+    registry = _recorded(tmp_path, files)
+    _write(tmp_path, *lost)
+    with pytest.raises(ArtifactDerivationIndeterminate) as caught:
+        registry.derive_from_workspace(str(tmp_path), "M2")
+    assert [problem.split(":")[0] for problem in caught.value.problems] == [named]
+    assert ecosystem in caught.value.problems[0] and "M1" in caught.value.problems[0]
+    assert ArtifactRegistry().derive_from_workspace(str(tmp_path), "M2") == ()       # nothing recorded -> nothing expected: valid empty
+    assert [(v.reason_code, v.drifted) for v in registry.validate(str(tmp_path), "M1")] == [("ARTIFACT_DRIFT", True)]   # validate stays tolerant
+
+
+def test_the_expectation_is_only_about_a_present_descriptor_and_a_changed_identity_still_derives(tmp_path):
+    registry = _recorded(tmp_path, {"package.json": GOOD_JSON})
+    _write(tmp_path, "package.json", '{"name": "renamed", "version": "2.0.0"}\n')
+    assert [r.coordinates["name"] for r in registry.derive_from_workspace(str(tmp_path), "M2")] == ["renamed"]
+    (tmp_path / "package.json").unlink()                                                # a removed descriptor is drift for consumers, not flagged here
+    assert registry.derive_from_workspace(str(tmp_path), "M2") == ()
+
+
+def _plan_with_provides():
+    return {"group_id": "grp-gatef", "original_goal": "Add mul and div to calc.py.", "milestones": [
+        {"id": "M1", "goal": "Add mul(a, b) to calc.py.", "success_criterion": "mul works", "depends_on": [], "provides": [{"name": "lib"}]},
+        {"id": "M2", "goal": "Add div(a, b) to calc.py.", "success_criterion": "div works", "depends_on": ["M1"], "consumes": ["lib"]},
+    ]}
+
+
+BARE_POM = ("<project xmlns='http://maven.apache.org/POM/4.0.0'><modelVersion>4.0.0</modelVersion>"
+            "<groupId>g</groupId><version>1</version></project>\n")
+
+
+@pytest.fixture
+def maven_gates_pass(monkeypatch):
+    """The Maven compile/test/pom gates need a container Maven cache; this characterization is about the registry, so they pass."""
+    import test_gate_f_milestone_artifact_registry as gate_f_module
+
+    from kriya.tools.validate import PolymorphicValidator
+
+    ok = {"success": True, "output": "ok"}
+    monkeypatch.setattr(gate_f_module, "_plan", _plan_with_provides)
+    monkeypatch.setattr(PolymorphicValidator, "run_compile_check", lambda *a, **k: ok)
+    monkeypatch.setattr(PolymorphicValidator, "run_tests", lambda *a, **k: {"success": True, "output": "tests/test_x.py .\n1 passed in 0.01s"})
+    monkeypatch.setattr(PolymorphicValidator, "run_pom_validate", lambda *a, **k: ok)
+
+
+def test_control_a_no_artifact_expected_a_parseable_incomplete_pom_completes(tmp_path, maven_gates_pass, gate_failures):
+    workspace, run, legacy, state = _execute(tmp_path, {"pom.xml": BARE_POM})
+    assert legacy["status"] == "success" and state.completed_milestone_ids == ["M1", "M2"]
+    assert _registry(workspace).all_records() == () and gate_failures.failures == []
+
+
+def test_case_b_an_artifact_recorded_by_m1_cannot_be_lost_by_m2_committing_a_pom_without_artifactid(
+        tmp_path, maven_gates_pass, gate_failures):
+    workspace, run, legacy, state = _execute(tmp_path, {"pom.xml": GOOD_POM}, m2=("pom.xml", BARE_POM))
+    assert legacy["status"] == "milestone_failed" and legacy["milestone_id"] == "M2"
+    assert state.completed_milestone_ids == ["M1"] and run.units == [1, 2]
+    assert (workspace / "pom.xml").read_text() == GOOD_POM                              # the incomplete pom never reached the real workspace
+    assert (workspace / "calc.py").read_text() == WITH_MUL and len(_committed_transactions(workspace)) == 1
+    registry = _registry(workspace)
+    [m1_record] = registry.resolve_for_milestone("M1")
+    assert m1_record.ecosystem == "maven" and registry.resolve_for_milestone("M2") == ()
+    assert [(v.reason_code, v.drifted) for v in registry.validate(str(workspace), "M1")] == [(None, False)]   # no stale record left behind
+    assert gate_failures.failures and all(
+        failure.diagnostics["reason_code"] == ARTIFACT_EXPECTED_BUT_DERIVATION_INDETERMINATE and "pom.xml" in failure.message
+        for failure in gate_failures.failures)
+    assert gate_failures.environment == [None] * len(gate_failures.failures)

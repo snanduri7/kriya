@@ -1,0 +1,83 @@
+{
+  "A_no_artifact_expected": {
+    "category": null,
+    "completed": [
+      "M1",
+      "M2"
+    ],
+    "env_failure": "None",
+    "legacy_keys": [
+      "group_id",
+      "integration_result",
+      "milestone_reuse",
+      "milestone_total",
+      "replay",
+      "status",
+      "work_unit_states"
+    ],
+    "pom_on_disk": "<project xmlns='http://maven.apache.org/POM/4.0.0'><modelVersion>4.0.0</modelVersion><groupId>g</groupId><version>1</version></project>\n",
+    "records": {
+      "M1": [],
+      "M2": []
+    },
+    "status": "success",
+    "units": [
+      1,
+      2,
+      3
+    ],
+    "validate_M1_now": []
+  },
+  "B_recorded_then_incomplete": {
+    "category": "quality_gates_exhausted",
+    "completed": [
+      "M1"
+    ],
+    "env_failure": "None",
+    "legacy_keys": [
+      "committed_changes_retained",
+      "committed_work_units",
+      "group_id",
+      "milestone_id",
+      "milestone_index",
+      "milestone_reuse",
+      "milestone_total",
+      "result",
+      "status",
+      "work_unit_states"
+    ],
+    "pom_on_disk": "<project xmlns='http://maven.apache.org/POM/4.0.0'><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>myapp</artifactId><version>1</version></project>\n",
+    "records": {
+      "M1": [
+        {
+          "content_hash": null,
+          "coordinates": {
+            "artifactId": "myapp",
+            "groupId": "g",
+            "version": "1"
+          },
+          "ecosystem": "maven",
+          "entrypoints": [],
+          "kind": "library",
+          "milestone_id": "M1",
+          "module_path": "",
+          "packaging": "jar",
+          "resolved_at_commit": "6abbaf44745a41049327e85e8bfeec3f",
+          "resource_roots": []
+        }
+      ],
+      "M2": []
+    },
+    "status": "milestone_failed",
+    "units": [
+      1,
+      2
+    ],
+    "validate_M1_now": [
+      [
+        null,
+        false
+      ]
+    ]
+  }
+}

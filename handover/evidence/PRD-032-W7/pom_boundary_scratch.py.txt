@@ -1,0 +1,51 @@
+"""SCRATCH (moved to evidence after capture): real-engine characterization of a parseable pom without artifactId."""
+import json, os
+from unittest.mock import patch
+import test_gate_f_milestone_artifact_registry as base
+from test_p2_artifact_derivation_indeterminate import ManifestRun, _seed, GOOD_POM
+from kriya.control.persistence import load_artifact_registry
+
+OUT = os.environ["POM_CHAR_OUT"]
+BARE_POM = "<project xmlns='http://maven.apache.org/POM/4.0.0'><modelVersion>4.0.0</modelVersion><groupId>g</groupId><version>1</version></project>\n"
+
+def plan_with_provides():
+    return {"group_id": base.GROUP, "original_goal": "Add mul and div to calc.py.", "milestones": [
+        {"id": "M1", "goal": "Add mul(a, b) to calc.py.", "success_criterion": "mul works", "depends_on": [], "provides": [{"name": "lib"}]},
+        {"id": "M2", "goal": "Add div(a, b) to calc.py.", "success_criterion": "div works", "depends_on": ["M1"], "consumes": ["lib"]},
+    ]}
+
+def _gates():
+    ok = {"success": True, "output": "ok"}
+    return [patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=lambda *a, **k: ok),
+            patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=lambda *a, **k: {"success": True, "output": "tests/test_x.py .\n1 passed in 0.01s"}),
+            patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", new=lambda *a, **k: ok)]
+
+def _rec(name, tmp_path, files, m2=None, monkeypatch=None):
+    monkeypatch.setattr(base, "_plan", plan_with_provides)
+    ws = tmp_path / name
+    _seed(ws, files)
+    run = ManifestRun(tmp_path / f"{name}-cfg", {1: base.WITH_MUL, 2: base.WITH_DIV, base.INTEGRATION: base.WITH_DIV})
+    run.m2 = m2
+    ps = _gates()
+    for p in ps: p.start()
+    try:
+        result, state = run.execute(ws)
+    finally:
+        for p in ps: p.stop()
+    reg = load_artifact_registry(str(ws))
+    inner = result.legacy_result.get("result") or {}
+    payload = {"status": result.legacy_result.get("status"), "completed": list(state.completed_milestone_ids), "units": run.units,
+               "records": {m: [r.to_dict() for r in reg.resolve_for_milestone(m)] for m in ("M1", "M2")},
+               "pom_on_disk": (ws / "pom.xml").read_text() if (ws / "pom.xml").exists() else None,
+               "validate_M1_now": [(v.reason_code, v.drifted) for v in reg.validate(str(ws), "M1")],
+               "env_failure": str(inner.get("environment_failure"))[:200], "category": inner.get("failure_category"),
+               "legacy_keys": sorted(result.legacy_result)[:12]}
+    ex = json.load(open(OUT)) if os.path.exists(OUT) else {}
+    ex[name] = payload
+    json.dump(ex, open(OUT, "w"), indent=2, sort_keys=True, default=str)
+
+def test_A_no_artifact_expected_bare_pom_present(tmp_path, monkeypatch):
+    _rec("A_no_artifact_expected", tmp_path, {"pom.xml": BARE_POM}, monkeypatch=monkeypatch)
+
+def test_B_artifact_recorded_then_pom_loses_artifactid(tmp_path, monkeypatch):
+    _rec("B_recorded_then_incomplete", tmp_path, {"pom.xml": GOOD_POM}, m2=("pom.xml", BARE_POM), monkeypatch=monkeypatch)

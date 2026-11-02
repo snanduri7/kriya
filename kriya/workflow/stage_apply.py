@@ -131,7 +131,7 @@ def milestone_registry_unit(work_unit: Any) -> Optional[str]:
     return work_unit.work_unit_id
 
 
-def run_artifact_registry_gate(state: RunState, *, worktree_path: str, work_unit: Any) -> None:
+def run_artifact_registry_gate(state: RunState, *, worktree_path: str, work_unit: Any, workspace_path: Optional[str] = None) -> None:
     """Gate F (owner ruling 2026-11-01), at the milestone pre-apply boundary: the canonical
     ``ArtifactRegistry.derive_from_workspace`` runs on the CANDIDATE before the terminal apply, exactly as the enforce
     terminal derives from its candidate before its commit. A failure is a deterministic stop (an I/O-class exception is an environment fault; an
@@ -142,9 +142,13 @@ def run_artifact_registry_gate(state: RunState, *, worktree_path: str, work_unit
     if milestone_id is None:
         return
     from kriya.control.artifacts import ArtifactDerivationIndeterminate, ArtifactRegistry, registry_digest
+    from kriya.control.persistence import load_artifact_registry
 
     try:
-        derived = ArtifactRegistry().derive_from_workspace(worktree_path, milestone_id)
+        # The REAL workspace's recorded registry says which artifacts are expected (an artifact recorded earlier whose descriptor
+        # the candidate leaves present but underivable is indeterminate); a missing store is an empty registry, an unreadable one fails closed.
+        registry = load_artifact_registry(workspace_path) if workspace_path is not None else ArtifactRegistry()
+        derived = registry.derive_from_workspace(worktree_path, milestone_id)
     except Exception as error:
         # ARTIFACT-DERIVATION-INDETERMINATE-MANIFEST-001: a present canonical manifest whose artifact cannot be derived is NOT
         # an environment fault: the candidate (or the repository it extends) carries the unusable manifest, so the Developer is
