@@ -148,6 +148,8 @@ SCENARIOS: Dict[str, Scenario] = {
                     "commit refused; workspace unchanged"),
     "D10": Scenario("commit", "commit", "static analysis disabled: direct candidate changed after the gates",
                     "verification binding refuses the commit; workspace unchanged; no Developer retry"),
+    "D11": Scenario("commit", "recovery", "milestone: failure between the source commit and the artifact-registry settlement",
+                    "explicitly UNSETTLED, not complete, dependents blocked; resume settles idempotently from commit evidence"),
     "E01": Scenario("static_analysis", "static_analysis", "commit with no static-analysis evidence while enabled",
                     "refused before commit intent"),
     "E02": Scenario("static_analysis", "static_analysis", "candidate bytes changed after the scan",
