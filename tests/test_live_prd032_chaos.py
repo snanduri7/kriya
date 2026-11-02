@@ -44,7 +44,7 @@ from _live_identity import qualified_live_config
 from kriya.core.inference_runtime import ChatResponse, register_runtime_adapter, runtime_adapter
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.core.model_runtime import OllamaRuntimeAdapter, clear_model_runtime_cache
+from kriya.core.model_runtime import clear_model_runtime_cache
 from kriya.workflow.workflow import WorkflowEngine
 
 SECRET = "LIVE-CHAOS-CANARY-9f41c2"
@@ -98,23 +98,27 @@ def test_live_repository_prompt_injection_crosses_no_boundary(chaos_case, live, 
                        **audit.evidence())
 
 
-class _MalformedFirstDeveloper(OllamaRuntimeAdapter):
-    """The packaged runtime (same name, probe and identity) whose first
-    Developer answer is replaced by a truncated JSON fragment."""
+def _malformed_first_developer(base):
+    """A wrapper of the runtime adapter the configuration actually names (``base``: that adapter's class, so the production
+    identity's own adapter - the native ``ollama_native`` one as well as the packaged ``ollama`` one - keeps its name, probe and
+    identity) whose first Developer answer is replaced by a truncated JSON fragment."""
 
-    def __init__(self):
-        super().__init__()
-        self.replaced = 0
-        self.developer_requests = 0
+    class _MalformedFirstDeveloper(base):
+        def __init__(self):
+            super().__init__()
+            self.replaced = 0
+            self.developer_requests = 0
 
-    async def complete(self, client, request):
-        if role_of(request) == "developer":
-            self.developer_requests += 1
-            if self.replaced == 0:
-                self.replaced = 1
-                return ChatResponse(content='[{"filepath": "calc.py", "content": "def sub(a, b):\\n    ret',
-                                    finish_reason="stop", prompt_tokens=11, completion_tokens=3)
-        return await super().complete(client, request)
+        async def complete(self, client, request):
+            if role_of(request) == "developer":
+                self.developer_requests += 1
+                if self.replaced == 0:
+                    self.replaced = 1
+                    return ChatResponse(content='[{"filepath": "calc.py", "content": "def sub(a, b):\\n    ret',
+                                        finish_reason="stop", prompt_tokens=11, completion_tokens=3)
+            return await super().complete(client, request)
+
+    return _MalformedFirstDeveloper()
 
 
 @chaos("L02")
@@ -122,8 +126,9 @@ def test_live_malformed_response_is_never_accepted_and_recovery_is_bounded(chaos
     config, identity = live
     chaos_case.identity.update(identity)
     workspace = git_workspace(tmp_path, {"calc.py": CALC, "test_calc.py": TEST_SUB})
-    packaged = runtime_adapter("ollama")
-    wrapper = _MalformedFirstDeveloper()
+    packaged = runtime_adapter(config.llm.inference_runtime or None)     # the adapter the production identity runs through
+    wrapper = _malformed_first_developer(type(packaged))
+    assert wrapper.name == packaged.name
     register_runtime_adapter(wrapper)
     clear_model_runtime_cache()
     chaos_case.arm()
