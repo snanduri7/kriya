@@ -2,5 +2,16 @@
 # them by digest before certifying (scripts/pinned_images.py --pull), and
 # scripts/certify.sh verifies each is present with exactly that digest
 # (--verify) - the product itself never pulls a pinned image (--pull never).
+# A line is `repo[:tag]@sha256:<digest>`; with a tag, the tag must resolve to that exact image (the tests and the product refer to images by tag).
+# The kriya-acq-* images are NOT listed: the product builds them on demand FROM these bases (kriya/tools/containment_oci.py).
 # Keep in sync with the tests that use them (tests/test_pinned_images.py).
 semgrep/semgrep@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b
+maven:3.9-eclipse-temurin-8@sha256:d8b1b22e93012cd0257d37b3fd6d7bec3d0f7ae611730fc3ba0657b9ebe4e7ca
+maven:3.9-eclipse-temurin-17@sha256:42a3ac393abbc64dae6c96703e5ead2e921fe9103371ac58b5b404b0d6a26502
+maven:3.9-eclipse-temurin-21@sha256:a972570be789ee5c9fa23446a8914ac7327560b5c022f662cfa9452aef829f18
+gradle:8-jdk8@sha256:de7e9465caf5a35e93a92b71c41f2bcf4e7a99ae0f8fbb7399458d86829b6a90
+gradle:8-jdk17@sha256:97c944e42dea3af8d3c987f1515015dda8033c1f41243137db2f107340f29ebc
+gradle:8-jdk21@sha256:f6588210adee6777f77fa9fccd02aa9a7a74a8b4c3f32a87d1f446679645dba2
+python:3.10-slim@sha256:31dd4d9529d02d7436659061cb7564cd4733fc90e5e152709a942d53382ec8d0
+python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
+debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171

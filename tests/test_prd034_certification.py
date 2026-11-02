@@ -155,8 +155,8 @@ def _certification_out(tmp_path, stages, *, unexpected=0, doctor=None, identity=
     return str(out)
 
 
-PASSING = {"environment": "RECORDED", "static": "PASS", "pytest": "PASS", "images": "PASS", "scanner": "PASS",
-           "release": "PASS", "doctor": "RECORDED"}
+PASSING = {"environment": "RECORDED", "static": "PASS", "collection": "PASS", "pytest": "PASS", "tier_execution": "PASS", "images": "PASS",
+           "scanner": "PASS", "release": "PASS", "doctor": "RECORDED"}
 DOCTOR = {"production_ready": False, "checks": [
     {"id": "model.qualification", "required": True, "status": "FAIL"},
     {"id": "profile.production", "required": True, "status": "PASS"}]}
@@ -169,9 +169,18 @@ def test_certified_only_when_every_mandatory_stage_passes_and_the_doctor_is_repo
     assert summary["doctor"]["production_ready"] is False
     assert summary["doctor"]["failed_required"] == ["model.qualification"]
     assert summary["tiers"]["pytest"]["junit"]["passed"] == 9
-    for stage, status in (("scanner", "UNAVAILABLE"), ("pytest", "FAIL"), ("images", "FAIL"), ("release", "FAIL")):
+    for stage, status in (("scanner", "UNAVAILABLE"), ("pytest", "FAIL"), ("images", "FAIL"), ("release", "FAIL"), ("collection", "FAIL"),
+                          ("tier_execution", "FAIL")):
         failing = module.summarize(_certification_out(tmp_path / stage, {**PASSING, stage: status}, doctor=DOCTOR))
         assert failing["status"] == "NOT_CERTIFIED" and f"{stage}: {status}" in failing["problems"]
+
+
+def test_a_requested_thresholds_freeze_that_did_not_record_is_never_certified(tmp_path):
+    module = _summary_module()
+    recorded = module.summarize(_certification_out(tmp_path / "r", {**PASSING, "thresholds": "RECORDED"}, doctor=DOCTOR))
+    assert recorded["status"] == "CERTIFIED"
+    failed = module.summarize(_certification_out(tmp_path / "f", {**PASSING, "thresholds": "FAIL"}, doctor=DOCTOR))
+    assert failed["status"] == "NOT_CERTIFIED" and "thresholds: FAIL" in failed["problems"]
 
 
 def test_an_unexpected_skip_or_a_missing_doctor_is_never_certified(tmp_path):
@@ -195,3 +204,46 @@ def test_certification_requires_a_pinned_release_identity(tmp_path, identity, pr
     assert summary["status"] == "NOT_CERTIFIED"
     assert any(p.startswith(problem) for p in summary["problems"]), summary["problems"]
     assert "Release identity" in module.render(summary)
+
+
+# --- scripts/certify.sh structure: authority is never minted, the canonical command is literal ----------------------------------------------
+
+CERTIFY = (TESTS.parent / "scripts" / "certify.sh").read_text(encoding="utf-8")
+
+
+def test_certify_never_executes_an_authority_approval():
+    """SEC-009: certification is not the operator. `authority approve` may appear only as text (a comment, or the owner command the script prints);
+    no line executes it (kriya/config/authority_approval.py: 'there is no CI runs approve non-interactively path')."""
+    offenders = [line.strip() for line in CERTIFY.splitlines()
+                 if "authority approve" in line and not line.lstrip().startswith("#") and "OWNER_CMD=" not in line and "printf" not in line]
+    assert offenders == [], offenders
+    assert "--confirm" not in CERTIFY
+
+
+def test_certify_runs_the_literal_canonical_population_once():
+    """C3: `pytest -o addopts= -m "not live_model"` includes real_toolchain and live_static_analysis; there is no second, smaller pytest population."""
+    runs = [line for line in CERTIFY.splitlines() if line.lstrip().startswith(("if pytest ", "pytest ")) and "--collect-only" not in line]
+    assert len(runs) == 1 and '-o addopts= -m "not live_model"' in runs[0]
+    assert "-m live_static_analysis" not in CERTIFY and "and not live_static_analysis" not in CERTIFY and "and not real_toolchain" not in CERTIFY
+    assert "--certification" in runs[0] and "--junitxml" in CERTIFY and "--collection-census" in CERTIFY
+
+
+CI = (TESTS.parent / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+
+def _certification_job():
+    return CI.split("  production-certification:", 1)[1].split("\n  live-model-smoke:", 1)[0]
+
+
+def test_the_hosted_certification_job_has_the_capacity_and_the_cold_runner_provisioning():
+    job = _certification_job()
+    assert int(re.search(r"timeout-minutes: (\d+)", job).group(1)) >= 300       # about 2.7 h serial locally, plus cold pulls and seeding
+    assert job.index("pinned_images.py --pull") < job.index("run: scripts/seed_offline_maven.sh") < job.index("run: scripts/certify.sh")
+    assert "-n " not in job and "xdist" not in job                                # the canonical certification stays serial
+    assert "authority approve" not in job and "--trust-file" not in job            # a hosted job never mints (or smuggles in) an approval
+
+
+def test_the_seed_script_resolves_from_coordinates_with_both_mavens_and_never_copies_a_cache():
+    seed = (TESTS.parent / "scripts" / "seed_offline_maven.sh").read_text(encoding="utf-8")
+    assert "mvn -B -ntp -q -Dmaven.repo.local=" in seed and "docker run" in seed and "--pull never" in seed
+    assert "cp -R \"$HOME/.m2" not in seed and "rsync" not in seed

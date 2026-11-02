@@ -83,3 +83,67 @@ def test_no_docker_is_unavailable_and_bad_arguments_are_refused(tmp_path, monkey
     monkeypatch.setenv("PATH", str(tmp_path))
     assert module.main(["--verify"]) == 2
     assert module.main(["--push"]) == 2
+
+
+# --- PRD-034 hosted parity: tagged pins ---------------------------------------------------------------------------------------------------
+
+TAGGED = "example/tool:1.2@sha256:" + "a" * 64
+
+
+def _scripted_docker(monkeypatch, module, *, repo_digests, ids):
+    """``docker image inspect <ref> --format <template>`` answered from ``repo_digests`` (digest reference -> list) and ``ids`` (reference -> Id)."""
+    calls = []
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        reference, template = command[3], command[5]
+        import subprocess
+
+        if template == "{{json .RepoDigests}}":
+            payload = repo_digests.get(reference)
+        else:
+            payload = ids.get(reference)
+        if payload is None:
+            return subprocess.CompletedProcess(command, 1, "", "No such image")
+        return subprocess.CompletedProcess(command, 0, __import__("json").dumps(payload) if template != "{{.Id}}" else payload, "")
+    monkeypatch.setattr(module.subprocess, "run", run)
+    return calls
+
+
+def test_a_tagged_pin_splits_into_the_digest_reference_and_the_tag():
+    module = _module()
+    assert module.split(TAGGED) == ("example/tool@sha256:" + "a" * 64, "1.2")
+    assert module.split(IMAGE) == (IMAGE, None)
+    assert module.split("registry.example:5000/team/tool:9@sha256:" + "c" * 64) == ("registry.example:5000/team/tool@sha256:" + "c" * 64, "9")
+    assert module.split("registry.example:5000/team/tool@sha256:" + "c" * 64)[1] is None   # a registry port is not a tag
+
+
+def test_a_tag_that_resolves_to_other_bytes_is_not_present(monkeypatch):
+    module = _module()
+    digest_reference = module.split(TAGGED)[0]
+    _scripted_docker(monkeypatch, module, repo_digests={digest_reference: [digest_reference]},
+                     ids={digest_reference: "sha256:one", "example/tool:1.2": "sha256:one"})
+    assert module.present("docker", TAGGED) is True
+    _scripted_docker(monkeypatch, module, repo_digests={digest_reference: [digest_reference]},
+                     ids={digest_reference: "sha256:one", "example/tool:1.2": "sha256:ANOTHER"})
+    assert module.present("docker", TAGGED) is False          # re-pointed tag: different bytes under the name the tests use
+    _scripted_docker(monkeypatch, module, repo_digests={digest_reference: [digest_reference]}, ids={digest_reference: "sha256:one"})
+    assert module.present("docker", TAGGED) is False          # the tag is absent
+
+
+def test_every_image_a_docker_tier_skip_or_provisions_is_in_the_manifest_with_its_tag():
+    """Drift guard: a test's skipif image, and every base image the Docker tiers run on, must be pinned (a cold runner has none of them)."""
+    import sys
+
+    sys.path.insert(0, str(ROOT / "tests"))
+    try:
+        import _real_oci
+    finally:
+        sys.path.remove(str(ROOT / "tests"))
+    module = _module()
+    tags = {tag: line for line in module.pinned_images() for _ref, tag in [module.split(line)] if tag}
+    for image in (_real_oci.MAVEN_IMAGE, _real_oci.MCP_IMAGE, "maven:3.9-eclipse-temurin-8", "maven:3.9-eclipse-temurin-21", "gradle:8-jdk8",
+                  "gradle:8-jdk17", "gradle:8-jdk21", "python:3.12-slim", "debian:bookworm-slim"):
+        repository, _, tag = image.partition(":")
+        assert any(line.startswith(f"{repository}:{tag}@sha256:") for line in module.pinned_images()), image
+    assert tags and all(line in module.pinned_images() for line in tags.values())

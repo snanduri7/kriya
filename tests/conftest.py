@@ -200,6 +200,8 @@ def pytest_addoption(parser):
                      help="PRD-034: an unexpected skip or xfail fails (tests/certification/skip_allowlist.yaml)")
     parser.addoption("--certification-report", default=None, metavar="DIR",
                      help="PRD-034: write skips.json (every skip, allowlisted or not) to DIR")
+    parser.addoption("--collection-census", default=None, metavar="FILE",
+                     help="PRD-034: write the census of the collected (post-selection) tests - node id, markers, tier facts - to FILE (tests/_certification_collection.py audits it)")
     parser.addoption("--model-certification", default=None, metavar="DIR",
                      help="PRD-035: write model-certification.json/.md (the live matrix report) to DIR")
     parser.addoption("--census-ids", default=None, metavar="FILE",
@@ -758,6 +760,18 @@ def _containment_census_seam(request, monkeypatch):
     if consulted and entry is None:
         pytest.fail(f"{request.node.nodeid} consults the canonical containment decision ({sorted(set(consulted))}) but is not classified in tests/containment_census.py - "
                     "add it (an exact id or its file rule) with its seam and class", pytrace=False)
+
+
+def pytest_collection_finish(session):
+    """PRD-034: the collected population, as the selection left it (``-m`` has already deselected)."""
+    census_path = session.config.getoption("--collection-census")
+    if not census_path:
+        return
+    from _certification_collection import census_record, write_census
+
+    write_census(census_path, [census_record(base_nodeid(item), item.iter_markers(), _needs_real_docker(item))
+                               for item in session.items],
+                 selection=session.config.getoption("-m") or "", args=list(session.config.invocation_params.args))
 
 
 def pytest_sessionfinish(session):

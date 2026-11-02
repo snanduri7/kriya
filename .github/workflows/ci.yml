@@ -165,7 +165,10 @@ jobs:
     # versions and the production doctor JSON are archived.
     name: Production certification
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    # 300 minutes: operational capacity, not a weakening of any test. The canonical population (`pytest -o addopts= -m "not live_model"`, serial by
+    # design: repository-writer safety, and the timing tests must not share a loaded runner with each other) takes about 2.7 hours locally, and a cold
+    # hosted runner also pulls every pinned image and seeds the offline Maven repository first. Reduce only on measured hosted durations.
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -194,7 +197,13 @@ jobs:
         # tests/certification/pinned_images.txt; certify.sh re-verifies and
         # fails (never skips) on a missing or re-pointed image.
         run: .venv/bin/python scripts/pinned_images.py --pull
+      - name: Seed the offline Maven repository (Ignite 2.18.0, JUnit 5.8.2) from Maven Central
+        # The Spring/Ignite post-check and mutant tests need these artifacts offline; a cold runner has no warm ~/.m2, and a mandatory test is never
+        # made optional (nor allowlisted) because the runner starts cold.
+        run: scripts/seed_offline_maven.sh
       - name: Certify
+        # Doctor mode here is `packaged_defaults`: a hosted runner holds no owner-approved production configuration (SEC-009: certification never
+        # approves anything itself), so the production doctor is recorded as it reports on packaged defaults. See scripts/certify.sh.
         run: scripts/certify.sh certification-out/ci
       - uses: actions/upload-artifact@v4
         if: always()

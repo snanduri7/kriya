@@ -1,7 +1,8 @@
 """PRD-034: the certification summary of one scripts/certify.sh run.
 
-Reads OUT_DIR/stages.jsonl, the junit files, the skip audits
-(skips.json), environment.json, release-identity.json and doctor.json. Writes
+Reads OUT_DIR/stages.jsonl, the junit file, the skip audit
+(skips.json), the collection audit and tier-execution records, thresholds.json (when frozen),
+doctor-mode.json, environment.json, release-identity.json and doctor.json. Writes
 certification-summary.json and certification-summary.md. The overall status
 is CERTIFIED only when every mandatory stage (static, pytest, images,
 scanner, release) is PASS, the doctor produced parseable JSON, and no unexpected skip
@@ -17,7 +18,7 @@ import sys
 import xml.etree.ElementTree as ElementTree
 from typing import Any, Dict, List, Optional
 
-MANDATORY = ("static", "pytest", "images", "scanner", "release")
+MANDATORY = ("static", "collection", "pytest", "tier_execution", "images", "scanner", "release")
 
 
 def _junit(path: str) -> Optional[Dict[str, int]]:
@@ -49,7 +50,7 @@ def summarize(out: str) -> Dict[str, Any]:
                 record = json.loads(line)
                 stages[record["stage"]] = record
     tiers = {}
-    for tier in ("pytest", "scanner"):
+    for tier in ("pytest",):  # the scanner tier runs INSIDE the canonical pytest population (PRD-034 C3): no second junit
         skips = _json(os.path.join(out, tier, "skips.json")) or {}
         tiers[tier] = {"junit": _junit(os.path.join(out, tier, "junit.xml")),
                        "skipped": skips.get("skipped"), "unexpected_skips": skips.get("unexpected")}
@@ -64,6 +65,8 @@ def summarize(out: str) -> Dict[str, Any]:
                          for status in sorted({c.get("status") for c in checks})},
         }
     problems: List[str] = []
+    if stages.get("thresholds", {}).get("status", "RECORDED") != "RECORDED":
+        problems.append(f"thresholds: {stages['thresholds']['status']}")
     for name in MANDATORY:
         status = stages.get(name, {}).get("status", "MISSING")
         if status != "PASS":
@@ -83,6 +86,10 @@ def summarize(out: str) -> Dict[str, Any]:
         "status": "CERTIFIED" if not problems else "NOT_CERTIFIED", "problems": problems,
         "stages": stages, "tiers": tiers, "doctor": doctor_summary,
         "environment": _json(os.path.join(out, "environment.json")),
+        "collection": _json(os.path.join(out, "collection", "collection-audit.json")),
+        "tier_execution": _json(os.path.join(out, "tier-execution.json")),
+        "doctor_mode": _json(os.path.join(out, "doctor-mode.json")),
+        "thresholds": _json(os.path.join(out, "thresholds.json")),
         "release_identity": identity,
     }
 
@@ -98,6 +105,16 @@ def render(summary: Dict[str, Any]) -> str:
         junit = data["junit"] or {}
         lines.append(f"| {tier} | {junit.get('tests', '-')} | {junit.get('passed', '-')} | {junit.get('failures', '-')} | "
                      f"{junit.get('errors', '-')} | {junit.get('skipped', '-')} | {data['unexpected_skips']} |")
+    collection = summary.get("collection") or {}
+    lines += ["", "## Population", "",
+              f"- canonical selection `{collection.get('selection')}`: {collection.get('selected')} selected, {collection.get('deselected')} deselected "
+              f"(of {collection.get('total')}); tiers selected: {json.dumps(collection.get('tiers_selected'), sort_keys=True)}",
+              f"- tier execution: {json.dumps((summary.get('tier_execution') or {}).get('per_tier'), sort_keys=True)}",
+              f"- doctor mode: {json.dumps(summary.get('doctor_mode'), sort_keys=True)}"]
+    thresholds = summary.get("thresholds")
+    if thresholds:
+        lines += [f"- thresholds: {thresholds.get('source_path')} sha256 {thresholds.get('file_sha256')} loader digest {thresholds.get('loader_digest')}; "
+                  f"effective {json.dumps(thresholds.get('effective'), sort_keys=True)}"]
     doctor = summary["doctor"]
     lines += ["", "## Production doctor (recorded as reported)", "",
               "```json", json.dumps(doctor, indent=2, sort_keys=True), "```",
