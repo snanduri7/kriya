@@ -152,6 +152,8 @@ SCENARIOS: Dict[str, Scenario] = {
                     "the generated test closes nothing: requirement VIOLATED by the independent acceptance evidence, not commit-eligible, commit refused, workspace unchanged"),
     "D11": Scenario("commit", "recovery", "milestone: failure between the source commit and the artifact-registry settlement",
                     "explicitly UNSETTLED, not complete, dependents blocked; resume settles idempotently from commit evidence"),
+    "D12": Scenario("commit", "recovery", "cross-unit: a consumer unit's behavioural test exposes an incomplete producer unit; the consumer has no authority over the producer file",
+                    "WAVE5-O1 characterization: no route back to the producer (stays open), fails closed: bounded retries, producer never reopened or edited, no false SUCCESS, truthful RunRecord"),
     "E01": Scenario("static_analysis", "static_analysis", "commit with no static-analysis evidence while enabled",
                     "refused before commit intent"),
     "E02": Scenario("static_analysis", "static_analysis", "candidate bytes changed after the scan",
