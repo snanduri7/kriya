@@ -1,0 +1,27 @@
+{
+  "purpose": "PRD-032 (Wave 7) deterministic chaos report x2 and live L01-L03: the exact executable and environment the evidence belongs to",
+  "executable_revision": "596e3ec68ef9be9d80dc8a688ba9b59f92669b8d",
+  "tracked_tree": "15477c03d117a9ddb1bccdddb354e3d38b87940d",
+  "kriya_package_tree": "f5aa15a99839a51207b913e660a320e3ea68614a",
+  "tracked_tree_clean_at_run": true,
+  "note": "later commits on this branch change only handover/ evidence; tests/ and kriya/ are byte-identical to the executable revision",
+  "kriya_module": "/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/kriya/__init__.py (editable install)",
+  "python": "3.14.6", "pytest": "9.1.1", "platform": "macOS-27.0.1-arm64", "semgrep": "1.178.0", "docker": "27.5.1",
+  "chaos_report_command": "scripts/chaos_report.sh <dir> scanner  (selection: chaos and not live_model; real Semgrep 1.178.0 for E08)",
+  "chaos_reports": {"run1": "chaos-run1/", "run2": "chaos-run2/"},
+  "chaos_content_digest": "fe5944cf34cd07545473a78b2a016cbe1dcf0f3f0f09d6b6f138f1265663f05d",
+  "chaos_results": "52 passed, 3 NOT_RUN (L01-L03, live tier), 0 failed; both runs identical",
+  "live_identity": {
+    "model": "qwen3-coder:30b-kriya-e52213655394", "runtime": "ollama_native", "provider": "ollama",
+    "runtime_fingerprint_digest": "7a02e748b2c53a8e02ef3174149a8dc076797e00e1f9d63b0d8fe4974bdbab3c",
+    "fingerprint_exact": true, "effective_context_window": 32768,
+    "developer_qualification": "QUALIFIED (verified 2026-11-02 by the live preflight logic, no inference)",
+    "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+    "release_config": "~/.kriya/operator/graphify-qwen3coder-native-production.yaml",
+    "release_config_sha256": "076e48ac125c8df3a7383c47ba771c03a9cf3a2641f29bd0d368bb5933c83d4e",
+    "qualification_home": "~/kriya-gate-e-2026-11-01/qualification (source ~/kriya-gate-e-2026-11-01/env.sh)"
+  },
+  "historical_evidence_classification": {
+    "handover/evidence/PRD-032/chaos (ae29d0a)": "STALE as acceptance (older lineage, runtime ea90552d on /v1); used only to diff observed outcomes: D09 and E02 now report VERIFIED_CANDIDATE_EVIDENCE_STALE (stricter commit-time binding first), L01-L03 are rerun live below"
+  }
+}
