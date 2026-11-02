@@ -1,0 +1,15 @@
+"""measurement-only plugin: every 50 completed tests append (elapsed_s, tests_done, basetemp_entries, process user/sys cpu) to GROWTH_OUT."""
+import os, time, json, resource, pytest
+_state = {"n": 0, "t0": time.time()}
+def pytest_runtest_logreport(report):
+    if report.when != "call": return
+    _state["n"] += 1
+    if _state["n"] % 50: return
+    base = pytest.tmp_path_factory_base if hasattr(pytest, "tmp_path_factory_base") else None
+    r = resource.getrusage(resource.RUSAGE_SELF); c = resource.getrusage(resource.RUSAGE_CHILDREN)
+    n_entries = len(os.listdir(base)) if base and os.path.isdir(base) else -1
+    with open(os.environ["GROWTH_OUT"], "a") as f:
+        f.write(json.dumps({"t": round(time.time() - _state["t0"], 1), "done": _state["n"], "basetemp_entries": n_entries, "user": round(r.ru_utime + c.ru_utime, 1), "sys": round(r.ru_stime + c.ru_stime, 1)}) + "\n")
+@pytest.fixture(scope="session", autouse=True)
+def _grab_base(tmp_path_factory):
+    pytest.tmp_path_factory_base = str(tmp_path_factory.getbasetemp()); yield

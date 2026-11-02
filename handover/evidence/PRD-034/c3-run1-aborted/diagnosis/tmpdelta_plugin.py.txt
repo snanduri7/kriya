@@ -1,0 +1,14 @@
+import os, pytest
+_seen = set()
+def pytest_runtest_logreport(report):
+    if report.when != "teardown": return
+    root = os.environ["TMPDIR"]
+    now = {n for n in os.listdir(root) if n.startswith("tmp")}
+    new = now - _seen; _seen.update(now)
+    if new:
+        with open(os.environ["TMPDELTA_OUT"], "a") as f:
+            for n in sorted(new): 
+                p = os.path.join(root, n)
+                try: kids = sorted(os.listdir(p))[:3]
+                except OSError: kids = ["<file>"]
+                f.write(f"{report.nodeid.split('::')[-1][:70]} -> {n} {kids}\n")

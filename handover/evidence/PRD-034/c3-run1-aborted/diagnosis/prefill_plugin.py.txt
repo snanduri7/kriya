@@ -1,0 +1,7 @@
+"""measurement-only plugin: pre-populate pytest's basetemp with N empty dirs (emulates the growth of an in-progress full run)."""
+import os, pytest
+@pytest.fixture(scope="session", autouse=True)
+def _prefill_basetemp(tmp_path_factory):
+    n = int(os.environ.get("PREFILL_N", "0")); base = tmp_path_factory.getbasetemp()
+    for i in range(n): os.mkdir(os.path.join(str(base), f"filler{i}"))
+    yield

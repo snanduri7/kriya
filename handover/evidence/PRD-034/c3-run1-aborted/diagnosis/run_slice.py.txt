@@ -1,0 +1,15 @@
+"""Run a pytest slice, report wall/user/sys, tests/sec; optional TMPDIR override and hard timeout."""
+import os, resource, subprocess, sys, time, json
+label, tmpdir, tmo = sys.argv[1], sys.argv[2], int(sys.argv[3]); args = sys.argv[4:]
+env = dict(os.environ)
+if tmpdir != "-": os.makedirs(tmpdir, exist_ok=True); env["TMPDIR"] = tmpdir
+env["PYTHONDONTWRITEBYTECODE"] = "1"
+cmd = [".venv/bin/pytest", "-o", "addopts=", "-p", "no:cacheprovider", "-q", "--certification", "--durations=5"] + args
+t0 = time.time(); r0 = resource.getrusage(resource.RUSAGE_CHILDREN)
+p = subprocess.Popen(cmd, cwd=os.path.expanduser("~/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2"), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+try: out, _ = p.communicate(timeout=tmo); status = "done"
+except subprocess.TimeoutExpired: p.terminate(); out, _ = p.communicate(); status = "TIMEOUT"
+w = time.time() - t0; r1 = resource.getrusage(resource.RUSAGE_CHILDREN)
+tail = [l for l in out.splitlines() if " passed" in l or " failed" in l or "error" in l.lower()][-2:]
+print(json.dumps({"label": label, "status": status, "wall_s": round(w,1), "user_s": round(r1.ru_utime-r0.ru_utime,1), "sys_s": round(r1.ru_stime-r0.ru_stime,1), "tmpdir": tmpdir, "summary": tail}))
+print("\n".join(out.splitlines()[-9:]))

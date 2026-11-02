@@ -1,0 +1,47 @@
+........................................................................ [  4%]
+........................................................................ [  9%]
+........................................................................ [ 14%]
+........................................................................ [ 19%]
+........................................................................ [ 24%]
+........................................................................ [ 29%]
+........................................................................ [ 34%]
+........................................................................ [ 39%]
+........................................................................ [ 44%]
+........................................................................ [ 49%]
+........................................................................ [ 53%]
+........................................................................ [ 58%]
+..........................................F............................. [ 63%]
+........................................................................ [ 68%]
+........................................................................ [ 73%]
+........................................................................ [ 78%]
+........................................................................ [ 83%]
+........................................................................ [ 88%]
+........................................................................ [ 93%]
+........................................................................ [ 98%]
+...........................                                              [100%]
+=================================== FAILURES ===================================
+_ test_j2_j3_9_10_a_wrong_result_or_a_candidate_exception_is_violated[throws] __
+
+tmp_path = PosixPath('/private/tmp/claude-501/perf/tmpBEFORE/pytest-of-sriramnanduri/pytest-0/test_j2_j3_9_10_a_wrong_result1')
+ws = PosixPath('/private/tmp/claude-501/perf/tmpBEFORE/pytest-of-sriramnanduri/pytest-0/test_j2_j3_9_10_a_wrong_result1/ws')
+variant = 'throws'
+
+    @pytest.mark.parametrize("variant", ["wrong", "throws"])
+    def test_j2_j3_9_10_a_wrong_result_or_a_candidate_exception_is_violated(tmp_path, ws, variant):
+        cand = candidate(ws, tmp_path / "c", variant)
+        reqs, ledger = _ledger(EXACT_GOAL)
+        [attempt] = _close(ledger, reqs, _artifact(tmp_path), ws, cand)
+        status = "failed" if variant == "wrong" else "error"
+>       assert attempt["case_results"] == {case: [status] for case in CASES}
+E       AssertionError: assert None == {'demo.KriyaAcceptanceTest.clampsAboveTheMaximum': ['error'], 'demo.KriyaAcceptanceTest.clampsBelowTheMinimum': ['error']}
+
+tests/test_b2c_jvm_acceptance.py:165: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  kriya.tools.dependency_execution:dependency_execution.py:747 Acquisition (maven, goal='mvn test -Dtest=KriyaAcceptanceTest'): exited 1.
+=========================== short test summary info ============================
+FAILED tests/test_b2c_jvm_acceptance.py::test_j2_j3_9_10_a_wrong_result_or_a_candidate_exception_is_violated[throws]
+1 failed, 1466 passed in 2002.62s (0:33:22)
+real 2006.35
+user 479.49
+sys 395.34
+exit=1

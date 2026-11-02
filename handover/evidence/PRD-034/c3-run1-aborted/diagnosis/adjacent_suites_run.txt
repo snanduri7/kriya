@@ -1,0 +1,87 @@
+........................................................................ [  6%]
+.......................................................F................ [ 13%]
+........................................................................ [ 19%]
+........................................................................ [ 26%]
+........................................................................ [ 32%]
+........................................................................ [ 39%]
+........................................................................ [ 45%]
+........................................................................ [ 52%]
+........................................................................ [ 58%]
+........................................................................ [ 65%]
+........................................................................ [ 71%]
+........................................................................ [ 78%]
+........................................................................ [ 84%]
+........................................................................ [ 91%]
+........................................................................ [ 97%]
+....s.E..................                                                [100%]
+==================================== ERRORS ====================================
+____ ERROR at teardown of test_consults_the_owner_without_a_classification _____
+tests/_census_probe_unclassified.py::test_consults_the_owner_without_a_classification consults the canonical containment decision (['probe']) but is not classified in tests/containment_census.py - add it (an exact id or its file rule) with its seam and class
+=================================== FAILURES ===================================
+_____________ test_a_real_greenfield_maven_compile_passes_its_gate _____________
+
+tmp_path = PosixPath('/private/tmp/kriya-cert.iothGc/pytest-of-sriramnanduri/pytest-0/test_a_real_greenfield_maven_c0')
+
+    @REAL_OCI_MAVEN   # S7: a real Maven build belongs to the real-OCI tier (the canonical provider image and cache), never a host `mvn`
+    def test_a_real_greenfield_maven_compile_passes_its_gate(tmp_path):
+        """The regression this fixes (measured at 3d2bfd2): a greenfield Maven
+        project has no .gitignore, so the real `mvn compile` gate's own target/
+        stopped the run as VERIFICATION_GATE_CREATED_UNAUTHORIZED_FILE."""
+        from kriya.tools.validate import PolymorphicValidator
+        from kriya.workflow.file_integrity import VerificationTreeBinding
+        from kriya.workflow.worktree import repository_content_paths
+    
+        for args in (["init", "-q"], ["config", "user.email", "t@x"], ["config", "user.name", "t"],
+                     ["commit", "-q", "--allow-empty", "-m", "init"]):
+            _git(tmp_path, *args)
+        (tmp_path / "src/main/java/demo").mkdir(parents=True)
+        (tmp_path / "pom.xml").write_text(
+            '<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>'
+            "<groupId>demo</groupId><artifactId>demo</artifactId><version>1</version><properties>"
+            "<maven.compiler.release>17</maven.compiler.release>"
+            "<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding></properties></project>\n")
+        (tmp_path / "src/main/java/demo/App.java").write_text(
+            'package demo; public class App { public static void main(String[] a) { System.out.println("hi"); } }\n')
+        validator = PolymorphicValidator(str(tmp_path))
+        validator.tree_binding = VerificationTreeBinding(
+            str(tmp_path), repository_content_paths(str(tmp_path)), ["pom.xml", "src/main/java/demo/App.java"])
+        result = validator.run_compile_check(["src/main/java/demo/App.java"])
+>       assert result["success"], result.get("output")
+E       AssertionError: Maven returned no trustworthy compilation verdict (MAVEN_COMPILE_RESOLUTION_UNVERIFIED); nothing about the candidate source was judged:
+E         [INFO] Scanning for projects...
+E         [INFO] 
+E         [INFO] -----------------------------< demo:demo >------------------------------
+E         [INFO] Building demo 1
+E         [INFO]   from pom.xml
+E         [INFO] --------------------------------[ jar ]---------------------------------
+E         [WARNING] The POM for org.apache.maven.plugins:maven-clean-plugin:jar:3.2.0 is missing, no dependency information available
+E         [INFO] ------------------------------------------------------------------------
+E         [INFO] BUILD FAILURE
+E         [INFO] ------------------------------------------------------------------------
+E         [INFO] Total time:  0.049 s
+E         [INFO] Finished at: 2026-11-02T13:28:18Z
+E         [INFO] ------------------------------------------------------------------------
+E         [ERROR] Plugin org.apache.maven.plugins:maven-clean-plugin:3.2.0 or one of its dependencies could not be resolved:
+E         [ERROR] 	Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact org.apache.maven.plugins:maven-clean-plugin:jar:3.2.0 has not been downloaded from it before.
+E         [ERROR] -> [Help 1]
+E         [ERROR] 
+E         [ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+E         [ERROR] Re-run Maven using the -X switch to enable full debug logging.
+E         [ERROR] 
+E         [ERROR] For more information about the errors and possible solutions, please read the following articles:
+E         [ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/PluginResolutionException
+E         
+E         MAVEN_ACQUISITION_INCOMPLETE: offline execution for goals ['clean', 'compile', '-Dmaven.compiler.showWarnings=true', '-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked'] reports a missing dependency/plugin: it is still missing after one bounded, network-enabled reacquisition attempt - this is a dependency-acquisition gap, not necessarily a defect in the generated code.
+E         Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp
+E         
+E       assert False
+
+tests/test_file_integrity_contract_001b.py:406: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  kriya.tools.dependency_execution:dependency_execution.py:747 Acquisition (maven, goal='mvn clean compile -Dmaven.compiler.showWarnings=true -Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked'): exited 1.
+WARNING  kriya.tools.validate:validate.py:1819 mvn clean compile -Dmaven.compiler.showWarnings=true -Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked still reports a missing dependency/plugin after one bounded reacquisition - terminating deterministically as acquisition-incomplete, not retrying further.
+=========================== short test summary info ============================
+FAILED tests/test_file_integrity_contract_001b.py::test_a_real_greenfield_maven_compile_passes_its_gate
+ERROR tests/_census_probe_unclassified.py::test_consults_the_owner_without_a_classification
+1 failed, 1102 passed, 1 skipped, 1 error in 992.00s (0:16:31)
+exit=1

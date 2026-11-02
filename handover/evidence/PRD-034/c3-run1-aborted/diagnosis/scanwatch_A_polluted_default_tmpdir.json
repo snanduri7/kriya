@@ -1,0 +1,42 @@
+[
+ {
+  "caller": "kriya/platform/filesystem_semantics.py:208",
+  "fn": "listdir",
+  "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T",
+  "calls": 16215,
+  "total_s": 194.32,
+  "max_entries": 22857
+ },
+ {
+  "caller": ".venv/lib/python3.14/site-packages/_pytest/pathlib.py:175",
+  "fn": "scandir",
+  "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri",
+  "calls": 1,
+  "total_s": 0.32,
+  "max_entries": 87
+ },
+ {
+  "caller": ".venv/lib/python3.14/site-packages/_pytest/pathlib.py:167",
+  "fn": "scandir",
+  "path": "12",
+  "calls": 20,
+  "total_s": 0.06,
+  "max_entries": 7329
+ },
+ {
+  "caller": ".venv/lib/python3.14/site-packages/_pytest/pathlib.py:167",
+  "fn": "scandir",
+  "path": "13",
+  "calls": 1,
+  "total_s": 0.04,
+  "max_entries": 1
+ },
+ {
+  "caller": ".venv/lib/python3.14/site-packages/_pytest/pathlib.py:167",
+  "fn": "scandir",
+  "path": "11",
+  "calls": 4,
+  "total_s": 0.04,
+  "max_entries": 37144
+ }
+]

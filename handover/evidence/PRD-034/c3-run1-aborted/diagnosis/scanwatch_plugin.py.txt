@@ -1,0 +1,36 @@
+"""pytest plugin (measurement only, outside the repo): record every os.listdir/os.scandir/glob-like call that takes >20ms or returns >2000 entries, with the first non-stdlib caller."""
+import collections, os, sys, time, traceback, atexit, json
+STATS = collections.defaultdict(lambda: [0, 0.0, 0])
+def _caller():
+    for fr in reversed(traceback.extract_stack()[:-2]):
+        if "/Kriya-rebuild-v2/" in fr.filename and "scanwatch" not in fr.filename:
+            return f"{fr.filename.split('Kriya-rebuild-v2/')[1]}:{fr.lineno}"
+    return "?"
+_ol, _sd = os.listdir, os.scandir
+def listdir(path="."):
+    t = time.perf_counter(); r = _ol(path); d = time.perf_counter() - t
+    if d > 0.02 or len(r) > 2000:
+        k = (_caller(), "listdir", str(path)[:90]); s = STATS[k]; s[0] += 1; s[1] += d; s[2] = max(s[2], len(r))
+    return r
+class _It:
+    def __init__(self, it, key, t0): self.it, self.key, self.n, self.t0 = it, key, 0, t0
+    def __iter__(self): return self
+    def __next__(self):
+        try: e = next(self.it); self.n += 1; return e
+        except StopIteration: self._done(); raise
+    def _done(self):
+        d = time.perf_counter() - self.t0
+        if d > 0.02 or self.n > 2000:
+            s = STATS[self.key]; s[0] += 1; s[1] += d; s[2] = max(s[2], self.n)
+    def __enter__(self): return self
+    def __exit__(self, *a): self.it.__exit__(*a) if hasattr(self.it, "__exit__") else None; self._done() if False else None
+    def close(self): self.it.close()
+def scandir(path="."):
+    t = time.perf_counter(); it = _sd(path)
+    return _It(it, (_caller(), "scandir", str(path)[:90]), t)
+os.listdir, os.scandir = listdir, scandir
+def _dump():
+    rows = sorted(STATS.items(), key=lambda kv: -kv[1][1])[:12]
+    with open(os.environ.get("SCANWATCH_OUT", "/private/tmp/claude-501/perf/scanwatch.json"), "w") as f:
+        json.dump([{"caller": k[0], "fn": k[1], "path": k[2], "calls": v[0], "total_s": round(v[1], 2), "max_entries": v[2]} for k, v in rows], f, indent=1)
+atexit.register(_dump)

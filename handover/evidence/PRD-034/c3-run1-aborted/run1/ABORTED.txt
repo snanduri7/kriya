@@ -1,0 +1,4 @@
+C3 run 1 (HEAD 97df908) was INTERRUPTED BY CLAUDE (SIGINT to pytest at 5h01m, ~49% / 9,730 of 19,672 tests), NOT a complete certification. Preserved as evidence, never a pass.
+Why: (1) 1 ERROR at test 3119: tests/test_d2_m2_fd_inheritance.py::test_linux_a_child_cannot_reopen_the_waiters_socket_through_proc -> "UNEXPECTED SKIP in certification mode: MANDATORY LINUX-HOST MEASUREMENT" (a Linux-only test; cannot run on this macOS host).
+(2) throughput collapsed to ~4 tests/min at 100% CPU, ~83% of it kernel (system) time; cause NOT yet diagnosed (INFERRED candidates: tmp-dir growth, 47,724 entries in pytest-5050 and 23,332 in $TMPDIR).
+Downstream stages (tier_execution, scanner) FAILED only because the run was interrupted (docker missing 98); they carry no independent signal.

@@ -1,0 +1,26 @@
+[
+ {
+  "caller": "kriya/platform/filesystem_semantics.py:208",
+  "fn": "listdir",
+  "path": "/private/tmp/claude-501/perf/freshtmp-C20000/pytest-of-sriramnanduri/pytest-0",
+  "calls": 16215,
+  "total_s": 162.66,
+  "max_entries": 20268
+ },
+ {
+  "caller": ".venv/lib/python3.14/site-packages/_pytest/pathlib.py:175",
+  "fn": "scandir",
+  "path": "/private/tmp/claude-501/perf/freshtmp-C20000/pytest-of-sriramnanduri/pytest-0",
+  "calls": 235,
+  "total_s": 3.19,
+  "max_entries": 20267
+ },
+ {
+  "caller": ".venv/lib/python3.14/site-packages/_pytest/pathlib.py:354",
+  "fn": "scandir",
+  "path": "/private/tmp/claude-501/perf/freshtmp-C20000/pytest-of-sriramnanduri/pytest-0",
+  "calls": 1,
+  "total_s": 0.01,
+  "max_entries": 20268
+ }
+]
