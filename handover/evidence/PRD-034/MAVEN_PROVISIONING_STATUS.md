@@ -61,3 +61,10 @@ log carried no network detail and the failure was seen once).
    `attest` compares every artifact/pom with the SHA-1 Central publishes and sets `attested`; a mismatch refuses and names the file. Then commit the manifest (a docs/evidence-class change; the manifest digest is the new repository identity).
 2. SEC-009: see the owner handoff (the final config digest is not frozen until the repository is attested and the executable is final).
 3. The sweep rows 3-6 (PyPI, release stage, Gradle, apt) remain explicit PRD-034 blockers (`EXTERNAL_DEPENDENCY_SWEEP.md`).
+
+## 6. FINAL state (2026-11-03) - supersedes section 5 (the Central bootstrap block is lifted)
+
+* Repository: `tests/certification/maven_repository.manifest.json`, **1,773 files, `attested: true`, content digest `c557384d52b7d3f196b3a79c3477a0441068717117dfd4560948d417bd25dec3`**. It was extended in iterative rounds from Central only (each added jar/pom compared with Central's published SHA-1; `extend` refuses a mismatch) because a failing test stops at the first missing artifact. The earlier 1,653/1,275-file sets are NOT final.
+* Final validation (one complete run over the union of the 136 Maven, 89 pip/Gradle and registry-mirror-real populations, empty caches, Central and PyPI denied): **227 passed in 1h31m**, 36,668 mirror requests (36,605 x 200; 63 x 404 = 60 checksum sidecars + the three artifacts that tests deliberately request and expect to be absent), 0 x 409, PyPI index 322 requests all 200.
+* Broad non-docker regression on the same tree: **19,454 passed, 1 skipped** (19,455 ids; 36m57s); ruff 0, pylint 0; performance probe PASS in a fresh temp root (engine slice 77 s, listing 4.6 s; the same slice took 296 s with 201 s of listing in a polluted ambient temp root - the first probe invocation, kept as evidence in `/private/tmp/claude-501/perf/probe-ambient-polluted`, was run outside certify.sh's fresh root and correctly FAILED).
+* `MAVEN-B2C-THROWS-ACQUISITION-FAILURE-001` final wording: **ENVIRONMENTAL ACQUISITION FAILURE - the deterministic mirror reproducer now passes; the exact historical HTTP-429 causality is not proven.**
