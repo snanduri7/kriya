@@ -1,3 +1,6 @@
+import logging
+import os
+import subprocess
 import sys
 from unittest.mock import patch
 
@@ -92,23 +95,59 @@ def test_tools_list_shows_working_plugin_despite_broken_sibling(tmp_path):
     assert "[WARNING]" in res.output and "bad_plugin" in res.output
 
 
-def test_tools_execute_works_despite_unrelated_broken_plugin(tmp_path):
-    """Same bug, execute path: a specific, working, explicitly-named tool must
-    be executable even when an unrelated plugin fails to initialize."""
+def _hermetic_workspace(tmp_path, monkeypatch):
+    """TOOLS-COMMAND-TEST-NONHERMETIC-CWD-001: `tools execute` is a possibly-mutating call, so it consults the
+    workspace's recovery state (PRD-006, D-001 nested_control_state) from the CURRENT directory. A test that never
+    changes directory runs inside the Kriya source repository, whose committed evidence archive holds an unreadable
+    commit record, and is refused for a reason unrelated to what it names. Run in a fresh git work tree instead."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    monkeypatch.chdir(workspace)
+    return workspace
+
+
+def _broken_and_good_plugins(tmp_path):
     plugin_dir = tmp_path / "plugins"
     plugin_dir.mkdir()
     _write_plugin(plugin_dir, "badplugin2", _bad_plugin_source("BadPlugin2", "bad_plugin_2"))
     _write_plugin(plugin_dir, "goodplugin2", _good_tool_plugin_source("GoodPlugin2", "good_plugin_2", "good_tool_2"))
     sys.modules.pop("badplugin2", None)
     sys.modules.pop("goodplugin2", None)
+    return plugin_dir
 
-    cfg = _cfg(plugin_dir)
+
+def test_tools_execute_works_despite_unrelated_broken_plugin(tmp_path, monkeypatch, caplog):
+    """Same bug, execute path: a specific, working, explicitly-named tool must
+    be executable even when an unrelated plugin fails to initialize."""
+    _hermetic_workspace(tmp_path, monkeypatch)
+    cfg = _cfg(_broken_and_good_plugins(tmp_path))
     runner = CliRunner()
-    with patch("kriya.cli.load_config", return_value=cfg):
+    with caplog.at_level(logging.ERROR, logger="kriya.cli"), patch("kriya.cli.load_config", return_value=cfg):
         res = runner.invoke(main, ["tools", "execute", "good_tool_2", "{}"])
 
     assert res.exit_code == 0
     assert "ok" in res.output
+    # negative control: the broken plugin really was loaded and really did fail, so the success above is the
+    # plugin-tolerance behaviour the test names, not a run in which the broken plugin was never reached.
+    assert "Plugin 'bad_plugin_2' failed to initialize" in caplog.text
+
+
+def test_tools_execute_still_refuses_in_a_workspace_holding_unsettled_nested_state(tmp_path, monkeypatch):
+    """The original failure mechanism, reproduced deterministically: control state left unreadable under a
+    sub-directory of the work tree makes the possibly-mutating `tools execute` refuse (the policy is unchanged and
+    correct). This is what the committed evidence archive did to the un-isolated version of the test above."""
+    workspace = _hermetic_workspace(tmp_path, monkeypatch)
+    commits = workspace / "sub" / ".kriya" / "control" / "commits"
+    commits.mkdir(parents=True)
+    (commits / "0123456789abcdef0123456789abcdef.json").write_text("{ not a commit record", encoding="utf-8")
+    cfg = _cfg(_broken_and_good_plugins(tmp_path))
+    with patch("kriya.cli.load_config", return_value=cfg):
+        res = CliRunner().invoke(main, ["tools", "execute", "good_tool_2", "{}"])
+
+    assert res.exit_code == 1
+    assert "Recovery Required" in res.output
+    assert os.path.realpath(workspace / "sub") in res.output   # the refusal is about THIS workspace's nested state, not an ambient repository's
 
 
 def test_tools_list_stops_kernel_even_when_listing_raises(tmp_path):

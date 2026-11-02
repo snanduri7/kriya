@@ -21,6 +21,7 @@ import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _real_oci import REAL_OCI_MAVEN
 from _strict_doubles import developer_double
 
 from kriya.config import AppConfig
@@ -334,13 +335,15 @@ def test_baseline_replay_reproduces_failure_and_is_isolated(tmp_path):
     assert set(os.listdir(workspace)) == before_entries
 
 
-@pytest.mark.live_model
+@pytest.mark.real_toolchain
+@REAL_OCI_MAVEN
 def test_real_baseline_replay_reproduces_failure_against_real_maven(tmp_path):
-    """Same shape as the mocked test above, against a REAL `mvn` binary and
-    a genuinely broken <sourceDirectory> - the exact live P7 defect,
-    reproduced for real rather than via a mocked subprocess. Excluded by
-    default (needs a real local Java/Maven toolchain, not an LLM - the same
-    "needs a real local dependency" bar as this repo's live_model tier)."""
+    """Same shape as the mocked test above, against a REAL Maven (contained, in the canonical
+    Maven image) and a genuinely broken <sourceDirectory> - the exact live P7 defect,
+    reproduced for real rather than via a mocked subprocess. Tier `real_toolchain`, not
+    `live_model` (PRD-034, WAVE5-LIVE-MODEL-MARKED-MAVEN-TEST-001): it needs Docker and the
+    Maven image and NO model, and the canonical `-m "not live_model"` population must run it.
+    Like the mocked test, the workspace is a Git work tree (R5/R6 bound-tree copy)."""
     broken_pom = _SINGLE_MODULE_POM.replace(
         "</project>", "  <build>\n    <sourceDirectory>src/nonstandard/java</sourceDirectory>\n  </build>\n</project>",
     )
@@ -351,6 +354,7 @@ def test_real_baseline_replay_reproduces_failure_against_real_maven(tmp_path):
     os.makedirs(java_dir)
     with open(os.path.join(java_dir, "Foo.java"), "w") as fh:
         fh.write(_JAVA_SOURCE)
+    _init_git_repo(tmp_path)
 
     before_fingerprint = _dir_fingerprint(workspace)
     before_entries = set(os.listdir(workspace))
