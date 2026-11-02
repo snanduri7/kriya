@@ -9,7 +9,8 @@ directory is PROVISIONED on each machine from it (``pip download --require-hashe
 
     certification_python_wheels.py hashes REQUIREMENTS OUT [name==ver ...]            BOOTSTRAP: hashed requirements from a pinned lock (asks PyPI for each published file hash)
     certification_python_wheels.py provision HASHED WHEELHOUSE                        PROVISION: download this machine's wheels, each verified against HASHED
-    certification_python_wheels.py verify HASHED WHEELHOUSE                           every wheelhouse file is one HASHED lists, and every requirement has a file; exit 1 otherwise
+    certification_python_wheels.py verify HASHED WHEELHOUSE                           every wheelhouse file is one HASHED lists, every requirement has a file, and the lock is
+                                                                                       dependency-CLOSED (every Requires-Dist of every wheel is locked); exit 1 otherwise
     certification_python_wheels.py digest HASHED WHEELHOUSE                           print the content identity (HASHED sha256 + the wheelhouse file digest)
     certification_python_wheels.py record POOL --port N [--bind A] --log F            DISCOVERY ONLY: a recording pass-through to PyPI that stores every file the contained pip tests
                                                                                        request into POOL (rewrites the index so the files come through here); never certification
@@ -31,11 +32,13 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from typing import Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 PYPI = "https://pypi.org"
 _LOCK_LINE = re.compile(r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)==(?P<version>[^\s;\\]+)")
 _FILE_SUFFIXES = (".whl", ".tar.gz", ".zip")
+VENV_PROVIDED = frozenset({"pip"})  # the fresh virtualenv the release stage creates ships pip itself; scripts/verify_release.sh then runs ``pip check`` over everything
 
 
 def normalize(name: str) -> str:
@@ -101,6 +104,48 @@ def _project_of(filename: str) -> str:
     return normalize(re.sub(r"-\d.*$", "", stem))
 
 
+def closure_problems(hashed: Mapping[str, Tuple[str, Set[str]]], wheelhouse: str) -> List[str]:
+    """Is the lock DEPENDENCY-CLOSED for this interpreter and platform? The release stage installs with ``--no-deps``, so every ``Requires-Dist`` of every wheel
+    (marker evaluated here, extras off) must itself be a locked project at a satisfying version - otherwise ``pip check`` fails at the END of a multi-hour run
+    (c3-run2, 2026-11-02: ``mcp 2.0.0 requires pyjwt, which is not installed``). Offline: it reads each wheel's own METADATA. An sdist has no readable metadata and is reported."""
+    from packaging.requirements import (  # noqa: PLC0415 - only the closure check needs it
+        InvalidRequirement,
+        Requirement,
+    )
+    from packaging.utils import canonicalize_name  # noqa: PLC0415
+
+    problems: List[str] = []
+    for name in sorted(os.listdir(wheelhouse)):
+        if name.endswith((".tar.gz", ".zip")):
+            problems.append(f"cannot check the dependencies of a source distribution: {name}")
+        if not name.endswith(".whl"):
+            continue
+        with zipfile.ZipFile(os.path.join(wheelhouse, name)) as archive:
+            metadata_names = [n for n in archive.namelist() if n.count("/") == 1 and n.endswith(".dist-info/METADATA")]
+            if not metadata_names:
+                problems.append(f"no METADATA in {name}")
+                continue
+            lines = archive.read(metadata_names[0]).decode("utf-8", "replace").splitlines()
+        for line in lines:
+            if not line.startswith("Requires-Dist:"):
+                continue
+            try:
+                requirement = Requirement(line.split(":", 1)[1].strip())
+            except InvalidRequirement:
+                problems.append(f"unparseable Requires-Dist in {name}: {line}")
+                continue
+            if requirement.marker is not None and not requirement.marker.evaluate({"extra": ""}):
+                continue
+            if canonicalize_name(requirement.name) in VENV_PROVIDED:
+                continue
+            locked = hashed.get(canonicalize_name(requirement.name))
+            if locked is None:
+                problems.append(f"NOT DEPENDENCY-CLOSED: {name} requires {requirement.name}{requirement.specifier}, which the lock does not contain")
+            elif not requirement.specifier.contains(locked[0], prereleases=True):
+                problems.append(f"NOT DEPENDENCY-CLOSED: {name} requires {requirement.name}{requirement.specifier}, the lock pins {locked[0]}")
+    return problems
+
+
 def verify(hashed_path: str, wheelhouse: str) -> List[str]:
     hashed = parse_hashed(open(hashed_path, encoding="utf-8").read())
     allowed: Set[str] = set().union(*(hashes for _version, hashes in hashed.values())) if hashed else set()
@@ -113,7 +158,7 @@ def verify(hashed_path: str, wheelhouse: str) -> List[str]:
     for project, (version, _hashes) in sorted(hashed.items()):
         if project not in present:
             problems.append(f"no file for {project}=={version}")
-    return problems
+    return problems + closure_problems(hashed, wheelhouse)
 
 
 def digest(hashed_path: str, wheelhouse: str) -> Dict[str, str]:

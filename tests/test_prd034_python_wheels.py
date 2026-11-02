@@ -46,7 +46,9 @@ def test_the_shipped_hashed_lock_covers_exactly_the_locked_requirements_with_has
     pins = wheels.parse_lock((ROOT / "requirements.txt").read_text())
     hashed = wheels.parse_hashed((ROOT / "tests" / "certification" / "requirements.release.hashes.txt").read_text())
     expected = {wheels.normalize(name): version for name, version in pins}
-    assert expected == {name: version for name, (version, _hashes) in hashed.items() if name != "six"}
+    extra = {"six", "pyjwt"}   # six: the pin the contained pip test installs; pyjwt: mcp's transitive dependency (c3-run2 `pip check`), not named in requirements.txt
+    assert expected == {name: version for name, (version, _hashes) in hashed.items() if name not in extra}
+    assert extra <= set(hashed), "both extra pins are in the lock"
     assert all(hashes for _version, hashes in hashed.values()), "every pin carries the SHA-256 of the files PyPI published for it"
     assert "six" in hashed and hashed["six"][0] == "1.16.0", "the pin the contained pip acquisition test installs"
 
@@ -73,6 +75,50 @@ def test_the_wheelhouse_digest_is_derived_from_the_lock_and_the_files_only(tmp_p
     assert first["wheelhouse_files"] == "1" and first == wheels.digest(str(hashed), str(house))
     wheel.write_bytes(wheel.read_bytes() + b"x")
     assert wheels.digest(str(hashed), str(house))["wheelhouse_sha256"] != first["wheelhouse_sha256"]
+
+
+# --- the lock must be DEPENDENCY-CLOSED (the release install is --no-deps; c3-run2 failed `pip check` on mcp -> pyjwt) -------------------------
+
+def _wheel_requiring(directory: Path, name: str, version: str, *requires: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    dist = f"{name}-{version}"
+    path = directory / f"{dist}-py3-none-any.whl"
+    metadata = f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n" + "".join(f"Requires-Dist: {r}\n" for r in requires)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(f"{dist}.dist-info/METADATA", metadata)
+        archive.writestr(f"{dist}.dist-info/WHEEL", "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
+    return path
+
+
+def _lock(tmp_path: Path, *wheels: Path) -> Path:
+    lines = []
+    for wheel in wheels:
+        name, version = wheel.name.split("-")[0], wheel.name.split("-")[1]
+        lines.append(f"{name}=={version} \\\n    --hash=sha256:{hashlib.sha256(wheel.read_bytes()).hexdigest()}")
+    path = tmp_path / "closed.txt"
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def test_verify_refuses_a_lock_that_is_not_dependency_closed_and_names_the_missing_project(tmp_path):
+    house = tmp_path / "house"
+    mcp = _wheel_requiring(house, "kmcp", "2.0.0", "kjwt>=2.10.1")
+    lock = _lock(tmp_path, mcp)                      # every file hash-listed, every pin has a file - and still not installable with --no-deps
+    problems = wheels.verify(str(lock), str(house))
+    assert problems == ["NOT DEPENDENCY-CLOSED: kmcp-2.0.0-py3-none-any.whl requires kjwt>=2.10.1, which the lock does not contain"], problems
+    jwt = _wheel_requiring(house, "kjwt", "2.13.0")
+    assert wheels.verify(str(_lock(tmp_path, mcp, jwt)), str(house)) == []
+
+
+def test_closure_checks_the_locked_version_evaluates_markers_and_ignores_extras_and_the_venv_provided_pip(tmp_path):
+    house = tmp_path / "house"
+    needy = _wheel_requiring(house, "kneedy", "1.0", "kdep<2", 'kwin>=1; sys_platform == "win32-not-this-host"', 'kextra>=1; extra == "speed"', "pip>=22.2")
+    too_new = _wheel_requiring(house, "kdep", "2.5")
+    problems = wheels.verify(str(_lock(tmp_path, needy, too_new)), str(house))
+    assert problems == ["NOT DEPENDENCY-CLOSED: kneedy-1.0-py3-none-any.whl requires kdep<2, the lock pins 2.5"], problems
+    ok = _wheel_requiring(house, "kdep", "1.9")
+    too_new.unlink()
+    assert wheels.verify(str(_lock(tmp_path, needy, ok)), str(house)) == [], "a marker that excludes this host, an extra and the venv's own pip are not dependencies of the lock"
 
 
 # --- the real install with the release stage's exact flags --------------------------------------------------------------------------------

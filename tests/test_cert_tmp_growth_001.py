@@ -134,6 +134,52 @@ def _run_nodes(writer, clock, count, seconds_each, *, outcome="passed"):
         writer.report(Report(node, "teardown"))
 
 
+def test_the_progress_writer_is_immune_to_a_test_that_patches_the_os_primitives_it_uses(tmp_path, monkeypatch):
+    """c3-run2: tests/test_d1_durable_write.py patches ``os.replace``/``os.fsync`` to fail; the progress flush ran during that test and aborted pytest at 15 %."""
+    clock = Clock()
+    writer = ProgressWriter(str(tmp_path), {"tests/test_x.py::test_0": []}, clock=clock)
+
+    def hostile(*_args, **_kwargs):
+        raise OSError(18, "injected failure")
+
+    for name in ("replace", "fsync", "getpid"):
+        monkeypatch.setattr(os, name, hostile)
+    monkeypatch.setattr(json, "dump", hostile)
+    writer.start("tests/test_x.py::test_0")
+    clock.now += 3.0
+    writer.report(Report("tests/test_x.py::test_0", "call", "passed"))
+    writer.report(Report("tests/test_x.py::test_0", "teardown"))
+    writer.finish(0)
+    done = read_progress(str(tmp_path))
+    assert (done["done"], done["passed"], done["finished"], done["write_errors"]) == (1, 1, True, 0), "written through the bound primitives, not the patched ones"
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_a_failed_progress_write_is_counted_never_raised_and_the_file_recovers(tmp_path):
+    clock = Clock()
+    report_dir = tmp_path / "report"
+    report_dir.mkdir()
+    writer = ProgressWriter(str(report_dir), {"tests/test_x.py::test_0": []}, clock=clock)
+    moved = tmp_path / "moved"
+    report_dir.rename(moved)                             # the report directory vanishes under a running writer
+    writer.start("tests/test_x.py::test_0")              # must not raise: observability never changes the run's outcome
+    writer.report(Report("tests/test_x.py::test_0", "call", "passed"))
+    assert writer._state["write_errors"] == 2            # pylint: disable=protected-access
+    moved.rename(report_dir)
+    writer.report(Report("tests/test_x.py::test_0", "teardown"))
+    recovered = read_progress(str(report_dir))
+    assert recovered["done"] == 1 and recovered["passed"] == 1 and recovered["write_errors"] == 2, "the next write succeeds and records how many were lost"
+
+
+def test_the_exact_c3_run2_scenario_a_real_pytest_session_with_the_report_active_completes_over_the_replace_patching_test(tmp_path):
+    root = Path(__file__).resolve().parent.parent
+    done = subprocess.run([sys.executable, "-m", "pytest", "-o", "addopts=", "-p", "no:cacheprovider", "-q", "tests/test_d1_durable_write.py", f"--certification-report={tmp_path}"],
+                          cwd=root, capture_output=True, text=True, timeout=300, check=False)
+    assert done.returncode == 0 and "INTERNALERROR" not in done.stdout + done.stderr, done.stdout[-1500:] + done.stderr[-1500:]
+    final = read_progress(str(tmp_path / "pytest")) or read_progress(str(tmp_path))
+    assert final is not None and final["finished"] is True and final["done"] == final["total"] > 0 and final["exit_status"] == 0
+
+
 def test_the_progress_file_counts_outcomes_names_the_current_node_and_its_tiers(tmp_path):
     clock = Clock()
     tiers = {"tests/test_x.py::test_0": ["docker"], "tests/test_x.py::test_1": [], "tests/test_x.py::test_2": ["live_static_analysis"]}

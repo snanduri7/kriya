@@ -44,11 +44,20 @@ NO_PROGRESS_S = 1200.0
 PROJECTION_FACTOR = 2.0
 
 
+# The writer runs INSIDE the pytest process, in hooks that fire while a test's own monkeypatches are still active. It therefore binds every OS
+# primitive it needs at import, before any test can retarget it (c3-run2, 2026-11-02: tests/test_d1_durable_write.py patches ``os.replace`` to raise,
+# the flush ran in pytest_runtest_logreport during that test, and the run aborted at 15 % with zero test failures).
+_OPEN = open
+_REPLACE = os.replace
+_GETPID = os.getpid
+_DUMP = json.dump
+
+
 def _atomic_write(path: str, payload: Mapping[str, Any]) -> None:
-    temporary = f"{path}.{os.getpid()}.tmp"
-    with open(temporary, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, sort_keys=True)
-    os.replace(temporary, path)
+    temporary = f"{path}.{_GETPID()}.tmp"
+    with _OPEN(temporary, "w", encoding="utf-8") as handle:
+        _DUMP(payload, handle, sort_keys=True)
+    _REPLACE(temporary, path)
 
 
 class ProgressWriter:
@@ -62,14 +71,20 @@ class ProgressWriter:
             "pid": os.getpid(), "started": clock(), "total": len(tiers), "done": 0,
             "passed": 0, "failed": 0, "errors": 0, "skipped": 0, "failed_nodes": [],
             "current": None, "current_tiers": [], "current_started": None, "longest_node_s": 0.0,
-            "history": [[clock(), 0]], "finished": False, "exit_status": None,
+            "history": [[clock(), 0]], "finished": False, "exit_status": None, "write_errors": 0,
         }
         self._current_began: Optional[float] = None
         self.flush()
 
     def flush(self) -> None:
+        """Observability must never change the outcome of the run it observes: a failed write (full disk, vanished report directory) is COUNTED in the
+        file's ``write_errors`` and the run continues; a stale file is then visible to the watchdog as NO_PROGRESS. Only OSError is absorbed - a coding
+        error in this module still fails loudly."""
         self._state["updated"] = self._clock()
-        _atomic_write(self._path, self._state)
+        try:
+            _atomic_write(self._path, self._state)
+        except OSError:
+            self._state["write_errors"] = self._state.get("write_errors", 0) + 1
 
     def start(self, nodeid: str) -> None:
         now = self._clock()
