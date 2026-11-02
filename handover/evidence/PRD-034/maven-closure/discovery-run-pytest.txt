@@ -1,0 +1,173 @@
+.......................................................................F [ 52%]
+......F................................F...........F....F.......         [100%]
+=================================== FAILURES ===================================
+_____________ test_registry_scoped_allows_authorized_https_connect _____________
+
+workspace = PosixPath('/private/tmp/kriya-cert.9hgO4G/pytest-of-sriramnanduri/pytest-0/test_registry_scoped_allows_au0/workspace')
+
+    def test_registry_scoped_allows_authorized_https_connect(workspace):
+        """Positive control for the test above - proves the 403 is real ACL
+        enforcement, not the proxy being broken/unreachable."""
+        controller = ProcessController()
+        profile = _registry_profile(workspace, ["repo.maven.apache.org"])
+        script = (
+            'PROXY_HOSTPORT="${http_proxy#http://}"; '
+            'printf "CONNECT repo.maven.apache.org:443 HTTP/1.1\\r\\nHost: repo.maven.apache.org:443\\r\\n\\r\\n" | '
+            'timeout 5 nc "${PROXY_HOSTPORT%:*}" "${PROXY_HOSTPORT##*:}" | head -1'
+        )
+        result = controller.run(
+            ["/bin/sh", "-c", script], cwd=str(workspace), timeout=60,
+            containment_profile=profile, containment_backend=OCIContainmentBackend(),
+        )
+>       assert "200" in result.stdout, result.stdout + result.stderr
+E       AssertionError: KRIYA_STEP_PROXY_CONNECT=OK
+E         KRIYA_STEP_FIREWALL=OK
+E         KRIYA_STEP_IPV6_DISABLE=OK
+E         KRIYA_STEP_SELFTEST=OK
+E         KRIYA_STEP_PRIVDROP=OK
+E         HTTP/1.1 403 Forbidden
+E         
+E       assert '200' in 'KRIYA_STEP_PROXY_CONNECT=OK\nKRIYA_STEP_FIREWALL=OK\nKRIYA_STEP_IPV6_DISABLE=OK\nKRIYA_STEP_SELFTEST=OK\nKRIYA_STEP_PRIVDROP=OK\nHTTP/1.1 403 Forbidden\n'
+E        +  where 'KRIYA_STEP_PROXY_CONNECT=OK\nKRIYA_STEP_FIREWALL=OK\nKRIYA_STEP_IPV6_DISABLE=OK\nKRIYA_STEP_SELFTEST=OK\nKRIYA_STEP_PRIVDROP=OK\nHTTP/1.1 403 Forbidden\n' = ProcessResult(returncode=0, stdout='KRIYA_STEP_PROXY_CONNECT=OK\nKRIYA_STEP_FIREWALL=OK\nKRIYA_STEP_IPV6_DISABLE=OK\nK...urce': 'autonomy.acquisition_registry_hosts', 'backend': 'OCIContainmentBackend'}, resources=None, target_started=True).stdout
+
+tests/test_containment_oci.py:288: AssertionError
+________ test_registry_scoped_concurrent_authorities_do_not_cross_grant ________
+
+tmp_path = PosixPath('/private/tmp/kriya-cert.9hgO4G/pytest-of-sriramnanduri/pytest-0/test_registry_scoped_concurren0')
+
+    def test_registry_scoped_concurrent_authorities_do_not_cross_grant(tmp_path):
+        """Mandatory concurrency test: two acquisitions with DIFFERENT
+        authorities, run truly concurrently, must each reach only their own
+        authorized host and be denied the other's - proving
+        authority(A) != authority(B) does not let A reach B's destination."""
+        import threading
+    
+        def run_one(hosts, own_target, other_target, results, key):
+            ws = tmp_path / key
+            ws.mkdir()
+            controller = ProcessController()
+            profile = _registry_profile(ws, hosts)
+            script = (
+                'PROXY_HOSTPORT="${http_proxy#http://}"; '
+                f'for t in {own_target} {other_target}; do '
+                'printf "CONNECT ${t}:443 HTTP/1.1\\r\\nHost: ${t}:443\\r\\n\\r\\n" | '
+                'timeout 5 nc "${PROXY_HOSTPORT%:*}" "${PROXY_HOSTPORT##*:}" | head -1; done'
+            )
+            results[key] = controller.run(
+                ["/bin/sh", "-c", script], cwd=str(ws), timeout=90,
+                containment_profile=profile, containment_backend=OCIContainmentBackend(),
+            )
+    
+        results = {}
+        t_a = threading.Thread(target=run_one, args=(
+            ["repo.maven.apache.org"], "repo.maven.apache.org", "pypi.org", results, "authority_a",
+        ))
+        t_b = threading.Thread(target=run_one, args=(
+            ["pypi.org"], "pypi.org", "repo.maven.apache.org", results, "authority_b",
+        ))
+        t_a.start()
+        t_b.start()
+        t_a.join(timeout=120)
+        t_b.join(timeout=120)
+    
+        # Real probe output only - strip the setup script's own preamble.
+        out_a = [line for line in results["authority_a"].stdout.splitlines() if not line.startswith("KRIYA_STEP")]
+        out_b = [line for line in results["authority_b"].stdout.splitlines() if not line.startswith("KRIYA_STEP")]
+>       assert "200" in out_a[0], out_a  # A reaches its own host
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: ['HTTP/1.1 403 Forbidden', 'HTTP/1.1 403 Forbidden']
+E       assert '200' in 'HTTP/1.1 403 Forbidden'
+
+tests/test_containment_oci.py:434: AssertionError
+______________ test_maven_two_phase_acquire_then_offline_execute _______________
+
+tmp_path = PosixPath('/private/tmp/kriya-cert.9hgO4G/pytest-of-sriramnanduri/pytest-0/test_maven_two_phase_acquire_t0')
+
+    def test_maven_two_phase_acquire_then_offline_execute(tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        cache = ephemeral_cache_path(tmp_path, "maven")
+        (workspace / "pom.xml").write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+    <project xmlns="http://maven.apache.org/POM/4.0.0">
+      <modelVersion>4.0.0</modelVersion>
+      <groupId>com.kriya.test</groupId>
+      <artifactId>sec001-oci-fixture</artifactId>
+      <version>1.0.0</version>
+      <packaging>jar</packaging>
+    </project>
+    """
+        )
+    
+        controller = ProcessController()
+        backend = OCIContainmentBackend()
+    
+        acquire_result = maven_acquire_dependencies(
+            str(workspace), str(cache), controller=controller, containment_backend=backend,
+            registry_hosts=["repo.maven.apache.org"], timeout=180,
+        )
+>       assert acquire_result.returncode == 0, acquire_result.stderr
+E       AssertionError: Picked up JAVA_TOOL_OPTIONS:  -Dhttp.proxyHost=172.19.0.2 -Dhttp.proxyPort=3128 -Dhttps.proxyHost=172.19.0.2 -Dhttps.proxyPort=3128 -Dhttp.nonProxyHosts=
+E         
+E       assert 1 == 0
+E        +  where 1 = ProcessResult(returncode=1, stdout='KRIYA_STEP_PROXY_CONNECT=OK\nKRIYA_STEP_FIREWALL=OK\nKRIYA_STEP_IPV6_DISABLE=OK\nK...urce': 'autonomy.acquisition_registry_hosts', 'backend': 'OCIContainmentBackend'}, resources=None, target_started=True).returncode
+
+tests/test_dependency_execution.py:141: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  kriya.tools.dependency_execution:dependency_execution.py:747 Acquisition (maven, goal='mvn dependency:go-offline'): exited 1.
+____________ test_production_package_manager_stays_registry_scoped _____________
+
+    @pytest.mark.asyncio
+    async def test_production_package_manager_stays_registry_scoped():
+        tool = ShellTool(autonomy_cfg=_production_cfg(acquisition_registry_hosts=["repo.maven.apache.org"]).autonomy)
+        authorized = await tool.execute(
+            command=f"mvn --version >/dev/null 2>&1 ; {_CONNECT_PROBE.format(host='repo.maven.apache.org')}",
+        )
+>       assert "200" in authorized["stdout"], authorized
+E       AssertionError: {'exit_code': 0, 'stdout': 'KRIYA_STEP_PROXY_CONNECT=OK
+E         KRIYA_STEP_FIREWALL=OK
+E         KRIYA_STEP_IPV6_DISABLE=OK
+E         KRIYA_STE...stry_only', 'destinations': ['repo.maven.apache.org'], 'authority_source': 'autonomy.acquisition_registry_hosts', ...}}
+E       assert '200' in 'KRIYA_STEP_PROXY_CONNECT=OK\nKRIYA_STEP_FIREWALL=OK\nKRIYA_STEP_IPV6_DISABLE=OK\nKRIYA_STEP_SELFTEST=OK\nKRIYA_STEP_PRIVDROP=OK\nHTTP/1.1 403 Forbidden\r\n'
+
+tests/test_prd012_egress_docker.py:80: AssertionError
+____ test_real_maven_command_through_shelltool_reaches_authorized_registry _____
+
+    @pytestmark_docker
+    @pytest.mark.asyncio
+    async def test_real_maven_command_through_shelltool_reaches_authorized_registry():
+        tool = _contained_shell_tool(["repo.maven.apache.org"])
+        probe = _CONNECT_PROBE.format(host="repo.maven.apache.org")
+        res = await tool.execute(command=f"mvn --version >/dev/null 2>&1 ; {probe}")
+>       assert "200" in res["stdout"], res
+E       AssertionError: {'exit_code': 0, 'stdout': 'KRIYA_STEP_PROXY_CONNECT=OK
+E         KRIYA_STEP_FIREWALL=OK
+E         KRIYA_STEP_IPV6_DISABLE=OK
+E         KRIYA_STE...stry_only', 'destinations': ['repo.maven.apache.org'], 'authority_source': 'autonomy.acquisition_registry_hosts', ...}}
+E       assert '200' in 'KRIYA_STEP_PROXY_CONNECT=OK\nKRIYA_STEP_FIREWALL=OK\nKRIYA_STEP_IPV6_DISABLE=OK\nKRIYA_STEP_SELFTEST=OK\nKRIYA_STEP_PRIVDROP=OK\nHTTP/1.1 403 Forbidden\r\n'
+
+tests/test_sec005_shell_acquisition_network.py:304: AssertionError
+============================= slowest 15 durations =============================
+514.01s call     tests/test_demo_v2_spring_ignite.py::test_every_cache_get_mutant_of_the_reference_is_killed_and_the_control_passes
+239.38s call     tests/test_direct_plan_real_maven.py::test_real_jdk_and_maven_build_test_and_run_the_reviewed_candidate_in_order
+186.23s call     tests/test_d3_runtime_prerequisite.py::test_stale_classes_from_an_earlier_source_revision_never_reach_runtime_verification
+173.41s call     tests/test_b2c_jvm_acceptance.py::test_22_a_changed_or_withdrawn_artifact_supersedes_earlier_jvm_evidence
+173.32s call     tests/test_d4_runtime_entrypoint_ownership.py::test_the_live_shape_is_a_candidate_defect_on_the_fresh_build
+169.96s call     tests/test_backend_readiness_v2_contract_feedback.py::test_real_runner_pass_and_violation_through_build_contract_feedback
+168.53s call     tests/test_b2c_jvm_acceptance.py::test_an_exception_only_in_the_acceptance_code_is_not_a_violation
+154.71s call     tests/test_b2c_jvm_acceptance.py::test_j5_12_one_counterexample_violates_a_general_claim
+147.42s call     tests/test_d3_runtime_prerequisite.py::test_the_prerequisite_build_is_bounded_by_the_runs_root_deadline
+140.03s call     tests/test_d3_runtime_prerequisite.py::test_runtime_verification_rebuilds_the_current_source_after_the_work_unit_reset[target-untracked]
+126.55s call     tests/test_b2c_jvm_acceptance.py::test_a_report_file_changed_after_the_run_is_not_read
+121.46s call     tests/test_d3_runtime_prerequisite.py::test_runtime_verification_rebuilds_the_current_source_after_the_work_unit_reset[target-ignored]
+118.31s call     tests/test_d3_runtime_prerequisite.py::test_a_validator_built_before_the_pom_existed_still_rebuilds
+113.54s call     tests/test_execution_copy_creator_provenance.py::test_real_oci_the_contract_feedback_runner_passes_and_violates_under_explicit_containment
+113.07s call     tests/test_direct_plan_real_maven.py::test_real_toolchain_rejecting_the_runtime_review_runs_nothing_and_applies_nothing
+=========================== short test summary info ============================
+FAILED tests/test_containment_oci.py::test_registry_scoped_allows_authorized_https_connect
+FAILED tests/test_containment_oci.py::test_registry_scoped_concurrent_authorities_do_not_cross_grant
+FAILED tests/test_dependency_execution.py::test_maven_two_phase_acquire_then_offline_execute
+FAILED tests/test_prd012_egress_docker.py::test_production_package_manager_stays_registry_scoped
+FAILED tests/test_sec005_shell_acquisition_network.py::test_real_maven_command_through_shelltool_reaches_authorized_registry
+5 failed, 131 passed, 19636 deselected in 4587.44s (1:16:27)
+exit=1
