@@ -40,6 +40,7 @@ from _chaos_harness import (
     typed_failure,
 )
 from _live_identity import qualified_live_config
+from _provider_usage import plausible_message_tokens
 
 from kriya.core.inference_runtime import ChatResponse, register_runtime_adapter, runtime_adapter
 from kriya.core.kernel import Kernel
@@ -115,7 +116,8 @@ def _malformed_first_developer(base):
                 if self.replaced == 0:
                     self.replaced = 1
                     return ChatResponse(content='[{"filepath": "calc.py", "content": "def sub(a, b):\\n    ret',
-                                        finish_reason="stop", prompt_tokens=11, completion_tokens=3)
+                                        finish_reason="stop", completion_tokens=3,
+                                        prompt_tokens=plausible_message_tokens(request.messages, request.tools))
             return await super().complete(client, request)
 
     return _MalformedFirstDeveloper()
