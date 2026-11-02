@@ -19,7 +19,7 @@ import xml.etree.ElementTree as ElementTree
 from typing import Any, Dict, List, Optional
 
 # Exit status: 0 CERTIFIED; 1 NOT_CERTIFIED; 3 INCOMPLETE_PLATFORM_EVIDENCE (never a pass).
-MANDATORY = ("static", "maven_repository", "maven_served", "collection", "perf_probe", "pytest", "tier_execution", "images", "scanner", "release")
+MANDATORY = ("static", "maven_repository", "maven_served", "python_wheelhouse", "python_served", "product_images", "images_unchanged", "collection", "perf_probe", "pytest", "tier_execution", "images", "scanner", "release")
 
 
 def _junit(path: str) -> Optional[Dict[str, int]]:
@@ -97,6 +97,7 @@ def summarize(out: str) -> Dict[str, Any]:
         "doctor_mode": _json(os.path.join(out, "doctor-mode.json")),
         "thresholds": _json(os.path.join(out, "thresholds.json")),
         "maven_repository": _json(os.path.join(out, "maven-repo.json")),
+        "python_wheelhouse": _json(os.path.join(out, "python-wheelhouse.json")),
         "release_identity": identity,
     }
 
@@ -126,6 +127,10 @@ def render(summary: Dict[str, Any]) -> str:
         lines += [f"- deterministic Maven repository: manifest content digest `{maven.get('manifest_content_digest')}` ({maven.get('files')} files, attested: {maven.get('attested')}); "
                   f"the run fetched {maven.get('served_paths')} distinct files in {maven.get('requests')} requests {json.dumps(maven.get('status_counts'), sort_keys=True)}; "
                   f"requests outside the frozen set: {len(maven.get('not_in_manifest_requests') or [])}; bytes-differ refusals: {maven.get('bytes_differ_refusals')}"]
+    wheels = summary.get("python_wheelhouse")
+    if wheels:
+        lines += [f"- frozen Python wheelhouse: hashed lock sha256 `{wheels.get('hashed_requirements_sha256')}`, {wheels.get('wheelhouse_files')} files, wheelhouse digest `{wheels.get('wheelhouse_sha256')}` "
+                  "(release stage: --no-index --require-hashes, fresh venv)"]
     thresholds = summary.get("thresholds")
     if thresholds:
         lines += [f"- thresholds: {thresholds.get('source_path')} sha256 {thresholds.get('file_sha256')} loader digest {thresholds.get('loader_digest')}; "

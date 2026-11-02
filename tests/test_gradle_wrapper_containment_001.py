@@ -18,6 +18,7 @@ import subprocess
 from unittest.mock import patch
 
 import pytest
+from _certification_mirror import gradle_registry
 from _dependency_scope import hold_dependency_scope
 from test_workflow import _minimal_attempt_ctx
 
@@ -334,8 +335,10 @@ def test_15_a_gradle_project_with_a_registry_dependency_compiles_offline_after_o
     project = tmp_path / "project"
     (project / "src" / "main" / "java" / "demo").mkdir(parents=True)
     (project / "settings.gradle").write_text("rootProject.name = 'demo'\n")
+    # PRD-034: under certification (scripts/certify.sh) the registry is the certification-owned frozen Maven-layout repository, declared with Gradle's standard `maven { url }` -
+    # what is certified here is the contained three-phase acquisition (DENIED, REGISTRY_ONLY, DENIED), not the availability of Maven Central.
     (project / "build.gradle").write_text(
-        "plugins { id 'java' }\nrepositories { mavenCentral() }\n"
+        f"plugins {{ id 'java' }}\nrepositories {{ {gradle_registry()} }}\n"
         "dependencies { implementation 'org.apache.commons:commons-lang3:3.14.0' }\n"
         "java { sourceCompatibility = JavaVersion.VERSION_17\n       targetCompatibility = JavaVersion.VERSION_17 }\n")
     (project / "src" / "main" / "java" / "demo" / "Demo.java").write_text(

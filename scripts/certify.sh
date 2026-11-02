@@ -33,7 +33,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
-THRESHOLDS=""; DOCTOR_CONFIG=""; DOCTOR_WORKSPACE=""; DOCTOR_TRUST=""; OUT_ARG=""; MAVEN_REPO="${KRIYA_CERT_MAVEN_REPO:-$HOME/.cache/kriya-cert-maven/repo}"
+THRESHOLDS=""; DOCTOR_CONFIG=""; DOCTOR_WORKSPACE=""; DOCTOR_TRUST=""; OUT_ARG=""; MAVEN_REPO="${KRIYA_CERT_MAVEN_REPO:-$HOME/.cache/kriya-cert-maven/repo}"; PY_WHEELS="${KRIYA_CERT_PYTHON_WHEELS:-$HOME/.cache/kriya-cert-wheels}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --thresholds) THRESHOLDS="${2:?--thresholds needs a file}"; shift 2 ;;
@@ -41,6 +41,7 @@ while [ $# -gt 0 ]; do
     --doctor-workspace) DOCTOR_WORKSPACE="${2:?--doctor-workspace needs a directory}"; shift 2 ;;
     --doctor-trust-file) DOCTOR_TRUST="${2:?--doctor-trust-file needs a file}"; shift 2 ;;
     --maven-repo) MAVEN_REPO="${2:?--maven-repo needs a directory}"; shift 2 ;;
+    --python-wheels) PY_WHEELS="${2:?--python-wheels needs a directory}"; shift 2 ;;
     -*) echo "[certify] unknown option: $1" >&2; exit 2 ;;
     *) OUT_ARG="$1"; shift ;;
   esac
@@ -77,7 +78,7 @@ export PYTHONDONTWRITEBYTECODE=1  # a real pytest run inside a bound candidate: 
 # of 80 s. Only this directory is removed on exit - never anything of the operator's.
 CERT_TMP="$(mktemp -d /tmp/kriya-cert.XXXXXX)"
 DOCTOR_HOME=""
-cleanup() { [ -n "${MAVEN_SERVER_PID:-}" ] && kill "$MAVEN_SERVER_PID" 2>/dev/null; rm -rf "$CERT_TMP" ${DOCTOR_HOME:+"$DOCTOR_HOME"}; }
+cleanup() { [ -n "${MAVEN_SERVER_PID:-}" ] && kill "$MAVEN_SERVER_PID" 2>/dev/null; [ -n "${PIP_SERVER_PID:-}" ] && kill "$PIP_SERVER_PID" 2>/dev/null; rm -rf "$CERT_TMP" ${DOCTOR_HOME:+"$DOCTOR_HOME"}; }
 trap cleanup EXIT
 export TMPDIR="$CERT_TMP"
 
@@ -151,6 +152,53 @@ else
   stage maven_repository FAIL "$(head -3 "$OUT/maven-repo-verify.txt" | tr '\n' ' ')"
 fi
 
+# --- frozen Python wheelhouse (PRD034-EXTERNAL-ACQUISITION: the release stage must not depend on live PyPI) ---------------------------------------------
+HASHED_REQUIREMENTS="$ROOT/tests/certification/requirements.release.hashes.txt"
+PY_WHEELS_OK=0
+PIP_SERVER_PID=""
+if "$VENV_BIN/python" scripts/certification_python_wheels.py verify "$HASHED_REQUIREMENTS" "$PY_WHEELS" > "$OUT/python-wheelhouse-verify.txt" 2>&1; then
+  "$VENV_BIN/python" scripts/certification_python_wheels.py digest "$HASHED_REQUIREMENTS" "$PY_WHEELS" > "$OUT/python-wheelhouse.json"
+  export KRIYA_RELEASE_WHEELHOUSE="$PY_WHEELS" KRIYA_RELEASE_HASHED_REQUIREMENTS="$HASHED_REQUIREMENTS"
+  PY_WHEELS_OK=1
+  # the SAME frozen wheelhouse also serves the contained pip tests as a PEP 503 index (hash-listed files only, re-hashed at every request): one content authority for PyPI
+  PIP_PORT="$("$VENV_BIN/python" -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+  case "$(uname -s)" in Linux) PIP_BIND="0.0.0.0" ;; *) PIP_BIND="127.0.0.1" ;; esac
+  "$VENV_BIN/python" scripts/certification_python_wheels.py serve "$HASHED_REQUIREMENTS" "$PY_WHEELS" --port "$PIP_PORT" --bind "$PIP_BIND" \
+      --log "$OUT/python-index-served.jsonl" --progress "$OUT/pytest/progress.json" > "$OUT/python-index-server.txt" 2>&1 &
+  PIP_SERVER_PID=$!
+  sleep 2
+  if kill -0 "$PIP_SERVER_PID" 2>/dev/null; then
+    export KRIYA_CERT_PIP_INDEX="http://host.docker.internal:$PIP_PORT/simple"
+    stage python_wheelhouse PASS "$(cat "$OUT/python-wheelhouse.json") index on $PIP_BIND:$PIP_PORT"
+  else
+    PY_WHEELS_OK=0
+    stage python_wheelhouse FAIL "the wheelhouse index server did not start: $(tail -2 "$OUT/python-index-server.txt" | tr '\n' ' ')"
+  fi
+else
+  stage python_wheelhouse FAIL "$(head -3 "$OUT/python-wheelhouse-verify.txt" | tr '\n' ' ') (provision: scripts/certification_python_wheels.py provision)"
+fi
+
+# --- product-built containment images are PRE-PROVISIONED (PRD034-EXTERNAL-ACQUISITION APT): the canonical run must not run apt-get ---------------------------
+IMAGES_OK=0
+if "$VENV_BIN/python" scripts/provision_containment_images.py record "$OUT/product-images.json" > "$OUT/product-images.txt" 2>&1 \
+   && "$VENV_BIN/python" - "$OUT/product-images.json" <<'PY'
+import json, sys
+sys.path.insert(0, "scripts")
+from provision_containment_images import BASES
+have = json.load(open(sys.argv[1]))["images"]
+from kriya.tools import containment_oci as oci
+need = [oci._acquisition_image_tag(base) for base in BASES] + [oci._PROXY_IMAGE_TAG]
+missing = [tag for tag in need if tag not in have]
+print("missing:", missing) if missing else None
+sys.exit(1 if missing else 0)
+PY
+then
+  IMAGES_OK=1
+  stage product_images PASS "$(wc -l < "$OUT/product-images.json" | tr -d ' ') lines; ids recorded (provision: scripts/provision_containment_images.py build)"
+else
+  stage product_images FAIL "a product-built containment image is missing: $(tail -2 "$OUT/product-images.txt" | tr '\n' ' ') (scripts/provision_containment_images.py build)"
+fi
+
 # --- collection truth (before the long run) -------------------------------------
 mkdir -p "$OUT/collection" "$OUT/pytest"
 if pytest -o addopts= --collect-only -q -p no:cacheprovider --collection-census="$OUT/collection/all.json" > "$OUT/collection/all.txt" 2>&1 \
@@ -185,6 +233,10 @@ elif [ "$SEMGREP_VERSION" != "1.178.0" ]; then
   stage pytest UNAVAILABLE "semgrep must be exactly 1.178.0 (found: ${SEMGREP_VERSION:-none})"
 elif [ "$MAVEN_REPO_OK" != "1" ]; then
   stage pytest UNAVAILABLE "the frozen, attested Maven certification repository is not available (stage maven_repository): the run would depend on live Maven Central"
+elif [ "$PY_WHEELS_OK" != "1" ]; then
+  stage pytest UNAVAILABLE "the frozen Python wheelhouse is not available (stage python_wheelhouse): the release stage would depend on live PyPI, hours after the pytest stage"
+elif [ "$IMAGES_OK" != "1" ]; then
+  stage pytest UNAVAILABLE "the product-built containment images are not provisioned (stage product_images): the run would execute apt-get on a cold host"
 elif [ "$PERF_PROBE_OK" != "1" ]; then
   stage pytest UNAVAILABLE "the performance probe failed (CERT-TMP-GROWTH-001): hours are not spent on a run that can crawl; see perf-probe/perf-probe.json"
 else
@@ -199,6 +251,7 @@ fi
 
 # --- what the canonical run actually fetched: only manifest bytes, no tamper refusal, nothing outside the frozen set that mattered ---------------------------------
 [ -n "$MAVEN_SERVER_PID" ] && kill "$MAVEN_SERVER_PID" 2>/dev/null
+[ -n "$PIP_SERVER_PID" ] && kill "$PIP_SERVER_PID" 2>/dev/null
 if [ "$MAVEN_REPO_OK" != "1" ]; then
   stage maven_served UNAVAILABLE "no frozen repository was served (stage maven_repository)"
 elif "$VENV_BIN/python" - "$OUT" "$MANIFEST" <<'PY'
@@ -216,6 +269,34 @@ then
   stage maven_served PASS "$("$VENV_BIN/python" -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["requests"], "requests,", d["served_paths"], "distinct files, 0 bytes-differ refusals; statuses", d["status_counts"])' "$OUT/maven-repo.json")"
 else
   stage maven_served FAIL "the frozen repository refused to serve altered bytes during the run (see maven-repo.json)"
+fi
+
+# --- what the contained pip tests fetched: hash-listed wheelhouse files only, no tamper refusal ------------------------------------------------------------------
+if [ "$PY_WHEELS_OK" != "1" ]; then
+  stage python_served UNAVAILABLE "no frozen wheelhouse index was served (stage python_wheelhouse)"
+elif "$VENV_BIN/python" - "$OUT" <<'PY'
+import collections, json, os, sys
+out = sys.argv[1]
+rows = [json.loads(l) for l in open(f"{out}/python-index-served.jsonl")] if os.path.exists(f"{out}/python-index-served.jsonl") else []
+counts = collections.Counter(r["status"] for r in rows)
+json.dump({"requests": len(rows), "status_counts": dict(counts), "bytes_differ_refusals": counts.get(409, 0),
+           "not_listed_requests": sorted({r["path"] for r in rows if r["status"] == 404})[:100],
+           "files_served": sorted({r["path"].rsplit("/", 1)[-1] for r in rows if r["status"] == 200 and r["path"].startswith("/packages/")})}, open(f"{out}/python-index.json", "w"), indent=2, sort_keys=True)
+sys.exit(1 if counts.get(409, 0) else 0)
+PY
+then
+  stage python_served PASS "$("$VENV_BIN/python" -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["requests"], "requests,", len(d["files_served"]), "distinct files, 0 bytes-differ refusals; statuses", d["status_counts"])' "$OUT/python-index.json")"
+else
+  stage python_served FAIL "the frozen wheelhouse refused to serve altered bytes during the run (see python-index.json)"
+fi
+
+# --- the canonical run built no image (no live apt-get happened inside it) -------------------------------------------------------------------------------------
+if [ "$IMAGES_OK" != "1" ]; then
+  stage images_unchanged UNAVAILABLE "no image record (stage product_images)"
+elif "$VENV_BIN/python" scripts/provision_containment_images.py check "$OUT/product-images.json" > "$OUT/product-images-after.txt" 2>&1; then
+  stage images_unchanged PASS "no product image was built or rebuilt during the run"
+else
+  stage images_unchanged FAIL "$(tail -3 "$OUT/product-images-after.txt" | tr '\n' ' ')"
 fi
 
 # --- every mandatory tier executed (junit), and the run's population is the audited one ---------
@@ -256,7 +337,9 @@ else
 fi
 
 # --- release: sdist/wheel integrity and clean install (PRD-002) ------------------
-if KRIYA_PYTHON="$VENV_BIN/python" bash scripts/verify_release.sh > "$OUT/release.txt" 2>&1; then
+if [ "$PY_WHEELS_OK" != "1" ]; then
+  stage release UNAVAILABLE "no frozen Python wheelhouse (stage python_wheelhouse)"
+elif KRIYA_PYTHON="$VENV_BIN/python" bash scripts/verify_release.sh > "$OUT/release.txt" 2>&1; then
   stage release PASS
 else
   stage release FAIL "see release.txt"

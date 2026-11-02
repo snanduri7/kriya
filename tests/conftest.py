@@ -145,22 +145,28 @@ CHECKOUT_MEMORY_RESOLVING_FILES = frozenset({
 })
 
 
-# PRD-034 (MAVEN-CENTRAL-CERTIFICATION-NONDETERMINISM-001): under certification every CONTAINED Maven acquisition goes through the operator-owned registry mirror
-# (autonomy.acquisition_registry_mirror -> the frozen repository served by scripts/certification_maven_repo.py), never live Maven Central. The mirror URL is a
-# TEST-HARNESS input read only here (exported visibly by scripts/certify.sh and recorded in its environment record - not a product configuration path). The seam is
-# the OCI backend's registry-scoped preparation: every acquisition profile (validator, standalone helpers, shell) reaches it, and a profile that already carries its own
-# mirror is left alone. Central is removed from the proxy ACL for these runs, so a fallback is DENIED (and logged), not silently carried.
+# PRD-034 (MAVEN-CENTRAL-CERTIFICATION-NONDETERMINISM-001, PRD034-EXTERNAL-ACQUISITION-PYPI-GRADLE-APT-001): under certification every CONTAINED package-manager acquisition goes
+# through the certification-owned frozen content, never live Maven Central / PyPI / the Gradle hosts.
+#   * Maven (and Gradle's Maven-layout repositories): the product's operator-owned registry mirror (autonomy.acquisition_registry_mirror -> the repository served by
+#     scripts/certification_maven_repo.py).
+#   * pip: the standard PIP_INDEX_URL / PIP_TRUSTED_HOST environment, carried into the acquisition container by the product's own env-allowlist mechanism
+#     (ContainmentProfile.env_allowlist -> build_restricted_env), pointing at the frozen wheelhouse index (scripts/certification_python_wheels.py serve).
+# Both URLs are TEST-HARNESS inputs read only here (exported visibly by scripts/certify.sh and recorded in its evidence - not a product configuration path). The seam is the OCI
+# backend's registry-scoped preparation: every acquisition profile (validator, standalone helpers, shell) reaches it. For a package-manager command the proxy ACL is REDUCED to
+# the certification host, so a fallback to any public registry is DENIED (and logged by the product), not silently carried. Direct `CONNECT` proxy probes (the tests that prove the
+# exact-host ACL against the real registry host) address the real host on purpose and are left untouched.
 CERT_MAVEN_MIRROR_ENV = "KRIYA_CERT_MAVEN_MIRROR"
-CENTRAL_HOST = "repo.maven.apache.org"
+CERT_PIP_INDEX_ENV = "KRIYA_CERT_PIP_INDEX"
 
 
 @pytest.fixture(autouse=True)
 def _certification_maven_mirror(monkeypatch):
     mirror = os.environ.get(CERT_MAVEN_MIRROR_ENV)
+    pip_index = os.environ.get(CERT_PIP_INDEX_ENV)
     if not mirror:
         yield
         return
-    import dataclasses
+    from _certification_mirror import rewrite_profile
 
     from kriya.config.config import AutonomyConfig
     from kriya.tools.containment_oci import OCIContainmentBackend
@@ -168,16 +174,14 @@ def _certification_maven_mirror(monkeypatch):
     # the mirror value is validated by the product's own grammar and rule (normalised form, host); a malformed value fails the run loudly here
     validated = AutonomyConfig(acquisition_registry_hosts=[mirror.split("://", 1)[1].split("/", 1)[0].split(":", 1)[0]], acquisition_registry_mirror=mirror)
     url, mirror_host = validated.acquisition_registry_mirror, validated.acquisition_registry_hosts[0]
+    if pip_index:
+        monkeypatch.setenv("PIP_INDEX_URL", pip_index)
+        monkeypatch.setenv("PIP_TRUSTED_HOST", mirror_host)
+        monkeypatch.setenv("PIP_DISABLE_PIP_VERSION_CHECK", "1")
     original = OCIContainmentBackend._prepare_registry_scoped  # pylint: disable=protected-access
 
     def with_mirror(self, docker_path, profile, command):
-        # only a MAVEN RESOLUTION (an `mvn` in the command) is a mirror consumer; the proxy-mechanism tests that CONNECT to the real registry host to prove the exact-host ACL
-        # (tests/test_containment_oci.py, test_prd012_egress_docker, test_sec005_*) deliberately address the real host and stay untouched
-        runs_maven = any("mvn" in str(part) for part in command) and not any("CONNECT " in str(part) for part in command)  # `mvn --version ; CONNECT probe` is a proxy probe
-        if runs_maven and profile.registry_mirror is None and CENTRAL_HOST in profile.network_destinations:
-            hosts = tuple(sorted((set(profile.network_destinations) - {CENTRAL_HOST}) | {mirror_host}))
-            profile = dataclasses.replace(profile, registry_mirror=url, network_destinations=hosts)
-        return original(self, docker_path, profile, command)
+        return original(self, docker_path, rewrite_profile(profile, command, mirror_url=url, mirror_host=mirror_host, pip_index=pip_index), command)
 
     monkeypatch.setattr(OCIContainmentBackend, "_prepare_registry_scoped", with_mirror)
     yield

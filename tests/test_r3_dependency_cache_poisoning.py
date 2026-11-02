@@ -10,6 +10,7 @@ import shutil
 import subprocess
 
 import pytest
+from _certification_mirror import gradle_registry
 
 from kriya.config.config import AutonomyConfig
 from kriya.tools.validate import PolymorphicValidator
@@ -103,6 +104,8 @@ java { sourceCompatibility = JavaVersion.VERSION_17
        targetCompatibility = JavaVersion.VERSION_17 }
 test { useJUnit() }
 """
+_GRADLE_BUILD = _GRADLE_BUILD.replace("mavenCentral()", gradle_registry())  # PRD-034: the frozen repository when certifying
+
 
 
 def _gradle_project(root, test_name, test_source):

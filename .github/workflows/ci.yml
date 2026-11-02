@@ -206,6 +206,14 @@ jobs:
         # committed manifest (each file is kept only if its SHA-256 equals the manifest's) - the one place Central is contacted; certify.sh then verifies it is attested and
         # byte-exact, serves it, and every contained Maven acquisition goes through the product's registry-mirror seam. Same manifest and tool as the local run.
         run: .venv/bin/python scripts/certification_maven_repo.py fetch tests/certification/maven_repository.manifest.json "$HOME/.cache/kriya-cert-maven/repo"
+      - name: Pre-build the product containment images (bootstrap, not certification)
+        # The registry proxy and the per-toolchain acquisition images are built by the product with apt-get on first use. Building them here, from the digest-pinned base images,
+        # keeps the canonical run free of live apt; certify.sh records their ids and fails if the run builds or rebuilds any image.
+        run: .venv/bin/python scripts/provision_containment_images.py build
+      - name: Provision the frozen Python wheelhouse (bootstrap, not certification)
+        # The release stage certifies packaging, not PyPI: it installs the locked dependencies with --no-index --require-hashes from this wheelhouse, which `pip download
+        # --require-hashes` builds from the committed hashed lock (a file is kept only if its SHA-256 is listed).
+        run: .venv/bin/python scripts/certification_python_wheels.py provision tests/certification/requirements.release.hashes.txt "$HOME/.cache/kriya-cert-wheels"
       - name: Certify
         # Doctor mode here is `packaged_defaults`: a hosted runner holds no owner-approved production configuration (SEC-009: certification never
         # approves anything itself), so the production doctor is recorded as it reports on packaged defaults. See scripts/certify.sh.

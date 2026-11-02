@@ -1,6 +1,6 @@
 {
  "attested": true,
- "content_digest": "a9889a756d851c6b43e4ac5f51bc91cc3496ce43cbb1af5734ca03a5c83a8e84",
+ "content_digest": "c557384d52b7d3f196b3a79c3477a0441068717117dfd4560948d417bd25dec3",
  "files": [
   {
    "artifactId": "aopalliance",
@@ -5027,6 +5027,262 @@
    "version": "1.0.1"
   },
   {
+   "artifactId": "byte-buddy-agent",
+   "classifier": "",
+   "groupId": "net.bytebuddy",
+   "kind": "pom",
+   "path": "net/bytebuddy/byte-buddy-agent/1.10.14/byte-buddy-agent-1.10.14.pom",
+   "provenance": {
+    "published_sha1": "82647b6e7b2a8262a12cc908cc3515d37a98e596",
+    "source": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-agent/1.10.14/byte-buddy-agent-1.10.14.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-agent/1.10.14/byte-buddy-agent-1.10.14.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "8712c22885e16de69179f921d501516493a7cef64997995fc428e7e58b12ea8d",
+   "type": "pom",
+   "version": "1.10.14"
+  },
+  {
+   "artifactId": "byte-buddy-agent",
+   "classifier": "",
+   "groupId": "net.bytebuddy",
+   "kind": "checksum",
+   "path": "net/bytebuddy/byte-buddy-agent/1.10.14/byte-buddy-agent-1.10.14.pom.sha1",
+   "provenance": {
+    "published_sha1": "82647b6e7b2a8262a12cc908cc3515d37a98e596",
+    "source": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-agent/1.10.14/byte-buddy-agent-1.10.14.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-agent/1.10.14/byte-buddy-agent-1.10.14.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "42ff3ec3269afb4ea2ae1573c4ab741a22c70af9c2261cd449e493adaea35e07",
+   "type": "pom",
+   "version": "1.10.14"
+  },
+  {
+   "artifactId": "byte-buddy-agent",
+   "classifier": "",
+   "groupId": "net.bytebuddy",
+   "kind": "pom",
+   "path": "net/bytebuddy/byte-buddy-agent/1.9.10/byte-buddy-agent-1.9.10.pom",
+   "provenance": {
+    "published_sha1": "856c025dc43c6c68ca5ae431ca2d77b5951b9c09",
+    "source": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-agent/1.9.10/byte-buddy-agent-1.9.10.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-agent/1.9.10/byte-buddy-agent-1.9.10.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "0ec07c293fdda816cf6054bb81df95e2b453e748bad92c6de150162348e64152",
+   "type": "pom",
+   "version": "1.9.10"
+  },
+  {
+   "artifactId": "byte-buddy-agent",
+   "classifier": "",
+   "groupId": "net.bytebuddy",
+   "kind": "checksum",
+   "path": "net/bytebuddy/byte-buddy-agent/1.9.10/byte-buddy-agent-1.9.10.pom.sha1",
+   "provenance": {
+    "published_sha1": "856c025dc43c6c68ca5ae431ca2d77b5951b9c09",
+    "source": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-agent/1.9.10/byte-buddy-agent-1.9.10.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-agent/1.9.10/byte-buddy-agent-1.9.10.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "fa7d8f7aeb845935d19979e44b9cb8fca16b8f5bfac227b4576578ddfb42584e",
+   "type": "pom",
+   "version": "1.9.10"
+  },
+  {
+   "artifactId": "byte-buddy-parent",
+   "classifier": "",
+   "groupId": "net.bytebuddy",
+   "kind": "pom",
+   "path": "net/bytebuddy/byte-buddy-parent/1.10.14/byte-buddy-parent-1.10.14.pom",
+   "provenance": {
+    "published_sha1": "3c1af2763d94bb3fd819a49bce19a6848285ed67",
+    "source": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-parent/1.10.14/byte-buddy-parent-1.10.14.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-parent/1.10.14/byte-buddy-parent-1.10.14.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "1fceef152e3962c8fbb3a860110324c7b14f417b925b07edf6ba997cdcf52eb9",
+   "type": "pom",
+   "version": "1.10.14"
+  },
+  {
+   "artifactId": "byte-buddy-parent",
+   "classifier": "",
+   "groupId": "net.bytebuddy",
+   "kind": "checksum",
+   "path": "net/bytebuddy/byte-buddy-parent/1.10.14/byte-buddy-parent-1.10.14.pom.sha1",
+   "provenance": {
+    "published_sha1": "3c1af2763d94bb3fd819a49bce19a6848285ed67",
+    "source": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-parent/1.10.14/byte-buddy-parent-1.10.14.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-parent/1.10.14/byte-buddy-parent-1.10.14.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "86d143db24510d5d854d78534086e10c9ec22e57c01456a397a197157cdf65e8",
+   "type": "pom",
+   "version": "1.10.14"
+  },
+  {
+   "artifactId": "byte-buddy-parent",
+   "classifier": "",
+   "groupId": "net.bytebuddy",
+   "kind": "pom",
+   "path": "net/bytebuddy/byte-buddy-parent/1.12.10/byte-buddy-parent-1.12.10.pom",
+   "provenance": {
+    "published_sha1": "c7fc3def367e8fb8b6b73165e519e57cfb1cdb5c",
+    "source": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-parent/1.12.10/byte-buddy-parent-1.12.10.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-parent/1.12.10/byte-buddy-parent-1.12.10.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "e2870e4340a748e717c8e764060504b90c28b9f7598e7779838d38caeea0b9d1",
+   "type": "pom",
+   "version": "1.12.10"
+  },
+  {
+   "artifactId": "byte-buddy-parent",
+   "classifier": "",
+   "groupId": "net.bytebuddy",
+   "kind": "checksum",
+   "path": "net/bytebuddy/byte-buddy-parent/1.12.10/byte-buddy-parent-1.12.10.pom.sha1",
+   "provenance": {
+    "published_sha1": "c7fc3def367e8fb8b6b73165e519e57cfb1cdb5c",
+    "source": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-parent/1.12.10/byte-buddy-parent-1.12.10.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-parent/1.12.10/byte-buddy-parent-1.12.10.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "f87b26e68ade09475320dc5bda0249e59b9c0cd52b4870e8670a32f498501a54",
+   "type": "pom",
+   "version": "1.12.10"
+  },
+  {
+   "artifactId": "byte-buddy-parent",
+   "classifier": "",
+   "groupId": "net.bytebuddy",
+   "kind": "pom",
+   "path": "net/bytebuddy/byte-buddy-parent/1.9.10/byte-buddy-parent-1.9.10.pom",
+   "provenance": {
+    "published_sha1": "adb368c4cca2acbc8d18380b065f6b5bba0f7b24",
+    "source": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-parent/1.9.10/byte-buddy-parent-1.9.10.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-parent/1.9.10/byte-buddy-parent-1.9.10.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "29fb23ea1e3445d124c427d41a4bd5541c5a8789c06d3644795c25b480f0e2ea",
+   "type": "pom",
+   "version": "1.9.10"
+  },
+  {
+   "artifactId": "byte-buddy-parent",
+   "classifier": "",
+   "groupId": "net.bytebuddy",
+   "kind": "checksum",
+   "path": "net/bytebuddy/byte-buddy-parent/1.9.10/byte-buddy-parent-1.9.10.pom.sha1",
+   "provenance": {
+    "published_sha1": "adb368c4cca2acbc8d18380b065f6b5bba0f7b24",
+    "source": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-parent/1.9.10/byte-buddy-parent-1.9.10.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-parent/1.9.10/byte-buddy-parent-1.9.10.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "f88a4e657e97e07b0fa1ec59b368671d7d2b9882ec21e8091720996cc529ec1d",
+   "type": "pom",
+   "version": "1.9.10"
+  },
+  {
+   "artifactId": "byte-buddy",
+   "classifier": "",
+   "groupId": "net.bytebuddy",
+   "kind": "pom",
+   "path": "net/bytebuddy/byte-buddy/1.10.14/byte-buddy-1.10.14.pom",
+   "provenance": {
+    "published_sha1": "6e2392834b58774d331adc3d469eafa25eb53d1e",
+    "source": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy/1.10.14/byte-buddy-1.10.14.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy/1.10.14/byte-buddy-1.10.14.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "3b39ca3d5ebb9ab757f9d42dcd6b677c88b4828edca7f6079f11bbf2ef3cee58",
+   "type": "pom",
+   "version": "1.10.14"
+  },
+  {
+   "artifactId": "byte-buddy",
+   "classifier": "",
+   "groupId": "net.bytebuddy",
+   "kind": "checksum",
+   "path": "net/bytebuddy/byte-buddy/1.10.14/byte-buddy-1.10.14.pom.sha1",
+   "provenance": {
+    "published_sha1": "6e2392834b58774d331adc3d469eafa25eb53d1e",
+    "source": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy/1.10.14/byte-buddy-1.10.14.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy/1.10.14/byte-buddy-1.10.14.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "5b1bc9b49869402d410ba8cbd4b70244a8a446559cc237c72ca0f52280d0afa1",
+   "type": "pom",
+   "version": "1.10.14"
+  },
+  {
+   "artifactId": "byte-buddy",
+   "classifier": "",
+   "groupId": "net.bytebuddy",
+   "kind": "pom",
+   "path": "net/bytebuddy/byte-buddy/1.12.10/byte-buddy-1.12.10.pom",
+   "provenance": {
+    "published_sha1": "5cfead22a1f95bece1c0de59253856d39aab9e56",
+    "source": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy/1.12.10/byte-buddy-1.12.10.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy/1.12.10/byte-buddy-1.12.10.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "d6f158ba70a080da562f8561a824e94b176c4c8cf4494daf695899c911395889",
+   "type": "pom",
+   "version": "1.12.10"
+  },
+  {
+   "artifactId": "byte-buddy",
+   "classifier": "",
+   "groupId": "net.bytebuddy",
+   "kind": "checksum",
+   "path": "net/bytebuddy/byte-buddy/1.12.10/byte-buddy-1.12.10.pom.sha1",
+   "provenance": {
+    "published_sha1": "5cfead22a1f95bece1c0de59253856d39aab9e56",
+    "source": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy/1.12.10/byte-buddy-1.12.10.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy/1.12.10/byte-buddy-1.12.10.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "7d5b64671125f841367ec338b5a626455c9f331e28f50e84e7564c54da900600",
+   "type": "pom",
+   "version": "1.12.10"
+  },
+  {
+   "artifactId": "byte-buddy",
+   "classifier": "",
+   "groupId": "net.bytebuddy",
+   "kind": "pom",
+   "path": "net/bytebuddy/byte-buddy/1.9.10/byte-buddy-1.9.10.pom",
+   "provenance": {
+    "published_sha1": "30e93444089cf78a839290ea30ef36fa892e045d",
+    "source": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy/1.9.10/byte-buddy-1.9.10.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy/1.9.10/byte-buddy-1.9.10.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "b3d5807907458353c10accad5cb696836114f3c2678a2955a1de46b62745be43",
+   "type": "pom",
+   "version": "1.9.10"
+  },
+  {
+   "artifactId": "byte-buddy",
+   "classifier": "",
+   "groupId": "net.bytebuddy",
+   "kind": "checksum",
+   "path": "net/bytebuddy/byte-buddy/1.9.10/byte-buddy-1.9.10.pom.sha1",
+   "provenance": {
+    "published_sha1": "30e93444089cf78a839290ea30ef36fa892e045d",
+    "source": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy/1.9.10/byte-buddy-1.9.10.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy/1.9.10/byte-buddy-1.9.10.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "2dcdeea272fa1107877c29a3ac4d7a8e3631cac7d9d08de133639a33e287d7d4",
+   "type": "pom",
+   "version": "1.9.10"
+  },
+  {
    "artifactId": "jvnet-parent",
    "classifier": "",
    "groupId": "net.java",
@@ -9457,6 +9713,70 @@
    "classifier": "",
    "groupId": "org.apache.maven",
    "kind": "artifact",
+   "path": "org/apache/maven/maven-archiver/3.6.2/maven-archiver-3.6.2.jar",
+   "provenance": {
+    "published_sha1": "a2d949d87fed6db197cc3cceec93012dd2317ca0",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/maven-archiver/3.6.2/maven-archiver-3.6.2.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/maven-archiver/3.6.2/maven-archiver-3.6.2.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "1f895a587df4844d9b7565e8e9a6352afe1d55532458a0dbeb746bc1d02e9216",
+   "type": "jar",
+   "version": "3.6.2"
+  },
+  {
+   "artifactId": "maven-archiver",
+   "classifier": "",
+   "groupId": "org.apache.maven",
+   "kind": "checksum",
+   "path": "org/apache/maven/maven-archiver/3.6.2/maven-archiver-3.6.2.jar.sha1",
+   "provenance": {
+    "published_sha1": "a2d949d87fed6db197cc3cceec93012dd2317ca0",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/maven-archiver/3.6.2/maven-archiver-3.6.2.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/maven-archiver/3.6.2/maven-archiver-3.6.2.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "dd3423cb6fc548f3988d12314d3356a4f645608e32178e7ca67eacd84201f86c",
+   "type": "jar",
+   "version": "3.6.2"
+  },
+  {
+   "artifactId": "maven-archiver",
+   "classifier": "",
+   "groupId": "org.apache.maven",
+   "kind": "pom",
+   "path": "org/apache/maven/maven-archiver/3.6.2/maven-archiver-3.6.2.pom",
+   "provenance": {
+    "published_sha1": "1eaa320b6d9c675e83099baf7a0ecf5ca232f9ba",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/maven-archiver/3.6.2/maven-archiver-3.6.2.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/maven-archiver/3.6.2/maven-archiver-3.6.2.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "8b117b0dc205a71abda33463f8c7ff891513cfb92241d8a011f9e8ac5ea21e77",
+   "type": "pom",
+   "version": "3.6.2"
+  },
+  {
+   "artifactId": "maven-archiver",
+   "classifier": "",
+   "groupId": "org.apache.maven",
+   "kind": "checksum",
+   "path": "org/apache/maven/maven-archiver/3.6.2/maven-archiver-3.6.2.pom.sha1",
+   "provenance": {
+    "published_sha1": "1eaa320b6d9c675e83099baf7a0ecf5ca232f9ba",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/maven-archiver/3.6.2/maven-archiver-3.6.2.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/maven-archiver/3.6.2/maven-archiver-3.6.2.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "2e975bb8e52450d180643662c266d4afb03cbce716dc69abc648cc0e45fb3c4e",
+   "type": "pom",
+   "version": "3.6.2"
+  },
+  {
+   "artifactId": "maven-archiver",
+   "classifier": "",
+   "groupId": "org.apache.maven",
+   "kind": "artifact",
    "path": "org/apache/maven/maven-archiver/3.6.5/maven-archiver-3.6.5.jar",
    "provenance": {
     "published_sha1": "f1b1096aafcaeff573908532459d723da87a9f4c",
@@ -11855,6 +12175,70 @@
    "classifier": "",
    "groupId": "org.apache.maven.plugins",
    "kind": "artifact",
+   "path": "org/apache/maven/plugins/maven-jar-plugin/3.4.1/maven-jar-plugin-3.4.1.jar",
+   "provenance": {
+    "published_sha1": "44be5e76ba16ce060eac02396299bc5dfe81d0eb",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-jar-plugin/3.4.1/maven-jar-plugin-3.4.1.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-jar-plugin/3.4.1/maven-jar-plugin-3.4.1.jar.sha1"
+   },
+   "purpose": "Maven build/lifecycle plugin; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "25e0a5b55b872d95e3a09a5d825bc1061f5ce25ee81f147e623405d8ebedfa5f",
+   "type": "jar",
+   "version": "3.4.1"
+  },
+  {
+   "artifactId": "maven-jar-plugin",
+   "classifier": "",
+   "groupId": "org.apache.maven.plugins",
+   "kind": "checksum",
+   "path": "org/apache/maven/plugins/maven-jar-plugin/3.4.1/maven-jar-plugin-3.4.1.jar.sha1",
+   "provenance": {
+    "published_sha1": "44be5e76ba16ce060eac02396299bc5dfe81d0eb",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-jar-plugin/3.4.1/maven-jar-plugin-3.4.1.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-jar-plugin/3.4.1/maven-jar-plugin-3.4.1.jar.sha1"
+   },
+   "purpose": "Maven build/lifecycle plugin; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "ce700dd793682d144913b8095bda9e570716014ade95e2a0d0c51c873866b78f",
+   "type": "jar",
+   "version": "3.4.1"
+  },
+  {
+   "artifactId": "maven-jar-plugin",
+   "classifier": "",
+   "groupId": "org.apache.maven.plugins",
+   "kind": "pom",
+   "path": "org/apache/maven/plugins/maven-jar-plugin/3.4.1/maven-jar-plugin-3.4.1.pom",
+   "provenance": {
+    "published_sha1": "f4be98b08ba44b43eb7b13dbddee45d0032b1665",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-jar-plugin/3.4.1/maven-jar-plugin-3.4.1.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-jar-plugin/3.4.1/maven-jar-plugin-3.4.1.pom.sha1"
+   },
+   "purpose": "Maven build/lifecycle plugin; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "be9318cc19895ffd5532df090df37adb5b97396d9a827f961fde65753b5a922f",
+   "type": "pom",
+   "version": "3.4.1"
+  },
+  {
+   "artifactId": "maven-jar-plugin",
+   "classifier": "",
+   "groupId": "org.apache.maven.plugins",
+   "kind": "checksum",
+   "path": "org/apache/maven/plugins/maven-jar-plugin/3.4.1/maven-jar-plugin-3.4.1.pom.sha1",
+   "provenance": {
+    "published_sha1": "f4be98b08ba44b43eb7b13dbddee45d0032b1665",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-jar-plugin/3.4.1/maven-jar-plugin-3.4.1.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-jar-plugin/3.4.1/maven-jar-plugin-3.4.1.pom.sha1"
+   },
+   "purpose": "Maven build/lifecycle plugin; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "770794972afa18aab2b911628ffd92a5640cc535759823b2a9cae1be6827a3ee",
+   "type": "pom",
+   "version": "3.4.1"
+  },
+  {
+   "artifactId": "maven-jar-plugin",
+   "classifier": "",
+   "groupId": "org.apache.maven.plugins",
+   "kind": "artifact",
    "path": "org/apache/maven/plugins/maven-jar-plugin/3.5.0/maven-jar-plugin-3.5.0.jar",
    "provenance": {
     "published_sha1": "ea6b835d40140aaa413e890452f354f358e83d4c",
@@ -12357,6 +12741,70 @@
    "sha256": "f57993ce10098d7af81f3e42e3e42fef8e0f7cf8edc2faf6a3f323a182583818",
    "type": "pom",
    "version": "3.12.1"
+  },
+  {
+   "artifactId": "maven-surefire-plugin",
+   "classifier": "",
+   "groupId": "org.apache.maven.plugins",
+   "kind": "artifact",
+   "path": "org/apache/maven/plugins/maven-surefire-plugin/3.0.0-M9/maven-surefire-plugin-3.0.0-M9.jar",
+   "provenance": {
+    "published_sha1": "0aa51aaa19ca647fb61c6216f1998e7d09cd695d",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-surefire-plugin/3.0.0-M9/maven-surefire-plugin-3.0.0-M9.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-surefire-plugin/3.0.0-M9/maven-surefire-plugin-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven build/lifecycle plugin; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "97c94779835657cb545bee8a9d875ae372f60570082068e2188ccdc967e6878e",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "maven-surefire-plugin",
+   "classifier": "",
+   "groupId": "org.apache.maven.plugins",
+   "kind": "checksum",
+   "path": "org/apache/maven/plugins/maven-surefire-plugin/3.0.0-M9/maven-surefire-plugin-3.0.0-M9.jar.sha1",
+   "provenance": {
+    "published_sha1": "0aa51aaa19ca647fb61c6216f1998e7d09cd695d",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-surefire-plugin/3.0.0-M9/maven-surefire-plugin-3.0.0-M9.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-surefire-plugin/3.0.0-M9/maven-surefire-plugin-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven build/lifecycle plugin; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "3359191a0d117d7c8f5b0decafb1e9d4699c23622c0662490ebb187d101b63d0",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "maven-surefire-plugin",
+   "classifier": "",
+   "groupId": "org.apache.maven.plugins",
+   "kind": "pom",
+   "path": "org/apache/maven/plugins/maven-surefire-plugin/3.0.0-M9/maven-surefire-plugin-3.0.0-M9.pom",
+   "provenance": {
+    "published_sha1": "79e54dc86b857d15debbb9f10ab7d29249f3b703",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-surefire-plugin/3.0.0-M9/maven-surefire-plugin-3.0.0-M9.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-surefire-plugin/3.0.0-M9/maven-surefire-plugin-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven build/lifecycle plugin; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "48a65066ddf2175fe068fa3248ab549cc487073859e72d50f9b9f08595dafb66",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "maven-surefire-plugin",
+   "classifier": "",
+   "groupId": "org.apache.maven.plugins",
+   "kind": "checksum",
+   "path": "org/apache/maven/plugins/maven-surefire-plugin/3.0.0-M9/maven-surefire-plugin-3.0.0-M9.pom.sha1",
+   "provenance": {
+    "published_sha1": "79e54dc86b857d15debbb9f10ab7d29249f3b703",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-surefire-plugin/3.0.0-M9/maven-surefire-plugin-3.0.0-M9.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-surefire-plugin/3.0.0-M9/maven-surefire-plugin-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven build/lifecycle plugin; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "0a13e67a99bead1e7e2e2a18dc56f54ef772628e511f0c110ee6401fb0ace3d9",
+   "type": "pom",
+   "version": "3.0.0-M9"
   },
   {
    "artifactId": "maven-surefire-plugin",
@@ -13208,6 +13656,70 @@
    "classifier": "",
    "groupId": "org.apache.maven.shared",
    "kind": "artifact",
+   "path": "org/apache/maven/shared/file-management/3.1.0/file-management-3.1.0.jar",
+   "provenance": {
+    "published_sha1": "f87a3a54c856714e4157b9ce7a5ff6ffc310d447",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/shared/file-management/3.1.0/file-management-3.1.0.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/shared/file-management/3.1.0/file-management-3.1.0.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "2e8cb2d546a01c2259cb17f1e06732db3d14b079d19622bf8400c82cb1ee6b96",
+   "type": "jar",
+   "version": "3.1.0"
+  },
+  {
+   "artifactId": "file-management",
+   "classifier": "",
+   "groupId": "org.apache.maven.shared",
+   "kind": "checksum",
+   "path": "org/apache/maven/shared/file-management/3.1.0/file-management-3.1.0.jar.sha1",
+   "provenance": {
+    "published_sha1": "f87a3a54c856714e4157b9ce7a5ff6ffc310d447",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/shared/file-management/3.1.0/file-management-3.1.0.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/shared/file-management/3.1.0/file-management-3.1.0.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "c1e0a812fd365272948b2838e7231d2659fa7bf8bd584205526b321b7f5b511d",
+   "type": "jar",
+   "version": "3.1.0"
+  },
+  {
+   "artifactId": "file-management",
+   "classifier": "",
+   "groupId": "org.apache.maven.shared",
+   "kind": "pom",
+   "path": "org/apache/maven/shared/file-management/3.1.0/file-management-3.1.0.pom",
+   "provenance": {
+    "published_sha1": "8c2dcedec327bbb9daf24ced48fc59ce228a6b1f",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/shared/file-management/3.1.0/file-management-3.1.0.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/shared/file-management/3.1.0/file-management-3.1.0.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "5e93a63b3042023e558dcbeb19914ce82e6a6fbccdbd68797f80b135121a8bde",
+   "type": "pom",
+   "version": "3.1.0"
+  },
+  {
+   "artifactId": "file-management",
+   "classifier": "",
+   "groupId": "org.apache.maven.shared",
+   "kind": "checksum",
+   "path": "org/apache/maven/shared/file-management/3.1.0/file-management-3.1.0.pom.sha1",
+   "provenance": {
+    "published_sha1": "8c2dcedec327bbb9daf24ced48fc59ce228a6b1f",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/shared/file-management/3.1.0/file-management-3.1.0.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/shared/file-management/3.1.0/file-management-3.1.0.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "3725feb017da45eea0c48ee32c7251cd261aa747d25d458486de69cee468c981",
+   "type": "pom",
+   "version": "3.1.0"
+  },
+  {
+   "artifactId": "file-management",
+   "classifier": "",
+   "groupId": "org.apache.maven.shared",
+   "kind": "artifact",
    "path": "org/apache/maven/shared/file-management/3.2.0/file-management-3.2.0.jar",
    "provenance": {
     "published_sha1": "73e1c849daa0502e59a107ed4c22e35f139f254f",
@@ -13954,6 +14466,38 @@
    "classifier": "",
    "groupId": "org.apache.maven.shared",
    "kind": "pom",
+   "path": "org/apache/maven/shared/maven-shared-components/36/maven-shared-components-36.pom",
+   "provenance": {
+    "published_sha1": "0376c5365dff8496ca0185247296d760ee80dfec",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/shared/maven-shared-components/36/maven-shared-components-36.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/shared/maven-shared-components/36/maven-shared-components-36.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "ec8e973e7964aaf490dbddd39f312340e00d113b8470f135a13e35e45f4baf9f",
+   "type": "pom",
+   "version": "36"
+  },
+  {
+   "artifactId": "maven-shared-components",
+   "classifier": "",
+   "groupId": "org.apache.maven.shared",
+   "kind": "checksum",
+   "path": "org/apache/maven/shared/maven-shared-components/36/maven-shared-components-36.pom.sha1",
+   "provenance": {
+    "published_sha1": "0376c5365dff8496ca0185247296d760ee80dfec",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/shared/maven-shared-components/36/maven-shared-components-36.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/shared/maven-shared-components/36/maven-shared-components-36.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "aa2a26269978cf653f2b309175edf2da14d6646b05365136999da7caff48f4e3",
+   "type": "pom",
+   "version": "36"
+  },
+  {
+   "artifactId": "maven-shared-components",
+   "classifier": "",
+   "groupId": "org.apache.maven.shared",
+   "kind": "pom",
    "path": "org/apache/maven/shared/maven-shared-components/37/maven-shared-components-37.pom",
    "provenance": {
     "published_sha1": "c38a33f4773da60ee98a770e2c980586d62df432",
@@ -14010,6 +14554,38 @@
    "sha256": "93989cf3445fe4e4c59e7850841b09f45ab32d527634cf3355fa734f43e2d40b",
    "type": "pom",
    "version": "39"
+  },
+  {
+   "artifactId": "maven-shared-components",
+   "classifier": "",
+   "groupId": "org.apache.maven.shared",
+   "kind": "pom",
+   "path": "org/apache/maven/shared/maven-shared-components/41/maven-shared-components-41.pom",
+   "provenance": {
+    "published_sha1": "f065cc41ea386a672156b8df42c4409ef1a972b2",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/shared/maven-shared-components/41/maven-shared-components-41.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/shared/maven-shared-components/41/maven-shared-components-41.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "c6bd81e2588e0f0f87392d4db590e1d81c126a25ee9253252ef89c506cde1e34",
+   "type": "pom",
+   "version": "41"
+  },
+  {
+   "artifactId": "maven-shared-components",
+   "classifier": "",
+   "groupId": "org.apache.maven.shared",
+   "kind": "checksum",
+   "path": "org/apache/maven/shared/maven-shared-components/41/maven-shared-components-41.pom.sha1",
+   "provenance": {
+    "published_sha1": "f065cc41ea386a672156b8df42c4409ef1a972b2",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/shared/maven-shared-components/41/maven-shared-components-41.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/shared/maven-shared-components/41/maven-shared-components-41.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "53ba42126fddb8d457af64e47d4b23d69665d3d9bc6932b52c00d100295f8077",
+   "type": "pom",
+   "version": "41"
   },
   {
    "artifactId": "maven-shared-components",
@@ -14390,6 +14966,70 @@
    "classifier": "",
    "groupId": "org.apache.maven.surefire",
    "kind": "artifact",
+   "path": "org/apache/maven/surefire/common-java5/3.0.0-M9/common-java5-3.0.0-M9.jar",
+   "provenance": {
+    "published_sha1": "a568228643dfb1caea99f1849f5c664ad57f6746",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/common-java5/3.0.0-M9/common-java5-3.0.0-M9.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/common-java5/3.0.0-M9/common-java5-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "2da1d132fec47a4b17d28e8bf65dfdc910d1a980169cf18112eef9a88680f382",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "common-java5",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/common-java5/3.0.0-M9/common-java5-3.0.0-M9.jar.sha1",
+   "provenance": {
+    "published_sha1": "a568228643dfb1caea99f1849f5c664ad57f6746",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/common-java5/3.0.0-M9/common-java5-3.0.0-M9.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/common-java5/3.0.0-M9/common-java5-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "cd6edf1801da378148e0f1b57f01b740b13805bac6b577a8b9ae353a0c4fb172",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "common-java5",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "pom",
+   "path": "org/apache/maven/surefire/common-java5/3.0.0-M9/common-java5-3.0.0-M9.pom",
+   "provenance": {
+    "published_sha1": "048cc251ba3b8e6c38f44e8ac985f71848e8d9f4",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/common-java5/3.0.0-M9/common-java5-3.0.0-M9.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/common-java5/3.0.0-M9/common-java5-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "854203fb1388696200554e067840bd25eac9b74b1c48f65cf4ddd7cafb1ba28e",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "common-java5",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/common-java5/3.0.0-M9/common-java5-3.0.0-M9.pom.sha1",
+   "provenance": {
+    "published_sha1": "048cc251ba3b8e6c38f44e8ac985f71848e8d9f4",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/common-java5/3.0.0-M9/common-java5-3.0.0-M9.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/common-java5/3.0.0-M9/common-java5-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "b0d246e9a194ea21831f3f5b09ad841359a8a39db6504bb672b7043f3c104da9",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "common-java5",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "artifact",
    "path": "org/apache/maven/surefire/common-java5/3.2.5/common-java5-3.2.5.jar",
    "provenance": {
     "published_sha1": "66a36806201e1c21468acf81d52afa564b39a515",
@@ -14638,6 +15278,70 @@
    "classifier": "",
    "groupId": "org.apache.maven.surefire",
    "kind": "artifact",
+   "path": "org/apache/maven/surefire/maven-surefire-common/3.0.0-M9/maven-surefire-common-3.0.0-M9.jar",
+   "provenance": {
+    "published_sha1": "2521b11651c620b7b1a2d97f1eee321c3b870595",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/maven-surefire-common/3.0.0-M9/maven-surefire-common-3.0.0-M9.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/maven-surefire-common/3.0.0-M9/maven-surefire-common-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "bc6f9031361ecfd0d0da7921e574f662d1bcb6ab19e08f0de353bd8d0c143a47",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "maven-surefire-common",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/maven-surefire-common/3.0.0-M9/maven-surefire-common-3.0.0-M9.jar.sha1",
+   "provenance": {
+    "published_sha1": "2521b11651c620b7b1a2d97f1eee321c3b870595",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/maven-surefire-common/3.0.0-M9/maven-surefire-common-3.0.0-M9.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/maven-surefire-common/3.0.0-M9/maven-surefire-common-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "e4492ad5c0ad3f48471b5d33c0ee62f87c6e168437c9886795a91c2a85538074",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "maven-surefire-common",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "pom",
+   "path": "org/apache/maven/surefire/maven-surefire-common/3.0.0-M9/maven-surefire-common-3.0.0-M9.pom",
+   "provenance": {
+    "published_sha1": "c01e67eb30c6da6e231e4f3ad614492e87d89eda",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/maven-surefire-common/3.0.0-M9/maven-surefire-common-3.0.0-M9.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/maven-surefire-common/3.0.0-M9/maven-surefire-common-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "2a328e15600c274229be1c0982557d9df3a005f4ec536248c89421fe3da0b27d",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "maven-surefire-common",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/maven-surefire-common/3.0.0-M9/maven-surefire-common-3.0.0-M9.pom.sha1",
+   "provenance": {
+    "published_sha1": "c01e67eb30c6da6e231e4f3ad614492e87d89eda",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/maven-surefire-common/3.0.0-M9/maven-surefire-common-3.0.0-M9.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/maven-surefire-common/3.0.0-M9/maven-surefire-common-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "7641d40ce44fa0daa32886cb8dec13733f9e92ebda496dde75d16bbc088e879a",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "maven-surefire-common",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "artifact",
    "path": "org/apache/maven/surefire/maven-surefire-common/3.2.5/maven-surefire-common-3.2.5.jar",
    "provenance": {
     "published_sha1": "f571ddce1d2c4ae2d8f26081d6e95fa131dfde22",
@@ -14756,6 +15460,70 @@
    "sha256": "ce58841169f7760dfb2009c5e4c46cc401b91b13023290d09252332482391e04",
    "type": "pom",
    "version": "3.5.4"
+  },
+  {
+   "artifactId": "surefire-api",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "artifact",
+   "path": "org/apache/maven/surefire/surefire-api/3.0.0-M9/surefire-api-3.0.0-M9.jar",
+   "provenance": {
+    "published_sha1": "5faf202f56dadcb7247642fa12cc1273a4875603",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-api/3.0.0-M9/surefire-api-3.0.0-M9.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-api/3.0.0-M9/surefire-api-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "dd33abea24574c46fcc9bf2b9fd5b1a5de270de4c32a1708d3dd813099938491",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-api",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/surefire-api/3.0.0-M9/surefire-api-3.0.0-M9.jar.sha1",
+   "provenance": {
+    "published_sha1": "5faf202f56dadcb7247642fa12cc1273a4875603",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-api/3.0.0-M9/surefire-api-3.0.0-M9.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-api/3.0.0-M9/surefire-api-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "bf4fd8c234b5c4eafc3f3308959b1dae71bac9a42e96edf9e7a6b80969ed20fd",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-api",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "pom",
+   "path": "org/apache/maven/surefire/surefire-api/3.0.0-M9/surefire-api-3.0.0-M9.pom",
+   "provenance": {
+    "published_sha1": "2a3be45df190320c97e7f4bb38847c5ce0c46280",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-api/3.0.0-M9/surefire-api-3.0.0-M9.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-api/3.0.0-M9/surefire-api-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "38204097640bbd7254edd947bfa0341f84fe658d389ade8e1dd8489af7d02cd9",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-api",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/surefire-api/3.0.0-M9/surefire-api-3.0.0-M9.pom.sha1",
+   "provenance": {
+    "published_sha1": "2a3be45df190320c97e7f4bb38847c5ce0c46280",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-api/3.0.0-M9/surefire-api-3.0.0-M9.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-api/3.0.0-M9/surefire-api-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "2a8b4b726dae95a352751f021c0fadb02715b23698f9f2ecc029f485b5798219",
+   "type": "pom",
+   "version": "3.0.0-M9"
   },
   {
    "artifactId": "surefire-api",
@@ -14886,6 +15654,70 @@
    "classifier": "",
    "groupId": "org.apache.maven.surefire",
    "kind": "artifact",
+   "path": "org/apache/maven/surefire/surefire-booter/3.0.0-M9/surefire-booter-3.0.0-M9.jar",
+   "provenance": {
+    "published_sha1": "7a27dfb3bb39ad5e9dfed770bed4e9687ec5296b",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-booter/3.0.0-M9/surefire-booter-3.0.0-M9.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-booter/3.0.0-M9/surefire-booter-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "c136b8ddde0af866e5a058982b49b477a69b0185043b2364f6bf0f4db18eff03",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-booter",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/surefire-booter/3.0.0-M9/surefire-booter-3.0.0-M9.jar.sha1",
+   "provenance": {
+    "published_sha1": "7a27dfb3bb39ad5e9dfed770bed4e9687ec5296b",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-booter/3.0.0-M9/surefire-booter-3.0.0-M9.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-booter/3.0.0-M9/surefire-booter-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "4a7ccd1dfd92676b8b7c15fcc9be08992a15546a5aaf7825078082bcb64d2bc9",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-booter",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "pom",
+   "path": "org/apache/maven/surefire/surefire-booter/3.0.0-M9/surefire-booter-3.0.0-M9.pom",
+   "provenance": {
+    "published_sha1": "da7f836166a4a2640ebf7441bd70e7ea9f232363",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-booter/3.0.0-M9/surefire-booter-3.0.0-M9.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-booter/3.0.0-M9/surefire-booter-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "06f18956513418d211582584278864a654673f147408cebf9c12a794c8666ce0",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-booter",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/surefire-booter/3.0.0-M9/surefire-booter-3.0.0-M9.pom.sha1",
+   "provenance": {
+    "published_sha1": "da7f836166a4a2640ebf7441bd70e7ea9f232363",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-booter/3.0.0-M9/surefire-booter-3.0.0-M9.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-booter/3.0.0-M9/surefire-booter-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "eccf58fb6a9e36c207731cd14ffd7902c47a34a46c1639f01a2ffe75bb2348d4",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-booter",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "artifact",
    "path": "org/apache/maven/surefire/surefire-booter/3.2.5/surefire-booter-3.2.5.jar",
    "provenance": {
     "published_sha1": "df5e66299137015f9de7acb979bd5597b6d9d708",
@@ -15004,6 +15836,70 @@
    "sha256": "b41fe00b851e97d08879f5f413339e37fadd68ec7c0e2bb6fd3c738a4de1b449",
    "type": "pom",
    "version": "3.5.4"
+  },
+  {
+   "artifactId": "surefire-extensions-api",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "artifact",
+   "path": "org/apache/maven/surefire/surefire-extensions-api/3.0.0-M9/surefire-extensions-api-3.0.0-M9.jar",
+   "provenance": {
+    "published_sha1": "354e8f035b828380231cb6f3967cc0ea0832ddb2",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-extensions-api/3.0.0-M9/surefire-extensions-api-3.0.0-M9.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-extensions-api/3.0.0-M9/surefire-extensions-api-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "ffba64cb36e3d6a29b1db3107569487d231e59e30358b2d1937f728da79f5406",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-extensions-api",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/surefire-extensions-api/3.0.0-M9/surefire-extensions-api-3.0.0-M9.jar.sha1",
+   "provenance": {
+    "published_sha1": "354e8f035b828380231cb6f3967cc0ea0832ddb2",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-extensions-api/3.0.0-M9/surefire-extensions-api-3.0.0-M9.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-extensions-api/3.0.0-M9/surefire-extensions-api-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "8a06bcbc582101b7514b271ec30fa84abb021fc55193baaa6e7ed09b2c95b804",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-extensions-api",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "pom",
+   "path": "org/apache/maven/surefire/surefire-extensions-api/3.0.0-M9/surefire-extensions-api-3.0.0-M9.pom",
+   "provenance": {
+    "published_sha1": "a9d07d32c61e77492c0919a5dec0afe3316efe29",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-extensions-api/3.0.0-M9/surefire-extensions-api-3.0.0-M9.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-extensions-api/3.0.0-M9/surefire-extensions-api-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "c33d4d23b2c9f62c37d4bdf82ba822494e086ebfda56c14212a7c0eccc26be49",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-extensions-api",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/surefire-extensions-api/3.0.0-M9/surefire-extensions-api-3.0.0-M9.pom.sha1",
+   "provenance": {
+    "published_sha1": "a9d07d32c61e77492c0919a5dec0afe3316efe29",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-extensions-api/3.0.0-M9/surefire-extensions-api-3.0.0-M9.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-extensions-api/3.0.0-M9/surefire-extensions-api-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "ba570b8a26a8570f468d78666add2da2c6825a3cf9988ba708bca14b447ba275",
+   "type": "pom",
+   "version": "3.0.0-M9"
   },
   {
    "artifactId": "surefire-extensions-api",
@@ -15134,6 +16030,70 @@
    "classifier": "",
    "groupId": "org.apache.maven.surefire",
    "kind": "artifact",
+   "path": "org/apache/maven/surefire/surefire-extensions-spi/3.0.0-M9/surefire-extensions-spi-3.0.0-M9.jar",
+   "provenance": {
+    "published_sha1": "612f68a812decd71130950a382c4dfa2030482ef",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-extensions-spi/3.0.0-M9/surefire-extensions-spi-3.0.0-M9.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-extensions-spi/3.0.0-M9/surefire-extensions-spi-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "f35dbfc0fa9bc96c5efdede76c76e40cfccbd0938ff2fc9c7afb16b5700a8386",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-extensions-spi",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/surefire-extensions-spi/3.0.0-M9/surefire-extensions-spi-3.0.0-M9.jar.sha1",
+   "provenance": {
+    "published_sha1": "612f68a812decd71130950a382c4dfa2030482ef",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-extensions-spi/3.0.0-M9/surefire-extensions-spi-3.0.0-M9.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-extensions-spi/3.0.0-M9/surefire-extensions-spi-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "37576476427fd28a6f0d7f05879fb410e0aa5afe5d75d7fb3d61db0ed1334311",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-extensions-spi",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "pom",
+   "path": "org/apache/maven/surefire/surefire-extensions-spi/3.0.0-M9/surefire-extensions-spi-3.0.0-M9.pom",
+   "provenance": {
+    "published_sha1": "5d28ad05a57b78480fcc443a769a35c787e67d83",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-extensions-spi/3.0.0-M9/surefire-extensions-spi-3.0.0-M9.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-extensions-spi/3.0.0-M9/surefire-extensions-spi-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "0836b0571e411ff8d107c64832462eaf4ae138800863a0ccd3e57acd9d5967ec",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-extensions-spi",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/surefire-extensions-spi/3.0.0-M9/surefire-extensions-spi-3.0.0-M9.pom.sha1",
+   "provenance": {
+    "published_sha1": "5d28ad05a57b78480fcc443a769a35c787e67d83",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-extensions-spi/3.0.0-M9/surefire-extensions-spi-3.0.0-M9.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-extensions-spi/3.0.0-M9/surefire-extensions-spi-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "b22f168028441b04b80478820fcb1d8f2af0b008d4c6d5da5d052ec9f1e9112b",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-extensions-spi",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "artifact",
    "path": "org/apache/maven/surefire/surefire-extensions-spi/3.2.5/surefire-extensions-spi-3.2.5.jar",
    "provenance": {
     "published_sha1": "04a5df0a33b2c9087c869f27e6a92d5b0a7c0b4d",
@@ -15252,6 +16212,70 @@
    "sha256": "d77601a6cdd69aa60dc20bbdcc3c803b12fb29210cff2bf04d22499c06dfc236",
    "type": "pom",
    "version": "3.5.4"
+  },
+  {
+   "artifactId": "surefire-junit-platform",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "artifact",
+   "path": "org/apache/maven/surefire/surefire-junit-platform/3.0.0-M9/surefire-junit-platform-3.0.0-M9.jar",
+   "provenance": {
+    "published_sha1": "7fb6144c2853dadfe87b02337cfae74c4bce4463",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-junit-platform/3.0.0-M9/surefire-junit-platform-3.0.0-M9.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-junit-platform/3.0.0-M9/surefire-junit-platform-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "61f500e15dd78ea7663821ba11dc27dad370e2354107f0f1885cc5311686e3eb",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-junit-platform",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/surefire-junit-platform/3.0.0-M9/surefire-junit-platform-3.0.0-M9.jar.sha1",
+   "provenance": {
+    "published_sha1": "7fb6144c2853dadfe87b02337cfae74c4bce4463",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-junit-platform/3.0.0-M9/surefire-junit-platform-3.0.0-M9.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-junit-platform/3.0.0-M9/surefire-junit-platform-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "efcf7bf81d8a021d0f81a2cc63c1864cfd36b13bd9f83e1128127c21627373a5",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-junit-platform",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "pom",
+   "path": "org/apache/maven/surefire/surefire-junit-platform/3.0.0-M9/surefire-junit-platform-3.0.0-M9.pom",
+   "provenance": {
+    "published_sha1": "ba636f9541d15d1fe2d098f1d41f3ecde80bde74",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-junit-platform/3.0.0-M9/surefire-junit-platform-3.0.0-M9.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-junit-platform/3.0.0-M9/surefire-junit-platform-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "beade330a5e80361c7d26af461a7f828388b1f9bc9528e150d691788515a6d04",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-junit-platform",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/surefire-junit-platform/3.0.0-M9/surefire-junit-platform-3.0.0-M9.pom.sha1",
+   "provenance": {
+    "published_sha1": "ba636f9541d15d1fe2d098f1d41f3ecde80bde74",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-junit-platform/3.0.0-M9/surefire-junit-platform-3.0.0-M9.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-junit-platform/3.0.0-M9/surefire-junit-platform-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "ca480bdeaaccee55271522ab3cde3b7d454308c3bca6bfa5a2a8a33aa6f47d92",
+   "type": "pom",
+   "version": "3.0.0-M9"
   },
   {
    "artifactId": "surefire-junit-platform",
@@ -15382,6 +16406,70 @@
    "classifier": "",
    "groupId": "org.apache.maven.surefire",
    "kind": "artifact",
+   "path": "org/apache/maven/surefire/surefire-logger-api/3.0.0-M9/surefire-logger-api-3.0.0-M9.jar",
+   "provenance": {
+    "published_sha1": "f040fe1bdc56dac4d1b9088327aad0994581f8b3",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-logger-api/3.0.0-M9/surefire-logger-api-3.0.0-M9.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-logger-api/3.0.0-M9/surefire-logger-api-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "93a62a2b383263fa4ad9356124505e325a9cfa63eab1de2a399aaef0f38d702d",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-logger-api",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/surefire-logger-api/3.0.0-M9/surefire-logger-api-3.0.0-M9.jar.sha1",
+   "provenance": {
+    "published_sha1": "f040fe1bdc56dac4d1b9088327aad0994581f8b3",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-logger-api/3.0.0-M9/surefire-logger-api-3.0.0-M9.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-logger-api/3.0.0-M9/surefire-logger-api-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "5bc65bd838c0a35a8bac002638395b479af3949dd550261ab6a9f6d8c6d5bd19",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-logger-api",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "pom",
+   "path": "org/apache/maven/surefire/surefire-logger-api/3.0.0-M9/surefire-logger-api-3.0.0-M9.pom",
+   "provenance": {
+    "published_sha1": "a04610035eb16601a9c3250ad8a8a77f23cce1b7",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-logger-api/3.0.0-M9/surefire-logger-api-3.0.0-M9.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-logger-api/3.0.0-M9/surefire-logger-api-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "cd3744a36254f898e0cf323101ac74e51e112a900c8fe689096ea96ab636a3f7",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-logger-api",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/surefire-logger-api/3.0.0-M9/surefire-logger-api-3.0.0-M9.pom.sha1",
+   "provenance": {
+    "published_sha1": "a04610035eb16601a9c3250ad8a8a77f23cce1b7",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-logger-api/3.0.0-M9/surefire-logger-api-3.0.0-M9.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-logger-api/3.0.0-M9/surefire-logger-api-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "f2bccaf2e5ab92288b5e5236d1900c894919cee04c4642b07186987746e5d5e4",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-logger-api",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "artifact",
    "path": "org/apache/maven/surefire/surefire-logger-api/3.2.5/surefire-logger-api-3.2.5.jar",
    "provenance": {
     "published_sha1": "ec8e7d8c08cf98d128c5c2835f4c7ea46c212c22",
@@ -15506,6 +16594,38 @@
    "classifier": "",
    "groupId": "org.apache.maven.surefire",
    "kind": "pom",
+   "path": "org/apache/maven/surefire/surefire-providers/3.0.0-M9/surefire-providers-3.0.0-M9.pom",
+   "provenance": {
+    "published_sha1": "36d74c103368e266d082bcbd0454cce53e65e5cf",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-providers/3.0.0-M9/surefire-providers-3.0.0-M9.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-providers/3.0.0-M9/surefire-providers-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "859a3dbe952c1fec5d825fa7e583673de0fc3a34eb1422c32d0db06436c2ae88",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-providers",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/surefire-providers/3.0.0-M9/surefire-providers-3.0.0-M9.pom.sha1",
+   "provenance": {
+    "published_sha1": "36d74c103368e266d082bcbd0454cce53e65e5cf",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-providers/3.0.0-M9/surefire-providers-3.0.0-M9.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-providers/3.0.0-M9/surefire-providers-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "be6457524f1b844ee55c4a7fec01870b8e5a929672a1292c39d7ab69b0543346",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-providers",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "pom",
    "path": "org/apache/maven/surefire/surefire-providers/3.2.5/surefire-providers-3.2.5.pom",
    "provenance": {
     "published_sha1": "2478c3d78326a46270e34a568606a277e3f335ce",
@@ -15562,6 +16682,70 @@
    "sha256": "11a79a0f79b2cd7a27cd268af6348583157c3fc510e39af9627d5032cfe3ffb8",
    "type": "pom",
    "version": "3.5.4"
+  },
+  {
+   "artifactId": "surefire-shared-utils",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "artifact",
+   "path": "org/apache/maven/surefire/surefire-shared-utils/3.0.0-M9/surefire-shared-utils-3.0.0-M9.jar",
+   "provenance": {
+    "published_sha1": "4e2aaa4291bb8824fc687dd0033b3bcb31b51d28",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-shared-utils/3.0.0-M9/surefire-shared-utils-3.0.0-M9.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-shared-utils/3.0.0-M9/surefire-shared-utils-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "48a494f3df1b03fcabc0056ad3aa1d6495ecbd9c0ddf76a8ec36b439e58aecf2",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-shared-utils",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/surefire-shared-utils/3.0.0-M9/surefire-shared-utils-3.0.0-M9.jar.sha1",
+   "provenance": {
+    "published_sha1": "4e2aaa4291bb8824fc687dd0033b3bcb31b51d28",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-shared-utils/3.0.0-M9/surefire-shared-utils-3.0.0-M9.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-shared-utils/3.0.0-M9/surefire-shared-utils-3.0.0-M9.jar.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "623699652e7c725d2f667d87692e48994d322e142afe7323afd9d851b8a4fb66",
+   "type": "jar",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-shared-utils",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "pom",
+   "path": "org/apache/maven/surefire/surefire-shared-utils/3.0.0-M9/surefire-shared-utils-3.0.0-M9.pom",
+   "provenance": {
+    "published_sha1": "80796c90704c15cc3813ba991a0362906cfc46d4",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-shared-utils/3.0.0-M9/surefire-shared-utils-3.0.0-M9.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-shared-utils/3.0.0-M9/surefire-shared-utils-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "1b0849896e50711a5aeb3bb8a2b9497c8728ccb513174a802a9c2a1b7cc5a9b8",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire-shared-utils",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/surefire-shared-utils/3.0.0-M9/surefire-shared-utils-3.0.0-M9.pom.sha1",
+   "provenance": {
+    "published_sha1": "80796c90704c15cc3813ba991a0362906cfc46d4",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-shared-utils/3.0.0-M9/surefire-shared-utils-3.0.0-M9.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire-shared-utils/3.0.0-M9/surefire-shared-utils-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "7a5269546a58d4b0bb77124c624dd184340878e3aad1e758ed700903caa2b4fc",
+   "type": "pom",
+   "version": "3.0.0-M9"
   },
   {
    "artifactId": "surefire-shared-utils",
@@ -15686,6 +16870,38 @@
    "sha256": "84eed815d5a0988859feca67c2c908beac3bdc0af490c471cc2d4ca87a568607",
    "type": "pom",
    "version": "3.5.4"
+  },
+  {
+   "artifactId": "surefire",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "pom",
+   "path": "org/apache/maven/surefire/surefire/3.0.0-M9/surefire-3.0.0-M9.pom",
+   "provenance": {
+    "published_sha1": "b9b1ec10c125b26c0f0dbcaf2b055537fa419171",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire/3.0.0-M9/surefire-3.0.0-M9.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire/3.0.0-M9/surefire-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "33a59538a199c708d6b464944c4d1e5197422d4d27080204abfac94126fae55f",
+   "type": "pom",
+   "version": "3.0.0-M9"
+  },
+  {
+   "artifactId": "surefire",
+   "classifier": "",
+   "groupId": "org.apache.maven.surefire",
+   "kind": "checksum",
+   "path": "org/apache/maven/surefire/surefire/3.0.0-M9/surefire-3.0.0-M9.pom.sha1",
+   "provenance": {
+    "published_sha1": "b9b1ec10c125b26c0f0dbcaf2b055537fa419171",
+    "source": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire/3.0.0-M9/surefire-3.0.0-M9.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apache/maven/surefire/surefire/3.0.0-M9/surefire-3.0.0-M9.pom.sha1"
+   },
+   "purpose": "Maven core/plugin runtime dependency; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "65c4b3abc98a45fb59a29ab6a12c6ec0c577167819781eb45f8bc292609a9b40",
+   "type": "pom",
+   "version": "3.0.0-M9"
   },
   {
    "artifactId": "surefire",
@@ -16002,6 +17218,70 @@
    "classifier": "",
    "groupId": "org.apiguardian",
    "kind": "artifact",
+   "path": "org/apiguardian/apiguardian-api/1.0.0/apiguardian-api-1.0.0.jar",
+   "provenance": {
+    "published_sha1": "3ef5276905e36f4d8055fe3cb0bdcc7503ffc85d",
+    "source": "https://repo.maven.apache.org/maven2/org/apiguardian/apiguardian-api/1.0.0/apiguardian-api-1.0.0.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apiguardian/apiguardian-api/1.0.0/apiguardian-api-1.0.0.jar.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "1f58b77470d8d147a0538d515347dd322f49a83b9e884b8970051160464b65b3",
+   "type": "jar",
+   "version": "1.0.0"
+  },
+  {
+   "artifactId": "apiguardian-api",
+   "classifier": "",
+   "groupId": "org.apiguardian",
+   "kind": "checksum",
+   "path": "org/apiguardian/apiguardian-api/1.0.0/apiguardian-api-1.0.0.jar.sha1",
+   "provenance": {
+    "published_sha1": "3ef5276905e36f4d8055fe3cb0bdcc7503ffc85d",
+    "source": "https://repo.maven.apache.org/maven2/org/apiguardian/apiguardian-api/1.0.0/apiguardian-api-1.0.0.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apiguardian/apiguardian-api/1.0.0/apiguardian-api-1.0.0.jar.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "0d344c6a421b2ea5020abcf086a01c37813bf1cee47a9acbf9720d072d5e4e91",
+   "type": "jar",
+   "version": "1.0.0"
+  },
+  {
+   "artifactId": "apiguardian-api",
+   "classifier": "",
+   "groupId": "org.apiguardian",
+   "kind": "pom",
+   "path": "org/apiguardian/apiguardian-api/1.0.0/apiguardian-api-1.0.0.pom",
+   "provenance": {
+    "published_sha1": "2c4e5835b7580f2696be7ee1402f4309b3665cf4",
+    "source": "https://repo.maven.apache.org/maven2/org/apiguardian/apiguardian-api/1.0.0/apiguardian-api-1.0.0.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apiguardian/apiguardian-api/1.0.0/apiguardian-api-1.0.0.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "2ecc15d2614124cb9630c7173efcae1776cf43588a8f3ab1b04684b8dbe02489",
+   "type": "pom",
+   "version": "1.0.0"
+  },
+  {
+   "artifactId": "apiguardian-api",
+   "classifier": "",
+   "groupId": "org.apiguardian",
+   "kind": "checksum",
+   "path": "org/apiguardian/apiguardian-api/1.0.0/apiguardian-api-1.0.0.pom.sha1",
+   "provenance": {
+    "published_sha1": "2c4e5835b7580f2696be7ee1402f4309b3665cf4",
+    "source": "https://repo.maven.apache.org/maven2/org/apiguardian/apiguardian-api/1.0.0/apiguardian-api-1.0.0.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/apiguardian/apiguardian-api/1.0.0/apiguardian-api-1.0.0.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "d6f82f99e93b5bc1bec308114415bb9735e2e5765303d16f5d34fab6891c7833",
+   "type": "pom",
+   "version": "1.0.0"
+  },
+  {
+   "artifactId": "apiguardian-api",
+   "classifier": "",
+   "groupId": "org.apiguardian",
+   "kind": "artifact",
    "path": "org/apiguardian/apiguardian-api/1.1.2/apiguardian-api-1.1.2.jar",
    "provenance": {
     "published_sha1": "a231e0d844d2721b0fa1b238006d15c6ded6842a",
@@ -16089,6 +17369,70 @@
    "sha256": "61be6eb3f788bd743b2a9e73210ae044b4d688db8eb1381a65beaab57918a13a",
    "type": "pom",
    "version": "3.25.3"
+  },
+  {
+   "artifactId": "assertj-core",
+   "classifier": "",
+   "groupId": "org.assertj",
+   "kind": "pom",
+   "path": "org/assertj/assertj-core/3.23.1/assertj-core-3.23.1.pom",
+   "provenance": {
+    "published_sha1": "42dd538806b108c5d64dca9176457e6af10c612f",
+    "source": "https://repo.maven.apache.org/maven2/org/assertj/assertj-core/3.23.1/assertj-core-3.23.1.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/assertj/assertj-core/3.23.1/assertj-core-3.23.1.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "fb9b93d31b77c85c11a7d0a2a031d0e8cc751a8957dd0ff06c63f4facacb0976",
+   "type": "pom",
+   "version": "3.23.1"
+  },
+  {
+   "artifactId": "assertj-core",
+   "classifier": "",
+   "groupId": "org.assertj",
+   "kind": "checksum",
+   "path": "org/assertj/assertj-core/3.23.1/assertj-core-3.23.1.pom.sha1",
+   "provenance": {
+    "published_sha1": "42dd538806b108c5d64dca9176457e6af10c612f",
+    "source": "https://repo.maven.apache.org/maven2/org/assertj/assertj-core/3.23.1/assertj-core-3.23.1.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/assertj/assertj-core/3.23.1/assertj-core-3.23.1.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "46f4f62741aec5e0c8ab0dda99d612ed2323448cf05153d7fa18b6cf1baf1dec",
+   "type": "pom",
+   "version": "3.23.1"
+  },
+  {
+   "artifactId": "assertj-parent-pom",
+   "classifier": "",
+   "groupId": "org.assertj",
+   "kind": "pom",
+   "path": "org/assertj/assertj-parent-pom/2.2.17/assertj-parent-pom-2.2.17.pom",
+   "provenance": {
+    "published_sha1": "a430f213e7e1ab31503eaaf5fd38b70b5e5ce9b9",
+    "source": "https://repo.maven.apache.org/maven2/org/assertj/assertj-parent-pom/2.2.17/assertj-parent-pom-2.2.17.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/assertj/assertj-parent-pom/2.2.17/assertj-parent-pom-2.2.17.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "c33cc79a471b6391cb5255f86469512027717996f362970ae9071bf886a03519",
+   "type": "pom",
+   "version": "2.2.17"
+  },
+  {
+   "artifactId": "assertj-parent-pom",
+   "classifier": "",
+   "groupId": "org.assertj",
+   "kind": "checksum",
+   "path": "org/assertj/assertj-parent-pom/2.2.17/assertj-parent-pom-2.2.17.pom.sha1",
+   "provenance": {
+    "published_sha1": "a430f213e7e1ab31503eaaf5fd38b70b5e5ce9b9",
+    "source": "https://repo.maven.apache.org/maven2/org/assertj/assertj-parent-pom/2.2.17/assertj-parent-pom-2.2.17.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/assertj/assertj-parent-pom/2.2.17/assertj-parent-pom-2.2.17.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "a1774f6edcbd3abc8513b64e7cdc51923378ada68ea788dd4e49cea716055609",
+   "type": "pom",
+   "version": "2.2.17"
   },
   {
    "artifactId": "exec-maven-plugin",
@@ -21972,6 +23316,38 @@
    "version": "1.3"
   },
   {
+   "artifactId": "hamcrest-library",
+   "classifier": "",
+   "groupId": "org.hamcrest",
+   "kind": "pom",
+   "path": "org/hamcrest/hamcrest-library/1.3/hamcrest-library-1.3.pom",
+   "provenance": {
+    "published_sha1": "8e2a1dd4d5ba590c7a904209f1f40f66d9349ee9",
+    "source": "https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-library/1.3/hamcrest-library-1.3.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-library/1.3/hamcrest-library-1.3.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "1ceb4bfb0f098ae29b935044b2363e11323313fe3ed2055df8b79737d5056277",
+   "type": "pom",
+   "version": "1.3"
+  },
+  {
+   "artifactId": "hamcrest-library",
+   "classifier": "",
+   "groupId": "org.hamcrest",
+   "kind": "checksum",
+   "path": "org/hamcrest/hamcrest-library/1.3/hamcrest-library-1.3.pom.sha1",
+   "provenance": {
+    "published_sha1": "8e2a1dd4d5ba590c7a904209f1f40f66d9349ee9",
+    "source": "https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-library/1.3/hamcrest-library-1.3.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-library/1.3/hamcrest-library-1.3.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "13960e5a49fa9fe414439584f2748ba022bd546a263ad73a894170f33d816f09",
+   "type": "pom",
+   "version": "1.3"
+  },
+  {
    "artifactId": "hamcrest-parent",
    "classifier": "",
    "groupId": "org.hamcrest",
@@ -22316,6 +23692,38 @@
    "sha256": "0f3a9166f844d49979223ebc92cd1602654f787fb4f77cc20c3cca2d2a72303c",
    "type": "pom",
    "version": "1.10.2"
+  },
+  {
+   "artifactId": "junit-bom",
+   "classifier": "",
+   "groupId": "org.junit",
+   "kind": "artifact",
+   "path": "org/junit/junit-bom/5.10.0/junit-bom-5.10.0.module",
+   "provenance": {
+    "published_sha1": "3cfd743479dd0e2805bb0ffc36de5033e7ad9813",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/junit-bom/5.10.0/junit-bom-5.10.0.module",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/junit-bom/5.10.0/junit-bom-5.10.0.module.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "eb3ee6127608010694a898056e7407d117296003aba5f5db801df430b9887fcf",
+   "type": "module",
+   "version": "5.10.0"
+  },
+  {
+   "artifactId": "junit-bom",
+   "classifier": "",
+   "groupId": "org.junit",
+   "kind": "checksum",
+   "path": "org/junit/junit-bom/5.10.0/junit-bom-5.10.0.module.sha1",
+   "provenance": {
+    "published_sha1": "3cfd743479dd0e2805bb0ffc36de5033e7ad9813",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/junit-bom/5.10.0/junit-bom-5.10.0.module.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/junit-bom/5.10.0/junit-bom-5.10.0.module.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "ecd2ecd2094f6e37dee811458745d35c2518184733661967b25cecb2ccb21929",
+   "type": "module",
+   "version": "5.10.0"
   },
   {
    "artifactId": "junit-bom",
@@ -22939,6 +24347,38 @@
    "version": "5.10.2"
   },
   {
+   "artifactId": "junit-jupiter-api",
+   "classifier": "",
+   "groupId": "org.junit.jupiter",
+   "kind": "pom",
+   "path": "org/junit/jupiter/junit-jupiter-api/5.3.2/junit-jupiter-api-5.3.2.pom",
+   "provenance": {
+    "published_sha1": "32774afff99807c766180f9b995e82ca48feb68c",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/jupiter/junit-jupiter-api/5.3.2/junit-jupiter-api-5.3.2.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/jupiter/junit-jupiter-api/5.3.2/junit-jupiter-api-5.3.2.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "985ef279bd94f6ff33d216302a9eec39436615f1faab7650192aecc837ed6da7",
+   "type": "pom",
+   "version": "5.3.2"
+  },
+  {
+   "artifactId": "junit-jupiter-api",
+   "classifier": "",
+   "groupId": "org.junit.jupiter",
+   "kind": "checksum",
+   "path": "org/junit/jupiter/junit-jupiter-api/5.3.2/junit-jupiter-api-5.3.2.pom.sha1",
+   "provenance": {
+    "published_sha1": "32774afff99807c766180f9b995e82ca48feb68c",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/jupiter/junit-jupiter-api/5.3.2/junit-jupiter-api-5.3.2.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/jupiter/junit-jupiter-api/5.3.2/junit-jupiter-api-5.3.2.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "52bb81ba03a3f4de136ae4fb2e3edeb99c40fd7b742aa1b05de8404ec47b5c2d",
+   "type": "pom",
+   "version": "5.3.2"
+  },
+  {
    "artifactId": "junit-jupiter-engine",
    "classifier": "",
    "groupId": "org.junit.jupiter",
@@ -23001,6 +24441,38 @@
    "version": "5.10.2"
   },
   {
+   "artifactId": "junit-jupiter-engine",
+   "classifier": "",
+   "groupId": "org.junit.jupiter",
+   "kind": "pom",
+   "path": "org/junit/jupiter/junit-jupiter-engine/5.3.2/junit-jupiter-engine-5.3.2.pom",
+   "provenance": {
+    "published_sha1": "029ad508b11f8d297f4f7d3b868732b6e223ae14",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/jupiter/junit-jupiter-engine/5.3.2/junit-jupiter-engine-5.3.2.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/jupiter/junit-jupiter-engine/5.3.2/junit-jupiter-engine-5.3.2.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "f79ccd3a022eaa7a9d366f4380c73f2c4ae3ded5062504e30c3d1bdfe5601c3c",
+   "type": "pom",
+   "version": "5.3.2"
+  },
+  {
+   "artifactId": "junit-jupiter-engine",
+   "classifier": "",
+   "groupId": "org.junit.jupiter",
+   "kind": "checksum",
+   "path": "org/junit/jupiter/junit-jupiter-engine/5.3.2/junit-jupiter-engine-5.3.2.pom.sha1",
+   "provenance": {
+    "published_sha1": "029ad508b11f8d297f4f7d3b868732b6e223ae14",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/jupiter/junit-jupiter-engine/5.3.2/junit-jupiter-engine-5.3.2.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/jupiter/junit-jupiter-engine/5.3.2/junit-jupiter-engine-5.3.2.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "7cbb0d879c8b507c129bea50ba3fed77e09764bc909bc5ac92bd701cc668f6e2",
+   "type": "pom",
+   "version": "5.3.2"
+  },
+  {
    "artifactId": "junit-jupiter-params",
    "classifier": "",
    "groupId": "org.junit.jupiter",
@@ -23061,6 +24533,38 @@
    "sha256": "156e6785a46ba5273a42ec79b7a09cd3e2bd04b1aaa1823f16476fbd813291e2",
    "type": "pom",
    "version": "5.10.2"
+  },
+  {
+   "artifactId": "junit-jupiter-params",
+   "classifier": "",
+   "groupId": "org.junit.jupiter",
+   "kind": "pom",
+   "path": "org/junit/jupiter/junit-jupiter-params/5.3.2/junit-jupiter-params-5.3.2.pom",
+   "provenance": {
+    "published_sha1": "0e9f346e870eaccc8fd7ac5969d316501153f66e",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/jupiter/junit-jupiter-params/5.3.2/junit-jupiter-params-5.3.2.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/jupiter/junit-jupiter-params/5.3.2/junit-jupiter-params-5.3.2.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "fc714eb8052d6c45abd67c9c824cb05c57c1ba9a087fae25e3a90b61586b4148",
+   "type": "pom",
+   "version": "5.3.2"
+  },
+  {
+   "artifactId": "junit-jupiter-params",
+   "classifier": "",
+   "groupId": "org.junit.jupiter",
+   "kind": "checksum",
+   "path": "org/junit/jupiter/junit-jupiter-params/5.3.2/junit-jupiter-params-5.3.2.pom.sha1",
+   "provenance": {
+    "published_sha1": "0e9f346e870eaccc8fd7ac5969d316501153f66e",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/jupiter/junit-jupiter-params/5.3.2/junit-jupiter-params-5.3.2.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/jupiter/junit-jupiter-params/5.3.2/junit-jupiter-params-5.3.2.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "213771140b058b1a175748debca0593b4c0957d2ee7f53a73177ac079bcee93f",
+   "type": "pom",
+   "version": "5.3.2"
   },
   {
    "artifactId": "junit-jupiter",
@@ -23191,6 +24695,70 @@
    "classifier": "",
    "groupId": "org.junit.platform",
    "kind": "artifact",
+   "path": "org/junit/platform/junit-platform-commons/1.3.2/junit-platform-commons-1.3.2.jar",
+   "provenance": {
+    "published_sha1": "378d1d1b162426ad031522f6d51e3bf28d1631a4",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-commons/1.3.2/junit-platform-commons-1.3.2.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-commons/1.3.2/junit-platform-commons-1.3.2.jar.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "34e2a20df030c377741f8dcdb2e94c82d3af3d554ac3d5e6c8053a320b4ae51a",
+   "type": "jar",
+   "version": "1.3.2"
+  },
+  {
+   "artifactId": "junit-platform-commons",
+   "classifier": "",
+   "groupId": "org.junit.platform",
+   "kind": "checksum",
+   "path": "org/junit/platform/junit-platform-commons/1.3.2/junit-platform-commons-1.3.2.jar.sha1",
+   "provenance": {
+    "published_sha1": "378d1d1b162426ad031522f6d51e3bf28d1631a4",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-commons/1.3.2/junit-platform-commons-1.3.2.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-commons/1.3.2/junit-platform-commons-1.3.2.jar.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "c8c3225955828891e00c78851e9b9c3aafcae13f5e5c0b1d975cc1cc8dab0cad",
+   "type": "jar",
+   "version": "1.3.2"
+  },
+  {
+   "artifactId": "junit-platform-commons",
+   "classifier": "",
+   "groupId": "org.junit.platform",
+   "kind": "pom",
+   "path": "org/junit/platform/junit-platform-commons/1.3.2/junit-platform-commons-1.3.2.pom",
+   "provenance": {
+    "published_sha1": "05823a79253b7abcb22165afecbd0a8bb3758101",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-commons/1.3.2/junit-platform-commons-1.3.2.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-commons/1.3.2/junit-platform-commons-1.3.2.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "d206772643daf333e0981ce5cc78dcce83bdb2a84666e79bb588f862fabd305a",
+   "type": "pom",
+   "version": "1.3.2"
+  },
+  {
+   "artifactId": "junit-platform-commons",
+   "classifier": "",
+   "groupId": "org.junit.platform",
+   "kind": "checksum",
+   "path": "org/junit/platform/junit-platform-commons/1.3.2/junit-platform-commons-1.3.2.pom.sha1",
+   "provenance": {
+    "published_sha1": "05823a79253b7abcb22165afecbd0a8bb3758101",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-commons/1.3.2/junit-platform-commons-1.3.2.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-commons/1.3.2/junit-platform-commons-1.3.2.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "70572b2724b6b2aca1fccd975a7b750a8766904032bb3c745c9a06699cae7d5b",
+   "type": "pom",
+   "version": "1.3.2"
+  },
+  {
+   "artifactId": "junit-platform-commons",
+   "classifier": "",
+   "groupId": "org.junit.platform",
+   "kind": "artifact",
    "path": "org/junit/platform/junit-platform-commons/1.9.3/junit-platform-commons-1.9.3.jar",
    "provenance": {
     "published_sha1": "36b2e26a90c41603be7f0094bee80e3f8a2cd4d4",
@@ -23309,6 +24877,70 @@
    "sha256": "e0042ce05ba7fa9c2848f01e97c967edc5989cc0f3bae8d0ec7ec203f8ae0349",
    "type": "pom",
    "version": "1.10.2"
+  },
+  {
+   "artifactId": "junit-platform-engine",
+   "classifier": "",
+   "groupId": "org.junit.platform",
+   "kind": "artifact",
+   "path": "org/junit/platform/junit-platform-engine/1.3.2/junit-platform-engine-1.3.2.jar",
+   "provenance": {
+    "published_sha1": "0c54bc1d4654bd1ef15fccf512ce664184085969",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-engine/1.3.2/junit-platform-engine-1.3.2.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-engine/1.3.2/junit-platform-engine-1.3.2.jar.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "0d7575d6f7a589c19ddad90d44325f24ee6f2254765f728bc9cbb9428a294e85",
+   "type": "jar",
+   "version": "1.3.2"
+  },
+  {
+   "artifactId": "junit-platform-engine",
+   "classifier": "",
+   "groupId": "org.junit.platform",
+   "kind": "checksum",
+   "path": "org/junit/platform/junit-platform-engine/1.3.2/junit-platform-engine-1.3.2.jar.sha1",
+   "provenance": {
+    "published_sha1": "0c54bc1d4654bd1ef15fccf512ce664184085969",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-engine/1.3.2/junit-platform-engine-1.3.2.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-engine/1.3.2/junit-platform-engine-1.3.2.jar.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "0124bc3885350f5cf1f049bf13f3cc55d89942e363ca46a7b7bd60ca2d93db38",
+   "type": "jar",
+   "version": "1.3.2"
+  },
+  {
+   "artifactId": "junit-platform-engine",
+   "classifier": "",
+   "groupId": "org.junit.platform",
+   "kind": "pom",
+   "path": "org/junit/platform/junit-platform-engine/1.3.2/junit-platform-engine-1.3.2.pom",
+   "provenance": {
+    "published_sha1": "b9ee8914680d39dd7501e8a3d9ee281628c6e3c5",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-engine/1.3.2/junit-platform-engine-1.3.2.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-engine/1.3.2/junit-platform-engine-1.3.2.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "57d6534a6bcecdeae4e7df1abca8cfc1b88aea77f66b45c5d6a2856c05c4e167",
+   "type": "pom",
+   "version": "1.3.2"
+  },
+  {
+   "artifactId": "junit-platform-engine",
+   "classifier": "",
+   "groupId": "org.junit.platform",
+   "kind": "checksum",
+   "path": "org/junit/platform/junit-platform-engine/1.3.2/junit-platform-engine-1.3.2.pom.sha1",
+   "provenance": {
+    "published_sha1": "b9ee8914680d39dd7501e8a3d9ee281628c6e3c5",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-engine/1.3.2/junit-platform-engine-1.3.2.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-engine/1.3.2/junit-platform-engine-1.3.2.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "1d4177dd8621b0103bc311c95be16f709aa3998533a74a065fc9ae3016cf8adc",
+   "type": "pom",
+   "version": "1.3.2"
   },
   {
    "artifactId": "junit-platform-engine",
@@ -23439,6 +25071,70 @@
    "classifier": "",
    "groupId": "org.junit.platform",
    "kind": "artifact",
+   "path": "org/junit/platform/junit-platform-launcher/1.3.2/junit-platform-launcher-1.3.2.jar",
+   "provenance": {
+    "published_sha1": "4c503033e9085087cf70d241142068f1e6bd8195",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-launcher/1.3.2/junit-platform-launcher-1.3.2.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-launcher/1.3.2/junit-platform-launcher-1.3.2.jar.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "797a863f256602ca349b8e70f9ff2460e20aafbd57b75627f5ac82beb927085a",
+   "type": "jar",
+   "version": "1.3.2"
+  },
+  {
+   "artifactId": "junit-platform-launcher",
+   "classifier": "",
+   "groupId": "org.junit.platform",
+   "kind": "checksum",
+   "path": "org/junit/platform/junit-platform-launcher/1.3.2/junit-platform-launcher-1.3.2.jar.sha1",
+   "provenance": {
+    "published_sha1": "4c503033e9085087cf70d241142068f1e6bd8195",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-launcher/1.3.2/junit-platform-launcher-1.3.2.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-launcher/1.3.2/junit-platform-launcher-1.3.2.jar.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "d94581ddf428ff35a2f8ab121b95ec03f6b0b0cc98c0beb7aef71b66e50c1928",
+   "type": "jar",
+   "version": "1.3.2"
+  },
+  {
+   "artifactId": "junit-platform-launcher",
+   "classifier": "",
+   "groupId": "org.junit.platform",
+   "kind": "pom",
+   "path": "org/junit/platform/junit-platform-launcher/1.3.2/junit-platform-launcher-1.3.2.pom",
+   "provenance": {
+    "published_sha1": "b0d529348ec17ed6bfc6460f37b3b38803f1cb32",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-launcher/1.3.2/junit-platform-launcher-1.3.2.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-launcher/1.3.2/junit-platform-launcher-1.3.2.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "142fa015b552ff3d17bc5a66bafbff189c493b302dad74b02f1ac17440553624",
+   "type": "pom",
+   "version": "1.3.2"
+  },
+  {
+   "artifactId": "junit-platform-launcher",
+   "classifier": "",
+   "groupId": "org.junit.platform",
+   "kind": "checksum",
+   "path": "org/junit/platform/junit-platform-launcher/1.3.2/junit-platform-launcher-1.3.2.pom.sha1",
+   "provenance": {
+    "published_sha1": "b0d529348ec17ed6bfc6460f37b3b38803f1cb32",
+    "source": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-launcher/1.3.2/junit-platform-launcher-1.3.2.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-launcher/1.3.2/junit-platform-launcher-1.3.2.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "66a5b0edf0f9fe35881aff478eed7ae5009cbbaee87bbb499f0484537cbe8fa0",
+   "type": "pom",
+   "version": "1.3.2"
+  },
+  {
+   "artifactId": "junit-platform-launcher",
+   "classifier": "",
+   "groupId": "org.junit.platform",
+   "kind": "artifact",
    "path": "org/junit/platform/junit-platform-launcher/1.9.3/junit-platform-launcher-1.9.3.jar",
    "provenance": {
     "published_sha1": "485650bfe2a2f39b606a6ca013285afda2eaee79",
@@ -23495,6 +25191,70 @@
    "sha256": "022edfb7c1c1ae870723c5700300f274485cfa807750c46a725ffc5054686774",
    "type": "pom",
    "version": "1.9.3"
+  },
+  {
+   "artifactId": "mockito-bom",
+   "classifier": "",
+   "groupId": "org.mockito",
+   "kind": "pom",
+   "path": "org/mockito/mockito-bom/4.5.1/mockito-bom-4.5.1.pom",
+   "provenance": {
+    "published_sha1": "afd415fdc83288ed6e3e775491e0bce3ac08959a",
+    "source": "https://repo.maven.apache.org/maven2/org/mockito/mockito-bom/4.5.1/mockito-bom-4.5.1.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/mockito/mockito-bom/4.5.1/mockito-bom-4.5.1.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "14bad55bcc2baf814c5fa494f9f6df0b4feed1ff1dc06a1d0155e3464db039c9",
+   "type": "pom",
+   "version": "4.5.1"
+  },
+  {
+   "artifactId": "mockito-bom",
+   "classifier": "",
+   "groupId": "org.mockito",
+   "kind": "checksum",
+   "path": "org/mockito/mockito-bom/4.5.1/mockito-bom-4.5.1.pom.sha1",
+   "provenance": {
+    "published_sha1": "afd415fdc83288ed6e3e775491e0bce3ac08959a",
+    "source": "https://repo.maven.apache.org/maven2/org/mockito/mockito-bom/4.5.1/mockito-bom-4.5.1.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/mockito/mockito-bom/4.5.1/mockito-bom-4.5.1.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "530942695219b7ec00e43a840c0350be4aba6bc20e8ad4d40618759a926f1914",
+   "type": "pom",
+   "version": "4.5.1"
+  },
+  {
+   "artifactId": "mockito-core",
+   "classifier": "",
+   "groupId": "org.mockito",
+   "kind": "pom",
+   "path": "org/mockito/mockito-core/2.28.2/mockito-core-2.28.2.pom",
+   "provenance": {
+    "published_sha1": "1faf95a65310f3b1cdd239ba19c6bf67b2f5a308",
+    "source": "https://repo.maven.apache.org/maven2/org/mockito/mockito-core/2.28.2/mockito-core-2.28.2.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/mockito/mockito-core/2.28.2/mockito-core-2.28.2.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "b3bf322abfee6c054935d68ddbb785a90f7934a97a17fcd140a4e6ad58e59d53",
+   "type": "pom",
+   "version": "2.28.2"
+  },
+  {
+   "artifactId": "mockito-core",
+   "classifier": "",
+   "groupId": "org.mockito",
+   "kind": "checksum",
+   "path": "org/mockito/mockito-core/2.28.2/mockito-core-2.28.2.pom.sha1",
+   "provenance": {
+    "published_sha1": "1faf95a65310f3b1cdd239ba19c6bf67b2f5a308",
+    "source": "https://repo.maven.apache.org/maven2/org/mockito/mockito-core/2.28.2/mockito-core-2.28.2.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/mockito/mockito-core/2.28.2/mockito-core-2.28.2.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "85ef85f1f46cae9eacdea365d04463ffcdbc1a3f6559896cf63fe54325861779",
+   "type": "pom",
+   "version": "2.28.2"
   },
   {
    "artifactId": "autolink",
@@ -23559,6 +25319,134 @@
    "sha256": "44f0f168fd43f2b4f28edc7b4fb405fb1b233357fa7a9892b57fd332f0255795",
    "type": "pom",
    "version": "0.6.0"
+  },
+  {
+   "artifactId": "objenesis-parent",
+   "classifier": "",
+   "groupId": "org.objenesis",
+   "kind": "pom",
+   "path": "org/objenesis/objenesis-parent/2.6/objenesis-parent-2.6.pom",
+   "provenance": {
+    "published_sha1": "cfc0966402e8174fbacd5c5dd355b5815364a4fe",
+    "source": "https://repo.maven.apache.org/maven2/org/objenesis/objenesis-parent/2.6/objenesis-parent-2.6.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/objenesis/objenesis-parent/2.6/objenesis-parent-2.6.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "3825feca2a3c176400b063dec7c6b0643e2b5256bbbfd4e0a7c11e0dd0983baa",
+   "type": "pom",
+   "version": "2.6"
+  },
+  {
+   "artifactId": "objenesis-parent",
+   "classifier": "",
+   "groupId": "org.objenesis",
+   "kind": "checksum",
+   "path": "org/objenesis/objenesis-parent/2.6/objenesis-parent-2.6.pom.sha1",
+   "provenance": {
+    "published_sha1": "cfc0966402e8174fbacd5c5dd355b5815364a4fe",
+    "source": "https://repo.maven.apache.org/maven2/org/objenesis/objenesis-parent/2.6/objenesis-parent-2.6.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/objenesis/objenesis-parent/2.6/objenesis-parent-2.6.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "47448cd8a08cfc1e588e04e1b249e4ef24837665529826bacd105ccbde8c6a19",
+   "type": "pom",
+   "version": "2.6"
+  },
+  {
+   "artifactId": "objenesis",
+   "classifier": "",
+   "groupId": "org.objenesis",
+   "kind": "pom",
+   "path": "org/objenesis/objenesis/2.6/objenesis-2.6.pom",
+   "provenance": {
+    "published_sha1": "b6d1f689e0d2b2d96b0730fad7b5d96902bf64d8",
+    "source": "https://repo.maven.apache.org/maven2/org/objenesis/objenesis/2.6/objenesis-2.6.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/objenesis/objenesis/2.6/objenesis-2.6.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "4c1307909dc62df1bd91f075503f8bdef5ae445e13353f1752af9448bea1d3f1",
+   "type": "pom",
+   "version": "2.6"
+  },
+  {
+   "artifactId": "objenesis",
+   "classifier": "",
+   "groupId": "org.objenesis",
+   "kind": "checksum",
+   "path": "org/objenesis/objenesis/2.6/objenesis-2.6.pom.sha1",
+   "provenance": {
+    "published_sha1": "b6d1f689e0d2b2d96b0730fad7b5d96902bf64d8",
+    "source": "https://repo.maven.apache.org/maven2/org/objenesis/objenesis/2.6/objenesis-2.6.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/objenesis/objenesis/2.6/objenesis-2.6.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "076b7ff521e478d9212704f2337133f34734ead145e02d68bef52764041b6c0f",
+   "type": "pom",
+   "version": "2.6"
+  },
+  {
+   "artifactId": "opentest4j",
+   "classifier": "",
+   "groupId": "org.opentest4j",
+   "kind": "artifact",
+   "path": "org/opentest4j/opentest4j/1.1.1/opentest4j-1.1.1.jar",
+   "provenance": {
+    "published_sha1": "efd9f971e91074491ea55b19f67b13470cf4fcdd",
+    "source": "https://repo.maven.apache.org/maven2/org/opentest4j/opentest4j/1.1.1/opentest4j-1.1.1.jar",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/opentest4j/opentest4j/1.1.1/opentest4j-1.1.1.jar.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "f106351abd941110226745ed103c85863b3f04e9fa82ddea1084639ae0c5336c",
+   "type": "jar",
+   "version": "1.1.1"
+  },
+  {
+   "artifactId": "opentest4j",
+   "classifier": "",
+   "groupId": "org.opentest4j",
+   "kind": "checksum",
+   "path": "org/opentest4j/opentest4j/1.1.1/opentest4j-1.1.1.jar.sha1",
+   "provenance": {
+    "published_sha1": "efd9f971e91074491ea55b19f67b13470cf4fcdd",
+    "source": "https://repo.maven.apache.org/maven2/org/opentest4j/opentest4j/1.1.1/opentest4j-1.1.1.jar.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/opentest4j/opentest4j/1.1.1/opentest4j-1.1.1.jar.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "bb9185a4c76c483bac02a9a22a71270c370dddcbc5911f273500a3ab32fadf83",
+   "type": "jar",
+   "version": "1.1.1"
+  },
+  {
+   "artifactId": "opentest4j",
+   "classifier": "",
+   "groupId": "org.opentest4j",
+   "kind": "pom",
+   "path": "org/opentest4j/opentest4j/1.1.1/opentest4j-1.1.1.pom",
+   "provenance": {
+    "published_sha1": "6554a839d3c3f1c77c593498a3ae4b692878946a",
+    "source": "https://repo.maven.apache.org/maven2/org/opentest4j/opentest4j/1.1.1/opentest4j-1.1.1.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/opentest4j/opentest4j/1.1.1/opentest4j-1.1.1.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "d9ddb3babfbfc0a7b5b3a76e7ebd0e8f35854af9f6db0e949919b6f85b7dfd68",
+   "type": "pom",
+   "version": "1.1.1"
+  },
+  {
+   "artifactId": "opentest4j",
+   "classifier": "",
+   "groupId": "org.opentest4j",
+   "kind": "checksum",
+   "path": "org/opentest4j/opentest4j/1.1.1/opentest4j-1.1.1.pom.sha1",
+   "provenance": {
+    "published_sha1": "6554a839d3c3f1c77c593498a3ae4b692878946a",
+    "source": "https://repo.maven.apache.org/maven2/org/opentest4j/opentest4j/1.1.1/opentest4j-1.1.1.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/opentest4j/opentest4j/1.1.1/opentest4j-1.1.1.pom.sha1"
+   },
+   "purpose": "JUnit/Hamcrest test framework for generated-code verification; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "eb4c8aba37ffee8d5437caf809088da30c37917e7e588b58482126a44bf21c64",
+   "type": "pom",
+   "version": "1.1.1"
   },
   {
    "artifactId": "opentest4j",
@@ -24210,6 +26098,38 @@
    "sha256": "c92a324681142a707330f48583e6434a58209fac4db998b0e01a7cd5cb4478e2",
    "type": "pom",
    "version": "1.5.1"
+  },
+  {
+   "artifactId": "powermock-reflect",
+   "classifier": "",
+   "groupId": "org.powermock",
+   "kind": "pom",
+   "path": "org/powermock/powermock-reflect/2.0.9/powermock-reflect-2.0.9.pom",
+   "provenance": {
+    "published_sha1": "c34f31239ab7a43420e7db11ac85729fa39c9bfc",
+    "source": "https://repo.maven.apache.org/maven2/org/powermock/powermock-reflect/2.0.9/powermock-reflect-2.0.9.pom",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/powermock/powermock-reflect/2.0.9/powermock-reflect-2.0.9.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "316ff63f5b09e3e240a4d4e1cafeb7fcfb27208ccabaaf17fee8a455e8654a24",
+   "type": "pom",
+   "version": "2.0.9"
+  },
+  {
+   "artifactId": "powermock-reflect",
+   "classifier": "",
+   "groupId": "org.powermock",
+   "kind": "checksum",
+   "path": "org/powermock/powermock-reflect/2.0.9/powermock-reflect-2.0.9.pom.sha1",
+   "provenance": {
+    "published_sha1": "c34f31239ab7a43420e7db11ac85729fa39c9bfc",
+    "source": "https://repo.maven.apache.org/maven2/org/powermock/powermock-reflect/2.0.9/powermock-reflect-2.0.9.pom.sha1",
+    "verified_against": "https://repo.maven.apache.org/maven2/org/powermock/powermock-reflect/2.0.9/powermock-reflect-2.0.9.pom.sha1"
+   },
+   "purpose": "transitive dependency resolved by Maven for the above; requested by the PRD-034 discovery run, absent from the candidate pool; bootstrapped from Central",
+   "sha256": "000f0d18f26e78328573feed4dd18c9c661ba2ae67bdc2c4a12c8fccb26e345b",
+   "type": "pom",
+   "version": "2.0.9"
   },
   {
    "artifactId": "slf4j-api",

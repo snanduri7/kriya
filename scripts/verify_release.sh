@@ -19,7 +19,14 @@ for artifact in "$release_work"/dist/*.tar.gz; do
     | tee -a "$release_work/integrity.jsonl"
 done
 "$python_bin" -m venv "$release_work/venv"
-"$release_work/venv/bin/python" -m pip install -r requirements.txt
+if [ -n "${KRIYA_RELEASE_WHEELHOUSE:-}" ]; then
+  # PRD-034 (PYPI): the canonical certification certifies PACKAGING, not PyPI. A fresh venv installs the locked dependencies from the frozen, hash-verified wheelhouse:
+  # no index, no fallback (scripts/certification_python_wheels.py; the hashed lock is the content authority). Unset = the ordinary online install below.
+  "$release_work/venv/bin/python" -m pip install --no-index --find-links "$KRIYA_RELEASE_WHEELHOUSE" --require-hashes --no-deps \
+      -r "${KRIYA_RELEASE_HASHED_REQUIREMENTS:?KRIYA_RELEASE_HASHED_REQUIREMENTS must name the hashed lock}"
+else
+  "$release_work/venv/bin/python" -m pip install -r requirements.txt
+fi
 "$release_work/venv/bin/python" -m pip install --no-deps "$release_work"/dist/*.whl
 "$release_work/venv/bin/python" -m pip check
 cd "$release_work"
