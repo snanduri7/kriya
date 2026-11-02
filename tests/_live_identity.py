@@ -27,6 +27,7 @@ from kriya.core.model_runtime import clear_model_runtime_cache, resolve_configur
 BASE_URL = os.environ.get("KRIYA_LIVE_BASE_URL", "http://localhost:11434/v1")
 PRIMARY = os.environ.get("KRIYA_LIVE_LLM_MODEL", "qwen3-coder:30b")
 EXPECTED_CONTEXT_WINDOW = int(os.environ.get("KRIYA_LIVE_CONTEXT_WINDOW", "32768"))
+EXPECTED_ADAPTER = os.environ.get("KRIYA_LIVE_ADAPTER", "kriya-ollama-native/3")
 RELEASE_CONFIG = os.environ.get("KRIYA_RELEASE_CONFIG")
 TRUSTED_STORES = (("KRIYA_STATIC_ANALYSIS_HOME", "waivers"), ("KRIYA_AUTHORITY_HOME", "authority"),
                   ("KRIYA_MCP_APPROVAL_HOME", "mcp"), ("KRIYA_ADJUDICATION_HOME", "adjudications"))
@@ -51,15 +52,9 @@ def release_fallback_binding() -> Optional[FallbackModelConfig]:
     return FallbackModelConfig(**chain[0]) if chain else None
 
 
-def qualified_live_config(tmp_path: Any, monkeypatch: Any, *, model: str = PRIMARY) -> Tuple[AppConfig, Dict[str, str]]:
-    for variable, name in TRUSTED_STORES:
-        store = tmp_path / "trusted" / name
-        store.mkdir(parents=True, exist_ok=True)
-        (store / "sentinel.json").write_text('{"owner": "operator"}\n')
-        monkeypatch.setenv(variable, str(store))
-    operator = tmp_path / "operator.yaml"
-    operator.write_text("{}\n", encoding="utf-8")
-    config = load_config(str(operator))
+def bind_primary(config: AppConfig, *, model: str = PRIMARY) -> str:
+    """Bind ``config`` to the live primary: the operator release configuration's binding when ``KRIYA_RELEASE_CONFIG`` names one, else the
+    environment's endpoint and model. Nothing else about the configuration changes. Returns the model name."""
     release = release_primary_binding(config.llm)
     if release is not None:
         config.llm = release
@@ -69,26 +64,53 @@ def qualified_live_config(tmp_path: Any, monkeypatch: Any, *, model: str = PRIMA
         config.llm.model = model
         config.llm.api_key = os.environ.get("KRIYA_LIVE_API_KEY", "local-key")
     config.llm_chain = []
-    config.autonomy.mode = "guardrails"
-    config.autonomy.run_verification_enabled = False
-    config.paths.skills = str(tmp_path / "skills")
+    return model
+
+
+def identity_problems(fingerprint: Any, assessment: Any, *, expected_window: int = EXPECTED_CONTEXT_WINDOW,
+                      expected_adapter: str = EXPECTED_ADAPTER) -> list:
+    """Why the resolved Developer identity is not the qualified production identity ([] when it is)."""
+    problems = []
+    if fingerprint.effective_context_window != expected_window:
+        problems.append(f"effective context window {fingerprint.effective_context_window} != {expected_window}")
+    if assessment.status != mq.QUALIFIED:
+        problems.append(f"developer qualification is {assessment.status}")
+    if not fingerprint.exact:
+        problems.append("the runtime fingerprint is not exact")
+    if fingerprint.adapter_version != expected_adapter:
+        problems.append(f"runtime adapter {fingerprint.adapter_version!r} != {expected_adapter!r}")
+    return problems
+
+
+def verify_identity(config: AppConfig, model: str) -> Dict[str, str]:
+    """The fail-closed live-identity preflight: the exact runtime fingerprint, a QUALIFIED Developer, the expected adapter and served context. A
+    failure is UNAVAILABLE (a fixture/configuration error), never a skip and never a product result. Returns the identity to persist as evidence."""
     clear_model_runtime_cache()
     try:
         fingerprint = resolve_configured_model_runtime(config, model, fresh=True)
     except Exception as error:  # noqa: BLE001 - reported as UNAVAILABLE, never skipped
         pytest.fail(f"UNAVAILABLE: the live endpoint {config.llm.base_url} could not be identified: {error}", pytrace=False)
-    assessment = mq.assess(fingerprint, mq.required_capabilities(config, "developer", model),
-                           settings=role_inference_settings(config, "developer", model))
-    problems = []
-    if fingerprint.effective_context_window != EXPECTED_CONTEXT_WINDOW:
-        problems.append(f"effective context window {fingerprint.effective_context_window} != {EXPECTED_CONTEXT_WINDOW}")
-    if assessment.status != mq.QUALIFIED:
-        problems.append(f"developer qualification is {assessment.status}")
-    if not fingerprint.exact:
-        problems.append("the runtime fingerprint is not exact")
-    if problems:
-        pytest.fail("UNAVAILABLE (live identity): " + "; ".join(problems)
-                    + f". Qualify it first: kriya model qualify --model {model}", pytrace=False)
     settings = role_inference_settings(config, "developer", model)
-    return config, {"model": model, "runtime_fingerprint": fingerprint.digest, "runtime_exact": str(fingerprint.exact),
-                    "qualification": assessment.status, "inference_settings_digest": settings.digest}
+    assessment = mq.assess(fingerprint, mq.required_capabilities(config, "developer", model), settings=settings)
+    problems = identity_problems(fingerprint, assessment)
+    if problems:
+        pytest.fail("UNAVAILABLE (live identity): " + "; ".join(problems) + f". Qualify it first: kriya model qualify --model {model}", pytrace=False)
+    return {"model": model, "runtime_fingerprint": fingerprint.digest, "runtime_exact": str(fingerprint.exact),
+            "adapter": fingerprint.adapter_version, "effective_context_window": str(fingerprint.effective_context_window),
+            "qualification": assessment.status, "inference_settings_digest": settings.digest}
+
+
+def qualified_live_config(tmp_path: Any, monkeypatch: Any, *, model: str = PRIMARY) -> Tuple[AppConfig, Dict[str, str]]:
+    for variable, name in TRUSTED_STORES:
+        store = tmp_path / "trusted" / name
+        store.mkdir(parents=True, exist_ok=True)
+        (store / "sentinel.json").write_text('{"owner": "operator"}\n')
+        monkeypatch.setenv(variable, str(store))
+    operator = tmp_path / "operator.yaml"
+    operator.write_text("{}\n", encoding="utf-8")
+    config = load_config(str(operator))
+    model = bind_primary(config, model=model)
+    config.autonomy.mode = "guardrails"
+    config.autonomy.run_verification_enabled = False
+    config.paths.skills = str(tmp_path / "skills")
+    return config, verify_identity(config, model)

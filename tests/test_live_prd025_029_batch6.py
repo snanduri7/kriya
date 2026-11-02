@@ -46,6 +46,7 @@ Run:
 import contextlib
 import json
 import os
+import subprocess
 import sys
 
 import pytest
@@ -54,10 +55,11 @@ from kriya.agents.agent import RunVerifierAgent
 from kriya.config.config import load_config
 from kriya.core import model_qualification as mq
 from kriya.core.llm import LLMClient
-from kriya.core.model_runtime import clear_model_runtime_cache
 from kriya.tools.process import ProcessController
 from kriya.workflow.context_budget import allocation_window
 from kriya.workflow.verifier_evidence import RetainedRuntimeEvidence
+
+from _live_identity import bind_primary, verify_identity  # isort: skip
 
 # PRD-034: needs the qualified target identity, never the CI wiring-smoke model.
 pytestmark = [pytest.mark.live_model, pytest.mark.live_target]
@@ -121,6 +123,13 @@ def accept_certification(evidence, data):
     )
 
 
+def _git_baseline(repo):
+    """The fixture repository as Git's own committed baseline (the membership authority and the bound-tree copy both need a work tree)."""
+    for args in (["init", "-q"], ["config", "user.email", "live@kriya.test"], ["config", "user.name", "Kriya Live"], ["add", "-A"],
+                 ["commit", "-q", "-m", "baseline"]):
+        subprocess.run(["git", *args], cwd=repo, check=True)
+
+
 def live_identity_problems(fingerprint, assessment, expected_window):
     """Why the resolved Developer identity is not the qualified one these live
     cases are meant to exercise ([] when it is). A fixture that silently ran
@@ -138,32 +147,15 @@ def live_identity_problems(fingerprint, assessment, expected_window):
 
 @pytest.fixture
 def cfg(tmp_path):
+    """LIVE-STOCK-FIXTURE-IDENTITY-001: only the model binding is the live one - the operator release configuration's primary
+    (``KRIYA_RELEASE_CONFIG``: the qualified ``ollama_native`` identity) or, without one, the environment's endpoint and model - and the shared
+    fail-closed preflight (tests/_live_identity.py) asserts the exact fingerprint, a QUALIFIED Developer, the native adapter and the 32768 window
+    before any product result; the identity is persisted. Nothing else about the packaged configuration is overridden."""
     operator = tmp_path / "operator.yaml"
     operator.write_text("{}\n", encoding="utf-8")
     config = load_config(str(operator))
-    config.llm.base_url = BASE_URL
-    config.llm.model = PRIMARY
-    config.llm.api_key = os.environ.get("KRIYA_LIVE_API_KEY", "local-key")
-    config.llm_chain = []
-    clear_model_runtime_cache()
-    from kriya.core.inference_settings import role_inference_settings
-    from kriya.core.model_runtime import resolve_configured_model_runtime
-
-    fingerprint = resolve_configured_model_runtime(config, PRIMARY, fresh=True)
-    assessment = mq.assess(
-        fingerprint, mq.required_capabilities(config, "developer", PRIMARY),
-        settings=role_inference_settings(config, "developer", PRIMARY),
-    )
-    problems = live_identity_problems(fingerprint, assessment, EXPECTED_CONTEXT_WINDOW)
-    _write_evidence("preflight_identity.json", {
-        "model": PRIMARY, "runtime_digest": fingerprint.digest, "runtime_exact": fingerprint.exact,
-        "effective_context_window": fingerprint.effective_context_window,
-        "expected_context_window": EXPECTED_CONTEXT_WINDOW, "qualification": assessment.status,
-        "problems": problems,
-    })
-    if problems:
-        pytest.fail("LIVE FIXTURE CONFIG ERROR (not a product result): " + "; ".join(problems)
-                    + ". Qualify the model first: kriya model qualify --model " + PRIMARY, pytrace=False)
+    identity = verify_identity(config, bind_primary(config, model=PRIMARY))
+    _write_evidence("preflight_identity.json", {**identity, "expected_context_window": EXPECTED_CONTEXT_WINDOW})
     return config
 
 
@@ -335,6 +327,7 @@ async def test_live_prd027_developer_prompt_receives_golden_evidence(cfg, tmp_pa
         for path, content in JAVA_SHOP.files:
             (repo / path).parent.mkdir(parents=True, exist_ok=True)
             (repo / path).write_text(content, encoding="utf-8")
+        _git_baseline(repo)   # repository-membership authority refuses a plain non-git directory before any model call
         cfg.paths.memory = str(tmp_path / "memory")
         cfg.paths.skills = str(tmp_path / "skills")
         os.makedirs(cfg.paths.memory)
@@ -395,6 +388,7 @@ async def test_live_prd028_member_authority_is_revision_bound_and_in_scope(cfg, 
         repo.mkdir()
         source = _large_module()
         (repo / "ledger.py").write_text(source, encoding="utf-8")
+        _git_baseline(repo)   # repository-membership authority refuses a plain non-git directory before any model call
         fee_line = source.splitlines().index("        return amount - 5") + 1
         # Deterministic trigger, independent of what the model writes: the
         # first compile of a CHANGED ledger.py fails once at apply_fee's line

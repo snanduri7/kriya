@@ -31,9 +31,10 @@ import subprocess
 import pytest
 
 from kriya.config.config import load_config
-from kriya.core import model_qualification as mq
 from kriya.core.model_runtime import clear_model_runtime_cache
 from kriya.core.state_paths import trace_db_path
+
+from _live_identity import bind_primary, verify_identity  # isort: skip
 
 # PRD-034: needs the qualified target identity, never the CI wiring-smoke model.
 pytestmark = [pytest.mark.live_model, pytest.mark.live_target]
@@ -62,18 +63,16 @@ def _repo(root, files):
 
 
 @pytest.fixture
-def cfg(tmp_path, monkeypatch):
-    monkeypatch.setenv(mq.QUALIFICATION_HOME_ENV, str(tmp_path / "qualifications"))
+def cfg(tmp_path):
+    """LIVE-STOCK-FIXTURE-IDENTITY-001: the stock fixture used to override the window (16384) and the output budget (4096) and had no identity
+    check, so a stock run could be recorded as a pass at an unqualified identity. Now only the model binding is live (the operator release
+    configuration's qualified primary, or the environment's), and the shared fail-closed preflight asserts exact / QUALIFIED / native adapter /
+    32768 before any product result; the identity is persisted."""
     operator = tmp_path / "operator.yaml"
     operator.write_text("{}\n", encoding="utf-8")
     config = load_config(str(operator))
-    config.llm.base_url = BASE_URL
-    config.llm.model = PRIMARY
-    config.llm.api_key = os.environ.get("KRIYA_LIVE_API_KEY", "local-key")
-    config.llm.extra_body = {"options": {"num_ctx": 16384}}
-    config.llm.context_window = 16384
-    config.llm.max_tokens = 4096
-    config.llm_chain = []
+    identity = verify_identity(config, bind_primary(config, model=PRIMARY))
+    _evidence("preflight_identity.json", identity)
     config.autonomy.mode = "guardrails"
     config.autonomy.run_verification_enabled = False
     config.autonomy.web_lookup_enabled = False
@@ -190,14 +189,16 @@ def test_prd022_duplicate_owner_first_and_second_attempt(cfg, tmp_path):
     goal = "Add a bulk discount: price() gives 10% off for quantities over 10"
     result, _, developer_calls = _run(cfg, goal, ws, record_developer=True)
     redirects = [e for e in _events(cfg, "ownership.redirect_restored")]
+    retried = [after for after in developer_calls[1:] if "candidate=" in str(after.get("prior_error_context") or "")]   # an ownership violation was retried
+    branch = "ownership_violation_retried" if retried else "no_ownership_violation_retry"
     _evidence("prd022-attempts.json", {"developer_calls": developer_calls, "redirect_restored": redirects,
-                                       "files": result.get("files"), "quality_gates_passed":
-                                       result.get("quality_gates_passed")})
+                                       "files": result.get("files"), "quality_gates_passed": result.get("quality_gates_passed"),
+                                       "ownership_findings": result.get("ownership_findings"), "branch_executed": branch})
 
     assert developer_calls
-    for after in developer_calls[1:]:
-        if "candidate=" in str(after.get("prior_error_context") or ""):  # an ownership violation was retried
-            assert after["known_target_files"] == ["src/pricing.py"]
+    assert branch in ("ownership_violation_retried", "no_ownership_violation_retry")   # which branch occurred is recorded, not implied
+    for after in retried:
+        assert after["known_target_files"] == ["src/pricing.py"]
 
 
 def test_prd024_pre_existing_failure_is_not_a_new_regression(cfg, tmp_path):
