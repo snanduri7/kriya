@@ -4,7 +4,7 @@ Requirement source (precedence): the original signed PRD-033 text is NOT in this
 owner-approved release-threshold text and the owner's reporting rule ("EVERY metrics/certification report must state: runs/cases; exact runtime identities; observed incidents; what statistical claim is and is
 NOT supported"). Historical `handover/PRD-033_*` define nothing. No acceptance criterion was invented.
 
-PRODUCT revision: `4a9273e1520901de7d0f327a5fb0b50b1bb88891` (tree `1520...` = `git rev-parse 4a9273e^{tree}`; `kriya/` tree `05d611e9da623b090f83f04226e97713e1f34ea7`). Tests run AT that revision: 639 passed
+PRODUCT revision: `4a9273e1520901de7d0f327a5fb0b50b1bb88891` (tree `4e5fdff165fad2407c9aa4c0ad2d475bc3420ec9`; `kriya/` tree `05d611e9da623b090f83f04226e97713e1f34ea7`). Tests run AT that revision: 639 passed
 (`tests/test_prd033_*.py`, every other test file referencing `kriya.metrics`, `tests/architecture`), ruff 0, pylint 0. Python 3.14.6, pytest 9.1.1, macOS-27.0.1-arm64, editable install of this tree. No live model
 was used (C2 states no live requirement for PRD-033). Statuses: MEASURED PASS / CURRENT LIVE PASS / DETERMINISTICALLY VERIFIED / NOT APPLICABLE / OPEN.
 
