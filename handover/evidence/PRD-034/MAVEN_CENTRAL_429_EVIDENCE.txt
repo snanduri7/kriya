@@ -1,0 +1,30 @@
+# Maven Central HTTP 429 evidence (preserved; MEASURED)
+# captured 2026-11-02T14:27:34Z from this host; the same 429 was observed from inside a maven:3.9-eclipse-temurin-17 container at 13:44Z
+
+== https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.pom
+HTTP/2 429 
+date: Mon, 02 Nov 2026 14:27:34 GMT
+content-type: text/plain
+content-length: 96
+cache-control: private, max-age=0, no-store, no-cache, must-revalidate, post-check=0, pre-check=0
+expires: Thu, 01 Jan 1970 00:00:01 GMT
+referrer-policy: same-origin
+x-frame-options: SAMEORIGIN
+server: cloudflare
+cf-ray: a543d21a9de235b6-MAA
+alt-svc: h3=":443"; ma=86400
+
+
+== https://repo1.maven.org/maven2/junit/junit/4.13.2/junit-4.13.2.pom
+HTTP/2 429 
+date: Mon, 02 Nov 2026 14:27:34 GMT
+content-type: text/plain
+content-length: 96
+cache-control: private, max-age=0, no-store, no-cache, must-revalidate, post-check=0, pre-check=0
+expires: Thu, 01 Jan 1970 00:00:01 GMT
+referrer-policy: same-origin
+x-frame-options: SAMEORIGIN
+server: cloudflare
+cf-ray: a543d21bd80d7bbb-MAA
+alt-svc: h3=":443"; ma=86400
+
