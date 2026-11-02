@@ -434,17 +434,22 @@ def test_native_keep_alive_is_serialized_on_the_wire(native_server):
     assert native_server.requests[0][1]["keep_alive"] == "30m"
 
 
-def test_the_run_deadline_cuts_a_slow_native_request_as_one_request(native_server, tmp_path):
-    from kriya.control.run_coordinator import begin_mutating_run, current_run_context
+def test_the_run_deadline_cuts_a_slow_native_request_as_one_request(native_server, tmp_path, monkeypatch):
+    from _deadline_clock import freeze_budget_clock, set_generation_budget_used
+
+    from kriya.control.run_coordinator import begin_mutating_run
     from kriya.core.llm import INFERENCE_DEADLINE_EXCEEDED, InferenceDeadlineError
 
+    # TEST-DEADLINE-TIMING-001: exactly 0.5 s of budget left on the injected clock, whatever the load. The server answers after 3 s, so an
+    # answered request would not raise at all: the typed stop below IS the proof that the request was cut at the deadline, as one request.
+    clock = freeze_budget_clock(monkeypatch)
     native_server.delay = 3.0
     config = _config(native_server.url)
     config.autonomy.generation_time_budget_seconds = 600
-    started = time.monotonic()
     with begin_mutating_run(str(tmp_path)):
-        current_run_context()._lease.generation_clock = time.monotonic() - 599.5  # pylint: disable=protected-access
+        set_generation_budget_used(clock, 599.5)
         with pytest.raises(InferenceDeadlineError) as stopped:
             asyncio.run(_call(config))
     assert stopped.value.reason_code == INFERENCE_DEADLINE_EXCEEDED
-    assert time.monotonic() - started < 2.5 and len(native_server.requests) == 1
+    assert stopped.value.details["remaining_budget_at_dispatch_ms"] == 500
+    assert len(native_server.requests) == 1

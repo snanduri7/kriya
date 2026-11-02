@@ -482,7 +482,8 @@ def test_if_the_approval_cannot_be_recorded_nothing_is_approved(ws):
         await asyncio.to_thread(scenario, host, pending)
         outcome["approved"] = await asyncio.wait_for(task, 20)
 
-    local.setattr(approval, "APPROVAL_WAIT_SECONDS", 5.0)
+    # TEST-DEADLINE-TIMING-001 / TEST-LAUNCH-APPROVAL-EXPIRY-TIMING-001: this test's contract is the failed durable write, not expiry, so the review keeps
+    # the production window (APPROVAL_WAIT_SECONDS) - an override here (0.5 s, widened to 5.0 s) only let the review expire on a loaded machine.
     try:
         with begin_mutating_run(canonical):
             asyncio.run(main_())

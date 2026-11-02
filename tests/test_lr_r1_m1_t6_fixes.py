@@ -356,9 +356,15 @@ def test_e_a_dispatched_call_without_its_response_is_missing_evidence(tmp_path, 
 
 def test_e_an_attempt_that_made_no_model_call_is_not_applicable(tmp_path, monkeypatch):
     """The generation budget admission stops the attempt before any call."""
+    from _chaos_harness import CALC_WITH_SUB
+    from _deadline_clock import freeze_budget_clock
+
+    # TEST-DEADLINE-TIMING-001: the planner and architect calls before the attempt must see the whole 2 s on the injected clock; on the real clock a loaded
+    # machine spent it before the first call (INFERENCE_DEADLINE_EXHAUSTED: no attempt record at all). The admission refusal itself is arithmetic
+    # (remaining < the per-file estimate + gate reserve), not a race.
+    freeze_budget_clock(monkeypatch)
     cfg = chaos_config()
     cfg.autonomy.generation_time_budget_seconds = 2
-    from _chaos_harness import CALC_WITH_SUB
 
     observed = direct_run(tmp_path, monkeypatch, _always(CALC_WITH_SUB), FILES, cfg=cfg)
     answers = observed.attempt(1)
@@ -496,6 +502,11 @@ def test_g3_a_deadline_cut_call_has_no_model_answer(tmp_path, monkeypatch):
     import asyncio
 
     from _chaos_harness import CALC_WITH_SUB, ChaosRuntime, role_of
+    from _deadline_clock import freeze_budget_clock
+
+    # TEST-DEADLINE-TIMING-001: the 3 s budget is frozen on the injected clock, so the Developer call is always DISPATCHED with exactly 3 s left and cut
+    # in flight (never refused before dispatch because the real clock ran out during the earlier stages).
+    freeze_budget_clock(monkeypatch)
 
     class Slow(ChaosRuntime):
         async def complete(self, client, request):

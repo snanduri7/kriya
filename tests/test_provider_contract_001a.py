@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from _deadline_clock import freeze_budget_clock
 from _fake_inference_runtime import FakeRuntimeAdapter
 
 from kriya.config import AppConfig, ModelCapabilities
@@ -81,11 +82,19 @@ def _config(*, budget=None, read=900.0):
     return config
 
 
-def _in_run(workspace, call, *, already_used=0.0):
+@pytest.fixture
+def budget_clock(monkeypatch):
+    """TEST-DEADLINE-TIMING-001: the generation-budget clock is injected and frozen (tests/_deadline_clock.py), so
+    "N seconds of budget left" is exact at dispatch whatever the machine load."""
+    return freeze_budget_clock(monkeypatch)
+
+
+def _in_run(workspace, call, *, already_used=0.0, clock=None):
     """Run ``call()`` inside one mutating run whose generation clock started
-    ``already_used`` seconds ago (an earlier unit's model work)."""
+    ``already_used`` seconds ago (an earlier unit's model work), by ``clock`` when one is injected."""
     with begin_mutating_run(str(workspace)):
-        current_run_context()._lease.generation_clock = time.monotonic() - already_used  # pylint: disable=protected-access
+        now = clock() if clock is not None else time.monotonic()
+        current_run_context()._lease.generation_clock = now - already_used  # pylint: disable=protected-access
         return asyncio.run(call())
 
 
@@ -107,9 +116,9 @@ def test_a_smaller_transport_timeout_is_the_request_timeout(fake, tmp_path):
 
 
 @pytest.mark.usefixtures("bound_workspace")
-def test_a_smaller_remaining_budget_is_the_request_timeout(fake, tmp_path):
+def test_a_smaller_remaining_budget_is_the_request_timeout(fake, tmp_path, budget_clock):
     llm = LLMClient(_config(budget=600, read=600.0))
-    _in_run(tmp_path, lambda: llm.complete_result("s", "u"), already_used=575)
+    _in_run(tmp_path, lambda: llm.complete_result("s", "u"), already_used=575, clock=budget_clock)
     assert 24.0 < fake.requests[0].timeout.read <= 25.0
     record = _deadline(llm)
     assert 24_000 < record["effective_request_timeout_ms"] <= 25_000
@@ -142,23 +151,53 @@ def test_an_exhausted_budget_refuses_a_tool_call_too(fake, tmp_path):
 
 # --- D: a slow provider is cut at the deadline, as one request ----------------------------------------------
 
-def test_a_request_outliving_the_budget_is_a_typed_deadline_stop(fake, tmp_path):
-    fake.delay = 30.0  # far beyond the 2.5 s left; the fake ignores its read timeout
+def test_a_request_outliving_the_budget_is_a_typed_deadline_stop(fake, tmp_path, budget_clock):
+    fake.delay = 30.0  # far beyond the 0.5 s left; the fake ignores its read timeout
     llm = LLMClient(_config(budget=600))
-    started = time.monotonic()
     with pytest.raises(InferenceDeadlineError) as stopped:
-        _in_run(tmp_path, lambda: llm.complete_result("s", "u"), already_used=597.5)  # 2.5 s left: a loaded 8-worker run can spend 0.5 s before dispatch (the full suite did: EXHAUSTED, never reaching the in-flight EXCEEDED path)
-    assert time.monotonic() - started < 5.0
+        # EXACTLY 0.5 s left at dispatch (injected clock): the call is dispatched and cut in flight. Before TEST-DEADLINE-TIMING-001 the
+        # budget was measured on the real clock, so a loaded run could spend it before dispatch (EXHAUSTED, nothing dispatched).
+        _in_run(tmp_path, lambda: llm.complete_result("s", "u"), already_used=599.5, clock=budget_clock)
     assert stopped.value.reason_code == INFERENCE_DEADLINE_EXCEEDED
     assert len(fake.started) == 1 and fake.requests == []  # one request, cut: no SDK or Kriya resend
     result = llm.last_completion
     assert result.status is CompletionStatus.TIMEOUT and result.backend_status == "deadline"
     record = _deadline(llm)
     assert record["deadline_bound"] is True and record["timeout_reason"] == INFERENCE_DEADLINE_EXCEEDED
-    # The request ran until the deadline, not shorter: what was left of the budget at dispatch (not a fixed
-    # wall-clock figure - under an 8-worker load the time between claiming the clock and dispatching eats into
-    # the 500 ms left; BACKEND-READINESS-004 RC3 measured 311 ms once) and far less than the fake's 30 s delay.
-    assert record["remaining_budget_at_dispatch_ms"] - 100 <= record["elapsed_request_ms"] < 5_000
+    # The request ran until the deadline, not shorter: what was left of the budget at dispatch (exactly 500 ms on the injected clock),
+    # and it was cut, not answered: it ended before the fake's 30 s delay could elapse (the raise above is already the proof; this
+    # bound is the fake's own delay, not a load-sensitive wall-clock figure).
+    assert record["remaining_budget_at_dispatch_ms"] == 500
+    assert record["remaining_budget_at_dispatch_ms"] - 100 <= record["elapsed_request_ms"] < int(fake.delay * 1000)
+
+
+def test_real_time_spent_before_dispatch_cannot_turn_a_cut_call_into_a_refused_one(fake, tmp_path, budget_clock):
+    """TEST-DEADLINE-TIMING-001, the load emulation: 0.8 s of REAL time passes between claiming the 0.5 s of budget and dispatching - exactly what a
+    loaded 8-worker run did. On the injected clock the call is still dispatched with 500 ms and cut in flight (EXCEEDED); measured on the real clock the
+    same sequence is INFERENCE_DEADLINE_EXHAUSTED with nothing dispatched (the failure the suite showed), so this test fails if the clock is un-injected."""
+    fake.delay = 30.0
+    llm = LLMClient(_config(budget=600))
+
+    async def late_dispatch():
+        time.sleep(0.8)   # blocking on purpose: the machine was busy between the budget claim and the dispatch
+        return await llm.complete_result("s", "u")
+
+    with pytest.raises(InferenceDeadlineError) as stopped:
+        _in_run(tmp_path, late_dispatch, already_used=599.5, clock=budget_clock)
+    assert stopped.value.reason_code == INFERENCE_DEADLINE_EXCEEDED and len(fake.started) == 1
+
+
+def test_the_same_late_dispatch_on_the_real_clock_is_refused_before_dispatch(fake, tmp_path):
+    """The negative control for the test above: without the injected clock, 0.8 s of real time spends a 0.5 s budget before dispatch."""
+    llm = LLMClient(_config(budget=600))
+
+    async def late_dispatch():
+        time.sleep(0.8)
+        return await llm.complete_result("s", "u")
+
+    with pytest.raises(InferenceDeadlineError) as refused:
+        _in_run(tmp_path, late_dispatch, already_used=599.5)
+    assert refused.value.reason_code == INFERENCE_DEADLINE_EXHAUSTED and fake.started == []
 
 
 def test_a_provider_timeout_unrelated_to_the_deadline_stays_a_provider_timeout(fake, tmp_path):
@@ -286,14 +325,14 @@ def test_a_local_cap_only_narrows_the_run_deadline(fake, tmp_path):
     assert record["deadline_source"] == DEADLINE_SOURCE_RUN_BUDGET and fake.requests[-1].timeout.read <= 10
 
 
-def test_no_deadline_leaks_out_of_a_run_or_a_cap(fake, tmp_path):
+def test_no_deadline_leaks_out_of_a_run_or_a_cap(fake, tmp_path, budget_clock):
     llm = LLMClient(_config(budget=600))
-    _in_run(tmp_path, lambda: llm.complete_result("s", "u"), already_used=599)
+    _in_run(tmp_path, lambda: llm.complete_result("s", "u"), already_used=599, clock=budget_clock)
     asyncio.run(llm.complete_result("s", "after the run"))  # e.g. qualification, outside any run
     assert _deadline(llm)["deadline_bound"] is False and fake.requests[-1].timeout.read == 900.0
 
     async def capped_then_free():
-        with inference_deadline(time.monotonic() + 1):
+        with inference_deadline(budget_clock() + 1):
             await llm.complete_result("s", "capped")
         await llm.complete_result("s", "free")
 
@@ -519,7 +558,7 @@ def test_a_deadline_stop_at_the_final_review_keeps_the_committed_run(tmp_path):
     assert (tmp_path / "math.py").exists()
 
 
-def test_a_deadline_stop_is_never_resent_without_response_format(fake, tmp_path):
+def test_a_deadline_stop_is_never_resent_without_response_format(fake, tmp_path, budget_clock):
     # The reasoning-model JSON fallback resends once on a REQUEST-kind error;
     # a deadline stop is not one (the evidence would otherwise read EXHAUSTED
     # and a dropped response_format that never happened).
@@ -527,7 +566,7 @@ def test_a_deadline_stop_is_never_resent_without_response_format(fake, tmp_path)
     llm = LLMClient(_config(budget=600))
     with pytest.raises(InferenceDeadlineError) as stopped:
         _in_run(tmp_path, lambda: llm.complete_result("s", "u", json_mode=True, reasoning_override=True),
-                already_used=597.5)  # 2.5 s left (see the test above): enough that dispatch still happens before the deadline under load
+                already_used=599.5, clock=budget_clock)  # exactly 0.5 s left on the injected clock (see the test above)
     assert stopped.value.reason_code == INFERENCE_DEADLINE_EXCEEDED
     assert len(fake.started) == 1
     assert llm.last_completion.protocol["response_format_dropped"] is False
