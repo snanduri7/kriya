@@ -1490,7 +1490,7 @@
     }
    ],
    "created_at": "<clock>",
-   "effective_config_fingerprint": "61db011f5a048a5c1d03542cdad31aa0bea70aacbb5d9952fff7ce8a0aae3e93",
+   "effective_config_fingerprint": "070c0d474aa855e27b3f2f1e834fd6a4d0b05ec0e283dbbc96a4a38e224b8243",
    "execution_plan": {
     "commit_strategy": "incremental_work_unit",
     "fingerprint": "4e1f0d6216887b277a2ea6a9dd288f5ed4cbfdf950ea32d497f1042c2b806596",

@@ -207,6 +207,8 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_prd026_retry_progress.py': ('S', 'M'),
  'tests/test_prd027_precision_expansion_seeds.py': ('S', 'M'),
  'tests/test_prd029_contract_lifecycle.py': ('S', 'M'),
+ 'tests/test_prd034_registry_mirror.py': ('N', 'C'),
+ 'tests/test_prd034_registry_mirror_real.py': ('N', 'C'),
  'tests/test_prd031a_static_analysis.py': ('S', 'M'),
  'tests/test_prd032_chaos_commit.py': ('S', 'M'),
  'tests/test_prd032_chaos_injection.py': ('F2', 'F'),

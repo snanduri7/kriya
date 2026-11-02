@@ -13,7 +13,7 @@
    "directory": "<TMP>/Work Space",
    "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
    "file": null,
-   "fingerprint": "33ac40c2d0710e52a3ec4b7c4c0b522c1a863507ac247f1ca5a217a9cac2efe4",
+   "fingerprint": "bc09c1e26793d9d2090426fdd8b7fd40fccdf93f81fd74d931f53e23b150e840",
    "source": "packaged_default",
    "status": "loaded"
   },

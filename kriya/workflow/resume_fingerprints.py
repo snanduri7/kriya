@@ -406,6 +406,7 @@ CONTAINMENT_CONFIG_FIELDS: Tuple[Tuple[str, ...], ...] = (
     ("autonomy", "acquisition_cpu_seconds"),
     ("autonomy", "acquisition_memory_mb"),
     ("autonomy", "acquisition_registry_hosts"),
+    ("autonomy", "acquisition_registry_mirror"),  # PRD-034: where contained acquisition fetches from
     ("mcp_lifecycle",),
 )
 VERIFICATION_POLICY_CONFIG_FIELDS: Tuple[Tuple[str, ...], ...] = (

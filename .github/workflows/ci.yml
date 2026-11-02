@@ -201,6 +201,11 @@ jobs:
         # The Spring/Ignite post-check and mutant tests need these artifacts offline; a cold runner has no warm ~/.m2, and a mandatory test is never
         # made optional (nor allowlisted) because the runner starts cold.
         run: scripts/seed_offline_maven.sh
+      - name: Provision the frozen certification Maven repository (bootstrap, not certification)
+        # MAVEN-CENTRAL-CERTIFICATION-NONDETERMINISM-001: the canonical run must not depend on live Maven Central. This step reconstructs the exact frozen set from the
+        # committed manifest (each file is kept only if its SHA-256 equals the manifest's) - the one place Central is contacted; certify.sh then verifies it is attested and
+        # byte-exact, serves it, and every contained Maven acquisition goes through the product's registry-mirror seam. Same manifest and tool as the local run.
+        run: .venv/bin/python scripts/certification_maven_repo.py fetch tests/certification/maven_repository.manifest.json "$HOME/.cache/kriya-cert-maven/repo"
       - name: Certify
         # Doctor mode here is `packaged_defaults`: a hosted runner holds no owner-approved production configuration (SEC-009: certification never
         # approves anything itself), so the production doctor is recorded as it reports on packaged defaults. See scripts/certify.sh.

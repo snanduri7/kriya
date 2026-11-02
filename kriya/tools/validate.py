@@ -1345,6 +1345,7 @@ class PolymorphicValidator:
             workspace_path=resolved_workspace_path,
             network=network,
             network_destinations=network_destinations,
+            registry_mirror=self.autonomy_cfg.acquisition_registry_mirror if network is NetworkAuthority.DEPENDENCY_REGISTRY_ONLY else None,
             env_allowlist=self.autonomy_cfg.sandbox_env_allowlist,
             cpu_seconds=cpu_seconds,
             memory_mb=memory_mb,

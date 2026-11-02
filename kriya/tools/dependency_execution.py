@@ -750,7 +750,7 @@ def log_acquisition_outcome(
 def _acquisition_profile(
     workspace_path: str, cache_path: str, env_allowlist: List[str],
     cpu_seconds: Optional[int] = _ACQUISITION_CPU_SECONDS, memory_mb: Optional[int] = _ACQUISITION_MEMORY_MB,
-    *, registry_hosts: Sequence[str],
+    *, registry_hosts: Sequence[str], registry_mirror: Optional[str] = None,
 ) -> ContainmentProfile:
     """SEC-006: `registry_hosts` is a REQUIRED keyword-only parameter, not
     a default - this module has no `AutonomyConfig` reference of its own
@@ -767,6 +767,7 @@ def _acquisition_profile(
         dependency_cache_writable=True,
         network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY,
         network_destinations=tuple(sorted(set(registry_hosts))),
+        registry_mirror=registry_mirror,
         env_allowlist=env_allowlist,
         cpu_seconds=cpu_seconds,
         memory_mb=memory_mb,
@@ -803,7 +804,7 @@ def _execution_profile(
 def maven_acquire_dependencies(
     workspace_path: str, cache_path: str, *, controller: ProcessController,
     containment_backend: ContainmentBackend, registry_hosts: Sequence[str],
-    timeout: int = 600, env_allowlist: Optional[List[str]] = None,
+    timeout: int = 600, env_allowlist: Optional[List[str]] = None, registry_mirror: Optional[str] = None,
 ) -> ProcessResult:
     """Phase 1: `mvn dependency:go-offline` populates `cache_path` (mounted
     as Maven's own local repository at MAVEN_CACHE_MOUNT by
@@ -817,7 +818,7 @@ def maven_acquire_dependencies(
     `dependency:go-offline` alone) - that is `maven_execute_offline`'s own
     `OfflineFailureKind.MISSING_DEPENDENCY` evidence to surface, not
     something this phase can guarantee away."""
-    profile = _acquisition_profile(workspace_path, cache_path, env_allowlist or [], registry_hosts=registry_hosts)
+    profile = _acquisition_profile(workspace_path, cache_path, env_allowlist or [], registry_hosts=registry_hosts, registry_mirror=registry_mirror)
     result = controller.run(
         ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}", "dependency:go-offline"],
         cwd=workspace_path, timeout=timeout,

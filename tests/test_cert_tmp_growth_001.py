@@ -65,8 +65,11 @@ def test_a_passed_test_leaves_no_per_test_directory_and_a_failed_one_keeps_them_
     assert [n for n in names if n.startswith("test_fails")] == ["test_fails0"], names
     for prefix in ("kriya-state", "kriya-authority", "kriya-qualifications", "kriya-certifications"):
         assert len([n for n in names if re.fullmatch(prefix + r"\d+", n)]) == 1, (prefix, names)
-    # ... and the passed test left NOTHING (no tmp_path, no isolation directory of its own)
+    # ... and the passed test left NOTHING (no tmp_path, no isolation directory of its own, and not the sibling file named after its tmp_path: pytest REUSES a released number,
+    # so the next parametrization of the same test would be handed the stale sibling - MEASURED with tests/test_d1_tool_crash.py's append-mode effects log)
     assert not any(n.startswith("test_passes") for n in names), names
+    everything = sorted(entry.name for entry in bases[0].iterdir())
+    assert "test_fails0-sibling.log" in everything and not any(n.startswith("test_passes") for n in everything), everything
 
 
 def test_the_milestone_harness_releases_its_candidate_directory(tmp_path, monkeypatch):
@@ -323,3 +326,30 @@ def test_certify_runs_in_its_own_fresh_temp_root_and_removes_only_that_and_probe
     assert probe < canonical, "the probe runs before the canonical population"
     assert 'elif [ "$PERF_PROBE_OK" != "1" ]; then' in script, "a failing probe blocks the canonical run"
     assert script.count('pytest -o addopts= -m "not live_model" -p no:cacheprovider -q --certification --certification-report') == 1
+
+
+# --- deterministic Maven provisioning wiring (MAVEN-CENTRAL-CERTIFICATION-NONDETERMINISM-001) ---------------------------------------------
+
+def test_certify_requires_the_attested_frozen_maven_repository_before_the_long_run_and_audits_what_was_served():
+    script = (ROOT / "scripts" / "certify.sh").read_text()
+    assert "certification_maven_repo.py verify" in script and "--require-attested" in script
+    assert script.index("stage maven_repository") < script.index("stage collection")
+    assert 'elif [ "$MAVEN_REPO_OK" != "1" ]; then' in script, "no frozen repository -> the canonical run is UNAVAILABLE, never a run on live Central"
+    assert "KRIYA_CERT_MAVEN_MIRROR" in script and "stage maven_served" in script
+    assert script.count("certification_maven_repo.py serve") == 1 and "--progress" in script, "served files are attributed to the pytest node that fetched them"
+    assert "pip" not in script.split("stage maven_repository")[0].split("MAVEN-CENTRAL-CERTIFICATION-NONDETERMINISM-001")[-1], "provisioning here is network-free"
+
+
+def test_the_hosted_job_provisions_the_same_manifest_with_the_same_tool():
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    step = ci.index("Provision the frozen certification Maven repository")
+    assert "certification_maven_repo.py fetch tests/certification/maven_repository.manifest.json" in ci[step:step + 1500]
+    assert step < ci.index("scripts/certify.sh certification-out/ci"), "provisioned before the certification runs"
+
+
+def test_a_manifest_that_was_not_attested_cannot_certify():
+    """The shipped manifest may be a bootstrap CANDIDATE (built from an unverified pool); certify.sh passes --require-attested, so it refuses until `attest` ran."""
+    tool = _load_script("certification_maven_repo")
+    manifest = tool.load_manifest(str(ROOT / "tests" / "certification" / "maven_repository.manifest.json"))
+    unattested = [i for i in manifest["files"] if i["kind"] in ("artifact", "pom") and not i["provenance"].get("verified_against")]
+    assert bool(manifest.get("attested")) == (not unattested), "the manifest's attested flag is exactly 'every artifact and pom was compared with Central's published SHA-1'"

@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from typing import Any, Dict, List, Literal, Optional, Union
 
 import yaml
@@ -413,6 +414,12 @@ def _containment_mandate(field: str, value: Any) -> bool:
     return parse_containment_mandate(field, value)
 
 
+_MIRROR_URL = re.compile(
+    r"(?P<scheme>https?)://(?P<host>[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(?::(?P<port>[0-9]{1,5}))?(?P<path>(?:/[A-Za-z0-9._~-]*)*)",
+    re.IGNORECASE,
+)  # PRD-034: acquisition_registry_mirror grammar (closed; the value reaches a root shell script and XML)
+
+
 class AutonomyConfig(BaseModel):
     # S16a (OI-130): a closed vocabulary (kriya.config.authority.AUTONOMY_MODES), validated at construction, on
     # assignment and on a model_copy update; a malformed value is AutonomyModeError, never a mode.
@@ -566,6 +573,44 @@ class AutonomyConfig(BaseModel):
                 raise ValueError("autonomy.acquisition_registry_hosts: empty hostname entry is not allowed.")
             normalized.append(host)
         return sorted(set(normalized))
+
+    # PRD-034 (D-type authority/contract correction, owner 2026-11-02): an OPERATOR-OWNED Maven registry mirror for the contained acquisition phase. Absent by
+    # default, and then nothing about acquisition changes (the generated Maven settings are byte-identical to before). When set, the trusted container setup
+    # writes a standard Maven <mirror> for Maven Central (``mirrorOf: central`` - a pom's OWN <repository> declaration is untouched and still resolves to the
+    # host it names, which the proxy ACL allows or denies, so SEC-006 "repository content cannot enlarge authority" holds). The mirror's host MUST also be in
+    # ``acquisition_registry_hosts`` (so the same exact-host ACL admits it) - an approved hostname does NOT make the content it serves trusted: certification
+    # binds the served bytes to a frozen manifest (scripts/certification_maven_repo.py). The value is interpolated into a root shell script and XML, so it is
+    # validated to a closed grammar and refused otherwise (never escaped): scheme://host[:port][/path] with http or https only.
+    acquisition_registry_mirror: Optional[str] = Field(default=None)
+
+    @field_validator("acquisition_registry_mirror")
+    @classmethod
+    def _validate_acquisition_registry_mirror(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        match = _MIRROR_URL.fullmatch(value.strip())
+        if match is None:
+            raise ValueError(
+                "autonomy.acquisition_registry_mirror: must be http(s)://<host>[:<port>][/<path>] using only letters, digits and . - _ ~ / in the path "
+                "(no credentials, query, fragment, spaces or shell/XML metacharacters); unset it (null) to disable the mirror."
+            )
+        scheme, host, port, path = match.group("scheme").lower(), match.group("host").lower(), match.group("port"), match.group("path") or ""
+        if port is not None and not 0 < int(port) < 65536:
+            raise ValueError("autonomy.acquisition_registry_mirror: the port must be 1..65535.")
+        if any(part == ".." for part in path.split("/")):
+            raise ValueError("autonomy.acquisition_registry_mirror: a '..' path segment is not allowed.")
+        return f"{scheme}://{host}{':' + port if port else ''}{path.rstrip('/')}"
+
+    @model_validator(mode="after")
+    def _mirror_host_is_an_authorized_registry_host(self) -> "AutonomyConfig":
+        if self.acquisition_registry_mirror is not None:
+            host = _MIRROR_URL.fullmatch(self.acquisition_registry_mirror).group("host")
+            if host not in self.acquisition_registry_hosts:
+                raise ValueError(
+                    f"autonomy.acquisition_registry_mirror: host {host!r} is not in autonomy.acquisition_registry_hosts - the mirror is reached through the same "
+                    "exact-host proxy ACL as every registry, so its host must be authorized there explicitly (an approved mirror is not a wildcard)."
+                )
+        return self
     # SEC-001 foundation (2026-09-11): which ContainmentBackend
     # (kriya/tools/containment.py) ProcessController composes for a
     # profile that requires one. "none" (NullContainmentBackend) is the

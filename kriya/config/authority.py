@@ -218,6 +218,8 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     # widens what ambient host env a repo's OWN sandboxed build/test command sees
     ("autonomy", "sandbox_env_allowlist"),
     ("autonomy", "egress_policy"), ("autonomy", "acquisition_registry_hosts"),
+    # PRD-034: WHERE contained acquisition fetches from (a mirror is an artifact source; an approved host is not trusted content)
+    ("autonomy", "acquisition_registry_mirror"),
     ("autonomy", "risk_threshold_lines"),
     # "human-in-the-loop" -> a more permissive mode removes the approval gate
     ("autonomy", "mode"),

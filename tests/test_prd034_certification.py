@@ -155,7 +155,7 @@ def _certification_out(tmp_path, stages, *, unexpected=0, doctor=None, identity=
     return str(out)
 
 
-PASSING = {"environment": "RECORDED", "static": "PASS", "collection": "PASS", "perf_probe": "PASS", "pytest": "PASS", "tier_execution": "PASS", "images": "PASS",
+PASSING = {"environment": "RECORDED", "static": "PASS", "maven_repository": "PASS", "maven_served": "PASS", "collection": "PASS", "perf_probe": "PASS", "pytest": "PASS", "tier_execution": "PASS", "images": "PASS",
            "scanner": "PASS", "release": "PASS", "doctor": "RECORDED"}
 DOCTOR = {"production_ready": False, "checks": [
     {"id": "model.qualification", "required": True, "status": "FAIL"},
@@ -170,7 +170,7 @@ def test_certified_only_when_every_mandatory_stage_passes_and_the_doctor_is_repo
     assert summary["doctor"]["failed_required"] == ["model.qualification"]
     assert summary["tiers"]["pytest"]["junit"]["passed"] == 9
     for stage, status in (("scanner", "UNAVAILABLE"), ("pytest", "FAIL"), ("images", "FAIL"), ("release", "FAIL"), ("collection", "FAIL"),
-                          ("tier_execution", "FAIL"), ("perf_probe", "FAIL")):
+                          ("tier_execution", "FAIL"), ("perf_probe", "FAIL"), ("maven_repository", "FAIL"), ("maven_served", "FAIL")):
         failing = module.summarize(_certification_out(tmp_path / stage, {**PASSING, stage: status}, doctor=DOCTOR))
         assert failing["status"] == "NOT_CERTIFIED" and f"{stage}: {status}" in failing["problems"]
 

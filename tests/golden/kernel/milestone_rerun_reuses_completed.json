@@ -131,7 +131,7 @@
     }
    ],
    "created_at": "<clock>",
-   "effective_config_fingerprint": "7ca35b7ea73307b48ae101639e7c4d17476c4bd7e21f6f91eeddfb33f5cfd052",
+   "effective_config_fingerprint": "4f90715d7ebf0ca1f35183710e3eba850506e725f7464921c19053cd458ff91f",
    "execution_plan": {
     "commit_strategy": "incremental_work_unit",
     "fingerprint": "e9f4bf17f8148e3f111379c3c07e4cf1410a7d10babc8d04e50da4da55a87f51",
@@ -275,7 +275,7 @@
    "commit_transaction_id": null,
    "commits": [],
    "created_at": "<clock>",
-   "effective_config_fingerprint": "7ca35b7ea73307b48ae101639e7c4d17476c4bd7e21f6f91eeddfb33f5cfd052",
+   "effective_config_fingerprint": "4f90715d7ebf0ca1f35183710e3eba850506e725f7464921c19053cd458ff91f",
    "execution_plan": {
     "commit_strategy": "incremental_work_unit",
     "fingerprint": "e9f4bf17f8148e3f111379c3c07e4cf1410a7d10babc8d04e50da4da55a87f51",

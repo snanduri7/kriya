@@ -3,12 +3,15 @@
 # `production-certification` runs exactly this, and so does the target
 # machine; the local run is the executed evidence.
 #
-#   scripts/certify.sh [--thresholds FILE] [--doctor-config FILE --doctor-workspace DIR [--doctor-trust-file FILE]] [OUT_DIR]
+#   scripts/certify.sh [--maven-repo DIR] [--thresholds FILE] [--doctor-config FILE --doctor-workspace DIR [--doctor-trust-file FILE]] [OUT_DIR]
 #                                       (OUT_DIR default: certification-out/<UTC stamp>; pass one OUTSIDE the work tree for a canonical run)
 #
 # Stages, each recorded in OUT_DIR/stages.jsonl:
 #   static        ruff + pylint (zero findings)
 #   (progress)    during pytest, OUT_DIR/pytest/progress.json is kept current; watch it with scripts/certification_watch.py OUT_DIR
+#   maven_repository  the frozen, ATTESTED certification Maven repository (tests/certification/maven_repository.manifest.json) is present and byte-exact; it is then served
+#                 on loopback for the whole run and every contained Maven acquisition goes through it (autonomy.acquisition_registry_mirror seam; Central is not in the proxy
+#                 ACL). Provision it first with `scripts/certification_maven_repo.py fetch` (needs Central ONCE, bootstrap - never during the run).
 #   collection    collection/deselection audit: the canonical population is exactly `not live_model`, every deselected test is live_model,
 #                 no real_toolchain / live_static_analysis / Docker / JVM / Gradle-container test disappeared (tests/_certification_collection.py)
 #   perf_probe    bounded representative probe (fresh temp root, basetemp not growing, listing a small fraction of time); FAIL blocks pytest
@@ -30,13 +33,14 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
-THRESHOLDS=""; DOCTOR_CONFIG=""; DOCTOR_WORKSPACE=""; DOCTOR_TRUST=""; OUT_ARG=""
+THRESHOLDS=""; DOCTOR_CONFIG=""; DOCTOR_WORKSPACE=""; DOCTOR_TRUST=""; OUT_ARG=""; MAVEN_REPO="${KRIYA_CERT_MAVEN_REPO:-$HOME/.cache/kriya-cert-maven/repo}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --thresholds) THRESHOLDS="${2:?--thresholds needs a file}"; shift 2 ;;
     --doctor-config) DOCTOR_CONFIG="${2:?--doctor-config needs a file}"; shift 2 ;;
     --doctor-workspace) DOCTOR_WORKSPACE="${2:?--doctor-workspace needs a directory}"; shift 2 ;;
     --doctor-trust-file) DOCTOR_TRUST="${2:?--doctor-trust-file needs a file}"; shift 2 ;;
+    --maven-repo) MAVEN_REPO="${2:?--maven-repo needs a directory}"; shift 2 ;;
     -*) echo "[certify] unknown option: $1" >&2; exit 2 ;;
     *) OUT_ARG="$1"; shift ;;
   esac
@@ -73,7 +77,7 @@ export PYTHONDONTWRITEBYTECODE=1  # a real pytest run inside a bound candidate: 
 # of 80 s. Only this directory is removed on exit - never anything of the operator's.
 CERT_TMP="$(mktemp -d /tmp/kriya-cert.XXXXXX)"
 DOCTOR_HOME=""
-cleanup() { rm -rf "$CERT_TMP" ${DOCTOR_HOME:+"$DOCTOR_HOME"}; }
+cleanup() { [ -n "${MAVEN_SERVER_PID:-}" ] && kill "$MAVEN_SERVER_PID" 2>/dev/null; rm -rf "$CERT_TMP" ${DOCTOR_HOME:+"$DOCTOR_HOME"}; }
 trap cleanup EXIT
 export TMPDIR="$CERT_TMP"
 
@@ -119,6 +123,34 @@ else
   stage static FAIL "see ruff.txt / pylint.txt"
 fi
 
+# --- deterministic Maven provisioning (MAVEN-CENTRAL-CERTIFICATION-NONDETERMINISM-001) --------------------------------------------
+# The canonical run must not depend on live Maven Central: every contained Maven acquisition goes through the product's operator-owned registry mirror
+# (tests/conftest.py::_certification_maven_mirror, env KRIYA_CERT_MAVEN_MIRROR) to the frozen repository served here. No network is used by this stage.
+MANIFEST="$ROOT/tests/certification/maven_repository.manifest.json"
+MAVEN_SERVER_PID=""
+MAVEN_REPO_OK=0
+if "$VENV_BIN/python" scripts/certification_maven_repo.py verify "$MAVEN_REPO" "$MANIFEST" --require-attested > "$OUT/maven-repo-verify.txt" 2>&1; then
+  MAVEN_PORT="$("$VENV_BIN/python" -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+  case "$(uname -s)" in Linux) MAVEN_BIND="0.0.0.0" ;; *) MAVEN_BIND="127.0.0.1" ;; esac  # Docker Engine reaches the host through host-gateway; Docker Desktop reaches loopback
+  "$VENV_BIN/python" scripts/certification_maven_repo.py serve "$MAVEN_REPO" "$MANIFEST" --port "$MAVEN_PORT" --bind "$MAVEN_BIND" --require-attested \
+      --log "$OUT/maven-repo-served.jsonl" --progress "$OUT/pytest/progress.json" > "$OUT/maven-repo-server.txt" 2>&1 &
+  MAVEN_SERVER_PID=$!
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    curl -s -o /dev/null "http://127.0.0.1:$MAVEN_PORT/maven2/" && break
+    kill -0 "$MAVEN_SERVER_PID" 2>/dev/null || break
+    sleep 1
+  done
+  if kill -0 "$MAVEN_SERVER_PID" 2>/dev/null; then
+    export KRIYA_CERT_MAVEN_MIRROR="http://host.docker.internal:$MAVEN_PORT/maven2" KRIYA_CERT_MAVEN_REPO="$MAVEN_REPO" KRIYA_CERT_MAVEN_MANIFEST="$MANIFEST"
+    MAVEN_REPO_OK=1
+    stage maven_repository PASS "content digest $("$VENV_BIN/python" -c 'import json, sys; print(json.load(open(sys.argv[1]))["content_digest"])' "$MANIFEST") served on $MAVEN_BIND:$MAVEN_PORT"
+  else
+    stage maven_repository FAIL "the repository server did not start: $(tail -2 "$OUT/maven-repo-server.txt" | tr '\n' ' ')"
+  fi
+else
+  stage maven_repository FAIL "$(head -3 "$OUT/maven-repo-verify.txt" | tr '\n' ' ')"
+fi
+
 # --- collection truth (before the long run) -------------------------------------
 mkdir -p "$OUT/collection" "$OUT/pytest"
 if pytest -o addopts= --collect-only -q -p no:cacheprovider --collection-census="$OUT/collection/all.json" > "$OUT/collection/all.txt" 2>&1 \
@@ -151,6 +183,8 @@ elif ! docker info >/dev/null 2>&1; then
   stage pytest UNAVAILABLE "docker daemon not reachable"
 elif [ "$SEMGREP_VERSION" != "1.178.0" ]; then
   stage pytest UNAVAILABLE "semgrep must be exactly 1.178.0 (found: ${SEMGREP_VERSION:-none})"
+elif [ "$MAVEN_REPO_OK" != "1" ]; then
+  stage pytest UNAVAILABLE "the frozen, attested Maven certification repository is not available (stage maven_repository): the run would depend on live Maven Central"
 elif [ "$PERF_PROBE_OK" != "1" ]; then
   stage pytest UNAVAILABLE "the performance probe failed (CERT-TMP-GROWTH-001): hours are not spent on a run that can crawl; see perf-probe/perf-probe.json"
 else
@@ -161,6 +195,27 @@ else
   else
     stage pytest FAIL "$(tail -1 "$OUT/pytest.txt")"
   fi
+fi
+
+# --- what the canonical run actually fetched: only manifest bytes, no tamper refusal, nothing outside the frozen set that mattered ---------------------------------
+[ -n "$MAVEN_SERVER_PID" ] && kill "$MAVEN_SERVER_PID" 2>/dev/null
+if [ "$MAVEN_REPO_OK" != "1" ]; then
+  stage maven_served UNAVAILABLE "no frozen repository was served (stage maven_repository)"
+elif "$VENV_BIN/python" - "$OUT" "$MANIFEST" <<'PY'
+import collections, json, os, sys
+out, manifest = sys.argv[1], json.load(open(sys.argv[2]))
+rows = [json.loads(l) for l in open(f"{out}/maven-repo-served.jsonl")] if os.path.exists(f"{out}/maven-repo-served.jsonl") else []
+counts = collections.Counter(r["status"] for r in rows)
+json.dump({"manifest_content_digest": manifest["content_digest"], "files": len(manifest["files"]), "attested": manifest.get("attested"), "requests": len(rows),
+           "status_counts": dict(counts), "bytes_differ_refusals": counts.get(409, 0),
+           "not_in_manifest_requests": sorted({r["path"] for r in rows if r["status"] == 404})[:200],
+           "served_paths": len({r["path"] for r in rows if r["status"] == 200})}, open(f"{out}/maven-repo.json", "w"), indent=2, sort_keys=True)
+sys.exit(1 if counts.get(409, 0) else 0)
+PY
+then
+  stage maven_served PASS "$("$VENV_BIN/python" -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["requests"], "requests,", d["served_paths"], "distinct files, 0 bytes-differ refusals; statuses", d["status_counts"])' "$OUT/maven-repo.json")"
+else
+  stage maven_served FAIL "the frozen repository refused to serve altered bytes during the run (see maven-repo.json)"
 fi
 
 # --- every mandatory tier executed (junit), and the run's population is the audited one ---------

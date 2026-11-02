@@ -237,6 +237,9 @@ class ContainmentProfile:
     # computes for observability/isolation (kriya/tools/containment_oci.py).
     # Meaningless (and ignored) for DENIED/UNRESTRICTED profiles.
     network_destinations: Tuple[str, ...] = ()
+    # PRD-034: the operator's Maven registry mirror (AutonomyConfig.acquisition_registry_mirror, already validated; its host is among
+    # ``network_destinations``). None = nothing changes. Only meaningful for DEPENDENCY_REGISTRY_ONLY.
+    registry_mirror: Optional[str] = None
     env_allowlist: List[str] = field(default_factory=list)
     cpu_seconds: Optional[int] = None
     memory_mb: Optional[int] = None

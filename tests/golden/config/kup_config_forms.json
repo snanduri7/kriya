@@ -5,7 +5,7 @@
   "error": {
    "code": "CONFIG_LOAD_FAILED",
    "database_state": null,
-   "message": "the configuration cannot be read: ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+   "message": "the configuration cannot be read: ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing "
   },
   "observed_at": "<volatile>",
   "operation": "configuration.approval_status",
@@ -109,7 +109,7 @@
   "error": {
    "code": "CONFIG_LOAD_FAILED",
    "database_state": null,
-   "message": "the configuration cannot be read: StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+   "message": "the configuration cannot be read: StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_re"
   },
   "observed_at": "<volatile>",
   "operation": "configuration.approval_status",
@@ -123,7 +123,7 @@
   "error": {
    "code": "CONFIG_LOAD_FAILED",
    "database_state": null,
-   "message": "the configuration cannot be read: ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+   "message": "the configuration cannot be read: ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing "
   },
   "observed_at": "<volatile>",
   "operation": "configuration.approve",
@@ -145,7 +145,7 @@
    "tools": null,
    "unavailable_reason": {
     "code": "CONFIG_LOAD_FAILED",
-    "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+    "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malfor"
    },
    "workspace": {
     "identity": "<MALFORMED>_ID",
@@ -428,7 +428,7 @@
    "tools": null,
    "unavailable_reason": {
     "code": "CONFIG_LOAD_FAILED",
-    "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+    "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP"
    },
    "workspace": {
     "identity": "<STATE_RELATIVE>_ID",
@@ -452,7 +452,7 @@
    "blockers": [
     {
      "code": "CONFIG_LOAD_FAILED",
-     "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+     "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malfor"
     }
    ],
    "configuration": {
@@ -527,7 +527,7 @@
     "directory": "<TMP>/plain",
     "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/plain/kriya.yaml",
-    "fingerprint": "33ac40c2d0710e52a3ec4b7c4c0b522c1a863507ac247f1ca5a217a9cac2efe4",
+    "fingerprint": "bc09c1e26793d9d2090426fdd8b7fd40fccdf93f81fd74d931f53e23b150e840",
     "source": "auto_discovered_cwd",
     "status": "loaded"
    },
@@ -746,7 +746,7 @@
    "blockers": [
     {
      "code": "CONFIG_LOAD_FAILED",
-     "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+     "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP"
     }
    ],
    "configuration": {
@@ -819,7 +819,7 @@
    "truncated": false,
    "unavailable_reason": {
     "code": "CONFIG_LOAD_FAILED",
-    "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+    "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malfor"
    },
    "workspace": {
     "identity": "<MALFORMED>_ID",
@@ -1085,7 +1085,7 @@
    "truncated": false,
    "unavailable_reason": {
     "code": "CONFIG_LOAD_FAILED",
-    "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+    "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP"
    },
    "workspace": {
     "identity": "<STATE_RELATIVE>_ID",
@@ -1112,7 +1112,7 @@
    "total": 0,
    "unavailable_reason": {
     "code": "CONFIG_LOAD_FAILED",
-    "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+    "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malfor"
    },
    "workspace": {
     "identity": "<MALFORMED>_ID",
@@ -1217,7 +1217,7 @@
    "total": 0,
    "unavailable_reason": {
     "code": "CONFIG_LOAD_FAILED",
-    "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+    "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP"
    },
    "workspace": {
     "identity": "<STATE_RELATIVE>_ID",
@@ -1238,7 +1238,7 @@
   "error": {
    "code": "CONFIG_LOAD_FAILED",
    "database_state": null,
-   "message": "the configuration cannot be read: ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+   "message": "the configuration cannot be read: ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing "
   },
   "observed_at": "<volatile>",
   "operation": "configuration.approval_status",
@@ -1342,7 +1342,7 @@
   "error": {
    "code": "CONFIG_LOAD_FAILED",
    "database_state": null,
-   "message": "the configuration cannot be read: StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+   "message": "the configuration cannot be read: StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_re"
   },
   "observed_at": "<volatile>",
   "operation": "configuration.approval_status",
@@ -1374,7 +1374,7 @@
    "blockers": [
     {
      "code": "CONFIG_LOAD_FAILED",
-     "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+     "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malfor"
     }
    ],
    "configuration": {
@@ -1449,7 +1449,7 @@
     "directory": "<TMP>/plain",
     "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/plain/kriya.yaml",
-    "fingerprint": "33ac40c2d0710e52a3ec4b7c4c0b522c1a863507ac247f1ca5a217a9cac2efe4",
+    "fingerprint": "bc09c1e26793d9d2090426fdd8b7fd40fccdf93f81fd74d931f53e23b150e840",
     "source": "auto_discovered_cwd",
     "status": "loaded"
    },
@@ -1516,7 +1516,7 @@
    "blockers": [
     {
      "code": "CONFIG_LOAD_FAILED",
-     "message": "TrustPathInsideWorkspaceError: trust-artifact path '<TMP>/protected/trust.json' resolves inside the workspace root '<TMP>/protected' - a trust artifact must live outside the workspace a repository/checkout"
+     "message": "TrustPathInsideWorkspaceError: trust-artifact path '<TMP>/protected/trust.json' resolves inside the workspace root '<TMP"
     }
    ],
    "configuration": {
@@ -1585,7 +1585,7 @@
    "blockers": [
     {
      "code": "CONFIG_LOAD_FAILED",
-     "message": "TrustPathInsideWorkspaceError: trust-artifact path '<TMP>/refused/trust.json' resolves inside the workspace root '<TMP>/refused' - a trust artifact must live outside the workspace a repository/checkout can"
+     "message": "TrustPathInsideWorkspaceError: trust-artifact path '<TMP>/refused/trust.json' resolves inside the workspace root '<TMP>/"
     }
    ],
    "configuration": {
@@ -1654,7 +1654,7 @@
    "blockers": [
     {
      "code": "CONFIG_LOAD_FAILED",
-     "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+     "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP"
     }
    ],
    "configuration": {
@@ -1720,7 +1720,7 @@
   "error": {
    "code": "CONFIG_LOAD_FAILED",
    "database_state": null,
-   "message": "the configuration cannot be read: ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+   "message": "the configuration cannot be read: ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing "
   },
   "observed_at": "<volatile>",
   "operation": "configuration.approval_status",
@@ -1824,7 +1824,7 @@
   "error": {
    "code": "CONFIG_LOAD_FAILED",
    "database_state": null,
-   "message": "the configuration cannot be read: StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+   "message": "the configuration cannot be read: StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_re"
   },
   "observed_at": "<volatile>",
   "operation": "configuration.approval_status",
@@ -1856,7 +1856,7 @@
    "blockers": [
     {
      "code": "CONFIG_LOAD_FAILED",
-     "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+     "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malfor"
     }
    ],
    "configuration": {
@@ -1931,7 +1931,7 @@
     "directory": "<TMP>/plain",
     "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/plain/kriya.yaml",
-    "fingerprint": "33ac40c2d0710e52a3ec4b7c4c0b522c1a863507ac247f1ca5a217a9cac2efe4",
+    "fingerprint": "bc09c1e26793d9d2090426fdd8b7fd40fccdf93f81fd74d931f53e23b150e840",
     "source": "auto_discovered_cwd",
     "status": "loaded"
    },
@@ -2150,7 +2150,7 @@
    "blockers": [
     {
      "code": "CONFIG_LOAD_FAILED",
-     "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+     "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP"
     }
    ],
    "configuration": {
@@ -2216,7 +2216,7 @@
   "error": {
    "code": "CONFIG_LOAD_FAILED",
    "database_state": null,
-   "message": "the configuration cannot be read: ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+   "message": "the configuration cannot be read: ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing "
   },
   "observed_at": "<volatile>",
   "operation": "configuration.approval_status",
@@ -2320,7 +2320,7 @@
   "error": {
    "code": "CONFIG_LOAD_FAILED",
    "database_state": null,
-   "message": "the configuration cannot be read: StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+   "message": "the configuration cannot be read: StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_re"
   },
   "observed_at": "<volatile>",
   "operation": "configuration.approval_status",
@@ -2352,7 +2352,7 @@
    "blockers": [
     {
      "code": "CONFIG_LOAD_FAILED",
-     "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malformed/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but"
+     "message": "ValueError: Failed to load configuration at <TMP>/malformed/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/malfor"
     }
    ],
    "configuration": {
@@ -2427,7 +2427,7 @@
     "directory": "<TMP>/plain",
     "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml at the root of the repository that contains this folder (this folder itself when it is in no repository), else the Kriya installation, is read; fields only the operator may set need a durable approval.",
     "file": "<TMP>/plain/kriya.yaml",
-    "fingerprint": "33ac40c2d0710e52a3ec4b7c4c0b522c1a863507ac247f1ca5a217a9cac2efe4",
+    "fingerprint": "bc09c1e26793d9d2090426fdd8b7fd40fccdf93f81fd74d931f53e23b150e840",
     "source": "auto_discovered_cwd",
     "status": "loaded"
    },
@@ -2494,7 +2494,7 @@
    "blockers": [
     {
      "code": "CONFIG_LOAD_FAILED",
-     "message": "TrustPathInsideWorkspaceError: trust-artifact path 'trust.json' resolves inside the workspace root '<TMP>/protected' - a trust artifact must live outside the workspace a repository/checkout can populate; see kriya/config/authority_approval.py's module docstring fo"
+     "message": "TrustPathInsideWorkspaceError: trust-artifact path 'trust.json' resolves inside the workspace root '<TMP>/protected' - a"
     }
    ],
    "configuration": {
@@ -2563,7 +2563,7 @@
    "blockers": [
     {
      "code": "CONFIG_LOAD_FAILED",
-     "message": "TrustPathInsideWorkspaceError: trust-artifact path 'trust.json' resolves inside the workspace root '<TMP>/refused' - a trust artifact must live outside the workspace a repository/checkout can populate; see kriya/config/authority_approval.py's module docstring for "
+     "message": "TrustPathInsideWorkspaceError: trust-artifact path 'trust.json' resolves inside the workspace root '<TMP>/refused' - a t"
     }
    ],
    "configuration": {
@@ -2632,7 +2632,7 @@
    "blockers": [
     {
      "code": "CONFIG_LOAD_FAILED",
-     "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP>/state_relative/.kriya/; use e.g. '.kriya/state', or a directory o"
+     "message": "StateDirectoryError: paths.state 'state' resolves inside the workspace (<TMP>/state_relative/state) but not beneath <TMP"
     }
    ],
    "configuration": {

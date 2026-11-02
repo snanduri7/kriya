@@ -1,7 +1,7 @@
 {
  "discovered": {
   "load": {
-   "app": "cf223283900a048ddc5d99807c317fa8192b936788674ecc2349ae4fe8850820",
+   "app": "6e2668a851ee7912dbd72d799c2dda66582924c5fb0e37738ac4b60d1dddbed9",
    "logging_directory": null,
    "paths": {
     "memory": "<INSTALL>/memory",
@@ -42,7 +42,7 @@
  },
  "discovered_yml": {
   "load": {
-   "app": "976c553739cb999c8534a3e782d4c210696533ca25469689f7d0174a7a645f63",
+   "app": "899a4d34dfcad6122bddb7045c697da8671b08a317bbb3b292ed2d0ca22ff69e",
    "logging_directory": null,
    "paths": {
     "memory": "<INSTALL>/memory",
@@ -83,7 +83,7 @@
  },
  "explicit_missing": {
   "load": {
-   "app": "103fc472cb929e0367b94d844eb7c47107e72e1db11e369c559447b193655a3f",
+   "app": "e5bbf8d8ed2cf2dbeb681b654efb87aeeadf06f338af9b56c82079e7502a06c0",
    "logging_directory": null,
    "paths": {
     "memory": "<INSTALL>/memory",
@@ -124,7 +124,7 @@
  },
  "explicit_outside": {
   "load": {
-   "app": "61f53aad243c90cd9dd7fc7afb26d4c32eb3c3b27d3f1a018d50e847e37284f2",
+   "app": "cd9d9d0f57561bbfaca3b42961187ae5cc9c83aaba038e8d435b549ac0c08e51",
    "logging_directory": null,
    "paths": {
     "memory": "<INSTALL>/memory",
@@ -165,7 +165,7 @@
  },
  "explicit_symlink": {
   "load": {
-   "app": "6bcd1c7b8845606e84caf57147e68a0bea6a3f11fa03447564f5cc3a8c92b11e",
+   "app": "fdf06e72d62d383834d3d1ca990a15e75fe7aa35015d7fd3d747c66dd3a2a56b",
    "logging_directory": null,
    "paths": {
     "memory": "<INSTALL>/memory",
@@ -206,7 +206,7 @@
  },
  "log_null": {
   "load": {
-   "app": "103fc472cb929e0367b94d844eb7c47107e72e1db11e369c559447b193655a3f",
+   "app": "e5bbf8d8ed2cf2dbeb681b654efb87aeeadf06f338af9b56c82079e7502a06c0",
    "logging_directory": null,
    "paths": {
     "memory": "<INSTALL>/memory",
@@ -301,21 +301,21 @@
  "malformed": {
   "load": {
    "error": "ValueError",
-   "message": "Failed to load configuration at <TMP>/ws/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/ws/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but got '<stream end>'\n  in \"<TMP>/ws/kriya.yaml\", line 2, column 1"
+   "message": "Failed to load configuration at <TMP>/ws/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/ws/kriya.yaml\", line 1, c"
   },
   "resolve": {
    "error": "ValueError",
-   "message": "Failed to load configuration at <TMP>/ws/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/ws/kriya.yaml\", line 1, column 6\nexpected ',' or ']', but got '<stream end>'\n  in \"<TMP>/ws/kriya.yaml\", line 2, column 1"
+   "message": "Failed to load configuration at <TMP>/ws/kriya.yaml: while parsing a flow sequence\n  in \"<TMP>/ws/kriya.yaml\", line 1, c"
   }
  },
  "mcp_escape": {
   "load": {
    "error": "ValueError",
-   "message": "Failed to load configuration at <TMP>/ws/kriya.yaml: mcp.srv.capabilities.additional_read_paths entry '../escape' is a relative path that resolves outside '<TMP>/ws' - a relative capability path must stay within the config's own directory; use an absolute path to explicitly authorize a host path outside it."
+   "message": "Failed to load configuration at <TMP>/ws/kriya.yaml: mcp.srv.capabilities.additional_read_paths entry '../escape' is a r"
   },
   "resolve": {
    "error": "ValueError",
-   "message": "Failed to load configuration at <TMP>/ws/kriya.yaml: mcp.srv.capabilities.additional_read_paths entry '../escape' is a relative path that resolves outside '<TMP>/ws' - a relative capability path must stay within the config's own directory; use an absolute path to explicitly authorize a host path outside it."
+   "message": "Failed to load configuration at <TMP>/ws/kriya.yaml: mcp.srv.capabilities.additional_read_paths entry '../escape' is a r"
   }
  },
  "mcp_paths": {
@@ -373,7 +373,7 @@
  },
  "none": {
   "load": {
-   "app": "103fc472cb929e0367b94d844eb7c47107e72e1db11e369c559447b193655a3f",
+   "app": "e5bbf8d8ed2cf2dbeb681b654efb87aeeadf06f338af9b56c82079e7502a06c0",
    "logging_directory": null,
    "paths": {
     "memory": "<INSTALL>/memory",
@@ -434,7 +434,7 @@
  },
  "protected_approved": {
   "load": {
-   "app": "ea9d7621c65535ce5d1f8814a7c4f983c5072f0d44cac22f6a530f12e04b1686",
+   "app": "d7d4060e5cf5ab1e35ac3a42505dd16ab391178921d16f227c43c6fc8ca84b54",
    "logging_directory": null,
    "paths": {
     "memory": "<INSTALL>/memory",
@@ -612,7 +612,7 @@
  "protected_trust_inside": {
   "load": {
    "error": "TrustPathInsideWorkspaceError",
-   "message": "trust-artifact path '<TMP>/ws/trust.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must live outside the workspace a repository/checkout can populate; see kriya/config/authority_approval.py's module docstring for why this is refused, not just discouraged."
+   "message": "trust-artifact path '<TMP>/ws/trust.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must live out"
   },
   "resolve": {
    "config_dict": "882d6abd291a9d0ab337e4bae2f6e31bc4a73bd05d46cfa3f8ffe49f48f93085",
@@ -647,7 +647,7 @@
  "protected_trust_relative": {
   "load": {
    "error": "TrustPathInsideWorkspaceError",
-   "message": "trust-artifact path 'trust.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must live outside the workspace a repository/checkout can populate; see kriya/config/authority_approval.py's module docstring for why this is refused, not just discouraged."
+   "message": "trust-artifact path 'trust.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must live outside the "
   },
   "resolve": {
    "config_dict": "882d6abd291a9d0ab337e4bae2f6e31bc4a73bd05d46cfa3f8ffe49f48f93085",
@@ -725,11 +725,11 @@
  "removed_logging_file": {
   "load": {
    "error": "RemovedConfigFieldError",
-   "message": "<TMP>/ws/kriya.yaml: logging.file was removed; use logging.directory to configure the log directory (or logging.file_enabled: false to turn the application log off)."
+   "message": "<TMP>/ws/kriya.yaml: logging.file was removed; use logging.directory to configure the log directory (or logging.file_ena"
   },
   "resolve": {
    "error": "RemovedConfigFieldError",
-   "message": "<TMP>/ws/kriya.yaml: logging.file was removed; use logging.directory to configure the log directory (or logging.file_enabled: false to turn the application log off)."
+   "message": "<TMP>/ws/kriya.yaml: logging.file was removed; use logging.directory to configure the log directory (or logging.file_ena"
   }
  },
  "removed_paths_logs": {
@@ -831,16 +831,16 @@
  "state_is_kriya_dir": {
   "load": {
    "error": "StateDirectoryError",
-   "message": "paths.state '.kriya' resolves inside the workspace (<TMP>/ws/.kriya) but not beneath <TMP>/ws/.kriya/; use e.g. '.kriya/state', or a directory outside the workspace."
+   "message": "paths.state '.kriya' resolves inside the workspace (<TMP>/ws/.kriya) but not beneath <TMP>/ws/.kriya/; use e.g. '.kriya/"
   },
   "resolve": {
    "error": "StateDirectoryError",
-   "message": "paths.state '.kriya' resolves inside the workspace (<TMP>/ws/.kriya) but not beneath <TMP>/ws/.kriya/; use e.g. '.kriya/state', or a directory outside the workspace."
+   "message": "paths.state '.kriya' resolves inside the workspace (<TMP>/ws/.kriya) but not beneath <TMP>/ws/.kriya/; use e.g. '.kriya/"
   }
  },
  "state_null": {
   "load": {
-   "app": "103fc472cb929e0367b94d844eb7c47107e72e1db11e369c559447b193655a3f",
+   "app": "e5bbf8d8ed2cf2dbeb681b654efb87aeeadf06f338af9b56c82079e7502a06c0",
    "logging_directory": null,
    "paths": {
     "memory": "<INSTALL>/memory",
@@ -925,11 +925,11 @@
  "state_relative": {
   "load": {
    "error": "StateDirectoryError",
-   "message": "paths.state 'state' resolves inside the workspace (<TMP>/ws/state) but not beneath <TMP>/ws/.kriya/; use e.g. '.kriya/state', or a directory outside the workspace."
+   "message": "paths.state 'state' resolves inside the workspace (<TMP>/ws/state) but not beneath <TMP>/ws/.kriya/; use e.g. '.kriya/st"
   },
   "resolve": {
    "error": "StateDirectoryError",
-   "message": "paths.state 'state' resolves inside the workspace (<TMP>/ws/state) but not beneath <TMP>/ws/.kriya/; use e.g. '.kriya/state', or a directory outside the workspace."
+   "message": "paths.state 'state' resolves inside the workspace (<TMP>/ws/state) but not beneath <TMP>/ws/.kriya/; use e.g. '.kriya/st"
   }
  },
  "state_tilde": {
@@ -977,7 +977,7 @@
  },
  "state_under_kriya": {
   "load": {
-   "app": "5c543a77517ea7530ff7af62fa4d52dccda6c7c8eb8aa5e06691798108db05fc",
+   "app": "a302ecd135c1756d09dcfaf0ce6be843d424566549956c6d3097adcb802bb479",
    "logging_directory": null,
    "paths": {
     "memory": "<INSTALL>/memory",

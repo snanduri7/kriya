@@ -925,7 +925,7 @@ if [ -d /usr/share/maven/conf ]; then
       <port>$PROXY_PORT</port>
       <nonProxyHosts></nonProxyHosts>
     </proxy>
-  </proxies>
+  </proxies>__MIRRORS__
 </settings>
 EOF
 fi
@@ -966,7 +966,7 @@ class RegistryAcquisitionSetupError(BackendUnavailableError):
     retry it as if it were a missing-dependency/offline-mode failure."""
 
 
-def compute_authority_id(hosts: Tuple[str, ...]) -> str:
+def compute_authority_id(hosts: Tuple[str, ...], registry_mirror: Optional[str] = None) -> str:
     """Canonical identity for a set of authorized registry hosts - used
     for observability/labeling only (docker labels, log lines), NEVER for
     infrastructure reuse/refcounting across runs (SEC-006's own explicit
@@ -975,6 +975,8 @@ def compute_authority_id(hosts: Tuple[str, ...]) -> str:
     regardless of whether another concurrent run shares the same
     authority_id - see `_prepare_registry_scoped`."""
     canonical = ",".join(sorted({h.strip().lower().rstrip(".") for h in hosts if h.strip()}))
+    if registry_mirror is not None:  # unset -> the exact identity as before the mirror seam existed
+        canonical += f"|mirror={registry_mirror}"
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 
 
@@ -1078,6 +1080,15 @@ def _render_squid_conf(hosts: Tuple[str, ...]) -> str:
     )
 
 
+def _mirror_host_gateway_args(registry_mirror: Optional[str]) -> List[str]:
+    """Only when the operator's mirror is served by the Docker HOST under the conventional name ``host.docker.internal``: Docker Desktop resolves that name by
+    itself; Docker Engine on Linux only with ``host-gateway`` on the container that resolves it (the proxy - it is the only container that connects to the mirror).
+    Nothing is added for any other configuration."""
+    if registry_mirror is not None and _mirror_host(registry_mirror) == "host.docker.internal":
+        return ["--add-host", "host.docker.internal:host-gateway"]
+    return []
+
+
 def _container_ip(docker_path: str, container_name: str, network_name: str) -> str:
     inspect = subprocess.run(
         [docker_path, "inspect", container_name, "--format",
@@ -1109,9 +1120,37 @@ def _extract_denied_hosts(proxy_log: str) -> List[str]:
     return sorted(hosts)
 
 
-def _render_setup_script(proxy_ip: str, acquisition_uid: int, acquisition_gid: int) -> str:
+_MIRROR_FOR_SCRIPT = re.compile(
+    r"https?://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~-]*)*"
+)  # the closed grammar of AutonomyConfig.acquisition_registry_mirror, re-checked here: the value is expanded by a ROOT shell heredoc and written as XML
+
+
+def _mirror_host(mirror: str) -> str:
+    return mirror.split("://", 1)[1].split("/", 1)[0].split(":", 1)[0].lower()
+
+
+def _render_mirrors_block(registry_mirror: Optional[str]) -> str:
+    """The standard Maven <mirror> for Maven Central, or "" (then the rendered script is byte-identical to before the seam existed).
+    ``mirrorOf: central`` only: a pom's own <repository> still resolves to the host it names, which the proxy ACL allows or denies (SEC-006).
+    The mirror's id is ``central`` ON PURPOSE (MEASURED 2026-11-02): Maven records the id of the repository an artifact came from (``_remote.repositories``), and the
+    OFFLINE execution phase - which has no network and no mirror - only accepts an artifact "cached from" an id available in its build context, i.e. ``central``;
+    any other id makes every acquired artifact unusable offline (MAVEN_ACQUISITION_INCOMPLETE)."""
+    if registry_mirror is None:
+        return ""
+    well_formed = _MIRROR_FOR_SCRIPT.fullmatch(registry_mirror) is not None and ".." not in registry_mirror
+    port = registry_mirror.split("://", 1)[1].split("/", 1)[0].partition(":")[2] if well_formed else ""
+    if not well_formed or (port and not 0 < int(port) < 65536):
+        raise BackendUnavailableError(f"registry mirror {registry_mirror!r} is not a valid acquisition mirror URL - refusing to render it into the trusted setup script.")
+    return (
+        "\n  <mirrors>\n    <mirror>\n      <id>central</id>\n      <mirrorOf>central</mirrorOf>\n"
+        f"      <url>{registry_mirror}</url>\n    </mirror>\n  </mirrors>"
+    )
+
+
+def _render_setup_script(proxy_ip: str, acquisition_uid: int, acquisition_gid: int, registry_mirror: Optional[str] = None) -> str:
     return (
         _SETUP_SCRIPT_TEMPLATE
+        .replace("__MIRRORS__", _render_mirrors_block(registry_mirror))
         .replace("__PROXY_IP__", proxy_ip)
         .replace("__PROXY_PORT__", str(_PROXY_PORT))
         .replace("__ACQ_UID__", str(acquisition_uid))
@@ -1584,6 +1623,13 @@ class OCIContainmentBackend:
                 "in AutonomyConfig.acquisition_registry_hosts, not worked around here)."
             )
 
+        registry_mirror = profile.registry_mirror
+        if registry_mirror is not None and _mirror_host(registry_mirror) not in hosts:
+            raise BackendUnavailableError(
+                f"ContainmentProfile.registry_mirror {registry_mirror!r}: its host is not in network_destinations {list(hosts)} - the mirror is reached through "
+                "the same exact-host proxy ACL as every registry (AutonomyConfig.acquisition_registry_hosts); refusing, not widening."
+            )
+
         workspace_host = os.path.abspath(profile.workspace_path)
         if not os.path.isdir(workspace_host):
             raise BackendUnavailableError(
@@ -1605,7 +1651,7 @@ class OCIContainmentBackend:
         # S1: after the existing identity refusal (which keeps its precedence) and before any network or proxy exists, so a refusal leaks nothing.
         ensure_authority_namespace(workspace_host, workspace_writable=True)
 
-        authority_id = compute_authority_id(hosts)
+        authority_id = compute_authority_id(hosts, registry_mirror)
         if profile.toolchain_identity is not None:
             image = profile.toolchain_identity.containment_image
             cache_mount_point = _toolchain_cache_mount(profile.toolchain_identity)
@@ -1655,6 +1701,7 @@ class OCIContainmentBackend:
                     docker_path, "run", "-d", "--name", proxy_name,
                     "--label", f"kriya.authority={authority_id}",
                     "--network", network_name, "--cap-drop", "ALL",
+                    *_mirror_host_gateway_args(registry_mirror),
                     # Squid drops ITS OWN privileges internally (root ->
                     # 'proxy' user, via setuid/setgid) at startup and
                     # refuses to run as root - confirmed empirically:
@@ -1733,7 +1780,7 @@ class OCIContainmentBackend:
             _remove_network()
             raise BackendUnavailableError(f"Registry proxy readiness check failed: {e}") from e
 
-        setup_script = _render_setup_script(proxy_ip, acquisition_uid, acquisition_gid)
+        setup_script = _render_setup_script(proxy_ip, acquisition_uid, acquisition_gid, registry_mirror)
 
         args: List[str] = [
             docker_path, "run", "--rm", "--name", container_name,

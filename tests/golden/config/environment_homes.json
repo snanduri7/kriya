@@ -192,7 +192,7 @@
   "authority_home": "<TMP>/ws/rel/override",
   "authority_local_path": {
    "error": "TrustPathInsideWorkspaceError",
-   "message": "trust-artifact path '<TMP>/ws/rel/override/x.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must live outside the workspace a repository/checkout can populate; see kriya/config/authority_approval.py's module docstring for why this is refused, not just discouraged."
+   "message": "trust-artifact path '<TMP>/ws/rel/override/x.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must"
   },
   "certification_home": "<TMP>/home/.kriya/certifications",
   "default_log_directory": "<TMP>/home/.kriya/logs",
@@ -220,7 +220,7 @@
   "authority_home": "<TMP>/ws/~/override",
   "authority_local_path": {
    "error": "TrustPathInsideWorkspaceError",
-   "message": "trust-artifact path '<TMP>/ws/~/override/x.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must live outside the workspace a repository/checkout can populate; see kriya/config/authority_approval.py's module docstring for why this is refused, not just discouraged."
+   "message": "trust-artifact path '<TMP>/ws/~/override/x.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must l"
   },
   "certification_home": "<TMP>/home/.kriya/certifications",
   "default_log_directory": "<TMP>/home/.kriya/logs",
@@ -986,7 +986,7 @@
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": {
    "error": "TrustPathInsideWorkspaceError",
-   "message": "trust-artifact path '<TMP>/ws/rel/override/<WS>_ID.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must live outside the workspace a repository/checkout can populate; see kriya/config/authority_approval.py's module docstring for why this is refused, not just discouraged."
+   "message": "trust-artifact path '<TMP>/ws/rel/override/<WS>_ID.json' resolves inside the workspace root '<TMP>/ws' - a trust artifac"
   }
  },
  "KRIYA_STATIC_ANALYSIS_HOME=tilde": {
@@ -1014,7 +1014,7 @@
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": {
    "error": "TrustPathInsideWorkspaceError",
-   "message": "trust-artifact path '<TMP>/ws/~/override/<WS>_ID.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact must live outside the workspace a repository/checkout can populate; see kriya/config/authority_approval.py's module docstring for why this is refused, not just discouraged."
+   "message": "trust-artifact path '<TMP>/ws/~/override/<WS>_ID.json' resolves inside the workspace root '<TMP>/ws' - a trust artifact "
   }
  },
  "KRIYA_STATIC_ANALYSIS_HOME=unset": {

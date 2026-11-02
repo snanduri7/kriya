@@ -33,6 +33,7 @@ from kriya.core.state_paths import ENV_STATE_DIR
 # the 5-hour canonical run's crawl). A test that PASSED therefore leaves nothing behind; a failed one keeps every directory for diagnosis (tmp_path itself
 # follows ``tmp_path_retention_policy = "failed"`` in pyproject.toml).
 _TEST_FAILED = pytest.StashKey[bool]()
+_release_tree = shutil.rmtree  # captured at import: a test that patches ``shutil.rmtree`` (tests/test_oi142_gate_view.py) must not break the release of its directories
 
 
 def _per_test_dir(request, tmp_path_factory, name):
@@ -41,10 +42,35 @@ def _per_test_dir(request, tmp_path_factory, name):
 
     def _discard():
         if not request.node.stash.get(_TEST_FAILED, False):
-            shutil.rmtree(path, ignore_errors=True)
+            _release_tree(path, ignore_errors=True)
 
     request.addfinalizer(_discard)
     return path
+
+
+@pytest.fixture(autouse=True)
+def _release_tmp_path_siblings(request):
+    """A test that writes files NEXT TO its ``tmp_path`` under ``tmp_path.name + '-...'`` (tests/test_d1_tool_crash.py's effects log, test_prd005's outside files, the kernel golden's cwd)
+    must not leave them behind once its tmp_path is released: pytest reuses a released number, so the NEXT parametrization of the same test would be handed the stale sibling
+    (MEASURED: test_d1_tool_crash's append-mode log then read EFFECT_BEGIN twice). A failed test keeps them for diagnosis."""
+    yield
+    tmp_path = request.node.funcargs.get("tmp_path") if hasattr(request.node, "funcargs") else None
+    if tmp_path is None or request.node.stash.get(_TEST_FAILED, False):
+        return
+    parent, prefix = os.path.dirname(str(tmp_path)), os.path.basename(str(tmp_path)) + "-"
+    try:
+        names = [name for name in os.listdir(parent) if name.startswith(prefix)]
+    except OSError:
+        return
+    for name in names:
+        target = os.path.join(parent, name)
+        if os.path.isdir(target) and not os.path.islink(target):
+            _release_tree(target, ignore_errors=True)
+        else:
+            try:
+                os.unlink(target)
+            except OSError:
+                pass
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -119,10 +145,48 @@ CHECKOUT_MEMORY_RESOLVING_FILES = frozenset({
 })
 
 
+# PRD-034 (MAVEN-CENTRAL-CERTIFICATION-NONDETERMINISM-001): under certification every CONTAINED Maven acquisition goes through the operator-owned registry mirror
+# (autonomy.acquisition_registry_mirror -> the frozen repository served by scripts/certification_maven_repo.py), never live Maven Central. The mirror URL is a
+# TEST-HARNESS input read only here (exported visibly by scripts/certify.sh and recorded in its environment record - not a product configuration path). The seam is
+# the OCI backend's registry-scoped preparation: every acquisition profile (validator, standalone helpers, shell) reaches it, and a profile that already carries its own
+# mirror is left alone. Central is removed from the proxy ACL for these runs, so a fallback is DENIED (and logged), not silently carried.
+CERT_MAVEN_MIRROR_ENV = "KRIYA_CERT_MAVEN_MIRROR"
+CENTRAL_HOST = "repo.maven.apache.org"
+
+
+@pytest.fixture(autouse=True)
+def _certification_maven_mirror(monkeypatch):
+    mirror = os.environ.get(CERT_MAVEN_MIRROR_ENV)
+    if not mirror:
+        yield
+        return
+    import dataclasses
+
+    from kriya.config.config import AutonomyConfig
+    from kriya.tools.containment_oci import OCIContainmentBackend
+
+    # the mirror value is validated by the product's own grammar and rule (normalised form, host); a malformed value fails the run loudly here
+    validated = AutonomyConfig(acquisition_registry_hosts=[mirror.split("://", 1)[1].split("/", 1)[0].split(":", 1)[0]], acquisition_registry_mirror=mirror)
+    url, mirror_host = validated.acquisition_registry_mirror, validated.acquisition_registry_hosts[0]
+    original = OCIContainmentBackend._prepare_registry_scoped  # pylint: disable=protected-access
+
+    def with_mirror(self, docker_path, profile, command):
+        # only a MAVEN RESOLUTION (an `mvn` in the command) is a mirror consumer; the proxy-mechanism tests that CONNECT to the real registry host to prove the exact-host ACL
+        # (tests/test_containment_oci.py, test_prd012_egress_docker, test_sec005_*) deliberately address the real host and stay untouched
+        runs_maven = any("mvn" in str(part) for part in command) and not any("CONNECT " in str(part) for part in command)  # `mvn --version ; CONNECT probe` is a proxy probe
+        if runs_maven and profile.registry_mirror is None and CENTRAL_HOST in profile.network_destinations:
+            hosts = tuple(sorted((set(profile.network_destinations) - {CENTRAL_HOST}) | {mirror_host}))
+            profile = dataclasses.replace(profile, registry_mirror=url, network_destinations=hosts)
+        return original(self, docker_path, profile, command)
+
+    monkeypatch.setattr(OCIContainmentBackend, "_prepare_registry_scoped", with_mirror)
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _checkout_memory_isolated(request, tmp_path_factory, monkeypatch):
     if request.path.name in CHECKOUT_MEMORY_RESOLVING_FILES:
-        cwd = _per_test_dir(request, tmp_path_factory, "cwd")
+        cwd = tmp_path_factory.mktemp("cwd")  # not released: tests/test_checkout_memory_isolation.py drives this fixture with a bare namespace request
         (cwd / "memory").mkdir()
         monkeypatch.chdir(cwd)
     yield

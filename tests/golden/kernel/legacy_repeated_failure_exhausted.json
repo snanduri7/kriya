@@ -6242,7 +6242,7 @@
    "commit_transaction_id": null,
    "commits": [],
    "created_at": "<clock>",
-   "effective_config_fingerprint": "0b722a5938d1514bf699630637dc353add0853e1ec20760eb01a5bb68b2b627f",
+   "effective_config_fingerprint": "63da5d4394469d8e0a5fdb994dd685a9a757bebd05eec6e4d9aa4546f842a57f",
    "execution_plan": {
     "commit_strategy": "incremental_work_unit",
     "fingerprint": "4e1f0d6216887b277a2ea6a9dd288f5ed4cbfdf950ea32d497f1042c2b806596",

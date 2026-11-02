@@ -89,6 +89,7 @@ class World:
 VOLATILE_KEYS = frozenset({"observed_at"})  # wall-clock time of the envelope (MEASURED: the only timestamp key)
 # A message that is cut at a fixed length (``str(error)[:300]``) can end INSIDE a temporary path, whose length varies between runs:
 # from the first remaining temporary-directory prefix to the end of the string is replaced by one token.
+_PATH_MESSAGE_HEAD = 120
 _TMP_TAIL = re.compile("(" + re.escape(os.path.realpath(tempfile.gettempdir())) + "|" + re.escape(tempfile.gettempdir()) + ").*$",
                        re.DOTALL)
 
@@ -101,7 +102,12 @@ def normalize(value: Any, world: World) -> Any:
     if isinstance(value, str):
         for real, token in world.tokens():
             value = value.replace(real, token)
-        return _TMP_TAIL.sub("<TRUNCATED_TMP_PATH>", _SHA.sub("sha256:<DIGEST>", value))
+        value = _TMP_TAIL.sub("<TRUNCATED_TMP_PATH>", _SHA.sub("sha256:<DIGEST>", value))
+        # CERT-TMP-GROWTH-001: the PRODUCT caps the error text of a config-load refusal at 300 RAW characters (kriya/application/configuration.py), and a message that names paths shrinks
+        # by (root length - len("<TMP>")) per occurrence once the root is tokenised - so how much of it survives depends on the LENGTH of the temp root (a golden written under macOS's long
+        # /var/folders/... root failed under any shorter one: the certification's own fresh /tmp root, and a Linux runner). The head of a path-bearing message is stable for every root
+        # up to ~70 characters (300 - 3 occurrences x 65 > 120); what the cap cut off is not part of the contract.
+        return value[:_PATH_MESSAGE_HEAD] if "<TMP>" in value or "<TRUNCATED_TMP_PATH>" in value else value
     return value
 
 

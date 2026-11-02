@@ -917,6 +917,7 @@ def _check_egress(ctx: _Context) -> DoctorCheck:
         evidence={
             "policy": ctx.cfg.autonomy.egress_policy,
             "registry_hosts": registry_hosts,
+            **({"registry_mirror": ctx.cfg.autonomy.acquisition_registry_mirror} if ctx.cfg.autonomy.acquisition_registry_mirror else {}),
             "model_endpoints": endpoints,
             "non_local_endpoints": non_local,
         },
