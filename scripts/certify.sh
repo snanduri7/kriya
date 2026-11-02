@@ -8,8 +8,10 @@
 #
 # Stages, each recorded in OUT_DIR/stages.jsonl:
 #   static        ruff + pylint (zero findings)
+#   (progress)    during pytest, OUT_DIR/pytest/progress.json is kept current; watch it with scripts/certification_watch.py OUT_DIR
 #   collection    collection/deselection audit: the canonical population is exactly `not live_model`, every deselected test is live_model,
 #                 no real_toolchain / live_static_analysis / Docker / JVM / Gradle-container test disappeared (tests/_certification_collection.py)
+#   perf_probe    bounded representative probe (fresh temp root, basetemp not growing, listing a small fraction of time); FAIL blocks pytest
 #   pytest        THE canonical population, literally `pytest -o addopts= -m "not live_model"` in certification mode (an unexpected skip fails)
 #   tier_execution  every test of every mandatory tier appears in the junit file and PASSED; the run's population equals the audited one
 #   images        every digest-pinned image present with exactly its digest (never pulled here)
@@ -66,6 +68,14 @@ fi
 export PATH="$VENV_BIN:$PATH"
 export KRIYA_CERTIFICATION=1
 export PYTHONDONTWRITEBYTECODE=1  # a real pytest run inside a bound candidate: __pycache__ would be flagged by the verification-tree binding
+# CERT-TMP-GROWTH-001: the run gets its OWN fresh temp root, outside the ambient system temp area. MEASURED: path-identity checks list every ancestor
+# directory of a workspace in full, and an ambient temp area holding the leftovers of earlier runs (23k entries) made the same 47 tests take 302 s instead
+# of 80 s. Only this directory is removed on exit - never anything of the operator's.
+CERT_TMP="$(mktemp -d /tmp/kriya-cert.XXXXXX)"
+DOCTOR_HOME=""
+cleanup() { rm -rf "$CERT_TMP" ${DOCTOR_HOME:+"$DOCTOR_HOME"}; }
+trap cleanup EXIT
+export TMPDIR="$CERT_TMP"
 
 # --- environment identity ---------------------------------------------------
 "$VENV_BIN/python" - "$OUT/environment.json" <<'PY'
@@ -119,6 +129,17 @@ else
   stage collection FAIL "$(head -3 "$OUT/collection/audit.txt" 2>/dev/null | tr '\n' ' ')"
 fi
 
+# --- performance probe (CERT-TMP-GROWTH-001): the run-1 crawl must not be able to recur before hours are spent ---------------------
+# A small fixed representative population judged by mechanism invariants (fresh temp root, basetemp not growing, directory listing a small fraction of
+# the time) - not a wall-clock budget. FAIL blocks the canonical pytest stage.
+PERF_PROBE_OK=1
+if "$VENV_BIN/python" scripts/certification_perf_probe.py "$OUT/perf-probe" > "$OUT/perf-probe.txt" 2>&1; then
+  stage perf_probe PASS "$(grep -c '^\[perf-probe\] ' "$OUT/perf-probe.txt") classes; see perf-probe/perf-probe.json"
+else
+  PERF_PROBE_OK=0
+  stage perf_probe FAIL "$(tail -3 "$OUT/perf-probe.txt" | tr '\n' ' ')"
+fi
+
 # --- THE canonical population: pytest -o addopts= -m "not live_model" ------------
 # Includes real_toolchain, live_static_analysis, Docker and JDK/Maven/Gradle-container tests; the repository addopts must not remove a tier.
 missing=""
@@ -130,6 +151,8 @@ elif ! docker info >/dev/null 2>&1; then
   stage pytest UNAVAILABLE "docker daemon not reachable"
 elif [ "$SEMGREP_VERSION" != "1.178.0" ]; then
   stage pytest UNAVAILABLE "semgrep must be exactly 1.178.0 (found: ${SEMGREP_VERSION:-none})"
+elif [ "$PERF_PROBE_OK" != "1" ]; then
+  stage pytest UNAVAILABLE "the performance probe failed (CERT-TMP-GROWTH-001): hours are not spent on a run that can crawl; see perf-probe/perf-probe.json"
 else
   printf '%s\n' "pytest -o addopts= -m \"not live_model\" -p no:cacheprovider -q --certification --certification-report=$OUT/pytest --collection-census=$OUT/pytest/collection-census.json --junitxml=$OUT/pytest/junit.xml --durations=50" > "$OUT/pytest/command.txt"
   if pytest -o addopts= -m "not live_model" -p no:cacheprovider -q --certification --certification-report="$OUT/pytest" \
@@ -204,8 +227,7 @@ if [ -n "$DOCTOR_CONFIG" ]; then
   OWNER_CMD="cd '$DOCTOR_WORKSPACE' && '$VENV_BIN/kriya' --config '$DOCTOR_CONFIG' authority approve${DOCTOR_TRUST:+ --out '$DOCTOR_TRUST'}"
 else
   DOCTOR_MODE="packaged_defaults"
-  DOCTOR_HOME="$(mktemp -d "${TMPDIR:-/tmp}/kriya-cert-doctor.XXXXXXXX")"
-  trap 'rm -rf "$DOCTOR_HOME"' EXIT  # disposable: its outputs are captured under $OUT (LEAK-RELEASE-TMP-001)
+  DOCTOR_HOME="$(mktemp -d "${TMPDIR:-/tmp}/kriya-cert-doctor.XXXXXXXX")"  # disposable (removed by cleanup): its outputs are captured under $OUT (LEAK-RELEASE-TMP-001)
   mkdir -p "$DOCTOR_HOME/workspace"
   git -C "$DOCTOR_HOME/workspace" init -q  # a real (empty) repository, as a deployment has
   ( cd "$DOCTOR_HOME/workspace" && "$VENV_BIN/kriya" doctor --production --json ) > "$OUT/doctor.json" 2> "$OUT/doctor.stderr.txt"

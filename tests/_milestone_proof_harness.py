@@ -8,6 +8,7 @@ default import mode), like _plugin_test_support.
 """
 import asyncio
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -55,25 +56,28 @@ def _workspace(tmp_path):
 def _apply(workspace_path, changes):
     """Commit ``changes`` ({relpath: bytes | (bytes, mode) | None=delete})
     through the real terminal commit seam, as a verified candidate would be."""
-    candidate = Path(tempfile.mkdtemp())
-    files = []
-    for relpath, spec in sorted(changes.items()):
-        target = os.path.join(workspace_path, relpath)
-        if spec is None:
-            files.append(CandidateFile(relpath, read_file_revision(target), delete=True))
-            continue
-        data, mode = spec if isinstance(spec, tuple) else (spec, 0o644)
-        path = candidate / relpath
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-        os.chmod(path, mode)
-        files.append(CandidateFile(relpath, read_file_revision(target)))
-    writes = materialize_candidate(str(candidate), str(workspace_path), files)
-    outcome = commit_terminal_candidate(
-        writes, workspace_path=str(workspace_path), static_analysis=DISABLED_STATIC_ANALYSIS,
-        transaction_id=uuid.uuid4().hex, verified_candidate=bind_candidate(writes, str(workspace_path)),
-    )
-    assert outcome.committed, outcome.failure_payload()
+    candidate = Path(tempfile.mkdtemp(prefix="kriya-milestone-candidate-"))
+    try:  # CERT-TMP-GROWTH-001: the candidate directory is this call's scratch - it used to be left in the temp root (~2 per milestone run)
+        files = []
+        for relpath, spec in sorted(changes.items()):
+            target = os.path.join(workspace_path, relpath)
+            if spec is None:
+                files.append(CandidateFile(relpath, read_file_revision(target), delete=True))
+                continue
+            data, mode = spec if isinstance(spec, tuple) else (spec, 0o644)
+            path = candidate / relpath
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            os.chmod(path, mode)
+            files.append(CandidateFile(relpath, read_file_revision(target)))
+        writes = materialize_candidate(str(candidate), str(workspace_path), files)
+        outcome = commit_terminal_candidate(
+            writes, workspace_path=str(workspace_path), static_analysis=DISABLED_STATIC_ANALYSIS,
+            transaction_id=uuid.uuid4().hex, verified_candidate=bind_candidate(writes, str(workspace_path)),
+        )
+        assert outcome.committed, outcome.failure_payload()
+    finally:
+        shutil.rmtree(candidate, ignore_errors=True)
 
 
 def _route():

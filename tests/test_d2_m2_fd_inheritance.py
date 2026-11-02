@@ -92,6 +92,7 @@ def test_the_probe_has_teeth_a_descriptor_that_is_still_inheritable_or_explicitl
     assert probe["write_fd3"] == "WROTE" and received == b"X", "the child really wrote into the host's end"
 
 
+@pytest.mark.requires_platform("linux")  # PRD-034: mandatory Linux-HOST evidence; PENDING (never a pass) anywhere else
 @pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="MANDATORY LINUX-HOST MEASUREMENT (owner 2026-10-23): /proc/<pid>/fd access to the review socket is INFERRED, not measured, on this platform; "
                                                               "run this test on a Linux host before final production qualification")
 def test_linux_a_child_cannot_reopen_the_waiters_socket_through_proc():

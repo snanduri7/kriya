@@ -71,6 +71,8 @@ include = ["kriya*", "plugins.core_tools*", "skills"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
+# CERT-TMP-GROWTH-001: a passed test leaves no tmp_path behind (see tests/conftest.py _per_test_dir): an unbounded basetemp makes every path-identity call O(entries).
+tmp_path_retention_policy = "failed"
 # Without this, a bare `pytest` from the repo root recursively discovers
 # test_*.py ANYWHERE under the tree - including spikes/eval_harness/runs/,
 # which fills up with real generated code (test_store.py, etc.) every time
@@ -118,6 +120,7 @@ markers = [
     "adapters: module tier - ADAPTER-KUP, ADAPTER-CLI, METRICS; applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
     "architecture: module tier - architecture and inventory tripwires (tests/architecture/ and the existing guards); applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
     "integration: module tier - cross-module integration; applied by tests/conftest.py MODULE_TIER_FILES (handover/MODULARIZATION/TEST-MATRIX.md)",
+    "requires_platform(name): PRD-034 - the test is MANDATORY evidence of the platform `name` (a sys.platform prefix, e.g. linux). On that platform it must run and pass; elsewhere it is PENDING (tests/_certification.py), never a pass, and the certification cannot be CERTIFIED while one is pending",
     "xdist_group(name): pytest-xdist scheduling group; tests/conftest.py pins every real-Docker test to the `docker` group so `--dist loadgroup` runs them on one worker. pytest-xdist registers this marker itself when installed; it is registered here too so a sequential run without pytest-xdist raises no PytestUnknownMarkWarning (the marker is then inert)",
 ]
 # Excluded by default so a bare `pytest` never unexpectedly hangs/fails for

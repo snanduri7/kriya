@@ -16,6 +16,7 @@
 Tests of the precedence rules unset KRIYA_LOG_DIR / KRIYA_STATE_DIR themselves."""
 import functools
 import os
+import shutil
 import sys
 
 import pytest
@@ -25,6 +26,25 @@ from _authority_isolation import (
 
 from kriya.core.logging_setup import ENV_LOG_DIR
 from kriya.core.state_paths import ENV_STATE_DIR
+
+# CERT-TMP-GROWTH-001: pytest's basetemp is a numbered directory every per-test directory is created in. Left in place, a full run piles up ~5 entries per
+# test (47,724 after ~9,700 tests) and kriya.platform.filesystem_semantics.canonical_spelling lists every ancestor of a workspace path in full, so each
+# path-identity call costs O(entries): MEASURED, the same 47 tests took 82 s with an empty basetemp and 269 s with 20,000 entries in it (kernel time 32 s -> 187 s;
+# the 5-hour canonical run's crawl). A test that PASSED therefore leaves nothing behind; a failed one keeps every directory for diagnosis (tmp_path itself
+# follows ``tmp_path_retention_policy = "failed"`` in pyproject.toml).
+_TEST_FAILED = pytest.StashKey[bool]()
+
+
+def _per_test_dir(request, tmp_path_factory, name):
+    """``tmp_path_factory.mktemp(name)``, removed again when the test passed."""
+    path = tmp_path_factory.mktemp(name)
+
+    def _discard():
+        if not request.node.stash.get(_TEST_FAILED, False):
+            shutil.rmtree(path, ignore_errors=True)
+
+    request.addfinalizer(_discard)
+    return path
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -39,17 +59,17 @@ def _isolated_kriya_log_dir(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
-def _isolated_kriya_state_dir(tmp_path_factory, monkeypatch):
+def _isolated_kriya_state_dir(request, tmp_path_factory, monkeypatch):
     from kriya.core import state_paths
 
-    state_dir = tmp_path_factory.mktemp("kriya-state")
+    state_dir = _per_test_dir(request, tmp_path_factory, "kriya-state")
     monkeypatch.setenv(ENV_STATE_DIR, str(state_dir))
     monkeypatch.setattr(state_paths, "historical_default_trace_db",
                         lambda: str(state_dir / "no-historical-install" / "logs" / "traces.db"))
 
 
 @pytest.fixture(autouse=True)
-def _isolated_kriya_authority_home(tmp_path_factory, monkeypatch):
+def _isolated_kriya_authority_home(request, tmp_path_factory, monkeypatch):
     """D2: the Kriya-owned authority home (SEC-009 approvals; the human-decision records) is a per-test temp dir, never the
     real ~/.kriya/authority. Exported through the environment, so CLI/waiter subprocesses a test starts inherit it. A test that
     sets KRIYA_AUTHORITY_HOME itself (or unsets it to test the default) overrides this the ordinary monkeypatch way. The value this
@@ -57,7 +77,7 @@ def _isolated_kriya_authority_home(tmp_path_factory, monkeypatch):
     real home, which the session fixture also watches (read-only) and fails the session over if it changes."""
     from kriya.config.environment import AUTHORITY_HOME
 
-    monkeypatch.setenv(AUTHORITY_HOME, str(tmp_path_factory.mktemp("kriya-authority")))
+    monkeypatch.setenv(AUTHORITY_HOME, str(_per_test_dir(request, tmp_path_factory, "kriya-authority")))
 
 
 @pytest.fixture(autouse=True)
@@ -102,7 +122,7 @@ CHECKOUT_MEMORY_RESOLVING_FILES = frozenset({
 @pytest.fixture(autouse=True)
 def _checkout_memory_isolated(request, tmp_path_factory, monkeypatch):
     if request.path.name in CHECKOUT_MEMORY_RESOLVING_FILES:
-        cwd = tmp_path_factory.mktemp("cwd")
+        cwd = _per_test_dir(request, tmp_path_factory, "cwd")
         (cwd / "memory").mkdir()
         monkeypatch.chdir(cwd)
     yield
@@ -124,10 +144,10 @@ def _no_model_runtime_probe(request, monkeypatch, tmp_path_factory):
         monkeypatch.setattr(execution_environment, "_cached_host_properties", lambda: dict(_TEST_HOST))
         # PRD-014: never read or write the developer's real qualification store.
         monkeypatch.setenv(model_qualification.QUALIFICATION_HOME_ENV,
-                           str(tmp_path_factory.mktemp("kriya-qualifications")))
+                           str(_per_test_dir(request, tmp_path_factory, "kriya-qualifications")))
         # PRD-035/036: never read or write the real certification records or release streaks.
         monkeypatch.setenv(model_certification.CERTIFICATION_HOME_ENV,
-                           str(tmp_path_factory.mktemp("kriya-certifications")))
+                           str(_per_test_dir(request, tmp_path_factory, "kriya-certifications")))
     model_runtime.clear_model_runtime_cache()
     yield
     model_runtime.clear_model_runtime_cache()
@@ -623,17 +643,22 @@ def _audit_skip(item, report):
     unallowlisted one becomes a failure."""
     if not (report.skipped or hasattr(report, "wasxfail")):
         return
-    from _certification import match_skip, skip_reason
+    from _certification import match_skip, platform_satisfied, required_platform, skip_reason
 
     reason = str(getattr(report, "wasxfail", "")) or skip_reason(report.longrepr)
     entry, expired = match_skip(item.config.stash[_ALLOWLIST], item.nodeid, reason)
     allowed = entry is not None and not expired
+    # A skip of a test that is mandatory on ANOTHER platform is PENDING evidence, not an allowed skip: it never counts as a pass (see
+    # tests/_certification.py). On the required platform the same skip is unexpected like any other.
+    required = required_platform(list(item.iter_markers()))
+    pending = required is not None and not platform_satisfied(required)
     item.config.stash[_SKIPS].append({
         "nodeid": item.nodeid, "phase": report.when, "reason": reason,
         "kind": "xfail" if hasattr(report, "wasxfail") else "skip",
         "allowlisted": entry.id if allowed else None, "expired_entry": entry.id if expired else None,
+        "platform_pending": required if pending else None,
     })
-    if _certification_mode(item.config) and not allowed:
+    if _certification_mode(item.config) and not allowed and not pending:
         report.outcome = "failed"
         report.longrepr = (f"UNEXPECTED SKIP in certification mode: {reason}"
                            + (f" (allowlist entry {entry.id} expired)" if expired else ""))
@@ -679,6 +704,8 @@ _CERTIFICATION_PHASES = pytest.StashKey[dict]()
 def pytest_runtest_makereport(item, call):
     outcome = yield
     report = outcome.get_result()
+    if report.failed:
+        item.stash[_TEST_FAILED] = True  # every phase: a setup/teardown error keeps the directories too
     _audit_skip(item, report)  # first: a certification failure is the verdict the chaos report records
     _record_chaos_phase(item, report)
     _record_certification_case(item, report)
@@ -763,19 +790,44 @@ def _containment_census_seam(request, monkeypatch):
 
 
 def pytest_collection_finish(session):
-    """PRD-034: the collected population, as the selection left it (``-m`` has already deselected)."""
+    """PRD-034: the collected population, as the selection left it (``-m`` has already deselected); and the run's progress file."""
     census_path = session.config.getoption("--collection-census")
-    if not census_path:
+    progress_dir = session.config.getoption("--certification-report")
+    if not census_path and not (progress_dir and not session.config.getoption("collectonly")):
         return
-    from _certification_collection import census_record, write_census
+    from _certification_collection import census_record, tiers_of
 
-    write_census(census_path, [census_record(base_nodeid(item), item.iter_markers(), _needs_real_docker(item))
-                               for item in session.items],
-                 selection=session.config.getoption("-m") or "", args=list(session.config.invocation_params.args))
+    records = [census_record(base_nodeid(item), item.iter_markers(), _needs_real_docker(item)) for item in session.items]
+    if census_path:
+        from _certification_collection import write_census
+
+        write_census(census_path, records, selection=session.config.getoption("-m") or "", args=list(session.config.invocation_params.args))
+    if progress_dir and not session.config.getoption("collectonly"):
+        from _certification_progress import ProgressWriter
+
+        os.makedirs(progress_dir, exist_ok=True)
+        tiers = {record["id"]: tiers_of(record) for record in records}
+        _PROGRESS[0] = ProgressWriter(progress_dir, {item.nodeid: tiers.get(base_nodeid(item), ()) for item in session.items})
 
 
-def pytest_sessionfinish(session):
+_PROGRESS: list = [None]  # the run's ProgressWriter (tests/_certification_progress.py), set when --certification-report is given
+
+
+def pytest_runtest_logstart(nodeid, location):  # pylint: disable=unused-argument
+    if _PROGRESS[0] is not None:
+        _PROGRESS[0].start(nodeid)
+
+
+def pytest_runtest_logreport(report):
+    if _PROGRESS[0] is not None:
+        _PROGRESS[0].report(report)
+
+
+def pytest_sessionfinish(session, exitstatus):
     from _strict_doubles import release_default_roots
+
+    if _PROGRESS[0] is not None:
+        _PROGRESS[0].finish(int(exitstatus))
 
     release_default_roots()
     model_dir = session.config.getoption("--model-certification")

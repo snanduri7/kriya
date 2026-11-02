@@ -13,6 +13,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
+import sys
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -85,12 +86,35 @@ def skip_reason(longrepr: Any) -> str:
     return str(longrepr)
 
 
+# --- certification-platform matrix -----------------------------------------------------------------------------------------------
+# ``@pytest.mark.requires_platform("linux")`` declares that a test is MANDATORY evidence of a platform the run may not be on (the Linux-HOST
+# procfs measurement of tests/test_d2_m2_fd_inheritance.py). This is NOT a skip allowlist entry: on the required platform the test must run and PASS
+# (a skip there is an unexpected skip, a failure); on another platform it cannot be satisfied, so it is recorded as PENDING and the certification can
+# never be CERTIFIED while one is pending (INCOMPLETE_PLATFORM_EVIDENCE) - a macOS skip is never a pass. The hosted Linux cell supplies it.
+PLATFORM_MARKER = "requires_platform"
+
+
+def required_platform(markers: Sequence[Any]) -> Optional[str]:
+    """The platform a test is mandatory on (``sys.platform`` prefix, e.g. ``linux``), from its markers; None for an ordinary test."""
+    for marker in markers:
+        if getattr(marker, "name", None) == PLATFORM_MARKER and marker.args:
+            return str(marker.args[0])
+    return None
+
+
+def platform_satisfied(required: Optional[str], platform: Optional[str] = None) -> bool:
+    """Whether a run on ``platform`` (default: this one) can supply the evidence a test requires of ``required``."""
+    return required is None or (platform or sys.platform).startswith(required)
+
+
 def write_skips(directory: str, skips: List[Mapping[str, Any]], certification: bool) -> str:
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, "skips.json")
-    unexpected = [s for s in skips if not s.get("allowlisted")]
-    payload: Dict[str, Any] = {"certification_mode": certification, "skipped": len(skips),
-                               "unexpected": len(unexpected), "skips": sorted(skips, key=lambda s: s["nodeid"])}
+    unexpected = [s for s in skips if not s.get("allowlisted") and not s.get("platform_pending")]
+    pending = [{"nodeid": s["nodeid"], "required_platform": s["platform_pending"], "reason": s["reason"]} for s in skips if s.get("platform_pending")]
+    payload: Dict[str, Any] = {"certification_mode": certification, "skipped": len(skips), "platform": sys.platform,
+                               "unexpected": len(unexpected), "platform_pending": sorted(pending, key=lambda s: s["nodeid"]),
+                               "skips": sorted(skips, key=lambda s: s["nodeid"])}
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, sort_keys=True)
         handle.write("\n")

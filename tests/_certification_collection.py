@@ -20,6 +20,8 @@ import sys
 import xml.etree.ElementTree as ElementTree
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
+from _certification import platform_satisfied, required_platform
+
 CANONICAL_SELECTION = "not live_model"
 DESELECTABLE_TIER = "live_model"  # the ONLY tier the canonical selection may leave out
 TIER_MARKERS = ("live_model", "live_static_analysis", "real_toolchain")
@@ -40,7 +42,7 @@ def census_record(nodeid: str, markers: Iterable[Any], needs_docker: bool) -> Di
     markers = list(markers)  # item.iter_markers() is a generator: both reads below need it
     names = sorted({marker.name for marker in markers})
     reasons = sorted({str(marker.kwargs.get("reason", "")) for marker in markers if marker.name in ("skip", "skipif")} - {""})
-    return {"id": nodeid, "markers": names, "skip_reasons": reasons, "docker": bool(needs_docker)}
+    return {"id": nodeid, "markers": names, "skip_reasons": reasons, "docker": bool(needs_docker), "requires_platform": required_platform(markers)}
 
 
 def tiers_of(record: Mapping[str, Any]) -> List[str]:
@@ -132,12 +134,25 @@ def junit_outcomes(path: str) -> Dict[Any, str]:
 
 
 def executed(selected_census: Mapping[str, Any], outcomes: Mapping[Any, str],
-             floors: Optional[Mapping[str, int]] = None) -> Dict[str, Any]:
-    """Every test of every mandatory tier appears in the run and PASSED (the outcome, not merely the absence of a skip)."""
+             floors: Optional[Mapping[str, int]] = None, platform: Optional[str] = None) -> Dict[str, Any]:
+    """Every test of every mandatory tier appears in the run and PASSED (the outcome, not merely the absence of a skip).
+
+    A test mandatory on ANOTHER platform (``requires_platform``) cannot be satisfied here: whatever it did locally, it is PENDING platform evidence
+    (``platform_pending``), never counted as a pass, and the certification summary cannot be CERTIFIED while one is pending. On the required platform it
+    must have PASSED like any mandatory test."""
     floors = MANDATORY_TIER_FLOORS if floors is None else floors
     per_tier: Dict[str, Dict[str, int]] = {tier: {"passed": 0, "skipped": 0, "failed": 0, "missing": 0} for tier in floors}
     problems: List[str] = []
+    pending: List[Dict[str, str]] = []
     for record in selected_census["tests"]:
+        required = record.get("requires_platform")
+        if required:
+            status = outcomes.get(_junit_key(record["id"]), "missing")
+            if platform_satisfied(required, platform):
+                if status != "passed":
+                    problems.append(f"platform {required}: {record['id']} -> {status}")
+            else:
+                pending.append({"id": record["id"], "required_platform": required, "local_outcome": status})
         for tier in tiers_of(record):
             if tier not in per_tier:
                 continue
@@ -148,7 +163,7 @@ def executed(selected_census: Mapping[str, Any], outcomes: Mapping[Any, str],
     for tier, counts in per_tier.items():
         if counts["passed"] < max(1, floors[tier]):
             problems.append(f"mandatory tier {tier!r}: {counts['passed']} passed < floor {max(1, floors[tier])}")
-    return {"ok": not problems, "problems": problems, "per_tier": per_tier}
+    return {"ok": not problems, "problems": problems, "per_tier": per_tier, "platform_pending": pending}
 
 
 def render_audit(report: Mapping[str, Any]) -> str:
@@ -184,6 +199,7 @@ def main(argv: Sequence[str]) -> int:
         report = executed(_load(argv[2]), junit_outcomes(argv[3]))
         _write(argv[4], report)
         print(f"[tier-execution] {'PASS' if report['ok'] else 'FAIL'}: {json.dumps(report['per_tier'], sort_keys=True)}"
+              + "".join(f"\n  - PLATFORM EVIDENCE PENDING ({item['required_platform']}): {item['id']}" for item in report["platform_pending"])
               + "".join(f"\n  - {problem}" for problem in report["problems"][:20]))
         return 0 if report["ok"] else 1
     print(usage, file=sys.stderr)

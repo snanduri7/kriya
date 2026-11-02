@@ -18,7 +18,8 @@ import sys
 import xml.etree.ElementTree as ElementTree
 from typing import Any, Dict, List, Optional
 
-MANDATORY = ("static", "collection", "pytest", "tier_execution", "images", "scanner", "release")
+# Exit status: 0 CERTIFIED; 1 NOT_CERTIFIED; 3 INCOMPLETE_PLATFORM_EVIDENCE (never a pass).
+MANDATORY = ("static", "collection", "perf_probe", "pytest", "tier_execution", "images", "scanner", "release")
 
 
 def _junit(path: str) -> Optional[Dict[str, int]]:
@@ -76,14 +77,19 @@ def summarize(out: str) -> Dict[str, Any]:
     for tier, data in tiers.items():
         if data["unexpected_skips"]:
             problems.append(f"{tier}: {data['unexpected_skips']} unexpected skip(s)")
+    tier_execution = _json(os.path.join(out, "tier-execution.json")) or {}
+    pending = list(tier_execution.get("platform_pending") or [])  # mandatory on ANOTHER platform: never a pass here
     identity = _json(os.path.join(out, "release-identity.json"))
     kriya = (identity or {}).get("kriya") if isinstance(identity, dict) else None
     if not isinstance(identity, dict) or not identity.get("digest"):
         problems.append("release_identity: not recorded")
     elif not isinstance(kriya, dict) or kriya.get("revision") in (None, "unavailable") or kriya.get("dirty") is not False:
         problems.append("release_identity: Kriya revision not pinned (dirty or unavailable)")
+    # A final CERTIFIED needs every required platform's evidence. Executable evidence all passing while a platform's is still missing is the
+    # distinct INCOMPLETE_PLATFORM_EVIDENCE: not a pass, not a failure of what ran.
+    status = "NOT_CERTIFIED" if problems else ("INCOMPLETE_PLATFORM_EVIDENCE" if pending else "CERTIFIED")
     return {
-        "status": "CERTIFIED" if not problems else "NOT_CERTIFIED", "problems": problems,
+        "status": status, "problems": problems, "platform_pending": pending,
         "stages": stages, "tiers": tiers, "doctor": doctor_summary,
         "environment": _json(os.path.join(out, "environment.json")),
         "collection": _json(os.path.join(out, "collection", "collection-audit.json")),
@@ -96,7 +102,10 @@ def summarize(out: str) -> Dict[str, Any]:
 
 def render(summary: Dict[str, Any]) -> str:
     lines = [f"# Kriya production certification: **{summary['status']}**", ""]
-    lines += [f"- {problem}" for problem in summary["problems"]] or ["- every mandatory stage passed"]
+    lines += [f"- {problem}" for problem in summary["problems"]] or ["- every mandatory stage that is executable here passed"]
+    for item in summary.get("platform_pending") or []:
+        lines.append(f"- REQUIRED {item['required_platform'].upper()}-HOST EVIDENCE - NOT EXERCISED LOCALLY (OPEN until a {item['required_platform']} certification "
+                     f"executes it and it passes): `{item['id']}`")
     lines += ["", "| Stage | Status | Detail |", "|---|---|---|"]
     for name, record in summary["stages"].items():
         lines.append(f"| {name} | {record['status']} | {str(record.get('detail') or '')[:160]} |")
@@ -132,7 +141,7 @@ def main(out: str) -> int:
     with open(os.path.join(out, "certification-summary.md"), "w", encoding="utf-8") as handle:
         handle.write(render(summary))
     print(f"[certify] {summary['status']}" + "".join(f"\n  - {p}" for p in summary["problems"]))
-    return 0 if summary["status"] == "CERTIFIED" else 1
+    return {"CERTIFIED": 0, "INCOMPLETE_PLATFORM_EVIDENCE": 3}.get(summary["status"], 1)  # 3: all executable evidence passed, other-platform evidence open
 
 
 if __name__ == "__main__":
