@@ -25,3 +25,11 @@ killed by the intended tests (expected-artifact check bypassed per ecosystem, re
 Documented limit: a manifest that PARSES but carries no identity stays NOT APPLICABLE for Maven (a well-formed pom without `artifactId`, a skeleton `<project/>`)
 and npm (no `name`); a skeleton pom is used as a marker by ~30 test files, and Maven's own build rejects it. Only an unparseable pom is Maven-indeterminate.
 Also not covered: a `<module>` declared by a pom whose directory/pom is absent (skipped by `_find_pom_files`).
+
+## Final review addendum: parseable-but-incomplete descriptor (pom_boundary_*.json, pom_boundary_scratch.py.txt)
+
+Real engine, Maven compile/test/pom gates patched (a container Maven cache is not the question). Case A (bare pom, nothing recorded): success, empty registry - valid. Case B (M1 records the Maven
+artifact; M2 commits a parseable pom without `artifactId`): PRE-FIX `success`, M2 with 0 records, M1's record stale (`ARTIFACT_DRIFT` only if a consumer validates it later) - silent completion, so P2 was
+not fully closed. Post-fix (`pom_boundary_postfix.json`): B `milestone_failed` at the pre-commit gate, pom byte-identical, M1 record intact, no drift; A unchanged. Also corrected in the same commit: the python
+`[project]`-without-`name` rule (my first P2 commit) made a skeleton pyproject indeterminate and failed `tests/test_workflow_controller_enforce.py::test_enforce_generic_non_maven_shape_permits_a_second_distinct_recovery`;
+parseable-but-identity-less is now "not applicable unless a recorded artifact expects it" for all three ecosystems.

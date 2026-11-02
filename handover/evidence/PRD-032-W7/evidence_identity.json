@@ -1,27 +1,40 @@
 {
-  "purpose": "PRD-032 (Wave 7) deterministic chaos report x2 and live L01-L03: the exact executable and environment the evidence belongs to",
-  "executable_revision": "596e3ec68ef9be9d80dc8a688ba9b59f92669b8d",
-  "tracked_tree": "15477c03d117a9ddb1bccdddb354e3d38b87940d",
-  "kriya_package_tree": "f5aa15a99839a51207b913e660a320e3ea68614a",
-  "tracked_tree_clean_at_run": true,
-  "note": "later commits on this branch change only handover/ evidence; tests/ and kriya/ are byte-identical to the executable revision",
-  "kriya_module": "/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/kriya/__init__.py (editable install)",
-  "python": "3.14.6", "pytest": "9.1.1", "platform": "macOS-27.0.1-arm64", "semgrep": "1.178.0", "docker": "27.5.1",
-  "chaos_report_command": "scripts/chaos_report.sh <dir> scanner  (selection: chaos and not live_model; real Semgrep 1.178.0 for E08)",
-  "chaos_reports": {"run1": "chaos-run1/", "run2": "chaos-run2/"},
-  "chaos_content_digest": "fe5944cf34cd07545473a78b2a016cbe1dcf0f3f0f09d6b6f138f1265663f05d",
-  "chaos_results": "52 passed, 3 NOT_RUN (L01-L03, live tier), 0 failed; both runs identical",
+  "purpose": "PRD-032 (Wave 7): the exact PRODUCT revision and the exact TEST/HARNESS revision behind every piece of evidence, plus the config, runtime and environment identity. Corrected 2026-11-02 after the final review: an earlier version described every live run as bound to executable 596e3ec alone, which was wrong for the second L02 run.",
+  "environment": {
+    "kriya_module": "/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/kriya/__init__.py (editable install)",
+    "python": "3.14.6", "pytest": "9.1.1", "platform": "macOS-27.0.1-arm64", "semgrep": "1.178.0", "docker": "27.5.1"
+  },
+  "revisions": {
+    "596e3ec": {"commit": "596e3ec68ef9be9d80dc8a688ba9b59f92669b8d", "tree": "15477c03d117a9ddb1bccdddb354e3d38b87940d", "kriya_tree": "f5aa15a99839a51207b913e660a320e3ea68614a", "role": "PRODUCT revision of the first PRD-032 deterministic evidence and of ALL live runs (kriya/ is byte-identical to 508cfd6)"},
+    "459f4a3": {"commit": "459f4a3", "kriya_tree": "f5aa15a99839a51207b913e660a320e3ea68614a", "role": "TEST/HARNESS revision of live run 2 (L02): differs from 596e3ec only in tests/test_live_prd032_chaos.py (plausible usage in the injected response); kriya/ unchanged"},
+    "aa85b84": {"commit": "aa85b846522b2769b74d1cbfc25aa38d03a337d0", "tree": "6b77a9d1008912dbf9049bac3632a21623b37b0b", "kriya_tree": "0d4d6c2555052dad72fbdb175955292c2067d296", "role": "FINAL PRD-032 PRODUCT revision (artifact derivation: recorded-artifact expectation; python skeleton [project] narrowed). kriya/ differs from 596e3ec in kriya/control/artifacts.py, kriya/workflow/stage_apply.py, kriya/workflow/development_loop.py only"}
+  },
+  "evidence": {
+    "chaos_report_runs_1_2": {"dirs": ["chaos-run1/", "chaos-run2/"], "product_revision": "596e3ec", "harness_revision": "596e3ec", "content_digest": "fe5944cf34cd07545473a78b2a016cbe1dcf0f3f0f09d6b6f138f1265663f05d", "result": "52 passed, 0 failed, 3 live NOT_RUN", "currentness": "STALE for the final executable (kriya/ changed afterwards); kept as pre-correction evidence"},
+    "chaos_report_runs_3_4": {"dirs": ["chaos-run3/", "chaos-run4/"], "product_revision": "aa85b84", "harness_revision": "aa85b84", "content_digest": "fe5944cf34cd07545473a78b2a016cbe1dcf0f3f0f09d6b6f138f1265663f05d", "result": "52 passed, 0 failed, 3 live NOT_RUN", "currentness": "CURRENT for the final executable; digest identical to runs 1-2 (chaos observations are content-free by design)", "command": "scripts/chaos_report.sh <dir> scanner (selection: chaos and not live_model; real Semgrep 1.178.0 for E08)"},
+    "live_run_1 (L01, L02 first attempt, L03)": {"dir": "live-run1/", "product_revision": "596e3ec (kriya tree f5aa15a9...)", "harness_revision": "828db3d (tests identical to 596e3ec; L02 still carried prompt_tokens=11)", "L01": "PASSED, branch SUCCESS_WITHIN_PLAN", "L03": "PASSED, no_progress", "L02": "FAILED - test-harness defect (fabricated usage), correctly rejected by Kriya as PROVIDER_PROMPT_TRUNCATED; preserved"},
+    "live_run_2 (L02 only)": {"dir": "live-run2-L02/", "product_revision": "596e3ec (kriya tree f5aa15a9...)", "harness_revision": "459f4a3 (L02 usage fixed)", "L02": "PASSED, RECOVERED_AFTER_MALFORMED", "rerun_justification": "a material harness correction occurred after a classified harness defect; not a lucky rerun; L01 and L03 were not rerun"},
+    "live_evidence_currentness_after_aa85b84": "REUSABLE, not rerun. kriya/ changed since the live runs only in artifact derivation, the milestone registry gate and one argument pass-through. L01-L03 run run_generation_workflow directly; development_loop calls run_artifact_registry_gate, which returns before any changed code because milestone_registry_unit(work_unit) is None for a non-milestone unit; derive_from_workspace has no other caller on that path (callers: terminal_gate_service, stage_apply, milestones). Tests changed since the live runs: tests/test_live_prd032_chaos.py (459f4a3, L02 harness) and tests/test_p2_artifact_derivation_indeterminate.py only."
+  },
   "live_identity": {
     "model": "qwen3-coder:30b-kriya-e52213655394", "runtime": "ollama_native", "provider": "ollama",
+    "adapter_protocol": "kriya-ollama-native/3 (kriya/core/model_runtime.py NATIVE_PROTOCOL_ADAPTER_VERSION)",
     "runtime_fingerprint_digest": "7a02e748b2c53a8e02ef3174149a8dc076797e00e1f9d63b0d8fe4974bdbab3c",
     "fingerprint_exact": true, "effective_context_window": 32768,
-    "developer_qualification": "QUALIFIED (verified 2026-11-02 by the live preflight logic, no inference)",
+    "developer_qualification": "QUALIFIED (verified 2026-11-02 by the live preflight logic before inference; re-asserted by every live test's preflight)",
     "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
     "release_config": "~/.kriya/operator/graphify-qwen3coder-native-production.yaml",
     "release_config_sha256": "076e48ac125c8df3a7383c47ba771c03a9cf3a2641f29bd0d368bb5933c83d4e",
-    "qualification_home": "~/kriya-gate-e-2026-11-01/qualification (source ~/kriya-gate-e-2026-11-01/env.sh)"
+    "qualification_home": "~/kriya-gate-e-2026-11-01/qualification (source ~/kriya-gate-e-2026-11-01/env.sh)",
+    "sec009": "no authority approval needed: the live tier reads the release bindings as data and never loads that file through load_config"
+  },
+  "adjacent_suite_run": {
+    "product_revision": "596e3ec", "result": "1336 tests: 1 failed, 1335 passed",
+    "reasoning_for_not_rerunning_all": "The only failure was tests/architecture/test_patch_points.py (my own pin omission). The correction 41eafd4 changed that one test file (4 lines) and no kriya/ file (git diff ecd9d8c..41eafd4 -- kriya is empty); no shared test helper, fixture or conftest changed in it; the architecture subset reran green (175/175). The later test-only commits 596e3ec and 459f4a3 touch only tests/test_live_prd032_chaos.py, which is outside that set. The later PRODUCT change aa85b84 is a different event: the artifact-registry, milestone, terminal-gate and enforce suites that exercise the changed code were rerun on it (see the closure checklist)."
   },
   "historical_evidence_classification": {
-    "handover/evidence/PRD-032/chaos (ae29d0a)": "STALE as acceptance (older lineage, runtime ea90552d on /v1); used only to diff observed outcomes: D09 and E02 now report VERIFIED_CANDIDATE_EVIDENCE_STALE (stricter commit-time binding first), L01-L03 are rerun live below"
+    "handover/evidence/PRD-032/chaos (ae29d0a)": "STALE as acceptance (older lineage, runtime ea90552d on /v1); used only to diff observed outcomes",
+    "p2_prefix_real_engine*.json / pom_boundary_prefix.json": "pre-fix evidence, preserved, never overwritten",
+    "p2_postfix_real_engine.json": "captured at an intermediate P2 revision (before the Maven and Python rules were narrowed); superseded by the committed tests"
   }
 }
