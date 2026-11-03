@@ -15,7 +15,8 @@
 #   collection    collection/deselection audit: the canonical population is exactly `not live_model`, every deselected test is live_model,
 #                 no real_toolchain / live_static_analysis / Docker / JVM / Gradle-container test disappeared (tests/_certification_collection.py)
 #   perf_probe    bounded representative probe (fresh temp root, basetemp not growing, listing a small fraction of time); FAIL blocks pytest
-#   pytest        THE canonical population, literally `pytest -o addopts= -m "not live_model"` in certification mode (an unexpected skip fails)
+#   pytest        THE canonical population `pytest -o addopts= -m "not live_model"` in certification mode (an unexpected skip fails), run as a deterministic static SHARDING of
+#                 the one audited census (scripts/certification_shards.py; CERT_TOPOLOGY=serial runs the single-process reference), merged and audited before any verdict
 #   tier_execution  every test of every mandatory tier appears in the junit file and PASSED; the run's population equals the audited one
 #   images        every digest-pinned image present with exactly its digest (never pulled here)
 #   scanner       Semgrep is exactly 1.178.0 and the live_static_analysis tests of the pytest run passed (no second pytest run)
@@ -78,7 +79,7 @@ export PYTHONDONTWRITEBYTECODE=1  # a real pytest run inside a bound candidate: 
 # of 80 s. Only this directory is removed on exit - never anything of the operator's.
 CERT_TMP="$(mktemp -d /tmp/kriya-cert.XXXXXX)"
 DOCTOR_HOME=""
-cleanup() { [ -n "${MAVEN_SERVER_PID:-}" ] && kill "$MAVEN_SERVER_PID" 2>/dev/null; [ -n "${PIP_SERVER_PID:-}" ] && kill "$PIP_SERVER_PID" 2>/dev/null; rm -rf "$CERT_TMP" ${DOCTOR_HOME:+"$DOCTOR_HOME"}; }
+cleanup() { [ -n "${SHARD_RUN_PID:-}" ] && kill "$SHARD_RUN_PID" 2>/dev/null; [ -n "${MAVEN_SERVER_PID:-}" ] && kill "$MAVEN_SERVER_PID" 2>/dev/null; [ -n "${PIP_SERVER_PID:-}" ] && kill "$PIP_SERVER_PID" 2>/dev/null; rm -rf "$CERT_TMP" ${DOCTOR_HOME:+"$DOCTOR_HOME"}; }
 trap cleanup EXIT
 export TMPDIR="$CERT_TMP"
 
@@ -239,7 +240,8 @@ elif [ "$IMAGES_OK" != "1" ]; then
   stage pytest UNAVAILABLE "the product-built containment images are not provisioned (stage product_images): the run would execute apt-get on a cold host"
 elif [ "$PERF_PROBE_OK" != "1" ]; then
   stage pytest UNAVAILABLE "the performance probe failed (CERT-TMP-GROWTH-001): hours are not spent on a run that can crawl; see perf-probe/perf-probe.json"
-else
+elif [ "${CERT_TOPOLOGY:-sharded}" = "serial" ]; then
+  # the SERIAL reference topology (c3-run4: 4h58m). Same population, one process.
   printf '%s\n' "pytest -o addopts= -m \"not live_model\" -p no:cacheprovider -q --certification --certification-report=$OUT/pytest --collection-census=$OUT/pytest/collection-census.json --junitxml=$OUT/pytest/junit.xml --durations=50" > "$OUT/pytest/command.txt"
   if pytest -o addopts= -m "not live_model" -p no:cacheprovider -q --certification --certification-report="$OUT/pytest" \
       --collection-census="$OUT/pytest/collection-census.json" --junitxml="$OUT/pytest/junit.xml" --durations=50 > "$OUT/pytest.txt" 2>&1; then
@@ -247,6 +249,18 @@ else
   else
     stage pytest FAIL "$(tail -1 "$OUT/pytest.txt")"
   fi
+else
+  # PRD-034 static sharding (scripts/certification_shards.py): ONE authoritative census (stage collection), a deterministic disjoint partition into one EXCLUSIVE shard
+  # (every Docker / JVM / Maven / toolchain / Semgrep test and every measured container user: their leak checks list every kriya container on the daemon) and N ordinary
+  # shards, each its own pytest process with its own TMPDIR, basetemp, progress, junit and census. Ordinary shards see a `docker` that refuses container-mutating
+  # subcommands. NO shard declares PASS: the verdict is derived from the merged junit after the merge audit proved union == census, disjoint, one result per node, tiers equal.
+  "$VENV_BIN/python" scripts/certification_shards.py run "$OUT/collection/selected.json" "$OUT/shards" "$OUT/pytest" --ordinary "${CERT_ORDINARY_SHARDS:-3}" \
+      --exclusive-files tests/certification/shard_exclusive_files.json --timings tests/certification/shard_timings.json --tmp-root "$CERT_TMP" > "$OUT/pytest-run.txt" 2>&1 &
+  SHARD_RUN_PID=$!
+  wait "$SHARD_RUN_PID"; run_status=$?
+  SHARD_RUN_PID=""
+  if [ "$run_status" = "0" ]; then stage pytest PASS "$(tail -1 "$OUT/pytest.txt")"
+  else stage pytest FAIL "$( [ -f "$OUT/pytest.txt" ] && tail -1 "$OUT/pytest.txt" || tail -2 "$OUT/pytest-run.txt" | tr '\n' ' ')"; fi
 fi
 
 # --- what the canonical run actually fetched: only manifest bytes, no tamper refusal, nothing outside the frozen set that mattered ---------------------------------

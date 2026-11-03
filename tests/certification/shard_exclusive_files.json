@@ -1,0 +1,8 @@
+{
+ "files": {
+  "tests/test_prd032_chaos_commit.py": "32 containers created in the docker-excluded ordinary run (docker events, c3-run4 decomposition)",
+  "tests/test_rdcg_item1b_replay_containment.py": "2 containers (docker events, c3-run4 decomposition)",
+  "tests/test_runtime_maven_acquisition.py": "17 containers when run alone; 1 of its 16 tests carries the docker skip reason"
+ },
+ "version": 1
+}

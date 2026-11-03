@@ -274,9 +274,17 @@ class _Log:
         except (OSError, ValueError, TypeError):
             return None
 
+    def _shard(self) -> Optional[str]:
+        """The shard that owns ``current`` (a sharded run's progress file names it; a serial run's has none)."""
+        try:
+            with open(self._progress, "r", encoding="utf-8") as handle:  # type: ignore[arg-type]
+                return json.load(handle).get("current_shard")
+        except (OSError, ValueError, TypeError):
+            return None
+
     def write(self, record: Mapping[str, Any]) -> None:
         if self._path:
-            extra = {"node": self._node()} if self._progress else {}
+            extra = {"node": self._node(), "shard": self._shard()} if self._progress else {}
             with self._lock, open(self._path, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps({"t": round(time.time(), 3), **extra, **record}, sort_keys=True) + "\n")
 

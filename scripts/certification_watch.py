@@ -61,6 +61,28 @@ def _count(command) -> "int | None":
     return len([line for line in result.stdout.splitlines() if line.strip()]) if result.returncode == 0 else None
 
 
+def _shard_health(pytest_dir: str, now: float, previous: dict):
+    """Per-shard health for a sharded run: each shard's own progress file is judged by the same `assess` (its own process, throughput, node age, CPU split), so one
+    stalled or kernel-bound shard is not averaged away by the others. -> (flags prefixed with the shard id, a compact 'id done/total' text)."""
+    flags, parts = [], []
+    root = os.path.join(pytest_dir, "shards")
+    for name in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+        snapshot = read_progress(os.path.join(root, name))
+        if snapshot is None:
+            continue
+        pid = int(snapshot["pid"])
+        alive = _alive(pid)
+        sample = _cpu_seconds(pid) if alive else None
+        window = {k: max(0.0, sample[k] - previous[name][k]) for k in sample} if sample and previous.get(name) else None
+        previous[name] = sample or previous.get(name)
+        children = _count(["pgrep", "-P", str(pid)])
+        flags += [{"flag": item["flag"], "detail": f"[{name}] {item['detail']}"}
+                  for item in assess(snapshot, now=now, cpu=window, process_alive=alive, docker_containers=_count(["docker", "ps", "-q"]) if name == "exclusive" else None,
+                                     child_processes=children)]
+        parts.append(f"{name} {snapshot['done']:,}/{snapshot['total']:,}{' done' if snapshot.get('finished') else ''}")
+    return flags, ", ".join(parts)
+
+
 def main(argv) -> int:
     args = [a for a in argv[1:] if not a.startswith("--")]
     if len(args) != 1:
@@ -74,7 +96,7 @@ def main(argv) -> int:
         if arg == "--step-percent":
             step = float(argv[index + 1])
     pytest_dir = os.path.join(out, "pytest")
-    previous_cpu, last_percent_step, last_flags = None, -1, ()
+    previous_cpu, last_percent_step, last_flags, shard_cpu = None, -1, (), {}
     while True:
         snapshot = read_progress(pytest_dir)
         now = time.time()
@@ -91,8 +113,14 @@ def main(argv) -> int:
             previous_cpu = sample or previous_cpu
             containers = _count(["docker", "ps", "-q"])
             children = _count(["pgrep", "-P", str(pid)])
-            flags = assess(snapshot, now=now, cpu=window, process_alive=alive, docker_containers=containers, child_processes=children)
-            line = render_line(snapshot, now=now, flags=flags, cpu=window, docker_containers=containers)
+            if snapshot.get("shards"):  # sharded run: the aggregator's pid and sums are shown; health is judged per shard
+                flags, shard_text = _shard_health(pytest_dir, now, shard_cpu)
+                if not alive and not snapshot.get("finished"):
+                    flags.append({"flag": "PROCESS_GONE", "detail": "the progress aggregator exited without finishing"})
+                line = render_line(snapshot, now=now, flags=flags, cpu=window, docker_containers=containers) + f" | SHARDS: {shard_text}"
+            else:
+                flags = assess(snapshot, now=now, cpu=window, process_alive=alive, docker_containers=containers, child_processes=children)
+                line = render_line(snapshot, now=now, flags=flags, cpu=window, docker_containers=containers)
             with open(os.path.join(out, "health.json"), "w", encoding="utf-8") as handle:
                 json.dump({"at": now, "snapshot": snapshot, "flags": flags, "cpu_window": window, "docker_containers": containers,
                            "pytest_children": children}, handle, indent=1, sort_keys=True)

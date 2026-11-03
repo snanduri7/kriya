@@ -181,15 +181,16 @@ class _Log:
     def write(self, record: Mapping[str, object]) -> None:
         if not self._path:
             return
-        node = None
+        node = shard = None
         if self._progress:
             try:
                 with open(self._progress, "r", encoding="utf-8") as handle:
-                    node = json.load(handle).get("current")
+                    document = json.load(handle)
+                    node, shard = document.get("current"), document.get("current_shard")
             except (OSError, ValueError):
-                node = None
+                node = shard = None
         with open(self._path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps({"t": round(time.time(), 3), "node": node, **record}, sort_keys=True) + "\n")
+            handle.write(json.dumps({"t": round(time.time(), 3), "node": node, "shard": shard, **record}, sort_keys=True) + "\n")
 
 
 def _make_handler(hashed: Mapping[str, Tuple[str, Set[str]]], wheelhouse: str, log: _Log):
