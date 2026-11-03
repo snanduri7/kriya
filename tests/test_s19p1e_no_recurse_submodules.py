@@ -29,8 +29,8 @@ INERT = "[user]\n\tname = s19p1e\n\temail = s19p1e@local\n[protocol \"file\"]\n\
 
 
 @pytest.fixture(autouse=True)
-def _isolated_git(tmp_path_factory, monkeypatch) -> Path:
-    home = tmp_path_factory.mktemp("s19p1e-git-home")
+def _isolated_git(scratch_dir, monkeypatch) -> Path:
+    home = scratch_dir("s19p1e-git-home")
     config = home / ".gitconfig"
     config.write_text(INERT)
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))

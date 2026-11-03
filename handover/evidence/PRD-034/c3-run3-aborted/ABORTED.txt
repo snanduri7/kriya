@@ -1,0 +1,7 @@
+C3 RUN 3 - STOPPED BY THE OPERATOR SESSION at 4,062/19,757 (20.6%), 0 failures, 0 errors, 1 skip (the Linux-only platform-pending test). NOT CERTIFIED. HEAD 621624f.
+Reason (MEASURED + TRACED, not a test failure): the run's pytest basetemp grew without bound - 1,748 entries after 4,047 tests (0.43 per completed test): 1,549 DANGLING
+'<name>current' symlinks (pytest make_numbered_dir creates one per distinct tmp-dir name; the passed-test release removes the numbered directory but not the symlink) and
+185 unreleased directories (s19e-home x112, cwd x60: plain mktemp fixtures). Extrapolated ~8.5k entries at the end of the run. Per the owner-accepted A/B of 2026-11-02 a
+20k-entry basetemp made the same 47 engine tests 3.4x slower (canonical_spelling lists every ancestor directory), so the run was heading for a measurable slowdown and
+violated the bounded-basetemp invariant CERT-TMP-GROWTH-001 exists to enforce. The run was still healthy and capable of certifying; it was stopped because any later fix would
+change the certified tree and force a rerun anyway. Snapshot: basetemp-snapshot-at-abort.txt. Passed past the c3-run2 abort point (the progress-writer fix held).

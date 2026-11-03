@@ -1,0 +1,4 @@
+snapshot 2026-11-03T01:52:43Z run3 basetemp=/tmp/kriya-cert.kbftkm/pytest-of-sriramnanduri/pytest-0
+{'dir': 185, 'dangling-symlink': 1549, 'file': 1, 'live-symlink': 13} total 1748
+dirs by prefix: [('s19e-homeN', 112), ('cwdN', 60), ('buildN', 2), ('outsideN', 1), ('kriya-authority-sessionN', 1), ('workspaceN', 1), ('worktreeN', 1), ('kriya-certificationsN', 1)]
+run TMPDIR entries:      203

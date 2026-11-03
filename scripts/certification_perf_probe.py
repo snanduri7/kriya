@@ -13,7 +13,7 @@ INVARIANTS, not a wall-clock budget (the suite's legitimate nodes range from mil
   1. every probe test passed;
   2. the temp root it runs in started essentially empty (a polluted ambient temp area is exactly what crawled) and the tests leave (almost)
      nothing in it: a test that leaks a scratch directory per run re-creates that pollution (tests/_milestone_proof_harness.py did, ~2 per run);
-  3. pytest's basetemp does not GROW while tests pass (entries after the last test <= entries after the first few + SLACK);
+  3. pytest's basetemp does not GROW while tests pass (entries after the last test <= entries after the first few + a fixed slack + a small per-test slope);
   4. the time spent listing directories is a small fraction of the wall time.
 
 A violation means the crawl can recur: certification stays blocked. It also records tests, elapsed, tests/s, user/system CPU, the slowest nodes and
@@ -32,7 +32,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROBE_FILES = {"engine": ["tests/test_prd008_s4c_milestone_resume.py"], "ordinary": ["tests/test_agents.py"]}
 TMP_ROOT_MAX_ENTRIES = 50  # the temp root a certification runs in must start (nearly) empty
 TMP_ROOT_GROWTH_MAX = 10  # entries a probe class may leave behind in the temp root
-BASETEMP_GROWTH_SLACK = 25  # entries
+BASETEMP_FIXED_SLACK = 8  # entries: a few fixtures live for the whole session
+BASETEMP_PER_TEST_SLACK = 0.05  # entries per passing test: c3-run3 leaked 0.43 per test and passed a flat 25-entry allowance on a 47-test sample
 LISTING_FRACTION_MAX = 0.15
 
 
@@ -51,8 +52,9 @@ def evaluate(metrics: Mapping[str, Any], first_class: bool = True) -> Tuple[bool
     if len(samples) >= 20:
         early = max(entries for _, entries in samples[:10])
         last = samples[-1][1]
-        if last > early + BASETEMP_GROWTH_SLACK:
-            problems.append(f"pytest's basetemp grew from {early} to {last} entries over {samples[-1][0]} passing tests: per-test directories are not being released")
+        allowed = early + BASETEMP_FIXED_SLACK + BASETEMP_PER_TEST_SLACK * samples[-1][0]
+        if last > allowed:
+            problems.append(f"pytest's basetemp grew from {early} to {last} entries over {samples[-1][0]} passing tests (allowed {allowed:.0f}): per-test directories or their links are not being released")
     if metrics["wall_s"] > 0 and metrics["listing_s"] / metrics["wall_s"] > LISTING_FRACTION_MAX:
         problems.append(f"{100 * metrics['listing_s'] / metrics['wall_s']:.0f}% of the wall time is directory listing (> {100 * LISTING_FRACTION_MAX:.0f}%), "
                         f"worst: {metrics['listing_worst_path']} with {metrics['listing_max_entries']} entries")
@@ -133,7 +135,7 @@ def main(argv: List[str]) -> int:
                  "if_all_at_the_slowest_probe_class_hours": round(total / min(rates.values()) / 3600, 1),
                  "note": "an order-of-magnitude BOUND between the measured classes, not a forecast; the watchdog (scripts/certification_watch.py) judges the run against its own throughput"}
     report = {"ok": not problems, "problems": problems, "classes": classes, "full_run_bound": bound, "invariants": {
-        "tmp_root_max_entries": TMP_ROOT_MAX_ENTRIES, "tmp_root_growth_max": TMP_ROOT_GROWTH_MAX, "basetemp_growth_slack": BASETEMP_GROWTH_SLACK, "listing_fraction_max": LISTING_FRACTION_MAX}}
+        "tmp_root_max_entries": TMP_ROOT_MAX_ENTRIES, "tmp_root_growth_max": TMP_ROOT_GROWTH_MAX, "basetemp_fixed_slack": BASETEMP_FIXED_SLACK, "basetemp_per_test_slack": BASETEMP_PER_TEST_SLACK, "listing_fraction_max": LISTING_FRACTION_MAX}}
     with open(os.path.join(out, "perf-probe.json"), "w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2, sort_keys=True)
         handle.write("\n")

@@ -47,8 +47,8 @@ STALE = ('[filter "media"]\n\tclean = git media clean %f\n\tsmudge = git media s
 
 
 @pytest.fixture(autouse=True)
-def _isolated_git(tmp_path_factory, monkeypatch):
-    home = tmp_path_factory.mktemp("s19p1d-git-home")
+def _isolated_git(scratch_dir, monkeypatch):
+    home = scratch_dir("s19p1d-git-home")
     config = home / ".gitconfig"                     # HOME/.gitconfig: the Open Folder probe reads this one too
     # The S19 Q1 commit identity: the golden predictor (GOLDEN) binds commit ids made with it.
     config.write_text("[user]\n\tname = s19q1\n\temail = s19q1@local\n" + STALE)

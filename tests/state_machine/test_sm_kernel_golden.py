@@ -417,21 +417,21 @@ def _opened_build() -> dict:
     return {key: payload["kriya_build"][key] for key in ("python", "version", "build_provenance", "commit", "tree", "dirty")}
 
 
-def test_the_goldens_hold_in_another_build_environment(tmp_path, tmp_path_factory, monkeypatch):
+def test_the_goldens_hold_in_another_build_environment(tmp_path, scratch_dir, monkeypatch):
     """OI-43: on another interpreter version, installed version and embedded build the scenario still records the golden
     environment (kg.GOLDEN_PYTHON / GOLDEN_KRIYA_VERSION, no embedded build) and reproduces its golden byte for byte."""
-    _another_build_environment(monkeypatch, tmp_path_factory.mktemp("build"))
+    _another_build_environment(monkeypatch, scratch_dir("build"))
     form = _form(INSTALL_SCENARIO, tmp_path)
     assert _opened_build() == {"python": kg.GOLDEN_PYTHON, "version": kg.GOLDEN_KRIYA_VERSION,
                                "build_provenance": "unavailable", "commit": "UNKNOWN", "tree": "UNKNOWN", "dirty": None}
     assert form == _golden(INSTALL_SCENARIO)
 
 
-def test_without_the_harness_environment_the_golden_follows_the_machine(tmp_path, tmp_path_factory, monkeypatch):
+def test_without_the_harness_environment_the_golden_follows_the_machine(tmp_path, scratch_dir, monkeypatch):
     """OI-43 negative control: with the harness's environment removed, the same machine's identity reaches run.opened
     and breaks the golden."""
     monkeypatch.setattr(kg, "golden_build_environment", contextlib.nullcontext)
-    _another_build_environment(monkeypatch, tmp_path_factory.mktemp("build"))
+    _another_build_environment(monkeypatch, scratch_dir("build"))
     form = _form(INSTALL_SCENARIO, tmp_path)
     assert _opened_build() == {"python": "3.14.7", "version": "9.9.9", "build_provenance": "embedded",
                                "commit": "a" * 40, "tree": "b" * 40, "dirty": False}

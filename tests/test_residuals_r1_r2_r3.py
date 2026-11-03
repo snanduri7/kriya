@@ -127,9 +127,9 @@ class TestPerfDependency001VenvCache:
         assert mock_run.call_count == 1
         assert validator.venv_install_attempts == 1
 
-    def test_separate_workspaces_do_not_share_cache_state(self, tmp_path_factory):
-        ws_a = tmp_path_factory.mktemp("ws_a")
-        ws_b = tmp_path_factory.mktemp("ws_b")
+    def test_separate_workspaces_do_not_share_cache_state(self, scratch_dir):
+        ws_a = scratch_dir("ws_a")
+        ws_b = scratch_dir("ws_b")
         for ws in (ws_a, ws_b):
             (ws / "requirements.txt").write_text("requests==2.31.0\n", encoding="utf-8")
         validator_a = hold_dependency_scope(PolymorphicValidator(str(ws_a)))

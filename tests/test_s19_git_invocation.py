@@ -27,8 +27,8 @@ from tests._plugin_test_support import load_core_tools_module
 
 
 @pytest.fixture(autouse=True)
-def _isolated_git(tmp_path_factory, monkeypatch):
-    home = tmp_path_factory.mktemp("s19-git-home")
+def _isolated_git(scratch_dir, monkeypatch):
+    home = scratch_dir("s19-git-home")
     config = home / "gitconfig"
     config.write_text("[user]\n\tname = s19\n\temail = s19@local\n")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))

@@ -1,0 +1,18 @@
+{"stage": "environment", "status": "RECORDED", "detail": "{  \"docker_client\": \"27.5.1\",  \"docker_server\": \"27.5.1\",  \"git\": \"git version 2.54.0\",  \"git_revision\": \"621624ff309e3f452eb3bcad92d7b4c7d060a296\",  \"gradle\": null,  \"java\": \"openjdk version \\\"17.0.1"}
+{"stage": "release_identity", "status": "RECORDED", "detail": "86251cf0625a2ea53703d9f5c189156b214a942f7926ba399db61fb3e54afd8d"}
+{"stage": "static", "status": "PASS", "detail": ""}
+{"stage": "maven_repository", "status": "PASS", "detail": "content digest c557384d52b7d3f196b3a79c3477a0441068717117dfd4560948d417bd25dec3 served on 127.0.0.1:52190"}
+{"stage": "python_wheelhouse", "status": "PASS", "detail": "{\"hashed_requirements_sha256\": \"b4583335692ccfa8aa19e9387f8c8beb186f83745e1057654195e13eb710fd58\", \"wheelhouse_files\": \"70\", \"wheelhouse_sha256\": \"749cb00672adb9eabe100b9439a651b74443b2c3c9895269074d5d45bcdc5aa4\"} index on 127.0.0.1:52193"}
+{"stage": "product_images", "status": "PASS", "detail": "11 lines; ids recorded (provision: scripts/provision_containment_images.py build)"}
+{"stage": "collection", "status": "PASS", "detail": "[collection-audit] PASS: 19757 selected / 45 deselected"}
+{"stage": "perf_probe", "status": "PASS", "detail": "3 classes; see perf-probe/perf-probe.json"}
+{"stage": "pytest", "status": "FAIL", "detail": "AttributeError: 'NoneType' object has no attribute 'get'"}
+{"stage": "maven_served", "status": "PASS", "detail": "29628 requests, 1625 distinct files, 0 bytes-differ refusals; statuses {'200': 29585, '404': 43}"}
+{"stage": "python_served", "status": "PASS", "detail": "22 requests, 6 distinct files, 0 bytes-differ refusals; statuses {'200': 22}"}
+{"stage": "images_unchanged", "status": "PASS", "detail": "no product image was built or rebuilt during the run"}
+{"stage": "tier_execution", "status": "FAIL", "detail": "population identical: yes; [tier-execution] FAIL: {\"docker\": {\"failed\": 0, \"missing\": 164, \"passed\": 121, \"skipped\": 0}, \"gradle_container\": {\"failed\": 0, \"missing\": 4, \"passed\": 1, \"skipped\": 0}, \"jvm\": {\"failed\": 0, \"missing\": 17, \"passed\": 71, \"skipped\": 0}, \"live_static_analysis\": {\"failed\": 0, \"missing\": 11, \"passed\": 0, \"skipped\": 0}, \"real_toolchain\": {\"failed\": 0, \"missing\": 0, \"passed\": 5, \"skipped\": 0}}   - PLATFORM EVIDENCE PENDING (linux): tests/test_d2_m2_fd_inheritance.py::test_linux_a_child_cannot_reopen_the_waiters_socket_through_proc "}
+{"stage": "scanner", "status": "FAIL", "detail": "live_static_analysis tier did not fully pass in the canonical run (see tier-execution.json)"}
+{"stage": "images", "status": "PASS", "detail": "[pinned-images] 10 present, 0 missing"}
+{"stage": "release", "status": "PASS", "detail": ""}
+{"stage": "thresholds", "status": "RECORDED", "detail": "[thresholds] RECORDED 0955d5b610a10c4f"}
+{"stage": "doctor", "status": "RECORDED", "detail": "production doctor JSON archived (mode: operator_config)"}

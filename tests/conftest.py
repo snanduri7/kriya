@@ -48,14 +48,46 @@ def _per_test_dir(request, tmp_path_factory, name):
     return path
 
 
+@pytest.fixture
+def scratch_dir(request, tmp_path_factory):
+    """``scratch_dir("name")``: a fresh directory under the basetemp that is removed again when the test PASSED - for a test that needs a second directory next to
+    ``tmp_path`` (a fake HOME, an outside directory, another workspace). ``tmp_path_factory.mktemp`` directly is for module/session-scoped fixtures only
+    (tests/test_cert_tmp_growth_001.py pins the allowlist): a function-scoped one is never released, and 1,000+ of them were the residual growth of c3-run3."""
+    return lambda name: _per_test_dir(request, tmp_path_factory, name)
+
+
+def _release_dead_symlinks(directory):
+    """pytest's ``make_numbered_dir`` leaves a ``<name>current`` symlink per tmp directory and only removes the dangling ones at SESSION end (_pytest.pathlib.cleanup_dead_symlinks),
+    so a released directory's link stays in the basetemp for the whole run: 1,549 of them after 4,047 tests in c3-run3 (MEASURED)."""
+    try:
+        entries = list(os.scandir(directory))
+    except OSError:
+        return
+    for entry in entries:
+        if entry.is_symlink() and not os.path.exists(entry.path):
+            try:
+                os.unlink(entry.path)
+            except OSError:
+                pass
+
+
+_RELEASE_AFTER_PASS: list = []  # directories a fixture created WITHOUT a request of its own (tests/test_checkout_memory_isolation.py drives one with a bare namespace)
+
+
 @pytest.fixture(autouse=True)
-def _release_tmp_path_siblings(request):
+def _release_tmp_path_siblings(request, tmp_path_factory):
     """A test that writes files NEXT TO its ``tmp_path`` under ``tmp_path.name + '-...'`` (tests/test_d1_tool_crash.py's effects log, test_prd005's outside files, the kernel golden's cwd)
     must not leave them behind once its tmp_path is released: pytest reuses a released number, so the NEXT parametrization of the same test would be handed the stale sibling
     (MEASURED: test_d1_tool_crash's append-mode log then read EFFECT_BEGIN twice). A failed test keeps them for diagnosis."""
     yield
+    registered, _RELEASE_AFTER_PASS[:] = list(_RELEASE_AFTER_PASS), []
     tmp_path = request.node.funcargs.get("tmp_path") if hasattr(request.node, "funcargs") else None
-    if tmp_path is None or request.node.stash.get(_TEST_FAILED, False):
+    if request.node.stash.get(_TEST_FAILED, False):
+        return                                                   # a failed test keeps every directory for diagnosis
+    for path in registered:
+        _release_tree(path, ignore_errors=True)
+    _release_dead_symlinks(str(tmp_path_factory.getbasetemp()))
+    if tmp_path is None:
         return
     parent, prefix = os.path.dirname(str(tmp_path)), os.path.basename(str(tmp_path)) + "-"
     try:
@@ -190,7 +222,8 @@ def _certification_maven_mirror(monkeypatch):
 @pytest.fixture(autouse=True)
 def _checkout_memory_isolated(request, tmp_path_factory, monkeypatch):
     if request.path.name in CHECKOUT_MEMORY_RESOLVING_FILES:
-        cwd = tmp_path_factory.mktemp("cwd")  # not released: tests/test_checkout_memory_isolation.py drives this fixture with a bare namespace request
+        cwd = tmp_path_factory.mktemp("cwd")
+        _RELEASE_AFTER_PASS.append(cwd)  # released by _release_tmp_path_siblings: tests/test_checkout_memory_isolation.py drives this fixture with a bare namespace request, so no addfinalizer
         (cwd / "memory").mkdir()
         monkeypatch.chdir(cwd)
     yield

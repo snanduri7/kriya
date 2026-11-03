@@ -279,11 +279,11 @@ def test_proposal_verified_in_same_repo_passes(tmp_path):
     assert verify_proposal_bindings(proposal, str(tmp_path)).ok is True
 
 
-def test_same_files_different_workspace_root_rejected(tmp_path, tmp_path_factory):
+def test_same_files_different_workspace_root_rejected(tmp_path, scratch_dir):
     _write_target(str(tmp_path))
     proposal = _built_proposal(str(tmp_path))
 
-    other_root = tmp_path_factory.mktemp("other_workspace")
+    other_root = scratch_dir("other_workspace")
     other_abs = os.path.join(str(other_root), RELPATH)
     os.makedirs(os.path.dirname(other_abs), exist_ok=True)
     shutil.copy(os.path.join(str(tmp_path), RELPATH), other_abs)

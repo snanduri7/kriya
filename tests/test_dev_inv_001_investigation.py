@@ -569,8 +569,8 @@ class TestResolvers:
         assert text.startswith("ERROR:")
 
     @pytest.mark.asyncio
-    async def test_out_of_workspace_read_denied(self, tmp_path, tmp_path_factory):
-        outside = tmp_path_factory.mktemp("outside")
+    async def test_out_of_workspace_read_denied(self, tmp_path, scratch_dir):
+        outside = scratch_dir("outside")
         (outside / "secret.py").write_text("SECRET = 1\n", encoding="utf-8")
         deps = _deps(tmp_path)
         # An absolute path escaping the workspace root entirely.
@@ -1238,9 +1238,9 @@ class TestModelDeclaredSufficiencyCannotBypassD1:
 
 class TestCurrentWorktreeAuthority:
     @pytest.mark.asyncio
-    async def test_worktree_content_wins_over_stale_workspace_copy(self, tmp_path_factory):
-        workspace = tmp_path_factory.mktemp("workspace")
-        worktree = tmp_path_factory.mktemp("worktree")
+    async def test_worktree_content_wins_over_stale_workspace_copy(self, scratch_dir):
+        workspace = scratch_dir("workspace")
+        worktree = scratch_dir("worktree")
         (workspace / "a.py").write_text("class Foo:\n    def bar(self):\n        return 1  # old\n", encoding="utf-8")
         (worktree / "a.py").write_text("class Foo:\n    def bar(self):\n        return 2  # new\n", encoding="utf-8")
         deps = InvestigationDependencies(

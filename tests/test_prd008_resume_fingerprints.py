@@ -517,9 +517,9 @@ async def test_workflow_does_not_resume_a_legacy_checkpoint_without_fingerprints
 
 
 @pytest.mark.asyncio
-async def test_workflow_does_not_resume_after_a_skill_changed(git_repo, tmp_path_factory):
+async def test_workflow_does_not_resume_after_a_skill_changed(git_repo, scratch_dir):
     cfg = _config()
-    skills = tmp_path_factory.mktemp("skills")
+    skills = scratch_dir("skills")
     (skills / "demo").mkdir()
     (skills / "demo" / "rules.txt").write_text("before\n")
     cfg.paths.skills = str(skills)

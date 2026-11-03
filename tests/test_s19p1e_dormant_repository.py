@@ -47,8 +47,8 @@ UNINSPECTABLE = "GIT_CONFIG_UNINSPECTABLE"
 
 
 @pytest.fixture(autouse=True)
-def _isolated_git(tmp_path_factory, monkeypatch) -> Path:
-    home = tmp_path_factory.mktemp("s19p1e-git-home")
+def _isolated_git(scratch_dir, monkeypatch) -> Path:
+    home = scratch_dir("s19p1e-git-home")
     config = home / ".gitconfig"
     config.write_text("[user]\n\tname = s19q1\n\temail = s19q1@local\n")       # inert: no operator filter at all
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))

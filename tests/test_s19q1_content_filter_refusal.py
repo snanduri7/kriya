@@ -29,8 +29,8 @@ IN_REPOSITORY = "GIT_CONTENT_FILTER_ORIGIN_IN_REPOSITORY"
 
 
 @pytest.fixture(autouse=True)
-def _isolated_git(tmp_path_factory, monkeypatch):
-    home = tmp_path_factory.mktemp("s19q1-git-home")
+def _isolated_git(scratch_dir, monkeypatch):
+    home = scratch_dir("s19q1-git-home")
     config = home / "gitconfig"
     config.write_text("[user]\n\tname = s19q1\n\temail = s19q1@local\n")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))

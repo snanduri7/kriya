@@ -56,7 +56,7 @@ def _sample_run(tmp_path, sample, *args, certification=True):
 def test_a_passed_test_leaves_no_per_test_directory_and_a_failed_one_keeps_them_all(tmp_path):
     (tmp_path / "t").mkdir()
     completed, _, _ = _sample_run(tmp_path, "sample_tmp_retention.py", certification=False)
-    assert completed.returncode == 1 and "1 failed, 1 passed" in completed.stdout, completed.stdout[-1500:]
+    assert completed.returncode == 1 and "2 failed, 3 passed" in completed.stdout, completed.stdout[-1500:]
     bases = sorted((tmp_path / "t").glob("pytest-of-*/pytest-[0-9]*"))
     assert len(bases) == 1, "the failed test keeps the base temp directory"
     # ``mktemp`` numbers each directory and keeps one ``<name>current`` symlink per prefix; only the numbered directories are per-test state
@@ -64,7 +64,7 @@ def test_a_passed_test_leaves_no_per_test_directory_and_a_failed_one_keeps_them_
     # the failed test's tmp_path and its isolation directories are all kept for diagnosis ...
     assert [n for n in names if n.startswith("test_fails")] == ["test_fails0"], names
     for prefix in ("kriya-state", "kriya-authority", "kriya-qualifications", "kriya-certifications"):
-        assert len([n for n in names if re.fullmatch(prefix + r"\d+", n)]) == 1, (prefix, names)
+        assert len([n for n in names if re.fullmatch(prefix + r"\d+", n)]) == 2, (prefix, names)  # one per FAILED test; the three passing ones released theirs
     # ... and the passed test left NOTHING (no tmp_path, no isolation directory of its own, and not the sibling file named after its tmp_path: pytest REUSES a released number,
     # so the next parametrization of the same test would be handed the stale sibling - MEASURED with tests/test_d1_tool_crash.py's append-mode effects log)
     assert not any(n.startswith("test_passes") for n in names), names
@@ -399,3 +399,47 @@ def test_a_manifest_that_was_not_attested_cannot_certify():
     manifest = tool.load_manifest(str(ROOT / "tests" / "certification" / "maven_repository.manifest.json"))
     unattested = [i for i in manifest["files"] if i["kind"] in ("artifact", "pom") and not i["provenance"].get("verified_against")]
     assert bool(manifest.get("attested")) == (not unattested), "the manifest's attested flag is exactly 'every artifact and pom was compared with Central's published SHA-1'"
+
+
+# --- c3-run3: the residual growth (dead '<name>current' links + function-scoped mktemp directories) ----------------------------------------
+
+def test_the_probe_flags_the_c3_run3_shape_a_slow_steady_basetemp_slope_a_flat_25_entry_allowance_used_to_swallow():
+    probe = _load_script("certification_perf_probe")
+    run3 = {**HEALTHY, "basetemp_samples": [[i, 12 + int(0.5 * i)] for i in range(1, 48)]}   # 12 -> 35 over 47 tests, MEASURED in the engine probe class
+    ok, problems = probe.evaluate(run3)
+    assert not ok and any("basetemp grew from" in p and "not being released" in p for p in problems), problems
+    assert probe.evaluate({**HEALTHY, "basetemp_samples": [[i, 9] for i in range(1, 48)]}) == (True, [])
+    assert probe.evaluate({**HEALTHY, "basetemp_samples": [[i, 9 + (3 if i > 30 else 0)] for i in range(1, 48)]})[0], "a few long-lived fixtures are allowed"
+
+
+def test_only_module_and_session_scoped_fixtures_call_mktemp_directly_everything_function_scoped_uses_scratch_dir():
+    """A function-scoped ``tmp_path_factory.mktemp`` is never released (c3-run3: 185 directories after 4,047 tests). The remaining direct callers outlive a test on purpose."""
+    root = Path(__file__).resolve().parent
+    callers = sorted(f"{path.relative_to(root)}:{line.split('.mktemp(')[1].split(')')[0]}"
+                     for path in root.rglob("*.py") for line in path.read_text(encoding="utf-8").splitlines()
+                     if ".mktemp(" in line and "tmp_path_factory" in line and "``" not in line and not line.lstrip().startswith("#") and path.name != "test_cert_tmp_growth_001.py")
+    assert callers == sorted([
+        '_authority_isolation.py:"kriya-authority-session"',                       # session-scoped
+        'conftest.py:"kriya-logs"',                                                # session-scoped
+        'conftest.py:"cwd"',                                                       # released through _RELEASE_AFTER_PASS
+        'conftest.py:name',                                                        # _per_test_dir: released on pass
+        'test_greenfield_direct_plan_runtime.py:"direct"',                         # module-scoped approved_run
+        'test_prd034_python_wheels.py:"venv"',                                     # module-scoped fresh_venv
+    ]), callers
+
+
+def test_a_real_session_over_the_formerly_leaking_fixtures_keeps_the_basetemp_flat(tmp_path):
+    """The original c3-run3 symptom in a real pytest session: the ``cwd`` fixture (driven with a bare namespace by test_checkout_memory_isolation) and an autouse home fixture used to add ~1 entry per test."""
+    root = Path(__file__).resolve().parent.parent
+    probe_out = tmp_path / "probe.json"
+    scratch_tmp = tmp_path / "t"
+    scratch_tmp.mkdir()
+    env = dict(os.environ, TMPDIR=str(scratch_tmp), PERF_PROBE_OUT=str(probe_out), PYTHONPATH=os.pathsep.join([str(root / "tests"), os.environ.get("PYTHONPATH", "")]))
+    done = subprocess.run([sys.executable, "-m", "pytest", "-o", "addopts=", "-p", "no:cacheprovider", "-p", "_perf_probe_plugin", "-q",
+                           "tests/test_checkout_memory_isolation.py", "tests/test_taf4_snapshot_fallback.py"],
+                          cwd=root, capture_output=True, text=True, timeout=600, env=env, check=False)
+    assert done.returncode == 0, done.stdout[-1500:] + done.stderr[-1500:]
+    samples = json.loads(probe_out.read_text())["basetemp_samples"]
+    assert len(samples) >= 40, "enough tests to see a slope"
+    early, last = max(entries for _, entries in samples[:10]), samples[-1][1]
+    assert last <= early + 8, f"basetemp grew from {early} to {last} over {samples[-1][0]} passing tests: {samples[-3:]}"

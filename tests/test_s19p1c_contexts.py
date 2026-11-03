@@ -26,8 +26,8 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(autouse=True)
-def _isolated_git(tmp_path_factory, monkeypatch):
-    home = tmp_path_factory.mktemp("s19p1c-ctx-home")
+def _isolated_git(scratch_dir, monkeypatch):
+    home = scratch_dir("s19p1c-ctx-home")
     config = home / "gitconfig"
     config.write_text("[user]\n\tname = s19p1c\n\temail = s19p1c@local\n")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))

@@ -23,8 +23,8 @@ from kriya.workflow import worktree
 
 
 @pytest.fixture(autouse=True)
-def _isolated_git(tmp_path_factory, monkeypatch):
-    home = tmp_path_factory.mktemp("taf4-home")
+def _isolated_git(scratch_dir, monkeypatch):
+    home = scratch_dir("taf4-home")
     (home / ".gitconfig").write_text("[user]\n\tname = taf4\n\temail = taf4@local\n")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(home / ".gitconfig"))
