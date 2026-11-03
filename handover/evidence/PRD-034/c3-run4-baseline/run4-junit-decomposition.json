@@ -1,0 +1,389 @@
+{
+ "tests": 19760,
+ "sum_test_time_s": 17617.0,
+ "pytest_wall_s": 17695.14,
+ "unattributed_s": 78.1,
+ "by_tier": {
+  "ordinary": {
+   "tests": 19455,
+   "seconds": 11828.2,
+   "pct_of_wall": 66.8
+  },
+  "jvm": {
+   "tests": 83,
+   "seconds": 3829.3,
+   "pct_of_wall": 21.6
+  },
+  "docker": {
+   "tests": 201,
+   "seconds": 1626.3,
+   "pct_of_wall": 9.2
+  },
+  "real_toolchain": {
+   "tests": 5,
+   "seconds": 185.4,
+   "pct_of_wall": 1.0
+  },
+  "gradle_container": {
+   "tests": 5,
+   "seconds": 94.6,
+   "pct_of_wall": 0.5
+  },
+  "live_static_analysis": {
+   "tests": 11,
+   "seconds": 53.3,
+   "pct_of_wall": 0.3
+  }
+ },
+ "top25_files": [
+  {
+   "file": "tests/test_b2c_jvm_acceptance.py",
+   "tests": 53,
+   "seconds": 1716.0,
+   "tiers": [
+    "jvm"
+   ]
+  },
+  {
+   "file": "tests/test_workflow.py",
+   "tests": 871,
+   "seconds": 1011.4,
+   "tiers": [
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_d3_runtime_prerequisite.py",
+   "tests": 8,
+   "seconds": 871.6,
+   "tiers": [
+    "jvm"
+   ]
+  },
+  {
+   "file": "tests/test_demo_v2_spring_ignite.py",
+   "tests": 34,
+   "seconds": 528.2,
+   "tiers": [
+    "jvm",
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_lr_r1_m1_equivalence_scenarios.py",
+   "tests": 9,
+   "seconds": 447.2,
+   "tiers": [
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_outcome.py",
+   "tests": 87,
+   "seconds": 352.1,
+   "tiers": [
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/state_machine/test_sm_kernel_golden.py",
+   "tests": 62,
+   "seconds": 329.0,
+   "tiers": [
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_runtime_verification.py",
+   "tests": 157,
+   "seconds": 322.4,
+   "tiers": [
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_lr_r1_m1_t6_fixes.py",
+   "tests": 37,
+   "seconds": 320.3,
+   "tiers": [
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_oi142_gate_view_oci.py",
+   "tests": 21,
+   "seconds": 300.8,
+   "tiers": [
+    "docker"
+   ]
+  },
+  {
+   "file": "tests/test_r3_dependency_cache_poisoning.py",
+   "tests": 3,
+   "seconds": 275.8,
+   "tiers": [
+    "docker",
+    "gradle_container"
+   ]
+  },
+  {
+   "file": "tests/test_midrun_workspace_mutations.py",
+   "tests": 50,
+   "seconds": 255.5,
+   "tiers": [
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_live_lookup_review_outcomes.py",
+   "tests": 34,
+   "seconds": 230.2,
+   "tiers": [
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_e14_pre_characterization.py",
+   "tests": 41,
+   "seconds": 207.4,
+   "tiers": [
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_greenfield_runtime_end_to_end.py",
+   "tests": 7,
+   "seconds": 193.1,
+   "tiers": [
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_backend_readiness_004_java_examples.py",
+   "tests": 4,
+   "seconds": 180.9,
+   "tiers": [
+    "jvm",
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_direct_plan_real_maven.py",
+   "tests": 3,
+   "seconds": 171.5,
+   "tiers": [
+    "real_toolchain"
+   ]
+  },
+  {
+   "file": "tests/state_machine/test_sm_reserved_fallback.py",
+   "tests": 5,
+   "seconds": 154.2,
+   "tiers": [
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_s18d_read_view_and_enforce_prompt.py",
+   "tests": 79,
+   "seconds": 153.9,
+   "tiers": [
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_greenfield_direct_plan_runtime.py",
+   "tests": 45,
+   "seconds": 153.3,
+   "tiers": [
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_direct_closer_failure_truth.py",
+   "tests": 56,
+   "seconds": 151.3,
+   "tiers": [
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_b2a_acceptance_oracle.py",
+   "tests": 81,
+   "seconds": 150.0,
+   "tiers": [
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_workflow_controller_enforce.py",
+   "tests": 276,
+   "seconds": 144.7,
+   "tiers": [
+    "ordinary"
+   ]
+  },
+  {
+   "file": "tests/test_r3_runtime_dependency_layer.py",
+   "tests": 3,
+   "seconds": 144.6,
+   "tiers": [
+    "docker",
+    "gradle_container"
+   ]
+  },
+  {
+   "file": "tests/test_b3_human_acceptance.py",
+   "tests": 47,
+   "seconds": 142.1,
+   "tiers": [
+    "jvm",
+    "ordinary"
+   ]
+  }
+ ],
+ "top25_tests": [
+  {
+   "test": "tests/test_demo_v2_spring_ignite.py::test_every_cache_get_mutant_of_the_reference_is_killed_and_the_control_passes",
+   "seconds": 477.5,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_d3_runtime_prerequisite.py::test_a_validator_built_before_the_pom_existed_still_rebuilds",
+   "seconds": 182.8,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_d3_runtime_prerequisite.py::test_stale_classes_from_an_earlier_source_revision_never_reach_runtime_verification",
+   "seconds": 155.7,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_b2c_jvm_acceptance.py::test_j6_13_an_expected_identity_that_did_not_execute_is_not_a_pass",
+   "seconds": 155.0,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_d3_runtime_prerequisite.py::test_a_verification_only_work_unit_runs_the_current_application",
+   "seconds": 144.6,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_direct_plan_real_maven.py::test_real_jdk_and_maven_build_test_and_run_the_reviewed_candidate_in_order",
+   "seconds": 138.3,
+   "tier": "real_toolchain"
+  },
+  {
+   "test": "tests/test_b2c_jvm_acceptance.py::test_23_direct_path[wrong-violated]",
+   "seconds": 130.3,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_b2c_jvm_acceptance.py::test_24_enforce_terminal_path[throws-violated]",
+   "seconds": 127.3,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_d3_runtime_prerequisite.py::test_runtime_verification_rebuilds_the_current_source_after_the_work_unit_reset[target-ignored]",
+   "seconds": 115.4,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_r3_runtime_dependency_layer.py::test_a_runtime_session_fills_its_own_fresh_layer_and_runs_offline",
+   "seconds": 111.5,
+   "tier": "docker"
+  },
+  {
+   "test": "tests/test_r3_dependency_cache_poisoning.py::test_a_later_authority_bundle_run_never_consumes_dependency_bytes_an_earlier_candidate_wrote",
+   "seconds": 110.0,
+   "tier": "docker"
+  },
+  {
+   "test": "tests/test_r3_dependency_cache_poisoning.py::test_a_later_maven_gate_never_consumes_dependency_bytes_an_earlier_candidate_wrote",
+   "seconds": 107.7,
+   "tier": "docker"
+  },
+  {
+   "test": "tests/test_d3_runtime_prerequisite.py::test_the_prerequisite_build_is_bounded_by_the_runs_root_deadline",
+   "seconds": 107.1,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_b2c_jvm_acceptance.py::test_4_evidence_for_another_candidate_never_closes_this_one",
+   "seconds": 100.8,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_d3_runtime_prerequisite.py::test_a_prerequisite_build_failure_stops_before_anything_runs",
+   "seconds": 100.7,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_b2c_jvm_acceptance.py::test_15_malformed_missing_or_inconsistent_evidence_cannot_close[<lambda>4]",
+   "seconds": 90.7,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_b2c_jvm_acceptance.py::test_15_malformed_missing_or_inconsistent_evidence_cannot_close[<lambda>0]",
+   "seconds": 90.6,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_backend_readiness_004_java_examples.py::test_03_the_derived_class_compiles_and_judges_a_real_maven_candidate[wrong-ACCEPTANCE_VIOLATED]",
+   "seconds": 90.3,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_b2c_jvm_acceptance.py::test_j2_j3_9_10_a_wrong_result_or_a_candidate_exception_is_violated[wrong]",
+   "seconds": 90.1,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_b2c_jvm_acceptance.py::test_an_assertion_in_a_class_that_never_references_candidate_code_is_not_a_violation",
+   "seconds": 89.9,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_backend_readiness_004_java_examples.py::test_03_the_derived_class_compiles_and_judges_a_real_maven_candidate[correct-ACCEPTANCE_PASSED]",
+   "seconds": 89.5,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_b2c_jvm_acceptance.py::test_19_a_model_satisfied_verdict_never_replaces_missing_jvm_evidence",
+   "seconds": 88.2,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_execution_copy_creator_provenance.py::test_real_oci_the_contract_feedback_runner_passes_and_violates_under_explicit_containment",
+   "seconds": 86.3,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_backend_readiness_v2_contract_feedback.py::test_real_runner_pass_and_violation_through_build_contract_feedback",
+   "seconds": 84.1,
+   "tier": "jvm"
+  },
+  {
+   "test": "tests/test_b2c_jvm_acceptance.py::test_an_exception_only_in_the_acceptance_code_is_not_a_violation",
+   "seconds": 83.7,
+   "tier": "jvm"
+  }
+ ],
+ "files_total": 793,
+ "files_for_80pct_of_test_time": 99,
+ "tests_over_30s": {
+  "count": 68,
+  "seconds": 5206.8
+ },
+ "tests_under_1s": {
+  "count": 17199,
+  "seconds": 1108.8
+ },
+ "ordinary_percentiles_s": {
+  "50": 0.005,
+  "75": 0.108,
+  "90": 1.282,
+  "95": 3.625,
+  "99": 9.541
+ }
+}

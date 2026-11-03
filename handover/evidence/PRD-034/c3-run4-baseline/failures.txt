@@ -1,0 +1,10 @@
+tests.test_kup_project_context test_a_path_too_long_for_the_filesystem_is_a_typed_refusal_not_a_crash_and_leaves_nothing failure
+OSError: [Errno 63] File name too long: '/private/tmp/kriya-cert.icY47B/pytest-of-sriramnanduri/pytest-0/test_a_path_too_long_for_the_f0/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+
+tests.test_linux_oci_workspace_identity test_a_private_workspace_compiles_and_its_outputs_belong_to_the_host_owner failure
+AssertionError: Hello.class
+assert (501, 0) == (501, 20)
+  
+  At index 1 diff: 0 != 20
+  Use -v to get more diff
+

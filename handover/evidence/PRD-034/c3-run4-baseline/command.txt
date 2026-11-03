@@ -1,0 +1,1 @@
+pytest -o addopts= -m "not live_model" -p no:cacheprovider -q --certification --certification-report=/Users/sriramnanduri/kriya-cert-2026-11-02/c3-run4/pytest --collection-census=/Users/sriramnanduri/kriya-cert-2026-11-02/c3-run4/pytest/collection-census.json --junitxml=/Users/sriramnanduri/kriya-cert-2026-11-02/c3-run4/pytest/junit.xml --durations=50

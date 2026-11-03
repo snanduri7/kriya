@@ -1,0 +1,285 @@
+1793693855 container create festive_raman sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693856 container attach festive_raman sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693856 network connect bridge <no value>
+1793693856 container start festive_raman sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693856 network disconnect bridge <no value>
+1793693856 container die festive_raman sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693856 container destroy festive_raman sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693856 container create kriya-oci-44a20f390e00 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693856 container attach kriya-oci-44a20f390e00 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693856 network connect none <no value>
+1793693856 container start kriya-oci-44a20f390e00 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693857 network disconnect none <no value>
+1793693857 container die kriya-oci-44a20f390e00 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693857 container destroy kriya-oci-44a20f390e00 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693858 container create kriya-oci-2ddcb99ec62e sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693858 container attach kriya-oci-2ddcb99ec62e sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693858 network connect none <no value>
+1793693858 container start kriya-oci-2ddcb99ec62e sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693859 container create sharp_jackson sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693859 container attach sharp_jackson sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693859 network connect bridge <no value>
+1793693859 container start sharp_jackson sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693859 network disconnect bridge <no value>
+1793693859 container die sharp_jackson sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693859 container destroy sharp_jackson sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693859 container create kriya-oci-c1e831e25243 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693859 container attach kriya-oci-c1e831e25243 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693859 network connect none <no value>
+1793693860 container start kriya-oci-c1e831e25243 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693860 network disconnect none <no value>
+1793693860 container die kriya-oci-c1e831e25243 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693860 container destroy kriya-oci-c1e831e25243 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693861 container create kriya-oci-e3915e7c681a sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693861 container attach kriya-oci-e3915e7c681a sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693861 network connect none <no value>
+1793693861 container start kriya-oci-e3915e7c681a sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693862 container create beautiful_mclaren sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693862 container attach beautiful_mclaren sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693862 network connect bridge <no value>
+1793693862 container start beautiful_mclaren sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693862 network disconnect bridge <no value>
+1793693862 container die beautiful_mclaren sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693862 container destroy beautiful_mclaren sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693862 container create kriya-oci-e72cd91f8e9c sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693862 container attach kriya-oci-e72cd91f8e9c sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693862 network connect none <no value>
+1793693863 container start kriya-oci-e72cd91f8e9c sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693863 network disconnect none <no value>
+1793693863 container die kriya-oci-e72cd91f8e9c sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693863 container destroy kriya-oci-e72cd91f8e9c sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693864 container create kriya-oci-8ef28d3941f8 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693864 container attach kriya-oci-8ef28d3941f8 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693864 network connect none <no value>
+1793693864 container start kriya-oci-8ef28d3941f8 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693865 network disconnect none <no value>
+1793693865 container die kriya-oci-2ddcb99ec62e sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693865 container destroy kriya-oci-2ddcb99ec62e sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693865 container create angry_hertz sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693865 container attach angry_hertz sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693866 network connect bridge <no value>
+1793693866 container start angry_hertz sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693866 network disconnect bridge <no value>
+1793693866 container die angry_hertz sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693866 container destroy angry_hertz sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693866 container create pedantic_northcutt kriya-acq-tools--python-3.12-slim:1
+1793693866 container attach pedantic_northcutt kriya-acq-tools--python-3.12-slim:1
+1793693866 network connect bridge <no value>
+1793693866 container start pedantic_northcutt kriya-acq-tools--python-3.12-slim:1
+1793693866 network disconnect bridge <no value>
+1793693866 container die pedantic_northcutt kriya-acq-tools--python-3.12-slim:1
+1793693866 container destroy pedantic_northcutt kriya-acq-tools--python-3.12-slim:1
+1793693867 network create kriya-acq-net-dc7d7c691ac2 <no value>
+1793693867 container create kriya-acq-proxy-dc7d7c691ac2 kriya-acq-proxy-base:1
+1793693867 network connect kriya-acq-net-dc7d7c691ac2 <no value>
+1793693867 container start kriya-acq-proxy-dc7d7c691ac2 kriya-acq-proxy-base:1
+1793693867 container exec_create: nc -z -w1 localhost 3128 kriya-acq-proxy-dc7d7c691ac2 kriya-acq-proxy-base:1
+1793693867 container exec_start: nc -z -w1 localhost 3128 kriya-acq-proxy-dc7d7c691ac2 kriya-acq-proxy-base:1
+1793693867 container exec_die kriya-acq-proxy-dc7d7c691ac2 kriya-acq-proxy-base:1
+1793693868 container create kriya-oci-dc7d7c691ac2 sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693868 container attach kriya-oci-dc7d7c691ac2 sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693868 network connect kriya-acq-net-dc7d7c691ac2 <no value>
+1793693868 container start kriya-oci-dc7d7c691ac2 sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693868 network disconnect none <no value>
+1793693868 container die kriya-oci-e3915e7c681a sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693868 container destroy kriya-oci-e3915e7c681a sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693869 container create determined_jepsen sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693869 container attach determined_jepsen sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693869 network connect bridge <no value>
+1793693869 container start determined_jepsen sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693869 network disconnect bridge <no value>
+1793693869 container die determined_jepsen sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693869 container destroy determined_jepsen sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693869 container create funny_sanderson kriya-acq-tools--python-3.12-slim:1
+1793693869 container attach funny_sanderson kriya-acq-tools--python-3.12-slim:1
+1793693869 network connect bridge <no value>
+1793693870 container start funny_sanderson kriya-acq-tools--python-3.12-slim:1
+1793693870 network disconnect bridge <no value>
+1793693870 container die funny_sanderson kriya-acq-tools--python-3.12-slim:1
+1793693870 container destroy funny_sanderson kriya-acq-tools--python-3.12-slim:1
+1793693870 network create kriya-acq-net-e3a8d856778d <no value>
+1793693870 container create kriya-acq-proxy-e3a8d856778d kriya-acq-proxy-base:1
+1793693870 network connect kriya-acq-net-e3a8d856778d <no value>
+1793693870 network disconnect none <no value>
+1793693870 container die kriya-oci-8ef28d3941f8 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693870 container destroy kriya-oci-8ef28d3941f8 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693871 container start kriya-acq-proxy-e3a8d856778d kriya-acq-proxy-base:1
+1793693871 container exec_create: nc -z -w1 localhost 3128 kriya-acq-proxy-e3a8d856778d kriya-acq-proxy-base:1
+1793693871 container exec_start: nc -z -w1 localhost 3128 kriya-acq-proxy-e3a8d856778d kriya-acq-proxy-base:1
+1793693871 container exec_die kriya-acq-proxy-e3a8d856778d kriya-acq-proxy-base:1
+1793693871 container create kriya-oci-e3a8d856778d sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693871 container attach kriya-oci-e3a8d856778d sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693871 container create nervous_clarke sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693871 container attach nervous_clarke sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693871 network connect kriya-acq-net-e3a8d856778d <no value>
+1793693871 network connect bridge <no value>
+1793693872 container start nervous_clarke sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693872 container start kriya-oci-e3a8d856778d sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693872 network disconnect bridge <no value>
+1793693872 container die nervous_clarke sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693872 container destroy nervous_clarke sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693872 container create zen_kirch kriya-acq-tools--python-3.12-slim:1
+1793693872 container attach zen_kirch kriya-acq-tools--python-3.12-slim:1
+1793693872 network connect bridge <no value>
+1793693872 container start zen_kirch kriya-acq-tools--python-3.12-slim:1
+1793693872 network disconnect bridge <no value>
+1793693872 container die zen_kirch kriya-acq-tools--python-3.12-slim:1
+1793693872 container destroy zen_kirch kriya-acq-tools--python-3.12-slim:1
+1793693873 network create kriya-acq-net-5130f170f75e <no value>
+1793693873 container create kriya-acq-proxy-5130f170f75e kriya-acq-proxy-base:1
+1793693873 network connect kriya-acq-net-5130f170f75e <no value>
+1793693873 container start kriya-acq-proxy-5130f170f75e kriya-acq-proxy-base:1
+1793693873 container exec_create: nc -z -w1 localhost 3128 kriya-acq-proxy-5130f170f75e kriya-acq-proxy-base:1
+1793693873 container exec_start: nc -z -w1 localhost 3128 kriya-acq-proxy-5130f170f75e kriya-acq-proxy-base:1
+1793693873 container exec_die kriya-acq-proxy-5130f170f75e kriya-acq-proxy-base:1
+1793693873 container create kriya-oci-5130f170f75e sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693873 container attach kriya-oci-5130f170f75e sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693874 network connect kriya-acq-net-5130f170f75e <no value>
+1793693874 container start kriya-oci-5130f170f75e sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693876 network disconnect kriya-acq-net-dc7d7c691ac2 <no value>
+1793693876 container die kriya-oci-dc7d7c691ac2 sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693876 container destroy kriya-oci-dc7d7c691ac2 sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693877 container exec_create: cat /var/log/squid/access.log kriya-acq-proxy-dc7d7c691ac2 kriya-acq-proxy-base:1
+1793693877 container exec_start: cat /var/log/squid/access.log kriya-acq-proxy-dc7d7c691ac2 kriya-acq-proxy-base:1
+1793693877 container exec_die kriya-acq-proxy-dc7d7c691ac2 kriya-acq-proxy-base:1
+1793693877 container kill kriya-acq-proxy-dc7d7c691ac2 kriya-acq-proxy-base:1
+1793693877 network disconnect kriya-acq-net-dc7d7c691ac2 <no value>
+1793693877 container die kriya-acq-proxy-dc7d7c691ac2 kriya-acq-proxy-base:1
+1793693877 container destroy kriya-acq-proxy-dc7d7c691ac2 kriya-acq-proxy-base:1
+1793693878 network destroy kriya-acq-net-dc7d7c691ac2 <no value>
+1793693878 container create kriya-oci-f978e9d4d7d5 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693878 container attach kriya-oci-f978e9d4d7d5 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693878 network connect none <no value>
+1793693878 container start kriya-oci-f978e9d4d7d5 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693879 network disconnect none <no value>
+1793693879 container die kriya-oci-f978e9d4d7d5 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693879 container destroy kriya-oci-f978e9d4d7d5 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693881 network disconnect kriya-acq-net-e3a8d856778d <no value>
+1793693881 container die kriya-oci-e3a8d856778d sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693881 container destroy kriya-oci-e3a8d856778d sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693881 container exec_create: cat /var/log/squid/access.log kriya-acq-proxy-e3a8d856778d kriya-acq-proxy-base:1
+1793693881 container exec_start: cat /var/log/squid/access.log kriya-acq-proxy-e3a8d856778d kriya-acq-proxy-base:1
+1793693881 container exec_die kriya-acq-proxy-e3a8d856778d kriya-acq-proxy-base:1
+1793693882 container kill kriya-acq-proxy-e3a8d856778d kriya-acq-proxy-base:1
+1793693882 network disconnect kriya-acq-net-e3a8d856778d <no value>
+1793693882 container die kriya-acq-proxy-e3a8d856778d kriya-acq-proxy-base:1
+1793693882 container destroy kriya-acq-proxy-e3a8d856778d kriya-acq-proxy-base:1
+1793693882 network destroy kriya-acq-net-e3a8d856778d <no value>
+1793693883 container create kriya-oci-e0783cba1500 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693883 container attach kriya-oci-e0783cba1500 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693883 network connect none <no value>
+1793693883 container start kriya-oci-e0783cba1500 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693883 network disconnect kriya-acq-net-5130f170f75e <no value>
+1793693883 container die kriya-oci-5130f170f75e sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693883 container destroy kriya-oci-5130f170f75e sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693884 container exec_create: cat /var/log/squid/access.log kriya-acq-proxy-5130f170f75e kriya-acq-proxy-base:1
+1793693884 container exec_start: cat /var/log/squid/access.log kriya-acq-proxy-5130f170f75e kriya-acq-proxy-base:1
+1793693884 network disconnect none <no value>
+1793693884 container die kriya-oci-e0783cba1500 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693884 container exec_die kriya-acq-proxy-5130f170f75e kriya-acq-proxy-base:1
+1793693884 container destroy kriya-oci-e0783cba1500 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693884 container kill kriya-acq-proxy-5130f170f75e kriya-acq-proxy-base:1
+1793693884 network disconnect kriya-acq-net-5130f170f75e <no value>
+1793693884 container die kriya-acq-proxy-5130f170f75e kriya-acq-proxy-base:1
+1793693884 container destroy kriya-acq-proxy-5130f170f75e kriya-acq-proxy-base:1
+1793693885 network destroy kriya-acq-net-5130f170f75e <no value>
+1793693885 container create kriya-oci-35b64bfbf5ed sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693885 container attach kriya-oci-35b64bfbf5ed sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693885 network connect none <no value>
+1793693885 container start kriya-oci-35b64bfbf5ed sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693886 container create goofy_perlman sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693886 container attach goofy_perlman sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693886 network connect bridge <no value>
+1793693886 container start goofy_perlman sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693886 network disconnect bridge <no value>
+1793693886 container die goofy_perlman sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693886 container destroy goofy_perlman sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693886 container create kriya-oci-7765f1d7cc10 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693886 container attach kriya-oci-7765f1d7cc10 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693887 network connect none <no value>
+1793693887 network disconnect none <no value>
+1793693887 container die kriya-oci-35b64bfbf5ed sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693887 container destroy kriya-oci-35b64bfbf5ed sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693887 container start kriya-oci-7765f1d7cc10 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693887 network disconnect none <no value>
+1793693887 container die kriya-oci-7765f1d7cc10 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693887 container destroy kriya-oci-7765f1d7cc10 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693888 container create kriya-oci-dd908058c0ef sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693888 container attach kriya-oci-dd908058c0ef sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693888 network connect none <no value>
+1793693888 container start kriya-oci-dd908058c0ef sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693893 network disconnect none <no value>
+1793693893 container die kriya-oci-dd908058c0ef sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693893 container destroy kriya-oci-dd908058c0ef sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693894 container create sad_tharp sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693894 container attach sad_tharp sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693894 network connect bridge <no value>
+1793693895 container start sad_tharp sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693895 network disconnect bridge <no value>
+1793693895 container die sad_tharp sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693895 container destroy sad_tharp sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693895 container create inspiring_pascal kriya-acq-tools--python-3.12-slim:1
+1793693895 container attach inspiring_pascal kriya-acq-tools--python-3.12-slim:1
+1793693895 network connect bridge <no value>
+1793693895 container start inspiring_pascal kriya-acq-tools--python-3.12-slim:1
+1793693895 network disconnect bridge <no value>
+1793693895 container die inspiring_pascal kriya-acq-tools--python-3.12-slim:1
+1793693895 container destroy inspiring_pascal kriya-acq-tools--python-3.12-slim:1
+1793693896 network create kriya-acq-net-f600d891546d <no value>
+1793693896 container create kriya-acq-proxy-f600d891546d kriya-acq-proxy-base:1
+1793693896 network connect kriya-acq-net-f600d891546d <no value>
+1793693896 container start kriya-acq-proxy-f600d891546d kriya-acq-proxy-base:1
+1793693896 container exec_create: nc -z -w1 localhost 3128 kriya-acq-proxy-f600d891546d kriya-acq-proxy-base:1
+1793693896 container exec_start: nc -z -w1 localhost 3128 kriya-acq-proxy-f600d891546d kriya-acq-proxy-base:1
+1793693896 container exec_die kriya-acq-proxy-f600d891546d kriya-acq-proxy-base:1
+1793693897 container create kriya-oci-f600d891546d sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693897 container attach kriya-oci-f600d891546d sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693897 network connect kriya-acq-net-f600d891546d <no value>
+1793693897 container start kriya-oci-f600d891546d sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693905 network disconnect kriya-acq-net-f600d891546d <no value>
+1793693905 container die kriya-oci-f600d891546d sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693905 container destroy kriya-oci-f600d891546d sha256:ed9a415e0752c9bf9b4721dc851aa380c6ce8f3704e335f032359dfca4fd62c0
+1793693905 container exec_create: cat /var/log/squid/access.log kriya-acq-proxy-f600d891546d kriya-acq-proxy-base:1
+1793693905 container exec_start: cat /var/log/squid/access.log kriya-acq-proxy-f600d891546d kriya-acq-proxy-base:1
+1793693905 container exec_die kriya-acq-proxy-f600d891546d kriya-acq-proxy-base:1
+1793693905 container kill kriya-acq-proxy-f600d891546d kriya-acq-proxy-base:1
+1793693906 network disconnect kriya-acq-net-f600d891546d <no value>
+1793693906 container die kriya-acq-proxy-f600d891546d kriya-acq-proxy-base:1
+1793693906 container destroy kriya-acq-proxy-f600d891546d kriya-acq-proxy-base:1
+1793693906 network destroy kriya-acq-net-f600d891546d <no value>
+1793693907 container create kriya-oci-8d94e21e6bf0 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693907 container attach kriya-oci-8d94e21e6bf0 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693907 network connect none <no value>
+1793693907 container start kriya-oci-8d94e21e6bf0 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693908 network disconnect none <no value>
+1793693908 container die kriya-oci-8d94e21e6bf0 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693908 container destroy kriya-oci-8d94e21e6bf0 sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793693990 container create kriya-oci-5ca506051420 python:3.12-slim
+1793693990 container create kriya-oci-f8b211a13f1d python:3.12-slim
+1793693990 container attach kriya-oci-5ca506051420 python:3.12-slim
+1793693990 container attach kriya-oci-f8b211a13f1d python:3.12-slim
+1793693990 network connect none <no value>
+1793693990 network connect none <no value>
+1793693991 container start kriya-oci-5ca506051420 python:3.12-slim
+1793693991 container start kriya-oci-f8b211a13f1d python:3.12-slim
+1793693991 network disconnect none <no value>
+1793693991 network disconnect none <no value>
+1793693991 container die kriya-oci-5ca506051420 python:3.12-slim
+1793693991 container die kriya-oci-f8b211a13f1d python:3.12-slim
+1793693991 container destroy kriya-oci-5ca506051420 python:3.12-slim
+1793693991 container destroy kriya-oci-f8b211a13f1d python:3.12-slim
+1793694042 container create tender_sanderson sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793694042 container attach tender_sanderson sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793694042 network connect bridge <no value>
+1793694042 container start tender_sanderson sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793694042 network disconnect bridge <no value>
+1793694042 container die tender_sanderson sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793694042 container destroy tender_sanderson sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793694042 container create kriya-oci-2ecf1d49ea5c sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793694043 container attach kriya-oci-2ecf1d49ea5c sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793694043 network connect none <no value>
+1793694043 container start kriya-oci-2ecf1d49ea5c sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793694043 network disconnect none <no value>
+1793694043 container die kriya-oci-2ecf1d49ea5c sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+1793694043 container destroy kriya-oci-2ecf1d49ea5c sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786
+context canceled
