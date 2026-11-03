@@ -5,6 +5,7 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 
 import _authority_isolation as isolation
 import pytest
@@ -138,7 +139,7 @@ def test_a_stalled_inner_session_is_a_self_diagnosing_failure_and_leaves_no_proc
     """The failure path of the harness itself: a session that does not finish in its cap fails with the process snapshot and the partial output, and its group is gone."""
     real = tmp_path / "pretend-real-home"
     real.mkdir()
-    grandchild = f"kriya-inner-grandchild-{tmp_path.name}"
+    grandchild = f"kriya-inner-grandchild-{uuid.uuid4().hex}"  # unique per invocation: ``pgrep -f`` below must never match another pytest session's identically named tmp_path (3 concurrent copies did)
     body = ("import subprocess, sys, time\n\n\ndef test_stalls():\n    print('INNER-STARTED', flush=True)\n"
             f"    subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)', {grandchild!r}])  # a grandchild that outlives a kill of only the inner pytest, its argv names it\n"
             "    time.sleep(120)\n")

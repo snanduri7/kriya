@@ -26,9 +26,19 @@ WINDOWS = {
 }
 
 
+def _child_env(tmp_path):
+    """The crash child dies with os._exit, so its own scratch (strict_config's default root) is never released: point its TMPDIR at a SIBLING of the test's tmp_path, which the
+    conftest releases with it (CERT-TMP-GROWTH-001: 10 ``kriya-strict-config-*`` directories left in the run's temp root)."""
+    scratch = tmp_path.parent / f"{tmp_path.name}-child-tmp"
+    scratch.mkdir(exist_ok=True)
+    return {**os.environ, "TMPDIR": str(scratch)}
+
+
+
 def _crash(tmp_path, window):
     effects = tmp_path.parent / f"{tmp_path.name}-effects.log"
-    done = subprocess.run([sys.executable, CHILD, str(tmp_path), str(effects), window], capture_output=True, text=True, timeout=240, check=False)
+    done = subprocess.run([sys.executable, CHILD, str(tmp_path), str(effects), window], capture_output=True, text=True, timeout=240, check=False,
+                          env=_child_env(tmp_path))
     assert done.returncode == 137, f"the child did not die at the window: rc={done.returncode}\n{done.stderr[-1500:]}"
     return effects.read_text().splitlines() if effects.exists() else []
 

@@ -16,6 +16,15 @@ from kriya.control.state import SUBTASK_STATE_TOOL_STARTED, ControlState
 CHILD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_d1_tool_crash_child.py")
 
 
+def _child_env(tmp_path):
+    """The crash child dies with os._exit, so its own scratch (strict_config's default root) is never released: point its TMPDIR at a SIBLING of the test's tmp_path, which the
+    conftest releases with it (CERT-TMP-GROWTH-001: 10 ``kriya-strict-config-*`` directories left in the run's temp root)."""
+    scratch = tmp_path.parent / f"{tmp_path.name}-child-tmp"
+    scratch.mkdir(exist_ok=True)
+    return {**os.environ, "TMPDIR": str(scratch)}
+
+
+
 @pytest.fixture
 def workspace(tmp_path):
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
@@ -68,7 +77,8 @@ def test_a_mutating_run_is_refused_with_the_typed_reason_and_the_record_is_untou
 def test_retention_never_erases_an_unresolved_tool_execution(tmp_path):
     """RETENTION: after a genuine crash the unresolved STARTED record (and the run record it belongs to) survives the most aggressive cleanup."""
     effects = tmp_path.parent / f"{tmp_path.name}-effects.log"
-    done = subprocess.run([sys.executable, CHILD, str(tmp_path), str(effects), "during_effect"], capture_output=True, text=True, timeout=240, check=False)
+    done = subprocess.run([sys.executable, CHILD, str(tmp_path), str(effects), "during_effect"], capture_output=True, text=True, timeout=240, check=False,
+                          env=_child_env(tmp_path))
     assert done.returncode == 137, done.stderr[-800:]
     path = control_state_path(str(tmp_path))
     before, runs_before = _sha(path), sorted(r.run_id for r in list_run_records(str(tmp_path)))
