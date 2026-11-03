@@ -328,6 +328,7 @@ def run(census_path: str, out_dir: str, pytest_dir: str, *, ordinary: int, exclu
             handle.write(f"{status}\n")
     stop.set()
     watcher.join(timeout=30)
+    aggregate(pytest_dir, expect=len(processes), once=True)  # the final snapshot: finished=True with the true totals (the loop stops between two samples)
     for handle in handles:
         handle.close()
     audit = merge(out_dir, pytest_dir)

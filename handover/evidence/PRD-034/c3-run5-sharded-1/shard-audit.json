@@ -1,0 +1,66 @@
+{
+  "ok": false,
+  "plan_digest": "5348b0f79618c69a5b0e894734c0dbaa70406c704f9c876e726c81fd3de47cd5",
+  "problems": [
+    "shard ordinary-3: 3 container-mutating docker call(s) in an ordinary shard, first from tests/test_s7_resource_limit_replacement.py::test_a_memory_budget_becomes_a_hard_cgroup_limit_with_no_swap_headroom[denied-network] (call): rm -f kriya-oci-c2339c90ea78"
+  ],
+  "shards": {
+    "exclusive": {
+      "docker_refusals": 0,
+      "exit_status": "0",
+      "failed": 0,
+      "passed": 335,
+      "planned": 335,
+      "results": 335,
+      "skipped": 0
+    },
+    "ordinary-1": {
+      "docker_refusals": 0,
+      "exit_status": "0",
+      "failed": 0,
+      "passed": 6653,
+      "planned": 6653,
+      "results": 6653,
+      "skipped": 0
+    },
+    "ordinary-2": {
+      "docker_refusals": 0,
+      "exit_status": "0",
+      "failed": 0,
+      "passed": 5568,
+      "planned": 5569,
+      "results": 5569,
+      "skipped": 1
+    },
+    "ordinary-3": {
+      "docker_refusals": 3,
+      "exit_status": "0",
+      "failed": 0,
+      "passed": 7296,
+      "planned": 7296,
+      "results": 7296,
+      "skipped": 0
+    }
+  },
+  "summary": "0 failed, 19852 passed, 1 skipped, 0 errors across 4 shards (merge audit FAILED: 1 problem(s))",
+  "tiers_census": {
+    "docker": 285,
+    "gradle_container": 5,
+    "jvm": 88,
+    "live_static_analysis": 11,
+    "real_toolchain": 5
+  },
+  "tiers_ran": {
+    "docker": 285,
+    "gradle_container": 5,
+    "jvm": 88,
+    "live_static_analysis": 11,
+    "real_toolchain": 5
+  },
+  "totals": {
+    "errors": 0,
+    "failures": 0,
+    "skipped": 1,
+    "tests": 19853
+  }
+}

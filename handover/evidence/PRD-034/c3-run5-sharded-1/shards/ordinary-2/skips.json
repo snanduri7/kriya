@@ -1,0 +1,24 @@
+{
+  "certification_mode": true,
+  "platform": "darwin",
+  "platform_pending": [
+    {
+      "nodeid": "tests/test_d2_m2_fd_inheritance.py::test_linux_a_child_cannot_reopen_the_waiters_socket_through_proc",
+      "reason": "MANDATORY LINUX-HOST MEASUREMENT (owner 2026-10-23): /proc/<pid>/fd access to the review socket is INFERRED, not measured, on this platform; run this test on a Linux host before final production qualification",
+      "required_platform": "linux"
+    }
+  ],
+  "skipped": 1,
+  "skips": [
+    {
+      "allowlisted": null,
+      "expired_entry": null,
+      "kind": "skip",
+      "nodeid": "tests/test_d2_m2_fd_inheritance.py::test_linux_a_child_cannot_reopen_the_waiters_socket_through_proc",
+      "phase": "setup",
+      "platform_pending": "linux",
+      "reason": "MANDATORY LINUX-HOST MEASUREMENT (owner 2026-10-23): /proc/<pid>/fd access to the review socket is INFERRED, not measured, on this platform; run this test on a Linux host before final production qualification"
+    }
+  ],
+  "unexpected": 0
+}

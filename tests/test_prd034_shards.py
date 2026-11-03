@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
 import pytest
+from _certification_progress import ProgressWriter
 
 TESTS = Path(__file__).resolve().parent
 ROOT = TESTS.parent
@@ -266,22 +267,20 @@ def test_a_real_sample_is_planned_run_as_separate_pytest_processes_and_merges_to
     timings_file = tmp_path / "timings.json"
     exclusive_file.write_text(json.dumps({"files": {}}))
     timings_file.write_text(json.dumps({"files": {}}))
-    planned = subprocess.run([sys.executable, str(ROOT / "scripts" / "certification_shards.py"), "plan", str(census_path), str(tmp_path / "shards"), "--ordinary", "2",
-                              "--exclusive-files", str(exclusive_file), "--timings", str(timings_file)], capture_output=True, text=True, check=False)
-    assert planned.returncode == 0, planned.stdout + planned.stderr
+    ran = subprocess.run([sys.executable, str(ROOT / "scripts" / "certification_shards.py"), "run", str(census_path), str(tmp_path / "shards"), str(tmp_path / "pytest"), "--ordinary", "2",
+                          "--exclusive-files", str(exclusive_file), "--timings", str(timings_file), "--tmp-root", str(tmp_path / "tmp"), "--no-certification",
+                          *[arg for sample in SAMPLES for arg in ("--target", sample)]], cwd=str(ROOT), capture_output=True, text=True, timeout=300, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines()[-1].startswith("[shards] PASS:")
     document = json.loads((tmp_path / "shards" / "plan.json").read_text())
     assert [shard["id"] for shard in document["shards"]] == ["exclusive", "ordinary-1", "ordinary-2"]
-    assert [shard["count"] for shard in document["shards"]] == [1, 3, 2] or sorted(shard["count"] for shard in document["shards"]) == [1, 2, 3]
+    assert sorted(shard["count"] for shard in document["shards"]) == [1, 2, 3]
     for shard in document["shards"]:
         directory = tmp_path / "pytest" / "shards" / shard["id"]
-        directory.mkdir(parents=True)
-        done = _pytest(*SAMPLES, f"--census-ids={shard['ids_file']}", f"--certification-report={directory}", f"--junitxml={directory / 'junit.xml'}",
-                       f"--collection-census={directory / 'collection-census.json'}")
-        (directory / "exit-status.txt").write_text(f"{done.returncode}\n")
-        assert done.returncode == 0, done.stdout + done.stderr
-    merged = subprocess.run([sys.executable, str(ROOT / "scripts" / "certification_shards.py"), "merge", str(tmp_path / "shards"), str(tmp_path / "pytest")], capture_output=True, text=True, check=False)
-    assert merged.returncode == 0, merged.stdout + merged.stderr
-    assert merged.stdout.splitlines()[-1].startswith("[shards] PASS:")
+        assert (directory / "exit-status.txt").read_text().strip() == "0" and (directory / "junit.xml").exists()  # every shard was its own pytest process with its own artifacts
+    assert (tmp_path / "pytest" / "command.txt").read_text().count("TMPDIR=") == 3
+    final = json.loads((tmp_path / "pytest" / "progress.json").read_text())  # the aggregate ends FINISHED with the true totals (run 5: it ended at 19,852 / 19,853, unfinished)
+    assert final["finished"] is True and final["done"] == final["total"] == 6
     audit = json.loads((tmp_path / "pytest" / "shard-audit.json").read_text())
     assert audit["ok"] and audit["totals"] == {"tests": 6, "failures": 0, "errors": 0, "skipped": 0} and audit["tiers_ran"] == audit["tiers_census"]
     ids = [record["id"] for record in json.loads((tmp_path / "pytest" / "collection-census.json").read_text())["tests"]]
@@ -324,3 +323,11 @@ def test_the_runner_terminates_its_shards_when_it_is_interrupted(tmp_path):
         time.sleep(0.1)
     else:
         pytest.fail("a shard process survived its runner")
+
+
+def test_the_watchdog_accepts_its_own_valued_options(tmp_path):
+    (tmp_path / "pytest").mkdir()
+    ProgressWriter(str(tmp_path / "pytest"), {"tests/test_x.py::test_0": ()}).start("tests/test_x.py::test_0")
+    completed = subprocess.run([sys.executable, str(ROOT / "scripts" / "certification_watch.py"), str(tmp_path), "--interval", "30", "--step-percent", "10", "--once"],
+                               capture_output=True, text=True, timeout=120, check=False)
+    assert completed.returncode == 0 and completed.stdout.startswith("C3: 0 / 1"), completed.stdout + completed.stderr

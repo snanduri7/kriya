@@ -1,0 +1,3 @@
+27.60s call     tests/test_b2c_jvm_acceptance.py::test_j1_8_a_correct_candidate_closes_an_exact_claim
+27.56s call     tests/test_s4_1_managed_service_view.py::test_real_oci_a_fresh_cache_contained_service_builds_in_the_view_runs_there_and_leaves_the_worktree_untouched
+335 passed, 19563 deselected in 6149.77s (1:42:29)

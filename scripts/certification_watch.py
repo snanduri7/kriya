@@ -84,7 +84,8 @@ def _shard_health(pytest_dir: str, now: float, previous: dict):
 
 
 def main(argv) -> int:
-    args = [a for a in argv[1:] if not a.startswith("--")]
+    valued = {"--interval", "--step-percent"}  # their VALUES are not positional (the first run-5 Monitor exited with usage text because they were counted)
+    args = [a for index, a in enumerate(argv[1:], start=1) if not a.startswith("--") and argv[index - 1] not in valued]
     if len(args) != 1:
         print(__doc__, file=sys.stderr)
         return 2

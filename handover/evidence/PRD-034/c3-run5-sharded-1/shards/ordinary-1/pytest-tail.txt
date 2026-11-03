@@ -1,0 +1,3 @@
+11.98s call     tests/state_machine/test_sm_best_of_n.py::test_a_contract_violation_hands_recovery_to_the_main_loop
+11.64s call     tests/test_workflow.py::test_workflow_scopes_retry_to_grader_likely_files_on_run_verification_failure
+6653 passed, 13245 deselected, 13 warnings in 4603.11s (1:16:43)

@@ -1,0 +1,24 @@
+{
+  "attested": true,
+  "bytes_differ_refusals": 0,
+  "files": 1773,
+  "manifest_content_digest": "c557384d52b7d3f196b3a79c3477a0441068717117dfd4560948d417bd25dec3",
+  "not_in_manifest_requests": [
+    "",
+    "org/apache/maven/plugins/maven-metadata.xml.md5",
+    "org/apache/maven/plugins/maven-metadata.xml.sha1",
+    "org/codehaus/mojo/exec-maven-plugin/maven-metadata.xml.md5",
+    "org/codehaus/mojo/exec-maven-plugin/maven-metadata.xml.sha1",
+    "org/codehaus/mojo/maven-metadata.xml.md5",
+    "org/codehaus/mojo/maven-metadata.xml.sha1",
+    "org/kriya/nonexistent/kriya-definitely-not-a-real-artifact/4.13.2/kriya-definitely-not-a-real-artifact-4.13.2.jar",
+    "org/kriya/nonexistent/kriya-definitely-not-a-real-artifact/4.13.2/kriya-definitely-not-a-real-artifact-4.13.2.pom",
+    "org/kriya/outside/thing/1.0/thing-1.0.pom"
+  ],
+  "requests": 36971,
+  "served_paths": 1744,
+  "status_counts": {
+    "200": 36907,
+    "404": 64
+  }
+}

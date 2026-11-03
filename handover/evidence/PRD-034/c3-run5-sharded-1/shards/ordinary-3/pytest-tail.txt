@@ -1,0 +1,3 @@
+10.76s call     tests/test_skill_commit_failure_truth.py::test_a_run_reports_a_promotion_commit_failure_in_its_persistence_errors
+9.90s call     tests/test_runtime_verification.py::test_engine_runtime_verification_trace[argv_contract]
+7296 passed, 12602 deselected, 1 warning in 4217.96s (1:10:17)

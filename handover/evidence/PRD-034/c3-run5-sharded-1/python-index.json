@@ -1,0 +1,17 @@
+{
+  "bytes_differ_refusals": 0,
+  "files_served": [
+    "iniconfig-2.3.0-py3-none-any.whl",
+    "packaging-26.2-py3-none-any.whl",
+    "pluggy-1.6.0-py3-none-any.whl",
+    "pygments-2.20.0-py3-none-any.whl",
+    "pytest-9.1.1-py3-none-any.whl",
+    "setuptools-83.0.0-py3-none-any.whl",
+    "six-1.16.0-py2.py3-none-any.whl"
+  ],
+  "not_listed_requests": [],
+  "requests": 322,
+  "status_counts": {
+    "200": 322
+  }
+}
