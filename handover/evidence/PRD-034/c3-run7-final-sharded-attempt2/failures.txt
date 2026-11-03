@@ -1,0 +1,83 @@
+===== tests.test_prd032_chaos_commit test_resume_from_an_uncertain_workspace_is_refused time 9.199
+chaos_case = ChaosCase(scenario_id='D08', root=PosixPath('/private/tmp/kriya-cert.C4FzqM/s1/pytest-of-sriramnanduri/pytest-0/test_r...uncertain_0'), _before=None, observation=None, identity={'model': 'ChaosRuntime (role-scripted InferenceRuntimePort)'})
+tmp_path = PosixPath('/private/tmp/kriya-cert.C4FzqM/s1/pytest-of-sriramnanduri/pytest-0/test_resume_from_an_uncertain_0')
+
+    @chaos("D08")
+    def test_resume_from_an_uncertain_workspace_is_refused(chaos_case, tmp_path):
+>       workspace = _crash(tmp_path, "between_replaces")
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/tests/test_prd032_chaos_commit.py:300: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+tmp_path = PosixPath('/private/tmp/kriya-cert.C4FzqM/s1/pytest-of-sriramnanduri/pytest-0/test_resume_from_an_uncertain_0')
+crash_at = 'between_replaces'
+
+    def _crash(tmp_path, crash_at):
+        workspace = git_workspace(tmp_path, {"calc.py": CALC, "helper.py": HELPER})
+        died = subprocess.run([sys.executable, "-c", CRASH_SCRIPT, str(workspace), crash_at, TESTS_DIR],
+                              env=dict(os.environ, PYTHONPATH=TESTS_DIR), capture_output=True, text=True, timeout=300)
+>       assert died.returncode == 9, died.stderr[-2000:]
+E       AssertionError: Failed to create project-local venv at /private/tmp/kriya-cert.C4FzqM/s1/pytest-of-sriramnanduri/pytest-0/test_resume_from_an_uncertain_0/ws/.kriya/worktree/.kriya/venv: `python3 -m venv` exited 0: 
+E         
+E         ----------------------------------------------------------------------
+E                          OVERALL ATTEMPT - Attempt 1: FAILED                  
+E         ----------------------------------------------------------------------
+E         full-set, full-set 0/4 + targeted 0/3: VERIFICATION_INFRASTRUCTURE_FAILURE: the regression_test gate's verification tool could not start (PYTHON_ENVIRONMENT_UNAVAILABLE); nothing about the candidate was observed, so this is not a code failure.
+E         PYTHON_ENVIRONMENT_UNAVAILABLE: the project's verification environment (.kriya/venv) could not be created, so no interpreter can produce an authoritative verdict for this workspace; nothing about the candidate was observed, so this is not a code failure. `python3 -m venv` exited 0: 
+E         Quality Gates stopped early - VERIFICATION_INFRASTRUCTURE_FAILURE: the regression_test gate's verification tool could not start (PYTHON_ENVIRONMENT_UNAVAILABLE); nothing about the candidate was observed, so this is not a code failure.
+E         PYTHON_ENVIRONMENT_UNAVAILABLE: the project's verification environment (.kriya/venv) could not be created, so no interpreter can produce an authoritative verdict for this workspace; nothing about the candidate was observed, so this is not a code failure. `python3 -m venv` exited 0: 
+E         
+E       assert 0 == 9
+E        +  where 0 = CompletedProcess(args=['/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/.venv/bin/python3.14', '-...is workspace; nothing about the candidate was observed, so this is not a code failure. `python3 -m venv` exited 0: \n").returncode
+
+/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/tests/test_prd032_chaos_commit.py:223: AssertionError
+
+===== tests.test_validate_oci test_contained_python_validation_without_manifest_runs_tests_from_a_pytest_venv time 8.504
+tmp_path = PosixPath('/private/tmp/kriya-cert.C4FzqM/s1/pytest-of-sriramnanduri/pytest-0/test_contained_python_validati0')
+caplog = <_pytest.logging.LogCaptureFixture object at 0x11445b750>
+
+    def test_contained_python_validation_without_manifest_runs_tests_from_a_pytest_venv(tmp_path, caplog):
+        """CONTAINED-PYTHON-TEST-GATE-001 (cohort T1): no requirements.txt and no
+        pyproject dependencies, a src-layout package and a test under tests/ -
+        through the REAL run_tests() under OCI containment. Before the fix the
+        gate ran the image's bare `python3` (no pytest -> STRUCTURED_REPORT_MISSING,
+        zero tests on baseline and candidate); now the project venv provides
+        pytest and the in-child resolved roots make `import pkg` work at the
+        container mount."""
+        import sys
+    
+        (tmp_path / "src" / "pkg").mkdir(parents=True)
+        (tmp_path / "src" / "pkg" / "__init__.py").write_text("def answer():\n    return 42\n")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "__init__.py").write_text("")
+        (tmp_path / "tests" / "test_pkg.py").write_text(
+            "from pkg import answer\n\ndef test_answer():\n    assert answer() == 42\n")
+    
+        validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path), autonomy_cfg=_contained_cfg()))
+        assert validator.stack == "python"
+        caplog.set_level("INFO", logger="kriya.tools")
+        result = validator.run_tests()
+>       assert result["success"] is True, result["output"] + _venv_forensics(tmp_path, validator, caplog)
+E       AssertionError: 'pip install ' failed:
+E         KRIYA_STEP_PROXY_CONNECT=OK
+E         KRIYA_STEP_FIREWALL=OK
+E         KRIYA_STEP_IPV6_DISABLE=OK
+E         KRIYA_STEP_SELFTEST=OK
+E         KRIYA_STEP_PRIVDROP=OK
+E         
+E         kriya-launch: 4: exec: .kriya/venv/bin/python: not found
+E         --- venv forensics (c3-run6 intermittent failure) ---
+E         .kriya/ mode=0o755 uid=501 entries=3
+E         .kriya/checkpoints/ mode=0o700 uid=501 entries=0
+E         .kriya/test-reports/ mode=0o755 uid=501 entries=0
+E         .kriya/control/ mode=0o700 uid=501 entries=0
+E         .kriya exists=True; venv dir exists=False; venv python lexists=False
+E         validator: venv_install_attempts=1 venv_recreations=0 creation_error=None
+E         log INFO kriya.tools.containment_oci: Registry-scoped acquisition starting: authority_id=2df3e91808a0 allowed_host_count=1 allowed_hosts=['host.docker.internal'] run_id=e64f9d69516e
+E         log INFO kriya.tools.containment_oci: Registry-scoped acquisition containment steps completed: {'PROXY_CONNECT': 'OK', 'FIREWALL': 'OK', 'SELFTEST': 'OK', 'PRIVDROP': 'OK'}
+E         log WARNING kriya.tools.dependency_execution: Acquisition (python, goal='pip install '): exited 127.
+E       assert False is True
+
+tests/test_validate_oci.py:110: AssertionError
+

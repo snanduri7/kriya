@@ -1,0 +1,64 @@
+{
+  "ok": false,
+  "plan_digest": "7e7e345bbeed74b557432c0b019addd658511a699cbe58f20c14d9ab60af3e63",
+  "problems": [],
+  "shards": {
+    "exclusive": {
+      "docker_refusals": 0,
+      "exit_status": "1",
+      "failed": 2,
+      "passed": 394,
+      "planned": 396,
+      "results": 396,
+      "skipped": 0
+    },
+    "ordinary-1": {
+      "docker_refusals": 0,
+      "exit_status": "0",
+      "failed": 0,
+      "passed": 6376,
+      "planned": 6376,
+      "results": 6376,
+      "skipped": 0
+    },
+    "ordinary-2": {
+      "docker_refusals": 0,
+      "exit_status": "0",
+      "failed": 0,
+      "passed": 6710,
+      "planned": 6711,
+      "results": 6711,
+      "skipped": 1
+    },
+    "ordinary-3": {
+      "docker_refusals": 0,
+      "exit_status": "0",
+      "failed": 0,
+      "passed": 6372,
+      "planned": 6372,
+      "results": 6372,
+      "skipped": 0
+    }
+  },
+  "summary": "2 failed, 19852 passed, 1 skipped, 0 errors across 4 shards (merge audit OK)",
+  "tiers_census": {
+    "docker": 285,
+    "gradle_container": 5,
+    "jvm": 88,
+    "live_static_analysis": 11,
+    "real_toolchain": 5
+  },
+  "tiers_ran": {
+    "docker": 285,
+    "gradle_container": 5,
+    "jvm": 88,
+    "live_static_analysis": 11,
+    "real_toolchain": 5
+  },
+  "totals": {
+    "errors": 0,
+    "failures": 2,
+    "skipped": 1,
+    "tests": 19855
+  }
+}
