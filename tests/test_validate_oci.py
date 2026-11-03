@@ -6,6 +6,7 @@ workspace-relative path - never Kriya's own host `sys.executable` - end to
 end through the real `run_tests()`/`run_compile_check()` entry points, not
 just the lower-level containment/process primitives already covered
 elsewhere. Real Docker daemon required, skipped otherwise."""
+import os
 import shutil
 import subprocess
 
@@ -66,7 +67,26 @@ def test_contained_python_validation_uses_container_interpreter_never_host_execu
     assert interpreter == ".kriya/venv/bin/python" or interpreter.replace("\\", "/") == ".kriya/venv/bin/python"
 
 
-def test_contained_python_validation_without_manifest_runs_tests_from_a_pytest_venv(tmp_path):
+def _venv_forensics(root, validator, caplog):
+    """Evidence for an intermittent c3-run6 failure (the project venv was absent on the host right after a successful contained pip install: ``kriya-launch: exec: .kriya/venv/bin/python:
+    not found``; 24 of 24 attempts outside the shard passed): the state of ``.kriya`` on the host, the validator's own counters and the warnings it logged. Built ONLY when the assertion fails."""
+    lines = ["", "--- venv forensics (c3-run6 intermittent failure) ---"]
+    kriya = os.path.join(str(root), ".kriya")
+    for directory, names, files in os.walk(kriya):
+        depth = os.path.relpath(directory, kriya).count(os.sep)
+        if depth > 2:
+            names[:] = []
+            continue
+        stat = os.stat(directory)
+        lines.append(f"{os.path.relpath(directory, str(root))}/ mode={oct(stat.st_mode & 0o7777)} uid={stat.st_uid} entries={len(names) + len(files)}")
+    lines.append(f".kriya exists={os.path.isdir(kriya)}; venv dir exists={os.path.isdir(os.path.join(kriya, 'venv'))}; venv python lexists={os.path.lexists(os.path.join(kriya, 'venv', 'bin', 'python'))}")
+    lines.append(f"validator: venv_install_attempts={getattr(validator, 'venv_install_attempts', None)} venv_recreations={getattr(validator, 'venv_recreations', None)} "
+                 f"creation_error={getattr(validator, '_venv_creation_error', None)!r}")
+    lines += [f"log {record.levelname} {record.name}: {record.getMessage()[:300]}" for record in caplog.records if record.name.startswith("kriya.tools")][:20]
+    return "\n".join(lines)
+
+
+def test_contained_python_validation_without_manifest_runs_tests_from_a_pytest_venv(tmp_path, caplog):
     """CONTAINED-PYTHON-TEST-GATE-001 (cohort T1): no requirements.txt and no
     pyproject dependencies, a src-layout package and a test under tests/ -
     through the REAL run_tests() under OCI containment. Before the fix the
@@ -85,8 +105,9 @@ def test_contained_python_validation_without_manifest_runs_tests_from_a_pytest_v
 
     validator = hold_dependency_scope(PolymorphicValidator(str(tmp_path), autonomy_cfg=_contained_cfg()))
     assert validator.stack == "python"
+    caplog.set_level("INFO", logger="kriya.tools")
     result = validator.run_tests()
-    assert result["success"] is True, result["output"]
+    assert result["success"] is True, result["output"] + _venv_forensics(tmp_path, validator, caplog)
     assert result["test_execution"]["completeness"] == "COMPLETE"
     assert result["test_execution"]["status_counts"] == {"passed": 1}
     interpreter, install_error = validator._resolve_python_interpreter()

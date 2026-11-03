@@ -11,7 +11,7 @@ Code under test: commit `8dc5f96` (tree `b40ff33c5c42f6d875f7be2141273db06fee577
 | Checks | union == census; pairwise disjoint; every node assigned once; every tiered node and every measured Docker-touching file is in the exclusive shard (396 == tier/measured set) |
 | Inputs | `tests/certification/shard_exclusive_files.json` (6 files: 3 measured container users + 3 real-cleanup OCI test files), `tests/certification/shard_timings.json` (run-4 per-file seconds) |
 | Acquisition | frozen Maven repository content digest `c557384d...` (1,773 files), wheelhouse `749cb006...`, lock `b4583335...`; pre-built product images guarded by `images_unchanged` |
-The run's own `collection` stage regenerates the census and `plan.json`; the post-run check is that its plan digest equals the one above.
+The run's own `collection` stage regenerates the census and `plan.json`; the post-run identity check is the census digest and the per-shard `ids_digest` values (exclusive `44420fa7f73e`, ordinary-1 `893cd0a78282`, ordinary-2 `426a7b1a4388`, ordinary-3 `d2a0cba5bd0c`). The printed `plan_digest` also hashes the input file PATHS, so it differs between a run directory and an offline plan and is not the identity check.
 
 ## Census reconciliation: run 4 (19,760) -> final (19,855)
 103 added, 8 removed. The 8 removed are the truncated Java ids of `test_b2c_jvm_acceptance::test_2...` (D3); the 8 corresponding additions are the same nodes with their real ids: **net 0**.
