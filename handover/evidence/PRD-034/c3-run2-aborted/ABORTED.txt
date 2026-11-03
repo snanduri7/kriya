@@ -1,0 +1,9 @@
+C3 RUN 2 - ABORTED / NOT CERTIFIED (preserved as evidence; started 2026-11-02T22:30:24Z, ended 23:41:13Z, HEAD d240c66, tree 84b18c61...).
+No certification claim is made from this run. Two HARNESS defects (mine), classified from the run's own output; zero test failures, zero product defects:
+ 1. pytest aborted at 2,968/19,752 (15%): tests/_certification_progress.py::_atomic_write called os.replace, which tests/test_d1_durable_write.py monkeypatches
+    to raise EXDEV; the flush ran in pytest_runtest_logreport while that test's patch was active -> exception in a pytest hook -> INTERNALERROR (pytest.txt).
+    tier_execution and scanner FAIL only because the remaining tests never ran.
+ 2. release stage FAIL: scripts/verify_release.sh `pip check` -> "mcp 2.0.0 requires pyjwt, which is not installed": the frozen hashed lock (installed --no-deps)
+    was not dependency-closed. The install itself from the frozen wheelhouse worked with no network.
+Stages that PASSED for real: static, maven_repository, python_wheelhouse, product_images, collection (19752/45), perf_probe, maven_served (17269 requests, 0 bytes-differ),
+images_unchanged, images; doctor and thresholds RECORDED (approval honoured). Seen again: ~75 tests/min in ordinary tier, temp root stayed 47-49 entries.
