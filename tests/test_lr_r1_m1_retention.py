@@ -134,7 +134,7 @@ class _Context:
 
 
 def test_run_close_prunes_with_the_configured_bounds_and_protects_references(tmp_path, monkeypatch):
-    from tests._strict_doubles import strict_config
+    from _strict_doubles import strict_config
 
     state_dir = tmp_path / "state"
     state_dir.mkdir()
@@ -154,7 +154,7 @@ def test_run_close_prunes_with_the_configured_bounds_and_protects_references(tmp
 
 
 def test_run_close_without_an_open_store_prunes_nothing(tmp_path, monkeypatch):
-    from tests._strict_doubles import strict_config
+    from _strict_doubles import strict_config
 
     state_dir = tmp_path / "state"
     state_dir.mkdir()
@@ -169,7 +169,7 @@ def test_run_close_without_an_open_store_prunes_nothing(tmp_path, monkeypatch):
 
 
 def test_a_failing_reference_lookup_never_escapes(tmp_path, monkeypatch):
-    from tests._strict_doubles import strict_config
+    from _strict_doubles import strict_config
 
     state_dir = tmp_path / "state"
     state_dir.mkdir()

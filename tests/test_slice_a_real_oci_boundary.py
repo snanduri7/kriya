@@ -80,9 +80,10 @@ def test_real_oci_a_contained_child_cannot_reach_the_operator_control_plane(tmp_
 
 
 @NEEDS_DOCKER
-def test_real_oci_negative_control_without_the_anchor_the_same_attack_forges_the_state_the_disposition_would_trust(tmp_path, monkeypatch):
+def test_real_oci_negative_control_without_the_anchor_the_same_attack_forges_the_state_the_disposition_would_trust(tmp_path, monkeypatch, acl_protected):
     """If this stops reproducing, the positive test above no longer proves the boundary does anything."""
     ws = _workspace_with_a_terminal_failed_tool(tmp_path)
+    acl_protected(ws / ".kriya.aside")  # the attack renames .kriya aside; Docker Desktop leaves deny-delete ACLs on the moved mask targets
     monkeypatch.setattr(containment_oci, "workspace_anchor_args", lambda workspace_host: [])
     report = _validator_run(ws, ["python3", "attack.py"])
     assert report["plant_forged_control"] == "SUCCEEDED", report

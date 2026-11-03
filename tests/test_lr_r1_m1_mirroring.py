@@ -12,6 +12,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _strict_doubles import strict_config
 
 from kriya.control.decisions import DecisionLedger
 from kriya.control.run_coordinator import begin_mutating_run
@@ -21,7 +22,6 @@ from kriya.workflow.failure import Failure
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.run_trace import write_outcome_trace
 from kriya.workflow.state import GenerationState
-from tests._strict_doubles import strict_config
 
 ROOT = Path(__file__).resolve().parents[1]
 

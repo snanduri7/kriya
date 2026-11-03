@@ -74,6 +74,17 @@ def _release_dead_symlinks(directory):
 _RELEASE_AFTER_PASS: list = []  # directories a fixture created WITHOUT a request of its own (tests/test_checkout_memory_isolation.py drives one with a bare namespace)
 
 
+@pytest.fixture
+def acl_protected(tmp_path):
+    """``acl_protected(path)`` registers a directory the test makes Docker Desktop ACL-protect (see tests/_acl_release.py); each is released at teardown, pass or fail."""
+    from _acl_release import release_acl_protected_tree
+
+    registered = []
+    yield registered.append
+    for path in registered:
+        release_acl_protected_tree(path, tmp_path)
+
+
 @pytest.fixture(autouse=True)
 def _release_tmp_path_siblings(request, tmp_path_factory):
     """A test that writes files NEXT TO its ``tmp_path`` under ``tmp_path.name + '-...'`` (tests/test_d1_tool_crash.py's effects log, test_prd005's outside files, the kernel golden's cwd)
@@ -688,9 +699,29 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.xdist_group("docker"))
 
 
+def strip_group_suffix(nodeid, group_names):
+    """``nodeid`` without xdist's scheduling suffix: exactly ``@`` + the sorted xdist_group names joined by ``_``, and only at the very end.
+
+    A parameter id may itself contain ``@`` (Java annotations: ``...[@Test-...]``); cutting at the last ``@`` truncated such ids (run 4: 8 false "missing"
+    nodes in the tier audit). Nothing is stripped unless the id ends with the exact suffix xdist would have appended.
+    """
+    if not group_names:
+        return nodeid
+    suffix = "@" + "_".join(sorted(group_names))
+    return nodeid[: -len(suffix)] if nodeid.endswith(suffix) else nodeid
+
+
+def _xdist_group_names(item):
+    # the same derivation xdist/remote.py uses: first positional argument, else ``name=``, else "default"
+    return {str(marker.args[0] if marker.args else marker.kwargs.get("name", "default")) for marker in item.iter_markers("xdist_group")}
+
+
 def base_nodeid(item):
-    """The node id without xdist's ``@<group>`` scheduling suffix (``--dist loadgroup`` appends it for a test carrying an xdist_group marker)."""
-    return item.nodeid.rsplit("@", 1)[0] if item.get_closest_marker("xdist_group") is not None and "@" in item.nodeid else item.nodeid
+    """The node id without xdist's ``@<group>`` suffix. xdist appends it only under ``--dist loadgroup``; in any other mode the id is untouched."""
+    config = getattr(item, "config", None)  # a hand-built item in a collection-hook test has none: no xdist, nothing was appended
+    if config is None or not config.getoption("loadgroup", False):
+        return item.nodeid
+    return strip_group_suffix(item.nodeid, _xdist_group_names(item))
 
 
 @pytest.hookimpl(trylast=True, specname="pytest_collection_modifyitems")
@@ -917,6 +948,14 @@ _PROGRESS: list = [None]  # the run's ProgressWriter (tests/_certification_progr
 def pytest_runtest_logstart(nodeid, location):  # pylint: disable=unused-argument
     if _PROGRESS[0] is not None:
         _PROGRESS[0].start(nodeid)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_call(item):
+    """The previous module's strict-config roots are no longer reachable here (its module/class fixtures are torn down): release them (CERT-TMP-GROWTH-001)."""
+    from _strict_doubles import release_finished_modules
+
+    release_finished_modules(item.nodeid.split("::", 1)[0])
 
 
 def pytest_runtest_logreport(report):

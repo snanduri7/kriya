@@ -326,10 +326,11 @@ def test_real_oci_a_child_and_a_grandchild_have_the_same_boundary(tmp_path):
 
 
 @NEEDS_DOCKER
-def test_real_oci_negative_control_without_the_anchor_the_original_reproducer_forges_host_authority(tmp_path, monkeypatch):
+def test_real_oci_negative_control_without_the_anchor_the_original_reproducer_forges_host_authority(tmp_path, monkeypatch, acl_protected):
     """The pre-S1 mount shape for the structure (leaf masks only): the workload renames ``.kriya`` aside and recreates a forged control directory at the
     original host-visible name. If this stops reproducing, the positive test above no longer proves the anchor does anything."""
     ws = _existing_workspace(tmp_path)
+    acl_protected(ws / ".kriya.moved")  # the attack renames .kriya aside; Docker Desktop leaves deny-delete ACLs on the moved mask targets
     monkeypatch.setattr(containment_oci, "workspace_anchor_args", lambda workspace_host: [])
     report = _validator_run(ws, ["python3", "attack.py"])
     assert report["rename"] == "SUCCEEDED" and (ws / ".kriya.moved").is_dir()

@@ -106,10 +106,11 @@ def test_b_a_verified_no_change_is_not_missing_evidence(tmp_path, monkeypatch):
 def test_b_genuinely_absent_candidate_evidence_stays_not_recorded(tmp_path, monkeypatch):
     """A Developer request whose answer was never parsed and no candidate
     decision: the only state that is reported as missing evidence."""
+    from _strict_doubles import strict_config
+
     from kriya.core.attempt_evidence import scope
     from kriya.core.attempt_evidence.explain import explain_run
     from kriya.core.state_paths import ENV_STATE_DIR
-    from tests._strict_doubles import strict_config
 
     monkeypatch.setenv(ENV_STATE_DIR, str(tmp_path / "state"))
 
@@ -145,10 +146,11 @@ def test_b_an_unverified_no_change_is_still_no_proposal_never_a_refused_candidat
 def test_b_a_parsed_proposal_without_a_candidate_decision_is_missing_evidence(tmp_path, monkeypatch):
     """Negative control: a parsed file proposal, then no staging or refusal
     record (an interrupted attempt) is NOT_RECORDED, never NO_CHANGE."""
+    from _strict_doubles import strict_config
+
     from kriya.core.attempt_evidence import scope
     from kriya.core.attempt_evidence.explain import explain_run
     from kriya.core.state_paths import ENV_STATE_DIR
-    from tests._strict_doubles import strict_config
 
     monkeypatch.setenv(ENV_STATE_DIR, str(tmp_path / "state"))
 
@@ -208,10 +210,11 @@ def test_c_a_successful_unit_is_the_q9_terminal_cause(tmp_path, monkeypatch):
 def test_c_a_terminal_cause_is_never_invented(tmp_path, monkeypatch):
     """Negative control: a closed unit that recorded no result fields says
     so; nothing is read from anywhere else."""
+    from _strict_doubles import strict_config
+
     from kriya.core.attempt_evidence import scope
     from kriya.core.attempt_evidence.explain import explain_run
     from kriya.core.state_paths import ENV_STATE_DIR
-    from tests._strict_doubles import strict_config
 
     monkeypatch.setenv(ENV_STATE_DIR, str(tmp_path / "state"))
 
@@ -332,10 +335,11 @@ def test_e_an_undispatched_call_beside_a_dispatched_one_is_listed_as_such(tmp_pa
 def test_e_a_dispatched_call_without_its_response_is_missing_evidence(tmp_path, monkeypatch):
     """Negative control: the provider was called, its response was not
     recorded - the only case reported as missing."""
+    from _strict_doubles import strict_config
+
     from kriya.core.attempt_evidence import scope
     from kriya.core.attempt_evidence.explain import explain_run
     from kriya.core.state_paths import ENV_STATE_DIR
-    from tests._strict_doubles import strict_config
 
     monkeypatch.setenv(ENV_STATE_DIR, str(tmp_path / "state"))
 
@@ -414,9 +418,10 @@ def test_f_a_call_without_a_transition_keeps_one_snapshot(tmp_path, monkeypatch)
 
 
 def test_f_a_transition_names_only_operations_that_changed(tmp_path, monkeypatch):
+    from _strict_doubles import strict_config
+
     from kriya.core.attempt_evidence import reader, scope
     from kriya.core.state_paths import ENV_STATE_DIR
-    from tests._strict_doubles import strict_config
 
     monkeypatch.setenv(ENV_STATE_DIR, str(tmp_path / "state"))
 
@@ -533,10 +538,11 @@ def test_g3_a_call_refused_before_dispatch_has_no_model_answer(tmp_path, monkeyp
 def _synthetic_q4(tmp_path, monkeypatch, run_id, calls):
     """``calls``: per Developer call, None (no response record), or the
     model.response payload recorded for it."""
+    from _strict_doubles import strict_config
+
     from kriya.core.attempt_evidence import scope
     from kriya.core.attempt_evidence.explain import explain_run
     from kriya.core.state_paths import ENV_STATE_DIR
-    from tests._strict_doubles import strict_config
 
     monkeypatch.setenv(ENV_STATE_DIR, str(tmp_path / "state"))
 
@@ -645,10 +651,11 @@ def test_h_a_successful_enforce_run_has_no_manufactured_failure(tmp_path, monkey
 
 
 def _synthetic_q9(tmp_path, monkeypatch, run_id, build, terminal_status):
+    from _strict_doubles import strict_config
+
     from kriya.core.attempt_evidence import scope
     from kriya.core.attempt_evidence.explain import explain_run
     from kriya.core.state_paths import ENV_STATE_DIR
-    from tests._strict_doubles import strict_config
 
     monkeypatch.setenv(ENV_STATE_DIR, str(tmp_path / "state"))
 

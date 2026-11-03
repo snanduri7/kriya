@@ -31,7 +31,7 @@ class _Context:
 
 
 def _recorded(tmp_path, monkeypatch, run_id, body):
-    from tests._strict_doubles import strict_config
+    from _strict_doubles import strict_config
 
     state_dir = tmp_path / "state"
     state_dir.mkdir()

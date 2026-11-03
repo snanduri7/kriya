@@ -79,7 +79,7 @@ def test_a_trimmed_section_is_recorded_with_what_was_kept_and_what_was_asked(tmp
     prompt = f"TASK HEADER\n{big}TASK FOOTER\n"
     capacity = RequestCapacity(tokens=600)
 
-    from tests._strict_doubles import strict_config
+    from _strict_doubles import strict_config
 
     class _Context:
         run_id = "run-sections"
@@ -104,8 +104,9 @@ def test_a_trimmed_section_is_recorded_with_what_was_kept_and_what_was_asked(tmp
 
 
 def test_the_primitive_records_each_fit_it_decides(tmp_path, monkeypatch):
+    from _strict_doubles import strict_config
+
     from kriya.core.attempt_evidence import scope
-    from tests._strict_doubles import strict_config
 
     state = tmp_path / "state"
     state.mkdir()

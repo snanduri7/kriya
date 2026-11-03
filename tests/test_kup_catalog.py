@@ -9,13 +9,13 @@ from pathlib import Path
 
 import jsonschema
 import pytest
+from _strict_doubles import strict_config
 
 from kriya.config import AppConfig
 from kriya.kup import catalog_ops, policy, serve
 from kriya.kup.cli_ops import run_kup_operation
 from kriya.mcp import invocation_approval as ia
 from kriya.policy.model import MCPToolIdentity
-from tests._strict_doubles import strict_config
 
 UI_KUP = Path(__file__).resolve().parent.parent / "ui" / "kup"
 SECRET_ARG = "--token=ghp_SECRETARGUMENTVALUE0123456789"

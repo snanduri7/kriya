@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import pytest
+from _strict_doubles import strict_config
 
 from kriya.skills import service as skill_service
 from kriya.skills.service import SkillDescriptor, SkillService
 from kriya.skills.skill import SkillEngine
-from tests._strict_doubles import strict_config
 
 SECRET_RULE = "RULE-TEXT-SENTINEL-must-never-be-returned"
 

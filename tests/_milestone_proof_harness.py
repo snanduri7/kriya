@@ -203,8 +203,12 @@ MID_COMMIT_OUTPUTS = {"M1": {"m1.py": b"M1 = 1\n"}, "M2": {"m2a.py": b"A\n", "m2
 
 def _crash_mid_commit(workspace, crash_at):
     """Run the chain in a subprocess that dies inside M2's commit."""
+    # The child is killed with os._exit, so no ``finally`` of its own runs: whatever scratch it made (``_apply``'s candidate directory) must land in the TEST's tree, which the
+    # fixture releases, not in the run's temp root (CERT-TMP-GROWTH-001: 7 ``kriya-milestone-candidate-*`` leftovers in the measured run).
+    child_tmp = Path(workspace).parent / "crash-child-tmp"
+    child_tmp.mkdir(exist_ok=True)
     crashed = subprocess.run(
         [sys.executable, "-c", CRASH_MID_COMMIT_SCRIPT, str(workspace), crash_at, TESTS_DIR],
-        env=dict(os.environ, PYTHONPATH=TESTS_DIR), capture_output=True, text=True, timeout=120,
+        env=dict(os.environ, PYTHONPATH=TESTS_DIR, TMPDIR=str(child_tmp)), capture_output=True, text=True, timeout=120,
     )
     assert crashed.returncode == 9, crashed.stderr

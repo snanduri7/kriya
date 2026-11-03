@@ -133,7 +133,7 @@ class _Context:
 
 
 def _store(tmp_path, monkeypatch, run_id):
-    from tests._strict_doubles import strict_config
+    from _strict_doubles import strict_config
 
     state = tmp_path / "state"
     state.mkdir(exist_ok=True)

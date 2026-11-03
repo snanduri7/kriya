@@ -443,3 +443,49 @@ def test_a_real_session_over_the_formerly_leaking_fixtures_keeps_the_basetemp_fl
     assert len(samples) >= 40, "enough tests to see a slope"
     early, last = max(entries for _, entries in samples[:10]), samples[-1][1]
     assert last <= early + 8, f"basetemp grew from {early} to {last} over {samples[-1][0]} passing tests: {samples[-3:]}"
+
+
+# --- run 4: the run's own temp root still grew (kriya-strict-config-*, kriya-milestone-candidate-*, kriya-authority-mask-*) -----------------------------
+
+def test_strict_config_roots_are_released_at_the_module_boundary_never_per_test_and_never_the_collection_time_root(monkeypatch):
+    import _strict_doubles as sd
+
+    monkeypatch.setattr(sd, "_DEFAULT_ROOTS", {})
+    roots = {}
+    for test_id in ("tests/test_a.py::test_one", "tests/test_a.py::test_two[x]", "tests/test_b.py::test_one", ""):
+        monkeypatch.setenv("PYTEST_CURRENT_TEST", f"{test_id} (call)" if test_id else "")
+        roots[test_id] = sd._default_root()
+        assert os.path.isdir(roots[test_id])
+    try:
+        assert sd.release_finished_modules("tests/test_a.py") == 1  # only test_b's root belongs to another module
+        assert os.path.isdir(roots["tests/test_a.py::test_one"]) and os.path.isdir(roots["tests/test_a.py::test_two[x]"])  # a module-scoped fixture still holds these
+        assert not os.path.exists(roots["tests/test_b.py::test_one"])
+        assert os.path.isdir(roots[""])  # created at collection by a module-level strict_config(): lives for the session
+        assert sd.release_finished_modules("tests/test_b.py") == 2
+        assert not os.path.exists(roots["tests/test_a.py::test_one"]) and os.path.isdir(roots[""])
+        monkeypatch.setenv("PYTEST_CURRENT_TEST", "tests/test_a.py::test_one (call)")
+        assert sd._default_root() == sd._default_root()  # one root per test: every default config inside a test is equal
+    finally:
+        sd.release_default_roots()
+    assert not any(os.path.exists(path) for path in roots.values())
+
+
+def test_the_milestone_crash_child_leaves_its_scratch_in_the_tests_tree_and_nothing_in_the_runs_temp_root(tmp_path, monkeypatch):
+    import _milestone_proof_harness as harness
+
+    run_tmp = tmp_path / "run-tmp"
+    run_tmp.mkdir()
+    monkeypatch.setenv("TMPDIR", str(run_tmp))
+    monkeypatch.setattr(tempfile, "tempdir", None)  # re-read TMPDIR
+    harness._crash_mid_commit(harness._workspace(tmp_path), "stage1")  # the child dies with os._exit inside the commit: no ``finally`` runs
+    assert os.listdir(run_tmp) == []  # the run's temp root gained nothing
+    leftovers = os.listdir(tmp_path / "crash-child-tmp")
+    assert any(name.startswith("kriya-milestone-candidate-") for name in leftovers), leftovers  # the crash scenario still leaves its scratch -- inside the test's own tree
+
+
+def test_the_strict_doubles_module_is_imported_under_one_name_only_so_its_roots_are_released():
+    # MEASURED (run-4 follow-up): ``from tests._strict_doubles import ...`` loads a SECOND copy of the module beside conftest's ``_strict_doubles``; its roots were
+    # never released (91 ``kriya-strict-config-*`` directories left in an 8-wide run). One name, one registry.
+    offenders = [str(path.relative_to(TESTS)) for path in TESTS.rglob("*.py") if re.search(r"\b(?:from|import) tests\._strict_doubles\b", path.read_text(encoding="utf-8"))
+                 if path.name != Path(__file__).name]
+    assert offenders == []

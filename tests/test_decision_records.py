@@ -14,13 +14,13 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _strict_doubles import strict_config
 
 from kriya.control.run_coordinator import begin_mutating_run
 from kriya.core.attempt_evidence import decisions as d
 from kriya.core.attempt_evidence import explain, model, reader, scope
 from kriya.core.attempt_evidence.writer import AttemptEvidenceWriter
 from kriya.core.state_paths import ENV_STATE_DIR
-from tests._strict_doubles import strict_config
 
 ROOT = Path(__file__).resolve().parents[1]
 DIGEST = "sha256:" + "ab" * 32

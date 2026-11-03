@@ -12,6 +12,15 @@ from pathlib import Path
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _fixed_stub_port_lock():
+    """The scenario-03 stub owns the fixed port 18767 (CERT-SHARED-PORT-001): every test of this module runs one at a time, machine-wide."""
+    from _shared_resource_lock import shared_resource_lock
+
+    with shared_resource_lock("demo-v2-stub-port-18767"):
+        yield
+
 ROOT = Path(__file__).resolve().parent.parent
 DEMO_V2 = ROOT / "demo-v2"
 SCRIPTS = DEMO_V2 / "scripts"

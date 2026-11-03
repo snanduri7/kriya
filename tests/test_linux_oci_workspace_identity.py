@@ -48,7 +48,9 @@ def _argv(profile, command=("sh", "-c", "true"), monkeypatch=None):
     backend = OCIContainmentBackend()
     if monkeypatch is not None:
         monkeypatch.setattr(backend, "_probe_daemon", lambda _docker: None)
-    return backend.prepare(profile, list(command)).command_prefix
+    prepared = backend.prepare(profile, list(command))
+    prepared.cleanup()  # the product's own teardown: removes the protected-leaf mask scratch directories ``prepare`` made (they leaked into the run's temp root, CERT-TMP-GROWTH-001)
+    return prepared.command_prefix
 
 
 def _value(argv, flag):
@@ -112,12 +114,21 @@ def test_a_private_workspace_compiles_and_its_outputs_belong_to_the_host_owner(t
     (workspace / "Hello.java").write_text(
         'public class Hello { public static void main(String[] a) { System.out.println("home=" + '
         'System.getProperty("user.home")); } }\n')
+    # The contract is "a container output is owned as a file the host user creates in this workspace would be": the OWNER is
+    # the host user (strict), the GROUP is whatever this filesystem gives that user's new files here (BSD semantics inherit
+    # the directory's group: wheel under /tmp, the user's primary group under the default TMPDIR). Comparing to the host
+    # primary gid made the verdict depend on the temp root's group (run 4: certify.sh's /tmp root gave (501, 0)).
+    control = workspace / "control-by-host-user.txt"
+    control.write_text("created by the host user, no container involved\n")
+    expected = (control.stat().st_uid, control.stat().st_gid)
+    assert expected[0] == os.getuid(), "the control file is not owned by the host user: the comparison would prove nothing"
     result = _run(_profile(workspace), ["sh", "-c", "javac Hello.java && java Hello && touch made.txt"], workspace)
     assert result.returncode == 0, result.stderr
     assert "home=/kriya/tmp" in result.stdout  # never "?", which Maven resolves inside the workspace
     for produced in ("Hello.class", "made.txt"):
         stat = (workspace / produced).stat()
-        assert (stat.st_uid, stat.st_gid) == (os.getuid(), os.getgid()), produced
+        assert (stat.st_uid, stat.st_gid) == expected, produced
+        assert stat.st_uid == os.getuid(), produced
     assert not (workspace / "?").exists()
 
 

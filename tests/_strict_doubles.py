@@ -24,6 +24,10 @@ from kriya.tools.containment import ContainmentProfile, PreparedContainment
 _DEFAULT_ROOTS: Dict[str, str] = {}
 
 
+def _module_of(test_id: str) -> str:
+    return test_id.split("::", 1)[0]
+
+
 def _default_root() -> str:
     """One temp root per test (per process when no test is running), so every
     default ``strict_config()`` in a test is equal: a resume or reuse check
@@ -35,12 +39,24 @@ def _default_root() -> str:
     return _DEFAULT_ROOTS[test_id]
 
 
+def release_finished_modules(current_module: str) -> int:
+    """Remove the roots of every test that belongs to a module other than ``current_module`` (tests/conftest.py calls this before each test body).
+
+    A root is released at the MODULE boundary, never per test: a module- or class-scoped fixture's config keeps the root of the test that set it up for the rest of its
+    scope, and the previous module's fixtures are already torn down when the next module's first test runs. The root keyed ``""`` is created at collection time (module
+    level ``strict_config()``) and lives for the session. A session-scoped fixture must not call ``strict_config()`` for the same reason. CERT-TMP-GROWTH-001: run 4
+    held 760 of these directories in the run's temp root by the halfway point."""
+    released = 0
+    for test_id in [key for key in _DEFAULT_ROOTS if key and _module_of(key) != current_module]:
+        shutil.rmtree(_DEFAULT_ROOTS.pop(test_id), ignore_errors=True)
+        released += 1
+    return released
+
+
 def release_default_roots() -> None:
     """Remove every default root this process created (tests/conftest.py's
-    ``pytest_sessionfinish``). Released once per session, never per test: a
-    module- or class-scoped fixture's config keeps the root of the test that
-    set it up for the rest of the scope. Without this each test left one
-    directory in the system temp dir for good (LEAK-STRICT-CONFIG-TMP-001)."""
+    ``pytest_sessionfinish``): whatever the module-boundary release has not
+    already removed (LEAK-STRICT-CONFIG-TMP-001)."""
     while _DEFAULT_ROOTS:
         _test_id, root = _DEFAULT_ROOTS.popitem()
         shutil.rmtree(root, ignore_errors=True)

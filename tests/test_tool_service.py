@@ -11,12 +11,12 @@ from pathlib import Path
 from typing import Dict
 
 import pytest
+from _strict_doubles import strict_config
 
 from kriya.mcp import invocation_approval as ia
 from kriya.mcp.mcp import MCPClient, MCPManager
 from kriya.policy.model import MCPToolIdentity
 from kriya.tools.service import ToolService
-from tests._strict_doubles import strict_config
 
 SECRET_ARG = "--token=ghp_SECRETARGUMENTVALUE0123456789"
 SECRET_ENV = "sk-SECRETENVVALUE0123456789"

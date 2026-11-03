@@ -13,6 +13,7 @@ import hashlib
 import json
 
 import pytest
+from _strict_doubles import strict_config
 
 from kriya.workflow import requirement_disposition as rd
 from kriya.workflow.contract_baseline import run_baseline_authorities
@@ -38,7 +39,6 @@ from kriya.workflow.requirements import (
     statement_origins,
 )
 from kriya.workflow.resume_fingerprints import generation_resume_fingerprints
-from tests._strict_doubles import strict_config
 from tests.test_verification_contract_003_authority import _git, _workspace
 
 FALSE_PREMISE = ("CSVFormat.EXCEL produces spurious empty records for blank lines.\n"

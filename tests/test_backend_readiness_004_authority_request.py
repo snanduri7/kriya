@@ -10,6 +10,7 @@ import os
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from _strict_doubles import strict_kernel
 from click.testing import CliRunner
 
 from kriya.config.config import AppConfig
@@ -31,7 +32,6 @@ from kriya.workflow.requirements import (
     derive_requirements,
     statement_origins,
 )
-from tests._strict_doubles import strict_kernel
 from tests.test_fs1_false_success_reproducer import PRODUCTION, _run
 from tests.test_fs1c1_requirement_claims import LEGACY, WRONG_BEHAVIOUR_GOAL
 from tests.test_prd020_requirement_lineage import _engine, _events, _git_base, _verdicts_json

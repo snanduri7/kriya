@@ -10,13 +10,13 @@ import subprocess
 
 import pytest
 import yaml
+from _strict_doubles import strict_config
 
 from kriya.config.authority import ConfigAuthorityError
 from kriya.config.config import load_config
 from kriya.control.run_coordinator import begin_mutating_run
 from kriya.core.attempt_evidence import reader, scope
 from kriya.core.state_paths import ENV_STATE_DIR
-from tests._strict_doubles import strict_config
 
 
 def _git_workspace(path):

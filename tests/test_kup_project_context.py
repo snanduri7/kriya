@@ -382,14 +382,62 @@ def test_fuzzed_requests_to_the_new_operations_always_answer_with_a_typed_envelo
                 assert env["error"]["code"] in policy.ERROR_CODES, env["error"]
 
 
+_DEEP_SEGMENT = 200  # below NAME_MAX (255) on every supported filesystem
+_DEEP_TARGET = 950  # the fixture's own path: 900..1000, below macOS PATH_MAX (1024); the 200-byte project name then crosses it
+_MACOS_PATH_MAX = 1024  # the lowest PATH_MAX we run on; the Linux limit (4096) is higher
+
+
+def _deep_segment_lengths(root_length, target=_DEEP_TARGET, segment=_DEEP_SEGMENT):
+    """Segment lengths that take a root of ``root_length`` characters to exactly ``target`` characters.
+
+    The fixture must size itself from the ACTUAL root: a fixed segment count made the fixture's own ``mkdir`` exceed
+    PATH_MAX under the certification temp root (run 4, ENAMETOOLONG in the test, not in the product).
+    """
+    remaining = target - root_length
+    assert remaining >= 2, f"temp root of {root_length} characters leaves no room for the deep path"
+    lengths = [segment] * ((remaining) // (segment + 1))
+    leftover = remaining - len(lengths) * (segment + 1)
+    if leftover >= 2:
+        lengths.append(leftover - 1)
+    return lengths
+
+
+def _old_root_insensitive_final_length(root_length, segment=_DEEP_SEGMENT):
+    """The pre-fix sizing: keep appending 200-character segments until the path reaches 900 characters."""
+    length = root_length
+    while length < 900:
+        length += segment + 1
+    return length
+
+
+@pytest.mark.parametrize("root_length", range(50, 301, 7))
+def test_the_deep_path_fixture_is_sized_from_the_actual_root(root_length):
+    lengths = _deep_segment_lengths(root_length)
+    final = root_length + sum(length + 1 for length in lengths)
+    assert 900 <= final <= 1000 < _MACOS_PATH_MAX
+    assert all(1 <= length <= 255 for length in lengths)
+
+
+def test_the_old_root_insensitive_sizing_exceeds_the_macos_limit_under_the_certification_temp_root():
+    # NEGATIVE CONTROL: the shape certify.sh produces (``/private/tmp/kriya-cert.XXXXXX`` + pytest basetemp + test dir) is what broke run 4.
+    root = "/private/tmp/kriya-cert.icY47B/pytest-of-sriramnanduri/pytest-0/test_a_path_too_long_for_the_f0"
+    assert _old_root_insensitive_final_length(len(root)) > _MACOS_PATH_MAX
+    assert len(root) + sum(length + 1 for length in _deep_segment_lengths(len(root))) < _MACOS_PATH_MAX
+
+
 def test_a_path_too_long_for_the_filesystem_is_a_typed_refusal_not_a_crash_and_leaves_nothing(tmp_path):
-    segment = "d" * 200
     deep = tmp_path
-    while len(str(deep)) < 900:
-        deep = deep / segment
+    for length in _deep_segment_lengths(len(str(tmp_path))):
+        deep = deep / ("d" * length)
         deep.mkdir()
-    env = _create(deep, "ü" * 100)
+    assert 900 <= len(str(deep)) <= 1000
+    name = "\u00fc" * 100
+    env = _create(deep, name)
     assert (env["data"] is None) != (env["error"] is None)
+    limit = os.pathconf(str(tmp_path), "PC_PATH_MAX")
+    crosses = len(os.fsencode(str(deep))) + 1 + len(os.fsencode(name)) >= limit
+    if crosses:  # macOS: the platform must refuse; never a crash, never a silent success
+        assert env["error"] is not None
     if env["error"]:  # the platform refused: typed, with a reason, and nothing half-made
         assert env["error"]["code"] in (policy.WORKSPACE_UNAVAILABLE, policy.INVALID_REQUEST) and env["error"].get("reason") in ("create_failed", "permission_denied", "parent_not_found", "invalid_parent")
         assert os.listdir(deep) == []

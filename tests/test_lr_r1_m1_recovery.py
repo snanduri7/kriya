@@ -155,7 +155,7 @@ class _Context:
 
 
 def _refusal_records(tmp_path, monkeypatch, *, staged):
-    from tests._strict_doubles import strict_config
+    from _strict_doubles import strict_config
 
     state = tmp_path / "state"
     state.mkdir()

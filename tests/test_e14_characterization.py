@@ -27,6 +27,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from _strict_doubles import strict_config, strict_kernel
 
 from kriya.analyzer.graph import DependencyGraph
 from kriya.policy.filesystem import WriteScopeMode
@@ -42,7 +43,6 @@ from kriya.workflow.repair_contract import RepairContractStatus
 from kriya.workflow.run_events import EventAuthority
 from kriya.workflow.state import GenerationState
 from kriya.workflow.workflow_types import SubtaskStatus
-from tests._strict_doubles import strict_config, strict_kernel
 
 RUNTIME_INVALID = {"verifier_kind": "application_runtime", "requires_runtime_execution": True,
                    "description": "The app must exit with a non-zero exit code for invalid input."}
@@ -1003,7 +1003,7 @@ def test_a_patch_of_a_patched_moved_name_reaches_its_deps_fields():
 
 
 def test_the_enforce_deps_bind_the_controllers_moved_names_at_call_time():
-    from tests._strict_doubles import strict_engine
+    from _strict_doubles import strict_engine
 
     built = controller.WorkflowController(strict_engine())
     for name in ("_evaluate_subtask_verification", "_enforce_contract_transition"):

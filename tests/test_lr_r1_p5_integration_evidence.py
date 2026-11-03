@@ -234,10 +234,11 @@ def test_every_production_call_passes_the_runs_provenance():
 
 
 def test_q9_explains_the_integration_decision(tmp_path, monkeypatch):
+    from _strict_doubles import strict_config
+
     from kriya.core.attempt_evidence import scope
     from kriya.core.attempt_evidence.explain import explain_run
     from kriya.core.state_paths import ENV_STATE_DIR
-    from tests._strict_doubles import strict_config
 
     state = tmp_path / "state"
     state.mkdir()

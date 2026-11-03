@@ -3,10 +3,11 @@ an attempt that made no Developer call cannot have a candidate, so its Q4
 is NOT_APPLICABLE(no_model_call) - a known fact, never missing evidence.
 NOT_RECORDED stays reserved for evidence that should exist and does not.
 Explain-only: the records below are what the recorder writes today."""
+from _strict_doubles import strict_config
+
 from kriya.core.attempt_evidence import scope
 from kriya.core.attempt_evidence.explain import explain_run
 from kriya.core.state_paths import ENV_STATE_DIR
-from tests._strict_doubles import strict_config
 
 NO_MODEL_CALL = {"status": "NOT_APPLICABLE", "reason": "no_model_call: no Developer request in this attempt"}
 MISSING = {"status": "NOT_RECORDED", "reason": "no candidate was staged or refused in this attempt"}
