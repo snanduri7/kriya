@@ -121,8 +121,8 @@ def test_oci_prepare_uses_resolved_image_and_persists_digest(tmp_path, monkeypat
         toolchain_identity=identity,
     )
     prepared = backend.prepare(profile, ["mvn", "test"])
-    # ``prepare`` made the protected-leaf mask scratch directories; the product's teardown removes them (its ``docker rm -f`` is stubbed: no daemon is involved here).
-    monkeypatch.setattr("kriya.tools.containment_oci.subprocess.run", lambda *args, **kwargs: None)
+    # ``prepare`` made the protected-leaf mask scratch directories; the product's REAL teardown removes them (its ``docker rm -f`` of the never-created container is a daemon call:
+    # this file is classified in the exclusive Docker shard, tests/certification/shard_exclusive_files.json)
     prepared.cleanup()
     # Runs the attested content by its immutable ID, never the movable tag.
     assert "sha256:resolved" in prepared.command_prefix

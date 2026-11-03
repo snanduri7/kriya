@@ -32,14 +32,7 @@ def _prepare(tmp_path, monkeypatch, *, acquisition=False, **limits):
         # in `finally`). A test that prepares without running must run it too - the first version of this file leaked a proxy container and a network per call (found by the real-OCI
         # tier's leak checks, 2026-10-26)
         if prepared.cleanup is not None:
-            if acquisition:
-                prepared.cleanup()
-            else:
-                # the denied-network path creates no container, network or proxy: its teardown's ``docker rm -f <never-created name>`` is a daemon call this test has no business making (in a
-                # sharded run it is a container-mutating call from an ordinary shard); the mask scratch directories ``prepare`` made are still removed by the same cleanup
-                with monkeypatch.context() as patch:
-                    patch.setattr(containment_oci.subprocess, "run", lambda *args, **kwargs: None)
-                    prepared.cleanup()
+            prepared.cleanup()
 
 
 # the registry-scoped path really creates a docker network and starts the proxy container, so that case needs a reachable daemon (its skip reason names docker: pinned to the docker worker)

@@ -331,3 +331,23 @@ def test_the_watchdog_accepts_its_own_valued_options(tmp_path):
     completed = subprocess.run([sys.executable, str(ROOT / "scripts" / "certification_watch.py"), str(tmp_path), "--interval", "30", "--step-percent", "10", "--once"],
                                capture_output=True, text=True, timeout=120, check=False)
     assert completed.returncode == 0 and completed.stdout.startswith("C3: 0 / 1"), completed.stdout + completed.stderr
+
+
+def test_a_failed_node_and_a_failed_audit_both_make_the_runner_exit_non_zero_and_say_fail_on_the_last_line(tmp_path):
+    # MANDATORY-AUDIT EXIT PROPAGATION (run 5 verified it: audit failed -> stage FAIL -> NOT_CERTIFIED -> certify.sh exit 1); this keeps it verified.
+    census_path = tmp_path / "selected.json"
+    assert _pytest("tests/certification/sample_shard_failing.py", "--collect-only", f"--collection-census={census_path}").returncode == 0
+    for name in ("exclusive.json", "timings.json"):
+        (tmp_path / name).write_text(json.dumps({"files": {}}))
+    command = [sys.executable, str(ROOT / "scripts" / "certification_shards.py"), "run", str(census_path), str(tmp_path / "shards"), str(tmp_path / "pytest"), "--ordinary", "1",
+               "--exclusive-files", str(tmp_path / "exclusive.json"), "--timings", str(tmp_path / "timings.json"), "--tmp-root", str(tmp_path / "tmp"), "--no-certification",
+               "--target", "tests/certification/sample_shard_failing.py"]
+    ran = subprocess.run(command, cwd=str(ROOT), capture_output=True, text=True, timeout=300, check=False)
+    assert ran.returncode == 1 and ran.stdout.splitlines()[-1].startswith("[shards] FAIL:"), ran.stdout + ran.stderr
+    assert (tmp_path / "pytest.txt").read_text().splitlines()[-1].startswith("[shards] FAIL:")  # the line certify.sh shows as the stage detail
+    audit = json.loads((tmp_path / "pytest" / "shard-audit.json").read_text())
+    assert audit["ok"] is False and audit["totals"]["failures"] == 1 and audit["problems"] == []  # every audit check held; the verdict still fails on the failed node
+    # and a merge-audit problem alone (a vanished shard artifact) fails the merge command too
+    (tmp_path / "pytest" / "shards" / "exclusive" / "junit.xml").unlink()
+    merged = subprocess.run([sys.executable, str(ROOT / "scripts" / "certification_shards.py"), "merge", str(tmp_path / "shards"), str(tmp_path / "pytest")], capture_output=True, text=True, check=False)
+    assert merged.returncode == 1 and merged.stdout.splitlines()[-1].startswith("[shards] FAIL:")

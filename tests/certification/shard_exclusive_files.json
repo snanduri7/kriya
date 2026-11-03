@@ -1,8 +1,11 @@
 {
  "files": {
+  "tests/test_containment_oci_registry_scoped_unit.py": "the test builds a prepared OCI command and runs the product's real cleanup(), whose `docker rm -f <never-created name>` is a daemon call (3 calls refused by the ordinary-shard guard in c3 run 5, all from test_s7); owner ruling 2026-11-03: Docker-touching for topology purposes, the exclusive shard owns the daemon",
+  "tests/test_prd011_toolchain_identity.py": "the test builds a prepared OCI command and runs the product's real cleanup(), whose `docker rm -f <never-created name>` is a daemon call (3 calls refused by the ordinary-shard guard in c3 run 5, all from test_s7); owner ruling 2026-11-03: Docker-touching for topology purposes, the exclusive shard owns the daemon",
   "tests/test_prd032_chaos_commit.py": "32 containers created in the docker-excluded ordinary run (docker events, c3-run4 decomposition)",
   "tests/test_rdcg_item1b_replay_containment.py": "2 containers (docker events, c3-run4 decomposition)",
-  "tests/test_runtime_maven_acquisition.py": "17 containers when run alone; 1 of its 16 tests carries the docker skip reason"
+  "tests/test_runtime_maven_acquisition.py": "17 containers when run alone; 1 of its 16 tests carries the docker skip reason",
+  "tests/test_s7_resource_limit_replacement.py": "the test builds a prepared OCI command and runs the product's real cleanup(), whose `docker rm -f <never-created name>` is a daemon call (3 calls refused by the ordinary-shard guard in c3 run 5, all from test_s7); owner ruling 2026-11-03: Docker-touching for topology purposes, the exclusive shard owns the daemon"
  },
  "version": 1
 }

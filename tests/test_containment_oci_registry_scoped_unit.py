@@ -131,7 +131,7 @@ def test_resolve_acquisition_identity_fails_closed_when_invoking_process_is_root
 
 # --- Invariant: DENIED profiles are unaffected by SEC-006 (test R) ---
 
-def test_denied_network_argv_has_no_cap_admin_or_net_admin(tmp_path, monkeypatch):
+def test_denied_network_argv_has_no_cap_admin_or_net_admin(tmp_path):
     """Adversarial R: target/execution containers (network=DENIED) must
     never gain NET_ADMIN - SEC-006 only ever adds that capability on the
     DEPENDENCY_REGISTRY_ONLY path."""
@@ -163,8 +163,7 @@ def test_denied_network_argv_has_no_cap_admin_or_net_admin(tmp_path, monkeypatch
 
     prepared = backend.prepare(profile, ["/bin/sh", "-c", "true"])
     argv = prepared.command_prefix
-    monkeypatch.setattr("kriya.tools.containment_oci.subprocess.run", lambda *args, **kwargs: None)  # the argv is all this test reads: no daemon call from the teardown
-    prepared.cleanup()  # removes the mask scratch directories ``prepare`` made
+    prepared.cleanup()  # the product's real teardown: removes the mask scratch directories ``prepare`` made (a daemon call: exclusive Docker shard)
     assert "--network" in argv and argv[argv.index("--network") + 1] == "none"
     assert "NET_ADMIN" not in argv
     assert "--cap-add" not in argv
