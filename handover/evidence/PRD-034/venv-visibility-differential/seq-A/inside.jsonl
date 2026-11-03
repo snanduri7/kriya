@@ -1,0 +1,490 @@
+{"container": "kriya-oci-d86bcfb3976c", "inside": ["exec-rc=1"], "t": 1793740632.6577642, "tag": "72441-1793740632655"}
+{"container": "kriya-oci-d86bcfb3976c", "inside": ["exec-rc=126"], "t": 1793740632.837762, "tag": "72441-1793740632655"}
+{"container": "kriya-oci-3aa3abfe22e6", "inside": ["exec-rc=1"], "t": 1793740634.923957, "tag": "72472-1793740634921"}
+{"container": "kriya-oci-3aa3abfe22e6", "inside": ["exec-rc=126"], "t": 1793740635.103754, "tag": "72472-1793740634921"}
+{"container": "kriya-oci-3041c396299e", "inside": ["exec-rc=1"], "t": 1793740637.307159, "tag": "72499-1793740637305"}
+{"container": "kriya-oci-3041c396299e", "inside": ["exec-rc=126"], "t": 1793740637.492393, "tag": "72499-1793740637305"}
+{"container": "kriya-oci-863c0cf631d7", "inside": ["exec-rc=1"], "t": 1793740638.816757, "tag": "72530-1793740638811"}
+{"container": "kriya-oci-0a75d3f15676", "inside": ["exec-rc=1"], "t": 1793740639.6744802, "tag": "72551-1793740639672"}
+{"container": "kriya-oci-0a75d3f15676", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740639.871109, "tag": "72551-1793740639672"}
+{"container": "kriya-oci-dffc097bb518", "inside": ["exec-rc=1"], "t": 1793740640.5786119, "tag": "72573-1793740640576"}
+{"container": "kriya-oci-dffc097bb518", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740640.765795, "tag": "72573-1793740640576"}
+{"container": "kriya-oci-5100f3e8d713", "inside": ["exec-rc=1"], "t": 1793740643.6257632, "tag": "72609-1793740643623"}
+{"container": "kriya-oci-5100f3e8d713", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740643.815825, "tag": "72609-1793740643623"}
+{"container": "kriya-oci-5100f3e8d713", "inside": ["exec-rc=1"], "t": 1793740646.262658, "tag": "72609-1793740643623"}
+{"container": "kriya-oci-1c730bd2aff4", "inside": ["exec-rc=1"], "t": 1793740649.3786838, "tag": "72677-1793740649376"}
+{"container": "kriya-oci-1c730bd2aff4", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740649.561846, "tag": "72677-1793740649376"}
+{"container": "kriya-oci-1c730bd2aff4", "inside": ["exec-rc=126"], "t": 1793740651.77576, "tag": "72677-1793740649376"}
+{"container": "kriya-oci-36754441c8ee", "inside": ["exec-rc=1"], "t": 1793740653.488141, "tag": "72714-1793740653486"}
+{"container": "kriya-oci-36754441c8ee", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740653.675733, "tag": "72714-1793740653486"}
+{"container": "kriya-oci-4839d98f04a3", "inside": ["exec-rc=1"], "t": 1793740654.4124732, "tag": "72736-1793740654410"}
+{"container": "kriya-oci-4839d98f04a3", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740654.595506, "tag": "72736-1793740654410"}
+{"container": "kriya-oci-04cb6aa89d7f", "inside": ["exec-rc=1"], "t": 1793740655.328632, "tag": "72758-1793740655327"}
+{"container": "kriya-oci-04cb6aa89d7f", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740655.512938, "tag": "72758-1793740655327"}
+{"container": "kriya-oci-357dba726a9a", "inside": ["exec-rc=1"], "t": 1793740727.7778828, "tag": "74562-1793740727775"}
+{"container": "kriya-oci-357dba726a9a", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740727.9590988, "tag": "74562-1793740727775"}
+{"container": "kriya-oci-2f6b4064b4b8", "inside": ["exec-rc=1"], "t": 1793740729.4826088, "tag": "74613-1793740729479"}
+{"container": "kriya-oci-2f6b4064b4b8", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740729.682892, "tag": "74613-1793740729479"}
+{"container": "kriya-oci-2f6b4064b4b8", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740729.946005, "tag": "74613-1793740729479"}
+{"container": "kriya-oci-9ed9c3a04306", "inside": ["exec-rc=1"], "t": 1793740735.6802402, "tag": "74678-1793740735678"}
+{"container": "kriya-oci-9ed9c3a04306", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740735.877106, "tag": "74678-1793740735678"}
+{"container": "kriya-oci-2e3ae5b62b6d", "inside": ["exec-rc=1"], "t": 1793740743.064634, "tag": "74737-1793740743062"}
+{"container": "kriya-oci-2e3ae5b62b6d", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740743.256448, "tag": "74737-1793740743062"}
+{"container": "kriya-oci-7ee36533376a", "inside": ["exec-rc=1"], "t": 1793740748.960798, "tag": "74987-1793740748958"}
+{"container": "kriya-oci-7ee36533376a", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740749.1382499, "tag": "74987-1793740748958"}
+{"container": "kriya-oci-2ae7c8b534cd", "inside": ["exec-rc=1"], "t": 1793740750.5003679, "tag": "75037-1793740750498"}
+{"container": "kriya-oci-2ae7c8b534cd", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740750.697162, "tag": "75037-1793740750498"}
+{"container": "kriya-oci-2ae7c8b534cd", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740750.927794, "tag": "75037-1793740750498"}
+{"container": "kriya-oci-2ae7c8b534cd", "inside": ["exec-rc=126"], "t": 1793740753.407032, "tag": "75037-1793740750498"}
+{"container": "kriya-oci-f12391c8bc06", "inside": ["exec-rc=1"], "t": 1793740756.675649, "tag": "75088-1793740756673"}
+{"container": "kriya-oci-f12391c8bc06", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740756.863293, "tag": "75088-1793740756673"}
+{"container": "kriya-oci-087f97a2b969", "inside": ["exec-rc=1"], "t": 1793740763.937375, "tag": "75146-1793740763935"}
+{"container": "kriya-oci-087f97a2b969", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740764.1248798, "tag": "75146-1793740763935"}
+{"container": "kriya-oci-818805286812", "inside": ["exec-rc=1"], "t": 1793740769.6826172, "tag": "75402-1793740769680"}
+{"container": "kriya-oci-818805286812", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740769.877291, "tag": "75402-1793740769680"}
+{"container": "kriya-oci-657c144cb624", "inside": ["exec-rc=1"], "t": 1793740771.242164, "tag": "75446-1793740771240"}
+{"container": "kriya-oci-657c144cb624", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740771.438037, "tag": "75446-1793740771240"}
+{"container": "kriya-oci-657c144cb624", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740771.6683478, "tag": "75446-1793740771240"}
+{"container": "kriya-oci-657c144cb624", "inside": ["exec-rc=126"], "t": 1793740774.149962, "tag": "75446-1793740771240"}
+{"container": "kriya-oci-5b32e5db2ee0", "inside": ["exec-rc=1"], "t": 1793740777.487658, "tag": "75497-1793740777485"}
+{"container": "kriya-oci-5b32e5db2ee0", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740777.688982, "tag": "75497-1793740777485"}
+{"container": "kriya-oci-5b32e5db2ee0", "inside": ["exec-rc=1"], "t": 1793740782.9030468, "tag": "75497-1793740777485"}
+{"container": "kriya-oci-df6cb3b22154", "inside": ["exec-rc=1"], "t": 1793740784.7725282, "tag": "75554-1793740784770"}
+{"container": "kriya-oci-df6cb3b22154", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740784.963813, "tag": "75554-1793740784770"}
+{"container": "kriya-oci-a487b30dffd9", "inside": ["exec-rc=1"], "t": 1793740790.877016, "tag": "75809-1793740790875"}
+{"container": "kriya-oci-a487b30dffd9", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740791.077323, "tag": "75809-1793740790875"}
+{"container": "kriya-oci-1df2cad35ead", "inside": ["exec-rc=1"], "t": 1793740792.488066, "tag": "75854-1793740792486"}
+{"container": "kriya-oci-1df2cad35ead", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740792.672479, "tag": "75854-1793740792486"}
+{"container": "kriya-oci-1df2cad35ead", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740792.9100292, "tag": "75854-1793740792486"}
+{"container": "kriya-oci-137bd6708adb", "inside": ["exec-rc=1"], "t": 1793740798.8454819, "tag": "75905-1793740798843"}
+{"container": "kriya-oci-137bd6708adb", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740799.030446, "tag": "75905-1793740798843"}
+{"container": "kriya-oci-934377378872", "inside": ["exec-rc=1"], "t": 1793740806.158558, "tag": "75969-1793740806156"}
+{"container": "kriya-oci-934377378872", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740806.347454, "tag": "75969-1793740806156"}
+{"container": "kriya-oci-bb8bff67cd2d", "inside": ["exec-rc=1"], "t": 1793740820.471156, "tag": "77164-1793740820469"}
+{"container": "kriya-oci-bb8bff67cd2d", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740820.649379, "tag": "77164-1793740820469"}
+{"container": "kriya-oci-0023edbf2eef", "inside": ["exec-rc=1"], "t": 1793740824.896959, "tag": "77207-1793740824895"}
+{"container": "kriya-oci-0023edbf2eef", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740825.0902998, "tag": "77207-1793740824895"}
+{"container": "kriya-oci-825e88e2dfe0", "inside": ["exec-rc=1"], "t": 1793740831.653333, "tag": "77262-1793740831651"}
+{"container": "kriya-oci-825e88e2dfe0", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740831.841229, "tag": "77262-1793740831651"}
+{"container": "kriya-oci-6308b6b720cb", "inside": ["exec-rc=1"], "t": 1793740834.868339, "tag": "77324-1793740834866"}
+{"container": "kriya-oci-6308b6b720cb", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740835.069673, "tag": "77324-1793740834866"}
+{"container": "kriya-oci-1a60699acaf5", "inside": ["exec-rc=1"], "t": 1793740838.250067, "tag": "77363-1793740838248"}
+{"container": "kriya-oci-1a60699acaf5", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740838.44401, "tag": "77363-1793740838248"}
+{"container": "kriya-oci-e6d87332fd8b", "inside": ["exec-rc=1"], "t": 1793740844.975381, "tag": "77418-1793740844973"}
+{"container": "kriya-oci-e6d87332fd8b", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740845.161796, "tag": "77418-1793740844973"}
+{"container": "kriya-oci-e6d87332fd8b", "inside": ["exec-rc=1"], "t": 1793740846.5505779, "tag": "77418-1793740844973"}
+{"container": "kriya-oci-5db272673a09", "inside": ["exec-rc=1"], "t": 1793740848.0886772, "tag": "77480-1793740848086"}
+{"container": "kriya-oci-5db272673a09", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740848.273232, "tag": "77480-1793740848086"}
+{"container": "kriya-oci-75d2541dfab3", "inside": ["exec-rc=1"], "t": 1793740851.346584, "tag": "77526-1793740851344"}
+{"container": "kriya-oci-75d2541dfab3", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740851.542225, "tag": "77526-1793740851344"}
+{"container": "kriya-oci-75d2541dfab3", "inside": ["exec-rc=1"], "t": 1793740854.7578251, "tag": "77526-1793740851344"}
+{"container": "kriya-oci-331a93ecac66", "inside": ["exec-rc=1"], "t": 1793740856.7051468, "tag": "77568-1793740856703"}
+{"container": "kriya-oci-331a93ecac66", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740856.897557, "tag": "77568-1793740856703"}
+{"container": "kriya-oci-4c90bf87aca2", "inside": ["exec-rc=1"], "t": 1793740859.15036, "tag": "77601-1793740859148"}
+{"container": "kriya-oci-4c90bf87aca2", "inside": ["exec-rc=126"], "t": 1793740859.33135, "tag": "77601-1793740859148"}
+{"container": "kriya-oci-ae8f679121a4", "inside": ["exec-rc=1"], "t": 1793740861.03133, "tag": "77638-1793740861029"}
+{"container": "kriya-oci-ae8f679121a4", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740861.2274601, "tag": "77638-1793740861029"}
+{"container": "kriya-oci-8a639598b2af", "inside": ["exec-rc=1"], "t": 1793740864.407017, "tag": "77677-1793740864405"}
+{"container": "kriya-oci-8a639598b2af", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740864.6072261, "tag": "77677-1793740864405"}
+{"container": "kriya-oci-568639b5db33", "inside": ["exec-rc=1"], "t": 1793740871.956774, "tag": "77738-1793740871954"}
+{"container": "kriya-oci-568639b5db33", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740872.140586, "tag": "77738-1793740871954"}
+{"container": "kriya-oci-568639b5db33", "inside": ["exec-rc=1"], "t": 1793740873.724093, "tag": "77738-1793740871954"}
+{"container": "kriya-oci-f6bd006da7e2", "inside": ["exec-rc=1"], "t": 1793740874.569536, "tag": "77770-1793740874567"}
+{"container": "kriya-oci-f6bd006da7e2", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740874.758087, "tag": "77770-1793740874567"}
+{"container": "kriya-oci-74ec8fb2974c", "inside": ["exec-rc=1"], "t": 1793740877.83677, "tag": "77809-1793740877835"}
+{"container": "kriya-oci-74ec8fb2974c", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740878.041158, "tag": "77809-1793740877835"}
+{"container": "kriya-oci-fd8fd6bb183b", "inside": ["exec-rc=1"], "t": 1793740887.421385, "tag": "77878-1793740887419"}
+{"container": "kriya-oci-fd8fd6bb183b", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740887.601401, "tag": "77878-1793740887419"}
+{"container": "kriya-oci-fd8fd6bb183b", "inside": ["exec-rc=126"], "t": 1793740891.045356, "tag": "77878-1793740887419"}
+{"container": "kriya-oci-5cf7f9b6062a", "inside": ["exec-rc=1"], "t": 1793740891.9532108, "tag": "77924-1793740891951"}
+{"container": "kriya-oci-5cf7f9b6062a", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740892.1406531, "tag": "77924-1793740891951"}
+{"container": "kriya-oci-1e53c5d1c502", "inside": ["exec-rc=1"], "t": 1793740895.22766, "tag": "77963-1793740895225"}
+{"container": "kriya-oci-1e53c5d1c502", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740895.424542, "tag": "77963-1793740895225"}
+{"container": "kriya-oci-81eb9e7e7a26", "inside": ["exec-rc=1"], "t": 1793740902.650611, "tag": "78021-1793740902648"}
+{"container": "kriya-oci-81eb9e7e7a26", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740902.8364842, "tag": "78021-1793740902648"}
+{"container": "kriya-oci-9775069e89a5", "inside": ["exec-rc=1"], "t": 1793740905.3892539, "tag": "78055-1793740905387"}
+{"container": "kriya-oci-9775069e89a5", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740905.569636, "tag": "78055-1793740905387"}
+{"container": "kriya-oci-d60b183b55a5", "inside": ["exec-rc=1"], "t": 1793740912.8253691, "tag": "78117-1793740912823"}
+{"container": "kriya-oci-d60b183b55a5", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740913.0157819, "tag": "78117-1793740912823"}
+{"container": "kriya-oci-d60b183b55a5", "inside": ["exec-rc=1"], "t": 1793740920.037964, "tag": "78117-1793740912823"}
+{"container": "kriya-oci-7863ca7be6b0", "inside": ["exec-rc=1"], "t": 1793740921.877942, "tag": "78182-1793740921876"}
+{"container": "kriya-oci-7863ca7be6b0", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740922.073746, "tag": "78182-1793740921876"}
+{"container": "kriya-oci-ab21ac512ce6", "inside": ["exec-rc=1"], "t": 1793740926.858615, "tag": "78246-1793740926856"}
+{"container": "kriya-oci-ab21ac512ce6", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740927.0364192, "tag": "78246-1793740926856"}
+{"container": "kriya-oci-af0ffa7b877d", "inside": ["exec-rc=1"], "t": 1793740933.015626, "tag": "78304-1793740933013"}
+{"container": "kriya-oci-af0ffa7b877d", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740933.211703, "tag": "78304-1793740933013"}
+{"container": "kriya-oci-af0ffa7b877d", "inside": ["exec-rc=1"], "t": 1793740941.3023622, "tag": "78304-1793740933013"}
+{"container": "kriya-oci-f8a351780291", "inside": ["exec-rc=1"], "t": 1793740943.199744, "tag": "78374-1793740943197"}
+{"container": "kriya-oci-f8a351780291", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740943.380215, "tag": "78374-1793740943197"}
+{"container": "kriya-oci-3dff4f2c417b", "inside": ["exec-rc=1"], "t": 1793740949.7719522, "tag": "78424-1793740949770"}
+{"container": "kriya-oci-3dff4f2c417b", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740949.951773, "tag": "78424-1793740949770"}
+{"container": "kriya-oci-d58d87d5b3d6", "inside": ["exec-rc=1"], "t": 1793740955.905791, "tag": "78481-1793740955904"}
+{"container": "kriya-oci-d58d87d5b3d6", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740956.09978, "tag": "78481-1793740955904"}
+{"container": "kriya-oci-d58d87d5b3d6", "inside": ["exec-rc=1"], "t": 1793740962.1612532, "tag": "78481-1793740955904"}
+{"container": "kriya-oci-30d8d47c7cbb", "inside": ["exec-rc=1"], "t": 1793740964.0402071, "tag": "78542-1793740964038"}
+{"container": "kriya-oci-30d8d47c7cbb", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740964.224671, "tag": "78542-1793740964038"}
+{"container": "kriya-oci-edb51f45da6e", "inside": ["exec-rc=1"], "t": 1793740968.9933498, "tag": "78589-1793740968991"}
+{"container": "kriya-oci-edb51f45da6e", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740969.172961, "tag": "78589-1793740968991"}
+{"container": "kriya-oci-4909cb713ddb", "inside": ["exec-rc=1"], "t": 1793740972.3266618, "tag": "78634-1793740972324"}
+{"container": "kriya-oci-4909cb713ddb", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740972.521058, "tag": "78634-1793740972324"}
+{"container": "kriya-oci-57f33bda25b7", "inside": ["exec-rc=1"], "t": 1793740979.06652, "tag": "78683-1793740979064"}
+{"container": "kriya-oci-57f33bda25b7", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740979.2569752, "tag": "78683-1793740979064"}
+{"container": "kriya-oci-aa1195153f94", "inside": ["exec-rc=1"], "t": 1793740981.198418, "tag": "78717-1793740981196"}
+{"container": "kriya-oci-aa1195153f94", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740981.381825, "tag": "78717-1793740981196"}
+{"container": "kriya-oci-011f3e40f4e4", "inside": ["exec-rc=1"], "t": 1793740983.1321, "tag": "78748-1793740983130"}
+{"container": "kriya-oci-011f3e40f4e4", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740983.318027, "tag": "78748-1793740983130"}
+{"container": "kriya-oci-62b5cfedf14f", "inside": ["exec-rc=1"], "t": 1793740986.485418, "tag": "78789-1793740986483"}
+{"container": "kriya-oci-62b5cfedf14f", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740986.6792371, "tag": "78789-1793740986483"}
+{"container": "kriya-oci-62b5cfedf14f", "inside": ["exec-rc=1"], "t": 1793740994.2411609, "tag": "78789-1793740986483"}
+{"container": "kriya-oci-42287132648b", "inside": ["exec-rc=1"], "t": 1793740996.143144, "tag": "78859-1793740996141"}
+{"container": "kriya-oci-42287132648b", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793740996.321013, "tag": "78859-1793740996141"}
+{"container": "kriya-oci-00e8472c5f35", "inside": ["exec-rc=1"], "t": 1793741000.564219, "tag": "78897-1793741000562"}
+{"container": "kriya-oci-00e8472c5f35", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741000.741774, "tag": "78897-1793741000562"}
+{"container": "kriya-oci-00e8472c5f35", "inside": ["exec-rc=126"], "t": 1793741004.122402, "tag": "78897-1793741000562"}
+{"container": "kriya-oci-d31fd48ef488", "inside": ["exec-rc=1"], "t": 1793741005.0335171, "tag": "78947-1793741005031"}
+{"container": "kriya-oci-d31fd48ef488", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741005.215926, "tag": "78947-1793741005031"}
+{"container": "kriya-oci-bed97096c29a", "inside": ["exec-rc=1"], "t": 1793741008.408391, "tag": "78986-1793741008406"}
+{"container": "kriya-oci-bed97096c29a", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741008.605272, "tag": "78986-1793741008406"}
+{"container": "kriya-oci-bed97096c29a", "inside": ["exec-rc=1"], "t": 1793741013.125685, "tag": "78986-1793741008406"}
+{"container": "kriya-oci-d76bc5e3bbfc", "inside": ["exec-rc=1"], "t": 1793741014.973608, "tag": "79040-1793741014971"}
+{"container": "kriya-oci-d76bc5e3bbfc", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741015.16192, "tag": "79040-1793741014971"}
+{"container": "kriya-oci-85f5fff19450", "inside": ["exec-rc=1"], "t": 1793741017.114051, "tag": "79068-1793741017112"}
+{"container": "kriya-oci-85f5fff19450", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741017.2931452, "tag": "79068-1793741017112"}
+{"container": "kriya-oci-1647b1c031f1", "inside": ["exec-rc=1"], "t": 1793741019.472327, "tag": "79122-1793741019470"}
+{"container": "kriya-oci-1647b1c031f1", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741019.6751711, "tag": "79122-1793741019470"}
+{"container": "kriya-oci-1647b1c031f1", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741019.921776, "tag": "79122-1793741019470"}
+{"container": "kriya-oci-1647b1c031f1", "inside": ["exec-rc=126"], "t": 1793741022.3899882, "tag": "79122-1793741019470"}
+{"container": "kriya-oci-806c711d26cc", "inside": ["exec-rc=1"], "t": 1793741025.1859741, "tag": "79177-1793741025184"}
+{"container": "kriya-oci-806c711d26cc", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741025.3750432, "tag": "79177-1793741025184"}
+{"container": "kriya-oci-8b6dfa94a7af", "inside": ["exec-rc=1"], "t": 1793741033.877292, "tag": "79241-1793741033874"}
+{"container": "kriya-oci-8b6dfa94a7af", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741034.063518, "tag": "79241-1793741033874"}
+{"container": "kriya-oci-13c2ba9fd211", "inside": ["exec-rc=1"], "t": 1793741035.805803, "tag": "79291-1793741035804"}
+{"container": "kriya-oci-13c2ba9fd211", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741036.003805, "tag": "79291-1793741035804"}
+{"container": "kriya-oci-13c2ba9fd211", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741036.290967, "tag": "79291-1793741035804"}
+{"container": "kriya-oci-13c2ba9fd211", "inside": ["exec-rc=1"], "t": 1793741038.7710001, "tag": "79291-1793741035804"}
+{"container": "kriya-oci-3ffc1220120d", "inside": ["exec-rc=1"], "t": 1793741041.129173, "tag": "79344-1793741041127"}
+{"container": "kriya-oci-3ffc1220120d", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741041.325067, "tag": "79344-1793741041127"}
+{"container": "kriya-oci-3ffc1220120d", "inside": ["exec-rc=126"], "t": 1793741048.022246, "tag": "79344-1793741041127"}
+{"container": "kriya-oci-d8fa21725d04", "inside": ["exec-rc=1"], "t": 1793741049.994561, "tag": "79405-1793741049992"}
+{"container": "kriya-oci-d8fa21725d04", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741050.185011, "tag": "79405-1793741049992"}
+{"container": "kriya-oci-4e50e2eebef6", "inside": ["exec-rc=1"], "t": 1793741051.940493, "tag": "79462-1793741051938"}
+{"container": "kriya-oci-4e50e2eebef6", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741052.125045, "tag": "79462-1793741051938"}
+{"container": "kriya-oci-4e50e2eebef6", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741052.369049, "tag": "79462-1793741051938"}
+{"container": "kriya-oci-a6331a65e6b2", "inside": ["exec-rc=1"], "t": 1793741057.258645, "tag": "79510-1793741057256"}
+{"container": "kriya-oci-a6331a65e6b2", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741057.451242, "tag": "79510-1793741057256"}
+{"container": "kriya-oci-a6331a65e6b2", "inside": ["exec-rc=1"], "t": 1793741063.990443, "tag": "79510-1793741057256"}
+{"container": "kriya-oci-acfafd27a475", "inside": ["exec-rc=1"], "t": 1793741065.8819158, "tag": "79573-1793741065880"}
+{"container": "kriya-oci-acfafd27a475", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741066.0860622, "tag": "79573-1793741065880"}
+{"container": "kriya-oci-461691b0a667", "inside": ["exec-rc=1"], "t": 1793741067.870223, "tag": "79624-1793741067868"}
+{"container": "kriya-oci-461691b0a667", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741068.076158, "tag": "79624-1793741067868"}
+{"container": "kriya-oci-461691b0a667", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741068.319167, "tag": "79624-1793741067868"}
+{"container": "kriya-oci-27694f99179c", "inside": ["exec-rc=1"], "t": 1793741073.256385, "tag": "79678-1793741073254"}
+{"container": "kriya-oci-27694f99179c", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741073.4538739, "tag": "79678-1793741073254"}
+{"container": "kriya-oci-27694f99179c", "inside": ["exec-rc=1"], "t": 1793741080.063024, "tag": "79678-1793741073254"}
+{"container": "kriya-oci-313afd1c2694", "inside": ["exec-rc=1"], "t": 1793741081.916924, "tag": "79742-1793741081915"}
+{"container": "kriya-oci-313afd1c2694", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741082.104654, "tag": "79742-1793741081915"}
+{"container": "kriya-oci-5d61d597f99d", "inside": ["exec-rc=1"], "t": 1793741083.621942, "tag": "79769-1793741083620"}
+{"container": "kriya-oci-5d61d597f99d", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741083.808469, "tag": "79769-1793741083620"}
+{"container": "kriya-oci-2a3d39f5b238", "inside": ["exec-rc=1"], "t": 1793741086.9526, "tag": "79808-1793741086950"}
+{"container": "kriya-oci-2a3d39f5b238", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741087.147359, "tag": "79808-1793741086950"}
+{"container": "kriya-oci-37ccda3274b7", "inside": ["exec-rc=1"], "t": 1793741096.809391, "tag": "79877-1793741096807"}
+{"container": "kriya-oci-37ccda3274b7", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741096.993702, "tag": "79877-1793741096807"}
+{"container": "kriya-oci-97fb75e22f9b", "inside": ["exec-rc=1"], "t": 1793741101.5854158, "tag": "79949-1793741101583"}
+{"container": "kriya-oci-97fb75e22f9b", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741101.7768488, "tag": "79949-1793741101583"}
+{"container": "kriya-oci-5196fa7ce602", "inside": ["exec-rc=1"], "t": 1793741104.919745, "tag": "79988-1793741104918"}
+{"container": "kriya-oci-5196fa7ce602", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741105.107711, "tag": "79988-1793741104918"}
+{"container": "kriya-oci-2a23e534b377", "inside": ["exec-rc=1"], "t": 1793741111.7979891, "tag": "80046-1793741111796"}
+{"container": "kriya-oci-2a23e534b377", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741111.989625, "tag": "80046-1793741111796"}
+{"container": "kriya-oci-2a23e534b377", "inside": ["exec-rc=126"], "t": 1793741113.3795352, "tag": "80046-1793741111796"}
+{"container": "kriya-oci-dfd377e1dde2", "inside": ["exec-rc=1"], "t": 1793741114.2295601, "tag": "80075-1793741114227"}
+{"container": "kriya-oci-dfd377e1dde2", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741114.413383, "tag": "80075-1793741114227"}
+{"container": "kriya-oci-dfd377e1dde2", "inside": ["exec-rc=1"], "t": 1793741115.345292, "tag": "80075-1793741114227"}
+{"container": "kriya-oci-d978773f4892", "inside": ["exec-rc=1"], "t": 1793741117.6143801, "tag": "80116-1793741117612"}
+{"container": "kriya-oci-d978773f4892", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741117.807491, "tag": "80116-1793741117612"}
+{"container": "kriya-oci-d978773f4892", "inside": ["exec-rc=1"], "t": 1793741121.388308, "tag": "80116-1793741117612"}
+{"container": "kriya-oci-39590cccf2f0", "inside": ["exec-rc=1"], "t": 1793741124.785749, "tag": "80179-1793741124783"}
+{"container": "kriya-oci-39590cccf2f0", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741124.981009, "tag": "80179-1793741124783"}
+{"container": "kriya-oci-39590cccf2f0", "inside": ["exec-rc=126"], "t": 1793741130.561911, "tag": "80179-1793741124783"}
+{"container": "kriya-oci-077d8a9486e8", "inside": ["exec-rc=1"], "t": 1793741132.516748, "tag": "80239-1793741132514"}
+{"container": "kriya-oci-077d8a9486e8", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741132.700511, "tag": "80239-1793741132514"}
+{"container": "kriya-oci-743380cf4eaa", "inside": ["exec-rc=1"], "t": 1793741134.9974751, "tag": "80292-1793741134995"}
+{"container": "kriya-oci-743380cf4eaa", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741135.17946, "tag": "80292-1793741134995"}
+{"container": "kriya-oci-7b944e654459", "inside": ["exec-rc=1"], "t": 1793741138.38026, "tag": "80331-1793741138378"}
+{"container": "kriya-oci-7b944e654459", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741138.578507, "tag": "80331-1793741138378"}
+{"container": "kriya-oci-1920def1412d", "inside": ["exec-rc=1"], "t": 1793741156.392334, "tag": "80443-1793741156390"}
+{"container": "kriya-oci-1920def1412d", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741156.580595, "tag": "80443-1793741156390"}
+{"container": "kriya-oci-1920def1412d", "inside": ["exec-rc=126"], "t": 1793741157.941844, "tag": "80443-1793741156390"}
+{"container": "kriya-oci-7d95d985defa", "inside": ["exec-rc=1"], "t": 1793741158.773251, "tag": "80473-1793741158771"}
+{"container": "kriya-oci-7d95d985defa", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741158.964115, "tag": "80473-1793741158771"}
+{"container": "kriya-oci-7d95d985defa", "inside": ["exec-rc=1"], "t": 1793741159.873237, "tag": "80473-1793741158771"}
+{"container": "kriya-oci-ce75872c3a17", "inside": ["exec-rc=1"], "t": 1793741162.150922, "tag": "80521-1793741162149"}
+{"container": "kriya-oci-ce75872c3a17", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741162.344555, "tag": "80521-1793741162149"}
+{"container": "kriya-oci-1cd8acbd74d1", "inside": ["exec-rc=1"], "t": 1793741204.9741771, "tag": "80764-1793741204972"}
+{"container": "kriya-oci-1cd8acbd74d1", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741205.162682, "tag": "80764-1793741204972"}
+{"container": "kriya-oci-22dfbab400df", "inside": ["exec-rc=1"], "t": 1793741210.275863, "tag": "80806-1793741210273"}
+{"container": "kriya-oci-22dfbab400df", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741210.46142, "tag": "80806-1793741210273"}
+{"container": "kriya-oci-22dfbab400df", "inside": ["exec-rc=126"], "t": 1793741211.376868, "tag": "80806-1793741210273"}
+{"container": "kriya-oci-8e006fc277ef", "inside": ["exec-rc=1"], "t": 1793741212.579577, "tag": "80864-1793741212576"}
+{"container": "kriya-oci-8e006fc277ef", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741212.764744, "tag": "80864-1793741212576"}
+{"container": "kriya-oci-8e006fc277ef", "inside": ["exec-rc=1"], "t": 1793741216.41799, "tag": "80864-1793741212576"}
+{"container": "kriya-oci-11fc673bda68", "inside": ["exec-rc=1"], "t": 1793741217.2271738, "tag": "80903-1793741217225"}
+{"container": "kriya-oci-11fc673bda68", "inside": ["exec-rc=126"], "t": 1793741217.410856, "tag": "80903-1793741217225"}
+{"container": "kriya-oci-bb6595b1f423", "inside": ["exec-rc=1"], "t": 1793741218.163518, "tag": "80926-1793741218161"}
+{"container": "kriya-oci-1547e1c7fcb5", "inside": ["exec-rc=1"], "t": 1793741219.0220318, "tag": "80949-1793741219020"}
+{"container": "kriya-oci-c9b5fc87d1b7", "inside": ["exec-rc=1"], "t": 1793741221.606017, "tag": "81079-1793741221604"}
+{"container": "kriya-oci-c9b5fc87d1b7", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741221.787661, "tag": "81079-1793741221604"}
+{"container": "kriya-oci-c2159083b9a6", "inside": ["exec-rc=1"], "t": 1793741225.129086, "tag": "81330-1793741225126"}
+{"container": "kriya-oci-c2159083b9a6", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741225.3163671, "tag": "81330-1793741225126"}
+{"container": "kriya-oci-d363fa7c9d76", "inside": ["exec-rc=1"], "t": 1793741228.4730082, "tag": "81375-1793741228470"}
+{"container": "kriya-oci-d363fa7c9d76", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741228.6683981, "tag": "81375-1793741228470"}
+{"container": "kriya-oci-d363fa7c9d76", "inside": ["exec-rc=1"], "t": 1793741233.35957, "tag": "81375-1793741228470"}
+{"container": "kriya-oci-5f1474f58e58", "inside": ["exec-rc=1"], "t": 1793741235.195296, "tag": "81430-1793741235193"}
+{"container": "kriya-oci-5f1474f58e58", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741235.376571, "tag": "81430-1793741235193"}
+{"container": "kriya-oci-5f1474f58e58", "inside": ["exec-rc=126"], "t": 1793741236.7160609, "tag": "81430-1793741235193"}
+{"container": "kriya-oci-008dcb9afde9", "inside": ["exec-rc=1"], "t": 1793741237.5829089, "tag": "81462-1793741237581"}
+{"container": "kriya-oci-008dcb9afde9", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741237.763714, "tag": "81462-1793741237581"}
+{"container": "kriya-oci-9040510d8af1", "inside": ["exec-rc=1"], "t": 1793741240.834854, "tag": "81502-1793741240833"}
+{"container": "kriya-oci-9040510d8af1", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741241.0248718, "tag": "81502-1793741240833"}
+{"container": "kriya-oci-9040510d8af1", "inside": ["exec-rc=1"], "t": 1793741244.878932, "tag": "81502-1793741240833"}
+{"container": "kriya-oci-e3b8c446408d", "inside": ["exec-rc=1"], "t": 1793741248.2403479, "tag": "81565-1793741248238"}
+{"container": "kriya-oci-e3b8c446408d", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741248.430967, "tag": "81565-1793741248238"}
+{"container": "kriya-oci-6999e7ba674f", "inside": ["exec-rc=1"], "t": 1793741322.9361181, "tag": "81973-1793741322934"}
+{"container": "kriya-oci-6999e7ba674f", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741323.1286788, "tag": "81973-1793741322934"}
+{"container": "kriya-oci-12837b9654fa", "inside": ["exec-rc=1"], "t": 1793741325.5006652, "tag": "82028-1793741325498"}
+{"container": "kriya-oci-12837b9654fa", "inside": ["exec-rc=126"], "t": 1793741325.682604, "tag": "82028-1793741325498"}
+{"container": "kriya-oci-24c04b0686c5", "inside": ["exec-rc=1"], "t": 1793741326.5941901, "tag": "82051-1793741326592"}
+{"container": "kriya-oci-24c04b0686c5", "inside": ["exec-rc=126"], "t": 1793741326.786741, "tag": "82051-1793741326592"}
+{"container": "kriya-oci-ce7bd7a9a107", "inside": ["exec-rc=1"], "t": 1793741327.815161, "tag": "82088-1793741327813"}
+{"container": "kriya-oci-ce7bd7a9a107", "inside": ["exec-rc=126"], "t": 1793741327.9958668, "tag": "82088-1793741327813"}
+{"container": "kriya-oci-76292f67095d", "inside": ["exec-rc=1"], "t": 1793741329.315305, "tag": "82155-1793741329313"}
+{"container": "kriya-oci-76292f67095d", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741329.503197, "tag": "82155-1793741329313"}
+{"container": "kriya-oci-8dd6350c013f", "inside": ["exec-rc=1"], "t": 1793741332.6415849, "tag": "82194-1793741332638"}
+{"container": "kriya-oci-8dd6350c013f", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741332.8426151, "tag": "82194-1793741332638"}
+{"container": "kriya-oci-cfc5dd28d36c", "inside": ["exec-rc=1"], "t": 1793741340.298327, "tag": "82253-1793741340296"}
+{"container": "kriya-oci-cfc5dd28d36c", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741340.4907808, "tag": "82253-1793741340296"}
+{"container": "kriya-oci-cfc5dd28d36c", "inside": ["exec-rc=1"], "t": 1793741341.856322, "tag": "82253-1793741340296"}
+{"container": "kriya-oci-f8836a26c2e7", "inside": ["exec-rc=1"], "t": 1793741342.67002, "tag": "82282-1793741342668"}
+{"container": "kriya-oci-f8836a26c2e7", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741342.8631449, "tag": "82282-1793741342668"}
+{"container": "kriya-oci-a10de315ad4a", "inside": ["exec-rc=1"], "t": 1793741344.484633, "tag": "82357-1793741344482"}
+{"container": "kriya-oci-a10de315ad4a", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741344.674459, "tag": "82357-1793741344482"}
+{"container": "kriya-oci-7fc6d982a7be", "inside": ["exec-rc=1"], "t": 1793741347.7693791, "tag": "82398-1793741347767"}
+{"container": "kriya-oci-7fc6d982a7be", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741347.956119, "tag": "82398-1793741347767"}
+{"container": "kriya-oci-9f8e8bac20f1", "inside": ["exec-rc=1"], "t": 1793741421.8064551, "tag": "82774-1793741421804"}
+{"container": "kriya-oci-9f8e8bac20f1", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741421.995269, "tag": "82774-1793741421804"}
+{"container": "kriya-oci-2de8074c2591", "inside": ["exec-rc=1"], "t": 1793741424.1820889, "tag": "82809-1793741424180"}
+{"container": "kriya-oci-2de8074c2591", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741424.362474, "tag": "82809-1793741424180"}
+{"container": "kriya-oci-59aa471515d6", "inside": ["exec-rc=1"], "t": 1793741426.201308, "tag": "82893-1793741426199"}
+{"container": "kriya-oci-59aa471515d6", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741426.3989818, "tag": "82893-1793741426199"}
+{"container": "kriya-oci-b7003abe73ea", "inside": ["exec-rc=1"], "t": 1793741429.5315242, "tag": "82931-1793741429529"}
+{"container": "kriya-oci-b7003abe73ea", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741429.724127, "tag": "82931-1793741429529"}
+{"container": "kriya-oci-92663fb20c5b", "inside": ["exec-rc=1"], "t": 1793741437.0327501, "tag": "82990-1793741437030"}
+{"container": "kriya-oci-92663fb20c5b", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741437.2155771, "tag": "82990-1793741437030"}
+{"container": "kriya-oci-92663fb20c5b", "inside": ["exec-rc=126"], "t": 1793741438.580105, "tag": "82990-1793741437030"}
+{"container": "kriya-oci-f844b0262966", "inside": ["exec-rc=1"], "t": 1793741439.4371588, "tag": "83019-1793741439434"}
+{"container": "kriya-oci-f844b0262966", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741439.6191812, "tag": "83019-1793741439434"}
+{"container": "kriya-oci-ada1ebd7eac1", "inside": ["exec-rc=1"], "t": 1793741441.408579, "tag": "83091-1793741441406"}
+{"container": "kriya-oci-ada1ebd7eac1", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741441.603979, "tag": "83091-1793741441406"}
+{"container": "kriya-oci-ada1ebd7eac1", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741441.86024, "tag": "83091-1793741441406"}
+{"container": "kriya-oci-fa810dd3c628", "inside": ["exec-rc=1"], "t": 1793741446.644651, "tag": "83144-1793741446642"}
+{"container": "kriya-oci-fa810dd3c628", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741446.829047, "tag": "83144-1793741446642"}
+{"container": "kriya-oci-fa810dd3c628", "inside": ["exec-rc=1"], "t": 1793741450.903525, "tag": "83144-1793741446642"}
+{"container": "kriya-oci-4be017e6f39a", "inside": ["exec-rc=1"], "t": 1793741453.03388, "tag": "83202-1793741453031"}
+{"container": "kriya-oci-4be017e6f39a", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741453.225697, "tag": "83202-1793741453031"}
+{"container": "kriya-oci-4be017e6f39a", "inside": ["exec-rc=1"], "t": 1793741453.458261, "tag": "83202-1793741453031"}
+{"container": "kriya-oci-09800472e6ad", "inside": ["exec-rc=1"], "t": 1793741454.986712, "tag": "83289-1793741454984"}
+{"container": "kriya-oci-09800472e6ad", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741455.183424, "tag": "83289-1793741454984"}
+{"container": "kriya-oci-cd6e6dfdc80b", "inside": ["exec-rc=1"], "t": 1793741458.3371148, "tag": "83328-1793741458335"}
+{"container": "kriya-oci-cd6e6dfdc80b", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741458.536382, "tag": "83328-1793741458335"}
+{"container": "kriya-oci-e6c0793582ff", "inside": ["exec-rc=1"], "t": 1793741463.8452039, "tag": "83378-1793741463843"}
+{"container": "kriya-oci-e6c0793582ff", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741464.028992, "tag": "83378-1793741463843"}
+{"container": "kriya-oci-c8c0359728c3", "inside": ["exec-rc=1"], "t": 1793741469.071745, "tag": "83512-1793741469069"}
+{"container": "kriya-oci-c8c0359728c3", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741469.258541, "tag": "83512-1793741469069"}
+{"container": "kriya-oci-fd8438156012", "inside": ["exec-rc=1"], "t": 1793741470.433995, "tag": "83538-1793741470432"}
+{"container": "kriya-oci-fd8438156012", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741470.636359, "tag": "83538-1793741470432"}
+{"container": "kriya-oci-627d46c56c44", "inside": ["exec-rc=1"], "t": 1793741472.0433438, "tag": "83585-1793741472041"}
+{"container": "kriya-oci-627d46c56c44", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741472.221592, "tag": "83585-1793741472041"}
+{"container": "kriya-oci-7ca0fc3aef8b", "inside": ["exec-rc=1"], "t": 1793741473.338568, "tag": "83610-1793741473336"}
+{"container": "kriya-oci-7ca0fc3aef8b", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741473.519545, "tag": "83610-1793741473336"}
+{"container": "kriya-oci-60dd620f8fa7", "inside": ["exec-rc=1"], "t": 1793741474.6213892, "tag": "83640-1793741474619"}
+{"container": "kriya-oci-60dd620f8fa7", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741474.811779, "tag": "83640-1793741474619"}
+{"container": "kriya-oci-39a1b0397cb6", "inside": ["exec-rc=1"], "t": 1793741476.051202, "tag": "83694-1793741476049"}
+{"container": "kriya-oci-39a1b0397cb6", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741476.241736, "tag": "83694-1793741476049"}
+{"container": "kriya-oci-a96f96636fee", "inside": ["exec-rc=1"], "t": 1793741479.363793, "tag": "83733-1793741479362"}
+{"container": "kriya-oci-a96f96636fee", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741479.5536551, "tag": "83733-1793741479362"}
+{"container": "kriya-oci-a96f96636fee", "inside": ["exec-rc=1"], "t": 1793741484.986937, "tag": "83733-1793741479362"}
+{"container": "kriya-oci-4a21dd8447ca", "inside": ["exec-rc=1"], "t": 1793741486.8806279, "tag": "83791-1793741486878"}
+{"container": "kriya-oci-4a21dd8447ca", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741487.068387, "tag": "83791-1793741486878"}
+{"container": "kriya-oci-4a21dd8447ca", "inside": ["exec-rc=1"], "t": 1793741488.4503338, "tag": "83791-1793741486878"}
+{"container": "kriya-oci-6cc3a2f30381", "inside": ["exec-rc=1"], "t": 1793741489.150966, "tag": "83818-1793741489149"}
+{"container": "kriya-oci-6cc3a2f30381", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741489.342307, "tag": "83818-1793741489149"}
+{"container": "kriya-oci-c2fb414db8f7", "inside": ["exec-rc=1"], "t": 1793741495.28966, "tag": "83871-1793741495287"}
+{"container": "kriya-oci-c2fb414db8f7", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741495.470541, "tag": "83871-1793741495287"}
+{"container": "kriya-oci-53846a1ae9d6", "inside": ["exec-rc=1"], "t": 1793741501.0640168, "tag": "83912-1793741501062"}
+{"container": "kriya-oci-53846a1ae9d6", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741501.2516549, "tag": "83912-1793741501062"}
+{"container": "kriya-oci-31d00c77c309", "inside": ["exec-rc=1"], "t": 1793741506.89996, "tag": "83958-1793741506898"}
+{"container": "kriya-oci-31d00c77c309", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741507.079255, "tag": "83958-1793741506898"}
+{"container": "kriya-oci-12766a5640ce", "inside": ["exec-rc=1"], "t": 1793741521.946336, "tag": "84066-1793741521944"}
+{"container": "kriya-oci-12766a5640ce", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741522.135332, "tag": "84066-1793741521944"}
+{"container": "kriya-oci-dc8e1701ce6f", "inside": ["exec-rc=1"], "t": 1793741528.634948, "tag": "84134-1793741528633"}
+{"container": "kriya-oci-dc8e1701ce6f", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741528.828626, "tag": "84134-1793741528633"}
+{"container": "kriya-oci-7f9901bd39b9", "inside": ["exec-rc=1"], "t": 1793741536.171666, "tag": "84190-1793741536170"}
+{"container": "kriya-oci-7f9901bd39b9", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741536.3516932, "tag": "84190-1793741536170"}
+{"container": "kriya-oci-a56a0490f671", "inside": ["exec-rc=1"], "t": 1793741543.9125671, "tag": "84238-1793741543910"}
+{"container": "kriya-oci-a56a0490f671", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741544.091421, "tag": "84238-1793741543910"}
+{"container": "kriya-oci-3a20a72c5f64", "inside": ["exec-rc=1"], "t": 1793741580.9157681, "tag": "84445-1793741580914"}
+{"container": "kriya-oci-3a20a72c5f64", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741581.104529, "tag": "84445-1793741580914"}
+{"container": "kriya-oci-3a20a72c5f64", "inside": ["exec-rc=1"], "t": 1793741583.564972, "tag": "84445-1793741580914"}
+{"container": "kriya-oci-7a5d49c05528", "inside": ["exec-rc=1"], "t": 1793741586.694444, "tag": "84501-1793741586692"}
+{"container": "kriya-oci-7a5d49c05528", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741586.893274, "tag": "84501-1793741586692"}
+{"container": "kriya-oci-7a5d49c05528", "inside": ["exec-rc=126"], "t": 1793741589.1594539, "tag": "84501-1793741586692"}
+{"container": "kriya-oci-39cdcb7cdca3", "inside": ["exec-rc=1"], "t": 1793741592.441524, "tag": "84552-1793741592439"}
+{"container": "kriya-oci-39cdcb7cdca3", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741592.6309388, "tag": "84552-1793741592439"}
+{"container": "kriya-oci-39cdcb7cdca3", "inside": ["exec-rc=1"], "t": 1793741596.2747781, "tag": "84552-1793741592439"}
+{"container": "kriya-oci-6d64602cad75", "inside": ["exec-rc=1"], "t": 1793741599.506701, "tag": "84613-1793741599504"}
+{"container": "kriya-oci-6d64602cad75", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741599.699829, "tag": "84613-1793741599504"}
+{"container": "kriya-oci-8f4668602a20", "inside": ["exec-rc=1"], "t": 1793741604.729432, "tag": "84660-1793741604727"}
+{"container": "kriya-oci-8f4668602a20", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741604.920007, "tag": "84660-1793741604727"}
+{"container": "kriya-oci-ce18a942abae", "inside": ["exec-rc=1"], "t": 1793741605.679052, "tag": "84682-1793741605677"}
+{"container": "kriya-oci-ce18a942abae", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741605.866934, "tag": "84682-1793741605677"}
+{"container": "kriya-oci-26e26aaaeb33", "inside": ["exec-rc=1"], "t": 1793741608.345238, "tag": "84706-1793741608343"}
+{"container": "kriya-oci-26e26aaaeb33", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741608.532303, "tag": "84706-1793741608343"}
+{"container": "kriya-oci-68d63261e6ae", "inside": ["exec-rc=1"], "t": 1793741637.6799428, "tag": "84872-1793741637678"}
+{"container": "kriya-oci-68d63261e6ae", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741637.8636, "tag": "84872-1793741637678"}
+{"container": "kriya-oci-e3fc43e725a2", "inside": ["exec-rc=1"], "t": 1793741639.205832, "tag": "84910-1793741639204"}
+{"container": "kriya-oci-e3fc43e725a2", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741639.3889768, "tag": "84910-1793741639204"}
+{"container": "kriya-oci-84ecec815602", "inside": ["exec-rc=1"], "t": 1793741640.737802, "tag": "84945-1793741640735"}
+{"container": "kriya-oci-84ecec815602", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741640.921163, "tag": "84945-1793741640735"}
+{"container": "kriya-oci-215fa6fcb35a", "inside": ["exec-rc=1"], "t": 1793741642.3207529, "tag": "84980-1793741642318"}
+{"container": "kriya-oci-215fa6fcb35a", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741642.503705, "tag": "84980-1793741642318"}
+{"container": "kriya-oci-45643f717477", "inside": ["exec-rc=1"], "t": 1793741646.096373, "tag": "85026-1793741646094"}
+{"container": "kriya-oci-2f4615e65164", "inside": ["exec-rc=1"], "t": 1793741651.063067, "tag": "85074-1793741651061"}
+{"container": "kriya-oci-2f4615e65164", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741651.2561831, "tag": "85074-1793741651061"}
+{"container": "kriya-oci-ede2425d4fad", "inside": ["exec-rc=1"], "t": 1793741652.219286, "tag": "85099-1793741652217"}
+{"container": "kriya-oci-ede2425d4fad", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741652.395967, "tag": "85099-1793741652217"}
+{"container": "kriya-oci-4169a749d56e", "inside": ["exec-rc=1"], "t": 1793741653.155513, "tag": "85122-1793741653153"}
+{"container": "kriya-oci-4169a749d56e", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741653.346415, "tag": "85122-1793741653153"}
+{"container": "kriya-oci-537155f8e15a", "inside": ["exec-rc=1"], "t": 1793741660.662555, "tag": "85182-1793741660660"}
+{"container": "kriya-oci-537155f8e15a", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741660.846038, "tag": "85182-1793741660660"}
+{"container": "kriya-oci-537155f8e15a", "inside": ["exec-rc=126"], "t": 1793741664.520273, "tag": "85182-1793741660660"}
+{"container": "kriya-oci-223ef6a55425", "inside": ["exec-rc=1"], "t": 1793741667.770744, "tag": "85244-1793741667768"}
+{"container": "kriya-oci-223ef6a55425", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741667.9675362, "tag": "85244-1793741667768"}
+{"container": "kriya-oci-a9546194ad49", "inside": ["exec-rc=1"], "t": 1793741674.532492, "tag": "85294-1793741674530"}
+{"container": "kriya-oci-a9546194ad49", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741674.721869, "tag": "85294-1793741674530"}
+{"container": "kriya-oci-ef4d5e67999e", "inside": ["exec-rc=1"], "t": 1793741681.249237, "tag": "85345-1793741681247"}
+{"container": "kriya-oci-ef4d5e67999e", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741681.430437, "tag": "85345-1793741681247"}
+{"container": "kriya-oci-38929d5c30fb", "inside": ["exec-rc=1"], "t": 1793741687.926681, "tag": "85397-1793741687925"}
+{"container": "kriya-oci-38929d5c30fb", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741688.120116, "tag": "85397-1793741687925"}
+{"container": "kriya-oci-7da493508d19", "inside": ["exec-rc=1"], "t": 1793741694.5736918, "tag": "85438-1793741694572"}
+{"container": "kriya-oci-7da493508d19", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741694.7599769, "tag": "85438-1793741694572"}
+{"container": "kriya-oci-cbff6ea2487e", "inside": ["exec-rc=1"], "t": 1793741701.279129, "tag": "85489-1793741701277"}
+{"container": "kriya-oci-cbff6ea2487e", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741701.469957, "tag": "85489-1793741701277"}
+{"container": "kriya-oci-f38cbf38614a", "inside": ["exec-rc=1"], "t": 1793741707.934887, "tag": "85546-1793741707933"}
+{"container": "kriya-oci-f38cbf38614a", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741708.12331, "tag": "85546-1793741707933"}
+{"container": "kriya-oci-4d3ecca304d5", "inside": ["exec-rc=1"], "t": 1793741714.574344, "tag": "85588-1793741714572"}
+{"container": "kriya-oci-4d3ecca304d5", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741714.76027, "tag": "85588-1793741714572"}
+{"container": "kriya-oci-de61104c84e4", "inside": ["exec-rc=1"], "t": 1793741722.1481862, "tag": "85641-1793741722146"}
+{"container": "kriya-oci-de61104c84e4", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741722.340374, "tag": "85641-1793741722146"}
+{"container": "kriya-oci-545ada72770e", "inside": ["exec-rc=1"], "t": 1793741728.757448, "tag": "85689-1793741728755"}
+{"container": "kriya-oci-545ada72770e", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741728.94357, "tag": "85689-1793741728755"}
+{"container": "kriya-oci-0522f2de9eb6", "inside": ["exec-rc=1"], "t": 1793741735.45083, "tag": "85735-1793741735449"}
+{"container": "kriya-oci-0522f2de9eb6", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741735.6360981, "tag": "85735-1793741735449"}
+{"container": "kriya-oci-30b4d13c266b", "inside": ["exec-rc=1"], "t": 1793741742.0271628, "tag": "85783-1793741742025"}
+{"container": "kriya-oci-30b4d13c266b", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741742.21538, "tag": "85783-1793741742025"}
+{"container": "kriya-oci-c7a35e75beb2", "inside": ["exec-rc=1"], "t": 1793741749.562287, "tag": "85835-1793741749560"}
+{"container": "kriya-oci-c7a35e75beb2", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741749.746347, "tag": "85835-1793741749560"}
+{"container": "kriya-oci-6f88e3e3df97", "inside": ["exec-rc=1"], "t": 1793741756.16991, "tag": "85885-1793741756168"}
+{"container": "kriya-oci-6f88e3e3df97", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741756.363073, "tag": "85885-1793741756168"}
+{"container": "kriya-oci-9a8ddc943a7e", "inside": ["exec-rc=1"], "t": 1793741763.744983, "tag": "85931-1793741763743"}
+{"container": "kriya-oci-9a8ddc943a7e", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741763.929179, "tag": "85931-1793741763743"}
+{"container": "kriya-oci-cacc5e36ad12", "inside": ["exec-rc=1"], "t": 1793741770.43753, "tag": "85980-1793741770435"}
+{"container": "kriya-oci-cacc5e36ad12", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741770.633636, "tag": "85980-1793741770435"}
+{"container": "kriya-oci-f5443d4cc356", "inside": ["exec-rc=1"], "t": 1793741778.050873, "tag": "86032-1793741778049"}
+{"container": "kriya-oci-f5443d4cc356", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741778.2366478, "tag": "86032-1793741778049"}
+{"container": "kriya-oci-f1b29d43488f", "inside": ["exec-rc=1"], "t": 1793741783.965277, "tag": "86072-1793741783963"}
+{"container": "kriya-oci-f1b29d43488f", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741784.1527302, "tag": "86072-1793741783963"}
+{"container": "kriya-oci-50cfaed5365c", "inside": ["exec-rc=1"], "t": 1793741789.724246, "tag": "86118-1793741789722"}
+{"container": "kriya-oci-50cfaed5365c", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741789.909386, "tag": "86118-1793741789722"}
+{"container": "kriya-oci-77265291eef8", "inside": ["exec-rc=1"], "t": 1793741809.973768, "tag": "86174-1793741809971"}
+{"container": "kriya-oci-77265291eef8", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741810.162869, "tag": "86174-1793741809971"}
+{"container": "kriya-oci-68055453abd8", "inside": ["exec-rc=1"], "t": 1793741815.927862, "tag": "86215-1793741815926"}
+{"container": "kriya-oci-68055453abd8", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741816.1125472, "tag": "86215-1793741815926"}
+{"container": "kriya-oci-9e42c4e52c7f", "inside": ["exec-rc=1"], "t": 1793741821.834017, "tag": "86263-1793741821832"}
+{"container": "kriya-oci-9e42c4e52c7f", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741822.018582, "tag": "86263-1793741821832"}
+{"container": "kriya-oci-3966bb10a34b", "inside": ["exec-rc=1"], "t": 1793741827.758453, "tag": "86328-1793741827757"}
+{"container": "kriya-oci-3966bb10a34b", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741827.941149, "tag": "86328-1793741827757"}
+{"container": "kriya-oci-8708d147754e", "inside": ["exec-rc=1"], "t": 1793741847.966002, "tag": "86393-1793741847964"}
+{"container": "kriya-oci-8708d147754e", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741848.156717, "tag": "86393-1793741847964"}
+{"container": "kriya-oci-2e7c9475938b", "inside": ["exec-rc=1"], "t": 1793741853.735698, "tag": "86439-1793741853734"}
+{"container": "kriya-oci-2e7c9475938b", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741853.923403, "tag": "86439-1793741853734"}
+{"container": "kriya-oci-364c52dd16b9", "inside": ["exec-rc=1"], "t": 1793741859.5090759, "tag": "86485-1793741859507"}
+{"container": "kriya-oci-364c52dd16b9", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741859.6956658, "tag": "86485-1793741859507"}
+{"container": "kriya-oci-61e3dcc5ed15", "inside": ["exec-rc=1"], "t": 1793741865.368913, "tag": "86531-1793741865367"}
+{"container": "kriya-oci-61e3dcc5ed15", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741865.562378, "tag": "86531-1793741865367"}
+{"container": "kriya-oci-83c288f20c96", "inside": ["exec-rc=1"], "t": 1793741871.1590478, "tag": "86579-1793741871157"}
+{"container": "kriya-oci-83c288f20c96", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741871.338633, "tag": "86579-1793741871157"}
+{"container": "kriya-oci-ff80d4754135", "inside": ["exec-rc=1"], "t": 1793741876.929718, "tag": "86625-1793741876927"}
+{"container": "kriya-oci-ff80d4754135", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741877.121397, "tag": "86625-1793741876927"}
+{"container": "kriya-oci-b8520be872e7", "inside": ["exec-rc=1"], "t": 1793741882.688757, "tag": "86665-1793741882687"}
+{"container": "kriya-oci-b8520be872e7", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741882.883292, "tag": "86665-1793741882687"}
+{"container": "kriya-oci-f2310838cc15", "inside": ["exec-rc=1"], "t": 1793741888.6836338, "tag": "86717-1793741888682"}
+{"container": "kriya-oci-f2310838cc15", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741888.868869, "tag": "86717-1793741888682"}
+{"container": "kriya-oci-d66f969b4074", "inside": ["exec-rc=1"], "t": 1793741894.5539908, "tag": "86757-1793741894552"}
+{"container": "kriya-oci-d66f969b4074", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741894.74563, "tag": "86757-1793741894552"}
+{"container": "kriya-oci-11b3e36859a5", "inside": ["exec-rc=1"], "t": 1793741900.3873239, "tag": "86803-1793741900385"}
+{"container": "kriya-oci-11b3e36859a5", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741900.5827122, "tag": "86803-1793741900385"}
+{"container": "kriya-oci-912fda8ee361", "inside": ["exec-rc=1"], "t": 1793741906.623241, "tag": "86858-1793741906621"}
+{"container": "kriya-oci-912fda8ee361", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741906.8184068, "tag": "86858-1793741906621"}
+{"container": "kriya-oci-c94973ef31db", "inside": ["exec-rc=1"], "t": 1793741912.622732, "tag": "86906-1793741912621"}
+{"container": "kriya-oci-c94973ef31db", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741912.809775, "tag": "86906-1793741912621"}
+{"container": "kriya-oci-478cc64d1637", "inside": ["exec-rc=1"], "t": 1793741923.032397, "tag": "86972-1793741923030"}
+{"container": "kriya-oci-478cc64d1637", "inside": ["N:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741923.217886, "tag": "86972-1793741923030"}
+{"container": "kriya-oci-e87cf68476bd", "inside": ["exec-rc=1"], "t": 1793741928.987561, "tag": "87020-1793741928985"}
+{"container": "kriya-oci-f2ece8e631bd", "inside": ["exec-rc=1"], "t": 1793741930.092535, "tag": "87044-1793741930090"}
+{"container": "kriya-oci-f2ece8e631bd", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741930.285982, "tag": "87044-1793741930090"}
+{"container": "kriya-oci-f2ece8e631bd", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741930.508332, "tag": "87044-1793741930090"}
+{"container": "kriya-oci-ed7dd67f4203", "inside": ["exec-rc=1"], "t": 1793741935.420674, "tag": "87091-1793741935418"}
+{"container": "kriya-oci-ed7dd67f4203", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741935.614753, "tag": "87091-1793741935418"}
+{"container": "kriya-oci-d48f8ab0f66e", "inside": ["exec-rc=1"], "t": 1793741941.9608629, "tag": "87146-1793741941959"}
+{"container": "kriya-oci-d48f8ab0f66e", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741942.152019, "tag": "87146-1793741941959"}
+{"container": "kriya-oci-a8777a2aedc4", "inside": ["exec-rc=1"], "t": 1793741943.593487, "tag": "87172-1793741943591"}
+{"container": "kriya-oci-a8777a2aedc4", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741943.787413, "tag": "87172-1793741943591"}
+{"container": "kriya-oci-a8777a2aedc4", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741944.03665, "tag": "87172-1793741943591"}
+{"container": "kriya-oci-a8777a2aedc4", "inside": ["exec-rc=1"], "t": 1793741946.708235, "tag": "87172-1793741943591"}
+{"container": "kriya-oci-2222b008557a", "inside": ["exec-rc=1"], "t": 1793741949.0983171, "tag": "87228-1793741949096"}
+{"container": "kriya-oci-2222b008557a", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741949.284863, "tag": "87228-1793741949096"}
+{"container": "kriya-oci-2222b008557a", "inside": ["exec-rc=126"], "t": 1793741953.483352, "tag": "87228-1793741949096"}
+{"container": "kriya-oci-5f4b628e4bc4", "inside": ["exec-rc=1"], "t": 1793741955.39889, "tag": "87276-1793741955397"}
+{"container": "kriya-oci-5f4b628e4bc4", "inside": ["Y:/kriya/workspace/.kriya", "Y:/kriya/workspace/.kriya/venv", "Y:/kriya/workspace/.kriya/venv/bin", "L:/kriya/workspace/.kriya/venv/bin/python->python3", "Y:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741955.5919738, "tag": "87276-1793741955397"}
+{"container": "kriya-oci-5319bf0cac27", "inside": ["exec-rc=1"], "t": 1793741957.0442739, "tag": "87303-1793741957042"}
+{"container": "kriya-oci-5319bf0cac27", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741957.23707, "tag": "87303-1793741957042"}
+{"container": "kriya-oci-14eade62f527", "inside": ["exec-rc=1"], "t": 1793741960.323958, "tag": "87347-1793741960322"}
+{"container": "kriya-oci-14eade62f527", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741960.518732, "tag": "87347-1793741960322"}
+{"container": "kriya-oci-b7baf61f547c", "inside": ["exec-rc=1"], "t": 1793741967.063005, "tag": "87396-1793741967061"}
+{"container": "kriya-oci-b7baf61f547c", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741967.257805, "tag": "87396-1793741967061"}
+{"container": "kriya-oci-35112dd424a7", "inside": ["exec-rc=1"], "t": 1793741969.4179142, "tag": "87432-1793741969416"}
+{"container": "kriya-oci-35112dd424a7", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741969.595788, "tag": "87432-1793741969416"}
+{"container": "kriya-oci-f703e1a861f2", "inside": ["exec-rc=1"], "t": 1793741972.654905, "tag": "87471-1793741972653"}
+{"container": "kriya-oci-f703e1a861f2", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741972.8565361, "tag": "87471-1793741972653"}
+{"container": "kriya-oci-4b6cf8e621a2", "inside": ["exec-rc=1"], "t": 1793741979.364489, "tag": "87528-1793741979362"}
+{"container": "kriya-oci-4b6cf8e621a2", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741979.555161, "tag": "87528-1793741979362"}
+{"container": "kriya-oci-65ff5434a078", "inside": ["exec-rc=1"], "t": 1793741981.716661, "tag": "87558-1793741981715"}
+{"container": "kriya-oci-65ff5434a078", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741981.900095, "tag": "87558-1793741981715"}
+{"container": "kriya-oci-fbbeb10cd49a", "inside": ["exec-rc=1"], "t": 1793741984.932033, "tag": "87597-1793741984930"}
+{"container": "kriya-oci-fbbeb10cd49a", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793741985.127795, "tag": "87597-1793741984930"}
+{"container": "kriya-oci-fbbeb10cd49a", "inside": ["exec-rc=1"], "t": 1793742027.39087, "tag": "87597-1793741984930"}
+{"container": "kriya-oci-893aa1f5f0fe", "inside": ["exec-rc=1"], "t": 1793742029.229729, "tag": "87847-1793742029227"}
+{"container": "kriya-oci-893aa1f5f0fe", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793742029.426284, "tag": "87847-1793742029227"}
+{"container": "kriya-oci-3c4cf8a1a45d", "inside": ["exec-rc=1"], "t": 1793742032.632751, "tag": "87879-1793742032631"}
+{"container": "kriya-oci-3c4cf8a1a45d", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793742032.814181, "tag": "87879-1793742032631"}
+{"container": "kriya-oci-4dbde5094fec", "inside": ["exec-rc=1"], "t": 1793742036.054803, "tag": "87917-1793742036052"}
+{"container": "kriya-oci-4dbde5094fec", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793742036.251746, "tag": "87917-1793742036052"}
+{"container": "kriya-oci-1a2e0429a30c", "inside": ["exec-rc=1"], "t": 1793742055.692053, "tag": "88041-1793742055690"}
+{"container": "kriya-oci-1a2e0429a30c", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793742055.890194, "tag": "88041-1793742055690"}
+{"container": "kriya-oci-7c6b9e792cda", "inside": ["exec-rc=1"], "t": 1793742058.705962, "tag": "88103-1793742058704"}
+{"container": "kriya-oci-7c6b9e792cda", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793742058.890731, "tag": "88103-1793742058704"}
+{"container": "kriya-oci-7dbc7d12de45", "inside": ["exec-rc=1"], "t": 1793742059.999462, "tag": "88156-1793742059997"}
+{"container": "kriya-oci-7dbc7d12de45", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793742060.2041652, "tag": "88156-1793742059997"}
+{"container": "kriya-oci-ec8b30f2e652", "inside": ["exec-rc=1"], "t": 1793742061.0649211, "tag": "88190-1793742061063"}
+{"container": "kriya-oci-ec8b30f2e652", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793742061.2483609, "tag": "88190-1793742061063"}
+{"container": "kriya-oci-891b9f7a1399", "inside": ["exec-rc=1"], "t": 1793742062.6764622, "tag": "88216-1793742062674"}
+{"container": "kriya-oci-891b9f7a1399", "inside": ["Y:/kriya/workspace/.kriya", "N:/kriya/workspace/.kriya/venv", "N:/kriya/workspace/.kriya/venv/bin", "N:/kriya/workspace/.kriya/venv/bin/python", "N:/kriya/workspace/.kriya/venv/pyvenv.cfg"], "t": 1793742062.859194, "tag": "88216-1793742062674"}

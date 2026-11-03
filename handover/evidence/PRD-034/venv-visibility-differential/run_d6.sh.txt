@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# usage: run_d6.sh TAG   (files-TAG.txt + ids-TAG.json in this directory)
+# Bounded differential replay of the exclusive-shard tail (owner ruling 2026-11-04 option 1). Read-only instrumentation only; PRODUCT AND TESTS UNCHANGED.
+TAG=$1
+D=/private/tmp/claude-501/perf/d6; OUTD=$D/out-$TAG; rm -rf $OUTD; mkdir -p $OUTD
+cd ~/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2 && source .venv/bin/activate
+REAL=$(command -v docker)
+{ date -u +%FT%TZ; git rev-parse HEAD; git rev-parse HEAD^{tree}; git status --short | wc -l; sw_vers -productVersion; docker version --format 'client {{.Client.Version}} server {{.Server.Version}}'; docker info --format 'ctx={{.Name}} os={{.OperatingSystem}} kernel={{.KernelVersion}} ncpu={{.NCPU}} mem={{.MemTotal}} driver={{.Driver}}'; uptime; } > $OUTD/identity.txt 2>&1
+snapshot() { # $1 = before|after
+  { echo "== $(date -u +%FT%TZ)"; docker ps -a --format '{{.ID}} {{.Names}} {{.Status}}'; echo "-- volumes"; docker volume ls -q; echo "-- networks"; docker network ls --format '{{.Name}}'; echo "-- df"; docker system df; echo "-- docker host procs (elapsed)"; ps -Ao pid,etime,pcpu,comm | grep -i -E "com.docker|vfkit|virtiofs|Docker Desktop" | grep -v grep; } > $OUTD/docker-state-$1.txt 2>&1
+}
+snapshot before
+T=$(mktemp -d /tmp/kriya-cert.XXXXXX); export TMPDIR=$T; echo $T > $OUTD/root
+# machine-load sampler (ambient conditions): every 10 s
+( while :; do { echo "== $(date -u +%FT%TZ)"; uptime; ps -Ao pcpu,comm | sort -nr | head -6; } >> $OUTD/load.txt 2>&1; sleep 10; done ) & LP=$!
+docker events --format '{{json .}}' --filter type=container > $OUTD/docker-events.jsonl 2>&1 & EP=$!
+python $D/d6tool.py watch $T $OUTD/watch.jsonl > /dev/null 2>&1 & WP=$!
+python $D/d6tool.py make-shim $T/shim $REAL $OUTD > /dev/null
+PORTM=$(python -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
+PORTP=$(python -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
+python scripts/certification_maven_repo.py serve ~/.cache/kriya-cert-maven/repo tests/certification/maven_repository.manifest.json --port $PORTM --bind 127.0.0.1 --require-attested --log $OUTD/maven.jsonl > $OUTD/maven.txt 2>&1 & MP=$!
+python scripts/certification_python_wheels.py serve tests/certification/requirements.release.hashes.txt ~/.cache/kriya-cert-wheels --port $PORTP --bind 127.0.0.1 --log $OUTD/pip.jsonl > $OUTD/pip.txt 2>&1 & PP=$!
+sleep 3
+export KRIYA_CERT_MAVEN_MIRROR="http://host.docker.internal:$PORTM/maven2" KRIYA_CERT_MAVEN_REPO=$HOME/.cache/kriya-cert-maven/repo KRIYA_CERT_MAVEN_MANIFEST=$PWD/tests/certification/maven_repository.manifest.json KRIYA_CERT_PIP_INDEX="http://host.docker.internal:$PORTP/simple" KRIYA_CERTIFICATION=1 KRIYA_CERT_LOCK_DIR=$T/locks
+mkdir -p $T/locks
+date -u +%FT%TZ > $OUTD/started
+PATH=$T/shim:$PATH python -m pytest -o addopts= -m "not live_model" -p no:cacheprovider -q --certification --certification-report=$OUTD/rep \
+  --census-ids=$D/ids-$TAG.json --junitxml=$OUTD/junit.xml $(cat $D/files-$TAG.txt) > $OUTD/pytest.txt 2>&1
+echo "exit=$?" >> $OUTD/pytest.txt
+date -u +%FT%TZ > $OUTD/finished
+sleep 8   # let the detached 5 s samplers finish
+kill $MP $PP $WP $EP $LP 2>/dev/null
+snapshot after
+ls -A $T > $OUTD/left.txt
+echo "kept for analysis: $T" >> $OUTD/left.txt

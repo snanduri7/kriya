@@ -1,0 +1,25 @@
+import json,sys,collections
+D=sys.argv[1]
+rows=[json.loads(l) for l in open(D+'/docker-calls.jsonl')]
+t00=rows[0]['t0'] if rows else 0
+def vis(seen):
+    return ''.join('Y' if s['x'] else '-' for s in seen)
+samples=collections.defaultdict(list)
+for l in open(D+'/samples.jsonl'):
+    r=json.loads(l); samples[r['tag']].append(r)
+inside=collections.defaultdict(list)
+for l in open(D+'/inside.jsonl'):
+    r=json.loads(l); inside[r['tag']].append(r)
+for r in rows:
+    if r['verb']!='run': continue
+    if not any('.kriya' in ' '.join(r['argv']) for _ in [0]): continue
+    argv=r['argv']; cmd=argv[-1] if argv else ''
+    if 'venv' not in ' '.join(argv): continue
+    vm=[m for m in r['mounts'] if (m['dst'] or '').endswith('.kriya/venv')]
+    print(f"t+{r['t0']-t00:8.2f}s rc={r['rc']} wall={r['wall']}s tag={r['tag']} venv-mount={'yes' if vm else 'no'} cmd=...{' '.join(argv[-4:])[:110]}")
+    print("   pre  ",vis(r['pre']),"post0",vis(r['post0']),"[ws,.kriya,venv,bin,python,cfg]")
+    for s in samples.get(r['tag'],[]): print(f"   +{s['offset']*1000:5.0f}ms",vis(s['seen']))
+    for i in inside.get(r['tag'],[]): print(f"   inside t+{i['t']-r['t0']:.2f}s",' '.join(x.split('/kriya/workspace/')[-1] for x in i['inside']))
+print('watch transitions:');
+for l in open(D+'/watch.jsonl'):
+    w=json.loads(l); print(f"  t+{w['t']-t00:8.2f}s",w['kriya'].split('pytest-of-')[-1][:60],w['dot_kriya_venv_bin_python_cfg'])
