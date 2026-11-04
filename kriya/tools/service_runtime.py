@@ -500,8 +500,9 @@ def _run_lifecycle(
 
 
 def _cleanup(managed: ManagedProcess, *, shutdown_timeout_seconds: float) -> Optional[str]:
-    if managed.poll() is not None:
-        return None
+    # No early return for a process that has already exited: ``terminate()`` is a no-op kill for one (it returns True at once) but ALWAYS runs the containment
+    # teardown the process was started with (the authoritative ``docker rm -f`` and the authority-mask scratch directories). Returning here skipped it on every
+    # SERVICE_EXITED_BEFORE_READY / already-gone path (CERT-SERVICE-EXITED-CLEANUP-SKIPPED-001) - against this lifecycle's own "cleanup runs unconditionally" guarantee.
     try:
         died = managed.terminate(reap_timeout=shutdown_timeout_seconds)
     except Exception as e:

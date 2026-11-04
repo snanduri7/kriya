@@ -8,6 +8,7 @@ lifecycle (start, drain threads, readiness polling, probe, SIGKILL/process-
 group termination) rather than mocking it away.
 """
 import contextlib
+import dataclasses
 import os
 import socket
 import subprocess
@@ -310,6 +311,58 @@ def test_service_early_exit_is_captured_with_returncode():
     assert result.outcome == ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY
     assert result.passed is False
     assert result.returncode == 3
+
+
+class _TeardownSpyStandIn(MountAwareStandIn):
+    """The containment stand-in with a recording teardown: whether the backend's authoritative cleanup (in production the ``docker rm -f`` and the authority-mask scratch directories) ran
+    is observable from OUTSIDE the lifecycle, not inferred from the result."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.teardowns = 0
+
+    def prepare(self, profile, command):
+        prepared = super().prepare(profile, command)
+
+        def _teardown() -> None:
+            self.teardowns += 1
+        return dataclasses.replace(prepared, cleanup=_teardown)
+
+
+def test_the_containment_teardown_runs_when_the_service_exits_before_ready():
+    """CERT-SERVICE-EXITED-CLEANUP-SKIPPED-001 (MEASURED in the PRD-034 differential: 4 of 6 leftover ``kriya-authority-mask-*`` directories, each from a real container service that
+    exited before ready): ``_cleanup`` returned early for a process that had already exited, so the backend teardown handed to ``ManagedProcess`` never ran on that path - against the
+    lifecycle's own guarantee that cleanup runs unconditionally."""
+    backend = _TeardownSpyStandIn()
+    result = _run_contained(_spec(_free_port(), _http_service_script(exit_code=3), startup_timeout=3.0), containment_backend=backend)
+    assert result.outcome == ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY and result.returncode == 3
+    assert backend.teardowns == 1
+
+
+def test_the_containment_teardown_runs_exactly_once_for_a_service_that_ran_to_a_probe():
+    backend = _TeardownSpyStandIn()
+    result = _run_contained(_spec(_free_port(), _http_service_script()), containment_backend=backend)
+    assert result.outcome == ServiceVerificationOutcomeKind.PROBE_PASSED
+    assert backend.teardowns == 1
+
+
+def test_cleanup_of_an_already_exited_process_still_terminates_so_the_teardown_runs():
+    from kriya.tools.service_runtime import _cleanup
+
+    class _ExitedManaged:
+        def __init__(self):
+            self.calls = []
+
+        def poll(self):
+            return 7  # already gone
+
+        def terminate(self, *, reap_timeout):
+            self.calls.append(reap_timeout)
+            return True
+
+    fake = _ExitedManaged()
+    assert _cleanup(fake, shutdown_timeout_seconds=1.5) is None
+    assert fake.calls == [1.5]
 
 
 # --- (11) exception path cleans up process ----------------------------------
