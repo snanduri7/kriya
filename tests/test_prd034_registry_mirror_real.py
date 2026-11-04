@@ -41,7 +41,7 @@ MIRROR_HOST = "host.docker.internal"
 
 
 class _Mirror:
-    """The frozen repository (optionally without some paths) served by the tool's own handler, bound to loopback; the Docker host name reaches it."""
+    """The frozen repository (optionally without some paths) served by the tool's own handler on the address a container reaches as the Docker host name (loopback on Docker Desktop, all interfaces on Docker Engine/Linux)."""
 
     def __init__(self, tmp_path, drop=()):
         tmp_path.mkdir(parents=True, exist_ok=True)
@@ -50,7 +50,7 @@ class _Mirror:
         self.log_path = tmp_path / "served.jsonl"
         expected = {item["path"]: item for item in manifest["files"]}
         handler = repo_tool._make_handler(REPO_DIR, expected, repo_tool._Log(str(self.log_path)))  # pylint: disable=protected-access
-        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.server = http.server.ThreadingHTTPServer((repo_tool.docker_host_bind_address(), 0), handler)  # the canonical bind rule (certify.sh states the same one)
         self.url = f"http://{MIRROR_HOST}:{self.server.server_address[1]}/maven2"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 

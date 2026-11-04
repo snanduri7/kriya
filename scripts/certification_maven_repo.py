@@ -27,6 +27,7 @@ import hashlib
 import http.server
 import json
 import os
+import platform
 import shutil
 import sys
 import threading
@@ -38,6 +39,14 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 SCHEMA_VERSION = 1
 URL_PREFIX = "/maven2"  # the mirror URL is http://host:port/maven2
 CHECKSUM_SUFFIXES = (".sha1", ".md5", ".sha256", ".sha512")
+
+
+def docker_host_bind_address(system: Optional[str] = None) -> str:
+    """The address a mirror served from THIS host must bind so that a container reaches it as ``host.docker.internal`` (HOSTED-MIRROR-REACHABILITY-001). Docker Engine on
+    Linux reaches the host through ``host-gateway`` (the bridge address), which a loopback-only server never answers; Docker Desktop (macOS, Windows) proxies loopback.
+    scripts/certify.sh states the same rule for the canonical mirror (``Linux) MAVEN_BIND="0.0.0.0"``); tests/test_prd034_maven_repo.py keeps the two in step. The
+    served content is the frozen, SHA-256-verified, read-only repository."""
+    return "0.0.0.0" if (system or platform.system()) == "Linux" else "127.0.0.1"  # noqa: S104 - deliberate: see above
 
 
 def sha256_file(path: str) -> str:

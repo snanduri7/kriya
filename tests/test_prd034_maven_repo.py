@@ -433,3 +433,13 @@ def test_a_tampered_payload_already_on_disk_is_not_a_basis_for_a_sidecar(tmp_pat
     assert any(p.startswith(f"cannot fetch {JAR}") for p in problems)
     assert [p for p in problems if SIDECAR in p] == [f"REFUSED {SIDECAR}: its payload {JAR} is not in the manifest or has not passed the manifest SHA-256"]
     assert not (fresh / SIDECAR).exists()
+
+
+def test_the_docker_host_bind_rule_is_one_rule_shared_with_certify_sh():
+    """HOSTED-MIRROR-REACHABILITY-001: a container reaches the host mirror through host-gateway on Linux Docker Engine (so it must bind beyond loopback) and through a
+    loopback proxy on Docker Desktop. The tool owns the rule; certify.sh states the same one for the canonical mirror and the wheel index."""
+    assert repo_tool.docker_host_bind_address("Linux") == "0.0.0.0"
+    assert repo_tool.docker_host_bind_address("Darwin") == "127.0.0.1" and repo_tool.docker_host_bind_address("Windows") == "127.0.0.1"
+    certify = (Path(__file__).resolve().parent.parent / "scripts" / "certify.sh").read_text(encoding="utf-8")
+    assert 'Linux) MAVEN_BIND="0.0.0.0" ;; *) MAVEN_BIND="127.0.0.1" ;;' in certify
+    assert 'Linux) PIP_BIND="0.0.0.0" ;; *) PIP_BIND="127.0.0.1" ;;' in certify

@@ -18,6 +18,11 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch the demo-v2 baseline tag and the history that connects it to HEAD
+        # demo-v2/scripts/verify_demo.sh requires tag kriya-v1.2.0-pre-modularization to exist AND to be an ancestor of HEAD (tests/test_demo_v2_owner_state.py and
+        # tests/test_demo_v2_spring_ignite.py run it). actions/checkout is a depth-1 clone without tags (MEASURED, run 41758354007: 5 failures, "baseline tag ... not
+        # present in this checkout"). Only this tag and the history connecting it are fetched - not every branch and tag; the test is not changed to avoid the tag.
+        run: git fetch --no-tags --unshallow origin "+refs/tags/kriya-v1.2.0-pre-modularization:refs/tags/kriya-v1.2.0-pre-modularization"
 
       - uses: actions/setup-python@v5
         with:
@@ -112,6 +117,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch the demo-v2 baseline tag and the history that connects it to HEAD
+        # demo-v2/scripts/verify_demo.sh requires tag kriya-v1.2.0-pre-modularization to exist AND to be an ancestor of HEAD (tests/test_demo_v2_owner_state.py and
+        # tests/test_demo_v2_spring_ignite.py run it). actions/checkout is a depth-1 clone without tags (MEASURED, run 41758354007: 5 failures, "baseline tag ... not
+        # present in this checkout"). Only this tag and the history connecting it are fetched - not every branch and tag; the test is not changed to avoid the tag.
+        run: git fetch --no-tags --unshallow origin "+refs/tags/kriya-v1.2.0-pre-modularization:refs/tags/kriya-v1.2.0-pre-modularization"
 
       - uses: actions/setup-python@v5
         with:
@@ -176,6 +186,11 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch the demo-v2 baseline tag and the history that connects it to HEAD
+        # demo-v2/scripts/verify_demo.sh requires tag kriya-v1.2.0-pre-modularization to exist AND to be an ancestor of HEAD (tests/test_demo_v2_owner_state.py and
+        # tests/test_demo_v2_spring_ignite.py run it). actions/checkout is a depth-1 clone without tags (MEASURED, run 41758354007: 5 failures, "baseline tag ... not
+        # present in this checkout"). Only this tag and the history connecting it are fetched - not every branch and tag; the test is not changed to avoid the tag.
+        run: git fetch --no-tags --unshallow origin "+refs/tags/kriya-v1.2.0-pre-modularization:refs/tags/kriya-v1.2.0-pre-modularization"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -219,6 +234,19 @@ jobs:
         # The release stage certifies packaging, not PyPI: it installs the locked dependencies with --no-index --require-hashes from this wheelhouse, which `pip download
         # --require-hashes` builds from the committed hashed lock (a file is kept only if its SHA-256 is listed).
         run: .venv/bin/python scripts/certification_python_wheels.py provision tests/certification/requirements.release.hashes.txt "$HOME/.cache/kriya-cert-wheels"
+      - name: Provision the pinned Spring XML benchmark (spring-framework-petclinic at 09351b3, bootstrap, not certification)
+        # tests/test_code_intel_config.py::test_pinned_spring_framework_petclinic_xml_parses_completely reads ~/kriya-bench/spring-framework-petclinic at exactly this commit
+        # (the one every LR-R1/B2C/B3 evidence document cites) and is a mandatory certification test: it must be provisioned, never allowlisted. Fetched by commit id, not by
+        # branch; the checkout is verified against the id.
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/kriya-bench"
+          git init -q "$HOME/kriya-bench/spring-framework-petclinic"
+          cd "$HOME/kriya-bench/spring-framework-petclinic"
+          git remote add origin https://github.com/spring-petclinic/spring-framework-petclinic.git
+          git fetch -q --depth 1 origin 09351b3ee0bd5aec2d480c0280e84700978f56d3
+          git checkout -q FETCH_HEAD
+          test "$(git rev-parse HEAD)" = 09351b3ee0bd5aec2d480c0280e84700978f56d3
       - name: Certify
         # Doctor mode here is `packaged_defaults`: a hosted runner holds no owner-approved production configuration (SEC-009: certification never
         # approves anything itself), so the production doctor is recorded as it reports on packaged defaults. See scripts/certify.sh.
