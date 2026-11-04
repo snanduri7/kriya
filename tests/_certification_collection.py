@@ -20,7 +20,7 @@ import sys
 import xml.etree.ElementTree as ElementTree
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
-from _certification import declared_not_applicable, platform_satisfied, required_platform
+from _certification import declared_not_applicable, declared_private_fixture, platform_satisfied, required_platform
 
 CANONICAL_SELECTION = "not live_model"
 DESELECTABLE_TIER = "live_model"  # the ONLY tier the canonical selection may leave out
@@ -43,7 +43,7 @@ def census_record(nodeid: str, markers: Iterable[Any], needs_docker: bool) -> Di
     names = sorted({marker.name for marker in markers})
     reasons = sorted({str(marker.kwargs.get("reason", "")) for marker in markers if marker.name in ("skip", "skipif")} - {""})
     return {"id": nodeid, "markers": names, "skip_reasons": reasons, "docker": bool(needs_docker), "requires_platform": required_platform(markers),
-            "not_applicable_on": declared_not_applicable(markers)}
+            "not_applicable_on": declared_not_applicable(markers), "external_private_fixture": declared_private_fixture(markers)}
 
 
 def tiers_of(record: Mapping[str, Any]) -> List[str]:
@@ -146,6 +146,7 @@ def executed(selected_census: Mapping[str, Any], outcomes: Mapping[Any, str],
     problems: List[str] = []
     pending: List[Dict[str, str]] = []
     not_applicable: List[Dict[str, str]] = []
+    private_pending: List[Dict[str, str]] = []
     known = {record["id"] for record in selected_census["tests"]}
     for record in selected_census["tests"]:
         declared = record.get("not_applicable_on")
@@ -156,6 +157,13 @@ def executed(selected_census: Mapping[str, Any], outcomes: Mapping[Any, str],
             if outcome != "passed":
                 problems.append(f"not applicable on {declared['platform']}: {record['id']} -> its equivalent {equivalent} is {outcome}")
             not_applicable.append({"id": record["id"], "platform": declared["platform"], "equivalent": equivalent, "equivalent_outcome": outcome})
+        gate = record.get("external_private_fixture")
+        if gate:
+            # EXTERNAL_PRIVATE_FIXTURE_REQUIRED: whatever it did here, it is PENDING the private gate's bound evidence record, never counted as a pass; a FAILURE here is still a failure.
+            status = outcomes.get(_junit_key(record["id"]), "missing")
+            if status == "failed":
+                problems.append(f"private fixture gate {gate}: {record['id']} -> failed")
+            private_pending.append({"id": record["id"], "gate": gate, "local_outcome": status})
         required = record.get("requires_platform")
         if required:
             status = outcomes.get(_junit_key(record["id"]), "missing")
@@ -174,7 +182,8 @@ def executed(selected_census: Mapping[str, Any], outcomes: Mapping[Any, str],
     for tier, counts in per_tier.items():
         if counts["passed"] < max(1, floors[tier]):
             problems.append(f"mandatory tier {tier!r}: {counts['passed']} passed < floor {max(1, floors[tier])}")
-    return {"ok": not problems, "problems": problems, "per_tier": per_tier, "platform_pending": pending, "not_applicable": not_applicable}
+    return {"ok": not problems, "problems": problems, "per_tier": per_tier, "platform_pending": pending, "not_applicable": not_applicable,
+            "private_fixture_pending": private_pending}
 
 
 def render_audit(report: Mapping[str, Any]) -> str:
@@ -211,6 +220,7 @@ def main(argv: Sequence[str]) -> int:
         _write(argv[4], report)
         print(f"[tier-execution] {'PASS' if report['ok'] else 'FAIL'}: {json.dumps(report['per_tier'], sort_keys=True)}"
               + "".join(f"\n  - PLATFORM EVIDENCE PENDING ({item['required_platform']}): {item['id']}" for item in report["platform_pending"])
+              + "".join(f"\n  - EXTERNAL_PRIVATE_FIXTURE_REQUIRED ({item['gate']}): {item['id']}" for item in report["private_fixture_pending"])
               + "".join(f"\n  - {problem}" for problem in report["problems"][:20]))
         return 0 if report["ok"] else 1
     print(usage, file=sys.stderr)

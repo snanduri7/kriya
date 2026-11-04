@@ -776,7 +776,14 @@ def _audit_skip(item, report):
     unallowlisted one becomes a failure."""
     if not (report.skipped or hasattr(report, "wasxfail")):
         return
-    from _certification import match_skip, not_applicable_equivalent, platform_satisfied, required_platform, skip_reason
+    from _certification import (
+        declared_private_fixture,
+        match_skip,
+        not_applicable_equivalent,
+        platform_satisfied,
+        required_platform,
+        skip_reason,
+    )
 
     reason = str(getattr(report, "wasxfail", "")) or skip_reason(report.longrepr)
     entry, expired = match_skip(item.config.stash[_ALLOWLIST], item.nodeid, reason)
@@ -789,13 +796,15 @@ def _audit_skip(item, report):
     # NOT APPLICABLE here (the mechanism is another platform's): an explicit, typed disposition naming the test that proves the invariant on THIS platform. Not an allowlist
     # entry; the execution audit requires the named equivalent to have passed.
     not_applicable = not_applicable_equivalent(markers)
+    # EXTERNAL_PRIVATE_FIXTURE_REQUIRED: the fixture may not be redistributed to a hosted runner; the skip is recorded under its gate and discharged only by a bound private-gate record.
+    private_fixture = declared_private_fixture(markers)
     item.config.stash[_SKIPS].append({
         "nodeid": item.nodeid, "phase": report.when, "reason": reason,
         "kind": "xfail" if hasattr(report, "wasxfail") else "skip",
         "allowlisted": entry.id if allowed else None, "expired_entry": entry.id if expired else None,
-        "platform_pending": required if pending else None, "not_applicable": not_applicable,
+        "platform_pending": required if pending else None, "not_applicable": not_applicable, "external_private_fixture": private_fixture,
     })
-    if _certification_mode(item.config) and not allowed and not pending and not_applicable is None:
+    if _certification_mode(item.config) and not allowed and not pending and not_applicable is None and private_fixture is None:
         report.outcome = "failed"
         report.longrepr = (f"UNEXPECTED SKIP in certification mode: {reason}"
                            + (f" (allowlist entry {entry.id} expired)" if expired else ""))

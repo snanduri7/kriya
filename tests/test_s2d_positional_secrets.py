@@ -193,11 +193,48 @@ def test_unclosed_quoted_values_cost_linear_time():
     import time
 
     count = 100_000 // 14
-    started = time.perf_counter()
+    started, cpu_started = time.perf_counter(), time.process_time()
     out = redact_text("sshpass -p 'a " * count)
-    elapsed = time.perf_counter() - started
+    elapsed, cpu_elapsed = time.perf_counter() - started, time.process_time() - cpu_started
     assert out == f"sshpass -p '{R} "
-    assert elapsed < 1.5, elapsed
+    if not elapsed < 1.5:  # the bound is unchanged; on a miss, RECORD what discriminates a slow computation from a descheduled one (hosted run 41785193323: 1.88 s, UNKNOWN)
+        pytest.fail(f"{elapsed} is not < 1.5\nS2D-TIMING {json.dumps(_timing_diagnostics(elapsed, cpu_elapsed, count), sort_keys=True)}", pytrace=False)
+
+
+def _timing_diagnostics(elapsed: float, cpu_elapsed: float, count: int) -> dict:
+    """RECORDING ONLY, after a miss: wall vs CPU time of the failing call (CPU ~ wall = the computation itself was slow; CPU << wall = the process was descheduled / the host was
+    contended), a fixed pure-Python calibration loop, the scaling of the same input at 1x/2x/4x (linear ~ 1:2:4, quadratic ~ 1:4:16), the load average and the CPU count. Never raises."""
+    import os
+    import time
+    info: dict = {"wall_seconds": elapsed, "cpu_seconds": cpu_elapsed, "cpu_over_wall": (cpu_elapsed / elapsed) if elapsed else None, "bound_seconds": 1.5}
+    try:
+        info["cpu_count"] = os.cpu_count()
+        info["loadavg"] = list(os.getloadavg())
+        started, cpu_started = time.perf_counter(), time.process_time()
+        total = 0
+        for index in range(2_000_000):
+            total += index
+        info["calibration_loop"] = {"wall": time.perf_counter() - started, "cpu": time.process_time() - cpu_started}
+        scaling = {}
+        for factor in (1, 2, 4):
+            best = None
+            for _ in range(3):
+                begun = time.perf_counter()
+                redact_text("sshpass -p 'a " * (count * factor))
+                best = min(best, time.perf_counter() - begun) if best is not None else time.perf_counter() - begun
+            scaling[str(factor)] = best
+        info["rescan_best_of_3_seconds_by_input_multiple"] = scaling
+    except Exception as error:  # pylint: disable=broad-except
+        info["probe_error"] = f"{type(error).__name__}: {error}"
+    return info
+
+
+def test_the_timing_diagnostics_are_recording_only_and_never_raise():
+    """Control: the diagnostics answer with their discriminating fields, and the linear cost they exist to confirm holds locally (no timing assertion beyond the existing bound)."""
+    info = _timing_diagnostics(0.05, 0.05, 100_000 // 14)
+    for key in ("wall_seconds", "cpu_seconds", "cpu_over_wall", "cpu_count", "calibration_loop", "rescan_best_of_3_seconds_by_input_multiple"):
+        assert key in info, key
+    assert "probe_error" not in info, info
 
 
 @pytest.mark.parametrize("text, expected", [

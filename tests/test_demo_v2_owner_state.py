@@ -7,7 +7,9 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -29,8 +31,14 @@ SPRING_SRC = Path(os.environ.get("DEMO_V2_BASELINE_SRC", Path.home() / "kriya-li
 HAS_SPRING = (SPRING_SRC / ".git").is_dir()
 
 
+def _kriya_executables() -> dict:
+    """The Python and `kriya` of THIS environment, handed to the scripts through their own KRIYA_PY / KRIYA_BIN override (an explicit value in the environment wins). The scripts default to
+    ``<repo>/.venv/bin/...``; a plain CI job installs into its setup-python environment and has no repo-root .venv (hosted run 41785193323, lock-file job), so the tests must not rely on it."""
+    return {"KRIYA_PY": os.environ.get("KRIYA_PY") or sys.executable, "KRIYA_BIN": os.environ.get("KRIYA_BIN") or str(Path(sys.executable).parent / "kriya")}
+
+
 def _env(work: Path) -> dict:
-    return {**os.environ, "DEMO_V2_WORK": str(work)}
+    return {**os.environ, **_kriya_executables(), "DEMO_V2_WORK": str(work)}
 
 
 def _run(script: str, work: Path, *args: str, timeout: int = 300) -> subprocess.CompletedProcess:
@@ -83,6 +91,7 @@ def test_reset_really_discards_what_a_run_left_behind(tmp_path: Path) -> None:
     assert _fingerprint(work) == clean
 
 
+@pytest.mark.external_private_fixture("PRD034-F9B-SCENARIO01")  # the fixture may not be hosted: a hosted skip is EXTERNAL_PRIVATE_FIXTURE_REQUIRED, discharged by scripts/certification_private_gate.py
 @pytest.mark.skipif(not HAS_SPRING, reason="scenario 01's fixture source is not available on this machine")
 def test_reset_all_is_idempotent_and_leaves_no_service(tmp_path: Path) -> None:
     work = tmp_path / "work"
@@ -110,6 +119,33 @@ def test_the_snapshot_copy_is_the_recorded_snapshot_and_the_repository_copy_is_n
     next(copy.glob("*/skill.yaml")).write_text("tampered\n")
     assert {str(p.relative_to(snapshot)): p.read_bytes() for p in snapshot.rglob("*") if p.is_file()} == before
     assert "PRESERVED GOVERNED ACQUISITION SNAPSHOT" in (work / "scenario-02" / "SNAPSHOT-LABEL.txt").read_text()
+
+
+def _demo_tree_without_a_venv(tmp_path: Path) -> Path:
+    """A copy of demo-v2 under a throw-away repo root that has NO ``.venv`` (what a plain CI job's checkout looks like); returns its scripts directory."""
+    root = tmp_path / "clean-checkout"
+    shutil.copytree(DEMO_V2, root / "demo-v2")
+    assert not (root / ".venv").exists()
+    return root / "demo-v2" / "scripts"
+
+
+def test_the_harness_needs_no_repo_root_venv_and_the_old_default_is_what_failed(tmp_path: Path) -> None:
+    """Hosted run 41785193323 (lock-file job): `stub_ctl.sh start` exited 1 because it defaulted to <repo>/.venv/bin/python, which that job does not create. In a checkout with no
+    .venv: the harness environment (KRIYA_PY/KRIYA_BIN of the running interpreter) starts and stops the stub; without it the same script fails exactly as it did there."""
+    scripts = _demo_tree_without_a_venv(tmp_path)
+    work = tmp_path / "work"
+    executables = _kriya_executables()
+    assert os.access(executables["KRIYA_PY"], os.X_OK) and os.access(executables["KRIYA_BIN"], os.X_OK), executables
+    clean = {k: v for k, v in os.environ.items() if k not in ("KRIYA_PY", "KRIYA_BIN")}
+    old = subprocess.run(["bash", str(scripts / "stub_ctl.sh"), "start"], capture_output=True, text=True, check=False, timeout=120, env={**clean, "DEMO_V2_WORK": str(work)})
+    old_log = work / "scenario-03" / "evidence" / "stub.stderr.log"
+    assert old.returncode != 0 and ".venv/bin/python" in old.stdout + old.stderr + (old_log.read_text() if old_log.exists() else ""), (old.returncode, old.stdout, old.stderr)  # the hosted symptom
+    new = subprocess.run(["bash", str(scripts / "stub_ctl.sh"), "start"], capture_output=True, text=True, check=False, timeout=120, env={**clean, **executables, "DEMO_V2_WORK": str(work)})
+    try:
+        assert new.returncode == 0, (new.stdout, new.stderr)
+        assert subprocess.run(["bash", str(scripts / "stub_ctl.sh"), "status"], capture_output=True, text=True, check=False, timeout=60, env={**clean, **executables, "DEMO_V2_WORK": str(work)}).returncode == 0
+    finally:
+        subprocess.run(["bash", str(scripts / "stub_ctl.sh"), "stop"], capture_output=True, text=True, check=False, timeout=60, env={**clean, **executables, "DEMO_V2_WORK": str(work)})
 
 
 def _idle_failures(work: Path, scenario: str) -> list:
@@ -155,7 +191,7 @@ def test_idle_check_sees_a_stale_operator_approval_and_reset_revokes_it(tmp_path
     work = tmp_path / "work"
     assert _run("prepare_demo.sh", work, "--scenario", "02", "--no-services").returncode == 0
     workspace = work / "scenario-02" / "workspace"
-    kriya = str(ROOT / ".venv" / "bin" / "kriya")
+    kriya = _kriya_executables()["KRIYA_BIN"]
     try:
         granted = subprocess.run([kriya, "authority", "approve", "--confirm"], cwd=workspace, capture_output=True, text=True, check=False, timeout=120)
         assert granted.returncode == 0, granted.stdout + granted.stderr

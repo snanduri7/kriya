@@ -123,6 +123,21 @@ def not_applicable_equivalent(markers: Sequence[Any], platform: Optional[str] = 
     return declared["equivalent"] if declared is not None and (platform or sys.platform).startswith(declared["platform"]) else None
 
 
+# ``@pytest.mark.external_private_fixture("PRD034-F9B-SCENARIO01")`` declares that a test needs a fixture that may NOT be redistributed to a hosted runner (PRD-034 F9b: a third-party project
+# snapshot with no licence). On a host without the fixture the test is skipped and the skip is recorded as EXTERNAL_PRIVATE_FIXTURE_REQUIRED for that gate - not an unexpected skip and not
+# an allowlist entry. It never counts as a pass: the certification summary cannot read CERTIFIED while one is pending, and the only way to discharge it is a private-gate evidence record
+# (scripts/certification_private_gate.py) that binds to the same Kriya revision/config and whose gate and node ids match tests/certification/private_fixtures.json.
+EXTERNAL_PRIVATE_FIXTURE_MARKER = "external_private_fixture"
+
+
+def declared_private_fixture(markers: Sequence[Any]) -> Optional[str]:
+    """The private-fixture gate id from an ``external_private_fixture`` marker, else None. A marker without a gate id is malformed and ignored (it can never excuse a skip)."""
+    for marker in markers:
+        if getattr(marker, "name", None) == EXTERNAL_PRIVATE_FIXTURE_MARKER and marker.args and str(marker.args[0]):
+            return str(marker.args[0])
+    return None
+
+
 def platform_satisfied(required: Optional[str], platform: Optional[str] = None) -> bool:
     """Whether a run on ``platform`` (default: this one) can supply the evidence a test requires of ``required``."""
     return required is None or (platform or sys.platform).startswith(required)
@@ -131,12 +146,14 @@ def platform_satisfied(required: Optional[str], platform: Optional[str] = None) 
 def write_skips(directory: str, skips: List[Mapping[str, Any]], certification: bool) -> str:
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, "skips.json")
-    unexpected = [s for s in skips if not s.get("allowlisted") and not s.get("platform_pending") and not s.get("not_applicable")]
+    unexpected = [s for s in skips if not s.get("allowlisted") and not s.get("platform_pending") and not s.get("not_applicable") and not s.get("external_private_fixture")]
+    private = [{"nodeid": s["nodeid"], "gate": s["external_private_fixture"], "reason": s["reason"]} for s in skips if s.get("external_private_fixture")]
     not_applicable = [{"nodeid": s["nodeid"], "equivalent": s["not_applicable"], "reason": s["reason"]} for s in skips if s.get("not_applicable")]
     pending = [{"nodeid": s["nodeid"], "required_platform": s["platform_pending"], "reason": s["reason"]} for s in skips if s.get("platform_pending")]
     payload: Dict[str, Any] = {"certification_mode": certification, "skipped": len(skips), "platform": sys.platform,
                                "unexpected": len(unexpected), "platform_pending": sorted(pending, key=lambda s: s["nodeid"]),
                                "not_applicable": sorted(not_applicable, key=lambda s: s["nodeid"]),
+                               "external_private_fixture": sorted(private, key=lambda s: s["nodeid"]),
                                "skips": sorted(skips, key=lambda s: s["nodeid"])}
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, sort_keys=True)

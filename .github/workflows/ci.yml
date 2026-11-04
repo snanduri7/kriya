@@ -250,7 +250,19 @@ jobs:
       - name: Certify
         # Doctor mode here is `packaged_defaults`: a hosted runner holds no owner-approved production configuration (SEC-009: certification never
         # approves anything itself), so the production doctor is recorded as it reports on packaged defaults. See scripts/certify.sh.
-        run: scripts/certify.sh certification-out/ci
+        #
+        # Exit status 4 = HOSTED_PASS_PRIVATE_FIXTURE_REQUIRED: every hosted requirement passed and the only open item is a typed EXTERNAL_PRIVATE_FIXTURE_REQUIRED test (PRD-034 F9b)
+        # whose fixture may not be hosted. That is the hosted half of the certification and this job reports it as such (a notice, a green step); it is NOT "CERTIFIED": the
+        # final verdict is `scripts/certification_private_gate.py verify`, which needs the private evidence record bound to this exact revision. Every other non-zero status
+        # (1 NOT_CERTIFIED, 3 INCOMPLETE_PLATFORM_EVIDENCE, ...) still fails the step.
+        run: |
+          rc=0
+          scripts/certify.sh certification-out/ci || rc=$?
+          if [ "$rc" = 4 ]; then
+            echo "::notice title=HOSTED PASS - NOT CERTIFIED::EXTERNAL_PRIVATE_FIXTURE_REQUIRED is open (PRD-034 F9b). Final CERTIFIED needs scripts/certification_private_gate.py verify with the private evidence record for this revision."
+            exit 0
+          fi
+          exit "$rc"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -1,0 +1,14 @@
+{
+  "contract": "kriya.private-fixture-gates.v1",
+  "gates": {
+    "PRD034-F9B-SCENARIO01": {
+      "description": "Scenario 01's brownfield fixture: a third-party project snapshot with no licence. It must never be pushed, uploaded, attached as a CI artifact/release asset or stored as a secret; this file records only its identity (digests), never its content.",
+      "nodeids": ["tests/test_demo_v2_owner_state.py::test_reset_all_is_idempotent_and_leaves_no_service"],
+      "fixture_commit": "0d7a09136cfec085156308d706d53b091ecd3cde",
+      "fixture_tree": "16188cde879c40fc1630fb10970996887e68279d",
+      "bundle_sha256": "3534c5d6fb027243f10b7df0e6aa6ada008c146ab5625566293469a5ced1cfb8",
+      "target_file": "src/main/java/com/myapp/service/driver/DefaultDriverService.java",
+      "target_sha256": "a15b6ba2c20bafafeea108b073adb1824bb538cc456dfd78400b8e79122944bb"
+    }
+  }
+}

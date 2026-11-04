@@ -239,7 +239,8 @@ def test_the_hosted_certification_job_has_the_capacity_and_the_cold_runner_provi
     job = _certification_job()
     assert int(re.search(r"timeout-minutes: (\d+)", job).group(1)) >= 360       # owner ruling 2026-11-04: GitHub's hosted-job ceiling for the first hosted measurement
     assert "serial by" not in job and "CERT_TOPOLOGY" in job and "union == census" in job     # the comment states the sharded topology, not the stale serial one
-    assert job.index("pinned_images.py --pull") < job.index("run: scripts/seed_offline_maven.sh") < job.index("run: scripts/certify.sh")
+    assert job.index("pinned_images.py --pull") < job.index("run: scripts/seed_offline_maven.sh") < job.index("scripts/certify.sh certification-out/ci || rc=$?")   # the Certify step (its exit status 4 is the typed hosted half, see tests/test_cert_private_fixture_001.py)
+    assert job.count("scripts/certify.sh certification-out/ci") == 1
     assert "-n " not in job and "xdist" not in job                                # the canonical certification stays serial
     assert "authority approve" not in job and "--trust-file" not in job            # a hosted job never mints (or smuggles in) an approval
 

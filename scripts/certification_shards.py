@@ -258,10 +258,11 @@ def _merge_skips(payloads: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     skips = sorted((item for payload in payloads for item in payload.get("skips", [])), key=lambda item: item["nodeid"])
     pending = sorted((item for payload in payloads for item in payload.get("platform_pending", [])), key=lambda item: item["nodeid"])
     not_applicable = sorted((item for payload in payloads for item in payload.get("not_applicable", [])), key=lambda item: item["nodeid"])
+    private = sorted((item for payload in payloads for item in payload.get("external_private_fixture", [])), key=lambda item: item["nodeid"])
     modes = {payload.get("certification_mode") for payload in payloads}
     return {"certification_mode": modes == {True}, "skipped": len(skips), "platform": payloads[0].get("platform") if payloads else sys.platform,
             "unexpected": sum(int(payload.get("unexpected", 0)) for payload in payloads), "platform_pending": pending,
-            "not_applicable": not_applicable, "skips": skips}
+            "not_applicable": not_applicable, "external_private_fixture": private, "skips": skips}
 
 
 # --------------------------------------------------------------------------------------------------------------------------------------------- run

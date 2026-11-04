@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 
+import pytest
 from _chaos_harness import (
     CALC,
     CALC_WITH_SUB,
@@ -105,6 +106,15 @@ def test_every_approval_decision_is_recorded_with_its_triggers(tmp_path):
     assert _generation(cfg)["human_escalations"] == {"approved": 1, "rejected": 1, "unavailable": 1}
 
 
+def _decision_of_the_new_run(runs, known_run_ids):
+    """The ``approval.decision`` event of the ONE run that is not in ``known_run_ids`` - chosen by run identity, never by list position (``load_trace_runs`` orders by a one-second
+    timestamp and then a random run id, so two runs inside one second come back in an arbitrary order; hosted run 41785193323 failed this test on four different cases)."""
+    fresh = [run for run in runs if run.run_id not in known_run_ids]
+    assert len(fresh) == 1, [run.run_id for run in fresh]
+    [event] = fresh[0].events_of("approval.decision")
+    return fresh[0].run_id, event
+
+
 def test_the_approval_decision_event_names_why_no_decision_could_be_obtained(tmp_path):
     """N1: a person's no (False / DECLINED), a launch that could not ask (UNAVAILABLE) and an approval are told apart by `outcome`; an UNAVAILABLE outcome also carries its closed
     machine-readable `reason_code`. An approval, a decline and a missing callback keep their recorded shape (no `reason_code` key: `outcome` already names them)."""
@@ -112,13 +122,33 @@ def test_the_approval_decision_event_names_why_no_decision_could_be_obtained(tmp
     cases = {"approved": (True, "approved", None), "declined": (False, "rejected", None), "typed-declined": (ApprovalOutcome.decline(), "rejected", None),
              "expired": (ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED), "unavailable", "APPROVAL_REVIEW_EXPIRED"),
              "garbage": ("yes", "unavailable", "APPROVAL_RESULT_UNRECOGNIZED")}
+    known = set()
     for name, (decision, outcome, code) in cases.items():
         cfg, _result, _seen = _approval_run(tmp_path / name, decision=decision)
-        event = _events(load_trace_runs(trace_db_path(cfg)), "approval.decision")[-1]  # one trace store per test: the latest run's decision is the last
+        run_id, event = _decision_of_the_new_run(load_trace_runs(trace_db_path(cfg)), known)  # one trace store per test: the run this case just made is the one run not seen before
+        known.add(run_id)
         assert (event["outcome"], event.get("reason_code")) == (outcome, code), name
     cfg, _result, _seen = _approval_run(tmp_path / "no-callback", decision=None)
-    event = _events(load_trace_runs(trace_db_path(cfg)), "approval.decision")[-1]
+    _run_id, event = _decision_of_the_new_run(load_trace_runs(trace_db_path(cfg)), known)
     assert event["outcome"] == "unavailable" and event.get("reason_code") is None
+
+
+@pytest.mark.parametrize("ids", [("aaaa", "zzzz"), ("zzzz", "aaaa")], ids=["intended-run-sorts-first", "intended-run-sorts-last"])
+def test_the_run_is_selected_by_identity_when_timestamps_are_identical_and_ids_arbitrary(ids):
+    """Control for the selection (hosted run 41785193323): two runs with the SAME timestamp come back in run-id order, which says nothing about which is newer. The old position-based
+    pick (`events[-1]`) returns the wrong run for one of the two id orders; the identity-based pick returns the intended run for both."""
+    from types import SimpleNamespace
+
+    def run(run_id, outcome):
+        return SimpleNamespace(run_id=run_id, timestamp="2026-11-04 14:00:00", events_of=lambda kind: [{"outcome": outcome}] if kind == "approval.decision" else [])
+
+    earlier, intended = run(ids[0], "approved"), run(ids[1], "rejected")   # `intended` is the case under test, made after `earlier`
+    listed = sorted([earlier, intended], key=lambda r: (r.timestamp, r.run_id))   # exactly load_trace_runs' ordering
+    _id, event = _decision_of_the_new_run(listed, {earlier.run_id})
+    assert event["outcome"] == "rejected"
+    position_based = _events(listed, "approval.decision")[-1]["outcome"]
+    assert position_based == ("rejected" if listed[-1] is intended else "approved")   # the old pick is only right when the ids happen to sort that way
+    assert (position_based == "rejected") == (ids == ("aaaa", "zzzz"))
 
 
 def test_an_unattached_pre_approval_review_is_recorded_and_shown_to_the_approver(tmp_path):
