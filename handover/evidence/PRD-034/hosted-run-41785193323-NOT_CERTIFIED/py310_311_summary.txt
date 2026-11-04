@@ -1,0 +1,57 @@
+== 3.10
+108 failed, 19696 passed, 89 skipped, 61 deselected, 38 warnings, 5 errors in 9335.06s (2:35:35)
+  19 tests/test_kup_evidence_manifest.py
+  18 tests/test_kup_cli.py
+  15 tests/test_kup_acquisition.py
+   6 tests/test_s2b_redaction_completeness.py
+   6 tests/test_reopened_project_history.py
+   5 tests/test_kup_workspace.py
+   4 tests/test_workflow.py
+   4 tests/test_oi131_redaction_architecture.py
+   3 tests/test_history_store.py
+   3 tests/test_demo_v2_owner_state.py
+   2 tests/test_outcome.py
+   2 tests/test_kup_evidence_cli.py
+   2 tests/state_machine/test_sm_kernel_golden.py
+   1 tests/test_s7_containment_census.py
+   1 tests/test_s2d_positional_secrets.py
+   1 tests/test_s19p1c_contexts.py
+   1 tests/test_risk_vocabulary_persistence.py
+   1 tests/test_reg_r1_pytest_regression_authority.py
+   1 tests/test_prd033_events_and_cli.py
+   1 tests/test_prd017_fallback_transition.py
+   1 tests/test_kup_write_boundary_portable.py
+   1 tests/test_kup_serve.py
+   1 tests/test_kup_host_environment.py
+   1 tests/test_kup_evidence_corruption_matrix.py
+   1 tests/test_kernel_seams.py
+   1 tests/test_goal_design_dedup_001.py
+   1 tests/test_file_integrity_contract_001b.py
+   1 tests/test_d2_carried_control_state.py
+   1 tests/test_commit_mechanism.py
+   1 tests/test_cli_registration.py
+== 3.11
+96 failed, 19708 passed, 89 skipped, 61 deselected, 38 warnings, 5 errors in 9905.39s (2:45:05)
+  19 tests/test_kup_evidence_manifest.py
+  18 tests/test_kup_cli.py
+  15 tests/test_kup_acquisition.py
+   6 tests/test_s2b_redaction_completeness.py
+   6 tests/test_reopened_project_history.py
+   5 tests/test_kup_workspace.py
+   4 tests/test_oi131_redaction_architecture.py
+   3 tests/test_history_store.py
+   3 tests/test_demo_v2_owner_state.py
+   2 tests/test_outcome.py
+   2 tests/test_kup_evidence_cli.py
+   2 tests/state_machine/test_sm_kernel_golden.py
+   1 tests/test_s7_containment_census.py
+   1 tests/test_s2d_positional_secrets.py
+   1 tests/test_reg_r1_pytest_regression_authority.py
+   1 tests/test_kup_write_boundary_portable.py
+   1 tests/test_kup_serve.py
+   1 tests/test_kup_host_environment.py
+   1 tests/test_kup_evidence_corruption_matrix.py
+   1 tests/test_d2_carried_control_state.py
+   1 tests/test_cli_registration.py
+   1 tests/contracts/test_evidence_state_stores_contract.py
+   1 tests/contracts/test_config_resolution_contract.py

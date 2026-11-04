@@ -1,0 +1,9 @@
+import sys, time, platform
+from kriya.foundation.redaction import redact_text
+def t(n):
+    best=9e9
+    for _ in range(5):
+        s=time.perf_counter(); redact_text("sshpass -p 'a " * n); best=min(best,time.perf_counter()-s)
+    return best
+base=100_000//14
+print(platform.python_version(), platform.machine(), {m: round(t(base*m),4) for m in (1,2,4)})

@@ -1,0 +1,27 @@
+BASELINE-PLAIN
+### gold
+5 failed, 145 passed in 324.90s (0:05:24)
+### cli
+1 failed, 3 passed in 0.46s
+### s7
+1 failed in 15.57s
+### regr1
+1 failed in 0.45s
+== pin pydantic 2.13.4 / core 2.46.4
+### gold-with-lock-pydantic
+150 passed in 315.80s (0:05:15)
+== pin click 8.4.2
+### cli-with-lock-click
+4 passed in 0.38s
+== pin pytest 9.1.1
+### s7-with-lock-pytest
+1 passed in 32.01s
+### regr1-with-lock-pytest
+1 passed in 0.40s
+== pin pytest-asyncio 1.4.0
+### regr1-with-lock-asyncio
+1 failed in 0.46s
+### s7-with-lock-asyncio
+1 failed in 15.13s
+
+[exited with code 0]

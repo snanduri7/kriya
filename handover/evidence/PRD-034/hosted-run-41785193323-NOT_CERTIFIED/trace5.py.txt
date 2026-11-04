@@ -1,0 +1,27 @@
+"""Recording-only: replicate tests/test_oi142_gate_view.py::_repo, then sample .git/objects until quiescent; GIT_TRACE2_EVENT names every git process (incl. detached maintenance)."""
+import json, os, subprocess, sys, tempfile, time
+def run(n):
+    root = tempfile.mkdtemp(prefix="t5-")
+    log = os.path.join(root, "trace2.jsonl")
+    env = {**os.environ, "GIT_TRACE2_EVENT": log}
+    repo = os.path.join(root, "cand"); os.makedirs(os.path.join(repo, "tests"))
+    for f, t in (("calc.py", "x=1\n"), ("tests/test_calc.py", "y=1\n"), (".gitignore", "__pycache__/\n")):
+        open(os.path.join(repo, f), "w").write(t)
+    g = lambda *a: subprocess.run(["git", "-c", "user.email=a@b.c", "-c", "user.name=x", *a], cwd=repo, check=True, capture_output=True, env=env)
+    g("init", "-q"); g("add", "-A"); g("commit", "-qm", "reviewed")
+    obj = os.path.join(repo, ".git", "objects")
+    t0 = time.monotonic(); timeline = []; last = None
+    while time.monotonic() - t0 < 3.0:
+        state = (os.path.exists(os.path.join(obj, "maintenance.lock")), os.stat(obj).st_mtime_ns)
+        if state != last:
+            timeline.append((round(time.monotonic() - t0, 4), state)); last = state
+        time.sleep(0.0005)
+    cmds = []
+    if os.path.exists(log):
+        for line in open(log):
+            e = json.loads(line)
+            if e["event"] == "start": cmds.append(("start", e.get("argv")))
+            if e["event"] == "cmd_name": cmds.append(("cmd_name", e.get("name"), e.get("hierarchy")))
+    return {"i": n, "timeline": timeline, "git_processes": [c for c in cmds if "maintenance" in str(c) or "gc" in str(c)]}
+for i in range(int(sys.argv[1])):
+    print(json.dumps(run(i)))
