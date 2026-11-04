@@ -84,7 +84,7 @@ Acceptance: zero new failures; zero unexpected certification skips; no new open 
 - Ubuntu 24.04.5, kernel 6.12.5 aarch64;
 - non-root `runner` uid 1001;
 - its own Docker 29.1.3 daemon (overlayfs, cgroup v2);
-- OpenJDK 17.0.20.1, Maven 3.9.9, Python 3.12.3.
+- OpenJDK 17.0.20.1, Maven 3.9.9 (HISTORICAL: the Maven this closure run actually used; the PRD-034 certification Maven is now Apache Maven 3.10.0, owner ruling 2026-11-04), Python 3.12.3.
 
 The environment and exact image digests are in `evidence/LINUX-CLOSURE/linux-environment.txt`. Differences from the hosted runner: aarch64 rather than x86-64, and a Docker VM with less RAM (the third JVM test needs the runner's 16 GB).
 

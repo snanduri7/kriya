@@ -352,7 +352,9 @@ def test_scenario_04_is_an_accepted_scenario_of_every_shared_script(script: str,
 
 # ---- verify_demo.sh --phase post for scenario 04 (needs Maven + the offline repository; skipped where they are absent) ----
 
-_HAS_OFFLINE_STACK = shutil.which("mvn") is not None and (Path.home() / ".m2/repository/org/apache/ignite/ignite-core/2.18.0/ignite-core-2.18.0.jar").is_file() \
+# PRD-034: the host Maven is the authority named by MAVEN_HOME (Apache Maven 3.10.0, verified by the scripts under test), never whichever `mvn` the PATH resolves. A MAVEN_HOME that
+# is set but is NOT the authority is not a skip: the scripts report it as a FAIL line and these tests fail.
+_HAS_OFFLINE_STACK = bool(os.environ.get("MAVEN_HOME")) and (Path.home() / ".m2/repository/org/apache/ignite/ignite-core/2.18.0/ignite-core-2.18.0.jar").is_file() \
     and (Path.home() / ".m2/repository/org/junit/jupiter/junit-jupiter/5.8.2/junit-jupiter-5.8.2.pom").is_file()
 
 
@@ -363,7 +365,8 @@ def _post(work: Path) -> list:
     return [line for line in result.stdout.splitlines() if line.startswith(("PASS", "FAIL")) and "tracked tree" not in line]
 
 
-_POST_CHECK_APP_PATH = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"  # verify_demo.sh's APP_PATH (the desktop app's fixed child PATH)
+_POST_CHECK_APP_PATH = os.pathsep.join(part for part in (os.path.join(os.path.realpath(os.environ["MAVEN_HOME"]), "bin") if os.environ.get("MAVEN_HOME") else "", "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin") if part)
+# ^ verify_demo.sh's app_path: the authority's bin in front of the desktop app's fixed child PATH
 
 
 def _mvn_diagnostics(work: Path) -> dict:
@@ -425,7 +428,7 @@ def _project(tmp_path: Path) -> Path:
     return work
 
 
-@pytest.mark.skipif(not _HAS_OFFLINE_STACK, reason="needs mvn and the offline Maven repository (Ignite 2.18.0, JUnit 5.8.2)")
+@pytest.mark.skipif(not _HAS_OFFLINE_STACK, reason="needs MAVEN_HOME (the authoritative Maven 3.10.0) and the offline Maven repository (Ignite 2.18.0, JUnit 5.8.2)")
 def test_post_check_passes_on_the_reference_and_leaves_the_project_untouched(tmp_path: Path) -> None:
     work = _project(tmp_path)
     workspace = work / "scenario-04" / "workspace"
@@ -438,7 +441,7 @@ def test_post_check_passes_on_the_reference_and_leaves_the_project_untouched(tmp
     assert _dir_digest(workspace) == before  # the evidence workspace is never rebuilt, cleaned or written to
 
 
-@pytest.mark.skipif(not _HAS_OFFLINE_STACK, reason="needs mvn and the offline Maven repository (Ignite 2.18.0, JUnit 5.8.2)")
+@pytest.mark.skipif(not _HAS_OFFLINE_STACK, reason="needs MAVEN_HOME (the authoritative Maven 3.10.0) and the offline Maven repository (Ignite 2.18.0, JUnit 5.8.2)")
 def test_post_check_rejects_a_program_that_prints_the_line_without_ignite(tmp_path: Path) -> None:
     work = _project(tmp_path)
     main = work / "scenario-04" / "workspace" / "src" / "main" / "java" / "com" / "example" / "Main.java"
@@ -463,7 +466,7 @@ def test_the_mvn_diagnostics_are_recording_only_and_never_raise(tmp_path: Path) 
         assert True  # a passing block raises nothing
 
 
-@pytest.mark.skipif(not _HAS_OFFLINE_STACK, reason="needs mvn and the offline Maven repository (Ignite 2.18.0, JUnit 5.8.2)")
+@pytest.mark.skipif(not _HAS_OFFLINE_STACK, reason="needs MAVEN_HOME (the authoritative Maven 3.10.0) and the offline Maven repository (Ignite 2.18.0, JUnit 5.8.2)")
 def test_post_check_rejects_missing_tests_and_a_leftover_ignite_directory(tmp_path: Path) -> None:
     work = _project(tmp_path)
     workspace = work / "scenario-04" / "workspace"
@@ -476,7 +479,7 @@ def test_post_check_rejects_missing_tests_and_a_leftover_ignite_directory(tmp_pa
 # ---- read-back is CAUSALLY proven: the reference's own mutants are killed (needs Maven + the offline repository; skipped where absent) ----
 
 @REAL_OCI_MAVEN      # S7: the mutants run CONTAINED (real OCI, network denied) from the offline cache seed; the seed's presence is checked below
-@pytest.mark.skipif(not _HAS_OFFLINE_STACK, reason="docker tier: needs the offline Maven repository seed (Ignite 2.18.0, JUnit 5.8.2) in ~/.m2")
+@pytest.mark.skipif(not _HAS_OFFLINE_STACK, reason="docker tier: needs MAVEN_HOME (the authoritative Maven 3.10.0) and the offline Maven repository seed (Ignite 2.18.0, JUnit 5.8.2) in ~/.m2")
 def test_every_cache_get_mutant_of_the_reference_is_killed_and_the_control_passes() -> None:
     result = subprocess.run([sys.executable, "-I", str(DEMO_V2 / "scripts" / "qualify_spring_ignite.py"), "mutants", "--repo", str(REPO), "--fixture", str(REFERENCE)],
                             capture_output=True, text=True, check=False, timeout=900)

@@ -205,11 +205,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: Install pinned Maven
+      - name: Provision the authoritative Maven (Apache Maven 3.10.0, pinned SHA-512 verified before extraction)
+        # PRD-034 (owner ruling 2026-11-04): ONE host Maven for the certified path, provisioned independently of the runner image. The archive is checked against the PINNED
+        # Apache-published SHA-512 (tests/certification/maven_toolchain.json) before anything is extracted, `mvn -v` must report exactly 3.10.0, and the result carries a
+        # provisioning marker. The runner image's own /usr/bin/mvn is never the authority (it has no marker); certify.sh and demo-v2 refuse anything that is not this one.
         run: |
-          curl -fsSL https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.tar.gz \
-            | tar xz -C "$HOME"
-          echo "$HOME/apache-maven-3.9.9/bin" >> "$GITHUB_PATH"
+          python3 scripts/certification_maven_toolchain.py provision "$HOME/kriya-maven-authority"
+          echo "MAVEN_HOME=$HOME/kriya-maven-authority" >> "$GITHUB_ENV"
+          echo "$HOME/kriya-maven-authority/bin" >> "$GITHUB_PATH"
       - name: Refuse to certify as root
         run: test "$(id -u)" != "0"
       - name: Create the certification venv (lock-file versions)
@@ -223,15 +226,16 @@ jobs:
         # tests/certification/pinned_images.txt; certify.sh re-verifies and
         # fails (never skips) on a missing or re-pointed image.
         run: .venv/bin/python scripts/pinned_images.py --pull
-      - name: Seed the offline Maven repository (Ignite 2.18.0, JUnit 5.8.2) from Maven Central
-        # The Spring/Ignite post-check and mutant tests need these artifacts offline; a cold runner has no warm ~/.m2, and a mandatory test is never
-        # made optional (nor allowlisted) because the runner starts cold.
-        run: scripts/seed_offline_maven.sh
       - name: Provision the frozen certification Maven repository (bootstrap, not certification)
         # MAVEN-CENTRAL-CERTIFICATION-NONDETERMINISM-001: the canonical run must not depend on live Maven Central. This step reconstructs the exact frozen set from the
         # committed manifest (each file is kept only if its SHA-256 equals the manifest's) - the one place Central is contacted; certify.sh then verifies it is attested and
         # byte-exact, serves it, and every contained Maven acquisition goes through the product's registry-mirror seam. Same manifest and tool as the local run.
         run: .venv/bin/python scripts/certification_maven_repo.py fetch tests/certification/maven_repository.manifest.json "$HOME/.cache/kriya-cert-maven/repo"
+      - name: Seed the host Maven repository (~/.m2) from the frozen repository, then prove it offline with the authoritative Maven
+        # The Spring/Ignite post-check and mutant tests run `mvn -o`; a cold runner has no warm ~/.m2, and a mandatory test is never made optional (nor allowlisted)
+        # because the runner starts cold. The files come ONLY from the frozen, attested repository above (the closure list tests/certification/demo_v2_m2_closure.txt,
+        # byte-compared; never from live Central), and the authoritative Maven (3.10.0) proves them offline on a throw-away copy of the reference.
+        run: scripts/seed_offline_maven.sh
       - name: Pre-build the product containment images (bootstrap, not certification)
         # The registry proxy and the per-toolchain acquisition images are built by the product with apt-get on first use. Building them here, from the digest-pinned base images,
         # keeps the canonical run free of live apt; certify.sh records their ids and fails if the run builds or rebuilds any image.

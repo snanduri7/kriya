@@ -270,6 +270,26 @@ def test_extend_adds_a_file_only_when_the_bytes_agree_with_the_sha1_central_publ
     assert repo_tool.verify(str(repo), after) == [] and after["content_digest"] != manifest["content_digest"]
 
 
+def test_extend_freezes_the_closed_bare_sidecar_even_when_centrals_own_text_is_irregular_and_a_fresh_fetch_rebuilds_it(tmp_path):
+    """2026-11-04 (MEASURED on the real tool): `extend` used to keep Central's raw `.sha1` text, and Central's text for plexus-utils-1.0.4.pom is `hash  /home/projects/maven/...`
+    - outside the closed renderings - so the extended manifest verified on the machine that built it but `fetch` REFUSED it on every fresh machine."""
+    repo, manifest_path, _ = _frozen(tmp_path)
+    new = "org/apache/maven/doxia/doxia-core/1.11.1/doxia-core-1.11.1.jar"
+    body = b"doxia-core-bytes"
+    digest = hashlib.sha1(body).hexdigest()
+    irregular = f"{digest}  /home/projects/maven/repository-staging/elsewhere/{new}\r\n".encode()
+    central = _Central({**FILES, new: body, new + ".sha1": irregular})
+    try:
+        assert repo_tool.extend(str(manifest_path), str(repo), [new], central.url) == []
+        after = repo_tool.load_manifest(str(manifest_path))
+        assert (repo / (new + ".sha1")).read_bytes() == digest.encode("ascii"), "the sidecar is the closed bare rendering derived from the payload, not Central's text"
+        fresh = tmp_path / "fresh-machine"
+        assert repo_tool.fetch(after, str(fresh), central.url) == [], "a fresh machine can rebuild every frozen file, the extended ones included"
+        assert repo_tool.verify(str(fresh), after) == []
+    finally:
+        central.close()
+
+
 # ---- HOSTED-MAVEN-SIDECAR-REPRESENTATION-001: a `.sha1` sidecar is DERIVED from the verified payload, never taken from Central's text ----
 
 JAR = "org/apache/maven/plugins/maven-clean-plugin/3.2.0/maven-clean-plugin-3.2.0.jar"

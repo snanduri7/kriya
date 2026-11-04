@@ -13,7 +13,7 @@ The hosted GitHub run of the new job is **NOT_EXECUTED (pending the user's push)
 1. **Non-root.** `scripts/certify.sh` refuses root (exit 2), and the CI job asserts `id -u != 0`. No test validates root refusal, so there is no exception.
 2. **Explicit toolchains.** The CI job installs:
    - Temurin JDK 17;
-   - Maven 3.9.9 (from the Apache archive);
+   - Apache Maven 3.10.0, the one authoritative host Maven (owner ruling 2026-11-04): `scripts/certification_maven_toolchain.py provision` verifies the pinned Apache SHA-512 before extraction; it was Maven 3.9.9 up to hosted run 41812207261, which is historical;
    - Python with the lock-file dependencies in a venv;
    - `semgrep==1.178.0` (pipx);
    - the pinned Semgrep image by digest.

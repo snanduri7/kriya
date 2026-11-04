@@ -1,0 +1,16 @@
+{
+  "docker_client": "28.0.4",
+  "docker_server": "28.0.4",
+  "git": "git version 2.56.0",
+  "git_revision": "680f3d9f7860882878e39c9dc66b3cd9b2a0a4e5",
+  "gradle": "Welcome to Gradle 9.8.2!",
+  "java": "openjdk version \"17.0.21\" 2026-10-20",
+  "machine": "x86_64",
+  "maven": "Apache Maven 3.9.9 (8e8579a9e76f7d015ee5ec7bfcdc97d260186937)",
+  "os": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+  "pip_freeze_sha256": "04fef02d96da7ccf3cb677b5ca59b0b577ac629f553e08ce5ad2ef0c738abfb8",
+  "python": "3.12.15",
+  "python_executable": "/home/runner/work/kriya/kriya/.venv/bin/python",
+  "semgrep": "1.178.0",
+  "uid_is_root": false
+}

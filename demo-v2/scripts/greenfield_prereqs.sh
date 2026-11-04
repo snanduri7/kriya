@@ -8,7 +8,8 @@ RC=0
 JAVA_VERSION="$(PATH="$FIXED_PATH" java -version 2>&1 | head -1 || true)"
 JAVA_MAJOR="$(printf '%s' "$JAVA_VERSION" | sed -n 's/.*version "\([0-9]*\).*/\1/p')"
 if [ -n "$JAVA_MAJOR" ] && [ "$JAVA_MAJOR" -ge 17 ]; then echo "PASS  java $JAVA_MAJOR is on the app's fixed PATH ($JAVA_VERSION)"; else echo "FAIL  Java 17+ is not on the app's fixed PATH ($FIXED_PATH): '$JAVA_VERSION'"; RC=1; fi
-if PATH="$FIXED_PATH" command -v mvn >/dev/null 2>&1; then echo "PASS  mvn is on the app's fixed PATH ($(PATH="$FIXED_PATH" command -v mvn))"; else echo "FAIL  mvn is not on the app's fixed PATH ($FIXED_PATH)"; RC=1; fi
+# PRD-034: the host Maven is the pinned authority (Apache Maven 3.10.0 from MAVEN_HOME), not whatever the fixed PATH happens to resolve.
+if resolve_maven_authority; then echo "PASS  the authoritative Maven is available ($(PATH="$(app_path)" authority_mvn -v | head -1) at $MAVEN_HOME)"; else echo "FAIL  the authoritative Maven (3.10.0) is unavailable: $MAVEN_AUTHORITY_ERROR"; RC=1; fi
 M2="${HOME}/.m2/repository"
 if [ -d "$M2/org/apache/maven/plugins/maven-compiler-plugin" ] && [ -d "$M2/org/apache/maven/plugins/maven-surefire-plugin" ]; then
   echo "INFO  the local Maven repository holds the compiler and surefire plugins; whether it holds the exact versions and test libraries the model chooses is only known during the run"

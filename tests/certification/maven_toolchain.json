@@ -1,0 +1,13 @@
+{
+  "contract": "kriya.maven-toolchain.v1",
+  "purpose": "The ONE authoritative host Maven for the PRD-034 certification / demo-v2 path (owner ruling 2026-11-04). Maven is a supplied, qualified toolchain: its version never defines Kriya behaviour, but the certified path runs exactly this one, provisioned independently of the CI runner image. Container (OCI image) Maven versions are separate supplied-toolchain identities and are recorded, not forced to this one.",
+  "version": "3.10.0",
+  "version_banner": "Apache Maven 3.10.0 (c43a36b8d67be7e0805a411bc0898af1a51f5472)",
+  "archive_url": "https://archive.apache.org/dist/maven/maven-3/3.10.0/binaries/apache-maven-3.10.0-bin.tar.gz",
+  "archive_bytes": 9979885,
+  "archive_sha512": "908b1501bfb420bf7c8affb855534a9c407fd6099367bfb9f2f2dcb8e9799102bffb84518cde74c679bd76870247c6528683abdd620581bffa90f95d92d175aa",
+  "archive_root": "apache-maven-3.10.0",
+  "published_sha512_url": "https://archive.apache.org/dist/maven/maven-3/3.10.0/binaries/apache-maven-3.10.0-bin.tar.gz.sha512",
+  "pinned_on": "2026-11-04",
+  "pinned_by": "the digest below equalled the Apache-published .sha512 file and the sha512 of the downloaded archive at pin time; provisioning verifies the PINNED value (not a value fetched at run time from the same host as the archive)"
+}

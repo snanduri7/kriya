@@ -83,9 +83,24 @@ cleanup() { [ -n "${SHARD_RUN_PID:-}" ] && kill "$SHARD_RUN_PID" 2>/dev/null; [ 
 trap cleanup EXIT
 export TMPDIR="$CERT_TMP"
 
+# --- the authoritative host Maven (PRD-034, owner ruling 2026-11-04) ----------------------------------------------------------------------------
+# Exactly ONE host Maven: Apache Maven 3.10.0, provisioned by scripts/certification_maven_toolchain.py (pinned Apache SHA-512 verified before extraction) and exposed as
+# MAVEN_HOME. Anything else - no MAVEN_HOME, a tree without the provisioning marker (the runner image's /usr/bin/mvn), an altered tree, another version - is a FAIL here and
+# the canonical pytest stage is then UNAVAILABLE. The authority's bin goes FIRST on PATH, so every host-side `mvn` of the run (and the environment record below) is its.
+MAVEN_AUTHORITY_OK=0
+if [ -n "${MAVEN_HOME:-}" ] && maven_verdict="$("$VENV_BIN/python" -I scripts/certification_maven_toolchain.py verify "$MAVEN_HOME" 2>&1)"; then
+  printf '%s\n' "$maven_verdict" > "$OUT/maven-toolchain.json"
+  export PATH="$(cd "$MAVEN_HOME" && pwd -P)/bin:$PATH"
+  MAVEN_AUTHORITY_OK=1
+  stage maven_toolchain PASS "$maven_verdict"
+else
+  [ -n "${MAVEN_HOME:-}" ] || maven_verdict="REFUSED: MAVEN_HOME is not set (provision the authority: scripts/certification_maven_toolchain.py provision DIR; export MAVEN_HOME=DIR)"
+  stage maven_toolchain FAIL "$maven_verdict"
+fi
+
 # --- environment identity ---------------------------------------------------
-"$VENV_BIN/python" - "$OUT/environment.json" <<'PY'
-import json, platform, shutil, subprocess, sys, hashlib
+"$VENV_BIN/python" - "$OUT/environment.json" "$OUT/maven-toolchain.json" <<'PY'
+import json, os, platform, shutil, subprocess, sys, hashlib
 def run(*cmd):
     if shutil.which(cmd[0]) is None:
         return None
@@ -97,10 +112,13 @@ env = {
     "os": platform.platform(), "machine": platform.machine(), "uid_is_root": False,
     "python": platform.python_version(), "python_executable": sys.executable,
     "pip_freeze_sha256": hashlib.sha256(freeze.encode()).hexdigest(),
-    "java": run("java", "-version"), "maven": run("mvn", "-v"), "gradle": run("gradle", "--version"),
+    "java": run("java", "-version"), "maven": run("mvn", "-v"), "maven_authority": json.load(open(sys.argv[2])) if os.path.exists(sys.argv[2]) else None, "gradle": run("gradle", "--version"),
     "docker_client": run("docker", "version", "--format", "{{.Client.Version}}"),
     "docker_server": run("docker", "version", "--format", "{{.Server.Version}}"),
     "semgrep": run("semgrep", "--version"), "git": run("git", "--version"),
+    # The Maven INSIDE each pinned Maven image is a separate supplied-toolchain identity (owner ruling 2026-11-04): recorded, not forced to the host authority's version.
+    "container_maven": {line.split("@")[0]: run("docker", "run", "--rm", "--pull", "never", "--network", "none", "--entrypoint", "mvn", line, "-v")
+                        for line in (raw.split("#")[0].strip() for raw in open("tests/certification/pinned_images.txt")) if line.startswith("maven:")},
     "git_revision": run("git", "rev-parse", "HEAD"),
 }
 json.dump(env, open(sys.argv[1], "w"), indent=2, sort_keys=True)
@@ -232,6 +250,8 @@ elif ! docker info >/dev/null 2>&1; then
   stage pytest UNAVAILABLE "docker daemon not reachable"
 elif [ "$SEMGREP_VERSION" != "1.178.0" ]; then
   stage pytest UNAVAILABLE "semgrep must be exactly 1.178.0 (found: ${SEMGREP_VERSION:-none})"
+elif [ "$MAVEN_AUTHORITY_OK" != "1" ]; then
+  stage pytest UNAVAILABLE "the authoritative host Maven (3.10.0) is not available (stage maven_toolchain): the run would use whatever mvn the host happens to have"
 elif [ "$MAVEN_REPO_OK" != "1" ]; then
   stage pytest UNAVAILABLE "the frozen, attested Maven certification repository is not available (stage maven_repository): the run would depend on live Maven Central"
 elif [ "$PY_WHEELS_OK" != "1" ]; then

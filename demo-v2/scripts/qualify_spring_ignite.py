@@ -146,8 +146,26 @@ MUTANTS = (
 )
 
 
+def _authority_mvn() -> str:
+    """The HOST Maven is the pinned authority (PRD-034: Apache Maven 3.10.0 from MAVEN_HOME, verified), never whatever `mvn` the PATH resolves. The runtime legs are a
+    different thing: project-controlled execution is always contained and uses the pinned Maven IMAGE (a separate supplied-toolchain identity)."""
+    import importlib.util
+    home = os.environ.get("MAVEN_HOME")
+    if not home:
+        raise SystemExit("qualify_spring_ignite: MAVEN_HOME is not set - the host Maven is the pinned authority (scripts/certification_maven_toolchain.py provision DIR; export MAVEN_HOME=DIR)")
+    path = Path(__file__).resolve().parents[2] / "scripts" / "certification_maven_toolchain.py"
+    spec = importlib.util.spec_from_file_location("certification_maven_toolchain", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    try:
+        module.verify(Path(home), module.load_pin())
+    except module.ToolchainError as refusal:
+        raise SystemExit(f"qualify_spring_ignite: MAVEN_HOME is not the authoritative Maven: {refusal}") from refusal
+    return str(Path(home).resolve() / "bin" / "mvn")
+
+
 def _mvn_test(project: str) -> Dict[str, bool]:
-    result = subprocess.run(["mvn", "-o", "-B", "clean", "test"], cwd=project, capture_output=True, text=True, check=False, timeout=600)
+    result = subprocess.run([_authority_mvn(), "-o", "-B", "clean", "test"], cwd=project, capture_output=True, text=True, check=False, timeout=600)
     return {"passes": result.returncode == 0 and "Tests run: 5, Failures: 0, Errors: 0, Skipped: 0" in result.stdout,
             "compile_error": "COMPILATION ERROR" in result.stdout}  # a mutant that does not compile is an invalid mutant, never a kill
 

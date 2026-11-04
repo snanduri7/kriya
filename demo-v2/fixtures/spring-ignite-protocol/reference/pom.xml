@@ -37,6 +37,19 @@
 
     <build>
         <plugins>
+            <!-- Every lifecycle plugin the certified path runs (`clean test`, `compile exec:exec`) is pinned: the build is deterministic independently of the default
+                 bindings of whichever Maven runs it (PRD-034; MEASURED with Apache Maven 3.10.0: clean:3.5.0, resources:3.5.0 for resources and testResources, compiler,
+                 surefire and exec below). jar/install are not part of those lifecycles and are not pinned. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <version>3.5.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.5.0</version>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>

@@ -73,7 +73,9 @@ FORGING = ("conftest_hook", "support_module", "runner_config", "identity_skipped
 
 
 def git(repo, *args):
-    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=repo, check=True,
+    # maintenance.auto=false / gc.auto=0: a fixture commit must not leave a DETACHED `git maintenance run --auto` behind (it holds .git/objects/maintenance.lock and touches
+    # .git/objects while a test snapshots the repository it created: CERT hosted #5 and run 41812207261). Per-command, repo-local, nothing global.
+    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=repo, check=True,
                           capture_output=True, text=True).stdout
 
 

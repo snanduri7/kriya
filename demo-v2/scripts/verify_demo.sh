@@ -93,7 +93,8 @@ if [ "$SCENARIO" = "00" ]; then
     TESTS="$(find "$S00/src/test/java" -name '*.java' 2>/dev/null | wc -l | tr -d ' ')"
     [ "$TESTS" -ge 1 ] && pass "$TESTS unit test file(s) were created" || fail "no unit test under src/test/java"
     # Independent re-check, OUTSIDE Kriya's own gates: an offline Maven test run, then run the compiled application and read what it prints.
-    if ( cd "$S00" && PATH="/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin" mvn -o -q clean test >"$W00/evidence/post-test.log" 2>&1 ); then pass "independent offline 'mvn test' passes"; else fail "independent offline 'mvn test' failed (see $W00/evidence/post-test.log)"; fi
+    resolve_maven_authority || fail "the authoritative Maven (3.10.0) is unavailable: $MAVEN_AUTHORITY_ERROR"
+    if ( cd "$S00" && PATH="$(app_path)" authority_mvn -o -q clean test >"$W00/evidence/post-test.log" 2>&1 ); then pass "independent offline 'mvn test' passes"; else fail "independent offline 'mvn test' failed (see $W00/evidence/post-test.log)"; fi
     if [ -n "$MAINS" ]; then
       PKG="$(sed -n 's/^package \([A-Za-z0-9_.]*\);.*/\1/p' "$MAINS" | head -1)"; CLS="$(basename "$MAINS" .java)"; FQN="${PKG:+$PKG.}$CLS"
       RUNOUT="$( cd "$S00" && java -cp target/classes "$FQN" 2>&1 || true )"
@@ -147,7 +148,7 @@ if [ "$SCENARIO" = "04" ]; then
   load_env_file "$DEMO_V2_DIR/fixtures/spring-ignite-protocol/fixture.env"
   W04="$(scenario_work 04)"; S04="$W04/workspace"
   K_PY="${KRIYA_PY:-$REPO_ROOT/.venv/bin/python}"; K_BIN="${KRIYA_BIN:-$REPO_ROOT/.venv/bin/kriya}"
-  APP_PATH="/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"   # the desktop app's fixed PATH (ui/standalone/src/main/child_env.ts)
+  APP_PATH="$DEMO_V2_APP_BASE_PATH"   # the desktop app's fixed PATH (ui/standalone/src/main/child_env.ts); the post-phase Maven checks put the authoritative Maven in front (below)
   check "goal file present and non-empty" test -s "$SC_DIR/goal.md"
   check "the goal names the technologies and the success line, and no tool command, flag, skill or internal term (static)" bash -c "
     grep -q 'Apache Ignite 2.18.0' '$SC_DIR/goal.md' && grep -q 'Spring XML' '$SC_DIR/goal.md' && grep -q 'Java 17' '$SC_DIR/goal.md' && grep -q 'JUnit' '$SC_DIR/goal.md' && grep -q '\[RESULT\]' '$SC_DIR/goal.md' &&
@@ -206,7 +207,8 @@ assert c['llm']['model'] == 'qwen3-coder:30b' and 'localhost:11434' in c['llm'][
     # (a failed run's generated code is evidence; it is also model code, so it is only ever executed in the copy).
     [ -e "$S04/ignite" ] && fail "an ignite/ work directory is left in the project (runtime state must not be part of the project)" || pass "no ignite/ work directory is left in the project"
     CHECK="$W04/evidence/post-check-copy"; rm -rf "$CHECK"; mkdir -p "$W04/evidence"; cp -R "$S04" "$CHECK"; rm -rf "$CHECK/target" "$CHECK/ignite"
-    if ( cd "$CHECK" && PATH="$APP_PATH" mvn -o -B clean test >"$W04/evidence/post-test.log" 2>&1 ); then
+    resolve_maven_authority && APP_PATH="$(app_path)" || fail "the authoritative Maven (3.10.0) is unavailable: $MAVEN_AUTHORITY_ERROR"
+    if ( cd "$CHECK" && PATH="$APP_PATH" authority_mvn -o -B clean test >"$W04/evidence/post-test.log" 2>&1 ); then
       N="$(sed -n 's/^\[INFO\] Tests run: \([0-9]*\), Failures: 0, Errors: 0.*/\1/p' "$W04/evidence/post-test.log" | tail -1)"
       SK="$(sed -n 's/^\[[A-Z]*\] Tests run: [0-9]*, Failures: 0, Errors: 0, Skipped: \([0-9]*\).*/\1/p' "$W04/evidence/post-test.log" | tail -1)"
       [ -n "$N" ] && [ "$N" -ge 1 ] && [ "${SK:-0}" = "0" ] && pass "independent offline 'mvn test' passes with $N test(s) executed, none skipped" || fail "independent offline 'mvn test' passed but executed no tests or skipped some (see $W04/evidence/post-test.log)"
@@ -215,7 +217,7 @@ assert c['llm']['model'] == 'qwen3-coder:30b' and 'localhost:11434' in c['llm'][
     MAINS="$(grep -rl 'public static void main' "$S04/src/main/java" 2>/dev/null | head -1 || true)"
     if [ -n "$MAINS" ]; then
       PKG="$(sed -n 's/^package \([A-Za-z0-9_.]*\);.*/\1/p' "$MAINS" | head -1)"; CLS="$(basename "$MAINS" .java)"; FQN="${PKG:+$PKG.}$CLS"
-      if ( cd "$CHECK" && PATH="$APP_PATH" mvn -o -B compile exec:exec -Dexec.mainClass="$FQN" >"$W04/evidence/post-run.log" 2>&1 ); then
+      if ( cd "$CHECK" && PATH="$APP_PATH" authority_mvn -o -B compile exec:exec -Dexec.mainClass="$FQN" >"$W04/evidence/post-run.log" 2>&1 ); then
         pass "the application ran and exited 0 by itself (mvn -o compile exec:exec -Dexec.mainClass=$FQN)"
         grep -qxF "$EXPECTED_RESULT_LINE" "$W04/evidence/post-run.log" && pass "the application printed exactly: $EXPECTED_RESULT_LINE" || fail "the application did not print the expected line (see $W04/evidence/post-run.log)"
         grep -q 'Ignite node started OK' "$W04/evidence/post-run.log" && grep -q 'Ignite node stopped OK' "$W04/evidence/post-run.log" && pass "Ignite itself logged 'node started OK' and 'node stopped OK' (the program did not merely print a line)" || fail "no Ignite start/stop lines in the run output: the application may not have used Ignite"

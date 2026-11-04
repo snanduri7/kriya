@@ -25,7 +25,9 @@ def _describe(path, cfg=None):
 
 
 def _git(cwd, *args):
-    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
+    # maintenance.auto=false / gc.auto=0: a fixture commit must not leave a DETACHED `git maintenance run --auto` behind (it holds .git/objects/maintenance.lock and touches
+    # .git/objects while a test snapshots the repository it created: CERT hosted #5 and run 41812207261). Per-command, repo-local, nothing global.
+    subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=cwd, check=True, capture_output=True, env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
 
 
 def _repo(path, dirty=False):

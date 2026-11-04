@@ -1,0 +1,61 @@
+{
+  "not_applicable": [
+    {
+      "equivalent": "tests/test_kup_write_boundary_portable.py::test_acquisition_writes_only_under_the_snapshot_directory_and_inspection_writes_nothing",
+      "equivalent_outcome": "passed",
+      "id": "tests/test_kup_write_boundary.py::test_acquisition_writes_only_source_sidecars_and_the_snapshot_directory_and_inspection_writes_nothing",
+      "platform": "linux"
+    },
+    {
+      "equivalent": "tests/test_kup_write_boundary_portable.py::test_negative_control_without_the_fixed_bytecode_suppression_the_recorder_sees_pyc_writes",
+      "equivalent_outcome": "passed",
+      "id": "tests/test_kup_write_boundary.py::test_negative_control_without_the_fixed_bytecode_suppression_a_fresh_install_attempts_pyc_writes",
+      "platform": "linux"
+    }
+  ],
+  "ok": false,
+  "per_tier": {
+    "docker": {
+      "failed": 0,
+      "missing": 0,
+      "passed": 286,
+      "skipped": 0
+    },
+    "gradle_container": {
+      "failed": 0,
+      "missing": 0,
+      "passed": 5,
+      "skipped": 0
+    },
+    "jvm": {
+      "failed": 2,
+      "missing": 0,
+      "passed": 86,
+      "skipped": 0
+    },
+    "live_static_analysis": {
+      "failed": 0,
+      "missing": 0,
+      "passed": 11,
+      "skipped": 0
+    },
+    "real_toolchain": {
+      "failed": 0,
+      "missing": 0,
+      "passed": 5,
+      "skipped": 0
+    }
+  },
+  "platform_pending": [],
+  "private_fixture_pending": [
+    {
+      "gate": "PRD034-F9B-SCENARIO01",
+      "id": "tests/test_demo_v2_owner_state.py::test_reset_all_is_idempotent_and_leaves_no_service",
+      "local_outcome": "skipped"
+    }
+  ],
+  "problems": [
+    "jvm: tests/test_demo_v2_spring_ignite.py::test_post_check_passes_on_the_reference_and_leaves_the_project_untouched -> failed",
+    "jvm: tests/test_demo_v2_spring_ignite.py::test_post_check_rejects_a_program_that_prints_the_line_without_ignite -> failed"
+  ]
+}

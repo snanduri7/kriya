@@ -58,7 +58,9 @@ INJECTION = "src/test/java/demo/KriyaAcceptanceTest.java"
 
 
 def _git(root: Path, *args: str) -> str:
-    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=root, check=True,
+    # maintenance.auto=false / gc.auto=0: a fixture commit must not leave a DETACHED `git maintenance run --auto` behind (it holds .git/objects/maintenance.lock and touches
+    # .git/objects while a test snapshots the repository it created: CERT hosted #5 and run 41812207261). Per-command, repo-local, nothing global.
+    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=root, check=True,
                           capture_output=True, text=True).stdout
 
 

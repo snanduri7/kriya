@@ -7,6 +7,7 @@ Live-model runs are **stochastic**: a run can fail or take more attempts than th
 ## A. Prerequisites
 - macOS, this checkout on branch `demo/v2`, `.venv` built. Ollama running with `qwen3-coder:30b`, `qwen3.6:35b-a3b-q4_K_M` and `nomic-embed-text` (checked for you, no model is called).
 - Java 17+ and the offline Maven repository for scenario A (checked by `prepare_demo.sh --check-build`). Docker is NOT needed (only for the optional live acquisition in E).
+- The authoritative Maven (PRD-034, owner ruling 2026-11-04): the Maven-running checks (`verify_demo.sh` post phases, `qualify_spring_ignite.sh`, `greenfield_prereqs.sh`) use ONLY Apache Maven 3.10.0 provisioned with the repo's `certification_maven_toolchain` tool (its `provision DIR` command, run with python3 from the repo's top-level scripts directory; the pinned Apache SHA-512 is verified before extraction) and exposed as `export MAVEN_HOME=DIR`. An ambient Maven (Homebrew, the runner image) is never used, even if it reports 3.10.0; without a valid `MAVEN_HOME` those checks stop with the provisioning instruction (no fallback). The offline `~/.m2` is seeded from the frozen certification repository by the repo-root `seed_offline_maven` shell script (no Maven Central).
 - The desktop app built from this checkout: `cd ui/standalone && npm run package:mac` (done for HEAD; `launch_gui.sh` refuses an app older than the newest UI change).
 
 ```bash

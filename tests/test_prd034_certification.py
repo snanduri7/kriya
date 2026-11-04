@@ -155,7 +155,7 @@ def _certification_out(tmp_path, stages, *, unexpected=0, doctor=None, identity=
     return str(out)
 
 
-PASSING = {"environment": "RECORDED", "static": "PASS", "maven_repository": "PASS", "maven_served": "PASS", "python_wheelhouse": "PASS", "python_served": "PASS", "product_images": "PASS", "images_unchanged": "PASS", "collection": "PASS", "perf_probe": "PASS", "pytest": "PASS", "tier_execution": "PASS", "images": "PASS",
+PASSING = {"environment": "RECORDED", "static": "PASS", "maven_toolchain": "PASS", "maven_repository": "PASS", "maven_served": "PASS", "python_wheelhouse": "PASS", "python_served": "PASS", "product_images": "PASS", "images_unchanged": "PASS", "collection": "PASS", "perf_probe": "PASS", "pytest": "PASS", "tier_execution": "PASS", "images": "PASS",
            "scanner": "PASS", "release": "PASS", "doctor": "RECORDED"}
 DOCTOR = {"production_ready": False, "checks": [
     {"id": "model.qualification", "required": True, "status": "FAIL"},
@@ -170,7 +170,7 @@ def test_certified_only_when_every_mandatory_stage_passes_and_the_doctor_is_repo
     assert summary["doctor"]["failed_required"] == ["model.qualification"]
     assert summary["tiers"]["pytest"]["junit"]["passed"] == 9
     for stage, status in (("scanner", "UNAVAILABLE"), ("pytest", "FAIL"), ("images", "FAIL"), ("release", "FAIL"), ("collection", "FAIL"),
-                          ("tier_execution", "FAIL"), ("perf_probe", "FAIL"), ("maven_repository", "FAIL"), ("maven_served", "FAIL"), ("python_wheelhouse", "FAIL"), ("python_served", "FAIL"), ("product_images", "FAIL"), ("images_unchanged", "FAIL")):
+                          ("tier_execution", "FAIL"), ("perf_probe", "FAIL"), ("maven_toolchain", "FAIL"), ("maven_repository", "FAIL"), ("maven_served", "FAIL"), ("python_wheelhouse", "FAIL"), ("python_served", "FAIL"), ("product_images", "FAIL"), ("images_unchanged", "FAIL")):
         failing = module.summarize(_certification_out(tmp_path / stage, {**PASSING, stage: status}, doctor=DOCTOR))
         assert failing["status"] == "NOT_CERTIFIED" and f"{stage}: {status}" in failing["problems"]
 
@@ -264,7 +264,12 @@ def test_a_manual_dispatch_never_starts_a_live_inference_job():
     assert "workflow_dispatch:" in CI.split("\njobs:\n", 1)[0]                          # and a dispatch is possible at all
 
 
-def test_the_seed_script_resolves_from_coordinates_with_both_mavens_and_never_copies_a_cache():
+def test_the_seed_script_copies_only_the_frozen_closure_and_never_contacts_central_or_copies_a_cache():
+    """Owner ruling 2026-11-04 (section 6): the host ~/.m2 comes from the FROZEN, attested repository (the closure the reference needs under the authoritative Maven), byte-
+    compared, and is proven OFFLINE; Maven is never run online by the seed (it used to resolve from Central at CI time, unattested)."""
     seed = (TESTS.parent / "scripts" / "seed_offline_maven.sh").read_text(encoding="utf-8")
-    assert "mvn -B -ntp -q -Dmaven.repo.local=" in seed and "docker run" in seed and "--pull never" in seed
-    assert "cp -R \"$HOME/.m2" not in seed and "rsync" not in seed
+    assert "certification_maven_repo.py" in seed and "--require-attested" in seed and "demo_v2_m2_closure.txt" in seed
+    runs = re.findall(r'"\$MVN" (\S+)', seed)
+    assert runs and set(runs) == {"-v", "-o"}, runs                    # every Maven run of the seed is offline (`-o`), apart from the version banner
+    assert "-Dmaven.repo.local" not in seed and "docker run" not in seed and "cp -R \"$HOME/.m2" not in seed and "rsync" not in seed
+    assert "cmp -s" in seed, "an existing file with different bytes must be a refusal"

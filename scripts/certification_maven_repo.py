@@ -225,7 +225,10 @@ def extend(manifest_path: str, repo_dir: str, paths: Sequence[str], central: str
         if hashlib.sha1(body).hexdigest() != published:  # noqa: S324 - comparing with Central's published SHA-1
             problems.append(f"REFUSED {path}: the downloaded bytes do not match the SHA-1 Central publishes")
             continue
-        for name, content in ((path, body), (path + ".sha1", published_text)):
+        # The sidecar is DERIVED from the verified payload (HOSTED-MAVEN-SIDECAR-REPRESENTATION-001), never kept as Central's own text, whose representation varies (CRLF,
+        # ``hash *name``, a historical staging path, ...): `fetch` can only reconstruct the closed renderings, so a raw one would freeze a file no fresh machine can rebuild
+        # (MEASURED 2026-11-04: plexus-utils-1.0.4.pom.sha1 on Central carries a staging path outside the closed set).
+        for name, content in ((path, body), (path + ".sha1", sidecar_renderings(body, path)["bare"])):
             target = os.path.join(repo_dir, name)
             os.makedirs(os.path.dirname(target), exist_ok=True)
             with open(target, "wb") as handle:

@@ -96,6 +96,35 @@ def test_negative_control_a_plain_git_commit_does_start_detached_maintenance(tmp
     assert [argv for argv in _spawned_git_commands(trace) if "maintenance" in argv], "this git no longer starts background maintenance after a commit: the control no longer discriminates"
 
 
+def _named_test_base(tmp_path):
+    from _named_test_oracle_harness import make_base
+    return make_base(tmp_path / "named")
+
+
+def _b2c_workspace(tmp_path):
+    from _b2c_fixtures import maven_workspace
+    (tmp_path / "b2c").mkdir()
+    return maven_workspace(tmp_path / "b2c")
+
+
+def _kup_repo(tmp_path):
+    from test_kup_workspace import _repo as kup_repo
+    return kup_repo(tmp_path / "kup")
+
+
+@pytest.mark.parametrize("builder", [_named_test_base, _b2c_workspace, _kup_repo], ids=["named_test_oracle_harness.make_base", "b2c_fixtures.maven_workspace", "kup_workspace._repo"])
+def test_every_fixture_repository_that_is_snapshotted_leaves_no_background_git_maintenance_behind(tmp_path, monkeypatch, builder):
+    """Run 41812207261 (hosted, Linux git 2.56.0): `make_base` was the SECOND fixture builder with the oi142 race (`.git/objects` mtime moved by ~1 ms between two snapshots with no
+    Kriya write). The sweep of every helper that commits a fixture repository which a test then snapshots found the same unguarded commit in these three; each must start no
+    `git maintenance` (git's own trace2 `child_start` events; the negative control above shows an unguarded commit does)."""
+    trace = tmp_path / "trace2.jsonl"
+    monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
+    builder(tmp_path)
+    assert trace.is_file() and _spawned_git_commands(trace) is not None
+    assert [argv for argv in _spawned_git_commands(trace) if "maintenance" in argv] == [], f"{builder.__name__} started background maintenance"
+    assert "commit" in trace.read_text(), "the builder ran no git commit: the check would be vacuous"
+
+
 # ----------------------------------------------------------------- B: a Kriya-created execution copy keeps its classification
 
 def test_an_execution_copy_stays_non_git_after_containment_prepared_its_git_target(tmp_path, monkeypatch):

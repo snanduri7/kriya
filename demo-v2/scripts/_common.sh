@@ -91,3 +91,33 @@ method_body() {
   # The pattern travels in the environment: awk -v would process its backslash escapes and break the regular expression.
   METHOD_RE="$2" awk '$0 ~ ENVIRON["METHOD_RE"] {on=1} on {print} on && $0 == "    }" {exit}' "$1"
 }
+
+# ---- the authoritative host Maven (PRD-034, owner ruling 2026-11-04) ----
+# The host-side Maven of the demo-v2 / PRD-034 path is exactly the one pinned in tests/certification/maven_toolchain.json (Apache Maven 3.10.0), provisioned by
+#   python3 scripts/certification_maven_toolchain.py provision DIR   and exposed as   export MAVEN_HOME=DIR
+# An ambient mvn (the runner image's /usr/bin/mvn, Homebrew, a developer's own) is NEVER the authority, even when it reports the same version: `verify` refuses a tree without
+# the provisioning marker. No fallback: without MAVEN_HOME the Maven-running scripts stop. The desktop app's fixed child PATH (ui/standalone/src/main/child_env.ts, product
+# code, untouched) stays the BASE of the scripts' PATH for every other tool; only `mvn` is the authority's, because its directory is put in front.
+DEMO_V2_APP_BASE_PATH="${DEMO_V2_APP_BASE_PATH:-/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin}"   # the override is a test seam (a decoy mvn inside the base); production never sets it
+# Non-dying: sets MAVEN_AUTHORITY_BIN, or MAVEN_AUTHORITY_ERROR and returns 1 (a checker can then REPORT the refusal as a FAIL line instead of aborting).
+resolve_maven_authority() {
+  MAVEN_AUTHORITY_BIN=""; MAVEN_AUTHORITY_ERROR=""
+  if [ -z "${MAVEN_HOME:-}" ]; then
+    MAVEN_AUTHORITY_ERROR="MAVEN_HOME is not set: the demo-v2 / PRD-034 path runs Maven only from the pinned authority (Apache Maven 3.10.0). Provision it once: python3 $REPO_ROOT/scripts/certification_maven_toolchain.py provision DIR && export MAVEN_HOME=DIR"
+    return 1
+  fi
+  local py="${KRIYA_MAVEN_VERIFY_PY:-python3}" verdict
+  if ! verdict="$("$py" -I "$REPO_ROOT/scripts/certification_maven_toolchain.py" verify "$MAVEN_HOME" 2>&1)"; then
+    MAVEN_AUTHORITY_ERROR="MAVEN_HOME ($MAVEN_HOME) is not the authoritative Maven: $verdict"
+    return 1
+  fi
+  MAVEN_AUTHORITY_BIN="$(cd "$MAVEN_HOME" && pwd -P)/bin"
+}
+require_maven_authority() { resolve_maven_authority || die "$MAVEN_AUTHORITY_ERROR"; }
+# The PATH the Maven-running checks use: the authority's bin FIRST, then the desktop app's fixed base.
+app_path() { echo "$MAVEN_AUTHORITY_BIN:$DEMO_V2_APP_BASE_PATH"; }
+# Every host-side Maven invocation of the path goes through this: the authority's mvn by ABSOLUTE path, so no PATH order, no ambient or decoy mvn can stand in for it.
+authority_mvn() {
+  [ -n "${MAVEN_AUTHORITY_BIN:-}" ] || { echo "the authoritative Maven is unavailable: ${MAVEN_AUTHORITY_ERROR:-not resolved}" >&2; return 127; }
+  "$MAVEN_AUTHORITY_BIN/mvn" "$@"
+}

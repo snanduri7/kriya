@@ -23,7 +23,8 @@ ensure_work_area
 load_env_file "$DEMO_V2_DIR/fixtures/spring-ignite-protocol/fixture.env"
 SC_DIR="$(scenario_dir 04)"
 KRIYA_PY="${KRIYA_PY:-$REPO_ROOT/.venv/bin/python}"
-APP_PATH="/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"   # the desktop app's fixed child PATH (ui/standalone/src/main/child_env.ts)
+require_maven_authority   # PRD-034: the host Maven is the pinned authority (3.10.0), never an ambient mvn
+APP_PATH="$(app_path)"    # the authority's bin in front of the desktop app's fixed child PATH (ui/standalone/src/main/child_env.ts)
 HELPER="$DEMO_V2_DIR/scripts/qualify_spring_ignite.py"
 [ -x "$KRIYA_PY" ] || die "$KRIYA_PY not found (python3 -m venv .venv && .venv/bin/pip install -e .)"
 if [ -z "$EVIDENCE" ]; then EVIDENCE="$(scenario_work 04)/evidence/qualification-$(date -u +%Y%m%dT%H%M%SZ)"; fi
@@ -39,7 +40,7 @@ echo "=== scenario 04 model-free qualification (evidence: $EVIDENCE) ==="
 
 # ---- 1. toolchain as the desktop app sees it (MEASURED, not assumed) ----
 APP_JAVA="$(env -i PATH="$APP_PATH" HOME="$HOME" java -version 2>&1 | head -1 || true)"
-APP_MVN="$(env -i PATH="$APP_PATH" HOME="$HOME" mvn -version 2>&1 | sed -n '1p;3p' | tr '\n' ' ' || true)"
+APP_MVN="$(env -i PATH="$APP_PATH" HOME="$HOME" "$MAVEN_AUTHORITY_BIN/mvn" -version 2>&1 | sed -n '1p;3p' | tr '\n' ' ' || true)"
 SHELL_JAVA="$(java -version 2>&1 | head -1 || true)"
 info "desktop app environment: java = $APP_JAVA"
 info "desktop app environment: mvn  = $APP_MVN"
@@ -48,7 +49,7 @@ printf 'app_java=%s\napp_mvn=%s\nshell_java=%s\nshell_java_home=%s\ngit_head=%s\
   "$(git -C "$REPO_ROOT" rev-parse HEAD)" "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no | tr '\n' ';')" > "$EVIDENCE/toolchain.txt"
 APP_MAJOR="$(printf '%s' "$APP_JAVA" | sed -n 's/.*version "\([0-9]*\).*/\1/p')"
 if [ -n "$APP_MAJOR" ] && [ "$APP_MAJOR" -ge 17 ]; then pass "java $APP_MAJOR (>= 17) is what the desktop app's PATH resolves; the project targets Java 17 through its compiler settings"; else fail "java 17+ is not available on the desktop app's PATH ('$APP_JAVA')"; fi
-env -i PATH="$APP_PATH" HOME="$HOME" mvn -version >/dev/null 2>&1 && pass "mvn is available on the desktop app's PATH" || fail "mvn is not available on the desktop app's PATH"
+env -i PATH="$APP_PATH" HOME="$HOME" "$MAVEN_AUTHORITY_BIN/mvn" -version >/dev/null 2>&1 && pass "mvn is available on the desktop app's PATH" || fail "mvn is not available on the desktop app's PATH"
 JAVA17_HOME="$(/usr/libexec/java_home -v 17 2>/dev/null || true)"
 
 # ---- 2. offline Maven repository: the exact artifacts, present as files ----
@@ -65,7 +66,7 @@ done
 
 # ---- 4. build + JUnit, offline, under the desktop app's environment ----
 REF="$TMP/reference"; cp -R "$DEMO_V2_DIR/$REFERENCE_DIR" "$REF"
-if ( cd "$REF" && env -i PATH="$APP_PATH" HOME="$HOME" mvn -o -B clean test >"$EVIDENCE/mvn-test.log" 2>&1 ); then
+if ( cd "$REF" && env -i PATH="$APP_PATH" HOME="$HOME" "$MAVEN_AUTHORITY_BIN/mvn" -o -B clean test >"$EVIDENCE/mvn-test.log" 2>&1 ); then
   N="$(sed -n 's/^\[INFO\] Tests run: \([0-9]*\), Failures: 0, Errors: 0, Skipped: 0$/\1/p' "$EVIDENCE/mvn-test.log" | tail -1)"
   [ "$N" = "$REFERENCE_TEST_COUNT" ] && pass "offline 'mvn test' (compile + JUnit 5.8.2 via surefire 2.22.2, including real embedded-Ignite round-trip tests): $N/$N tests passed" || fail "offline 'mvn test' passed but ran '$N' tests, expected $REFERENCE_TEST_COUNT"
 else fail "offline 'mvn test' failed (see $EVIDENCE/mvn-test.log)"; fi
@@ -75,8 +76,8 @@ cat > "$TMP/dead-remote-settings.xml" <<'EOS'
 <settings><mirrors><mirror><id>central</id><mirrorOf>*</mirrorOf><url>http://127.0.0.1:9/dead</url></mirror></mirrors></settings>
 EOS
 DEAD="$TMP/dead-remote"; cp -R "$DEMO_V2_DIR/$REFERENCE_DIR" "$DEAD"
-if ( cd "$DEAD" && env -i PATH="$APP_PATH" HOME="$HOME" mvn -B -s "$TMP/dead-remote-settings.xml" clean test >"$EVIDENCE/mvn-test-dead-remote.log" 2>&1 ) \
-   && ( cd "$DEAD" && env -i PATH="$APP_PATH" HOME="$HOME" mvn -B -q -s "$TMP/dead-remote-settings.xml" compile exec:exec -Dexec.mainClass="$REFERENCE_MAIN_CLASS" >"$EVIDENCE/mvn-run-dead-remote.log" 2>&1 ) \
+if ( cd "$DEAD" && env -i PATH="$APP_PATH" HOME="$HOME" "$MAVEN_AUTHORITY_BIN/mvn" -B -s "$TMP/dead-remote-settings.xml" clean test >"$EVIDENCE/mvn-test-dead-remote.log" 2>&1 ) \
+   && ( cd "$DEAD" && env -i PATH="$APP_PATH" HOME="$HOME" "$MAVEN_AUTHORITY_BIN/mvn" -B -q -s "$TMP/dead-remote-settings.xml" compile exec:exec -Dexec.mainClass="$REFERENCE_MAIN_CLASS" >"$EVIDENCE/mvn-run-dead-remote.log" 2>&1 ) \
    && grep -qxF "$EXPECTED_RESULT_LINE" "$EVIDENCE/mvn-run-dead-remote.log"; then
   pass "Maven WITHOUT -o and with every remote unreachable still builds, tests and runs the reference: the scenario needs no public network when its dependencies are cached"
 else fail "the reference needs a remote repository even though everything is cached (see $EVIDENCE/mvn-*-dead-remote.log)"; fi

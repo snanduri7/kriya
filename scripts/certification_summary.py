@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 # Exit status: 0 CERTIFIED; 1 NOT_CERTIFIED; 3 INCOMPLETE_PLATFORM_EVIDENCE (never a pass);
 # 4 HOSTED_PASS_PRIVATE_FIXTURE_REQUIRED (every hosted requirement passed; a mandatory test needs a fixture that may not be hosted: NOT a pass of PRD-034 until
 # scripts/certification_private_gate.py verify binds a private-gate evidence record to the same Kriya revision/config).
-MANDATORY = ("static", "maven_repository", "maven_served", "python_wheelhouse", "python_served", "product_images", "images_unchanged", "collection", "perf_probe", "pytest", "tier_execution", "images", "scanner", "release")
+MANDATORY = ("static", "maven_toolchain", "maven_repository", "maven_served", "python_wheelhouse", "python_served", "product_images", "images_unchanged", "collection", "perf_probe", "pytest", "tier_execution", "images", "scanner", "release")
 
 
 def _junit(path: str) -> Optional[Dict[str, int]]:
@@ -99,6 +99,7 @@ def summarize(out: str) -> Dict[str, Any]:
         "tier_execution": _json(os.path.join(out, "tier-execution.json")),
         "doctor_mode": _json(os.path.join(out, "doctor-mode.json")),
         "thresholds": _json(os.path.join(out, "thresholds.json")),
+        "maven_toolchain": _json(os.path.join(out, "maven-toolchain.json")),
         "maven_repository": _json(os.path.join(out, "maven-repo.json")),
         "python_wheelhouse": _json(os.path.join(out, "python-wheelhouse.json")),
         "release_identity": identity,
@@ -128,6 +129,10 @@ def render(summary: Dict[str, Any]) -> str:
               f"(of {collection.get('total')}); tiers selected: {json.dumps(collection.get('tiers_selected'), sort_keys=True)}",
               f"- tier execution: {json.dumps((summary.get('tier_execution') or {}).get('per_tier'), sort_keys=True)}",
               f"- doctor mode: {json.dumps(summary.get('doctor_mode'), sort_keys=True)}"]
+    toolchain = summary.get("maven_toolchain")
+    if toolchain:
+        lines += [f"- authoritative host Maven: {toolchain.get('version_banner')} at `{toolchain.get('maven_home')}` (pinned archive SHA-512 `{str(toolchain.get('archive_sha512'))[:32]}...`, "
+                  f"tree digest `{toolchain.get('tree_sha256')}`); container Maven versions are separate supplied-toolchain identities (see environment.json)"]
     maven = summary.get("maven_repository")
     if maven:
         lines += [f"- deterministic Maven repository: manifest content digest `{maven.get('manifest_content_digest')}` ({maven.get('files')} files, attested: {maven.get('attested')}); "
