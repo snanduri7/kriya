@@ -1,0 +1,476 @@
+﻿2026-11-04T01:15:48.7232599Z Current runner version: '2.338.2'
+2026-11-04T01:15:48.7260332Z ##[group]Runner Image Provisioner
+2026-11-04T01:15:48.7261196Z Hosted Compute Agent
+2026-11-04T01:15:48.7261770Z Version: 20261021.618
+2026-11-04T01:15:48.7262755Z Commit: 21505ad2541d5be6135ed84fc33697146cf75b8e
+2026-11-04T01:15:48.7263452Z Build Date: 2026-10-21T00:45:21Z
+2026-11-04T01:15:48.7264433Z Worker ID: {7510e9d7-5d89-4ea3-bdcc-067eb77751e4}
+2026-11-04T01:15:48.7265191Z Region: centralus
+2026-11-04T01:15:48.7265703Z Cloud: Azure
+2026-11-04T01:15:48.7266218Z ##[endgroup]
+2026-11-04T01:15:48.7268036Z ##[group]Operating System
+2026-11-04T01:15:48.7268686Z Microsoft Windows Server 2025
+2026-11-04T01:15:48.7269331Z 10.0.26100
+2026-11-04T01:15:48.7269826Z Datacenter
+2026-11-04T01:15:48.7270319Z ##[endgroup]
+2026-11-04T01:15:48.7270849Z ##[group]Runner Image
+2026-11-04T01:15:48.7271419Z Image: windows-2025-vs2026
+2026-11-04T01:15:48.7272049Z Version: 20261030.294.1
+2026-11-04T01:15:48.7273445Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20261030.294/images/windows/Windows2025-VS2026-Readme.md
+2026-11-04T01:15:48.7275086Z Image Release: https://github.com/actions/runner-images/releases/tag/win25-vs2026%2F20261030.294
+2026-11-04T01:15:48.7276044Z ##[endgroup]
+2026-11-04T01:15:48.7277231Z ##[group]GITHUB_TOKEN Permissions
+2026-11-04T01:15:48.7279348Z Contents: read
+2026-11-04T01:15:48.7279972Z Metadata: read
+2026-11-04T01:15:48.7280493Z Packages: read
+2026-11-04T01:15:48.7281020Z ##[endgroup]
+2026-11-04T01:15:48.7283107Z Secret source: Actions
+2026-11-04T01:15:48.7284390Z Cache mode: write
+2026-11-04T01:15:48.7285147Z Prepare workflow directory
+2026-11-04T01:15:48.7734630Z Prepare all required actions
+2026-11-04T01:15:48.7785667Z Getting action download info
+2026-11-04T01:15:49.0242870Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-11-04T01:15:49.1561617Z Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+2026-11-04T01:15:49.4378217Z Complete job name: Platform import and architecture guard (Windows)
+2026-11-04T01:15:49.5977028Z ##[group]Run actions/checkout@v4
+2026-11-04T01:15:49.5978183Z with:
+2026-11-04T01:15:49.5978864Z   repository: snanduri7/kriya
+2026-11-04T01:15:49.5983234Z   token: ***
+2026-11-04T01:15:49.5983644Z   ssh-strict: true
+2026-11-04T01:15:49.5984042Z   ssh-user: git
+2026-11-04T01:15:49.5984451Z   persist-credentials: true
+2026-11-04T01:15:49.5984896Z   clean: true
+2026-11-04T01:15:49.5985300Z   sparse-checkout-cone-mode: true
+2026-11-04T01:15:49.5985777Z   fetch-depth: 1
+2026-11-04T01:15:49.5986166Z   fetch-tags: false
+2026-11-04T01:15:49.5986571Z   show-progress: true
+2026-11-04T01:15:49.5986996Z   lfs: false
+2026-11-04T01:15:49.5987372Z   submodules: false
+2026-11-04T01:15:49.5987782Z   set-safe-directory: true
+2026-11-04T01:15:49.5988256Z   allow-unsafe-pr-checkout: false
+2026-11-04T01:15:49.5989032Z ##[endgroup]
+2026-11-04T01:15:49.7448645Z Syncing repository: snanduri7/kriya
+2026-11-04T01:15:49.7451807Z ##[group]Getting Git version info
+2026-11-04T01:15:49.7453286Z Working directory is 'D:\a\kriya\kriya'
+2026-11-04T01:15:49.8532081Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-11-04T01:15:50.1655509Z git version 2.56.0.windows.4
+2026-11-04T01:15:50.1707885Z ##[endgroup]
+2026-11-04T01:15:50.1727785Z Temporarily overriding HOME='D:\a\_temp\35bf40dd-e632-4077-ac52-fa50b9d351ee' before making global git config changes
+2026-11-04T01:15:50.1729187Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-04T01:15:50.1738534Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\kriya\kriya
+2026-11-04T01:15:50.2286411Z Deleting the contents of 'D:\a\kriya\kriya'
+2026-11-04T01:15:50.2293083Z ##[group]Initializing the repository
+2026-11-04T01:15:50.2301384Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\kriya\kriya
+2026-11-04T01:15:50.3212585Z Initialized empty Git repository in D:/a/kriya/kriya/.git/
+2026-11-04T01:15:50.3272012Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/snanduri7/kriya
+2026-11-04T01:15:50.3950765Z ##[endgroup]
+2026-11-04T01:15:50.3951947Z ##[group]Disabling automatic garbage collection
+2026-11-04T01:15:50.3961770Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+2026-11-04T01:15:50.4344176Z ##[endgroup]
+2026-11-04T01:15:50.4345251Z ##[group]Setting up auth
+2026-11-04T01:15:50.4356234Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-11-04T01:15:50.4750366Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-11-04T01:15:51.8754803Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-04T01:15:51.9155714Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-11-04T01:15:52.4898042Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-04T01:15:52.5291263Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-11-04T01:15:53.1153022Z [command]"C:\Program Files\Git\bin\git.exe" config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+2026-11-04T01:15:53.1563397Z ##[endgroup]
+2026-11-04T01:15:53.1564326Z ##[group]Fetching the repository
+2026-11-04T01:15:53.1578037Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +216c2a16b754f1da8e0047b9e21053761d042605:refs/remotes/origin/arch/containment-rebuild-v2
+2026-11-04T01:15:58.2676806Z From https://github.com/snanduri7/kriya
+2026-11-04T01:15:58.2678023Z  * [new ref]         216c2a16b754f1da8e0047b9e21053761d042605 -> origin/arch/containment-rebuild-v2
+2026-11-04T01:15:58.2715012Z ##[endgroup]
+2026-11-04T01:15:58.2715596Z ##[group]Determining the checkout info
+2026-11-04T01:15:58.2717891Z ##[endgroup]
+2026-11-04T01:15:58.2727445Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+2026-11-04T01:15:58.3329835Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+2026-11-04T01:15:58.3725537Z ##[group]Checking out the ref
+2026-11-04T01:15:58.3734406Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force -B arch/containment-rebuild-v2 refs/remotes/origin/arch/containment-rebuild-v2
+2026-11-04T01:15:59.5906290Z Updating files:  25% (1856/7340)
+2026-11-04T01:15:59.7375167Z Updating files:  26% (1909/7340)
+2026-11-04T01:15:59.9992267Z Updating files:  27% (1982/7340)
+2026-11-04T01:16:00.2069454Z Updating files:  28% (2056/7340)
+2026-11-04T01:16:00.2289293Z Updating files:  29% (2129/7340)
+2026-11-04T01:16:00.2508756Z Updating files:  30% (2202/7340)
+2026-11-04T01:16:00.2778862Z Updating files:  31% (2276/7340)
+2026-11-04T01:16:00.3012146Z Updating files:  32% (2349/7340)
+2026-11-04T01:16:00.3235218Z Updating files:  33% (2423/7340)
+2026-11-04T01:16:00.3462907Z Updating files:  34% (2496/7340)
+2026-11-04T01:16:00.3636291Z Updating files:  35% (2569/7340)
+2026-11-04T01:16:00.3842028Z Updating files:  36% (2643/7340)
+2026-11-04T01:16:00.4065584Z Updating files:  37% (2716/7340)
+2026-11-04T01:16:00.4294112Z Updating files:  38% (2790/7340)
+2026-11-04T01:16:00.4447039Z Updating files:  39% (2863/7340)
+2026-11-04T01:16:00.4465506Z Updating files:  40% (2936/7340)
+2026-11-04T01:16:00.4680912Z Updating files:  40% (2940/7340)
+2026-11-04T01:16:00.4875045Z Updating files:  41% (3010/7340)
+2026-11-04T01:16:00.5089082Z Updating files:  42% (3083/7340)
+2026-11-04T01:16:00.5266722Z Updating files:  43% (3157/7340)
+2026-11-04T01:16:00.5447794Z Updating files:  44% (3230/7340)
+2026-11-04T01:16:00.5897428Z Updating files:  45% (3303/7340)
+2026-11-04T01:16:00.7444600Z Updating files:  46% (3377/7340)
+2026-11-04T01:16:00.7509460Z Updating files:  47% (3450/7340)
+2026-11-04T01:16:00.7786672Z Updating files:  48% (3524/7340)
+2026-11-04T01:16:00.8019430Z Updating files:  49% (3597/7340)
+2026-11-04T01:16:00.8272901Z Updating files:  50% (3670/7340)
+2026-11-04T01:16:00.8515541Z Updating files:  51% (3744/7340)
+2026-11-04T01:16:00.8757026Z Updating files:  52% (3817/7340)
+2026-11-04T01:16:00.9018448Z Updating files:  53% (3891/7340)
+2026-11-04T01:16:00.9220783Z Updating files:  54% (3964/7340)
+2026-11-04T01:16:00.9480793Z Updating files:  55% (4037/7340)
+2026-11-04T01:16:00.9971484Z Updating files:  56% (4111/7340)
+2026-11-04T01:16:01.0348911Z Updating files:  57% (4184/7340)
+2026-11-04T01:16:01.0827249Z Updating files:  58% (4258/7340)
+2026-11-04T01:16:01.0994820Z Updating files:  59% (4331/7340)
+2026-11-04T01:16:01.1178848Z Updating files:  60% (4404/7340)
+2026-11-04T01:16:01.1423964Z Updating files:  61% (4478/7340)
+2026-11-04T01:16:01.1707725Z Updating files:  62% (4551/7340)
+2026-11-04T01:16:01.1983602Z Updating files:  63% (4625/7340)
+2026-11-04T01:16:01.2282857Z Updating files:  64% (4698/7340)
+2026-11-04T01:16:01.2946340Z Updating files:  65% (4771/7340)
+2026-11-04T01:16:01.3287207Z Updating files:  66% (4845/7340)
+2026-11-04T01:16:01.3508440Z Updating files:  67% (4918/7340)
+2026-11-04T01:16:01.3742262Z Updating files:  68% (4992/7340)
+2026-11-04T01:16:01.4039127Z Updating files:  69% (5065/7340)
+2026-11-04T01:16:01.4349815Z Updating files:  70% (5138/7340)
+2026-11-04T01:16:01.4544008Z Updating files:  71% (5212/7340)
+2026-11-04T01:16:01.5312178Z Updating files:  71% (5240/7340)
+2026-11-04T01:16:01.5942608Z Updating files:  72% (5285/7340)
+2026-11-04T01:16:01.6143203Z Updating files:  73% (5359/7340)
+2026-11-04T01:16:01.6416235Z Updating files:  74% (5432/7340)
+2026-11-04T01:16:01.6639351Z Updating files:  75% (5505/7340)
+2026-11-04T01:16:01.6824365Z Updating files:  76% (5579/7340)
+2026-11-04T01:16:01.7091167Z Updating files:  77% (5652/7340)
+2026-11-04T01:16:01.7291178Z Updating files:  78% (5726/7340)
+2026-11-04T01:16:01.7468855Z Updating files:  79% (5799/7340)
+2026-11-04T01:16:01.7676113Z Updating files:  80% (5872/7340)
+2026-11-04T01:16:01.7912396Z Updating files:  81% (5946/7340)
+2026-11-04T01:16:01.8117767Z Updating files:  82% (6019/7340)
+2026-11-04T01:16:01.8341378Z Updating files:  83% (6093/7340)
+2026-11-04T01:16:01.8578363Z Updating files:  84% (6166/7340)
+2026-11-04T01:16:01.8775895Z Updating files:  85% (6239/7340)
+2026-11-04T01:16:01.8989365Z Updating files:  86% (6313/7340)
+2026-11-04T01:16:01.9213016Z Updating files:  87% (6386/7340)
+2026-11-04T01:16:01.9431727Z Updating files:  88% (6460/7340)
+2026-11-04T01:16:01.9684803Z Updating files:  89% (6533/7340)
+2026-11-04T01:16:01.9918109Z Updating files:  90% (6606/7340)
+2026-11-04T01:16:02.0216424Z Updating files:  91% (6680/7340)
+2026-11-04T01:16:02.0394160Z Updating files:  92% (6753/7340)
+2026-11-04T01:16:02.0558702Z Updating files:  93% (6827/7340)
+2026-11-04T01:16:02.0771172Z Updating files:  94% (6900/7340)
+2026-11-04T01:16:02.1004635Z Updating files:  95% (6973/7340)
+2026-11-04T01:16:02.1203123Z Updating files:  96% (7047/7340)
+2026-11-04T01:16:02.1395354Z Updating files:  97% (7120/7340)
+2026-11-04T01:16:02.1757770Z Updating files:  98% (7194/7340)
+2026-11-04T01:16:02.1951662Z Updating files:  99% (7267/7340)
+2026-11-04T01:16:02.1952749Z Updating files: 100% (7340/7340)
+2026-11-04T01:16:02.1953205Z Updating files: 100% (7340/7340), done.
+2026-11-04T01:16:02.2195871Z Switched to a new branch 'arch/containment-rebuild-v2'
+2026-11-04T01:16:02.2214481Z branch 'arch/containment-rebuild-v2' set up to track 'origin/arch/containment-rebuild-v2'.
+2026-11-04T01:16:02.2435558Z ##[endgroup]
+2026-11-04T01:16:02.3995193Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2026-11-04T01:16:02.4860423Z 216c2a16b754f1da8e0047b9e21053761d042605
+2026-11-04T01:16:02.5346158Z ##[group]Run actions/setup-python@v5
+2026-11-04T01:16:02.5346472Z with:
+2026-11-04T01:16:02.5346659Z   python-version: 3.12
+2026-11-04T01:16:02.5346852Z   cache: pip
+2026-11-04T01:16:02.5347031Z   check-latest: false
+2026-11-04T01:16:02.5350676Z   token: ***
+2026-11-04T01:16:02.5350888Z   update-environment: true
+2026-11-04T01:16:02.5351111Z   allow-prereleases: false
+2026-11-04T01:16:02.5351318Z   freethreaded: false
+2026-11-04T01:16:02.5351507Z ##[endgroup]
+2026-11-04T01:16:02.7076202Z ##[group]Installed versions
+2026-11-04T01:16:02.9235856Z (node:9092) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-04T01:16:02.9236956Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-04T01:16:02.9237689Z Successfully set up CPython (3.12.10)
+2026-11-04T01:16:02.9238901Z ##[endgroup]
+2026-11-04T01:16:06.8666028Z Cache hit for: setup-python-Windows-x64-python-3.12.10-pip-333b2ef9fe610651de713ccd12a67df81ba0b203c770d2f5924922516aa8b9a0
+2026-11-04T01:16:06.8782868Z (node:9092) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-11-04T01:16:08.0517863Z Received 66188095 of 66188095 (100.0%), 61.5 MBs/sec
+2026-11-04T01:16:08.0521449Z Cache Size: ~63 MB (66188095 B)
+2026-11-04T01:16:08.0595362Z [command]"C:\Program Files\Git\usr\bin\tar.exe" -xf D:/a/_temp/bd9d6005-e0be-4123-bb18-147f3924eb08/cache.tzst -P -C D:/a/kriya/kriya --force-local --use-compress-program "zstd -d"
+2026-11-04T01:16:09.1027002Z Cache restored successfully
+2026-11-04T01:16:09.1074103Z Cache restored from key: setup-python-Windows-x64-python-3.12.10-pip-fd1d9587d3d7e071ed148db93fafad715fbc380918c571b04ddb9554210bd561
+2026-11-04T01:16:09.1440045Z ##[group]Run pip install -e ".[dev]"
+2026-11-04T01:16:09.1440425Z [36;1mpip install -e ".[dev]"[0m
+2026-11-04T01:16:09.2156592Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-11-04T01:16:09.2156983Z env:
+2026-11-04T01:16:09.2157272Z   pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-11-04T01:16:09.2157796Z   PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+2026-11-04T01:16:09.2158718Z   Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-11-04T01:16:09.2159213Z   Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-11-04T01:16:09.2159664Z   Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-11-04T01:16:09.2160021Z ##[endgroup]
+2026-11-04T01:16:12.3026923Z Obtaining file:///D:/a/kriya/kriya
+2026-11-04T01:16:12.3071820Z   Installing build dependencies: started
+2026-11-04T01:16:15.0802518Z   Installing build dependencies: finished with status 'done'
+2026-11-04T01:16:15.0820241Z   Checking if build backend supports build_editable: started
+2026-11-04T01:16:15.7229912Z   Checking if build backend supports build_editable: finished with status 'done'
+2026-11-04T01:16:15.7257479Z   Getting requirements to build editable: started
+2026-11-04T01:16:16.5455026Z   Getting requirements to build editable: finished with status 'done'
+2026-11-04T01:16:16.5486083Z   Preparing editable metadata (pyproject.toml): started
+2026-11-04T01:16:17.0711628Z   Preparing editable metadata (pyproject.toml): finished with status 'done'
+2026-11-04T01:16:17.0790330Z Requirement already satisfied: click>=8.0.0 in C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\site-packages (from kriya==0.1.0) (8.5.0)
+2026-11-04T01:16:17.5385212Z Collecting pydantic>=2.0.0 (from kriya==0.1.0)
+2026-11-04T01:16:17.7789606Z   Downloading pydantic-2.14.2-py3-none-any.whl.metadata (137 kB)
+2026-11-04T01:16:17.9763715Z Collecting pyyaml>=6.0 (from kriya==0.1.0)
+2026-11-04T01:16:17.9792429Z   Using cached pyyaml-6.0.3-cp312-cp312-win_amd64.whl.metadata (2.4 kB)
+2026-11-04T01:16:18.1089496Z Collecting openai>=1.0.0 (from kriya==0.1.0)
+2026-11-04T01:16:18.1209403Z   Downloading openai-3.44.0-py3-none-any.whl.metadata (45 kB)
+2026-11-04T01:16:18.2336004Z Collecting jinja2>=3.0.0 (from kriya==0.1.0)
+2026-11-04T01:16:18.2363310Z   Using cached jinja2-3.1.6-py3-none-any.whl.metadata (2.9 kB)
+2026-11-04T01:16:18.2830734Z Collecting mcp>=2.0.0 (from kriya==0.1.0)
+2026-11-04T01:16:18.2969163Z   Downloading mcp-2.3.0-py3-none-any.whl.metadata (6.6 kB)
+2026-11-04T01:16:18.3751076Z Collecting httpx>=0.24.0 (from kriya==0.1.0)
+2026-11-04T01:16:18.3776416Z   Using cached httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+2026-11-04T01:16:18.6551615Z Collecting numpy>=1.24.0 (from kriya==0.1.0)
+2026-11-04T01:16:18.6675919Z   Downloading numpy-2.5.4-cp312-cp312-win_amd64.whl.metadata (6.6 kB)
+2026-11-04T01:16:18.7350710Z Collecting prompt_toolkit>=3.0.0 (from kriya==0.1.0)
+2026-11-04T01:16:18.7376064Z   Using cached prompt_toolkit-3.0.53-py3-none-any.whl.metadata (6.4 kB)
+2026-11-04T01:16:18.8025597Z Collecting tree-sitter<0.26,>=0.25.2 (from kriya==0.1.0)
+2026-11-04T01:16:18.8059821Z   Using cached tree_sitter-0.25.2-cp312-cp312-win_amd64.whl.metadata (10 kB)
+2026-11-04T01:16:18.8421048Z Collecting tree-sitter-java>=0.23.5 (from kriya==0.1.0)
+2026-11-04T01:16:18.8445725Z   Using cached tree_sitter_java-0.23.5-cp39-abi3-win_amd64.whl.metadata (1.8 kB)
+2026-11-04T01:16:18.8849948Z Collecting tree-sitter-python>=0.25.0 (from kriya==0.1.0)
+2026-11-04T01:16:18.9099715Z   Using cached tree_sitter_python-0.25.0-cp310-abi3-win_amd64.whl.metadata (1.9 kB)
+2026-11-04T01:16:18.9712047Z Collecting pytest>=7.0.0 (from kriya==0.1.0)
+2026-11-04T01:16:18.9828479Z   Downloading pytest-9.2.0-py3-none-any.whl.metadata (7.9 kB)
+2026-11-04T01:16:19.0646312Z Collecting pytest-asyncio>=0.20.0 (from kriya==0.1.0)
+2026-11-04T01:16:19.0767383Z   Downloading pytest_asyncio-1.4.1.post1-py3-none-any.whl.metadata (4.4 kB)
+2026-11-04T01:16:19.1635022Z Collecting pip-tools>=7.0.0 (from kriya==0.1.0)
+2026-11-04T01:16:19.1767259Z   Downloading pip_tools-7.6.2-py3-none-any.whl.metadata (25 kB)
+2026-11-04T01:16:19.6632314Z Collecting ruff>=0.6.0 (from kriya==0.1.0)
+2026-11-04T01:16:19.6755225Z   Downloading ruff-0.17.3-py3-none-win_amd64.whl.metadata (21 kB)
+2026-11-04T01:16:19.7574810Z Collecting pylint>=3.2 (from kriya==0.1.0)
+2026-11-04T01:16:19.7714176Z   Downloading pylint-4.1.3-py3-none-any.whl.metadata (12 kB)
+2026-11-04T01:16:19.8678109Z Collecting pytest-xdist>=3.6 (from kriya==0.1.0)
+2026-11-04T01:16:19.8712984Z   Using cached pytest_xdist-3.8.0-py3-none-any.whl.metadata (3.0 kB)
+2026-11-04T01:16:20.0032218Z Collecting pytest-testmon>=2.1 (from kriya==0.1.0)
+2026-11-04T01:16:20.0164375Z   Downloading pytest_testmon-2.3.0-py3-none-any.whl.metadata (2.1 kB)
+2026-11-04T01:16:20.5221377Z Collecting anyio (from httpx>=0.24.0->kriya==0.1.0)
+2026-11-04T01:16:20.5339977Z   Downloading anyio-4.16.0-py3-none-any.whl.metadata (4.7 kB)
+2026-11-04T01:16:20.7648060Z Collecting certifi (from httpx>=0.24.0->kriya==0.1.0)
+2026-11-04T01:16:20.7766744Z   Downloading certifi-2026.10.23-py3-none-any.whl.metadata (2.5 kB)
+2026-11-04T01:16:21.5609883Z Collecting httpcore==1.* (from httpx>=0.24.0->kriya==0.1.0)
+2026-11-04T01:16:21.5634234Z   Using cached httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+2026-11-04T01:16:21.9022042Z Collecting idna (from httpx>=0.24.0->kriya==0.1.0)
+2026-11-04T01:16:21.9047224Z   Using cached idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+2026-11-04T01:16:22.0749877Z Collecting h11>=0.16 (from httpcore==1.*->httpx>=0.24.0->kriya==0.1.0)
+2026-11-04T01:16:22.0772169Z   Using cached h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+2026-11-04T01:16:22.3580403Z Collecting MarkupSafe>=2.0 (from jinja2>=3.0.0->kriya==0.1.0)
+2026-11-04T01:16:22.3700610Z   Downloading markupsafe-3.0.4-cp312-cp312-win_amd64.whl.metadata (2.8 kB)
+2026-11-04T01:16:22.9186712Z Collecting httpx2>=2.10.0 (from mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:22.9315365Z   Downloading httpx2-2.16.0-py3-none-any.whl.metadata (10 kB)
+2026-11-04T01:16:23.3188621Z Collecting jsonschema>=4.20.0 (from mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:23.3213721Z   Using cached jsonschema-4.26.0-py3-none-any.whl.metadata (7.6 kB)
+2026-11-04T01:16:23.7068134Z Collecting mcp-types==2.3.0 (from mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:23.7188229Z   Downloading mcp_types-2.3.0-py3-none-any.whl.metadata (1.9 kB)
+2026-11-04T01:16:23.9075496Z Collecting opentelemetry-api>=1.28.0 (from mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:23.9227636Z   Downloading opentelemetry_api-1.45.2-py3-none-any.whl.metadata (1.4 kB)
+2026-11-04T01:16:24.0833757Z Collecting pyjwt>=2.10.1 (from pyjwt[crypto]>=2.10.1->mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:24.0859046Z   Using cached pyjwt-2.15.1-py3-none-any.whl.metadata (3.5 kB)
+2026-11-04T01:16:24.1392366Z Collecting python-multipart>=0.0.9 (from mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:24.1607845Z   Downloading python_multipart-0.0.33-py3-none-any.whl.metadata (6.3 kB)
+2026-11-04T01:16:24.2529595Z Collecting pywin32>=311 (from mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:24.2554826Z   Using cached pywin32-312-cp312-cp312-win_amd64.whl.metadata (11 kB)
+2026-11-04T01:16:24.3258309Z Collecting sse-starlette>=3.0.0 (from mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:24.3382761Z   Downloading sse_starlette-3.6.0-py3-none-any.whl.metadata (15 kB)
+2026-11-04T01:16:24.7331484Z Collecting starlette>=0.27 (from mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:24.7450706Z   Downloading starlette-1.10.0-py3-none-any.whl.metadata (6.6 kB)
+2026-11-04T01:16:25.0548659Z Collecting typing-extensions>=4.13.0 (from mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:25.0577972Z   Using cached typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+2026-11-04T01:16:25.3053359Z Collecting typing-inspection>=0.4.1 (from mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:25.3088687Z   Using cached typing_inspection-0.4.4-py3-none-any.whl.metadata (2.6 kB)
+2026-11-04T01:16:25.5630494Z Collecting uvicorn>=0.31.1 (from mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:25.5666351Z   Using cached uvicorn-0.54.0-py3-none-any.whl.metadata (6.6 kB)
+2026-11-04T01:16:25.8344541Z Collecting httpcore2==2.16.0 (from httpx2>=2.10.0->mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:25.8605832Z   Downloading httpcore2-2.16.0-py3-none-any.whl.metadata (27 kB)
+2026-11-04T01:16:26.4045602Z Collecting truststore>=0.10 (from httpx2>=2.10.0->mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:26.4179458Z   Downloading truststore-0.10.5-py3-none-any.whl.metadata (4.5 kB)
+2026-11-04T01:16:26.6896599Z Collecting attrs>=22.2.0 (from jsonschema>=4.20.0->mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:26.7888578Z   Using cached attrs-26.1.0-py3-none-any.whl.metadata (8.8 kB)
+2026-11-04T01:16:26.9080029Z Collecting jsonschema-specifications>=2023.03.6 (from jsonschema>=4.20.0->mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:26.9311937Z   Using cached jsonschema_specifications-2025.9.1-py3-none-any.whl.metadata (2.9 kB)
+2026-11-04T01:16:27.1064251Z Collecting referencing>=0.28.4 (from jsonschema>=4.20.0->mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:27.1376176Z   Using cached referencing-0.37.0-py3-none-any.whl.metadata (2.8 kB)
+2026-11-04T01:16:27.8025527Z Collecting rpds-py>=0.25.0 (from jsonschema>=4.20.0->mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:27.8147865Z   Downloading rpds_py-2026.9.1-cp312-cp312-win_amd64.whl.metadata (4.2 kB)
+2026-11-04T01:16:28.2284637Z Collecting jiter<1,>=0.16.0 (from openai>=1.0.0->kriya==0.1.0)
+2026-11-04T01:16:28.2429881Z   Downloading jiter-0.18.0-cp312-cp312-win_amd64.whl.metadata (5.3 kB)
+2026-11-04T01:16:28.3021300Z Collecting sniffio (from openai>=1.0.0->kriya==0.1.0)
+2026-11-04T01:16:28.3047306Z   Using cached sniffio-1.3.1-py3-none-any.whl.metadata (3.9 kB)
+2026-11-04T01:16:28.3349164Z Collecting annotated-types>=0.6.0 (from pydantic>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:28.3376957Z   Using cached annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+2026-11-04T01:16:29.1950228Z Collecting pydantic-core==2.50.2 (from pydantic>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:29.2093073Z   Downloading pydantic_core-2.50.2-cp312-cp312-win_amd64.whl.metadata (6.7 kB)
+2026-11-04T01:16:29.2698814Z Collecting build>=1.0.0 (from pip-tools>=7.0.0->kriya==0.1.0)
+2026-11-04T01:16:29.2932096Z   Using cached build-1.6.1-py3-none-any.whl.metadata (5.6 kB)
+2026-11-04T01:16:29.2983255Z Requirement already satisfied: pip>=22.2 in C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\site-packages (from pip-tools>=7.0.0->kriya==0.1.0) (26.2.2)
+2026-11-04T01:16:29.3262436Z Collecting pyproject_hooks (from pip-tools>=7.0.0->kriya==0.1.0)
+2026-11-04T01:16:29.3286546Z   Using cached pyproject_hooks-1.3.3-py3-none-any.whl.metadata (1.3 kB)
+2026-11-04T01:16:29.4305199Z Collecting setuptools (from pip-tools>=7.0.0->kriya==0.1.0)
+2026-11-04T01:16:29.4330042Z   Using cached setuptools-84.2.1-py3-none-any.whl.metadata (6.6 kB)
+2026-11-04T01:16:29.4769657Z Collecting wheel (from pip-tools>=7.0.0->kriya==0.1.0)
+2026-11-04T01:16:29.4790501Z   Using cached wheel-0.48.0-py3-none-any.whl.metadata (2.3 kB)
+2026-11-04T01:16:29.4838491Z Requirement already satisfied: packaging>=24.0 in C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\site-packages (from build>=1.0.0->pip-tools>=7.0.0->kriya==0.1.0) (26.3)
+2026-11-04T01:16:29.4844619Z Requirement already satisfied: colorama in C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\site-packages (from build>=1.0.0->pip-tools>=7.0.0->kriya==0.1.0) (0.4.6)
+2026-11-04T01:16:29.5292467Z Collecting wcwidth>=0.1.4 (from prompt_toolkit>=3.0.0->kriya==0.1.0)
+2026-11-04T01:16:29.5412030Z   Downloading wcwidth-0.9.4-cp310-abi3-win_amd64.whl.metadata (24 kB)
+2026-11-04T01:16:29.7743763Z Collecting cryptography>=3.4.0 (from pyjwt[crypto]>=2.10.1->mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:29.7810080Z   Using cached cryptography-50.0.2-cp311-abi3-win_amd64.whl.metadata (4.4 kB)
+2026-11-04T01:16:29.9062390Z Collecting cffi>=2.0.0 (from cryptography>=3.4.0->pyjwt[crypto]>=2.10.1->mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:29.9090422Z   Using cached cffi-2.1.1-cp312-cp312-win_amd64.whl.metadata (2.6 kB)
+2026-11-04T01:16:29.9507472Z Collecting pycparser (from cffi>=2.0.0->cryptography>=3.4.0->pyjwt[crypto]>=2.10.1->mcp>=2.0.0->kriya==0.1.0)
+2026-11-04T01:16:29.9663623Z   Downloading pycparser-3.12-py3-none-any.whl.metadata (9.7 kB)
+2026-11-04T01:16:30.0455040Z Collecting astroid<=4.4,>=4.3.4 (from pylint>=3.2->kriya==0.1.0)
+2026-11-04T01:16:30.0586233Z   Downloading astroid-4.3.4-py3-none-any.whl.metadata (4.4 kB)
+2026-11-04T01:16:30.7920256Z Collecting dill>=0.3.6 (from pylint>=3.2->kriya==0.1.0)
+2026-11-04T01:16:30.7941301Z   Using cached dill-0.4.1-py3-none-any.whl.metadata (10 kB)
+2026-11-04T01:16:30.8788252Z Collecting isort!=5.13,<10,>=5 (from pylint>=3.2->kriya==0.1.0)
+2026-11-04T01:16:30.8812345Z   Using cached isort-9.0.2-cp312-cp312-win_amd64.whl.metadata (11 kB)
+2026-11-04T01:16:30.9062556Z Collecting mccabe<0.8,>=0.6 (from pylint>=3.2->kriya==0.1.0)
+2026-11-04T01:16:30.9085719Z   Using cached mccabe-0.7.0-py2.py3-none-any.whl.metadata (5.0 kB)
+2026-11-04T01:16:30.9158400Z Requirement already satisfied: platformdirs>=2.2 in C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\site-packages (from pylint>=3.2->kriya==0.1.0) (4.14.0)
+2026-11-04T01:16:30.9606256Z Collecting tomlkit>=0.10.1 (from pylint>=3.2->kriya==0.1.0)
+2026-11-04T01:16:30.9723253Z   Downloading tomlkit-0.15.2-py3-none-any.whl.metadata (3.4 kB)
+2026-11-04T01:16:31.0389100Z Collecting mypy-extensions>=1.1.0 (from isort!=5.13,<10,>=5->pylint>=3.2->kriya==0.1.0)
+2026-11-04T01:16:31.0509115Z   Downloading mypy_extensions-1.2.0-py3-none-any.whl.metadata (1.1 kB)
+2026-11-04T01:16:31.1155423Z Collecting iniconfig>=2 (from pytest>=7.0.0->kriya==0.1.0)
+2026-11-04T01:16:31.1280359Z   Downloading iniconfig-2.3.1-py3-none-any.whl.metadata (2.8 kB)
+2026-11-04T01:16:31.1926475Z Collecting pluggy<2,>=1.6 (from pytest>=7.0.0->kriya==0.1.0)
+2026-11-04T01:16:31.2046107Z   Downloading pluggy-1.7.0-py3-none-any.whl.metadata (5.0 kB)
+2026-11-04T01:16:31.2655975Z Collecting pygments>=2.15 (from pytest>=7.0.0->kriya==0.1.0)
+2026-11-04T01:16:31.2681081Z   Using cached pygments-2.21.0-py3-none-any.whl.metadata (2.5 kB)
+2026-11-04T01:16:31.8209839Z Collecting coverage<8,>=6 (from pytest-testmon>=2.1->kriya==0.1.0)
+2026-11-04T01:16:31.8334169Z   Downloading coverage-7.17.1-cp312-cp312-win_amd64.whl.metadata (8.3 kB)
+2026-11-04T01:16:31.8910362Z Collecting execnet>=2.1 (from pytest-xdist>=3.6->kriya==0.1.0)
+2026-11-04T01:16:31.8935532Z   Using cached execnet-2.1.2-py3-none-any.whl.metadata (2.9 kB)
+2026-11-04T01:16:31.9246131Z Using cached tree_sitter-0.25.2-cp312-cp312-win_amd64.whl (127 kB)
+2026-11-04T01:16:31.9266331Z Using cached httpx-0.28.1-py3-none-any.whl (73 kB)
+2026-11-04T01:16:31.9341034Z Using cached httpcore-1.0.9-py3-none-any.whl (78 kB)
+2026-11-04T01:16:31.9360930Z Using cached h11-0.16.0-py3-none-any.whl (37 kB)
+2026-11-04T01:16:31.9384444Z Using cached jinja2-3.1.6-py3-none-any.whl (134 kB)
+2026-11-04T01:16:31.9504300Z Downloading markupsafe-3.0.4-cp312-cp312-win_amd64.whl (14 kB)
+2026-11-04T01:16:32.0033372Z Downloading mcp-2.3.0-py3-none-any.whl (368 kB)
+2026-11-04T01:16:32.0514357Z Downloading mcp_types-2.3.0-py3-none-any.whl (69 kB)
+2026-11-04T01:16:32.0959806Z Downloading anyio-4.16.0-py3-none-any.whl (134 kB)
+2026-11-04T01:16:32.1355877Z Downloading httpx2-2.16.0-py3-none-any.whl (97 kB)
+2026-11-04T01:16:32.1671805Z Downloading httpcore2-2.16.0-py3-none-any.whl (85 kB)
+2026-11-04T01:16:32.2337564Z Using cached idna-3.20-py3-none-any.whl (69 kB)
+2026-11-04T01:16:32.2356302Z Using cached jsonschema-4.26.0-py3-none-any.whl (90 kB)
+2026-11-04T01:16:32.2375208Z Using cached attrs-26.1.0-py3-none-any.whl (67 kB)
+2026-11-04T01:16:32.2398568Z Using cached jsonschema_specifications-2025.9.1-py3-none-any.whl (18 kB)
+2026-11-04T01:16:32.2560308Z Downloading numpy-2.5.4-cp312-cp312-win_amd64.whl (12.6 MB)
+2026-11-04T01:16:32.4155453Z    ---------------------------------------- 12.6/12.6 MB 78.4 MB/s  0:00:00
+2026-11-04T01:16:32.4278969Z Downloading openai-3.44.0-py3-none-any.whl (2.4 MB)
+2026-11-04T01:16:32.4603017Z    ---------------------------------------- 2.4/2.4 MB 144.0 MB/s  0:00:00
+2026-11-04T01:16:32.4717185Z Downloading jiter-0.18.0-cp312-cp312-win_amd64.whl (225 kB)
+2026-11-04T01:16:32.5047408Z Downloading pydantic-2.14.2-py3-none-any.whl (490 kB)
+2026-11-04T01:16:32.5453028Z Downloading pydantic_core-2.50.2-cp312-cp312-win_amd64.whl (2.3 MB)
+2026-11-04T01:16:32.5943972Z    ---------------------------------------- 2.3/2.3 MB 42.3 MB/s  0:00:00
+2026-11-04T01:16:32.5963900Z Using cached typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+2026-11-04T01:16:32.5983216Z Using cached annotated_types-0.8.0-py3-none-any.whl (13 kB)
+2026-11-04T01:16:32.6103900Z Downloading opentelemetry_api-1.45.2-py3-none-any.whl (60 kB)
+2026-11-04T01:16:32.6466804Z Downloading pip_tools-7.6.2-py3-none-any.whl (76 kB)
+2026-11-04T01:16:32.6796287Z Using cached build-1.6.1-py3-none-any.whl (31 kB)
+2026-11-04T01:16:32.6817207Z Using cached prompt_toolkit-3.0.53-py3-none-any.whl (392 kB)
+2026-11-04T01:16:32.6840314Z Using cached pyjwt-2.15.1-py3-none-any.whl (33 kB)
+2026-11-04T01:16:32.6860250Z Using cached cryptography-50.0.2-cp311-abi3-win_amd64.whl (3.8 MB)
+2026-11-04T01:16:32.6905759Z Using cached cffi-2.1.1-cp312-cp312-win_amd64.whl (185 kB)
+2026-11-04T01:16:32.7032444Z Downloading pylint-4.1.3-py3-none-any.whl (588 kB)
+2026-11-04T01:16:32.7328940Z    ---------------------------------------- 589.0/589.0 kB 10.2 MB/s  0:00:00
+2026-11-04T01:16:32.7448397Z Downloading astroid-4.3.4-py3-none-any.whl (288 kB)
+2026-11-04T01:16:32.7690255Z Using cached isort-9.0.2-cp312-cp312-win_amd64.whl (880 kB)
+2026-11-04T01:16:32.7714172Z Using cached mccabe-0.7.0-py2.py3-none-any.whl (7.3 kB)
+2026-11-04T01:16:32.7732796Z Using cached dill-0.4.1-py3-none-any.whl (120 kB)
+2026-11-04T01:16:32.7856731Z Downloading mypy_extensions-1.2.0-py3-none-any.whl (5.1 kB)
+2026-11-04T01:16:32.8165179Z Downloading pytest-9.2.0-py3-none-any.whl (411 kB)
+2026-11-04T01:16:32.8504120Z Downloading pluggy-1.7.0-py3-none-any.whl (27 kB)
+2026-11-04T01:16:32.8911843Z Downloading iniconfig-2.3.1-py3-none-any.whl (7.6 kB)
+2026-11-04T01:16:32.9095798Z Using cached pygments-2.21.0-py3-none-any.whl (1.3 MB)
+2026-11-04T01:16:32.9221307Z Downloading pytest_asyncio-1.4.1.post1-py3-none-any.whl (17 kB)
+2026-11-04T01:16:32.9630716Z Downloading pytest_testmon-2.3.0-py3-none-any.whl (26 kB)
+2026-11-04T01:16:32.9941960Z Downloading coverage-7.17.1-cp312-cp312-win_amd64.whl (230 kB)
+2026-11-04T01:16:33.0222879Z Using cached pytest_xdist-3.8.0-py3-none-any.whl (46 kB)
+2026-11-04T01:16:33.0258545Z Using cached execnet-2.1.2-py3-none-any.whl (40 kB)
+2026-11-04T01:16:33.0374968Z Downloading python_multipart-0.0.33-py3-none-any.whl (32 kB)
+2026-11-04T01:16:33.0637180Z Using cached pywin32-312-cp312-cp312-win_amd64.whl (6.9 MB)
+2026-11-04T01:16:33.0697890Z Using cached pyyaml-6.0.3-cp312-cp312-win_amd64.whl (154 kB)
+2026-11-04T01:16:33.0717447Z Using cached referencing-0.37.0-py3-none-any.whl (26 kB)
+2026-11-04T01:16:33.0837454Z Downloading rpds_py-2026.9.1-cp312-cp312-win_amd64.whl (222 kB)
+2026-11-04T01:16:33.1221680Z Downloading ruff-0.17.3-py3-none-win_amd64.whl (10.3 MB)
+2026-11-04T01:16:33.2115350Z    ---------------------------------------- 10.3/10.3 MB 129.2 MB/s  0:00:00
+2026-11-04T01:16:33.2247586Z Downloading sse_starlette-3.6.0-py3-none-any.whl (17 kB)
+2026-11-04T01:16:33.2542800Z Downloading starlette-1.10.0-py3-none-any.whl (80 kB)
+2026-11-04T01:16:33.2886346Z Downloading tomlkit-0.15.2-py3-none-any.whl (52 kB)
+2026-11-04T01:16:33.3073668Z Using cached tree_sitter_java-0.23.5-cp39-abi3-win_amd64.whl (60 kB)
+2026-11-04T01:16:33.3092531Z Using cached tree_sitter_python-0.25.0-cp310-abi3-win_amd64.whl (76 kB)
+2026-11-04T01:16:33.3209231Z Downloading truststore-0.10.5-py3-none-any.whl (19 kB)
+2026-11-04T01:16:33.3461073Z Using cached typing_inspection-0.4.4-py3-none-any.whl (14 kB)
+2026-11-04T01:16:33.3482047Z Using cached uvicorn-0.54.0-py3-none-any.whl (87 kB)
+2026-11-04T01:16:33.3650096Z Downloading wcwidth-0.9.4-cp310-abi3-win_amd64.whl (597 kB)
+2026-11-04T01:16:33.3956434Z    ---------------------------------------- 597.8/597.8 kB 21.0 MB/s  0:00:00
+2026-11-04T01:16:33.4072595Z Downloading certifi-2026.10.23-py3-none-any.whl (135 kB)
+2026-11-04T01:16:33.4377427Z Downloading pycparser-3.12-py3-none-any.whl (62 kB)
+2026-11-04T01:16:33.4558636Z Using cached pyproject_hooks-1.3.3-py3-none-any.whl (10 kB)
+2026-11-04T01:16:33.4578832Z Using cached setuptools-84.2.1-py3-none-any.whl (876 kB)
+2026-11-04T01:16:33.4606376Z Using cached sniffio-1.3.1-py3-none-any.whl (10 kB)
+2026-11-04T01:16:33.4625272Z Using cached wheel-0.48.0-py3-none-any.whl (33 kB)
+2026-11-04T01:16:33.8133452Z Building wheels for collected packages: kriya
+2026-11-04T01:16:33.8723283Z   Building editable for kriya (pyproject.toml): started
+2026-11-04T01:16:34.5731118Z   Building editable for kriya (pyproject.toml): finished with status 'done'
+2026-11-04T01:16:34.5752855Z   Created wheel for kriya: filename=kriya-0.1.0-0.editable-py3-none-any.whl size=22603 sha256=d158c4b76a5b919943abeda9315e15948d9f8be3676f05dcf48ce8e89d0a1a9c
+2026-11-04T01:16:34.5755175Z   Stored in directory: C:\Users\runneradmin\AppData\Local\Temp\pip-ephem-wheel-cache-d5tk89s3\wheels\dd\ba\92\5c5625fe1fd888eb0acef4634019aa5684a41b812d77bf2643
+2026-11-04T01:16:34.5834785Z Successfully built kriya
+2026-11-04T01:16:34.7383159Z Installing collected packages: wheel, wcwidth, typing-extensions, truststore, tree-sitter-python, tree-sitter-java, tree-sitter, tomlkit, sniffio, setuptools, ruff, rpds-py, pyyaml, pywin32, python-multipart, pyproject_hooks, pyjwt, pygments, pycparser, pluggy, numpy, mypy-extensions, mccabe, MarkupSafe, jiter, iniconfig, idna, h11, execnet, dill, coverage, certifi, attrs, astroid, annotated-types, uvicorn, typing-inspection, referencing, pytest, pydantic-core, prompt_toolkit, opentelemetry-api, jinja2, isort, httpcore2, httpcore, cffi, build, anyio, starlette, pytest-xdist, pytest-testmon, pytest-asyncio, pylint, pydantic, pip-tools, jsonschema-specifications, httpx2, httpx, cryptography, sse-starlette, openai, mcp-types, jsonschema, mcp, kriya
+2026-11-04T01:17:02.8864696Z 
+2026-11-04T01:17:02.8932896Z Successfully installed MarkupSafe-3.0.4 annotated-types-0.8.0 anyio-4.16.0 astroid-4.3.4 attrs-26.1.0 build-1.6.1 certifi-2026.10.23 cffi-2.1.1 coverage-7.17.1 cryptography-50.0.2 dill-0.4.1 execnet-2.1.2 h11-0.16.0 httpcore-1.0.9 httpcore2-2.16.0 httpx-0.28.1 httpx2-2.16.0 idna-3.20 iniconfig-2.3.1 isort-9.0.2 jinja2-3.1.6 jiter-0.18.0 jsonschema-4.26.0 jsonschema-specifications-2025.9.1 kriya-0.1.0 mccabe-0.7.0 mcp-2.3.0 mcp-types-2.3.0 mypy-extensions-1.2.0 numpy-2.5.4 openai-3.44.0 opentelemetry-api-1.45.2 pip-tools-7.6.2 pluggy-1.7.0 prompt_toolkit-3.0.53 pycparser-3.12 pydantic-2.14.2 pydantic-core-2.50.2 pygments-2.21.0 pyjwt-2.15.1 pylint-4.1.3 pyproject_hooks-1.3.3 pytest-9.2.0 pytest-asyncio-1.4.1.post1 pytest-testmon-2.3.0 pytest-xdist-3.8.0 python-multipart-0.0.33 pywin32-312 pyyaml-6.0.3 referencing-0.37.0 rpds-py-2026.9.1 ruff-0.17.3 setuptools-84.2.1 sniffio-1.3.1 sse-starlette-3.6.0 starlette-1.10.0 tomlkit-0.15.2 tree-sitter-0.25.2 tree-sitter-java-0.23.5 tree-sitter-python-0.25.0 truststore-0.10.5 typing-extensions-4.16.0 typing-inspection-0.4.4 uvicorn-0.54.0 wcwidth-0.9.4 wheel-0.48.0
+2026-11-04T01:17:02.8946533Z 
+2026-11-04T01:17:02.8948656Z [notice] A new release of pip is available: 26.2.2 -> 26.3
+2026-11-04T01:17:02.8949250Z [notice] To update, run: python.exe -m pip install --upgrade pip
+2026-11-04T01:17:03.9969753Z ##[group]Run python -c "import kriya.cli, kriya.workflow.workflow, kriya.control.recovery, kriya.tools.validate, kriya.mcp.mcp, kriya.production_doctor, plugins.core_tools; from kriya.platform.services import platform_services; print(platform_services().identity())"
+2026-11-04T01:17:03.9971756Z [36;1mpython -c "import kriya.cli, kriya.workflow.workflow, kriya.control.recovery, kriya.tools.validate, kriya.mcp.mcp, kriya.production_doctor, plugins.core_tools; from kriya.platform.services import platform_services; print(platform_services().identity())"[0m
+2026-11-04T01:17:04.0043594Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-11-04T01:17:04.0043935Z env:
+2026-11-04T01:17:04.0044220Z   pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-11-04T01:17:04.0044703Z   PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+2026-11-04T01:17:04.0045164Z   Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-11-04T01:17:04.0045620Z   Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-11-04T01:17:04.0046042Z   Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-11-04T01:17:04.0046360Z ##[endgroup]
+2026-11-04T01:17:07.7735013Z {'family': 'windows', 'providers': {'workspace_lock': 'unavailable', 'resource_limits': 'unavailable', 'host_identity': 'unavailable', 'process_control': 'unavailable'}, 'capabilities': [{'capability': 'file_lock_crash_safe', 'status': 'unavailable', 'provider': 'unavailable', 'reason': 'no windows provider yet (Windows runtime is not supported; PLAT-WINDOWS-PROVIDERS-001)'}, {'capability': 'posix_rlimit_cpu', 'status': 'unavailable', 'provider': 'unavailable', 'reason': 'no windows provider yet (Windows runtime is not supported; PLAT-WINDOWS-PROVIDERS-001)'}, {'capability': 'posix_rlimit_as', 'status': 'unavailable', 'provider': 'unavailable', 'reason': 'no windows provider yet (Windows runtime is not supported; PLAT-WINDOWS-PROVIDERS-001)'}, {'capability': 'uid_gid_identity', 'status': 'unavailable', 'provider': 'unavailable', 'reason': 'no windows provider yet (Windows runtime is not supported; PLAT-WINDOWS-PROVIDERS-001)'}, {'capability': 'process_tree_termination', 'status': 'unavailable', 'provider': 'unavailable', 'reason': 'no windows provider yet (Windows runtime is not supported; PLAT-WINDOWS-PROVIDERS-001)'}]}
+2026-11-04T01:17:08.0505731Z ##[group]Run python -m pytest -q -p no:cacheprovider tests/test_platform_architecture_guard.py tests/test_platform_workspace_lock_contract.py
+2026-11-04T01:17:08.0507028Z [36;1mpython -m pytest -q -p no:cacheprovider tests/test_platform_architecture_guard.py tests/test_platform_workspace_lock_contract.py[0m
+2026-11-04T01:17:08.0578548Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-11-04T01:17:08.0578898Z env:
+2026-11-04T01:17:08.0579171Z   pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-11-04T01:17:08.0579655Z   PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+2026-11-04T01:17:08.0580108Z   Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-11-04T01:17:08.0580526Z   Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-11-04T01:17:08.0580929Z   Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-11-04T01:17:08.0581248Z ##[endgroup]
+2026-11-04T01:17:09.2165006Z ImportError while loading conftest 'D:\a\kriya\kriya\tests\conftest.py'.
+2026-11-04T01:17:09.3184389Z tests\conftest.py:24: in <module>
+2026-11-04T01:17:09.3184992Z     from _authority_isolation import (
+2026-11-04T01:17:09.3185566Z tests\_authority_isolation.py:17: in <module>
+2026-11-04T01:17:09.3185979Z     import pwd
+2026-11-04T01:17:09.3186259Z E   ModuleNotFoundError: No module named 'pwd'
+2026-11-04T01:17:09.4605411Z ##[error]Process completed with exit code 1.
+2026-11-04T01:17:09.4872564Z Post job cleanup.
+2026-11-04T01:17:09.6924987Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-11-04T01:17:09.7323018Z git version 2.56.0.windows.4
+2026-11-04T01:17:09.7404423Z Temporarily overriding HOME='D:\a\_temp\310bbeb1-dc5f-48d0-875d-e047483c0ca0' before making global git config changes
+2026-11-04T01:17:09.7405703Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-04T01:17:09.7417050Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\kriya\kriya
+2026-11-04T01:17:09.7902355Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-11-04T01:17:09.8304288Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-11-04T01:17:10.4225025Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-04T01:17:10.4602500Z http.https://github.com/.extraheader
+2026-11-04T01:17:10.4661453Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all http.https://github.com/.extraheader
+2026-11-04T01:17:10.5099927Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-11-04T01:17:11.0584062Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-04T01:17:11.0974061Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-11-04T01:17:11.6954728Z Cleaning up orphan processes
+2026-11-04T01:17:11.7388092Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-python@v5. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

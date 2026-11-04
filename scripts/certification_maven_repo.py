@@ -234,13 +234,46 @@ def extend(manifest_path: str, repo_dir: str, paths: Sequence[str], central: str
     return problems
 
 
+STAGING_PATH_PREFIX = "/home/maven/repository-staging/to-ibiblio/maven2/"  # the historical Maven Central staging prefix that 2 frozen sidecars carry
+
+
+def sidecar_renderings(payload: bytes, payload_path: str) -> Dict[str, bytes]:
+    """The CLOSED set of sidecar texts a frozen ``.sha1`` entry may have, each rendered from the VERIFIED payload's SHA-1 (HOSTED-MAVEN-SIDECAR-REPRESENTATION-001).
+    The frozen repository holds exactly these three (MEASURED over all 885 entries): bare lowercase hex with no newline (882), ``hash  basename\\n`` (1) and
+    ``hash  <staging prefix><repository path>\\n`` (2). The checksum VALUE comes from the payload bytes; Central's own ``.sha1`` text, whose representation varies
+    (CRLF, ``hash *name``, ``hash  -``, ...), is never consumed. Nothing outside this table is accepted, and no entry is special-cased by coordinates or filename."""
+    digest = hashlib.sha1(payload).hexdigest()  # noqa: S324 - the Maven sidecar format is SHA-1; the authority is the manifest's SHA-256
+    return {
+        "bare": digest.encode("ascii"),
+        "basename": f"{digest}  {payload_path.rsplit('/', 1)[-1]}\n".encode("utf-8"),
+        "staging-path": f"{digest}  {STAGING_PATH_PREFIX}{payload_path}\n".encode("utf-8"),
+    }
+
+
+def select_sidecar(candidates: Mapping[str, bytes], frozen_sha256: str) -> Tuple[Optional[bytes], str]:
+    """The ONE candidate whose SHA-256 equals the frozen sidecar digest: (bytes, renderer name), or (None, reason) for zero matches or an ambiguous match."""
+    matching = [name for name, content in candidates.items() if hashlib.sha256(content).hexdigest() == frozen_sha256]
+    if not matching:
+        return None, "matches none of the closed sidecar renderings"
+    if len(matching) > 1:
+        return None, f"is ambiguous: renderings {matching} all match"
+    return candidates[matching[0]], matching[0]
+
+
 def fetch(manifest: Mapping[str, Any], repo_dir: str, central: str = "https://repo.maven.apache.org/maven2") -> List[str]:
-    """PROVISIONING: reconstruct the frozen repository from its manifest. A file is kept ONLY if its SHA-256 equals the manifest's; otherwise it is refused (the
-    manifest, not the network, is the trust root). Returns the problems (empty = every file present and exact). Not a certification step."""
+    """PROVISIONING: reconstruct the frozen repository from its manifest. A payload is kept ONLY if its SHA-256 equals the manifest's; otherwise it is refused (the
+    manifest, not the network, is the trust root). A ``.sha1`` checksum entry is never downloaded (HOSTED-MAVEN-SIDECAR-REPRESENTATION-001): once its payload has passed
+    the manifest SHA-256, the sidecar is rendered from those bytes by the closed renderer set (``sidecar_renderings``) and kept ONLY if exactly one rendering's SHA-256 equals the sidecar's manifest entry. Returns the
+    problems (empty = every file present and exact). Not a certification step."""
     problems: List[str] = []
+    entries = {item["path"]: item for item in manifest["files"]}
+    sidecars: List[Mapping[str, Any]] = []
     for item in manifest["files"]:
         if not _safe_relpath(item["path"]):
             problems.append(f"unsafe manifest path {item['path']!r}")
+            continue
+        if item["kind"] == "checksum":
+            sidecars.append(item)
             continue
         target = os.path.join(repo_dir, item["path"])
         if os.path.isfile(target) and sha256_file(target) == item["sha256"]:
@@ -257,6 +290,26 @@ def fetch(manifest: Mapping[str, Any], repo_dir: str, central: str = "https://re
         os.makedirs(os.path.dirname(target), exist_ok=True)
         with open(target, "wb") as handle:
             handle.write(body)
+    for item in sidecars:
+        target = os.path.join(repo_dir, item["path"])
+        if os.path.isfile(target) and sha256_file(target) == item["sha256"]:
+            continue
+        if not item["path"].endswith(".sha1"):
+            problems.append(f"REFUSED {item['path']}: only .sha1 sidecars are derived; any other checksum kind has no authority here")
+            continue
+        payload_path = item["path"][: -len(".sha1")]
+        payload_item = entries.get(payload_path)
+        payload_file = os.path.join(repo_dir, payload_path)
+        if payload_item is None or not os.path.isfile(payload_file) or sha256_file(payload_file) != payload_item["sha256"]:
+            problems.append(f"REFUSED {item['path']}: its payload {payload_path} is not in the manifest or has not passed the manifest SHA-256")
+            continue
+        with open(payload_file, "rb") as handle:
+            chosen, detail = select_sidecar(sidecar_renderings(handle.read(), payload_path), item["sha256"])
+        if chosen is None:
+            problems.append(f"REFUSED {item['path']}: the sidecar frozen for it {detail}, derived from the verified payload")
+            continue
+        with open(target, "wb") as handle:
+            handle.write(chosen)
     return problems
 
 

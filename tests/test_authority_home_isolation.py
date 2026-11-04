@@ -183,3 +183,51 @@ def test_the_session_guard_stays_quiet_when_a_test_undoes_its_monkeypatch_and_wr
     assert outcome.returncode == 0, outcome.stdout + outcome.stderr
     assert sorted(os.listdir(real)) == ["approval.json"]
     assert f"AUTHORITY_AT_FINISH={real}" in outcome.stdout  # the operator's environment is put back exactly as it was
+
+
+# ---- HOSTED-WINDOWS-AUTHORITY-GUARD-001: the helper must import and still protect production's authority home on a platform with no ``pwd`` ----
+
+_WINDOWS_SHAPED = r"""
+import os, sys
+sys.modules["pwd"] = None            # Windows-shaped: ``import pwd`` raises ImportError
+sys.path.insert(0, {tests_dir!r})
+import _authority_isolation as isolation          # unconditional ``import pwd`` here is the hosted Windows failure (ModuleNotFoundError)
+from kriya.config.environment import authority_home
+
+assert isolation.pwd is None
+real = isolation.real_authority_home(None)
+production = os.path.realpath(authority_home())  # KRIYA_AUTHORITY_HOME is unset in this process: production's own default
+assert real == production, (real, production)
+assert real == os.path.realpath(os.path.join(os.path.expanduser("~"), ".kriya", "authority")), real
+before = isolation.snapshot(real)
+os.makedirs(real)                                # the write the guard exists to catch
+os.makedirs(os.path.join(real, "approvals"))
+found = isolation.changes(before, isolation.snapshot(real))
+assert found and found[0].startswith("the home was created"), found
+print("WINDOWS-SHAPED-OK " + real)
+"""
+
+
+def test_the_isolation_helper_imports_and_guards_the_production_home_without_pwd(tmp_path):
+    fake_home = tmp_path / "userprofile"
+    fake_home.mkdir()
+    env = {key: value for key, value in os.environ.items() if key != "KRIYA_AUTHORITY_HOME"}
+    env["HOME"] = str(fake_home)            # what os.path.expanduser("~") reads on POSIX (USERPROFILE on Windows)
+    env["USERPROFILE"] = str(fake_home)
+    script = _WINDOWS_SHAPED.format(tests_dir=os.path.dirname(os.path.abspath(__file__)))
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, env=env, check=False, timeout=120)
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr[-1500:]!r}"
+    assert f"WINDOWS-SHAPED-OK {os.path.realpath(str(fake_home / '.kriya' / 'authority'))}" in result.stdout
+
+
+def test_without_pwd_the_helper_resolves_production_semantics_and_with_pwd_it_still_ignores_home(monkeypatch, tmp_path):
+    redirected = tmp_path / "redirected-home"
+    redirected.mkdir()
+    monkeypatch.setenv("HOME", str(redirected))
+    monkeypatch.setenv("USERPROFILE", str(redirected))
+    monkeypatch.delenv("KRIYA_AUTHORITY_HOME", raising=False)
+    expected_redirected = os.path.realpath(str(redirected / ".kriya" / "authority"))
+    assert isolation.real_authority_home(None, account_database=None) == expected_redirected          # no pwd: production's expanduser("~")
+    assert os.path.realpath(authority_home()) == expected_redirected                                  # ... which IS production's default here
+    if isolation.pwd is not None:                                                                     # POSIX: $HOME stays unable to redirect the guard
+        assert isolation.real_authority_home(None) == _real_default_home() != expected_redirected

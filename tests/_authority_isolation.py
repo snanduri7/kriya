@@ -14,10 +14,14 @@ Production authority code is untouched: nothing here is a test-mode branch of ``
 from __future__ import annotations
 
 import os
-import pwd
 from typing import Dict, Optional, Tuple
 
 import pytest
+
+try:
+    import pwd  # POSIX only: the account database. Windows has no ``pwd`` module, so the fallback below uses production's own expression.
+except ImportError:  # pragma: no cover - exercised through the ``account_database`` parameter in tests/test_authority_home_isolation.py
+    pwd = None  # type: ignore[assignment]
 
 AUTHORITY_HOME = "KRIYA_AUTHORITY_HOME"
 Entry = Tuple[int, int, int]  # (st_mode, st_size, st_mtime_ns)
@@ -30,12 +34,20 @@ def session_real_home() -> Optional[str]:
     return _REAL_HOME_AT_START
 
 
-def real_authority_home(configured: Optional[str]) -> str:
-    """The home the operator would really use: the value configured when pytest started, else the account database's ``~/.kriya/authority``
-    ($HOME is deliberately not consulted: a test must not be able to redirect what this guard watches)."""
+def real_authority_home(configured: Optional[str], account_database=pwd) -> str:
+    """The home the operator would really use: the value configured when pytest started, else ``~/.kriya/authority``.
+
+    POSIX: ``~`` comes from the account database ($HOME is deliberately not consulted: a test must not be able to redirect what this guard watches).
+    Windows (no ``pwd``): ``~`` is ``os.path.expanduser("~")`` - exactly production's ``kriya.config.environment.user_home()`` there (USERPROFILE, else
+    HOMEDRIVE+HOMEPATH). The session fixture resolves it once, before any test runs, so no test can have redirected it yet.
+    ``account_database`` is a seam for the Windows-shaped regression (None = the platform has no ``pwd``)."""
     if configured:
         return os.path.realpath(os.path.expanduser(configured))
-    return os.path.realpath(os.path.join(pwd.getpwuid(os.getuid()).pw_dir, ".kriya", "authority"))
+    if account_database is not None:
+        user_home = account_database.getpwuid(os.getuid()).pw_dir
+    else:
+        user_home = os.path.expanduser("~")
+    return os.path.realpath(os.path.join(user_home, ".kriya", "authority"))
 
 
 def snapshot(home: str) -> Snapshot:

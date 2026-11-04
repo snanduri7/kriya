@@ -24,7 +24,7 @@ spec.loader.exec_module(repo_tool)
 
 FILES = {
     "org/apache/maven/plugins/maven-clean-plugin/3.2.0/maven-clean-plugin-3.2.0.jar": b"clean-jar-bytes",
-    "org/apache/maven/plugins/maven-clean-plugin/3.2.0/maven-clean-plugin-3.2.0.jar.sha1": b"deadbeef",
+    "org/apache/maven/plugins/maven-clean-plugin/3.2.0/maven-clean-plugin-3.2.0.jar.sha1": hashlib.sha1(b"clean-jar-bytes").hexdigest().encode(),  # the real checksum, in the frozen bare form (fetch derives it)
     "org/apache/maven/plugins/maven-clean-plugin/3.2.0/maven-clean-plugin-3.2.0.pom": b"<project>clean</project>",
     "org/apache/maven/plugins/maven-metadata-central.xml": b"<metadata/>",
     "junit/junit/4.13.2/junit-4.13.2-sources.jar": b"junit-sources",
@@ -176,12 +176,14 @@ class _Central:
 
     def __init__(self, files):
         files = dict(files)
+        self.requests = []
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def log_message(self, *_):
                 return
 
             def do_GET(self):  # noqa: N802
+                self.server.requests.append(self.path[len("/maven2/"):])
                 body = files.get(self.path[len("/maven2/"):])
                 self.send_response(200 if body is not None else 404)
                 self.send_header("Content-Length", str(len(body or b"")))
@@ -189,6 +191,7 @@ class _Central:
                 self.wfile.write(body or b"")
 
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.requests = self.requests
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}/maven2"
 
@@ -265,3 +268,168 @@ def test_extend_adds_a_file_only_when_the_bytes_agree_with_the_sha1_central_publ
     added = {i["path"]: i for i in after["files"]}
     assert added[new]["provenance"]["verified_against"].endswith(".sha1") and new + ".sha1" in added
     assert repo_tool.verify(str(repo), after) == [] and after["content_digest"] != manifest["content_digest"]
+
+
+# ---- HOSTED-MAVEN-SIDECAR-REPRESENTATION-001: a `.sha1` sidecar is DERIVED from the verified payload, never taken from Central's text ----
+
+JAR = "org/apache/maven/plugins/maven-clean-plugin/3.2.0/maven-clean-plugin-3.2.0.jar"
+SIDECAR = JAR + ".sha1"
+JAR_SHA1 = hashlib.sha1(FILES[JAR]).hexdigest()
+
+
+def _central_with_sidecar(text: bytes):
+    return _Central({**FILES, SIDECAR: text})
+
+
+@pytest.mark.parametrize("representation", [
+    JAR_SHA1.encode(),                                                                     # bare, no newline (the frozen form)
+    (JAR_SHA1 + "\n").encode(),                                                            # bare + newline
+    (JAR_SHA1 + "\r\n").encode(),                                                          # CRLF (Central serves this for velocity-tools)
+    (JAR_SHA1 + "  maven-clean-plugin-3.2.0.jar\n").encode(),                              # `hash  name`
+    (JAR_SHA1 + " *maven-clean-plugin-3.2.0.jar").encode(),                                # `hash *name` (no newline)
+    (JAR_SHA1 + "  /home/projects/maven/repository-staging/to-ibiblio/maven2/x.jar\n").encode(),  # staging path
+    (JAR_SHA1 + "  -\n").encode(),                                                         # `hash  -`
+    b"not even a checksum",                                                                # the remote text is not consulted at all
+], ids=["bare", "bare-newline", "crlf", "hash-name", "hash-star-name", "staging-path", "hash-dash", "not-a-checksum"])
+def test_fetch_writes_the_frozen_sidecar_whatever_representation_central_serves(tmp_path, representation):
+    _, _, manifest = _frozen(tmp_path)
+    central = _central_with_sidecar(representation)
+    fresh = tmp_path / "fresh"
+    try:
+        assert repo_tool.fetch(manifest, str(fresh), central.url) == []
+        assert (fresh / SIDECAR).read_bytes() == FILES[SIDECAR] == JAR_SHA1.encode(), "the written sidecar is the canonical frozen bytes"
+        assert repo_tool.verify(str(fresh), manifest) == []
+        assert SIDECAR not in central.requests, "a .sha1 entry is never downloaded"
+        assert JAR in central.requests
+    finally:
+        central.close()
+
+
+def test_a_wrong_payload_fails_closed_and_no_sidecar_is_derived_from_it(tmp_path):
+    _, _, manifest = _frozen(tmp_path)
+    central = _Central({**FILES, JAR: b"tampered-jar-bytes"})
+    fresh = tmp_path / "fresh"
+    try:
+        problems = repo_tool.fetch(manifest, str(fresh), central.url)
+    finally:
+        central.close()
+    assert any(p.startswith(f"REFUSED {JAR}:") for p in problems)
+    assert any(p.startswith(f"REFUSED {SIDECAR}:") and "has not passed the manifest SHA-256" in p for p in problems)
+    assert not (fresh / JAR).exists() and not (fresh / SIDECAR).exists(), "neither the bad payload nor a sidecar derived from it is written"
+
+
+def test_a_wrong_frozen_sidecar_digest_fails_closed_even_when_the_payload_is_exact(tmp_path):
+    _, _, manifest = _frozen(tmp_path)
+    tampered = json.loads(json.dumps(manifest))
+    entry = next(item for item in tampered["files"] if item["path"] == SIDECAR)
+    entry["sha256"] = hashlib.sha256(b"0" * 40).hexdigest()  # the manifest froze some other sidecar than the one the verified payload derives
+    central = _Central(FILES)
+    fresh = tmp_path / "fresh"
+    try:
+        problems = repo_tool.fetch(tampered, str(fresh), central.url)
+    finally:
+        central.close()
+    assert [p for p in problems if SIDECAR in p] == [f"REFUSED {SIDECAR}: the sidecar frozen for it matches none of the closed sidecar renderings, derived from the verified payload"]
+    assert (fresh / JAR).read_bytes() == FILES[JAR], "the exact payload is still provisioned"
+    assert not (fresh / SIDECAR).exists(), "a sidecar that does not match its frozen digest is never written"
+
+
+def test_a_frozen_sidecar_that_is_not_the_checksum_of_its_payload_fails_closed(tmp_path):
+    pool = tmp_path / "pool"
+    for path, body in {**FILES, SIDECAR: b"deadbeef"}.items():  # the pre-fix fixture: a sidecar frozen with a value that is not the jar's SHA-1
+        (pool / path).parent.mkdir(parents=True, exist_ok=True)
+        (pool / path).write_bytes(body)
+    manifest = repo_tool.build(str(pool), list(FILES), str(tmp_path / "repo"), str(tmp_path / "m.json"), "test purpose")
+    central = _Central({**FILES, SIDECAR: b"deadbeef"})  # Central agrees with the (wrong) frozen sidecar: the old fetch would have accepted this
+    try:
+        problems = repo_tool.fetch(manifest, str(tmp_path / "fresh"), central.url)
+    finally:
+        central.close()
+    assert any(p.startswith(f"REFUSED {SIDECAR}:") and "matches none of the closed sidecar renderings" in p for p in problems)
+
+
+def test_a_sidecar_without_a_manifest_payload_and_an_unsupported_checksum_kind_are_refused(tmp_path):
+    _, _, manifest = _frozen(tmp_path)
+    orphan = json.loads(json.dumps(manifest))
+    orphan["files"] = [item for item in orphan["files"] if item["path"] != JAR]
+    md5_path = JAR + ".md5"
+    orphan["files"].append({"path": md5_path, "kind": "checksum", "sha256": hashlib.sha256(b"x").hexdigest()})
+    central = _Central({**FILES, md5_path: b"x"})
+    try:
+        problems = repo_tool.fetch(orphan, str(tmp_path / "fresh"), central.url)
+    finally:
+        central.close()
+    assert any(p.startswith(f"REFUSED {SIDECAR}:") and "is not in the manifest" in p for p in problems)
+    assert any(p.startswith(f"REFUSED {md5_path}:") and "only .sha1 sidecars are derived" in p for p in problems)
+    assert md5_path not in central.requests, "no fallback acquisition for a checksum kind the tool does not derive"
+
+
+def _frozen_sidecar_form(tmp_path, sidecar_bytes: bytes):
+    pool = tmp_path / "pool"
+    for path, body in {**FILES, SIDECAR: sidecar_bytes}.items():
+        (pool / path).parent.mkdir(parents=True, exist_ok=True)
+        (pool / path).write_bytes(body)
+    return repo_tool.build(str(pool), list(FILES), str(tmp_path / "repo"), str(tmp_path / "m.json"), "test purpose")
+
+
+@pytest.mark.parametrize("name, frozen", [
+    ("bare", JAR_SHA1.encode()),
+    ("basename", f"{JAR_SHA1}  maven-clean-plugin-3.2.0.jar\n".encode()),
+    ("staging-path", f"{JAR_SHA1}  {repo_tool.STAGING_PATH_PREFIX}{JAR}\n".encode()),
+], ids=["bare", "basename", "staging-path"])
+def test_each_closed_renderer_provisions_a_sidecar_frozen_in_that_form_regardless_of_central(tmp_path, name, frozen):
+    manifest = _frozen_sidecar_form(tmp_path, frozen)
+    central = _central_with_sidecar(b"0" * 40 + b" *whatever\r\n")  # remote .sha1 text is irrelevant
+    fresh = tmp_path / "fresh"
+    try:
+        assert repo_tool.fetch(manifest, str(fresh), central.url) == []
+        assert (fresh / SIDECAR).read_bytes() == frozen, name
+        assert SIDECAR not in central.requests
+    finally:
+        central.close()
+
+
+@pytest.mark.parametrize("frozen", [
+    (JAR_SHA1 + "\n").encode(), (JAR_SHA1 + "\r\n").encode(), f"{JAR_SHA1} *maven-clean-plugin-3.2.0.jar".encode(), f"{JAR_SHA1}  -\n".encode(),
+    f"{JAR_SHA1}  /some/other/staging/{JAR}\n".encode(), (JAR_SHA1.upper()).encode(),
+], ids=["bare-newline", "crlf", "hash-star-name", "hash-dash", "other-staging-prefix", "uppercase-hash"])
+def test_a_sidecar_frozen_in_a_form_outside_the_closed_set_fails_closed(tmp_path, frozen):
+    manifest = _frozen_sidecar_form(tmp_path, frozen)
+    central = _Central(FILES)
+    fresh = tmp_path / "fresh"
+    try:
+        problems = repo_tool.fetch(manifest, str(fresh), central.url)
+    finally:
+        central.close()
+    assert [p for p in problems if SIDECAR in p] == [f"REFUSED {SIDECAR}: the sidecar frozen for it matches none of the closed sidecar renderings, derived from the verified payload"]
+    assert not (fresh / SIDECAR).exists()
+
+
+def test_select_sidecar_accepts_exactly_one_match_and_refuses_zero_or_ambiguous_matches():
+    one, two = b"one", b"two"
+    digest = lambda content: hashlib.sha256(content).hexdigest()  # noqa: E731
+    assert repo_tool.select_sidecar({"a": one, "b": two}, digest(two)) == (two, "b")
+    assert repo_tool.select_sidecar({"a": one, "b": two}, digest(b"other")) == (None, "matches none of the closed sidecar renderings")
+    chosen, detail = repo_tool.select_sidecar({"a": one, "b": one, "c": two}, digest(one))  # two renderers producing identical bytes: not constructible from the real table
+    assert chosen is None and detail.startswith("is ambiguous") and "'a'" in detail and "'b'" in detail
+
+
+def test_the_renderer_table_is_exactly_the_three_frozen_forms():
+    rendered = repo_tool.sidecar_renderings(b"x", "g/a/1/a-1.jar")
+    assert set(rendered) == {"bare", "basename", "staging-path"} and len({*rendered.values()}) == 3, "the closed set is not widened and never self-collides"
+
+
+def test_a_tampered_payload_already_on_disk_is_not_a_basis_for_a_sidecar(tmp_path):
+    """A payload that exists but never passed the manifest SHA-256 (it was on disk before fetch and the download of the exact bytes failed) must be named as the reason."""
+    _, _, manifest = _frozen(tmp_path)
+    fresh = tmp_path / "fresh"
+    (fresh / JAR).parent.mkdir(parents=True)
+    (fresh / JAR).write_bytes(b"tampered-jar-bytes")
+    central = _Central({p: b for p, b in FILES.items() if p != JAR})  # Central cannot supply the exact payload, so the tampered file stays where it is
+    try:
+        problems = repo_tool.fetch(manifest, str(fresh), central.url)
+    finally:
+        central.close()
+    assert any(p.startswith(f"cannot fetch {JAR}") for p in problems)
+    assert [p for p in problems if SIDECAR in p] == [f"REFUSED {SIDECAR}: its payload {JAR} is not in the manifest or has not passed the manifest SHA-256"]
+    assert not (fresh / SIDECAR).exists()
