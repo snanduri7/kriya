@@ -8,6 +8,7 @@ SkillService, the reference candidate satisfies the structural contract, and res
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib.util
 import json
@@ -362,6 +363,57 @@ def _post(work: Path) -> list:
     return [line for line in result.stdout.splitlines() if line.startswith(("PASS", "FAIL")) and "tracked tree" not in line]
 
 
+_POST_CHECK_APP_PATH = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"  # verify_demo.sh's APP_PATH (the desktop app's fixed child PATH)
+
+
+def _mvn_diagnostics(work: Path) -> dict:
+    """RECORDING ONLY (hosted #3/#4, run 41785193323: the post-check's `independent offline 'mvn test'` failed on ubuntu-latest and its post-test.log was not kept; it does not
+    reproduce locally). Facts, taken AFTER a failure and changing nothing the test asserts, that discriminate the candidate causes: which Maven/Java the post-check's fixed PATH
+    resolves (vs the Maven the offline repository was seeded with), the effective JAVA_HOME, the Maven repository/settings identity, the log the check wrote, and the exit code
+    and output of the same command re-run once in a throw-away copy. Never raises (a broken probe is itself recorded)."""
+    def probe(argv, *, env=None, cwd=None, timeout=60, tail=1500):
+        try:
+            done = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout, check=False)
+            return {"rc": done.returncode, "out": done.stdout[-tail:], "err": done.stderr[-tail:]}
+        except Exception as error:  # pylint: disable=broad-except
+            return {"probe_error": f"{type(error).__name__}: {error}"}
+
+    def tail_of(path: Path, lines: int = 80) -> str:
+        try:
+            return "\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:])
+        except OSError as error:
+            return f"<unreadable: {error}>"
+
+    app_env = {"PATH": _POST_CHECK_APP_PATH, "HOME": str(Path.home())}
+    repository = Path.home() / ".m2" / "repository"
+    settings = Path.home() / ".m2" / "settings.xml"
+    info: dict = {"test_process_path": os.environ.get("PATH", ""), "test_process_mvn": shutil.which("mvn"), "java_home_env": os.environ.get("JAVA_HOME"),
+                  "app_path_mvn": shutil.which("mvn", path=_POST_CHECK_APP_PATH), "app_path_java": shutil.which("java", path=_POST_CHECK_APP_PATH),
+                  "app_path_mvn_realpath": os.path.realpath(shutil.which("mvn", path=_POST_CHECK_APP_PATH) or ""),
+                  "mvn_version_under_app_path": probe(["mvn", "-version"], env=app_env), "java_version_under_app_path": probe(["java", "-version"], env=app_env),
+                  "mvn_version_under_test_path": probe(["mvn", "-version"]),
+                  "m2_settings_sha256": hashlib.sha256(settings.read_bytes()).hexdigest() if settings.is_file() else None,
+                  "m2_repository_exists": repository.is_dir(), "m2_repository_files": sum(len(files) for _r, _d, files in os.walk(repository)) if repository.is_dir() else None,
+                  "m2_surefire_plugins": sorted(p.name for p in (repository / "org/apache/maven/plugins/maven-surefire-plugin").glob("*")) if repository.is_dir() else None,
+                  "post_test_log_tail": tail_of(work / "scenario-04" / "evidence" / "post-test.log"), "post_run_log_tail": tail_of(work / "scenario-04" / "evidence" / "post-run.log")}
+    copy = work / "scenario-04" / "evidence" / "mvn-diagnostic-copy"
+    try:
+        shutil.copytree(work / "scenario-04" / "workspace", copy, ignore=shutil.ignore_patterns("target", "ignite"), dirs_exist_ok=True)
+        info["rerun_mvn_o_B_clean_test_in_a_throwaway_copy"] = probe(["mvn", "-o", "-B", "clean", "test"], env=app_env, cwd=copy, timeout=240, tail=3000)
+    except Exception as error:  # pylint: disable=broad-except
+        info["rerun_mvn_o_B_clean_test_in_a_throwaway_copy"] = {"probe_error": f"{type(error).__name__}: {error}"}
+    return info
+
+
+@contextlib.contextmanager
+def _with_mvn_diagnostics(work: Path):
+    """Appends MVN-DIAGNOSTICS to an assertion failure of the block; the assertion itself is unchanged."""
+    try:
+        yield
+    except AssertionError as failed:
+        pytest.fail(f"{failed}\nMVN-DIAGNOSTICS {json.dumps(_mvn_diagnostics(work), sort_keys=True)}", pytrace=False)
+
+
 def _project(tmp_path: Path) -> Path:
     work = tmp_path / "work"
     assert _run_reset(work).returncode == 0
@@ -379,9 +431,10 @@ def test_post_check_passes_on_the_reference_and_leaves_the_project_untouched(tmp
     workspace = work / "scenario-04" / "workspace"
     before = _dir_digest(workspace)
     lines = _post(work)
-    assert lines and not [line for line in lines if line.startswith("FAIL")], lines
-    for needed in ("Ignite itself logged", "marshaller registry names a Protocol", "executed, none skipped", "printed exactly"):
-        assert any(needed in line and line.startswith("PASS") for line in lines), needed
+    with _with_mvn_diagnostics(work):
+        assert lines and not [line for line in lines if line.startswith("FAIL")], lines
+        for needed in ("Ignite itself logged", "marshaller registry names a Protocol", "executed, none skipped", "printed exactly"):
+            assert any(needed in line and line.startswith("PASS") for line in lines), needed
     assert _dir_digest(workspace) == before  # the evidence workspace is never rebuilt, cleaned or written to
 
 
@@ -391,7 +444,23 @@ def test_post_check_rejects_a_program_that_prints_the_line_without_ignite(tmp_pa
     main = work / "scenario-04" / "workspace" / "src" / "main" / "java" / "com" / "example" / "Main.java"
     main.write_text('package com.example;\npublic class Main { public static void main(String[] a) { System.out.println("' + _env(FIXTURE / "fixture.env")["EXPECTED_RESULT_LINE"] + '"); } }\n', encoding="utf-8")
     failures = [line for line in _post(work) if line.startswith("FAIL")]
-    assert any("Ignite start/stop" in line for line in failures) and any("marshaller" in line for line in failures), failures
+    with _with_mvn_diagnostics(work):
+        assert any("Ignite start/stop" in line for line in failures) and any("marshaller" in line for line in failures), failures
+
+
+def test_the_mvn_diagnostics_are_recording_only_and_never_raise(tmp_path: Path) -> None:
+    """Control for the hosted #3/#4 diagnostics: on an empty work tree (no logs, no workspace) they still answer, name the probes, and change nothing; and a failing
+    assertion inside the guarded block still fails with the SAME message plus the diagnostics (they cannot turn a failure into a pass or hide its text)."""
+    info = _mvn_diagnostics(tmp_path)
+    for key in ("app_path_mvn", "app_path_java", "java_home_env", "mvn_version_under_app_path", "m2_settings_sha256", "post_test_log_tail", "rerun_mvn_o_B_clean_test_in_a_throwaway_copy"):
+        assert key in info, key
+    assert list(tmp_path.iterdir()) == [] or {p.name for p in tmp_path.iterdir()} == {"scenario-04"}, "the probe may only create its own scratch copy under scenario-04/evidence"
+    with pytest.raises(pytest.fail.Exception) as caught:
+        with _with_mvn_diagnostics(tmp_path):
+            raise AssertionError("the original failure text")
+    assert "the original failure text" in str(caught.value) and "MVN-DIAGNOSTICS" in str(caught.value)
+    with _with_mvn_diagnostics(tmp_path):
+        assert True  # a passing block raises nothing
 
 
 @pytest.mark.skipif(not _HAS_OFFLINE_STACK, reason="needs mvn and the offline Maven repository (Ignite 2.18.0, JUnit 5.8.2)")

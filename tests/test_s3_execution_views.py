@@ -61,6 +61,41 @@ def _snapshot(root) -> dict:
     return seen
 
 
+# ----------------------------------------------------------------- A0: the fixture repository is quiescent when it is snapshotted (hosted #5)
+
+def _spawned_git_commands(trace_file) -> list:
+    """The argv of every child process a git command started, from git's own trace2 event stream (the parent logs ``child_start`` synchronously, so no waiting)."""
+    import json
+    commands = []
+    for line in trace_file.read_text().splitlines():
+        event = json.loads(line)
+        if event.get("event") == "child_start" and event.get("argv"):
+            commands.append(list(event["argv"]))
+    return commands
+
+
+def test_the_fixture_repository_leaves_no_background_git_maintenance_behind(tmp_path, monkeypatch):
+    """Hosted run 41785193323 / #5 (MEASURED on Linux git 2.56.0): ``git commit`` spawns ``git maintenance run --auto --detach``; for a moment it holds
+    ``.git/objects/maintenance.lock`` and then touches ``.git/objects``, so a snapshot taken right after the fixture commit differs from one taken later with NO Kriya
+    write involved. The fixture must not start it (the product-write assertion is untouched)."""
+    trace = tmp_path / "trace2.jsonl"
+    monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
+    _repo(tmp_path)
+    assert not [argv for argv in _spawned_git_commands(trace) if "maintenance" in argv], "the fixture commit started background maintenance"
+
+
+def test_negative_control_a_plain_git_commit_does_start_detached_maintenance(tmp_path, monkeypatch):
+    """The control that makes the test above non-vacuous: the same fixture commit WITHOUT the fixture's repo-local switches starts the detached maintenance."""
+    trace = tmp_path / "trace2.jsonl"
+    monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
+    repo = tmp_path / "plain"
+    repo.mkdir()
+    (repo / "f").write_text("x")
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "c"]):
+        subprocess.run(["git", "-c", "user.email=a@b.c", "-c", "user.name=x", *args], cwd=repo, check=True, capture_output=True)
+    assert [argv for argv in _spawned_git_commands(trace) if "maintenance" in argv], "this git no longer starts background maintenance after a commit: the control no longer discriminates"
+
+
 # ----------------------------------------------------------------- B: a Kriya-created execution copy keeps its classification
 
 def test_an_execution_copy_stays_non_git_after_containment_prepared_its_git_target(tmp_path, monkeypatch):

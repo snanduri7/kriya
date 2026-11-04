@@ -56,7 +56,9 @@ def _build(root, **kwargs):
 
 
 def _git(root, *args):
-    subprocess.run(["git", "-c", "user.email=a@b.c", "-c", "user.name=x", *args], cwd=root, check=True, capture_output=True)
+    # maintenance.auto=false / gc.auto=0: a fixture commit must not leave a DETACHED `git maintenance run --auto` behind (CERT hosted #5, run 41785193323: it holds
+    # .git/objects/maintenance.lock and touches .git/objects while a test is snapshotting the repository it created). Per-command, repo-local, nothing global.
+    subprocess.run(["git", "-c", "user.email=a@b.c", "-c", "user.name=x", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=root, check=True, capture_output=True)
 
 
 def _repo(tmp_path, calc=CALC1, test=TEST2, extra=None, name="cand"):

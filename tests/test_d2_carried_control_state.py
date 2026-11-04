@@ -173,21 +173,72 @@ def test_the_namespaces_are_exactly_the_runtime_control_ones():
 
 
 
-def test_a_repository_git_refuses_for_its_ownership_is_the_ownership_refusal_not_uninspectable(tmp_path, monkeypatch):
-    """OI-163/S19e: before the fix the carried-state inspection answered CARRIED_STATE_UNINSPECTABLE first and the S19e ownership refusal
-    (the cause git states) never surfaced."""
-    from kriya.repository.git import GIT_REPOSITORY_OWNERSHIP_REFUSED, RepositoryContentFilterRefused
+_AMBIENT_SAFE_DIRECTORY = "[safe]\n\tdirectory = *\n"  # what the hosted runner's /etc/gitconfig carries (F14, run 41785193323 diagnostics)
 
+
+def _hermetic_git_config(monkeypatch, home: Path) -> None:
+    """Make git's configuration deterministic for an ownership scenario: no system file, an empty user config, no environment-injected config. Mirrors the canonical
+    isolation of tests/test_s19e_honest_refusal.py (_isolated_git). Ambient ``safe.directory=*`` would otherwise make git trust every repository, whatever
+    GIT_TEST_ASSUME_DIFFERENT_OWNER says."""
+    home.mkdir(parents=True, exist_ok=True)
+    config = home / ".gitconfig"
+    config.write_text("")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    for name in ("GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"):  # GIT_CONFIG_SYSTEM is left alone on purpose: NOSYSTEM must win over it
+        monkeypatch.delenv(name, raising=False)
+
+
+def _foreign_repository(tmp_path: Path, monkeypatch) -> Path:
     repository = tmp_path / "owned_elsewhere"
     repository.mkdir()
     _git(repository, "init", "-q")
     monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")  # git's own test switch: every repository is foreign
+    return repository
+
+
+def _ambient_system_safe_directory(monkeypatch, tmp_path: Path) -> None:
+    """Reproduce the hosted runner's /etc/gitconfig (safe.directory=*) through git's own override of the system file (GIT_CONFIG_SYSTEM, honoured unless NOSYSTEM)."""
+    system = tmp_path / "ambient-system-gitconfig"
+    system.write_text(_AMBIENT_SAFE_DIRECTORY)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(system))
+    monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
+
+
+def test_a_repository_git_refuses_for_its_ownership_is_the_ownership_refusal_not_uninspectable(tmp_path, monkeypatch):
+    """OI-163/S19e: before the fix the carried-state inspection answered CARRIED_STATE_UNINSPECTABLE first and the S19e ownership refusal
+    (the cause git states) never surfaced. F14: the test owns its git configuration, so an ambient system/global ``safe.directory=*`` cannot defeat it."""
+    from kriya.repository.git import GIT_REPOSITORY_OWNERSHIP_REFUSED, RepositoryContentFilterRefused
+
+    _ambient_system_safe_directory(monkeypatch, tmp_path)  # the hosted environment, present on purpose ...
+    _hermetic_git_config(monkeypatch, tmp_path / "git-home")  # ... and neutralised by the test's own isolation
+    repository = _foreign_repository(tmp_path, monkeypatch)
     try:
         with pytest.raises(RepositoryContentFilterRefused) as caught:
             refuse_repository_carried_control_state(str(repository))
-    except pytest.fail.Exception as did_not_raise:  # F14: hosted-only, not reproduced locally - record the facts that could explain it, change nothing
+    except pytest.fail.Exception as did_not_raise:  # F14 diagnostics stay: recording only
         pytest.fail(f"{did_not_raise}\nF14-DIAGNOSTICS {json.dumps(_f14_diagnostics(repository), sort_keys=True)}", pytrace=False)
     assert caught.value.reason_code == GIT_REPOSITORY_OWNERSHIP_REFUSED
+
+
+def test_f14_negative_control_an_ambient_system_safe_directory_defeats_the_unisolated_scenario(tmp_path, monkeypatch):
+    """The OLD behaviour (no isolation) with the ambient file present: git trusts the foreign repository, so the product raises nothing. This is exactly the hosted failure;
+    it proves the isolation above is what makes the scenario real (the same scenario without the ambient file must raise)."""
+    from kriya.repository.git import RepositoryContentFilterRefused
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home-without-config"))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
+    repository = _foreign_repository(tmp_path, monkeypatch)
+    # sanity: without the ambient file the unisolated scenario is the ownership refusal ...
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    with pytest.raises(RepositoryContentFilterRefused):
+        refuse_repository_carried_control_state(str(repository))
+    # ... and with it, nothing is raised (the hosted symptom)
+    _ambient_system_safe_directory(monkeypatch, tmp_path)
+    refuse_repository_carried_control_state(str(repository))
 
 
 def _f14_diagnostics(repository: Path) -> dict:
