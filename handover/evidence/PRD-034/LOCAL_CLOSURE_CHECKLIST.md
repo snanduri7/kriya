@@ -44,3 +44,19 @@ Executable revision for everything below: `9d88ff820e24c2c6a811ef3b35a9cf4316811
 
 Expected hosted jobs once triggered (from `ci.yml`): `Test (Python 3.10-3.14)`, `Platform import and architecture guard (Windows)`, `Lint (ruff)`, `Static check (pylint)`, `Verify dependency lock file`, `Source distribution and clean wheel install`, **`Production certification`** (the discriminating job; ubuntu-latest, non-root, pinned images, frozen Maven repo + wheelhouse provisioned in bootstrap steps), `Primary live model regression` (Ollama smoke, `live_model and not live_target`).
 Exact command, if the owner authorizes creating the branch: `git push origin arch/containment-rebuild-v2`; to start the certification: `gh workflow run ci.yml --ref arch/containment-rebuild-v2` (or a PR).
+
+## D. Pre-push record - acquisition / plan input digests at HEAD (full sha256)
+| File | sha256 |
+|---|---|
+| `tests/certification/maven_repository.manifest.json` | `852776379e32cc7fa1a891c27b23c1a6a6c8cee77e44de33e6caae3f49dded37` |
+| `tests/certification/requirements.release.hashes.txt` | `b4583335692ccfa8aa19e9387f8c8beb186f83745e1057654195e13eb710fd58` |
+| `tests/certification/pinned_images.txt` | `eb7a9ee4b68266a428626dbe630b1067fc36b3f0a0221d15ab3aec857f62dd25` |
+| `tests/certification/shard_exclusive_files.json` | `9bc742718525fd94ff6663ff3e6823df0e0e49920a34e3d84108806272756459` |
+| `tests/certification/shard_timings.json` | `5377605edf9febfa5eb9fcc18e70d39edb3086c680a77fb4c933c35418699a47` |
+| `tests/certification/skip_allowlist.yaml` | `4ad86ffc12c961f20006cc788903e93cd81b04bb11d06caf323d4141b44c3484` |
+Frozen content digests: Maven repo `c557384d...` (1,773 files), wheelhouse `749cb006...` (70 files).
+
+## E. What the hosted `Production certification` job is, and whether it can reach the exclusive-shard tail (MEASURED from `ci.yml`; capacity INFERRED)
+* `runs-on: ubuntu-latest`, `timeout-minutes: 300`; the repository is PUBLIC, so the standard hosted runner (4 vCPU / 16 GB / ~14 GB disk, INFERRED from GitHub's documented public-repo size) applies. `scripts/certify.sh` defaults to the SHARDED topology (`CERT_TOPOLOGY` unset -> sharded, 3 ordinary shards): 4 concurrent pytest processes on 4 vCPU.
+* Local timings (10-core Mac): sharded wall 1h54m, of which the exclusive Docker shard alone is 1h50m (6,630 s of test time), and the serial reference took 4h58m. The `ci.yml` comment still says "serial by design ... about 2.7 hours locally" - STALE (documentation only; the job runs the sharded default).
+* **Risk (INFERRED, unmeasurable before a run):** on 4 vCPU with cold image pulls and Maven/wheelhouse provisioning, the job may take well over the local 1h54m; if it exceeds 300 minutes the run is cancelled before or inside the exclusive shard tail, which is ruling-section-7 Outcome C (infrastructure) and says nothing about the venv issue. Serial would not fit at all. No timeout change is made here ("Reduce only on measured hosted durations").

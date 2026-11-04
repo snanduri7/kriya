@@ -21,7 +21,7 @@ Subject: C3 final-run attempts 1 and 2 (`c3-run6-*`, `c3-run7-*`): `test_validat
 | pip-step host state after exit vs 0 ms | no change within 2 s | no change within 2 s |
 | leftover containers / volumes | none (4 pre-existing exited containers) | same |
 | leftover temp entries | 6 `kriya-authority-mask-*` | 6 `kriya-authority-mask-*` (not from the reclassified files: present in B too) |
-| attribution of the 6 (docker argv mount sources) | 2 from `test_service_runtime_oci` (`test_contained_managed_service*`), 2 from tests using the per-test `kriya-state` dir (test not resolved), 2 prepared but never run by docker | same shape |
+| attribution of the 6 (docker argv mount sources) | 2 from `test_service_runtime_oci::test_contained_managed_service_start_failure_still_cleans_up` (re-measured 2 -> 0), 2 from `test_s4_1_managed_service_view::test_real_oci_an_ignored_module_cannot_make_a_broken_contained_service_pass_and_nothing_survives` (workspace under the per-test `kriya-state` dir; identified later by re-measure: pre-fix behaviour reinstated -> 2 left, committed fix -> 0), 2 prepared but never run by docker | same shape |
 | are they a failed cleanup? | NO: all 12 are EMPTY, owner-writable (`drwx------`), carry NO ACL entries - `shutil.rmtree` would have removed them; `cleanup()` was never invoked | same |
 | rc 127 runs | 2, both deliberate host-interpreter-in-container negative controls | same |
 
@@ -46,3 +46,6 @@ The disappearance of the venv ~15 s after the test (watcher) is the test's own t
 * One pass each (n = 11 creations per sequence). The failure rate is low and intermittent (run 4 and run 5 passed these tests; runs 6 and 7 each failed 1-2 of the exclusive shard's 396 tests), so a clean replay does not exclude the mechanism, and it excludes the *reclassification* as the sole trigger only weakly (the replay starts without the ~5,000-6,400 s of preceding exclusive-shard activity that preceded the failures).
 * The failing tests ran at 5,007 s and 6,402-6,485 s into the exclusive shard; the replays reach them at ~1,300 s. A long-accumulation effect (Docker VM state, thousands of prior containers/mounts) is untested and untestable without a ~2 h population.
 * The sidecar `docker exec` adds ~7 execs/s of load while a venv container runs.
+
+## Addendum 2026-11-04 (after the lifecycle trace)
+Four of the six leftovers are the product defect `service_runtime._cleanup` early return (CERT-SERVICE-EXITED-CLEANUP-SKIPPED-001, fixed in `139eba9`); both pairs were re-measured (pre-fix behaviour reinstated by a scratch plugin: 2 + 2 left; committed fix: 0). Two remain unattributed (prepared, no docker run). They are unrelated to the venv disappearance. See `VENV_LIFECYCLE_TRACE.md`.
