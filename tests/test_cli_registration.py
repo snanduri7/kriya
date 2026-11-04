@@ -12,6 +12,7 @@ The tree's callbacks (which module a command body lives in) are deliberately NOT
 exactly what E14 changes.
 """
 import copy
+import inspect
 import json
 import os
 from pathlib import Path
@@ -35,9 +36,23 @@ def _commands(info: Dict[str, Any], path: Tuple[str, ...] = ()) -> Iterator[Tupl
         yield from _commands(child, path + (name,))
 
 
+_HELP_KEYS = ("help", "short_help", "epilog")
+
+
+def _clean(value: Any) -> Any:
+    """Docstring-derived help compared without its indentation: Python 3.13+ dedents a compiled docstring and 3.10-3.12 keep the source indentation, so the same words
+    were rendered as two different strings (HOSTED-GOLDEN-DOCSTRING-INDENT-001: the golden came from 3.14, the hosted certification runs 3.12 - 43 command paths differed
+    by whitespace only). The words, their order and every other field are still compared exactly."""
+    if isinstance(value, dict):
+        return {k: (inspect.cleandoc(v) if k in _HELP_KEYS and isinstance(v, str) else _clean(v)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_clean(item) for item in value]
+    return value
+
+
 def _mismatches(tree: Dict[str, Any], golden: Dict[str, Any]) -> list:
     """Every command path whose own entry differs from the golden (a missing or extra command included)."""
-    ours, theirs = dict(_commands(tree)), dict(_commands(golden))
+    ours, theirs = dict(_commands(_clean(tree))), dict(_commands(_clean(golden)))
     strip = lambda info: {k: v for k, v in info.items() if k != "commands"}  # noqa: E731 - the children are compared one by one
     return sorted(" ".join(("kriya",) + path) for path in set(ours) | set(theirs)
                   if path not in ours or path not in theirs or strip(ours[path]) != strip(theirs[path]))
@@ -64,3 +79,14 @@ def test_the_comparison_fails_on_a_dropped_command_or_a_renamed_option():
     assert _mismatches(dropped, golden) == ["kriya runs prune"]
     assert _mismatches(renamed, golden) == ["kriya authority approve"]
     assert _mismatches(golden, golden) == []
+
+
+def test_help_text_is_compared_without_docstring_indentation_but_not_without_its_words():
+    golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
+    original = golden["commands"]["authority"]["commands"]["approve"]["help"]
+    assert "\n" in original
+    indented, reworded = copy.deepcopy(golden), copy.deepcopy(golden)
+    indented["commands"]["authority"]["commands"]["approve"]["help"] = original.replace("\n", "\n    ")        # the Python 3.10-3.12 rendering of the same docstring
+    reworded["commands"]["authority"]["commands"]["approve"]["help"] = original + " Extra words."
+    assert _mismatches(indented, golden) == []
+    assert _mismatches(reworded, golden) == ["kriya authority approve"]

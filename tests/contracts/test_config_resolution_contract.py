@@ -423,8 +423,13 @@ def environment_homes(tmp: Path, monkeypatch) -> Dict[str, Any]:
         else:
             monkeypatch.setenv("PATH", _value(world, raw))
         monkeypatch.delenv("HOME", raising=False) if label == "unset" else None
-        forms[f"PATH={label}"] = {"probe_env": normalize(git_metadata._probe_env(), world),
-                                  "git_candidates": normalize(git_metadata._git_candidates(), world)}
+        candidates = git_metadata._git_candidates()
+        if label == "unset":
+            # The default search path names SYSTEM directories, so the host's layout decides how many aliases of its one git exist: on a usr-merged Linux (Ubuntu 24.04)
+            # /bin/git IS /usr/bin/git and both are listed (HOSTED-GOLDEN-HOST-LAYOUT-001, MEASURED run 41758354007); on macOS only /usr/bin/git exists. The golden records
+            # the git(s) the default path reaches, so aliases of one file are folded; the 'empty' and 'two' cases (worlds under tmp) stay exact.
+            candidates = list(dict.fromkeys(os.path.realpath(candidate) for candidate in candidates))
+        forms[f"PATH={label}"] = {"probe_env": normalize(git_metadata._probe_env(), world), "git_candidates": normalize(candidates, world)}
     for label, raw in (("unset", None), ("empty", ""), ("absolute", "<OUTSIDE>/gradle-home")):
         world = World(tmp / f"GRADLE_USER_HOME-{label}", monkeypatch)
         if raw is not None:

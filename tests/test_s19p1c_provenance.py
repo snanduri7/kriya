@@ -164,7 +164,8 @@ def test_an_operator_alias_of_a_shell_is_still_a_shell(owner, _isolated_git, mon
     plant = Plant(owner, _isolated_git, monkeypatch)
     (plant.operator / "innocent").symlink_to("/bin/sh")
     plant.define("innocent -c x")
-    _refused(owner, plant.marker, "shell, interpreter or evaluator (sh)")
+    # The message names the RESOLVED program: /bin/sh is `sh` (bash in POSIX mode) on macOS but `dash` on Debian/Ubuntu.
+    _refused(owner, plant.marker, f"shell, interpreter or evaluator ({os.path.basename(os.path.realpath('/bin/sh'))})")
 
 
 @pytest.mark.parametrize("entry", ["", ".", "tools", "{ws}/bin"])

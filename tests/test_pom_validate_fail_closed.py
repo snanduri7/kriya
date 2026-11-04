@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from _hermetic_path import hermetic_path
 
 from kriya.config.config import AutonomyConfig
 from kriya.tools.containment import ContainmentSetupError
@@ -261,7 +262,8 @@ def _fake_mvn(tmp_path, script, *, executable=True):
         mvn.write_text(script)
         mvn.chmod(0o755 if executable else 0o644)
     (tmp_path / "pom.xml").write_text(POM)
-    return f"{bindir}:/usr/bin:/bin"
+    # PATH is the fake bin dir plus `sleep` only: a host `mvn` elsewhere on PATH (a hosted runner image has one) must not answer for a missing or non-executable fake.
+    return f"{bindir}:{hermetic_path(tmp_path / 'tools', ('sleep',), absent=('mvn',))}"
 
 
 REAL_PROCESS = [

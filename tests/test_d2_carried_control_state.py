@@ -5,6 +5,7 @@ Original symptom (MEASURED before the fix, closure/d2/m3_symptom_PREFIX.txt): a 
 were Kriya's own. Every test here uses real git (init, ``add -f``, commit, clone, checkout) - never a mock of the carrier."""
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -181,6 +182,48 @@ def test_a_repository_git_refuses_for_its_ownership_is_the_ownership_refusal_not
     repository.mkdir()
     _git(repository, "init", "-q")
     monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")  # git's own test switch: every repository is foreign
-    with pytest.raises(RepositoryContentFilterRefused) as caught:
-        refuse_repository_carried_control_state(str(repository))
+    try:
+        with pytest.raises(RepositoryContentFilterRefused) as caught:
+            refuse_repository_carried_control_state(str(repository))
+    except pytest.fail.Exception as did_not_raise:  # F14: hosted-only, not reproduced locally - record the facts that could explain it, change nothing
+        pytest.fail(f"{did_not_raise}\nF14-DIAGNOSTICS {json.dumps(_f14_diagnostics(repository), sort_keys=True)}", pytrace=False)
     assert caught.value.reason_code == GIT_REPOSITORY_OWNERSHIP_REFUSED
+
+
+def _f14_diagnostics(repository: Path) -> dict:
+    """F14 - UNKNOWN / HOSTED-ONLY, NOT REPRODUCED (run 41758354007: this test did not raise on ubuntu-latest; it passes in a faithful Ubuntu 24.04 / git 2.56.0 / uid 1001
+    reproduction). RECORDING ONLY: read-only facts, taken after the failure, that discriminate the candidate causes - git configuration that makes the repository safe, whether
+    git itself honours the switch for this directory, what the product's own git call answered, and who owns the directory. Never raises (a broken probe is itself recorded)."""
+    def run(*args: str, **kw):
+        try:
+            done = subprocess.run(["git", *args], cwd=kw.get("cwd"), capture_output=True, text=True, timeout=20, check=False, env=kw.get("env", os.environ))
+            return {"rc": done.returncode, "out": done.stdout.strip()[:600], "err": done.stderr.strip()[:300]}
+        except Exception as error:  # pylint: disable=broad-except
+            return {"probe_error": f"{type(error).__name__}: {error}"}
+    info = {"git_version": run("--version"), "uid": os.getuid(), "euid": os.geteuid(), "dir_owner_uid": None, "in_container": os.path.exists("/.dockerenv"),
+            "git_env": {k: v for k, v in sorted(os.environ.items()) if k.startswith("GIT_") or k in ("HOME", "XDG_CONFIG_HOME", "LANG", "LC_ALL")}}
+    try:
+        info["dir_owner_uid"] = os.stat(repository).st_uid
+    except OSError as error:
+        info["dir_owner_uid"] = f"{type(error).__name__}"
+    info["safe_directory_config"] = run("config", "--show-scope", "--show-origin", "--get-all", "safe.directory", cwd=str(repository))
+    info["system_and_global_config"] = run("config", "--show-scope", "--show-origin", "--list", cwd="/")
+    info["git_rev_parse_in_repository"] = run("rev-parse", "--is-inside-work-tree", cwd=str(repository))
+    try:
+        info["product_tracked_paths"] = carried_state.tracked_paths(str(repository), carried_state.RUNTIME_CONTROL_PATHSPECS)
+    except Exception as error:  # pylint: disable=broad-except
+        info["product_tracked_paths_raised"] = f"{type(error).__name__}: {str(error)[:200]}"
+    return info
+
+
+def test_the_f14_diagnostics_are_read_only_and_never_raise(tmp_path):
+    """The recording must work on the NORMAL path too (a NameError inside it would otherwise hide behind the failure it is meant to explain)."""
+    repository = tmp_path / "plain"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    before = sorted(path.name for path in repository.iterdir())
+    info = _f14_diagnostics(repository)
+    assert {"git_version", "uid", "dir_owner_uid", "safe_directory_config", "git_rev_parse_in_repository", "git_env", "system_and_global_config"} <= set(info)
+    assert info["git_rev_parse_in_repository"]["rc"] == 0 and info["dir_owner_uid"] == os.stat(repository).st_uid and info["product_tracked_paths"] == []
+    assert sorted(path.name for path in repository.iterdir()) == before, "diagnostics changed the repository"
+    json.dumps(info)  # serialisable

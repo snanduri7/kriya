@@ -1,7 +1,9 @@
 """BACKEND-READINESS-V2 Stage D2: the evaluation wrapper classifies every oracle exit before it can be read as a verdict.
 The wrapper runs against FAKE oracles (ORACLE_DIR) in a temp tree: a candidate rejection stays REJECT, broken infrastructure becomes
 ENVIRONMENT_UNAVAILABLE, unclassifiable output becomes INDETERMINATE, success stays PASS - and the last two make the run INVALID."""
+import hashlib
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -22,6 +24,25 @@ CASES = {
 }
 
 
+FREEZE = ROOT.parent / "closing_cohort_v7f_FREEZE.json"
+
+
+def _wrapper_shell() -> str:
+    """The interpreter the frozen wrapper runs under. Its shebang is zsh and its bytes are FROZEN (``closing_cohort_v7f_FREEZE.json`` pins ``evaluate_v3_sha256``), so it
+    cannot be edited to be portable; zsh is an operator-host tool, not a Kriya prerequisite. zsh where installed, otherwise bash: every construct the wrapper uses (``$'..'``
+    quoting, POSIX parameter expansion, ``$(( ))``) is common to both, and the paths it expands are space-free here (zsh does not word-split unquoted expansions, bash does).
+    Never ``sh``: dash has no ``$'..'`` (HOSTED-ZSH-FIXTURE-001: ``/bin/zsh`` was absent on the hosted runner, 10 FileNotFoundError failures)."""
+    shell = shutil.which("zsh") or shutil.which("bash")
+    if shell is None:
+        pytest.fail("neither zsh nor bash is available to run the frozen oracle wrapper")
+    return shell
+
+
+def test_the_wrapper_under_test_is_the_frozen_one():
+    """The portability decision above rests on the wrapper's bytes being frozen: this is the same digest the frozen cohort record binds."""
+    assert hashlib.sha256(WRAPPER.read_bytes()).hexdigest() == json.loads(FREEZE.read_text())["versions"]["environment_preflight"]["evaluate_v3_sha256"]
+
+
 def _run(tmp_path, body, kind="accept", preflight=None):
     oracles = tmp_path / "oracle"
     oracles.mkdir()
@@ -36,7 +57,7 @@ def _run(tmp_path, body, kind="accept", preflight=None):
            "OUT_DIR": str(out), "SCRATCH_DIR": str(tmp_path / "scratch")}
     if preflight is not None:
         env["PREFLIGHT_SCRIPT"] = str(preflight)
-    done = subprocess.run(["/bin/zsh", str(WRAPPER), "c2", "TX", str(tree), "tag", "-lbl"], env=env, capture_output=True, text=True,
+    done = subprocess.run([_wrapper_shell(), str(WRAPPER), "c2", "TX", str(tree), "tag", "-lbl"], env=env, capture_output=True, text=True,
                           check=False)
     return done, json.loads((out / f"oracle-{kind}-tag.json").read_text())
 

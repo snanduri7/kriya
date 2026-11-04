@@ -104,6 +104,16 @@ def test_the_snapshot_guard_distinguishes_a_missing_home_from_a_created_one(tmp_
 INNER_SESSION_CAP_SECONDS = 120
 
 
+def _process_group_snapshot(pgid: int) -> str:
+    """The processes of process group ``pgid``: PID, PPID, PGID, state, CPU, elapsed time and the FULL command line. HOSTED-PS-PORTABILITY-001: ``ps -g`` means a process
+    group on BSD/macOS but a session or a group NAME on procps, and a width-limited COMMAND column cut ``.../bin/py`` out of ``.../bin/python -m pytest`` on a hosted
+    runner (MEASURED, run 41758354007), so the diagnostics could not name the stalled pytest. ``-ww`` (unlimited width) and an explicit PGID filter behave the same on both."""
+    done = subprocess.run(["ps", "-axww", "-o", "pid,ppid,pgid,stat,%cpu,etime,command"], capture_output=True, text=True, timeout=20, check=False)
+    lines = done.stdout.splitlines()
+    rows = [line for line in lines[1:] if len(line.split(None, 3)) >= 3 and line.split()[2] == str(pgid)]
+    return "\n".join(lines[:1] + rows)
+
+
 def _inner_session(tmp_path, body: str, *, real_home, cap_seconds: float = INNER_SESSION_CAP_SECONDS):
     """A real pytest session (a child process) that registers the SAME session fixture; its 'operator-configured' authority home is ``real_home``.
 
@@ -126,7 +136,7 @@ def _inner_session(tmp_path, body: str, *, real_home, cap_seconds: float = INNER
     try:
         stdout, stderr = process.communicate(timeout=cap_seconds)
     except subprocess.TimeoutExpired as expired:
-        snapshot = subprocess.run(["ps", "-g", str(process.pid), "-o", "pid,ppid,stat,%cpu,etime,command"], capture_output=True, text=True, timeout=20, check=False).stdout
+        snapshot = _process_group_snapshot(process.pid)
         load = os.getloadavg()
         os.killpg(process.pid, signal.SIGKILL)
         stdout, stderr = process.communicate(timeout=30)

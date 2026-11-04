@@ -66,13 +66,16 @@ def test_01_dropping_a_declared_dependency_rebuilds_the_venv_so_the_removed_modu
         assert os.path.exists(os.path.join(site, "six.py")) and os.path.exists(os.path.join(site, "attrs.py"))
         marker = json.load(open(os.path.join(root, ".kriya", "venv", v._VENV_INSTALLED_MARKER)))
         assert marker == {"specifiers": ["attrs", "six"]}
-        first_inode = os.stat(root / ".kriya" / "venv").st_ino
+        # "rebuilt from nothing" is proven by content of the OLD build that no pip install could recreate - never by the directory's inode number, which a filesystem
+        # may legally hand out again straight after removal (ext4 does: HOSTED-INODE-REUSE-001, MEASURED run 41758354007).
+        old_build_witness = root / ".kriya" / "venv" / "witness-of-the-first-build.txt"
+        old_build_witness.write_text("first build\n")
         # the candidate drops `six`: the venv is rebuilt from nothing, six is gone, attrs reinstalled
         (root / "pyproject.toml").write_text('[project]\nname = "pkg"\nversion = "0"\ndependencies = ["attrs"]\n')
         python2, error = validator._resolve_python_interpreter()
         assert error is None and validator.venv_recreations == 1 and installs == [["six", "attrs"], ["attrs"]]
         assert not os.path.exists(os.path.join(site, "six.py")) and os.path.exists(os.path.join(site, "attrs.py"))
-        assert os.stat(root / ".kriya" / "venv").st_ino != first_inode
+        assert not old_build_witness.exists(), "the venv was removed and rebuilt, not repaired in place"
         assert json.load(open(os.path.join(root, ".kriya", "venv", v._VENV_INSTALLED_MARKER))) == {"specifiers": ["attrs"]}
         # growing the set reuses the venv (no rebuild): additive is what pip does well
         (root / "pyproject.toml").write_text('[project]\nname = "pkg"\nversion = "0"\ndependencies = ["attrs", "cachetools"]\n')

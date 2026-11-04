@@ -2,6 +2,7 @@ import os
 from unittest.mock import AsyncMock, patch
 
 import yaml
+from _fake_embedding import StaticEmbedder
 from click.testing import CliRunner
 
 from kriya.cli import main
@@ -63,12 +64,17 @@ def test_analyze_warns_when_skills_dir_resolves_to_shared_install(tmp_path):
         return {"description": "test", "instructions": "# test", "rules": ["rule"]}
 
     runner = CliRunner()
+    # HOSTED-LIVE-EMBEDDING-001: `analyze` indexes the project with an embedding client. Left real, this test needed a live Ollama on localhost (present on the developer
+    # machine, absent on a runner: "Analysis failed: EMBEDDING_UNAVAILABLE: ConnectError" before the guard ran), against the suite's no-live-calls contract. The canonical
+    # deterministic embedder (tests/_fake_embedding.py) answers instead.
     with patch("kriya.cli.load_config", return_value=cfg), \
          patch("kriya.skills.skill.get_global_skills_dir", return_value=str(fake_install_skills_dir)), \
+         patch("kriya.memory.vector.OllamaEmbeddingClient", new=lambda *args, **kwargs: StaticEmbedder([0.1] * 8)), \
          patch("kriya.agents.extractor.ConventionsExtractorAgent.extract_conventions", new=AsyncMock(side_effect=mock_extract)), \
          patch("kriya.core.llm.LLMClient.__init__", return_value=None):
         res = runner.invoke(main, ["analyze", str(project_dir)])
 
+    assert "EMBEDDING_UNAVAILABLE" not in res.output, res.output
     assert "SHARED install skills directory" in res.output
     # Confirms the warning fired for the RIGHT reason (the guard's real
     # comparison logic), not a coincidence - the skill still gets written to

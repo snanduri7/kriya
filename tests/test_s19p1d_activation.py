@@ -15,13 +15,13 @@ The planted executable vector is the measured one: the global `git media clean %
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Callable, List
 
 import pytest
 
+from tests._hermetic_path import hermetic_path
 from tests.test_s19q1_content_filter_refusal import (
     _NEEDS_WORKTREE,
     GOLDEN,
@@ -39,6 +39,8 @@ from tests.test_s19q1_content_filter_refusal import (
 
 UNPROVEN = "GIT_CONTENT_FILTER_EXECUTABLE_UNPROVEN"
 UNINSPECTABLE = "GIT_CONFIG_UNINSPECTABLE"
+# What the planted filter scripts and `git submodule` (a shell script) run on the PATH; git-lfs is deliberately not among them.
+_POSIX_TOOLS = ("sh", "cat", "touch", "sed", "basename", "dirname", "mkdir", "rm", "tr", "env", "uname", "expr", "head", "ls", "grep", "wc", "mv", "cp", "date", "sort")
 # The owner host's stale lines (OI-161), reproduced verbatim in shape: git media (an evaluator: `git <alias>`) and an
 # uninstalled git-lfs (unresolved).
 STALE = ('[filter "media"]\n\tclean = git media clean %f\n\tsmudge = git media smudge %f\n\trequired = true\n'
@@ -60,8 +62,8 @@ def _isolated_git(scratch_dir, monkeypatch):
     for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT",
                  "GIT_EXEC_PATH", "GIT_CEILING_DIRECTORIES", "GIT_ATTR_SOURCE"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
-    assert shutil.which("git-lfs") is None            # the host shape: git-lfs is NOT installed
+    # The host shape: git-lfs is NOT installed. Modelled by a PATH that holds exactly git and the POSIX basics - never by `/usr/bin:/bin`, where a hosted runner image ships git-lfs.
+    monkeypatch.setenv("PATH", hermetic_path(scratch_dir("s19p1d-path"), ("git", *_POSIX_TOOLS), absent=("git-lfs",)))
     return config
 
 

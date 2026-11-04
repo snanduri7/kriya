@@ -416,14 +416,22 @@ def _case_insensitive(path: Path) -> bool:
 
 
 def test_a_case_variant_attributes_file_on_a_case_insensitive_disk_is_refused(tmp_path):
-    """D5b: the target carries `.GitAttributes`; on a case-insensitive disk (core.ignoreCase) git resolves it as the
-    attributes file (MEASURED: the unguarded checkout ran the smudge, and the activation rule saw kx for the
-    materialized target) - the checkout's own inspection refuses."""
-    if not _case_insensitive(tmp_path):
-        pytest.skip("needs a case-insensitive file system (the D5b shape)")
+    """D5b: the target carries `.GitAttributes`. The invariant - "a driver git can ACTIVATE is judged; a driver it cannot is not" - is stated in filesystem terms, so
+    each kind of disk proves its own side (HOSTED-CASE-SENSITIVITY-001: this was a skip on a case-sensitive disk, an unexpected skip on a Linux runner):
+
+    * case-insensitive disk (core.ignoreCase; macOS APFS default): git resolves `.GitAttributes` as the attributes file (MEASURED: the unguarded checkout ran the smudge, and
+      the activation rule saw kx for the materialized target) - the checkout's own inspection refuses;
+    * case-sensitive disk (Linux): `.GitAttributes` is NOT the attributes file, nothing binds the driver, so nothing is refused AND nothing runs - for Kriya's git and,
+      as the validity control, for plain git as well (a refusal here would be a false positive, a run a missed activation)."""
     repo, target, marker = _diverging(tmp_path, {".GitAttributes": "*.txt filter=kx\n"})
     _define(repo, marker)
-    _refused_or_runs_nothing(repo, (target,), marker, (), "refused")
+    if _case_insensitive(tmp_path):
+        _refused_or_runs_nothing(repo, (target,), marker, (), "refused")
+    else:
+        _refused_or_runs_nothing(repo, (target,), marker, ("checkout", "-f", "--no-recurse-submodules", target), "allowed")
+        (repo / "a.txt").write_text("changed after the checkout\n")
+        subprocess.run(["git", "diff", "--stat"], cwd=repo, capture_output=True, stdin=subprocess.DEVNULL, check=False)
+        assert not marker.exists(), "validity: on a case-sensitive disk plain git must not treat `.GitAttributes` as the attributes file either"
 
 
 @pytest.mark.parametrize("force", [True, False], ids=["kriya-argv", "control-without-force"])

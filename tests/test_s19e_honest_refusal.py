@@ -25,6 +25,8 @@ import asyncio
 import hashlib
 import json
 import os
+import shlex
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -437,6 +439,23 @@ def test_every_generic_handler_of_the_retry_wrappers_lets_the_refusal_through(pa
 # ------------------------------------------------------------------------------------------- OI-163: ownership
 
 
+def _translating_git(tmp_path: Path, monkeypatch) -> None:
+    """Put a ``git`` first on PATH that is the real git (same output, same exit status) except that outside the C locale it states its ownership refusal in French,
+    as a git with a French catalog does."""
+    real = shlex.quote(shutil.which("git"))
+    bindir = tmp_path / "translating-git"
+    bindir.mkdir()
+    stub = bindir / "git"
+    stub.write_text(
+        "#!/bin/sh\n"
+        f'if [ "${{LC_ALL:-}}" = "C" ]; then exec {real} "$@"; fi\n'
+        'err=$(mktemp); ' + real + ' "$@" 2>"$err"; status=$?\n'
+        "if grep -q 'detected dubious ownership' \"$err\"; then echo \"fatal: propriétaire douteux détecté dans le dépôt à '$PWD'\" >&2; else cat \"$err\" >&2; fi\n"
+        'rm -f "$err"; exit $status\n', encoding="utf-8")
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+
+
 def _owned_elsewhere(monkeypatch) -> None:
     monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")      # git's own test switch: every repository is foreign
 
@@ -477,12 +496,17 @@ def test_a_dubiously_owned_repository_is_the_ownership_refusal_and_nothing_is_wr
 
 
 def test_the_ownership_refusal_is_recognised_whatever_git_s_language(tmp_path, monkeypatch):
-    """git translates its refusal (MEASURED on this host: LANGUAGE=fr -> "propriétaire douteux détecté"); the
-    discovery probe reads it in the C locale."""
+    """git translates its refusal (MEASURED on a developer host: LANGUAGE=fr -> "propriétaire douteux détecté"); the
+    discovery probe reads it in the C locale.
+
+    The translation is emulated at the process boundary by a ``git`` that behaves like the real one except that outside the C locale it answers in French. A real
+    French catalog is NOT required: a hosted runner has no fr_FR locale, so git answered in English there and the test's own precondition failed (HOSTED-GIT-LOCALE-001).
+    The contract proved is Kriya's (the probe asks git in the C locale), not the host's installed locales."""
     from kriya.workflow import worktree
 
     repo = _repository(tmp_path)
     _owned_elsewhere(monkeypatch)
+    _translating_git(tmp_path, monkeypatch)
     monkeypatch.setenv("LANGUAGE", "fr")
     monkeypatch.setenv("LC_ALL", "fr_FR.UTF-8")
     translated = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=repo, capture_output=True, text=True,

@@ -15877,8 +15877,20 @@ async def test_workflow_strips_jdk_incompatible_jvm_flag_before_running(tmp_path
     final_pom = (tmp_path / "pom.xml").read_text()
     assert "-Djava.security.manager=allow" not in final_pom
 
+def _fake_jdk_home(base, major: int = 17) -> str:
+    """A valid JDK home for a test that patches the JDK-home override: ``release`` metadata (the product proves the JDK version from it and fails closed without it) and a
+    ``bin/java`` entry. HOSTED-JDK-LITERAL-001: these tests used a literal macOS path (/Library/Java/JavaVirtualMachines/...), which only exists on a Mac that has that JDK;
+    on Linux the product's fail-closed proof (``<home>/release``) correctly refused it."""
+    home = base / "fake-jdks" / f"temurin-{major}.jdk" / "Contents" / "Home"
+    (home / "bin").mkdir(parents=True)
+    (home / "release").write_text(f'JAVA_VERSION="{major}.0.12"\n', encoding="utf-8")
+    (home / "bin" / "java").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (home / "bin" / "java").chmod(0o755)
+    return str(home)
+
+
 @pytest.mark.asyncio
-async def test_workflow_jvm_flag_strip_decides_against_override_not_mvn_default(tmp_path):
+async def test_workflow_jvm_flag_strip_decides_against_override_not_mvn_default(tmp_path, scratch_dir):
     """Workflow-level regression test for a real bug found live (2026-08-07,
     ignite_qpid_person re-run immediately after the JAVA_HOME override
     feature shipped): with java_home_override active, the flag-strip call
@@ -15889,6 +15901,7 @@ async def test_workflow_jvm_flag_strip_decides_against_override_not_mvn_default(
     target (17) reported as toolchain['java_version'], the flag - required
     on 17, forbidden only on 24+ - must survive, even though mvn's own
     untouched default is 26."""
+    fake_jdk = _fake_jdk_home(scratch_dir("jdk"))
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     kernel = Kernel(config=cfg)
@@ -15915,7 +15928,7 @@ async def test_workflow_jvm_flag_strip_decides_against_override_not_mvn_default(
 
     with patch(
         "kriya.workflow.attempt._resolve_java_home_override",
-        return_value="/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home",
+        return_value=fake_jdk,
     ), patch("kriya.tools.validate.check_java_toolchain", return_value={
         "java_found": True, "java_version": "17",
         "mvn_found": True, "mvn_java_version": "26",
@@ -15948,7 +15961,7 @@ async def test_workflow_jvm_flag_strip_decides_against_override_not_mvn_default(
     assert "-Djava.security.manager=allow" in final_pom
 
 @pytest.mark.asyncio
-async def test_workflow_pins_exec_plugin_executable_to_resolved_jdk_in_applied_workspace(tmp_path):
+async def test_workflow_pins_exec_plugin_executable_to_resolved_jdk_in_applied_workspace(tmp_path, scratch_dir):
     """Workflow-level regression test for a real bug found live, 2026-08-11
     (kriya-staged-protocol-ignite-qpid): Runtime Verification reported
     PASSED because Kriya forces JAVA_HOME onto the goal-stated target JDK for
@@ -15957,6 +15970,7 @@ async def test_workflow_pins_exec_plugin_executable_to_resolved_jdk_in_applied_w
     later (on a machine where 'mvn' defaults to a genuinely incompatible JDK)
     got a crash Kriya's own verification never saw. Confirms the fix reaches
     the FINAL APPLIED workspace file, not just the worktree copy."""
+    fake_jdk = _fake_jdk_home(scratch_dir("jdk"))
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     kernel = Kernel(config=cfg)
@@ -15983,7 +15997,7 @@ async def test_workflow_pins_exec_plugin_executable_to_resolved_jdk_in_applied_w
 
     with patch(
         "kriya.workflow.attempt._resolve_java_home_override",
-        return_value="/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home",
+        return_value=fake_jdk,
     ), patch("kriya.tools.validate.check_java_toolchain", return_value={
         "java_found": True, "java_version": "17",
         "mvn_found": True, "mvn_java_version": "26",
@@ -16009,7 +16023,7 @@ async def test_workflow_pins_exec_plugin_executable_to_resolved_jdk_in_applied_w
     assert res["quality_gates_passed"] is True
     final_pom = (tmp_path / "pom.xml").read_text()
     assert (
-        "<executable>/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home/bin/java</executable>"
+        f"<executable>{fake_jdk}/bin/java</executable>"
         in final_pom
     )
 
