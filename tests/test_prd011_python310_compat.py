@@ -1,7 +1,9 @@
-"""PRD-011 reopen: Kriya declares requires-python >=3.10, so nothing it
-imports may need a 3.11+-only module or syntax. The concrete defect was an
-unconditional ``import tomllib`` in kriya/tools/toolchain_identity.py, which
-made ``import kriya.cli`` fail on 3.10."""
+"""PRD-011 reopen (history): Kriya once declared requires-python >=3.10, so nothing it imported could need a 3.11+-only module or syntax; the concrete defect was an
+unconditional ``import tomllib`` that made ``import kriya.cli`` fail on 3.10.
+
+SUPPORT CONTRACT CORRECTED 2026-11-04 (PRD-034, owner ruling): measured product code uses ``sqlite3.Connection.setconfig`` (Python 3.12+, kriya/control/history/acquire.py), so
+the 3.10/3.11 claim was false (run 41785193323: 108 and 96 plain-job failures). Kriya now declares ``requires-python >=3.12`` (tests/test_python_support_contract_001.py). The
+tomlcompat facade and its guards below are kept as harmless structure checks; the ``tomli`` backport is no longer a dependency."""
 import ast
 import os
 import subprocess
@@ -68,13 +70,13 @@ def test_tomllib_is_imported_only_through_tomlcompat():
     assert offenders == [], f"import tomllib via kriya.foundation.tomlcompat: {offenders}"
 
 
-def test_tomli_backport_is_declared_for_python_310():
+def test_the_tomli_backport_is_no_longer_declared_because_python_310_and_311_are_not_supported():
     from kriya.core.tomlcompat import tomllib
 
     with open(os.path.join(REPO_ROOT, "pyproject.toml"), "rb") as stream:
         project = tomllib.load(stream)["project"]
-    assert project["requires-python"] == ">=3.10"
-    assert "tomli>=1.1.0; python_version < '3.11'" in project["dependencies"]
+    assert project["requires-python"] == ">=3.12"
+    assert not [dependency for dependency in project["dependencies"] if dependency.startswith("tomli")]
 
 
 # 3.11+-only standard-library names; any of these in kriya/ breaks 3.10.

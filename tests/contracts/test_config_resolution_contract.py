@@ -539,7 +539,23 @@ def kup_forms(tmp: Path, monkeypatch) -> Dict[str, Any]:
 
 # ------------------------------------------------------------------ the comparisons
 
+_PYDANTIC_DOCS_URL = re.compile(r"(https://errors\.pydantic\.dev/)\d+\.\d+(/)")
+
+
+def _scrub_pydantic_docs_url(value: Any) -> Any:
+    """pydantic appends ``https://errors.pydantic.dev/<major.minor>/v/<code>`` to the validation errors the configuration loader quotes. Measured (run 41785193323): pydantic 2.13 -> 2.14
+    changed that version in the ONE case that quotes it and nothing else (the case was equal after this single token). A third party's documentation URL version is not Kriya's behaviour."""
+    if isinstance(value, str):
+        return _PYDANTIC_DOCS_URL.sub(r"\1<pydantic-docs-version>\2", value)
+    if isinstance(value, dict):
+        return {k: _scrub_pydantic_docs_url(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_scrub_pydantic_docs_url(v) for v in value]
+    return value
+
+
 def _compare(name: str, value: Any) -> None:
+    value = _scrub_pydantic_docs_url(value)
     text = json.dumps(value, indent=1, sort_keys=True, ensure_ascii=False) + "\n"
     path = GOLDEN / name
     if WRITE:

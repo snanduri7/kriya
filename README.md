@@ -79,7 +79,7 @@ graph TD
 ## 4. Setup Guide
 
 ### Prerequisites
-- Python 3.10 or higher.
+- Python 3.12 or higher (`requires-python >=3.12`; KUP acquisition uses `sqlite3.Connection.setconfig`, which does not exist before 3.12).
 - [Ollama](https://ollama.com/) running locally.
 - Pull the default models:
   ```bash
@@ -447,9 +447,11 @@ runtime. The installed `plugins` directory is a namespace package in
 site-packages; another distribution shipping a top-level `plugins` package would
 share that directory - a known, accepted packaging limitation.
 
-Use Python 3.14 for the existing `requirements.txt` lock; the supported-version
-CI matrix continues to test declared dependency ranges. This change introduces
-no new dependency or parallel lock mechanism.
+Use Python 3.14 for the existing `requirements.txt` lock. CI installs that exact
+lock (never the declared ranges) on every supported Python (3.12, 3.13, 3.14); the
+only job that still installs declared ranges is the Windows import guard, because
+the lock is POSIX-resolved (PLAT-036). This change introduces no new dependency or
+parallel lock mechanism.
 
 The build backend (`setuptools`) is pinned inside `requirements.txt` itself
 (`pip-compile --allow-unsafe`). After installing `requirements.txt`, run:

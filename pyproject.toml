@@ -7,7 +7,7 @@ name = "kriya"
 version = "0.1.0"
 description = "Kriya AI Engineering Platform"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "click>=8.0.0",
     "pydantic>=2.0.0",
@@ -26,8 +26,6 @@ dependencies = [
     "tree-sitter>=0.25.2,<0.26",
     "tree-sitter-java>=0.23.5",
     "tree-sitter-python>=0.25.0",
-    # stdlib tomllib is 3.11+; kriya/foundation/tomlcompat.py uses this backport on 3.10.
-    "tomli>=1.1.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
@@ -141,7 +139,7 @@ filterwarnings = [
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py312"
 # Exactly ONE directory is excluded, and not by a per-file ignore: handover/MODEL-ROUTING-V1/tools/ holds the Model Routing V1 experiment tooling. It is frozen and its digests are
 # recorded in the task-bank manifest (BANK_MANIFEST_HASH), so retroactive lint or formatting fixes would change experiment evidence. It is not an active Kriya product module. All other
 # handover material, and every product, plugin and test file, stays linted.

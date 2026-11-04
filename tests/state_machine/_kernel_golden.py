@@ -268,6 +268,14 @@ def digest(data: Any) -> str:
 
 
 _CODE = re.compile(r"^[A-Za-z0-9_.:/<>\-]{0,80}$")
+# pydantic appends "For further information visit https://errors.pydantic.dev/<major.minor>/v/<code>" to every validation error it renders. The planner repair prompt quotes that text,
+# so the golden digest changed with pydantic's MINOR VERSION and nothing else (measured, run 41785193323: with 2.13.5 -> 2.14.2 the four prompt texts are byte-identical after this
+# one token). The version of a third party's documentation URL is not Kriya behaviour; every other character of the text is still digested.
+PYDANTIC_DOCS_URL = re.compile(r"(https://errors\.pydantic\.dev/)\d+\.\d+(/)")
+
+
+def scrub_third_party_text(text: str) -> str:
+    return PYDANTIC_DOCS_URL.sub(r"\1<pydantic-docs-version>\2", text)
 
 
 def redact(value: Any, norm: Normalizer, key: str = "") -> Any:
@@ -281,6 +289,7 @@ def redact(value: Any, norm: Normalizer, key: str = "") -> Any:
         if isinstance(item, list):
             return [walk(v) for v in item]
         if isinstance(item, str) and not _CODE.match(item):
+            item = scrub_third_party_text(item)
             return {"text": digest(item.encode("utf-8")), "chars": len(item)}
         return item
     return walk(value)

@@ -467,12 +467,12 @@
      "text": "sha256:865e7d7962dc4370"
     },
     {
-     "chars": 5365,
-     "text": "sha256:631a5dec379db937"
+     "chars": 5384,
+     "text": "sha256:5fbff525031d2397"
     },
     {
-     "chars": 5365,
-     "text": "sha256:02848c29a07001e3"
+     "chars": 5384,
+     "text": "sha256:ac2a60692b8061de"
     }
    ]
   },
@@ -480,8 +480,8 @@
    [
     "planner_output_schema_invalid",
     {
-     "chars": 364,
-     "text": "sha256:fbfbfa894f0999da"
+     "chars": 383,
+     "text": "sha256:eab0528b8e76151a"
     }
    ]
   ],
@@ -612,8 +612,8 @@
      "text": "sha256:c78ee4598519080a"
     },
     "reason": {
-     "chars": 364,
-     "text": "sha256:fbfbfa894f0999da"
+     "chars": 383,
+     "text": "sha256:eab0528b8e76151a"
     },
     "run_id": "<trace:1>",
     "status": "planner_output_schema_invalid",

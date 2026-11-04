@@ -1,12 +1,12 @@
-"""The one TOML reader Kriya uses: stdlib ``tomllib`` on Python 3.11+, the
-API-identical ``tomli`` backport (a declared dependency for
-``python_version < "3.11"``) on 3.10. Import ``tomllib`` from here, never
-directly, so every supported interpreter parses pyproject.toml the same way.
+"""The one TOML reader Kriya uses: stdlib ``tomllib`` (Python 3.11+; Kriya requires
+3.12+, so the ``tomli`` fallback below is unreachable on a supported interpreter and
+``tomli`` is no longer a dependency). Import ``tomllib`` from here, never
+directly, so every interpreter parses pyproject.toml the same way.
 FOUNDATION-owned (full modularization, slice A1); ``kriya/core/tomlcompat.py``
 is its import facade."""
 try:
     import tomllib
-except ModuleNotFoundError:  # Python 3.10 (exercised by the 3.10 CI leg)
+except ModuleNotFoundError:  # unreachable on a supported interpreter (requires-python >=3.12)
     import tomli as tomllib
 
 __all__ = ["tomllib"]

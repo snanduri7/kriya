@@ -15,7 +15,7 @@ Obey handover/ENGINEERING_RULES.md, imported below so it loads at every session 
 ## Commands
 
 ```bash
-# Setup (Python 3.10+)
+# Setup (Python 3.12+)
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .                    # installs `kriya` and `kriya-mcp` console scripts

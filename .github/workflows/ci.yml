@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - name: Fetch the demo-v2 baseline tag and the history that connects it to HEAD
@@ -29,8 +29,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install Kriya (declared dependency ranges)
-        run: pip install -e ".[dev]"
+      # The EXACT locked dependency set (requirements.txt), never the declared ranges: a release-gating job must not float to whatever the index serves today (measured on
+      # run 41785193323: pydantic 2.14.2, click 8.5.0 and pytest 9.2.0 changed three families of tests with no code change). Supported Python: pyproject `requires-python
+      # >=3.12` (sqlite3.Connection.setconfig, used by KUP acquisition, does not exist before 3.12); tests/test_python_support_contract_001.py pins this matrix to it.
+      - name: Install Kriya (the exact locked dependencies)
+        run: |
+          pip install -r requirements.txt
+          pip install -e . --no-deps
+          pip check
 
       - name: Run test suite
         run: pytest -q
@@ -102,12 +108,12 @@ jobs:
           python-version: "3.14"
           # No cache: pip - see the lint job's comment.
 
-      # pylint and astroid at the lock-file versions, for the same reason as
+      # The whole lock file (pylint and astroid included), for the same reason as
       # the ruff pin above. Kriya is installed so imports resolve.
       - name: Install Kriya and the lock-file pylint/astroid
         run: |
-          pip install -e ".[dev]"
-          pip install "$(grep '^pylint==' requirements.txt)" "$(grep '^astroid==' requirements.txt)"
+          pip install -r requirements.txt
+          pip install -e . --no-deps
 
       - name: Run pylint gate
         run: pylint kriya plugins/core_tools tests

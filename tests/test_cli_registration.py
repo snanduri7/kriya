@@ -39,15 +39,28 @@ def _commands(info: Dict[str, Any], path: Tuple[str, ...] = ()) -> Iterator[Tupl
 _HELP_KEYS = ("help", "short_help", "epilog")
 
 
-def _clean(value: Any) -> Any:
+def _clean(value: Any, key: str = "") -> Any:
     """Docstring-derived help compared without its indentation: Python 3.13+ dedents a compiled docstring and 3.10-3.12 keep the source indentation, so the same words
     were rendered as two different strings (HOSTED-GOLDEN-DOCSTRING-INDENT-001: the golden came from 3.14, the hosted certification runs 3.12 - 43 command paths differed
     by whitespace only). The words, their order and every other field are still compared exactly."""
     if isinstance(value, dict):
-        return {k: (inspect.cleandoc(v) if k in _HELP_KEYS and isinstance(v, str) else _clean(v)) for k, v in value.items()}
+        # A parameter's NULL-valued keys are not compared: click 8.5.0 added `"help": null` to an Argument's info dict, a key the golden (click 8.4.2) does not record. Null and absent are
+        # one state; a key with a value, or a value that changed to or from null, is still compared (see the controls below). Measured: with click 8.5.0 the ONLY difference of the 82 command
+        # paths is that key; no command, option name, type, default or help word differs.
+        drop_null = key == "params"
+        return {k: (inspect.cleandoc(v) if k in _HELP_KEYS and isinstance(v, str) else _clean(v, k)) for k, v in value.items() if not (drop_null and v is None)}
     if isinstance(value, list):
-        return [_clean(item) for item in value]
+        return [(_clean_parameter(item) if key == "params" and isinstance(item, dict) else _clean(item, key)) for item in value]
     return value
+
+
+def _clean_parameter(item: Dict[str, Any]) -> Dict[str, Any]:
+    """One parameter entry: null-valued keys dropped (see above), and click's implicit ``--help`` option under one name. click 8.5.0 names that implicit option ``_click_default_help``
+    where 8.4.2 named it ``help`` (measured: the only other difference of the 82 command paths); it is the same ``--help`` flag, so only that exact pair is unified."""
+    cleaned = {k: _clean(v, k) for k, v in item.items() if v is not None}
+    if cleaned.get("name") == "_click_default_help" and cleaned.get("opts") == ["--help"]:
+        cleaned["name"] = "help"
+    return cleaned
 
 
 def _mismatches(tree: Dict[str, Any], golden: Dict[str, Any]) -> list:
@@ -90,3 +103,43 @@ def test_help_text_is_compared_without_docstring_indentation_but_not_without_its
     reworded["commands"]["authority"]["commands"]["approve"]["help"] = original + " Extra words."
     assert _mismatches(indented, golden) == []
     assert _mismatches(reworded, golden) == ["kriya authority approve"]
+
+
+def _first_argument(tree):
+    return next(p for p in tree["commands"]["analyze"]["params"] if p["param_type_name"] == "argument")
+
+
+def test_a_null_valued_key_that_a_newer_click_adds_to_a_parameter_is_not_a_difference_but_anything_with_a_value_is():
+    """HOSTED/plain-job drift (click 8.4.2 -> 8.5.0 added `"help": null` to an Argument's to_info_dict). Null == absent for a parameter key; every other change still fails."""
+    golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
+    assert "help" not in _first_argument(golden)
+    added_null = copy.deepcopy(golden)
+    _first_argument(added_null)["help"] = None
+    assert _mismatches(added_null, golden) == [] and _mismatches(golden, added_null) == []
+    added_value = copy.deepcopy(golden)
+    _first_argument(added_value)["help"] = "now documented"
+    assert _mismatches(added_value, golden) == ["kriya analyze"]
+    for mutate in (lambda a: a.__setitem__("required", False), lambda a: a.__setitem__("name", "other"), lambda a: a.__setitem__("nargs", 2), lambda a: a.pop("opts")):
+        changed = copy.deepcopy(golden)
+        mutate(_first_argument(changed))
+        assert _mismatches(changed, golden) == ["kriya analyze"]
+    to_null = copy.deepcopy(golden)
+    option = next(p for p in to_null["commands"]["authority"]["commands"]["approve"]["params"] if p.get("help"))
+    option["help"] = None
+    assert _mismatches(to_null, golden) == ["kriya authority approve"], "a help that became null is a change, not noise"
+
+
+def test_click_s_renamed_implicit_help_option_is_unified_but_no_other_rename_is():
+    golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
+    implicit = next(p for p in golden["commands"]["analyze"]["params"] if p["opts"] == ["--help"])
+    assert implicit["name"] == "help"
+    renamed = copy.deepcopy(golden)
+    next(p for p in renamed["commands"]["analyze"]["params"] if p["opts"] == ["--help"])["name"] = "_click_default_help"
+    assert _mismatches(renamed, golden) == [] and _mismatches(golden, renamed) == []
+    other = copy.deepcopy(golden)
+    next(p for p in other["commands"]["analyze"]["params"] if p["opts"] == ["--help"])["name"] = "manual"
+    assert _mismatches(other, golden) == ["kriya analyze"]
+    flag = copy.deepcopy(golden)
+    target = next(p for p in flag["commands"]["analyze"]["params"] if p["opts"] == ["--help"])
+    target["name"], target["opts"] = "_click_default_help", ["--helpme"]
+    assert _mismatches(flag, golden) == ["kriya analyze"]

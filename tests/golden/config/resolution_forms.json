@@ -1088,7 +1088,7 @@
  "static_unregistered": {
   "load": {
    "error": "ValidationError",
-   "message": "1 validation error for AppConfig\nstatic_analysis\n  Value error, static_analysis.provider 'nope' is not a registered provider [type=value_error, input_value={'enabled': True, 'provider': 'nope'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+   "message": "1 validation error for AppConfig\nstatic_analysis\n  Value error, static_analysis.provider 'nope' is not a registered provider [type=value_error, input_value={'enabled': True, 'provider': 'nope'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/<pydantic-docs-version>/v/value_error"
   },
   "resolve": {
    "config_dict": "5858f91de6ab90d77066647574c2726693995527f6f59c53ca194949bd8acec7",
