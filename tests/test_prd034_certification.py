@@ -237,10 +237,30 @@ def _certification_job():
 
 def test_the_hosted_certification_job_has_the_capacity_and_the_cold_runner_provisioning():
     job = _certification_job()
-    assert int(re.search(r"timeout-minutes: (\d+)", job).group(1)) >= 300       # about 2.7 h serial locally, plus cold pulls and seeding
+    assert int(re.search(r"timeout-minutes: (\d+)", job).group(1)) >= 360       # owner ruling 2026-11-04: GitHub's hosted-job ceiling for the first hosted measurement
+    assert "serial by" not in job and "CERT_TOPOLOGY" in job and "union == census" in job     # the comment states the sharded topology, not the stale serial one
     assert job.index("pinned_images.py --pull") < job.index("run: scripts/seed_offline_maven.sh") < job.index("run: scripts/certify.sh")
     assert "-n " not in job and "xdist" not in job                                # the canonical certification stays serial
     assert "authority approve" not in job and "--trust-file" not in job            # a hosted job never mints (or smuggles in) an approval
+
+
+def _jobs():
+    body = CI.split("\njobs:\n", 1)[1]
+    parts = re.split(r"\n  ([a-z][a-z-]*):\n", "\n" + body)
+    return {parts[i]: parts[i + 1] for i in range(1, len(parts) - 1, 2)}
+
+
+def test_a_manual_dispatch_never_starts_a_live_inference_job():
+    """Owner ruling 2026-11-04 (section 4): the PRD-034 hosted dispatch is non-live; PRD-035 owns the live matrix. Every job that installs or uses Ollama
+    must be excluded from ``workflow_dispatch`` (and the nightly one stays schedule-only), while the certification job must still run on a dispatch."""
+    jobs = _jobs()
+    assert {"production-certification", "live-model-smoke", "nightly-live-model-matrix", "test", "lint"} <= set(jobs)
+    live = [name for name, text in jobs.items() if "ollama" in text.lower()]
+    assert sorted(live) == ["live-model-smoke", "nightly-live-model-matrix"]            # no third job quietly starts live inference
+    assert "github.event_name != 'workflow_dispatch'" in jobs["live-model-smoke"]
+    assert "github.event_name == 'schedule'" in jobs["nightly-live-model-matrix"]
+    assert re.search(r"(?m)^    if:", jobs["production-certification"]) is None             # the certification job has no gate: a dispatch runs it
+    assert "workflow_dispatch:" in CI.split("\njobs:\n", 1)[0]                          # and a dispatch is possible at all
 
 
 def test_the_seed_script_resolves_from_coordinates_with_both_mavens_and_never_copies_a_cache():

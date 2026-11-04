@@ -18,6 +18,7 @@ import functools
 import os
 import shutil
 import sys
+import tempfile
 
 import pytest
 from _authority_isolation import (
@@ -940,14 +941,20 @@ def pytest_collection_finish(session):
         os.makedirs(progress_dir, exist_ok=True)
         tiers = {record["id"]: tiers_of(record) for record in records}
         _PROGRESS[0] = ProgressWriter(progress_dir, {item.nodeid: tiers.get(base_nodeid(item), ()) for item in session.items})
+        from _mask_residue_sentinel import MaskResidueSentinel
+
+        _MASK_SENTINEL[0] = MaskResidueSentinel(progress_dir, tempfile.gettempdir())
 
 
 _PROGRESS: list = [None]  # the run's ProgressWriter (tests/_certification_progress.py), set when --certification-report is given
+_MASK_SENTINEL: list = [None]  # CERT-TMP-MASK-RESIDUE-EXCLUSIVE-001: recording-only (tests/_mask_residue_sentinel.py), same activation as _PROGRESS
 
 
 def pytest_runtest_logstart(nodeid, location):  # pylint: disable=unused-argument
     if _PROGRESS[0] is not None:
         _PROGRESS[0].start(nodeid)
+    if _MASK_SENTINEL[0] is not None:
+        _MASK_SENTINEL[0].start(nodeid)
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -961,6 +968,8 @@ def pytest_runtest_call(item):
 def pytest_runtest_logreport(report):
     if _PROGRESS[0] is not None:
         _PROGRESS[0].report(report)
+    if _MASK_SENTINEL[0] is not None and report.when == "teardown":
+        _MASK_SENTINEL[0].end(report.nodeid)
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -968,6 +977,8 @@ def pytest_sessionfinish(session, exitstatus):
 
     if _PROGRESS[0] is not None:
         _PROGRESS[0].finish(int(exitstatus))
+    if _MASK_SENTINEL[0] is not None:
+        _MASK_SENTINEL[0].finish()
 
     release_default_roots()
     model_dir = session.config.getoption("--model-certification")

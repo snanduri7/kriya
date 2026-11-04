@@ -165,10 +165,15 @@ jobs:
     # versions and the production doctor JSON are archived.
     name: Production certification
     runs-on: ubuntu-latest
-    # 300 minutes: operational capacity, not a weakening of any test. The canonical population (`pytest -o addopts= -m "not live_model"`, serial by
-    # design: repository-writer safety, and the timing tests must not share a loaded runner with each other) takes about 2.7 hours locally, and a cold
-    # hosted runner also pulls every pinned image and seeds the offline Maven repository first. Reduce only on measured hosted durations.
-    timeout-minutes: 300
+    # 360 minutes: operational capacity, not a weakening of any test - and GitHub's hosted-job ceiling, so there is no headroom above it. Topology:
+    # scripts/certify.sh runs the SHARDED plan by default (CERT_TOPOLOGY unset): ONE authoritative census of the canonical population (`pytest -o addopts=
+    # -m "not live_model"`), a deterministic static partition into one EXCLUSIVE shard (every Docker / JVM / Maven / toolchain / Semgrep test and every
+    # measured container user, because their leak checks list every kriya container on the daemon) and three ordinary shards (CERT_ORDINARY_SHARDS), each
+    # its own pytest process with its own TMPDIR, basetemp, progress and junit. No shard declares PASS: the verdict comes from the merged junit after the merge
+    # audit proves union == census, the shards disjoint, one result per node and the tiers equal. Measured locally on a 10-core Mac: 1h54m sharded wall (the
+    # exclusive shard alone 1h50m), 4h58m for the serial reference (CERT_TOPOLOGY=serial). A cold 4-vCPU hosted runner also pulls every pinned image and seeds the
+    # offline Maven repository first, so this is the FIRST hosted measurement: reduce only on measured hosted durations.
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -227,6 +232,9 @@ jobs:
 
   live-model-smoke:
     name: Primary live model regression (blocking)
+    # A manual dispatch is the PRD-034 hosted certification, which is non-live by contract (the live matrix is PRD-035): this job installs Ollama and pulls a
+    # model, so it does not start on `workflow_dispatch`. Push, pull request and the nightly schedule are unchanged.
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     # Every other job here runs entirely against mocks - zero live LLM calls.
     # This job is deliberately separate and blocking for the supported
