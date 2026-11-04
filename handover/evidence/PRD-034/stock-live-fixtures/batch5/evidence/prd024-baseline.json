@@ -1,0 +1,34 @@
+{
+  "deltas": [
+    {
+      "aggregate_drop_detected": false,
+      "authority": "pytest_per_test",
+      "blocking": false,
+      "blocking_reasons": [],
+      "diagnostic_level1": "PRE_EXISTING_FAILURE",
+      "flaky_preexisting": {},
+      "level1_classification": "PRE_EXISTING_FAILURE",
+      "level2": {
+        "tests/test_legacy.py::test_known_broken": "PRE_EXISTING_FAILURE"
+      },
+      "level2_available": true,
+      "level2_unavailable_reason": null,
+      "post_environment": "{\"basis\": \"contained-toolchain-image\", \"execution\": \"contained\", \"toolchain\": \"352086846531d3aa20572b24c8818e2e56629124b1761a2e449a6ed0b83712e6\", \"verification_policy\": {\"comparison_version\": 3, \"contained_execution_required\": true, \"containment_backend\": \"oci\", \"egress_policy\": \"local_only\", \"sandbox_cpu_seconds\": 240, \"sandbox_env_allowlist\": [\"HOME\", \"LANG\", \"LC_ALL\", \"USER\", \"SHELL\", \"TMPDIR\", \"TEMP\", \"TMP\", \"JAVA_HOME\", \"M2_HOME\", \"GRADLE_HOME\", \"VIRTUAL_ENV\", \"PYTHONPATH\"], \"sandbox_execution\": true, \"sandbox_memory_mb\": 4096}}",
+      "pre_environment": "{\"basis\": \"contained-toolchain-image\", \"execution\": \"contained\", \"toolchain\": \"352086846531d3aa20572b24c8818e2e56629124b1761a2e449a6ed0b83712e6\", \"verification_policy\": {\"comparison_version\": 3, \"contained_execution_required\": true, \"containment_backend\": \"oci\", \"egress_policy\": \"local_only\", \"sandbox_cpu_seconds\": 240, \"sandbox_env_allowlist\": [\"HOME\", \"LANG\", \"LC_ALL\", \"USER\", \"SHELL\", \"TMPDIR\", \"TEMP\", \"TMP\", \"JAVA_HOME\", \"M2_HOME\", \"GRADLE_HOME\", \"VIRTUAL_ENV\", \"PYTHONPATH\"], \"sandbox_execution\": true, \"sandbox_memory_mb\": 4096}}",
+      "pytest_evidence_status": "complete",
+      "stability": [],
+      "stability_context_id": null,
+      "unestablished_fields_ignored": {},
+      "volatile_fields_ignored": {}
+    }
+  ],
+  "failure_category": null,
+  "policy": [
+    {
+      "auto_decision": null,
+      "configured": "required",
+      "effective": "required"
+    }
+  ],
+  "quality_gates_passed": true
+}

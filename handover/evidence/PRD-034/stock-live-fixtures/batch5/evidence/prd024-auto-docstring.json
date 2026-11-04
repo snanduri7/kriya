@@ -1,0 +1,29 @@
+{
+  "policy": [
+    {
+      "auto_decision": {
+        "reasons": [
+          "no regression-risk signal for this change (an existing test names the changed source, which alone does not require a baseline)"
+        ],
+        "required": false,
+        "signals": {
+          "changed_existing_sources": [
+            "src/pricing.py"
+          ],
+          "execution_weight": "light",
+          "existing_tests": 1,
+          "risk": "LOW",
+          "route_kind": "task",
+          "supporting": {
+            "tested_changed_sources": [
+              "src/pricing.py"
+            ]
+          }
+        }
+      },
+      "configured": "auto",
+      "effective": "disabled"
+    }
+  ],
+  "quality_gates_passed": true
+}

@@ -1,0 +1,214 @@
+{
+  "design": "```json\n{\n  \"files\": [\"inventory.py\"]\n}\n```",
+  "lineage": [
+    {
+      "cited": [
+        "REQ-1",
+        "REQ-2",
+        "REQ-3",
+        "REQ-4"
+      ],
+      "omitted": [],
+      "requirement_set_digest": "3d5b161e268c8253419022239d33e371a63fc482d09603aa22929fc0f361a0cf",
+      "stage": "plan"
+    },
+    {
+      "cited": [],
+      "omitted": [
+        "REQ-1",
+        "REQ-2",
+        "REQ-3",
+        "REQ-4"
+      ],
+      "requirement_set_digest": "3d5b161e268c8253419022239d33e371a63fc482d09603aa22929fc0f361a0cf",
+      "stage": "design"
+    }
+  ],
+  "plan": "```markdown\n# Inventory.py Creation Plan\n\n## Step 1: Create inventory.py file\n- **Files**: Create `inventory.py` (REQ-1)\n- **Content**: \n  - Add constant MAX_STOCK = 500 (REQ-2)\n  - Add function restock(current, amount) that returns min(current + amount, MAX_STOCK) (REQ-3, REQ-4)\n\n## Step 2: Verify inventory.py functionality\n- **Files**: None (verification only)\n- **Content**: \n  - Confirm MAX_STOCK is set to 500 (REQ-2)\n  - Confirm restock function works correctly (REQ-3, REQ-4)\n  - Verify that restock never returns more than MAX_STOCK (REQ-4)\n\n```",
+  "quality_gates_passed": true,
+  "requirements": {
+    "digest": "3d5b161e268c8253419022239d33e371a63fc482d09603aa22929fc0f361a0cf",
+    "evidence": {},
+    "goal_digest": "72c0c08a2b593cee84b06be5927e6f1da33e89681ebf2fcc8b3e56e7f953aec5",
+    "outcomes": {
+      "REQ-1": "unverified",
+      "REQ-2": "unverified",
+      "REQ-3": "unverified",
+      "REQ-4": "unverified"
+    },
+    "requirements": [
+      {
+        "id": "REQ-1",
+        "kind": "requirement",
+        "ordinal": 1,
+        "source": "goal",
+        "text": "Create inventory.py for a small stock tracker."
+      },
+      {
+        "id": "REQ-2",
+        "kind": "requirement",
+        "ordinal": 2,
+        "source": "goal",
+        "text": "Add a constant MAX_STOCK set to 500"
+      },
+      {
+        "id": "REQ-3",
+        "kind": "requirement",
+        "ordinal": 3,
+        "source": "goal",
+        "text": "Add a function restock(current, amount) that returns the new stock level"
+      },
+      {
+        "id": "REQ-4",
+        "kind": "constraint",
+        "ordinal": 4,
+        "source": "goal",
+        "text": "restock must never return more than MAX_STOCK"
+      }
+    ],
+    "verdicts": {
+      "REQ-1": {
+        "detail": "File inventory.py exists and contains the required implementation",
+        "evidence_class": "MODEL_CLAIMED",
+        "evidence_id": "26fa2e29d65e610251841d0c57263f871b07e830eb602bd8d0dbd232fe16a1c4",
+        "model_outcome": "satisfied",
+        "outcome": "unverified",
+        "reason_code": "VERIFIER_CONFIRMED",
+        "revision": 1,
+        "source": "attempt.goal_spec_compliance",
+        "verifier": {
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "runtime_exact": true,
+          "runtime_fingerprint": "7a02e748b2c53a8e02ef3174149a8dc076797e00e1f9d63b0d8fe4974bdbab3c"
+        }
+      },
+      "REQ-2": {
+        "detail": "MAX_STOCK constant is defined as 500 in inventory.py",
+        "evidence_class": "MODEL_CLAIMED",
+        "evidence_id": "26fa2e29d65e610251841d0c57263f871b07e830eb602bd8d0dbd232fe16a1c4",
+        "model_outcome": "satisfied",
+        "outcome": "unverified",
+        "reason_code": "VERIFIER_CONFIRMED",
+        "revision": 1,
+        "source": "attempt.goal_spec_compliance",
+        "verifier": {
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "runtime_exact": true,
+          "runtime_fingerprint": "7a02e748b2c53a8e02ef3174149a8dc076797e00e1f9d63b0d8fe4974bdbab3c"
+        }
+      },
+      "REQ-3": {
+        "detail": "restock function with parameters (current, amount) exists in inventory.py",
+        "evidence_class": "MODEL_CLAIMED",
+        "evidence_id": "26fa2e29d65e610251841d0c57263f871b07e830eb602bd8d0dbd232fe16a1c4",
+        "model_outcome": "satisfied",
+        "outcome": "unverified",
+        "reason_code": "VERIFIER_CONFIRMED",
+        "revision": 1,
+        "source": "attempt.goal_spec_compliance",
+        "verifier": {
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "runtime_exact": true,
+          "runtime_fingerprint": "7a02e748b2c53a8e02ef3174149a8dc076797e00e1f9d63b0d8fe4974bdbab3c"
+        }
+      },
+      "REQ-4": {
+        "detail": "restock function uses min(current + amount, MAX_STOCK) to ensure it never exceeds MAX_STOCK",
+        "evidence_class": "MODEL_CLAIMED",
+        "evidence_id": "26fa2e29d65e610251841d0c57263f871b07e830eb602bd8d0dbd232fe16a1c4",
+        "model_outcome": "satisfied",
+        "outcome": "unverified",
+        "reason_code": "VERIFIER_CONFIRMED",
+        "revision": 1,
+        "source": "attempt.goal_spec_compliance",
+        "verifier": {
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "runtime_exact": true,
+          "runtime_fingerprint": "7a02e748b2c53a8e02ef3174149a8dc076797e00e1f9d63b0d8fe4974bdbab3c"
+        }
+      }
+    },
+    "version": 1
+  },
+  "verdicts": [
+    {
+      "evidence": {
+        "REQ-1": "File inventory.py exists and contains the required implementation",
+        "REQ-2": "MAX_STOCK constant is defined as 500 in inventory.py",
+        "REQ-3": "restock function with parameters (current, amount) exists in inventory.py",
+        "REQ-4": "restock function uses min(current + amount, MAX_STOCK) to ensure it never exceeds MAX_STOCK"
+      },
+      "evidence_id": "26fa2e29d65e610251841d0c57263f871b07e830eb602bd8d0dbd232fe16a1c4",
+      "findings": [],
+      "outcomes": {
+        "REQ-1": "unverified",
+        "REQ-2": "unverified",
+        "REQ-3": "unverified",
+        "REQ-4": "unverified"
+      },
+      "requirement_set_digest": "3d5b161e268c8253419022239d33e371a63fc482d09603aa22929fc0f361a0cf",
+      "verdicts": {
+        "REQ-1": {
+          "detail": "File inventory.py exists and contains the required implementation",
+          "evidence_class": "MODEL_CLAIMED",
+          "evidence_id": "26fa2e29d65e610251841d0c57263f871b07e830eb602bd8d0dbd232fe16a1c4",
+          "model_outcome": "satisfied",
+          "outcome": "unverified",
+          "reason_code": "VERIFIER_CONFIRMED",
+          "revision": 1,
+          "source": "attempt.goal_spec_compliance",
+          "verifier": {
+            "model": "qwen3-coder:30b-kriya-e52213655394",
+            "runtime_exact": true,
+            "runtime_fingerprint": "7a02e748b2c53a8e02ef3174149a8dc076797e00e1f9d63b0d8fe4974bdbab3c"
+          }
+        },
+        "REQ-2": {
+          "detail": "MAX_STOCK constant is defined as 500 in inventory.py",
+          "evidence_class": "MODEL_CLAIMED",
+          "evidence_id": "26fa2e29d65e610251841d0c57263f871b07e830eb602bd8d0dbd232fe16a1c4",
+          "model_outcome": "satisfied",
+          "outcome": "unverified",
+          "reason_code": "VERIFIER_CONFIRMED",
+          "revision": 1,
+          "source": "attempt.goal_spec_compliance",
+          "verifier": {
+            "model": "qwen3-coder:30b-kriya-e52213655394",
+            "runtime_exact": true,
+            "runtime_fingerprint": "7a02e748b2c53a8e02ef3174149a8dc076797e00e1f9d63b0d8fe4974bdbab3c"
+          }
+        },
+        "REQ-3": {
+          "detail": "restock function with parameters (current, amount) exists in inventory.py",
+          "evidence_class": "MODEL_CLAIMED",
+          "evidence_id": "26fa2e29d65e610251841d0c57263f871b07e830eb602bd8d0dbd232fe16a1c4",
+          "model_outcome": "satisfied",
+          "outcome": "unverified",
+          "reason_code": "VERIFIER_CONFIRMED",
+          "revision": 1,
+          "source": "attempt.goal_spec_compliance",
+          "verifier": {
+            "model": "qwen3-coder:30b-kriya-e52213655394",
+            "runtime_exact": true,
+            "runtime_fingerprint": "7a02e748b2c53a8e02ef3174149a8dc076797e00e1f9d63b0d8fe4974bdbab3c"
+          }
+        },
+        "REQ-4": {
+          "detail": "restock function uses min(current + amount, MAX_STOCK) to ensure it never exceeds MAX_STOCK",
+          "evidence_class": "MODEL_CLAIMED",
+          "evidence_id": "26fa2e29d65e610251841d0c57263f871b07e830eb602bd8d0dbd232fe16a1c4",
+          "model_outcome": "satisfied",
+          "outcome": "unverified",
+          "reason_code": "VERIFIER_CONFIRMED",
+          "revision": 1,
+          "source": "attempt.goal_spec_compliance",
+          "verifier": {
+            "model": "qwen3-coder:30b-kriya-e52213655394",
+            "runtime_exact": true,
+            "runtime_fingerprint": "7a02e748b2c53a8e02ef3174149a8dc076797e00e1f9d63b0d8fe4974bdbab3c"
+          }
+        }
+      }
+    }
+  ]
+}

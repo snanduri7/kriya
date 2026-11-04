@@ -1,0 +1,10 @@
+{
+  "adapter": "kriya-ollama-native/3",
+  "effective_context_window": "32768",
+  "expected_context_window": 32768,
+  "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+  "model": "qwen3-coder:30b-kriya-e52213655394",
+  "qualification": "QUALIFIED",
+  "runtime_exact": "True",
+  "runtime_fingerprint": "7a02e748b2c53a8e02ef3174149a8dc076797e00e1f9d63b0d8fe4974bdbab3c"
+}

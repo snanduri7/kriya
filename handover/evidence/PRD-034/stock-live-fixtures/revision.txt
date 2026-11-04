@@ -1,0 +1,6 @@
+branch=arch/containment-rebuild-v2
+HEAD=9d88ff820e24c2c6a811ef3b35a9cf4316811c68
+tree=b2c7e2b9ee7f5ff9bd23d6a4bff55c44b8476ac9
+status_lines=       0
+verified_ref=7eddc5d6e255
+2026-11-04T00:25:40Z

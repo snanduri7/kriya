@@ -1,0 +1,69 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2
+configfile: pyproject.toml
+plugins: xdist-3.8.0, asyncio-1.4.0, anyio-4.14.2, testmon-2.2.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 5 items
+
+tests/test_live_prd020_024_batch5.py 
+[Usage: 2821 input tokens, 160 output tokens | Time: 3.07s | Finish: stop]
+
+[Usage: 925 input tokens, 15 output tokens | Time: 0.79s | Finish: stop]
+
+[Usage: 1145 input tokens, 400 output tokens | Time: 6.96s | Finish: stop]
+
+[Usage: 1448 input tokens, 267 output tokens | Time: 4.71s | Finish: stop]
+
+[Usage: 2341 input tokens, 501 output tokens | Time: 9.12s | Finish: stop]
+.
+[Usage: 2849 input tokens, 825 output tokens | Time: 12.91s | Finish: stop]
+
+[Usage: 4136 input tokens, 673 output tokens | Time: 13.81s | Finish: stop]
+
+[Usage: 1502 input tokens, 457 output tokens | Time: 7.79s | Finish: stop]
+
+[Usage: 2241 input tokens, 43 output tokens | Time: 3.55s | Finish: stop]
+
+[Usage: 2267 input tokens, 50 output tokens | Time: 3.64s | Finish: stop]
+
+[Usage: 1042 input tokens, 153 output tokens | Time: 2.53s | Finish: stop]
+
+[Usage: 1669 input tokens, 256 output tokens | Time: 4.82s | Finish: stop]
+.
+[Usage: 2773 input tokens, 1085 output tokens | Time: 17.01s | Finish: stop]
+
+[Usage: 1832 input tokens, 113 output tokens | Time: 3.40s | Finish: stop]
+
+[Usage: 2192 input tokens, 112 output tokens | Time: 4.50s | Finish: stop]
+
+[Usage: 2291 input tokens, 272 output tokens | Time: 7.02s | Finish: stop]
+
+[Usage: 1348 input tokens, 142 output tokens | Time: 3.06s | Finish: stop]
+
+[Usage: 2278 input tokens, 359 output tokens | Time: 6.76s | Finish: stop]
+.
+[Usage: 2853 input tokens, 558 output tokens | Time: 9.08s | Finish: stop]
+
+[Usage: 1389 input tokens, 94 output tokens | Time: 2.42s | Finish: stop]
+
+[Usage: 1674 input tokens, 85 output tokens | Time: 3.40s | Finish: stop]
+
+[Usage: 1056 input tokens, 111 output tokens | Time: 2.02s | Finish: stop]
+
+[Usage: 1628 input tokens, 235 output tokens | Time: 4.04s | Finish: stop]
+.
+[Usage: 2853 input tokens, 689 output tokens | Time: 10.97s | Finish: stop]
+
+[Usage: 1520 input tokens, 17 output tokens | Time: 1.60s | Finish: stop]
+
+[Usage: 1727 input tokens, 83 output tokens | Time: 3.50s | Finish: stop]
+
+[Usage: 1054 input tokens, 115 output tokens | Time: 2.01s | Finish: stop]
+
+[Usage: 1624 input tokens, 224 output tokens | Time: 3.81s | Finish: stop]
+.
+
+- generated xml file: /Users/sriramnanduri/kriya-cert-2026-11-02/stock-live/batch5/junit.xml -
+======================== 5 passed in 302.34s (0:05:02) =========================
+exit=0

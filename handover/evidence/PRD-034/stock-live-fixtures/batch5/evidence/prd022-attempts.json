@@ -1,0 +1,24 @@
+{
+  "branch_executed": "no_ownership_violation_retry",
+  "developer_calls": [
+    {
+      "implicated_files": null,
+      "known_target_files": [
+        "src/product.py",
+        "tests/test_product.py"
+      ],
+      "operation_by_file": {
+        "src/product.py": "create_full_file",
+        "tests/test_product.py": "create_full_file"
+      },
+      "prior_error_context": null
+    }
+  ],
+  "files": [
+    "src/product.py",
+    "tests/test_product.py"
+  ],
+  "ownership_findings": null,
+  "quality_gates_passed": true,
+  "redirect_restored": []
+}

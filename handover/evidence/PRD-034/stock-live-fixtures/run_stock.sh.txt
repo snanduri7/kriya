@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# usage: run_stock.sh batch6|batch5   - ONE live pass of one stock module (owner ruling 2026-11-04 section 4)
+M=$1; S=$HOME/kriya-cert-2026-11-02/stock-live
+cd ~/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2 && source .venv/bin/activate
+export KRIYA_RELEASE_CONFIG=$HOME/.kriya/operator/graphify-qwen3coder-native-production.yaml
+case $M in batch6) F=tests/test_live_prd025_029_batch6.py; export KRIYA_BATCH6_EVIDENCE_DIR=$S/batch6/evidence;; batch5) F=tests/test_live_prd020_024_batch5.py; export KRIYA_BATCH5_EVIDENCE_DIR=$S/batch5/evidence;; esac
+date -u +%FT%TZ > $S/$M/started
+python -m pytest -o addopts= -m live_model -p no:cacheprovider -ra -s --junitxml=$S/$M/junit.xml $F > $S/$M/pytest.txt 2>&1
+echo "exit=$?" >> $S/$M/pytest.txt
+date -u +%FT%TZ > $S/$M/finished
