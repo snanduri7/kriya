@@ -1,0 +1,54 @@
+{
+  "certification_mode": true,
+  "platform": "linux",
+  "platform_pending": [],
+  "skipped": 5,
+  "skips": [
+    {
+      "allowlisted": null,
+      "expired_entry": null,
+      "kind": "skip",
+      "nodeid": "tests/test_code_intel_config.py::test_pinned_spring_framework_petclinic_xml_parses_completely",
+      "phase": "setup",
+      "platform_pending": null,
+      "reason": "pinned benchmark repository not cloned"
+    },
+    {
+      "allowlisted": null,
+      "expired_entry": null,
+      "kind": "skip",
+      "nodeid": "tests/test_demo_v2_owner_state.py::test_reset_all_is_idempotent_and_leaves_no_service",
+      "phase": "setup",
+      "platform_pending": null,
+      "reason": "scenario 01's fixture source is not available on this machine"
+    },
+    {
+      "allowlisted": null,
+      "expired_entry": null,
+      "kind": "skip",
+      "nodeid": "tests/test_kup_write_boundary.py::test_acquisition_writes_only_source_sidecars_and_the_snapshot_directory_and_inspection_writes_nothing",
+      "phase": "setup",
+      "platform_pending": null,
+      "reason": "needs macOS sandbox-exec and the unified log"
+    },
+    {
+      "allowlisted": null,
+      "expired_entry": null,
+      "kind": "skip",
+      "nodeid": "tests/test_kup_write_boundary.py::test_negative_control_without_the_fixed_bytecode_suppression_a_fresh_install_attempts_pyc_writes",
+      "phase": "setup",
+      "platform_pending": null,
+      "reason": "needs macOS sandbox-exec and the unified log"
+    },
+    {
+      "allowlisted": null,
+      "expired_entry": null,
+      "kind": "skip",
+      "nodeid": "tests/test_s19p1e_dormant_repository.py::test_a_case_variant_attributes_file_on_a_case_insensitive_disk_is_refused",
+      "phase": "call",
+      "platform_pending": null,
+      "reason": "needs a case-insensitive file system (the D5b shape)"
+    }
+  ],
+  "unexpected": 5
+}

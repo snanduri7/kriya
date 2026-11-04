@@ -1,0 +1,135 @@
+E401 [*] Multiple imports on one line
+ --> handover/evidence/PRD-034/hosted-run-41752818557-bootstrap-failure/measure_refused_sidecars.py:1:1
+  |
+1 | import json,sys,hashlib,urllib.request,re
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2 | S=sys.argv[1]; M=sys.argv[2]
+3 | man={f["path"]:f for f in json.load(open(M))["files"]}
+  |
+help: Split imports
+  |
+  - import json,sys,hashlib,urllib.request,re
+1 + import json
+2 + import sys
+3 + import hashlib
+4 + import urllib.request
+5 + import re
+6 | S=sys.argv[1]; M=sys.argv[2]
+  |
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> handover/evidence/PRD-034/hosted-run-41752818557-bootstrap-failure/measure_refused_sidecars.py:1:1
+  |
+1 | import json,sys,hashlib,urllib.request,re
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2 | S=sys.argv[1]; M=sys.argv[2]
+3 | man={f["path"]:f for f in json.load(open(M))["files"]}
+  |
+help: Organize imports
+  |
+  - import json,sys,hashlib,urllib.request,re
+1 + import hashlib
+2 + import json
+3 + import re
+4 + import sys
+5 + import urllib.request
+6 +
+7 | S=sys.argv[1]; M=sys.argv[2]
+  |
+
+E702 Multiple statements on one line (semicolon)
+ --> handover/evidence/PRD-034/hosted-run-41752818557-bootstrap-failure/measure_refused_sidecars.py:2:14
+  |
+1 | import json,sys,hashlib,urllib.request,re
+2 | S=sys.argv[1]; M=sys.argv[2]
+  |              ^
+3 | man={f["path"]:f for f in json.load(open(M))["files"]}
+4 | paths=[l.strip() for l in open(S+"/refused.txt") if l.strip()]
+  |
+
+E741 Ambiguous variable name: `l`
+ --> handover/evidence/PRD-034/hosted-run-41752818557-bootstrap-failure/measure_refused_sidecars.py:4:22
+  |
+2 | S=sys.argv[1]; M=sys.argv[2]
+3 | man={f["path"]:f for f in json.load(open(M))["files"]}
+4 | paths=[l.strip() for l in open(S+"/refused.txt") if l.strip()]
+  |                      ^
+5 | C="https://repo.maven.apache.org/maven2/"
+6 | def get(p): return urllib.request.urlopen(C+p,timeout=60).read()
+  |
+
+E702 Multiple statements on one line (semicolon)
+ --> handover/evidence/PRD-034/hosted-run-41752818557-bootstrap-failure/measure_refused_sidecars.py:7:8
+  |
+5 | C="https://repo.maven.apache.org/maven2/"
+6 | def get(p): return urllib.request.urlopen(C+p,timeout=60).read()
+7 | rows=[];bad=[]
+  |        ^
+8 | for sp in paths:
+9 |     ap=sp[:-5]
+  |
+
+E702 Multiple statements on one line (semicolon)
+  --> handover/evidence/PRD-034/hosted-run-41752818557-bootstrap-failure/measure_refused_sidecars.py:10:17
+   |
+ 8 | for sp in paths:
+ 9 |     ap=sp[:-5]
+10 |     side=get(sp); art=get(ap)
+   |                 ^
+11 |     art_ok=hashlib.sha256(art).hexdigest()==man[ap]["sha256"]       # Central artifact == frozen artifact?
+12 |     txt=side.decode("utf-8","replace")
+   |
+
+E701 Multiple statements on one line (colon)
+  --> handover/evidence/PRD-034/hosted-run-41752818557-bootstrap-failure/measure_refused_sidecars.py:22:14
+   |
+20 |     rep=("bare" if re.fullmatch(r"\s*[0-9a-fA-F]{40}\s*",txt) else "hash *name" if "*" in txt else "hash staging-path" if "/" in txt.s…
+21 |     ok=art_ok and val==sha1 and which==["bare"]
+22 |     if not ok: bad.append(sp)
+   |              ^
+23 |     rows.append((sp,rep,val==sha1,art_ok,which,repr(side)[:90]))
+24 | for r in rows: print(r)
+   |
+
+E701 Multiple statements on one line (colon)
+  --> handover/evidence/PRD-034/hosted-run-41752818557-bootstrap-failure/measure_refused_sidecars.py:24:14
+   |
+22 |     if not ok: bad.append(sp)
+23 |     rows.append((sp,rep,val==sha1,art_ok,which,repr(side)[:90]))
+24 | for r in rows: print(r)
+   |              ^
+25 | print("TOTAL",len(rows),"ALL_OK",not bad,"BAD",bad)
+26 | from collections import Counter; print(Counter(r[1] for r in rows))
+   |
+
+E402 Module level import not at top of file
+  --> handover/evidence/PRD-034/hosted-run-41752818557-bootstrap-failure/measure_refused_sidecars.py:26:1
+   |
+24 | for r in rows: print(r)
+25 | print("TOTAL",len(rows),"ALL_OK",not bad,"BAD",bad)
+26 | from collections import Counter; print(Counter(r[1] for r in rows))
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: Move module level imports to top of file
+
+I001 Import block is un-sorted or un-formatted
+  --> handover/evidence/PRD-034/hosted-run-41752818557-bootstrap-failure/measure_refused_sidecars.py:26:1
+   |
+24 | for r in rows: print(r)
+25 | print("TOTAL",len(rows),"ALL_OK",not bad,"BAD",bad)
+26 | from collections import Counter; print(Counter(r[1] for r in rows))
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: Organize imports
+
+E702 Multiple statements on one line (semicolon)
+  --> handover/evidence/PRD-034/hosted-run-41752818557-bootstrap-failure/measure_refused_sidecars.py:26:32
+   |
+24 | for r in rows: print(r)
+25 | print("TOTAL",len(rows),"ALL_OK",not bad,"BAD",bad)
+26 | from collections import Counter; print(Counter(r[1] for r in rows))
+   |                                ^
+   |
+
+Found 11 errors.
+[*] 2 fixable with the `--fix` option.

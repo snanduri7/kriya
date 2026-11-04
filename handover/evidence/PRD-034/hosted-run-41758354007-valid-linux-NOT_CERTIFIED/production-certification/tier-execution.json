@@ -1,0 +1,49 @@
+{
+  "ok": false,
+  "per_tier": {
+    "docker": {
+      "failed": 4,
+      "missing": 0,
+      "passed": 281,
+      "skipped": 0
+    },
+    "gradle_container": {
+      "failed": 0,
+      "missing": 0,
+      "passed": 5,
+      "skipped": 0
+    },
+    "jvm": {
+      "failed": 5,
+      "missing": 0,
+      "passed": 83,
+      "skipped": 0
+    },
+    "live_static_analysis": {
+      "failed": 0,
+      "missing": 0,
+      "passed": 11,
+      "skipped": 0
+    },
+    "real_toolchain": {
+      "failed": 0,
+      "missing": 0,
+      "passed": 5,
+      "skipped": 0
+    }
+  },
+  "platform_pending": [],
+  "problems": [
+    "docker: tests/test_d2_authority_namespace.py::test_real_oci_a_read_only_workspace_hides_the_leaf_contents -> failed",
+    "docker: tests/test_demo_v2_spring_ignite.py::test_every_cache_get_mutant_of_the_reference_is_killed_and_the_control_passes -> failed",
+    "jvm: tests/test_demo_v2_spring_ignite.py::test_every_cache_get_mutant_of_the_reference_is_killed_and_the_control_passes -> failed",
+    "jvm: tests/test_demo_v2_spring_ignite.py::test_post_check_passes_on_the_reference_and_leaves_the_project_untouched -> failed",
+    "jvm: tests/test_demo_v2_spring_ignite.py::test_post_check_rejects_a_program_that_prints_the_line_without_ignite -> failed",
+    "docker: tests/test_prd034_registry_mirror_real.py::test_c_d_an_empty_cache_acquires_through_the_mirror_and_executes_offline_with_central_not_even_authorized -> failed",
+    "jvm: tests/test_prd034_registry_mirror_real.py::test_c_d_an_empty_cache_acquires_through_the_mirror_and_executes_offline_with_central_not_even_authorized -> failed",
+    "docker: tests/test_prd034_registry_mirror_real.py::test_e_a_required_artifact_missing_from_the_mirror_fails_the_acquisition_and_nothing_reaches_central -> failed",
+    "jvm: tests/test_prd034_registry_mirror_real.py::test_e_a_required_artifact_missing_from_the_mirror_fails_the_acquisition_and_nothing_reaches_central -> failed",
+    "mandatory tier 'docker': 281 passed < floor 283",
+    "mandatory tier 'jvm': 83 passed < floor 86"
+  ]
+}

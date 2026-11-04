@@ -1,0 +1,7 @@
+2026-11-04T04:53:17Z
+== 41758354007
+{"conclusion":"failure","jobs":["Platform import and architecture guard (Windows): completed/success","Test (Python 3.10): completed/failure","Test (Python 3.14): completed/failure","Source distribution and clean wheel install: completed/success","Lint (ruff): completed/failure","Static check (pylint, unbound/undefined names): completed/success","Production certification: completed/failure","Test (Python 3.12): completed/failure","Verify dependency lock file: completed/failure","Test (Python 3.13): completed/failure","Test (Python 3.11): completed/failure","Nightly live model (${{ matrix.model }}): completed/skipped","Primary live model regression (blocking): completed/skipped"],"status":"completed"}
+== 41752818557
+{"conclusion":"failure","jobs":["Production certification: completed/failure","Source distribution and clean wheel install: completed/success","Test (Python 3.13): completed/failure","Static check (pylint, unbound/undefined names): completed/success","Platform import and architecture guard (Windows): completed/failure","Test (Python 3.12): completed/failure","Test (Python 3.14): completed/failure","Lint (ruff): completed/success","Verify dependency lock file: completed/failure","Test (Python 3.10): completed/failure","Test (Python 3.11): completed/failure","Primary live model regression (blocking): completed/skipped","Nightly live model (${{ matrix.model }}): completed/skipped"],"status":"completed"}
+
+[exited with code 0]
