@@ -200,6 +200,29 @@ def test_a_refusal_after_the_first_leaf_leaks_no_scratch_directory(tmp_path):
     assert _mask_scratch_dirs() == before
 
 
+def test_the_mask_scratch_directory_is_an_empty_readable_never_writable_directory_the_host_can_remove(tmp_path):
+    """LINUX-OCI-MASK-READABLE-001: the mask a read-only workspace binds over a protected leaf must be traversable by ANY contained identity (a root without
+    CAP_DAC_OVERRIDE on native Linux is not the host user, so 0700 made listing it a PermissionError), writable by nobody, empty, and removable by the host."""
+    ws = tmp_path / "ws"
+    (ws / ".kriya" / "control").mkdir(parents=True)
+    (ws / ".kriya" / "checkpoints").mkdir()
+    (ws / ".kriya" / "control" / "secret.txt").write_text("REAL-CONTROL")
+    before = _mask_scratch_dirs()
+    args, cleanup = authority_state_mask_args(str(ws), workspace_writable=False)
+    created = sorted(_mask_scratch_dirs() - before)
+    try:
+        assert len(created) == 2 and cleanup is not None, (created, args)
+        for name in created:
+            directory = Path(tempfile.gettempdir()) / name
+            assert stat.S_IMODE(directory.stat().st_mode) == 0o555, oct(directory.stat().st_mode)  # readable+traversable by all, writable by none (never 0777)
+            assert os.listdir(directory) == [], "the mask exposes no authority data"
+        assert (ws / ".kriya" / "control" / "secret.txt").read_text() == "REAL-CONTROL", "building the mask never touches the real leaf"
+    finally:
+        if cleanup is not None:
+            cleanup()
+    assert _mask_scratch_dirs() == before, "the host removes a non-writable empty mask"
+
+
 # ------------------------------------------------------------------ C. defaults unchanged
 
 def test_the_null_backend_creates_nothing_in_the_workspace(tmp_path):
@@ -414,6 +437,31 @@ def test_real_oci_a_read_only_workspace_hides_the_leaf_contents(tmp_path):
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "[] ['checkpoints', 'control']"  # the real leaf content (secret.txt) is hidden; nothing was created
     assert sorted(os.listdir(ws / ".kriya")) == ["checkpoints", "control"]
+
+
+@NEEDS_DOCKER
+def test_real_oci_a_read_only_workspace_mask_is_listable_but_cannot_be_written(tmp_path):
+    """LINUX-OCI-MASK-READABLE-001, negative control: the mask the contained process can now list is still not writable (read-only mount AND no write bit),
+    and nothing it tries lands in the real leaf."""
+    ws = _existing_workspace(tmp_path)
+    profile = ContainmentProfile(trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path=str(ws), network=NetworkAuthority.DENIED, workspace_write=False)
+    script = (
+        "import os, json\n"
+        "out = {'listing': sorted(os.listdir('/kriya/workspace/.kriya/control'))}\n"
+        "for name, action in (('create', lambda: open('/kriya/workspace/.kriya/control/forged.txt', 'w')),\n"
+        "                     ('mkdir', lambda: os.mkdir('/kriya/workspace/.kriya/control/forged')),\n"
+        "                     ('chmod', lambda: os.chmod('/kriya/workspace/.kriya/control', 0o777))):\n"
+        "    try:\n"
+        "        action(); out[name] = 'SUCCEEDED'\n"
+        "    except OSError as error:\n"
+        "        out[name] = 'OSError:' + str(error.errno)\n"
+        "print(json.dumps(out))\n")
+    result = ProcessController().run(["python3", "-c", script], cwd=str(ws), timeout=120, containment_profile=profile, containment_backend=OCIContainmentBackend())
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout.strip().splitlines()[-1])
+    assert report["listing"] == [], report
+    assert all(report[attempt] != "SUCCEEDED" for attempt in ("create", "mkdir", "chmod")), report
+    assert sorted(os.listdir(ws / ".kriya" / "control")) == ["secret.txt"] and (ws / ".kriya" / "control" / "secret.txt").read_text() == "REAL-CONTROL"
 
 
 @NEEDS_DOCKER

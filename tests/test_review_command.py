@@ -1,6 +1,9 @@
+import os
+import random
 import subprocess
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from kriya.cli import main
@@ -549,3 +552,67 @@ def test_review_single_java_file_member_coverage_rendered(tmp_path):
     assert res.exit_code == 0, res.output
     assert "1/2 deterministic member(s) accounted for" in res.stdout
     assert "M2" in res.stdout  # the missing member (doWork()) is called out by id
+
+
+# ---- REVIEW-FILE-ORDER-NONDETERMINISM-001: the reviewed set and its order must not depend on the filesystem's enumeration order ----
+
+class _Listed:
+    """What ``os.scandir`` returns, holding already-ordered entries (a context manager, an iterator, closable)."""
+
+    def __init__(self, entries):
+        self._iterator = iter(entries)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self._iterator)
+
+    def close(self):
+        return None
+
+
+def _filesystem_lists_in(order, monkeypatch):
+    """Every directory listing the process takes (os.listdir, and os.scandir which os.walk uses) comes back in ``order(names)``: a filesystem that lists differently,
+    the contents unchanged."""
+    real_listdir, real_scandir = os.listdir, os.scandir
+    monkeypatch.setattr(os, "listdir", lambda path=".": order(list(real_listdir(path))))
+
+    def scandir(path="."):
+        with real_scandir(path) as handle:
+            by_name = {entry.name: entry for entry in handle}
+        return _Listed([by_name[name] for name in order(list(by_name))])
+    monkeypatch.setattr(os, "scandir", scandir)
+
+
+REVIEWED_RELATIVE_PATHS = [f"f{i:02d}.py" if i % 4 != 3 else f"sub/f{i:02d}.py" for i in range(12)]
+
+
+@pytest.mark.parametrize("order", [
+    lambda names: names,
+    lambda names: list(reversed(names)),
+    lambda names: random.Random(7).sample(names, len(names)),
+    lambda names: random.Random(11).sample(names, len(names)),
+], ids=["natural", "reversed", "shuffled-7", "shuffled-11"])
+def test_the_reviewed_files_are_the_first_ten_by_repository_path_whatever_order_the_filesystem_lists(tmp_path, monkeypatch, order):
+    (tmp_path / "kriya.yaml").write_text("llm:\n  context_window: 200000\n")
+    project = tmp_path / "proj"
+    for relative in REVIEWED_RELATIVE_PATHS:
+        (project / relative).parent.mkdir(parents=True, exist_ok=True)
+        (project / relative).write_text(f"MARKER_{os.path.basename(relative)[:-3]} = 1\n")
+    _filesystem_lists_in(order, monkeypatch)
+    mock_complete = AsyncMock(return_value="Looks fine.")
+    with patch("kriya.core.llm.LLMClient.complete", new=mock_complete):
+        res = CliRunner().invoke(main, ["--config", str(tmp_path / "kriya.yaml"), "review", str(project)])
+    assert res.exit_code == 0, res.output
+    prompts = "\n".join(str(call[0][1]) for call in mock_complete.await_args_list)
+    reviewed = sorted(os.path.basename(r)[:-3] for r in REVIEWED_RELATIVE_PATHS if f"MARKER_{os.path.basename(r)[:-3]}" in prompts)
+    # the canonical order is the repository-relative path: the ten smallest paths, whatever the listing order
+    expected = sorted(os.path.basename(r)[:-3] for r in sorted(REVIEWED_RELATIVE_PATHS)[:10])
+    assert reviewed == expected and len(expected) == 10

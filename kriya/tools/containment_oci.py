@@ -327,6 +327,13 @@ def workspace_anchor_args(workspace_host: str) -> List[str]:
     return bind_mount_args(anchor, f"{_CONTAINER_WORKSPACE}/{WORKSPACE_ANCHOR_RELPATH}", writable=True)
 
 
+# LINUX-OCI-MASK-READABLE-001: the mask is an EMPTY directory bound read-only over a protected leaf. ``mkdtemp`` makes it 0700 (host user only); a contained process
+# that is not that user - a read-only workspace runs as root with ``--cap-drop ALL``, i.e. without CAP_DAC_OVERRIDE - then gets EACCES listing it on native Linux
+# bind mounts (Docker Desktop's file sharing hides this on macOS). 0555 lets any contained identity traverse and list the empty mask and nobody write it; it holds
+# no authority data, and the host owner can still remove it (removing an entry needs write access to the PARENT, not to the empty directory).
+_MASK_DIRECTORY_MODE = 0o555
+
+
 def authority_state_mask_args(workspace_host: str, *, tmp_root: Optional[str] = None,
                               workspace_writable: bool = False) -> Tuple[List[str], Optional[Callable[[], None]]]:
     """The docker args protecting Kriya's own state inside a mounted workspace, and a cleanup for the scratch directories they use.
@@ -348,6 +355,7 @@ def authority_state_mask_args(workspace_host: str, *, tmp_root: Optional[str] = 
     for relpath in masked:
         empty = tempfile.mkdtemp(prefix="kriya-authority-mask-", dir=tmp_root)
         scratch_dirs.append(empty)
+        os.chmod(empty, _MASK_DIRECTORY_MODE)
         args += bind_mount_args(empty, f"{_CONTAINER_WORKSPACE}/{relpath}", writable=False)
 
     def _cleanup_masks() -> None:

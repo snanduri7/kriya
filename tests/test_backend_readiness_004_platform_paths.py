@@ -15,6 +15,7 @@ import re
 import pytest
 
 from kriya.context import workspace_identity as wi
+from kriya.platform import filesystem_semantics as fs
 from kriya.platform.filesystem_semantics import PathRelation, canonical_spelling, path_relation
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -74,6 +75,45 @@ def test_02_a_case_variant_of_the_workspace_is_the_same_workspace_and_legacy_ids
     assert wi.workspace_identities(str(workspace)) >= {wi.workspace_identity(str(workspace)), wi.legacy_workspace_identity(str(workspace))}
     # a component that does not exist keeps its spelling; symlinks resolve
     assert canonical_spelling(str(workspace / "NoSuch" / "Child")).endswith(os.path.join("NoSuch", "Child"))
+
+
+# ---- HOSTED-CANONICAL-SPELLING-001: a differently cased name is folded into an existing entry only where the FILESYSTEM resolves both to one object ----
+
+def test_a_filesystem_that_resolves_both_spellings_folds_them_to_one_identity(tmp_path, monkeypatch):
+    """Case-insensitive semantics, proved on any host: the (emulated) filesystem answers for the variant with the existing directory's stat."""
+    workspace = tmp_path / "MixedCase"
+    workspace.mkdir()
+    variant = str(tmp_path / "mixedcase")
+    real_stat = fs._stat  # pylint: disable=protected-access
+    monkeypatch.setattr(fs, "_stat", lambda path: real_stat(str(workspace)) if os.path.basename(path) == "mixedcase" else real_stat(path))
+    assert canonical_spelling(variant) == canonical_spelling(str(workspace)) == str(workspace.resolve())
+    assert wi.workspace_identity(variant) == wi.workspace_identity(str(workspace))
+
+
+def test_a_filesystem_that_does_not_resolve_the_variant_keeps_it_distinct(tmp_path, monkeypatch):
+    """Case-sensitive semantics, proved on any host: the (emulated) filesystem has no entry named ``mixedcase``, so it keeps its own spelling and identity even though a
+    differently cased sibling exists - unconditional folding would give two distinct paths one persisted identity."""
+    workspace = tmp_path / "MixedCase"
+    workspace.mkdir()
+    variant = str(tmp_path / "mixedcase")
+    real_stat = fs._stat  # pylint: disable=protected-access
+    monkeypatch.setattr(fs, "_stat", lambda path: (None, True) if path == variant else real_stat(path))
+    assert canonical_spelling(variant) == variant
+    assert wi.workspace_identity(variant) != wi.workspace_identity(str(workspace))
+
+
+def test_directories_differing_only_in_case_are_distinct_where_the_disk_allows_both_and_one_where_it_does_not(tmp_path):
+    """The real disk decides (no OS-name check): a case-sensitive disk holds Foo and foo as two directories with two identities; a case-insensitive one cannot hold both
+    and resolves either spelling to one identity."""
+    upper, lower = tmp_path / "Foo", tmp_path / "foo"
+    upper.mkdir()
+    if _case_variant(upper) is not None:
+        assert canonical_spelling(str(lower)) == canonical_spelling(str(upper))
+        assert wi.workspace_identity(str(lower)) == wi.workspace_identity(str(upper))
+        return
+    lower.mkdir()
+    assert canonical_spelling(str(upper)) == str(upper.resolve()) and canonical_spelling(str(lower)) == str(lower.resolve())
+    assert wi.workspace_identity(str(upper)) != wi.workspace_identity(str(lower))
 
 
 def test_03_a_legacy_id_written_under_another_spelling_still_validates(tmp_path, monkeypatch):

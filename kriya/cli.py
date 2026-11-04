@@ -7,7 +7,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Collection, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 import click
 
@@ -3921,23 +3921,15 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
             # Fallback to scanning folder recursively if no modified files found
             if not files_to_review:
                 ignore_dirs = {".git", ".venv", "venv", "node_modules", "__pycache__"}
-                for root, dirs, files in os.walk(file_path):
-                    dirs[:] = [d for d in dirs if d not in ignore_dirs and not d.startswith(".")]
-                    for file in files:
-                        _, ext = os.path.splitext(file)
-                        if ext.lower() in REVIEW_EXTENSIONS:
-                            full = os.path.join(root, file)
-                            rel = os.path.relpath(full, file_path)
-                            files_to_review.append((rel, full))
-                            if len(files_to_review) >= 10: # Cap at 10 files
-                                truncated = True
-                                break
-                    if truncated:
+                for rel, full in _ordered_review_files(file_path, REVIEW_EXTENSIONS, ignore_dirs):
+                    files_to_review.append((rel, full))
+                    if len(files_to_review) >= 10: # Cap at 10 files
+                        truncated = True
                         break
                 if truncated:
                     click.secho(
-                        "Note: more than 10 reviewable files found - only the first 10 (by directory "
-                        "scan order) are being reviewed. Re-run against a subdirectory for full coverage.",
+                        "Note: more than 10 reviewable files found - only the first 10 (in repository-relative "
+                        "path order) are being reviewed. Re-run against a subdirectory for full coverage.",
                         fg="yellow", err=True,
                     )
         else:
@@ -4545,6 +4537,29 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
                     f"{', '.join(embedding_failed_sources)}.", bold=True, fg="red")
         sys.exit(1)
     click.secho("Local knowledge base updated successfully.", bold=True, fg="green")
+
+def _ordered_review_files(root: str, extensions: Sequence[str], ignore_dirs: Collection[str]) -> Iterator[Tuple[str, str]]:
+    """The reviewable files under ``root`` as ``(repository-relative path, full path)``, in ONE canonical order: entries of every directory sorted by name, a subdirectory
+    visited at its own position, so the sequence is the repository-relative paths in ascending order (REVIEW-FILE-ORDER-NONDETERMINISM-001). ``os.walk`` order is
+    whatever the filesystem lists (APFS sorted, ext4 hash order), so the first-N selection and the batch composition differed between hosts for identical contents;
+    nothing here depends on directory-entry, inode or enumeration order. Same filters as before: dot-directories and ``ignore_dirs`` are skipped, a symlinked directory
+    is neither listed as a file nor descended into, an unreadable directory is skipped."""
+    def walk(directory: str) -> Iterator[Tuple[str, str]]:
+        try:
+            names = sorted(os.listdir(directory))
+        except OSError:
+            return
+        for name in names:
+            full = os.path.join(directory, name)
+            if os.path.isdir(full):
+                if os.path.islink(full) or name in ignore_dirs or name.startswith("."):
+                    continue
+                yield from walk(full)
+            elif os.path.splitext(name)[1].lower() in extensions:
+                yield os.path.relpath(full, root), full
+
+    yield from walk(root)
+
 
 def _design_stage_stop_exit(res: Dict[str, Any]) -> Optional[int]:
     """W3-5 (KERNEL-STAGE-STOP-NO-CATEGORY-001): a design-stage stop (the KnowledgeGuard gap, a rejected Planner response, a rejected Architect file list) is a typed

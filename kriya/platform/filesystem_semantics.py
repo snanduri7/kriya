@@ -186,12 +186,22 @@ def path_identity(first: str, second: str) -> PathIdentity:
     return PathIdentity.SAME if same_tail else PathIdentity.DIFFERENT
 
 
+def _same_object(first: str, second: str) -> bool:
+    """The FILESYSTEM says both spellings name one object (HOSTED-CANONICAL-SPELLING-001). A name that merely case-folds to an existing entry is the same directory only
+    where the filesystem resolves it so (macOS APFS default, Windows, casefold mounts); on a case-sensitive filesystem ``mixedcase`` is a different, possibly non-existent
+    path and must keep its own spelling, or two distinct paths would share one persisted identity. Asked of the filesystem itself, never inferred from an OS name."""
+    first_stat, _ = _stat(first)
+    second_stat, _ = _stat(second)
+    return first_stat is not None and second_stat is not None and os.path.samestat(first_stat, second_stat)
+
+
 def canonical_spelling(path: str) -> str:
     """PLAT-017 (BACKEND-READINESS-004): the real path re-spelled exactly as
     the filesystem stores each existing component, so every case or
     normalization variant of one directory yields one string on a
     case-insensitive filesystem (and a case-sensitive one is unchanged:
-    only an exact entry matches there). Components that do not exist keep
+    only an exact entry matches there - a differently cased name is folded into an
+    existing entry only when the filesystem itself resolves both to one object). Components that do not exist keep
     the spelling given. Used for identities that are persisted and
     compared, never for authority decisions (``path_relation`` does those)."""
     try:
@@ -210,7 +220,7 @@ def canonical_spelling(path: str) -> str:
             spelled.append(part)
             current = candidate
             continue
-        actual = part if part in entries else next((e for e in entries if fold_name(e) == fold_name(part)), part)
+        actual = part if part in entries else next((e for e in entries if fold_name(e) == fold_name(part) and _same_object(candidate, os.path.join(current, e) if current else e)), part)
         spelled.append(actual)
         current = os.path.join(current, actual) if current else actual
     return (drive + os.sep if tail.startswith(os.sep) else drive) + os.sep.join(spelled) if spelled else real
