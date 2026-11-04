@@ -1,0 +1,1565 @@
+﻿2026-11-04T06:23:31.7983304Z Current runner version: '2.338.2'
+2026-11-04T06:23:31.8009604Z ##[group]Runner Image Provisioner
+2026-11-04T06:23:31.8010618Z Hosted Compute Agent
+2026-11-04T06:23:31.8011509Z Version: 20261021.618
+2026-11-04T06:23:31.8012201Z Commit: 21505ad2541d5be6135ed84fc33697146cf75b8e
+2026-11-04T06:23:31.8012936Z Build Date: 2026-10-21T00:45:21Z
+2026-11-04T06:23:31.8013678Z Worker ID: {d8ad0851-0989-4f21-a520-1330b05b6196}
+2026-11-04T06:23:31.8014414Z Region: westus2
+2026-11-04T06:23:31.8014945Z Cloud: Azure
+2026-11-04T06:23:31.8015550Z ##[endgroup]
+2026-11-04T06:23:31.8017069Z ##[group]Operating System
+2026-11-04T06:23:31.8017858Z Ubuntu
+2026-11-04T06:23:31.8018439Z 24.04.5
+2026-11-04T06:23:31.8018982Z LTS
+2026-11-04T06:23:31.8019573Z ##[endgroup]
+2026-11-04T06:23:31.8020192Z ##[group]Runner Image
+2026-11-04T06:23:31.8020834Z Image: ubuntu-24.04
+2026-11-04T06:23:31.8021947Z Version: 20261025.353.1
+2026-11-04T06:23:31.8023398Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261025.353/images/ubuntu/Ubuntu2404-Readme.md
+2026-11-04T06:23:31.8025001Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261025.353
+2026-11-04T06:23:31.8026018Z ##[endgroup]
+2026-11-04T06:23:31.8027288Z ##[group]GITHUB_TOKEN Permissions
+2026-11-04T06:23:31.8029295Z Contents: read
+2026-11-04T06:23:31.8029951Z Metadata: read
+2026-11-04T06:23:31.8030526Z Packages: read
+2026-11-04T06:23:31.8032047Z ##[endgroup]
+2026-11-04T06:23:31.8034304Z Secret source: Actions
+2026-11-04T06:23:31.8035351Z Cache mode: write
+2026-11-04T06:23:31.8036140Z Prepare workflow directory
+2026-11-04T06:23:31.8450437Z Prepare all required actions
+2026-11-04T06:23:31.8500874Z Getting action download info
+2026-11-04T06:23:32.1873650Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-11-04T06:23:32.2772486Z Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+2026-11-04T06:23:32.3611654Z Download action repository 'actions/setup-java@v4' (SHA:cf277c60eb25467037889841efdb72551f06f6c3)
+2026-11-04T06:23:32.6886947Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-11-04T06:23:32.9365292Z Complete job name: Production certification
+2026-11-04T06:23:33.0408234Z ##[group]Run actions/checkout@v4
+2026-11-04T06:23:33.0409145Z with:
+2026-11-04T06:23:33.0409599Z   repository: snanduri7/kriya
+2026-11-04T06:23:33.0414289Z   token: ***
+2026-11-04T06:23:33.0414746Z   ssh-strict: true
+2026-11-04T06:23:33.0415188Z   ssh-user: git
+2026-11-04T06:23:33.0415649Z   persist-credentials: true
+2026-11-04T06:23:33.0416362Z   clean: true
+2026-11-04T06:23:33.0416808Z   sparse-checkout-cone-mode: true
+2026-11-04T06:23:33.0417319Z   fetch-depth: 1
+2026-11-04T06:23:33.0417741Z   fetch-tags: false
+2026-11-04T06:23:33.0418181Z   show-progress: true
+2026-11-04T06:23:33.0418621Z   lfs: false
+2026-11-04T06:23:33.0419030Z   submodules: false
+2026-11-04T06:23:33.0419686Z   set-safe-directory: true
+2026-11-04T06:23:33.0420228Z   allow-unsafe-pr-checkout: false
+2026-11-04T06:23:33.0421327Z ##[endgroup]
+2026-11-04T06:23:33.3445477Z Syncing repository: snanduri7/kriya
+2026-11-04T06:23:33.3447885Z ##[group]Getting Git version info
+2026-11-04T06:23:33.3448725Z Working directory is '/home/runner/work/kriya/kriya'
+2026-11-04T06:23:33.3449728Z [command]/usr/bin/git version
+2026-11-04T06:23:33.3587033Z git version 2.56.0
+2026-11-04T06:23:33.3624101Z ##[endgroup]
+2026-11-04T06:23:33.3649119Z Temporarily overriding HOME='/home/runner/work/_temp/03009814-d564-4524-9f65-ee86bfd46785' before making global git config changes
+2026-11-04T06:23:33.3651476Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-04T06:23:33.3653325Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/kriya/kriya
+2026-11-04T06:23:33.3704125Z Deleting the contents of '/home/runner/work/kriya/kriya'
+2026-11-04T06:23:33.3717556Z ##[group]Initializing the repository
+2026-11-04T06:23:33.3724398Z [command]/usr/bin/git init /home/runner/work/kriya/kriya
+2026-11-04T06:23:33.3904477Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-04T06:23:33.3906256Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-04T06:23:33.3907941Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-04T06:23:33.4003414Z hint: call:
+2026-11-04T06:23:33.4009361Z hint:
+2026-11-04T06:23:33.4010338Z hint: 	git config --global init.defaultBranch <name>
+2026-11-04T06:23:33.4011683Z hint:
+2026-11-04T06:23:33.4012984Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-04T06:23:33.4014630Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-04T06:23:33.4015874Z hint:
+2026-11-04T06:23:33.4016563Z hint: 	git branch -m <name>
+2026-11-04T06:23:33.4017125Z hint:
+2026-11-04T06:23:33.4017910Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-04T06:23:33.4019682Z Initialized empty Git repository in /home/runner/work/kriya/kriya/.git/
+2026-11-04T06:23:33.4023064Z [command]/usr/bin/git remote add origin https://github.com/snanduri7/kriya
+2026-11-04T06:23:33.4025059Z ##[endgroup]
+2026-11-04T06:23:33.4025842Z ##[group]Disabling automatic garbage collection
+2026-11-04T06:23:33.4026541Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-04T06:23:33.4044477Z ##[endgroup]
+2026-11-04T06:23:33.4045916Z ##[group]Setting up auth
+2026-11-04T06:23:33.4052968Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-04T06:23:33.4095239Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-04T06:23:33.4533485Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-04T06:23:33.4581525Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-04T06:23:33.4833718Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-04T06:23:33.4882577Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-04T06:23:33.5133600Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-04T06:23:33.5186104Z ##[endgroup]
+2026-11-04T06:23:33.5186945Z ##[group]Fetching the repository
+2026-11-04T06:23:33.5199326Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +04ac1fdc63d6cd3691686ac9365ce3d8d49500d4:refs/remotes/origin/arch/containment-rebuild-v2
+2026-11-04T06:23:42.1749857Z From https://github.com/snanduri7/kriya
+2026-11-04T06:23:42.1751288Z  * [new ref]         04ac1fdc63d6cd3691686ac9365ce3d8d49500d4 -> origin/arch/containment-rebuild-v2
+2026-11-04T06:23:42.1758189Z ##[endgroup]
+2026-11-04T06:23:42.1758994Z ##[group]Determining the checkout info
+2026-11-04T06:23:42.1759977Z ##[endgroup]
+2026-11-04T06:23:42.1766089Z [command]/usr/bin/git sparse-checkout disable
+2026-11-04T06:23:42.1827986Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-04T06:23:42.1867477Z ##[group]Checking out the ref
+2026-11-04T06:23:42.1872611Z [command]/usr/bin/git checkout --progress --force -B arch/containment-rebuild-v2 refs/remotes/origin/arch/containment-rebuild-v2
+2026-11-04T06:23:43.2009270Z Updating files:  67% (5012/7375)
+2026-11-04T06:23:43.2080815Z Updating files:  68% (5015/7375)
+2026-11-04T06:23:43.2197555Z Updating files:  69% (5089/7375)
+2026-11-04T06:23:43.2305746Z Updating files:  70% (5163/7375)
+2026-11-04T06:23:43.2386954Z Updating files:  71% (5237/7375)
+2026-11-04T06:23:43.2445831Z Updating files:  72% (5310/7375)
+2026-11-04T06:23:43.2519215Z Updating files:  73% (5384/7375)
+2026-11-04T06:23:43.2607069Z Updating files:  74% (5458/7375)
+2026-11-04T06:23:43.2656819Z Updating files:  75% (5532/7375)
+2026-11-04T06:23:43.2695395Z Updating files:  76% (5605/7375)
+2026-11-04T06:23:43.2766622Z Updating files:  77% (5679/7375)
+2026-11-04T06:23:43.2792367Z Updating files:  78% (5753/7375)
+2026-11-04T06:23:43.2840673Z Updating files:  79% (5827/7375)
+2026-11-04T06:23:43.2873433Z Updating files:  80% (5900/7375)
+2026-11-04T06:23:43.2947482Z Updating files:  81% (5974/7375)
+2026-11-04T06:23:43.3011012Z Updating files:  82% (6048/7375)
+2026-11-04T06:23:43.3086938Z Updating files:  83% (6122/7375)
+2026-11-04T06:23:43.3158489Z Updating files:  84% (6195/7375)
+2026-11-04T06:23:43.3220431Z Updating files:  85% (6269/7375)
+2026-11-04T06:23:43.3287519Z Updating files:  86% (6343/7375)
+2026-11-04T06:23:43.3358865Z Updating files:  87% (6417/7375)
+2026-11-04T06:23:43.3429604Z Updating files:  88% (6490/7375)
+2026-11-04T06:23:43.3512544Z Updating files:  89% (6564/7375)
+2026-11-04T06:23:43.3583207Z Updating files:  90% (6638/7375)
+2026-11-04T06:23:43.3700993Z Updating files:  91% (6712/7375)
+2026-11-04T06:23:43.3738454Z Updating files:  92% (6785/7375)
+2026-11-04T06:23:43.3771702Z Updating files:  93% (6859/7375)
+2026-11-04T06:23:43.3835110Z Updating files:  94% (6933/7375)
+2026-11-04T06:23:43.3886482Z Updating files:  95% (7007/7375)
+2026-11-04T06:23:43.3941756Z Updating files:  96% (7080/7375)
+2026-11-04T06:23:43.3990461Z Updating files:  97% (7154/7375)
+2026-11-04T06:23:43.4133648Z Updating files:  98% (7228/7375)
+2026-11-04T06:23:43.4182213Z Updating files:  99% (7302/7375)
+2026-11-04T06:23:43.4182730Z Updating files: 100% (7375/7375)
+2026-11-04T06:23:43.4183064Z Updating files: 100% (7375/7375), done.
+2026-11-04T06:23:43.4280349Z Switched to a new branch 'arch/containment-rebuild-v2'
+2026-11-04T06:23:43.4285606Z branch 'arch/containment-rebuild-v2' set up to track 'origin/arch/containment-rebuild-v2'.
+2026-11-04T06:23:43.4330845Z ##[endgroup]
+2026-11-04T06:23:43.4388082Z [command]/usr/bin/git log -1 --format=%H
+2026-11-04T06:23:43.4423352Z 04ac1fdc63d6cd3691686ac9365ce3d8d49500d4
+2026-11-04T06:23:43.4678455Z ##[group]Run git fetch --no-tags --unshallow origin "+refs/tags/kriya-v1.2.0-pre-modularization:refs/tags/kriya-v1.2.0-pre-modularization"
+2026-11-04T06:23:43.4679563Z [36;1mgit fetch --no-tags --unshallow origin "+refs/tags/kriya-v1.2.0-pre-modularization:refs/tags/kriya-v1.2.0-pre-modularization"[0m
+2026-11-04T06:23:43.4704544Z shell: /usr/bin/bash -e {0}
+2026-11-04T06:23:43.4704842Z ##[endgroup]
+2026-11-04T06:23:50.6720863Z From https://github.com/snanduri7/kriya
+2026-11-04T06:23:50.6722471Z  * [new tag]           kriya-v1.2.0-pre-modularization -> kriya-v1.2.0-pre-modularization
+2026-11-04T06:23:50.6833638Z ##[group]Run actions/setup-python@v5
+2026-11-04T06:23:50.6833955Z with:
+2026-11-04T06:23:50.6834176Z   python-version: 3.12
+2026-11-04T06:23:50.6834402Z   check-latest: false
+2026-11-04T06:23:50.6837273Z   token: ***
+2026-11-04T06:23:50.6837530Z   update-environment: true
+2026-11-04T06:23:50.6837819Z   allow-prereleases: false
+2026-11-04T06:23:50.6838049Z   freethreaded: false
+2026-11-04T06:23:50.6838264Z ##[endgroup]
+2026-11-04T06:23:50.8265265Z ##[group]Installed versions
+2026-11-04T06:23:50.8356437Z (node:2598) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-04T06:23:50.8357529Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-04T06:23:50.8358407Z Successfully set up CPython (3.12.15)
+2026-11-04T06:23:50.8359225Z ##[endgroup]
+2026-11-04T06:23:50.8619667Z ##[group]Run actions/setup-java@v4
+2026-11-04T06:23:50.8620235Z with:
+2026-11-04T06:23:50.8620576Z   distribution: temurin
+2026-11-04T06:23:50.8620820Z   java-version: 17
+2026-11-04T06:23:50.8621031Z   java-package: jdk
+2026-11-04T06:23:50.8621567Z   check-latest: false
+2026-11-04T06:23:50.8621792Z   server-id: github
+2026-11-04T06:23:50.8622013Z   server-username: GITHUB_ACTOR
+2026-11-04T06:23:50.8622266Z   server-password: GITHUB_TOKEN
+2026-11-04T06:23:50.8622750Z   overwrite-settings: true
+2026-11-04T06:23:50.8622983Z   job-status: success
+2026-11-04T06:23:50.8627661Z   token: ***
+2026-11-04T06:23:50.8627989Z env:
+2026-11-04T06:23:50.8628339Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:23:50.8628821Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-11-04T06:23:50.8629252Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:23:50.8629955Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:23:50.8630821Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:23:50.8631930Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-11-04T06:23:50.8632629Z ##[endgroup]
+2026-11-04T06:23:51.0506648Z ##[warning]setup-java v4 is deprecated and will no longer receive updates. Please migrate to actions/setup-java@v5.
+2026-11-04T06:23:51.0515068Z ##[group]Installed distributions
+2026-11-04T06:23:51.0556056Z Resolved Java 17.0.21+9 from tool-cache
+2026-11-04T06:23:51.0556683Z Setting Java 17.0.21+9 as the default
+2026-11-04T06:23:51.0568295Z (node:2606) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-04T06:23:51.0569619Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-04T06:23:51.0573411Z Creating toolchains.xml for JDK version 17 from temurin
+2026-11-04T06:23:51.0652968Z Writing to /home/runner/.m2/toolchains.xml
+2026-11-04T06:23:51.0653455Z 
+2026-11-04T06:23:51.0653736Z Java configuration:
+2026-11-04T06:23:51.0654240Z   Distribution: temurin
+2026-11-04T06:23:51.0654723Z   Version: 17.0.21+9
+2026-11-04T06:23:51.0655355Z   Path: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:23:51.0655906Z 
+2026-11-04T06:23:51.0656622Z ##[endgroup]
+2026-11-04T06:23:51.0672335Z Creating settings.xml with server-id: github
+2026-11-04T06:23:51.0700289Z Writing to /home/runner/.m2/settings.xml
+2026-11-04T06:23:51.0873090Z ##[group]Run curl -fsSL https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.tar.gz \
+2026-11-04T06:23:51.0874554Z [36;1mcurl -fsSL https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.tar.gz \[0m
+2026-11-04T06:23:51.0875453Z [36;1m  | tar xz -C "$HOME"[0m
+2026-11-04T06:23:51.0875966Z [36;1mecho "$HOME/apache-maven-3.9.9/bin" >> "$GITHUB_PATH"[0m
+2026-11-04T06:23:51.0924304Z shell: /usr/bin/bash -e {0}
+2026-11-04T06:23:51.0924754Z env:
+2026-11-04T06:23:51.0925203Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:23:51.0926013Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-11-04T06:23:51.0926746Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:23:51.0927332Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:23:51.0927884Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:23:51.0928384Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-11-04T06:23:51.0928824Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:23:51.0929337Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:23:51.0929747Z ##[endgroup]
+2026-11-04T06:24:08.1967819Z ##[group]Run test "$(id -u)" != "0"
+2026-11-04T06:24:08.1968173Z [36;1mtest "$(id -u)" != "0"[0m
+2026-11-04T06:24:08.1989396Z shell: /usr/bin/bash -e {0}
+2026-11-04T06:24:08.1989649Z env:
+2026-11-04T06:24:08.1989925Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:24:08.1990417Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-11-04T06:24:08.1990867Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:24:08.1991518Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:24:08.1991904Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:24:08.1992293Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-11-04T06:24:08.1992909Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:24:08.1993387Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:24:08.1993761Z ##[endgroup]
+2026-11-04T06:24:08.2090277Z ##[group]Run python -m venv .venv
+2026-11-04T06:24:08.2090599Z [36;1mpython -m venv .venv[0m
+2026-11-04T06:24:08.2090924Z [36;1m.venv/bin/pip install -r requirements.txt[0m
+2026-11-04T06:24:08.2091647Z [36;1m.venv/bin/pip install -e . --no-deps[0m
+2026-11-04T06:24:08.2110970Z shell: /usr/bin/bash -e {0}
+2026-11-04T06:24:08.2111519Z env:
+2026-11-04T06:24:08.2111804Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:24:08.2112246Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-11-04T06:24:08.2112671Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:24:08.2113047Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:24:08.2113444Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:24:08.2113828Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-11-04T06:24:08.2114258Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:24:08.2114753Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:24:08.2115131Z ##[endgroup]
+2026-11-04T06:24:11.6798669Z Collecting annotated-types==0.8.0 (from -r requirements.txt (line 7))
+2026-11-04T06:24:11.7241817Z   Downloading annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+2026-11-04T06:24:11.7537626Z Collecting anyio==4.14.2 (from -r requirements.txt (line 9))
+2026-11-04T06:24:11.7614693Z   Downloading anyio-4.14.2-py3-none-any.whl.metadata (4.6 kB)
+2026-11-04T06:24:11.8091829Z Collecting astroid==4.0.4 (from -r requirements.txt (line 17))
+2026-11-04T06:24:11.8185774Z   Downloading astroid-4.0.4-py3-none-any.whl.metadata (4.4 kB)
+2026-11-04T06:24:11.8399283Z Collecting attrs==26.1.0 (from -r requirements.txt (line 19))
+2026-11-04T06:24:11.8477936Z   Downloading attrs-26.1.0-py3-none-any.whl.metadata (8.8 kB)
+2026-11-04T06:24:11.8685976Z Collecting build==1.5.0 (from -r requirements.txt (line 23))
+2026-11-04T06:24:11.8761811Z   Downloading build-1.5.0-py3-none-any.whl.metadata (5.7 kB)
+2026-11-04T06:24:11.9025284Z Collecting certifi==2026.7.22 (from -r requirements.txt (line 25))
+2026-11-04T06:24:11.9102286Z   Downloading certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+2026-11-04T06:24:12.0267182Z Collecting cffi==2.1.0 (from -r requirements.txt (line 29))
+2026-11-04T06:24:12.0342672Z   Downloading cffi-2.1.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.5 kB)
+2026-11-04T06:24:12.0565189Z Collecting click==8.4.2 (from -r requirements.txt (line 31))
+2026-11-04T06:24:12.0641445Z   Downloading click-8.4.2-py3-none-any.whl.metadata (2.6 kB)
+2026-11-04T06:24:12.4477685Z Collecting coverage==7.16.2 (from -r requirements.txt (line 36))
+2026-11-04T06:24:12.4572175Z   Downloading coverage-7.16.2-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (8.2 kB)
+2026-11-04T06:24:12.6562121Z Collecting cryptography==49.0.0 (from -r requirements.txt (line 38))
+2026-11-04T06:24:12.6639756Z   Downloading cryptography-49.0.0-cp311-abi3-manylinux_2_34_x86_64.whl.metadata (4.3 kB)
+2026-11-04T06:24:12.6826339Z Collecting dill==0.4.1 (from -r requirements.txt (line 40))
+2026-11-04T06:24:12.6899937Z   Downloading dill-0.4.1-py3-none-any.whl.metadata (10 kB)
+2026-11-04T06:24:12.7094063Z Collecting distro==1.9.0 (from -r requirements.txt (line 42))
+2026-11-04T06:24:12.7170166Z   Downloading distro-1.9.0-py3-none-any.whl.metadata (6.8 kB)
+2026-11-04T06:24:12.7371073Z Collecting execnet==2.1.2 (from -r requirements.txt (line 44))
+2026-11-04T06:24:12.7449665Z   Downloading execnet-2.1.2-py3-none-any.whl.metadata (2.9 kB)
+2026-11-04T06:24:12.7667913Z Collecting h11==0.16.0 (from -r requirements.txt (line 46))
+2026-11-04T06:24:12.7744758Z   Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+2026-11-04T06:24:12.7970437Z Collecting httpcore==1.0.9 (from -r requirements.txt (line 51))
+2026-11-04T06:24:12.8050809Z   Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+2026-11-04T06:24:12.8238357Z Collecting httpcore2==2.9.1 (from -r requirements.txt (line 53))
+2026-11-04T06:24:12.8343073Z   Downloading httpcore2-2.9.1-py3-none-any.whl.metadata (24 kB)
+2026-11-04T06:24:12.8592627Z Collecting httpx==0.28.1 (from -r requirements.txt (line 55))
+2026-11-04T06:24:12.8670352Z   Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+2026-11-04T06:24:12.8849860Z Collecting httpx2==2.9.1 (from -r requirements.txt (line 59))
+2026-11-04T06:24:12.8927383Z   Downloading httpx2-2.9.1-py3-none-any.whl.metadata (8.2 kB)
+2026-11-04T06:24:12.9140914Z Collecting idna==3.18 (from -r requirements.txt (line 61))
+2026-11-04T06:24:12.9217873Z   Downloading idna-3.18-py3-none-any.whl.metadata (6.1 kB)
+2026-11-04T06:24:12.9422425Z Collecting iniconfig==2.3.0 (from -r requirements.txt (line 66))
+2026-11-04T06:24:12.9502516Z   Downloading iniconfig-2.3.0-py3-none-any.whl.metadata (2.5 kB)
+2026-11-04T06:24:12.9962034Z Collecting isort==9.0.1 (from -r requirements.txt (line 68))
+2026-11-04T06:24:13.0058003Z   Downloading isort-9.0.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (11 kB)
+2026-11-04T06:24:13.0277128Z Collecting jinja2==3.1.6 (from -r requirements.txt (line 70))
+2026-11-04T06:24:13.0354224Z   Downloading jinja2-3.1.6-py3-none-any.whl.metadata (2.9 kB)
+2026-11-04T06:24:13.1256512Z Collecting jiter==0.16.0 (from -r requirements.txt (line 72))
+2026-11-04T06:24:13.1351636Z   Downloading jiter-0.16.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (5.2 kB)
+2026-11-04T06:24:13.1688228Z Collecting jsonschema==4.26.0 (from -r requirements.txt (line 74))
+2026-11-04T06:24:13.1768194Z   Downloading jsonschema-4.26.0-py3-none-any.whl.metadata (7.6 kB)
+2026-11-04T06:24:13.1965761Z Collecting jsonschema-specifications==2025.9.1 (from -r requirements.txt (line 76))
+2026-11-04T06:24:13.2053157Z   Downloading jsonschema_specifications-2025.9.1-py3-none-any.whl.metadata (2.9 kB)
+2026-11-04T06:24:13.2635953Z Collecting markupsafe==3.0.3 (from -r requirements.txt (line 78))
+2026-11-04T06:24:13.2715303Z   Downloading markupsafe-3.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.7 kB)
+2026-11-04T06:24:13.2903752Z Collecting mccabe==0.7.0 (from -r requirements.txt (line 80))
+2026-11-04T06:24:13.2979574Z   Downloading mccabe-0.7.0-py2.py3-none-any.whl.metadata (5.0 kB)
+2026-11-04T06:24:13.3219593Z Collecting mcp==2.0.0 (from -r requirements.txt (line 82))
+2026-11-04T06:24:13.3294741Z   Downloading mcp-2.0.0-py3-none-any.whl.metadata (7.7 kB)
+2026-11-04T06:24:13.3478744Z Collecting mcp-types==2.0.0 (from -r requirements.txt (line 84))
+2026-11-04T06:24:13.3552930Z   Downloading mcp_types-2.0.0-py3-none-any.whl.metadata (1.9 kB)
+2026-11-04T06:24:13.3702468Z Collecting mypy-extensions==1.1.0 (from -r requirements.txt (line 86))
+2026-11-04T06:24:13.3775260Z   Downloading mypy_extensions-1.1.0-py3-none-any.whl.metadata (1.1 kB)
+2026-11-04T06:24:13.5605856Z Collecting numpy==2.5.1 (from -r requirements.txt (line 88))
+2026-11-04T06:24:13.5682204Z   Downloading numpy-2.5.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+2026-11-04T06:24:13.6380642Z Collecting openai==2.50.0 (from -r requirements.txt (line 90))
+2026-11-04T06:24:13.6478824Z   Downloading openai-2.50.0-py3-none-any.whl.metadata (36 kB)
+2026-11-04T06:24:13.6794647Z Collecting opentelemetry-api==1.44.0 (from -r requirements.txt (line 92))
+2026-11-04T06:24:13.6869879Z   Downloading opentelemetry_api-1.44.0-py3-none-any.whl.metadata (1.4 kB)
+2026-11-04T06:24:13.7094805Z Collecting packaging==26.2 (from -r requirements.txt (line 94))
+2026-11-04T06:24:13.7169667Z   Downloading packaging-26.2-py3-none-any.whl.metadata (3.5 kB)
+2026-11-04T06:24:13.7493032Z Collecting pip-tools==7.6.0 (from -r requirements.txt (line 99))
+2026-11-04T06:24:13.7595621Z   Downloading pip_tools-7.6.0-py3-none-any.whl.metadata (25 kB)
+2026-11-04T06:24:13.7897804Z Collecting platformdirs==4.11.15 (from -r requirements.txt (line 101))
+2026-11-04T06:24:13.7998389Z   Downloading platformdirs-4.11.15-py3-none-any.whl.metadata (5.5 kB)
+2026-11-04T06:24:13.8163928Z Collecting pluggy==1.6.0 (from -r requirements.txt (line 103))
+2026-11-04T06:24:13.8246542Z   Downloading pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+2026-11-04T06:24:13.8889809Z Collecting prompt-toolkit==3.0.53 (from -r requirements.txt (line 105))
+2026-11-04T06:24:13.8967464Z   Downloading prompt_toolkit-3.0.53-py3-none-any.whl.metadata (6.4 kB)
+2026-11-04T06:24:13.9129193Z Collecting pycparser==3.0 (from -r requirements.txt (line 107))
+2026-11-04T06:24:13.9225597Z   Downloading pycparser-3.0-py3-none-any.whl.metadata (8.2 kB)
+2026-11-04T06:24:14.0335542Z Collecting pydantic==2.13.4 (from -r requirements.txt (line 109))
+2026-11-04T06:24:14.0415084Z   Downloading pydantic-2.13.4-py3-none-any.whl.metadata (109 kB)
+2026-11-04T06:24:14.7210685Z Collecting pydantic-core==2.46.4 (from -r requirements.txt (line 115))
+2026-11-04T06:24:14.7289977Z   Downloading pydantic_core-2.46.4-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.6 kB)
+2026-11-04T06:24:14.7530430Z Collecting pygments==2.20.0 (from -r requirements.txt (line 117))
+2026-11-04T06:24:14.7605630Z   Downloading pygments-2.20.0-py3-none-any.whl.metadata (2.5 kB)
+2026-11-04T06:24:14.7820970Z Collecting pyjwt==2.13.0 (from pyjwt[crypto]==2.13.0->-r requirements.txt (line 119))
+2026-11-04T06:24:14.7898490Z   Downloading pyjwt-2.13.0-py3-none-any.whl.metadata (3.4 kB)
+2026-11-04T06:24:14.8303116Z Collecting pylint==4.0.9 (from -r requirements.txt (line 121))
+2026-11-04T06:24:14.8494168Z   Downloading pylint-4.0.9-py3-none-any.whl.metadata (12 kB)
+2026-11-04T06:24:14.8667804Z Collecting pyproject-hooks==1.2.0 (from -r requirements.txt (line 123))
+2026-11-04T06:24:14.8741622Z   Downloading pyproject_hooks-1.2.0-py3-none-any.whl.metadata (1.3 kB)
+2026-11-04T06:24:14.9109519Z Collecting pytest==9.1.1 (from -r requirements.txt (line 127))
+2026-11-04T06:24:14.9186299Z   Downloading pytest-9.1.1-py3-none-any.whl.metadata (7.6 kB)
+2026-11-04T06:24:14.9447212Z Collecting pytest-asyncio==1.4.0 (from -r requirements.txt (line 133))
+2026-11-04T06:24:14.9523093Z   Downloading pytest_asyncio-1.4.0-py3-none-any.whl.metadata (4.1 kB)
+2026-11-04T06:24:14.9805632Z Collecting pytest-testmon==2.2.0 (from -r requirements.txt (line 135))
+2026-11-04T06:24:14.9893297Z   Downloading pytest_testmon-2.2.0-py3-none-any.whl.metadata (2.0 kB)
+2026-11-04T06:24:15.0113903Z Collecting pytest-xdist==3.8.0 (from -r requirements.txt (line 137))
+2026-11-04T06:24:15.0190582Z   Downloading pytest_xdist-3.8.0-py3-none-any.whl.metadata (3.0 kB)
+2026-11-04T06:24:15.0373914Z Collecting python-multipart==0.0.32 (from -r requirements.txt (line 139))
+2026-11-04T06:24:15.0450077Z   Downloading python_multipart-0.0.32-py3-none-any.whl.metadata (2.1 kB)
+2026-11-04T06:24:15.0811542Z Collecting pyyaml==6.0.3 (from -r requirements.txt (line 141))
+2026-11-04T06:24:15.0888153Z   Downloading pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+2026-11-04T06:24:15.1182714Z Collecting referencing==0.37.0 (from -r requirements.txt (line 143))
+2026-11-04T06:24:15.1259736Z   Downloading referencing-0.37.0-py3-none-any.whl.metadata (2.8 kB)
+2026-11-04T06:24:15.3678261Z Collecting rpds-py==2026.6.3 (from -r requirements.txt (line 147))
+2026-11-04T06:24:15.3752212Z   Downloading rpds_py-2026.6.3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.1 kB)
+2026-11-04T06:24:15.8436245Z Collecting ruff==0.16.0 (from -r requirements.txt (line 151))
+2026-11-04T06:24:15.8511586Z   Downloading ruff-0.16.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (26 kB)
+2026-11-04T06:24:15.8700273Z Collecting sniffio==1.3.1 (from -r requirements.txt (line 153))
+2026-11-04T06:24:15.8775175Z   Downloading sniffio-1.3.1-py3-none-any.whl.metadata (3.9 kB)
+2026-11-04T06:24:15.9017052Z Collecting sse-starlette==3.4.6 (from -r requirements.txt (line 155))
+2026-11-04T06:24:15.9236325Z   Downloading sse_starlette-3.4.6-py3-none-any.whl.metadata (15 kB)
+2026-11-04T06:24:15.9630921Z Collecting starlette==1.3.1 (from -r requirements.txt (line 157))
+2026-11-04T06:24:15.9725579Z   Downloading starlette-1.3.1-py3-none-any.whl.metadata (6.4 kB)
+2026-11-04T06:24:15.9961480Z Collecting tomlkit==0.15.1 (from -r requirements.txt (line 161))
+2026-11-04T06:24:16.0042039Z   Downloading tomlkit-0.15.1-py3-none-any.whl.metadata (3.3 kB)
+2026-11-04T06:24:16.0402287Z Collecting tqdm==4.70.0 (from -r requirements.txt (line 163))
+2026-11-04T06:24:16.0485180Z   Downloading tqdm-4.70.0-py3-none-any.whl.metadata (57 kB)
+2026-11-04T06:24:16.0979788Z Collecting tree-sitter==0.25.2 (from -r requirements.txt (line 165))
+2026-11-04T06:24:16.1056444Z   Downloading tree_sitter-0.25.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (10.0 kB)
+2026-11-04T06:24:16.1248118Z Collecting tree-sitter-java==0.23.5 (from -r requirements.txt (line 167))
+2026-11-04T06:24:16.1323122Z   Downloading tree_sitter_java-0.23.5-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.7 kB)
+2026-11-04T06:24:16.1490545Z Collecting tree-sitter-python==0.25.0 (from -r requirements.txt (line 169))
+2026-11-04T06:24:16.1565688Z   Downloading tree_sitter_python-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (1.9 kB)
+2026-11-04T06:24:16.1761798Z Collecting truststore==0.10.4 (from -r requirements.txt (line 171))
+2026-11-04T06:24:16.1856594Z   Downloading truststore-0.10.4-py3-none-any.whl.metadata (4.4 kB)
+2026-11-04T06:24:16.2073100Z Collecting typing-extensions==4.16.0 (from -r requirements.txt (line 175))
+2026-11-04T06:24:16.2150713Z   Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+2026-11-04T06:24:16.2303512Z Collecting typing-inspection==0.4.2 (from -r requirements.txt (line 184))
+2026-11-04T06:24:16.2377318Z   Downloading typing_inspection-0.4.2-py3-none-any.whl.metadata (2.6 kB)
+2026-11-04T06:24:16.2724544Z Collecting uvicorn==0.51.0 (from -r requirements.txt (line 188))
+2026-11-04T06:24:16.2804658Z   Downloading uvicorn-0.51.0-py3-none-any.whl.metadata (6.6 kB)
+2026-11-04T06:24:16.3067234Z Collecting wcwidth==0.8.2 (from -r requirements.txt (line 190))
+2026-11-04T06:24:16.3161770Z   Downloading wcwidth-0.8.2-py3-none-any.whl.metadata (43 kB)
+2026-11-04T06:24:16.3427915Z Collecting wheel==0.47.0 (from -r requirements.txt (line 192))
+2026-11-04T06:24:16.3519804Z   Downloading wheel-0.47.0-py3-none-any.whl.metadata (2.3 kB)
+2026-11-04T06:24:16.4670458Z Collecting setuptools==83.0.0 (from -r requirements.txt (line 197))
+2026-11-04T06:24:16.4749118Z   Downloading setuptools-83.0.0-py3-none-any.whl.metadata (6.6 kB)
+2026-11-04T06:24:16.6890716Z Requirement already satisfied: pip>=22.2 in ./.venv/lib/python3.12/site-packages (from pip-tools==7.6.0->-r requirements.txt (line 99)) (25.0.1)
+2026-11-04T06:24:16.9365166Z Downloading annotated_types-0.8.0-py3-none-any.whl (13 kB)
+2026-11-04T06:24:16.9460995Z Downloading anyio-4.14.2-py3-none-any.whl (125 kB)
+2026-11-04T06:24:16.9565180Z Downloading astroid-4.0.4-py3-none-any.whl (276 kB)
+2026-11-04T06:24:16.9717739Z Downloading attrs-26.1.0-py3-none-any.whl (67 kB)
+2026-11-04T06:24:16.9819018Z Downloading build-1.5.0-py3-none-any.whl (26 kB)
+2026-11-04T06:24:17.0086775Z Downloading certifi-2026.7.22-py3-none-any.whl (136 kB)
+2026-11-04T06:24:17.0200670Z Downloading cffi-2.1.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (221 kB)
+2026-11-04T06:24:17.0307547Z Downloading click-8.4.2-py3-none-any.whl (119 kB)
+2026-11-04T06:24:17.0409199Z Downloading coverage-7.16.2-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (258 kB)
+2026-11-04T06:24:17.0517176Z Downloading cryptography-49.0.0-cp311-abi3-manylinux_2_34_x86_64.whl (4.7 MB)
+2026-11-04T06:24:17.0782438Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.7/4.7 MB 196.5 MB/s eta 0:00:00
+2026-11-04T06:24:17.0858942Z Downloading dill-0.4.1-py3-none-any.whl (120 kB)
+2026-11-04T06:24:17.0960227Z Downloading distro-1.9.0-py3-none-any.whl (20 kB)
+2026-11-04T06:24:17.1055918Z Downloading execnet-2.1.2-py3-none-any.whl (40 kB)
+2026-11-04T06:24:17.1155535Z Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+2026-11-04T06:24:17.1279461Z Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+2026-11-04T06:24:17.1386286Z Downloading httpcore2-2.9.1-py3-none-any.whl (82 kB)
+2026-11-04T06:24:17.1483700Z Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+2026-11-04T06:24:17.1582077Z Downloading httpx2-2.9.1-py3-none-any.whl (91 kB)
+2026-11-04T06:24:17.1681589Z Downloading idna-3.18-py3-none-any.whl (65 kB)
+2026-11-04T06:24:17.1779084Z Downloading iniconfig-2.3.0-py3-none-any.whl (7.5 kB)
+2026-11-04T06:24:17.1948630Z Downloading isort-9.0.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.7 MB)
+2026-11-04T06:24:17.2036177Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.7/1.7 MB 233.7 MB/s eta 0:00:00
+2026-11-04T06:24:17.2118657Z Downloading jinja2-3.1.6-py3-none-any.whl (134 kB)
+2026-11-04T06:24:17.2223242Z Downloading jiter-0.16.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (343 kB)
+2026-11-04T06:24:17.2334452Z Downloading jsonschema-4.26.0-py3-none-any.whl (90 kB)
+2026-11-04T06:24:17.2437521Z Downloading jsonschema_specifications-2025.9.1-py3-none-any.whl (18 kB)
+2026-11-04T06:24:17.2547596Z Downloading markupsafe-3.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (22 kB)
+2026-11-04T06:24:17.2642143Z Downloading mccabe-0.7.0-py2.py3-none-any.whl (7.3 kB)
+2026-11-04T06:24:17.2733922Z Downloading mcp-2.0.0-py3-none-any.whl (349 kB)
+2026-11-04T06:24:17.2862545Z Downloading mcp_types-2.0.0-py3-none-any.whl (69 kB)
+2026-11-04T06:24:17.2962053Z Downloading mypy_extensions-1.1.0-py3-none-any.whl (5.0 kB)
+2026-11-04T06:24:17.3065678Z Downloading numpy-2.5.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.7 MB)
+2026-11-04T06:24:17.3716670Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.7/16.7 MB 268.3 MB/s eta 0:00:00
+2026-11-04T06:24:17.3861296Z Downloading openai-2.50.0-py3-none-any.whl (1.7 MB)
+2026-11-04T06:24:17.3956418Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.7/1.7 MB 208.1 MB/s eta 0:00:00
+2026-11-04T06:24:17.4039178Z Downloading opentelemetry_api-1.44.0-py3-none-any.whl (60 kB)
+2026-11-04T06:24:17.4142220Z Downloading packaging-26.2-py3-none-any.whl (100 kB)
+2026-11-04T06:24:17.4264210Z Downloading pip_tools-7.6.0-py3-none-any.whl (74 kB)
+2026-11-04T06:24:17.4386869Z Downloading platformdirs-4.11.15-py3-none-any.whl (26 kB)
+2026-11-04T06:24:17.4494113Z Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+2026-11-04T06:24:17.4609933Z Downloading prompt_toolkit-3.0.53-py3-none-any.whl (392 kB)
+2026-11-04T06:24:17.4729912Z Downloading pycparser-3.0-py3-none-any.whl (48 kB)
+2026-11-04T06:24:17.4837465Z Downloading pydantic-2.13.4-py3-none-any.whl (472 kB)
+2026-11-04T06:24:17.4954221Z Downloading pydantic_core-2.46.4-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+2026-11-04T06:24:17.5050264Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 270.6 MB/s eta 0:00:00
+2026-11-04T06:24:17.5133120Z Downloading pygments-2.20.0-py3-none-any.whl (1.2 MB)
+2026-11-04T06:24:17.5210526Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 190.7 MB/s eta 0:00:00
+2026-11-04T06:24:17.5298322Z Downloading pyjwt-2.13.0-py3-none-any.whl (31 kB)
+2026-11-04T06:24:17.5437190Z Downloading pylint-4.0.9-py3-none-any.whl (542 kB)
+2026-11-04T06:24:17.5496094Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 542.1/542.1 kB 89.2 MB/s eta 0:00:00
+2026-11-04T06:24:17.5575767Z Downloading pyproject_hooks-1.2.0-py3-none-any.whl (10 kB)
+2026-11-04T06:24:17.5691476Z Downloading pytest-9.1.1-py3-none-any.whl (386 kB)
+2026-11-04T06:24:17.5808323Z Downloading pytest_asyncio-1.4.0-py3-none-any.whl (16 kB)
+2026-11-04T06:24:17.5908350Z Downloading pytest_testmon-2.2.0-py3-none-any.whl (25 kB)
+2026-11-04T06:24:17.6038029Z Downloading pytest_xdist-3.8.0-py3-none-any.whl (46 kB)
+2026-11-04T06:24:17.6139085Z Downloading python_multipart-0.0.32-py3-none-any.whl (30 kB)
+2026-11-04T06:24:17.6247101Z Downloading pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (807 kB)
+2026-11-04T06:24:17.6310062Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 807.9/807.9 kB 152.9 MB/s eta 0:00:00
+2026-11-04T06:24:17.6390055Z Downloading referencing-0.37.0-py3-none-any.whl (26 kB)
+2026-11-04T06:24:17.6498906Z Downloading rpds_py-2026.6.3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (366 kB)
+2026-11-04T06:24:17.6606660Z Downloading ruff-0.16.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (11.4 MB)
+2026-11-04T06:24:17.7279161Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 11.4/11.4 MB 197.5 MB/s eta 0:00:00
+2026-11-04T06:24:17.7367939Z Downloading sniffio-1.3.1-py3-none-any.whl (10 kB)
+2026-11-04T06:24:17.7473966Z Downloading sse_starlette-3.4.6-py3-none-any.whl (16 kB)
+2026-11-04T06:24:17.7572218Z Downloading starlette-1.3.1-py3-none-any.whl (73 kB)
+2026-11-04T06:24:17.7668090Z Downloading tomlkit-0.15.1-py3-none-any.whl (49 kB)
+2026-11-04T06:24:17.7765879Z Downloading tqdm-4.70.0-py3-none-any.whl (80 kB)
+2026-11-04T06:24:17.7870153Z Downloading tree_sitter-0.25.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (635 kB)
+2026-11-04T06:24:17.7933421Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 635.4/635.4 kB 112.9 MB/s eta 0:00:00
+2026-11-04T06:24:17.8017681Z Downloading tree_sitter_java-0.23.5-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (84 kB)
+2026-11-04T06:24:17.8123075Z Downloading tree_sitter_python-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (108 kB)
+2026-11-04T06:24:17.8235634Z Downloading truststore-0.10.4-py3-none-any.whl (18 kB)
+2026-11-04T06:24:17.8346608Z Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+2026-11-04T06:24:17.8447250Z Downloading typing_inspection-0.4.2-py3-none-any.whl (14 kB)
+2026-11-04T06:24:17.8550932Z Downloading uvicorn-0.51.0-py3-none-any.whl (73 kB)
+2026-11-04T06:24:17.8660153Z Downloading wcwidth-0.8.2-py3-none-any.whl (323 kB)
+2026-11-04T06:24:17.8771307Z Downloading wheel-0.47.0-py3-none-any.whl (32 kB)
+2026-11-04T06:24:17.8878600Z Downloading setuptools-83.0.0-py3-none-any.whl (1.0 MB)
+2026-11-04T06:24:17.9025266Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.0/1.0 MB 63.3 MB/s eta 0:00:00
+2026-11-04T06:24:18.2013331Z Installing collected packages: wcwidth, typing-extensions, truststore, tree-sitter-python, tree-sitter-java, tree-sitter, tqdm, tomlkit, sniffio, setuptools, ruff, rpds-py, pyyaml, python-multipart, pyproject-hooks, pyjwt, pygments, pycparser, pluggy, platformdirs, packaging, numpy, mypy-extensions, mccabe, markupsafe, jiter, iniconfig, idna, h11, execnet, distro, dill, coverage, click, certifi, attrs, astroid, annotated-types, wheel, uvicorn, typing-inspection, referencing, pytest, pydantic-core, prompt-toolkit, opentelemetry-api, jinja2, isort, httpcore2, httpcore, cffi, build, anyio, starlette, pytest-xdist, pytest-testmon, pytest-asyncio, pylint, pydantic, pip-tools, jsonschema-specifications, httpx2, httpx, cryptography, sse-starlette, openai, mcp-types, jsonschema, mcp
+2026-11-04T06:24:27.4057180Z Successfully installed annotated-types-0.8.0 anyio-4.14.2 astroid-4.0.4 attrs-26.1.0 build-1.5.0 certifi-2026.7.22 cffi-2.1.0 click-8.4.2 coverage-7.16.2 cryptography-49.0.0 dill-0.4.1 distro-1.9.0 execnet-2.1.2 h11-0.16.0 httpcore-1.0.9 httpcore2-2.9.1 httpx-0.28.1 httpx2-2.9.1 idna-3.18 iniconfig-2.3.0 isort-9.0.1 jinja2-3.1.6 jiter-0.16.0 jsonschema-4.26.0 jsonschema-specifications-2025.9.1 markupsafe-3.0.3 mccabe-0.7.0 mcp-2.0.0 mcp-types-2.0.0 mypy-extensions-1.1.0 numpy-2.5.1 openai-2.50.0 opentelemetry-api-1.44.0 packaging-26.2 pip-tools-7.6.0 platformdirs-4.11.15 pluggy-1.6.0 prompt-toolkit-3.0.53 pycparser-3.0 pydantic-2.13.4 pydantic-core-2.46.4 pygments-2.20.0 pyjwt-2.13.0 pylint-4.0.9 pyproject-hooks-1.2.0 pytest-9.1.1 pytest-asyncio-1.4.0 pytest-testmon-2.2.0 pytest-xdist-3.8.0 python-multipart-0.0.32 pyyaml-6.0.3 referencing-0.37.0 rpds-py-2026.6.3 ruff-0.16.0 setuptools-83.0.0 sniffio-1.3.1 sse-starlette-3.4.6 starlette-1.3.1 tomlkit-0.15.1 tqdm-4.70.0 tree-sitter-0.25.2 tree-sitter-java-0.23.5 tree-sitter-python-0.25.0 truststore-0.10.4 typing-extensions-4.16.0 typing-inspection-0.4.2 uvicorn-0.51.0 wcwidth-0.8.2 wheel-0.47.0
+2026-11-04T06:24:27.5081414Z 
+2026-11-04T06:24:27.5082334Z [notice] A new release of pip is available: 25.0.1 -> 26.3
+2026-11-04T06:24:27.5082953Z [notice] To update, run: python -m pip install --upgrade pip
+2026-11-04T06:24:28.2792194Z Obtaining file:///home/runner/work/kriya/kriya
+2026-11-04T06:24:28.2828112Z   Installing build dependencies: started
+2026-11-04T06:24:29.6190542Z   Installing build dependencies: finished with status 'done'
+2026-11-04T06:24:29.6197793Z   Checking if build backend supports build_editable: started
+2026-11-04T06:24:29.8047102Z   Checking if build backend supports build_editable: finished with status 'done'
+2026-11-04T06:24:29.8056246Z   Getting requirements to build editable: started
+2026-11-04T06:24:30.1090508Z   Getting requirements to build editable: finished with status 'done'
+2026-11-04T06:24:30.1105483Z   Preparing editable metadata (pyproject.toml): started
+2026-11-04T06:24:30.4135265Z   Preparing editable metadata (pyproject.toml): finished with status 'done'
+2026-11-04T06:24:30.4228276Z Building wheels for collected packages: kriya
+2026-11-04T06:24:30.4236583Z   Building editable for kriya (pyproject.toml): started
+2026-11-04T06:24:30.8201618Z   Building editable for kriya (pyproject.toml): finished with status 'done'
+2026-11-04T06:24:30.8209020Z   Created wheel for kriya: filename=kriya-0.1.0-0.editable-py3-none-any.whl size=22533 sha256=4ee53b107048f38cc00acacb8c848c6522c5464f1a73be12c7642a60ac6c61a9
+2026-11-04T06:24:30.8210595Z   Stored in directory: /tmp/pip-ephem-wheel-cache-zmywt3kq/wheels/4e/ce/5c/272e5ddceede18cde0b3ca8b4b720271d343da39dc035b11e8
+2026-11-04T06:24:30.8248710Z Successfully built kriya
+2026-11-04T06:24:30.8251037Z Installing collected packages: kriya
+2026-11-04T06:24:30.8398861Z Successfully installed kriya-0.1.0
+2026-11-04T06:24:30.8671132Z 
+2026-11-04T06:24:30.8671621Z [notice] A new release of pip is available: 25.0.1 -> 26.3
+2026-11-04T06:24:30.8672570Z [notice] To update, run: python -m pip install --upgrade pip
+2026-11-04T06:24:30.9357294Z ##[group]Run pipx install semgrep==1.178.0
+2026-11-04T06:24:30.9357930Z [36;1mpipx install semgrep==1.178.0[0m
+2026-11-04T06:24:30.9388063Z shell: /usr/bin/bash -e {0}
+2026-11-04T06:24:30.9388506Z env:
+2026-11-04T06:24:30.9389035Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:24:30.9389898Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-11-04T06:24:30.9390758Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:24:30.9391753Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:24:30.9392481Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:24:30.9393490Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-11-04T06:24:30.9394286Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:24:30.9395203Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:24:30.9395960Z ##[endgroup]
+2026-11-04T06:24:31.3530433Z creating virtual environment...
+2026-11-04T06:24:31.5257615Z installing semgrep from spec 'semgrep==1.178.0'...
+2026-11-04T06:24:43.3715033Z done! ✨ 🌟 ✨
+2026-11-04T06:24:43.3715730Z   installed package semgrep 1.178.0, installed using Python 3.12.3
+2026-11-04T06:24:43.3716383Z   These apps are now available
+2026-11-04T06:24:43.3716816Z     - pysemgrep
+2026-11-04T06:24:43.3717163Z     - semgrep
+2026-11-04T06:24:43.4006205Z ##[group]Run .venv/bin/python scripts/pinned_images.py --pull
+2026-11-04T06:24:43.4007321Z [36;1m.venv/bin/python scripts/pinned_images.py --pull[0m
+2026-11-04T06:24:43.4038445Z shell: /usr/bin/bash -e {0}
+2026-11-04T06:24:43.4038895Z env:
+2026-11-04T06:24:43.4039619Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:24:43.4040440Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-11-04T06:24:43.4041455Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:24:43.4042190Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:24:43.4042913Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:24:43.4043649Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-11-04T06:24:43.4044460Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:24:43.4045442Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:24:43.4046159Z ##[endgroup]
+2026-11-04T06:24:44.1522351Z docker.io/semgrep/semgrep@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b: Pulling from semgrep/semgrep
+2026-11-04T06:24:44.4106396Z d0c1d894c237: Pulling fs layer
+2026-11-04T06:24:44.4106968Z 6458063cf5e1: Pulling fs layer
+2026-11-04T06:24:44.4107388Z bd9ddc54bea9: Pulling fs layer
+2026-11-04T06:24:44.4107671Z 916023ea49d3: Pulling fs layer
+2026-11-04T06:24:44.4107930Z 8e500f630314: Pulling fs layer
+2026-11-04T06:24:44.4108285Z 651eed3c01c9: Pulling fs layer
+2026-11-04T06:24:44.4108601Z 7dff38e5c1b7: Pulling fs layer
+2026-11-04T06:24:44.4108842Z 6559937a9f15: Pulling fs layer
+2026-11-04T06:24:44.4109078Z 2552c421f3af: Pulling fs layer
+2026-11-04T06:24:44.4109317Z c8fcc8976069: Pulling fs layer
+2026-11-04T06:24:44.4109554Z 3e5117a35689: Pulling fs layer
+2026-11-04T06:24:44.4109793Z da5f6c0e431d: Pulling fs layer
+2026-11-04T06:24:44.4110035Z 8aa6f24c4cb7: Pulling fs layer
+2026-11-04T06:24:44.4110299Z 6559937a9f15: Waiting
+2026-11-04T06:24:44.4110521Z 2552c421f3af: Waiting
+2026-11-04T06:24:44.4110742Z c8fcc8976069: Waiting
+2026-11-04T06:24:44.4110940Z 3e5117a35689: Waiting
+2026-11-04T06:24:44.4111404Z da5f6c0e431d: Waiting
+2026-11-04T06:24:44.4111749Z 8aa6f24c4cb7: Waiting
+2026-11-04T06:24:44.4112089Z 8e500f630314: Waiting
+2026-11-04T06:24:44.4112425Z 651eed3c01c9: Waiting
+2026-11-04T06:24:44.4112768Z 7dff38e5c1b7: Waiting
+2026-11-04T06:24:44.6738068Z bd9ddc54bea9: Download complete
+2026-11-04T06:24:44.7236243Z d0c1d894c237: Verifying Checksum
+2026-11-04T06:24:44.7237093Z d0c1d894c237: Download complete
+2026-11-04T06:24:44.8365607Z 6458063cf5e1: Verifying Checksum
+2026-11-04T06:24:44.8366131Z 6458063cf5e1: Download complete
+2026-11-04T06:24:44.8644775Z d0c1d894c237: Pull complete
+2026-11-04T06:24:44.9580972Z 916023ea49d3: Verifying Checksum
+2026-11-04T06:24:44.9582098Z 916023ea49d3: Download complete
+2026-11-04T06:24:45.2490673Z 7dff38e5c1b7: Verifying Checksum
+2026-11-04T06:24:45.2491512Z 7dff38e5c1b7: Download complete
+2026-11-04T06:24:45.4856319Z 6559937a9f15: Verifying Checksum
+2026-11-04T06:24:45.4857949Z 6559937a9f15: Download complete
+2026-11-04T06:24:45.7242338Z 2552c421f3af: Verifying Checksum
+2026-11-04T06:24:45.7242895Z 2552c421f3af: Download complete
+2026-11-04T06:24:45.8559157Z 8e500f630314: Verifying Checksum
+2026-11-04T06:24:45.8560316Z 8e500f630314: Download complete
+2026-11-04T06:24:45.9285322Z 651eed3c01c9: Download complete
+2026-11-04T06:24:45.9541366Z c8fcc8976069: Verifying Checksum
+2026-11-04T06:24:45.9543362Z c8fcc8976069: Download complete
+2026-11-04T06:24:46.0835691Z 3e5117a35689: Verifying Checksum
+2026-11-04T06:24:46.0836059Z 3e5117a35689: Download complete
+2026-11-04T06:24:46.1599519Z da5f6c0e431d: Verifying Checksum
+2026-11-04T06:24:46.1600545Z da5f6c0e431d: Download complete
+2026-11-04T06:24:46.1878975Z 8aa6f24c4cb7: Verifying Checksum
+2026-11-04T06:24:46.1879931Z 8aa6f24c4cb7: Download complete
+2026-11-04T06:24:48.8756043Z 6458063cf5e1: Pull complete
+2026-11-04T06:24:48.8827906Z bd9ddc54bea9: Pull complete
+2026-11-04T06:24:48.9102232Z 916023ea49d3: Pull complete
+2026-11-04T06:24:49.6108316Z 8e500f630314: Pull complete
+2026-11-04T06:24:55.5071989Z 651eed3c01c9: Pull complete
+2026-11-04T06:24:55.5675435Z 7dff38e5c1b7: Pull complete
+2026-11-04T06:24:55.5775196Z 6559937a9f15: Pull complete
+2026-11-04T06:24:55.5885342Z 2552c421f3af: Pull complete
+2026-11-04T06:24:55.5979450Z c8fcc8976069: Pull complete
+2026-11-04T06:24:55.6087682Z 3e5117a35689: Pull complete
+2026-11-04T06:24:55.6165956Z da5f6c0e431d: Pull complete
+2026-11-04T06:24:55.6261339Z 8aa6f24c4cb7: Pull complete
+2026-11-04T06:24:55.6299288Z Digest: sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b
+2026-11-04T06:24:55.6306095Z Status: Downloaded newer image for semgrep/semgrep@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b
+2026-11-04T06:24:55.6314890Z docker.io/semgrep/semgrep@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b
+2026-11-04T06:24:56.2989239Z docker.io/library/maven@sha256:d8b1b22e93012cd0257d37b3fd6d7bec3d0f7ae611730fc3ba0657b9ebe4e7ca: Pulling from library/maven
+2026-11-04T06:24:56.5645056Z edd1ed89f0d4: Pulling fs layer
+2026-11-04T06:24:56.5645759Z d6d10bcdd9a8: Pulling fs layer
+2026-11-04T06:24:56.5646331Z 6c3b10820861: Pulling fs layer
+2026-11-04T06:24:56.5646871Z 14e261a1e870: Pulling fs layer
+2026-11-04T06:24:56.5647285Z b9340437cbdd: Pulling fs layer
+2026-11-04T06:24:56.5653727Z 262ec3be978e: Pulling fs layer
+2026-11-04T06:24:56.5654201Z e30fa700c6ad: Pulling fs layer
+2026-11-04T06:24:56.5654491Z 236674bde81e: Pulling fs layer
+2026-11-04T06:24:56.5654906Z f0d8a4002d41: Pulling fs layer
+2026-11-04T06:24:56.5655298Z 14e261a1e870: Waiting
+2026-11-04T06:24:56.5655640Z b9340437cbdd: Waiting
+2026-11-04T06:24:56.5656022Z 262ec3be978e: Waiting
+2026-11-04T06:24:56.5656418Z e30fa700c6ad: Waiting
+2026-11-04T06:24:56.5656661Z 236674bde81e: Waiting
+2026-11-04T06:24:56.5656884Z f0d8a4002d41: Waiting
+2026-11-04T06:24:56.8935887Z d6d10bcdd9a8: Verifying Checksum
+2026-11-04T06:24:56.8937084Z d6d10bcdd9a8: Download complete
+2026-11-04T06:24:56.9186945Z edd1ed89f0d4: Verifying Checksum
+2026-11-04T06:24:56.9188111Z edd1ed89f0d4: Download complete
+2026-11-04T06:24:57.1273634Z 14e261a1e870: Verifying Checksum
+2026-11-04T06:24:57.1275276Z 14e261a1e870: Download complete
+2026-11-04T06:24:57.1535828Z b9340437cbdd: Download complete
+2026-11-04T06:24:57.1660149Z 6c3b10820861: Verifying Checksum
+2026-11-04T06:24:57.1660504Z 6c3b10820861: Download complete
+2026-11-04T06:24:57.3854111Z 236674bde81e: Verifying Checksum
+2026-11-04T06:24:57.3855007Z 236674bde81e: Download complete
+2026-11-04T06:24:57.5817357Z e30fa700c6ad: Verifying Checksum
+2026-11-04T06:24:57.5818371Z e30fa700c6ad: Download complete
+2026-11-04T06:24:57.6150015Z 262ec3be978e: Verifying Checksum
+2026-11-04T06:24:57.6150622Z 262ec3be978e: Download complete
+2026-11-04T06:24:57.6195211Z f0d8a4002d41: Download complete
+2026-11-04T06:24:57.9905663Z edd1ed89f0d4: Pull complete
+2026-11-04T06:24:58.9070661Z d6d10bcdd9a8: Pull complete
+2026-11-04T06:24:59.7168587Z 6c3b10820861: Pull complete
+2026-11-04T06:24:59.7277905Z 14e261a1e870: Pull complete
+2026-11-04T06:24:59.7369555Z b9340437cbdd: Pull complete
+2026-11-04T06:25:00.5956373Z 262ec3be978e: Pull complete
+2026-11-04T06:25:00.6814343Z e30fa700c6ad: Pull complete
+2026-11-04T06:25:00.6901939Z 236674bde81e: Pull complete
+2026-11-04T06:25:00.7004612Z f0d8a4002d41: Pull complete
+2026-11-04T06:25:00.7040154Z Digest: sha256:d8b1b22e93012cd0257d37b3fd6d7bec3d0f7ae611730fc3ba0657b9ebe4e7ca
+2026-11-04T06:25:00.7046829Z Status: Downloaded newer image for maven@sha256:d8b1b22e93012cd0257d37b3fd6d7bec3d0f7ae611730fc3ba0657b9ebe4e7ca
+2026-11-04T06:25:00.7055469Z docker.io/library/maven@sha256:d8b1b22e93012cd0257d37b3fd6d7bec3d0f7ae611730fc3ba0657b9ebe4e7ca
+2026-11-04T06:25:01.4937149Z docker.io/library/maven@sha256:42a3ac393abbc64dae6c96703e5ead2e921fe9103371ac58b5b404b0d6a26502: Pulling from library/maven
+2026-11-04T06:25:01.7684580Z edd1ed89f0d4: Already exists
+2026-11-04T06:25:01.7699267Z 47b972074b15: Pulling fs layer
+2026-11-04T06:25:01.7699726Z 78731c0833cf: Pulling fs layer
+2026-11-04T06:25:01.7700193Z 2bfd9f2eb9dd: Pulling fs layer
+2026-11-04T06:25:01.7700440Z 9de0ee94abf4: Pulling fs layer
+2026-11-04T06:25:01.7700677Z 868b8fdd3adc: Pulling fs layer
+2026-11-04T06:25:01.7700909Z 7ce2e11b2a38: Pulling fs layer
+2026-11-04T06:25:01.7701445Z 1b31942465dd: Pulling fs layer
+2026-11-04T06:25:01.7701863Z ac404ec36379: Pulling fs layer
+2026-11-04T06:25:01.7702279Z e943c4f283fb: Pulling fs layer
+2026-11-04T06:25:01.7702680Z 9de0ee94abf4: Waiting
+2026-11-04T06:25:01.7702909Z 1b31942465dd: Waiting
+2026-11-04T06:25:01.7703106Z ac404ec36379: Waiting
+2026-11-04T06:25:01.7703299Z e943c4f283fb: Waiting
+2026-11-04T06:25:01.7703493Z 868b8fdd3adc: Waiting
+2026-11-04T06:25:01.7703690Z 7ce2e11b2a38: Waiting
+2026-11-04T06:25:02.0021927Z 2bfd9f2eb9dd: Download complete
+2026-11-04T06:25:02.1336346Z 47b972074b15: Verifying Checksum
+2026-11-04T06:25:02.1336982Z 47b972074b15: Download complete
+2026-11-04T06:25:02.2343285Z 9de0ee94abf4: Verifying Checksum
+2026-11-04T06:25:02.2343863Z 9de0ee94abf4: Download complete
+2026-11-04T06:25:02.5531001Z 7ce2e11b2a38: Verifying Checksum
+2026-11-04T06:25:02.5532078Z 7ce2e11b2a38: Download complete
+2026-11-04T06:25:02.6348111Z 868b8fdd3adc: Verifying Checksum
+2026-11-04T06:25:02.6349384Z 868b8fdd3adc: Download complete
+2026-11-04T06:25:02.7471048Z 78731c0833cf: Verifying Checksum
+2026-11-04T06:25:02.7474706Z 78731c0833cf: Download complete
+2026-11-04T06:25:02.7920038Z 1b31942465dd: Verifying Checksum
+2026-11-04T06:25:02.7920471Z 1b31942465dd: Download complete
+2026-11-04T06:25:02.8725063Z ac404ec36379: Verifying Checksum
+2026-11-04T06:25:02.8725471Z ac404ec36379: Download complete
+2026-11-04T06:25:02.9873167Z e943c4f283fb: Verifying Checksum
+2026-11-04T06:25:02.9873684Z e943c4f283fb: Download complete
+2026-11-04T06:25:03.4116416Z 47b972074b15: Pull complete
+2026-11-04T06:25:05.0067568Z 78731c0833cf: Pull complete
+2026-11-04T06:25:05.0160900Z 2bfd9f2eb9dd: Pull complete
+2026-11-04T06:25:05.0269286Z 9de0ee94abf4: Pull complete
+2026-11-04T06:25:05.8891453Z 868b8fdd3adc: Pull complete
+2026-11-04T06:25:05.9715109Z 7ce2e11b2a38: Pull complete
+2026-11-04T06:25:05.9804845Z 1b31942465dd: Pull complete
+2026-11-04T06:25:05.9899614Z ac404ec36379: Pull complete
+2026-11-04T06:25:05.9975281Z e943c4f283fb: Pull complete
+2026-11-04T06:25:06.0009226Z Digest: sha256:42a3ac393abbc64dae6c96703e5ead2e921fe9103371ac58b5b404b0d6a26502
+2026-11-04T06:25:06.0015687Z Status: Downloaded newer image for maven@sha256:42a3ac393abbc64dae6c96703e5ead2e921fe9103371ac58b5b404b0d6a26502
+2026-11-04T06:25:06.0023811Z docker.io/library/maven@sha256:42a3ac393abbc64dae6c96703e5ead2e921fe9103371ac58b5b404b0d6a26502
+2026-11-04T06:25:06.7302176Z docker.io/library/maven@sha256:a972570be789ee5c9fa23446a8914ac7327560b5c022f662cfa9452aef829f18: Pulling from library/maven
+2026-11-04T06:25:06.9859583Z e51aee9c82ec: Pulling fs layer
+2026-11-04T06:25:06.9860120Z be0bc3b98d96: Pulling fs layer
+2026-11-04T06:25:06.9860589Z b0738282e5e8: Pulling fs layer
+2026-11-04T06:25:06.9860885Z 51937f76dd8e: Pulling fs layer
+2026-11-04T06:25:06.9861459Z e9f7426d5fbd: Pulling fs layer
+2026-11-04T06:25:06.9861873Z 2093c0358e8a: Pulling fs layer
+2026-11-04T06:25:06.9862285Z 8d905b23edd8: Pulling fs layer
+2026-11-04T06:25:06.9862675Z be9a46a413a5: Pulling fs layer
+2026-11-04T06:25:06.9863098Z f7f3f197ffd9: Pulling fs layer
+2026-11-04T06:25:06.9863511Z 51937f76dd8e: Waiting
+2026-11-04T06:25:06.9863895Z e9f7426d5fbd: Waiting
+2026-11-04T06:25:06.9864218Z 2093c0358e8a: Waiting
+2026-11-04T06:25:06.9864550Z 8d905b23edd8: Waiting
+2026-11-04T06:25:06.9864907Z be9a46a413a5: Waiting
+2026-11-04T06:25:06.9865298Z f7f3f197ffd9: Waiting
+2026-11-04T06:25:07.3356939Z be0bc3b98d96: Verifying Checksum
+2026-11-04T06:25:07.3358239Z be0bc3b98d96: Download complete
+2026-11-04T06:25:07.3850812Z e51aee9c82ec: Verifying Checksum
+2026-11-04T06:25:07.3851703Z e51aee9c82ec: Download complete
+2026-11-04T06:25:07.5840748Z 51937f76dd8e: Download complete
+2026-11-04T06:25:07.6189231Z e9f7426d5fbd: Verifying Checksum
+2026-11-04T06:25:07.6190176Z e9f7426d5fbd: Download complete
+2026-11-04T06:25:07.8731842Z b0738282e5e8: Verifying Checksum
+2026-11-04T06:25:07.8737105Z b0738282e5e8: Download complete
+2026-11-04T06:25:07.9257419Z 8d905b23edd8: Verifying Checksum
+2026-11-04T06:25:07.9259522Z 8d905b23edd8: Download complete
+2026-11-04T06:25:07.9395330Z 2093c0358e8a: Verifying Checksum
+2026-11-04T06:25:07.9395904Z 2093c0358e8a: Download complete
+2026-11-04T06:25:08.1006323Z be9a46a413a5: Verifying Checksum
+2026-11-04T06:25:08.1007038Z be9a46a413a5: Download complete
+2026-11-04T06:25:08.1605995Z f7f3f197ffd9: Verifying Checksum
+2026-11-04T06:25:08.1606585Z f7f3f197ffd9: Download complete
+2026-11-04T06:25:08.5053996Z e51aee9c82ec: Pull complete
+2026-11-04T06:25:09.8691321Z be0bc3b98d96: Pull complete
+2026-11-04T06:25:11.6539272Z b0738282e5e8: Pull complete
+2026-11-04T06:25:11.6624768Z 51937f76dd8e: Pull complete
+2026-11-04T06:25:11.6743079Z e9f7426d5fbd: Pull complete
+2026-11-04T06:25:12.5358712Z 2093c0358e8a: Pull complete
+2026-11-04T06:25:12.6216493Z 8d905b23edd8: Pull complete
+2026-11-04T06:25:12.6298963Z be9a46a413a5: Pull complete
+2026-11-04T06:25:12.6397980Z f7f3f197ffd9: Pull complete
+2026-11-04T06:25:12.6435612Z Digest: sha256:a972570be789ee5c9fa23446a8914ac7327560b5c022f662cfa9452aef829f18
+2026-11-04T06:25:12.6442038Z Status: Downloaded newer image for maven@sha256:a972570be789ee5c9fa23446a8914ac7327560b5c022f662cfa9452aef829f18
+2026-11-04T06:25:12.6451615Z docker.io/library/maven@sha256:a972570be789ee5c9fa23446a8914ac7327560b5c022f662cfa9452aef829f18
+2026-11-04T06:25:13.3884629Z docker.io/library/gradle@sha256:de7e9465caf5a35e93a92b71c41f2bcf4e7a99ae0f8fbb7399458d86829b6a90: Pulling from library/gradle
+2026-11-04T06:25:13.6771443Z 98c4455a9898: Pulling fs layer
+2026-11-04T06:25:13.6772233Z 04554394ac47: Pulling fs layer
+2026-11-04T06:25:13.6772783Z 1a8d4566a561: Pulling fs layer
+2026-11-04T06:25:13.6773349Z 09014cf089e2: Pulling fs layer
+2026-11-04T06:25:13.6773823Z 782835a1524c: Pulling fs layer
+2026-11-04T06:25:13.6774325Z bcd88251097a: Pulling fs layer
+2026-11-04T06:25:13.6774778Z 4f4fb700ef54: Pulling fs layer
+2026-11-04T06:25:13.6775115Z 5247e19c43da: Pulling fs layer
+2026-11-04T06:25:13.6775369Z 1f26adc0374f: Pulling fs layer
+2026-11-04T06:25:13.6775612Z f375ccb640d3: Pulling fs layer
+2026-11-04T06:25:13.6775842Z 09014cf089e2: Waiting
+2026-11-04T06:25:13.6776053Z 782835a1524c: Waiting
+2026-11-04T06:25:13.6776255Z bcd88251097a: Waiting
+2026-11-04T06:25:13.6776458Z 4f4fb700ef54: Waiting
+2026-11-04T06:25:13.6776655Z 5247e19c43da: Waiting
+2026-11-04T06:25:13.6776852Z 1f26adc0374f: Waiting
+2026-11-04T06:25:13.6777222Z f375ccb640d3: Waiting
+2026-11-04T06:25:14.1163066Z 98c4455a9898: Verifying Checksum
+2026-11-04T06:25:14.1163661Z 98c4455a9898: Download complete
+2026-11-04T06:25:14.1424682Z 04554394ac47: Verifying Checksum
+2026-11-04T06:25:14.1427008Z 04554394ac47: Download complete
+2026-11-04T06:25:14.1555485Z 1a8d4566a561: Verifying Checksum
+2026-11-04T06:25:14.1555953Z 1a8d4566a561: Download complete
+2026-11-04T06:25:14.3500270Z 09014cf089e2: Verifying Checksum
+2026-11-04T06:25:14.3502364Z 09014cf089e2: Download complete
+2026-11-04T06:25:14.3739690Z 782835a1524c: Verifying Checksum
+2026-11-04T06:25:14.3740700Z 782835a1524c: Download complete
+2026-11-04T06:25:14.5778176Z 4f4fb700ef54: Verifying Checksum
+2026-11-04T06:25:14.5779021Z 4f4fb700ef54: Download complete
+2026-11-04T06:25:14.6607454Z bcd88251097a: Verifying Checksum
+2026-11-04T06:25:14.6609684Z bcd88251097a: Download complete
+2026-11-04T06:25:15.1235395Z 98c4455a9898: Pull complete
+2026-11-04T06:25:15.2632297Z f375ccb640d3: Verifying Checksum
+2026-11-04T06:25:15.2632861Z f375ccb640d3: Download complete
+2026-11-04T06:25:16.4341625Z 5247e19c43da: Verifying Checksum
+2026-11-04T06:25:16.4342327Z 5247e19c43da: Download complete
+2026-11-04T06:25:16.5130943Z 04554394ac47: Pull complete
+2026-11-04T06:25:17.5079768Z 1a8d4566a561: Pull complete
+2026-11-04T06:25:17.5193011Z 09014cf089e2: Pull complete
+2026-11-04T06:25:17.5278515Z 782835a1524c: Pull complete
+2026-11-04T06:25:17.5479805Z bcd88251097a: Pull complete
+2026-11-04T06:25:17.5607745Z 4f4fb700ef54: Pull complete
+2026-11-04T06:25:18.2039238Z 1f26adc0374f: Verifying Checksum
+2026-11-04T06:25:18.2039615Z 1f26adc0374f: Download complete
+2026-11-04T06:25:19.9720779Z 5247e19c43da: Pull complete
+2026-11-04T06:25:20.7687381Z 1f26adc0374f: Pull complete
+2026-11-04T06:25:20.7844938Z f375ccb640d3: Pull complete
+2026-11-04T06:25:20.7879538Z Digest: sha256:de7e9465caf5a35e93a92b71c41f2bcf4e7a99ae0f8fbb7399458d86829b6a90
+2026-11-04T06:25:20.7885722Z Status: Downloaded newer image for gradle@sha256:de7e9465caf5a35e93a92b71c41f2bcf4e7a99ae0f8fbb7399458d86829b6a90
+2026-11-04T06:25:20.7894795Z docker.io/library/gradle@sha256:de7e9465caf5a35e93a92b71c41f2bcf4e7a99ae0f8fbb7399458d86829b6a90
+2026-11-04T06:25:21.5480891Z docker.io/library/gradle@sha256:97c944e42dea3af8d3c987f1515015dda8033c1f41243137db2f107340f29ebc: Pulling from library/gradle
+2026-11-04T06:25:21.8007083Z edd1ed89f0d4: Already exists
+2026-11-04T06:25:21.8019141Z 47b972074b15: Already exists
+2026-11-04T06:25:21.8030690Z 78731c0833cf: Already exists
+2026-11-04T06:25:21.8041998Z 2bfd9f2eb9dd: Already exists
+2026-11-04T06:25:21.8053386Z 9de0ee94abf4: Already exists
+2026-11-04T06:25:21.8065212Z b661ba177710: Pulling fs layer
+2026-11-04T06:25:21.8066195Z 4f4fb700ef54: Pulling fs layer
+2026-11-04T06:25:21.8066985Z edaadf0f699f: Pulling fs layer
+2026-11-04T06:25:21.8069924Z 02c33ec68092: Pulling fs layer
+2026-11-04T06:25:21.8070222Z 96562c1be8d5: Pulling fs layer
+2026-11-04T06:25:21.8070579Z 02c33ec68092: Waiting
+2026-11-04T06:25:21.8070924Z 96562c1be8d5: Waiting
+2026-11-04T06:25:22.0372286Z 4f4fb700ef54: Download complete
+2026-11-04T06:25:22.3155856Z b661ba177710: Download complete
+2026-11-04T06:25:22.3290122Z b661ba177710: Pull complete
+2026-11-04T06:25:22.3406975Z 4f4fb700ef54: Pull complete
+2026-11-04T06:25:22.8913330Z 96562c1be8d5: Download complete
+2026-11-04T06:25:23.8385398Z edaadf0f699f: Verifying Checksum
+2026-11-04T06:25:23.8386061Z edaadf0f699f: Download complete
+2026-11-04T06:25:25.4609367Z 02c33ec68092: Verifying Checksum
+2026-11-04T06:25:25.4609920Z 02c33ec68092: Download complete
+2026-11-04T06:25:26.8630940Z edaadf0f699f: Pull complete
+2026-11-04T06:25:27.6680522Z 02c33ec68092: Pull complete
+2026-11-04T06:25:27.6858197Z 96562c1be8d5: Pull complete
+2026-11-04T06:25:27.6892820Z Digest: sha256:97c944e42dea3af8d3c987f1515015dda8033c1f41243137db2f107340f29ebc
+2026-11-04T06:25:27.6898194Z Status: Downloaded newer image for gradle@sha256:97c944e42dea3af8d3c987f1515015dda8033c1f41243137db2f107340f29ebc
+2026-11-04T06:25:27.6906305Z docker.io/library/gradle@sha256:97c944e42dea3af8d3c987f1515015dda8033c1f41243137db2f107340f29ebc
+2026-11-04T06:25:28.4378937Z docker.io/library/gradle@sha256:f6588210adee6777f77fa9fccd02aa9a7a74a8b4c3f32a87d1f446679645dba2: Pulling from library/gradle
+2026-11-04T06:25:28.7819546Z 7a48b8f0e5c7: Pulling fs layer
+2026-11-04T06:25:28.7820485Z 1107eb4d57a1: Pulling fs layer
+2026-11-04T06:25:28.7821406Z 3782cad2410f: Pulling fs layer
+2026-11-04T06:25:28.7822313Z d3ca24936b7e: Pulling fs layer
+2026-11-04T06:25:28.7823359Z 99edbeddc639: Pulling fs layer
+2026-11-04T06:25:28.7824293Z a74d62e4d131: Pulling fs layer
+2026-11-04T06:25:28.7825043Z 4f4fb700ef54: Pulling fs layer
+2026-11-04T06:25:28.7825690Z 7fe216ed6354: Pulling fs layer
+2026-11-04T06:25:28.7826407Z 5606f50575ab: Pulling fs layer
+2026-11-04T06:25:28.7827056Z 39efad4c1c83: Pulling fs layer
+2026-11-04T06:25:28.7827763Z d3ca24936b7e: Waiting
+2026-11-04T06:25:28.7828374Z 99edbeddc639: Waiting
+2026-11-04T06:25:28.7828961Z a74d62e4d131: Waiting
+2026-11-04T06:25:28.7829562Z 4f4fb700ef54: Waiting
+2026-11-04T06:25:28.7830158Z 7fe216ed6354: Waiting
+2026-11-04T06:25:28.7830756Z 5606f50575ab: Waiting
+2026-11-04T06:25:28.7831579Z 39efad4c1c83: Waiting
+2026-11-04T06:25:29.1504166Z 7a48b8f0e5c7: Verifying Checksum
+2026-11-04T06:25:29.1505085Z 7a48b8f0e5c7: Download complete
+2026-11-04T06:25:29.1621113Z 1107eb4d57a1: Verifying Checksum
+2026-11-04T06:25:29.1622450Z 1107eb4d57a1: Download complete
+2026-11-04T06:25:29.3892113Z d3ca24936b7e: Verifying Checksum
+2026-11-04T06:25:29.3892824Z d3ca24936b7e: Download complete
+2026-11-04T06:25:29.3913608Z 99edbeddc639: Verifying Checksum
+2026-11-04T06:25:29.3914176Z 99edbeddc639: Download complete
+2026-11-04T06:25:29.6106790Z 4f4fb700ef54: Verifying Checksum
+2026-11-04T06:25:29.6107811Z 4f4fb700ef54: Download complete
+2026-11-04T06:25:29.6223761Z a74d62e4d131: Verifying Checksum
+2026-11-04T06:25:29.6224387Z a74d62e4d131: Download complete
+2026-11-04T06:25:29.7490308Z 3782cad2410f: Verifying Checksum
+2026-11-04T06:25:29.7491499Z 3782cad2410f: Download complete
+2026-11-04T06:25:29.9856853Z 39efad4c1c83: Verifying Checksum
+2026-11-04T06:25:29.9857412Z 39efad4c1c83: Download complete
+2026-11-04T06:25:30.3508439Z 7fe216ed6354: Verifying Checksum
+2026-11-04T06:25:30.3510418Z 7fe216ed6354: Download complete
+2026-11-04T06:25:30.4089872Z 7a48b8f0e5c7: Pull complete
+2026-11-04T06:25:30.5671910Z 5606f50575ab: Verifying Checksum
+2026-11-04T06:25:30.5673317Z 5606f50575ab: Download complete
+2026-11-04T06:25:32.2115987Z 1107eb4d57a1: Pull complete
+2026-11-04T06:25:34.0158836Z 3782cad2410f: Pull complete
+2026-11-04T06:25:34.0273614Z d3ca24936b7e: Pull complete
+2026-11-04T06:25:34.0362122Z 99edbeddc639: Pull complete
+2026-11-04T06:25:34.0470706Z a74d62e4d131: Pull complete
+2026-11-04T06:25:34.0540000Z 4f4fb700ef54: Pull complete
+2026-11-04T06:25:36.6712218Z 7fe216ed6354: Pull complete
+2026-11-04T06:25:37.4655763Z 5606f50575ab: Pull complete
+2026-11-04T06:25:37.4790933Z 39efad4c1c83: Pull complete
+2026-11-04T06:25:37.4826076Z Digest: sha256:f6588210adee6777f77fa9fccd02aa9a7a74a8b4c3f32a87d1f446679645dba2
+2026-11-04T06:25:37.4830983Z Status: Downloaded newer image for gradle@sha256:f6588210adee6777f77fa9fccd02aa9a7a74a8b4c3f32a87d1f446679645dba2
+2026-11-04T06:25:37.4841207Z docker.io/library/gradle@sha256:f6588210adee6777f77fa9fccd02aa9a7a74a8b4c3f32a87d1f446679645dba2
+2026-11-04T06:25:38.1960419Z docker.io/library/python@sha256:31dd4d9529d02d7436659061cb7564cd4733fc90e5e152709a942d53382ec8d0: Pulling from library/python
+2026-11-04T06:25:38.4840748Z 6b37362b3da7: Pulling fs layer
+2026-11-04T06:25:38.4843164Z 7b0c45134812: Pulling fs layer
+2026-11-04T06:25:38.4843699Z 1f43bcf5ef11: Pulling fs layer
+2026-11-04T06:25:38.4844153Z 920e618c41a6: Pulling fs layer
+2026-11-04T06:25:38.4844619Z 920e618c41a6: Waiting
+2026-11-04T06:25:38.7505231Z 7b0c45134812: Verifying Checksum
+2026-11-04T06:25:38.7506043Z 7b0c45134812: Download complete
+2026-11-04T06:25:38.8036958Z 1f43bcf5ef11: Verifying Checksum
+2026-11-04T06:25:38.8037555Z 1f43bcf5ef11: Download complete
+2026-11-04T06:25:38.8407665Z 6b37362b3da7: Verifying Checksum
+2026-11-04T06:25:38.8408335Z 6b37362b3da7: Download complete
+2026-11-04T06:25:39.0019892Z 920e618c41a6: Verifying Checksum
+2026-11-04T06:25:39.0020937Z 920e618c41a6: Download complete
+2026-11-04T06:25:39.7799993Z 6b37362b3da7: Pull complete
+2026-11-04T06:25:39.9631046Z 7b0c45134812: Pull complete
+2026-11-04T06:25:40.7015501Z 1f43bcf5ef11: Pull complete
+2026-11-04T06:25:40.7105617Z 920e618c41a6: Pull complete
+2026-11-04T06:25:40.7140470Z Digest: sha256:31dd4d9529d02d7436659061cb7564cd4733fc90e5e152709a942d53382ec8d0
+2026-11-04T06:25:40.7146682Z Status: Downloaded newer image for python@sha256:31dd4d9529d02d7436659061cb7564cd4733fc90e5e152709a942d53382ec8d0
+2026-11-04T06:25:40.7154096Z docker.io/library/python@sha256:31dd4d9529d02d7436659061cb7564cd4733fc90e5e152709a942d53382ec8d0
+2026-11-04T06:25:41.3979206Z docker.io/library/python@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea: Pulling from library/python
+2026-11-04T06:25:41.6553647Z 6310eb16bf42: Pulling fs layer
+2026-11-04T06:25:41.6554184Z dbd0b7849e6c: Pulling fs layer
+2026-11-04T06:25:41.6554606Z 1560cfed01dc: Pulling fs layer
+2026-11-04T06:25:41.6555024Z 56235e424563: Pulling fs layer
+2026-11-04T06:25:41.6555445Z 56235e424563: Waiting
+2026-11-04T06:25:41.9395764Z dbd0b7849e6c: Verifying Checksum
+2026-11-04T06:25:41.9397037Z dbd0b7849e6c: Download complete
+2026-11-04T06:25:41.9622761Z 1560cfed01dc: Verifying Checksum
+2026-11-04T06:25:41.9623971Z 1560cfed01dc: Download complete
+2026-11-04T06:25:42.0116226Z 6310eb16bf42: Verifying Checksum
+2026-11-04T06:25:42.0116978Z 6310eb16bf42: Download complete
+2026-11-04T06:25:42.1753805Z 56235e424563: Verifying Checksum
+2026-11-04T06:25:42.1754869Z 56235e424563: Download complete
+2026-11-04T06:25:42.9478494Z 6310eb16bf42: Pull complete
+2026-11-04T06:25:43.1715826Z dbd0b7849e6c: Pull complete
+2026-11-04T06:25:43.7663719Z 1560cfed01dc: Pull complete
+2026-11-04T06:25:43.7764901Z 56235e424563: Pull complete
+2026-11-04T06:25:43.7818119Z Digest: sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
+2026-11-04T06:25:43.7825511Z Status: Downloaded newer image for python@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
+2026-11-04T06:25:43.7830757Z docker.io/library/python@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
+2026-11-04T06:25:44.5289266Z docker.io/library/debian@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171: Pulling from library/debian
+2026-11-04T06:25:44.8049095Z a8ac7f6c67ab: Pulling fs layer
+2026-11-04T06:25:45.1813675Z a8ac7f6c67ab: Verifying Checksum
+2026-11-04T06:25:45.1814041Z a8ac7f6c67ab: Download complete
+2026-11-04T06:25:46.2595051Z a8ac7f6c67ab: Pull complete
+2026-11-04T06:25:46.2631331Z Digest: sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
+2026-11-04T06:25:46.2637222Z Status: Downloaded newer image for debian@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
+2026-11-04T06:25:46.2643361Z docker.io/library/debian@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
+2026-11-04T06:25:46.3825755Z [pinned-images] 10 present, 0 missing
+2026-11-04T06:25:46.3928544Z ##[group]Run scripts/seed_offline_maven.sh
+2026-11-04T06:25:46.3928904Z [36;1mscripts/seed_offline_maven.sh[0m
+2026-11-04T06:25:46.3949731Z shell: /usr/bin/bash -e {0}
+2026-11-04T06:25:46.3949987Z env:
+2026-11-04T06:25:46.3950270Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:25:46.3950730Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-11-04T06:25:46.3951494Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:25:46.3951884Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:25:46.3952278Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:25:46.3952657Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-11-04T06:25:46.3953082Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:25:46.3953563Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:25:46.3953964Z ##[endgroup]
+2026-11-04T06:25:46.6863319Z [seed] host Maven: Apache Maven 3.9.9 (8e8579a9e76f7d015ee5ec7bfcdc97d260186937)
+2026-11-04T06:25:57.3009712Z Nov 04, 2026 6:25:57 AM org.apache.ignite.logger.java.JavaLogger warning
+2026-11-04T06:25:57.3010383Z WARNING: Failed to resolve default logging config file: config/java.util.logging.properties
+2026-11-04T06:25:57.5154229Z [06:25:57]    __________  ________________ 
+2026-11-04T06:25:57.5183944Z [06:25:57]   /  _/ ___/ |/ /  _/_  __/ __/ 
+2026-11-04T06:25:57.5198068Z [06:25:57]  _/ // (7 7    // /  / / / _/   
+2026-11-04T06:25:57.5221818Z [06:25:57] /___/\___/_/|_/___/ /_/ /x___/  
+2026-11-04T06:25:57.5238410Z [06:25:57] 
+2026-11-04T06:25:57.5260912Z [06:25:57] ver. 2.18.0#20260423-sha1:d49adada
+2026-11-04T06:25:57.5272559Z [06:25:57] 2026 Copyright(C) Apache Software Foundation
+2026-11-04T06:25:57.5273394Z [06:25:57] 
+2026-11-04T06:25:57.5274151Z [06:25:57] Ignite documentation: https://ignite.apache.org
+2026-11-04T06:25:57.5274985Z [06:25:57] 
+2026-11-04T06:25:57.5275533Z [06:25:57] Quiet mode.
+2026-11-04T06:25:57.5276300Z [06:25:57]   ^-- Logging by 'JavaLogger [quiet=true, config=null]'
+2026-11-04T06:25:57.5277386Z [06:25:57]   ^-- To see **FULL** console log here add -DIGNITE_QUIET=false or "-v" to ignite.{sh|bat}
+2026-11-04T06:25:57.5278245Z [06:25:57] 
+2026-11-04T06:25:57.5356660Z [06:25:57] OS: Linux 7.0.0-1017-azure amd64
+2026-11-04T06:25:57.5413218Z [06:25:57] VM information: OpenJDK Runtime Environment 17.0.21+9 Eclipse Adoptium OpenJDK 64-Bit Server VM 17.0.21+9
+2026-11-04T06:25:57.5463077Z [06:25:57] Please set system property '-Djava.net.preferIPv4Stack=true' to avoid possible problems in mixed environments.
+2026-11-04T06:25:57.6064690Z [06:25:57] Configured plugins:
+2026-11-04T06:25:57.6092530Z [06:25:57]   ^-- None
+2026-11-04T06:25:57.6114585Z [06:25:57] 
+2026-11-04T06:25:57.6133794Z [06:25:57] Configured failure handler: [hnd=StopNodeOrHaltFailureHandler [tryStop=false, timeout=0, super=AbstractFailureHandler [ignoredFailureTypes=UnmodifiableSet [SYSTEM_WORKER_BLOCKED, SYSTEM_CRITICAL_OPERATION_TIMEOUT]]]]
+2026-11-04T06:25:57.6366745Z [06:25:57] Initial heap size is 250MB (should be no less than 512MB, use -Xms512m -Xmx512m).
+2026-11-04T06:25:57.8380196Z [06:25:57] Message queue limit is set to 0 which may lead to potential OOMEs when running cache operations in FULL_ASYNC or PRIMARY_SYNC modes due to message queues growth on sender and receiver sides.
+2026-11-04T06:25:59.7670210Z [06:25:59] Data Regions Started: 3
+2026-11-04T06:25:59.7671092Z [06:25:59] 
+2026-11-04T06:25:59.7672191Z [06:25:59]     ^--   sysMemPlc region [type=internal, persistence=false, lazyAlloc=false,
+2026-11-04T06:25:59.7673129Z [06:25:59]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=40MB]
+2026-11-04T06:25:59.7674027Z [06:25:59]     ^--   default region [type=default, persistence=false, lazyAlloc=true,
+2026-11-04T06:25:59.7674898Z [06:25:59]       ...  initCfg=256MB, maxCfg=3196MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+2026-11-04T06:25:59.7676424Z [06:25:59]     ^--   volatileDsMemPlc region [type=user, persistence=false, lazyAlloc=true,
+2026-11-04T06:25:59.7677407Z [06:25:59]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+2026-11-04T06:26:00.1146176Z [06:26:00] Security status [authentication=off, sandbox=off, tls/ssl=off]
+2026-11-04T06:26:00.1147399Z [06:26:00] Performance suggestions for grid 'ignite-test-witness' (fix if possible)
+2026-11-04T06:26:00.1148252Z [06:26:00] To disable, set -DIGNITE_PERFORMANCE_SUGGESTIONS_DISABLED=true
+2026-11-04T06:26:00.1153112Z [06:26:00]   ^-- Specify JVM heap max size (add '-Xmx<size>[g|G|m|M|k|K]' to JVM options)
+2026-11-04T06:26:00.1154503Z [06:26:00]   ^-- Set max direct memory size if getting 'OOME: Direct buffer memory' (add '-XX:MaxDirectMemorySize=<size>[g|G|m|M|k|K]' to JVM options)
+2026-11-04T06:26:00.1157316Z [06:26:00]   ^-- Speed up flushing of dirty pages by OS (alter vm.dirty_expire_centisecs parameter by setting to 500)
+2026-11-04T06:26:00.1158308Z [06:26:00]   ^-- Reduce pages swapping ratio (set vm.swappiness=10 or less)
+2026-11-04T06:26:00.1159052Z [06:26:00]   ^-- Disable assertions (remove '-ea' from JVM options)
+2026-11-04T06:26:00.1160236Z [06:26:00] Refer to this page for more performance suggestions: https://ignite.apache.org/docs/latest/perf-and-troubleshooting/memory-tuning
+2026-11-04T06:26:00.1161536Z [06:26:00] 
+2026-11-04T06:26:00.1161733Z [06:26:00] 
+2026-11-04T06:26:00.1165280Z [06:26:00] Ignite node started OK (id=d585ca51, instance name=ignite-test-witness)
+2026-11-04T06:26:00.1365565Z [06:26:00] Topology snapshot [ver=1, locNode=d585ca51, servers=1, clients=0, state=ACTIVE, CPUs=4, offheap=3.1GB, heap=3.9GB]
+2026-11-04T06:26:00.1394566Z [06:26:00]   ^-- Baseline [id=0, size=1, online=1, offline=0]
+2026-11-04T06:26:00.2150225Z [06:26:00] Ignite node stopped OK [name=ignite-test-witness, uptime=00:00:00.101]
+2026-11-04T06:26:00.2960891Z [06:26:00]    __________  ________________ 
+2026-11-04T06:26:00.2961800Z [06:26:00]   /  _/ ___/ |/ /  _/_  __/ __/ 
+2026-11-04T06:26:00.2962315Z [06:26:00]  _/ // (7 7    // /  / / / _/   
+2026-11-04T06:26:00.2962758Z [06:26:00] /___/\___/_/|_/___/ /_/ /x___/  
+2026-11-04T06:26:00.2963179Z [06:26:00] 
+2026-11-04T06:26:00.2963538Z [06:26:00] ver. 2.18.0#20260423-sha1:d49adada
+2026-11-04T06:26:00.2964110Z [06:26:00] 2026 Copyright(C) Apache Software Foundation
+2026-11-04T06:26:00.2964655Z [06:26:00] 
+2026-11-04T06:26:00.2965618Z [06:26:00] Ignite documentation: https://ignite.apache.org
+2026-11-04T06:26:00.2966170Z [06:26:00] 
+2026-11-04T06:26:00.2966503Z [06:26:00] Quiet mode.
+2026-11-04T06:26:00.2967010Z [06:26:00]   ^-- Logging by 'JavaLogger [quiet=true, config=null]'
+2026-11-04T06:26:00.2967891Z [06:26:00]   ^-- To see **FULL** console log here add -DIGNITE_QUIET=false or "-v" to ignite.{sh|bat}
+2026-11-04T06:26:00.2968543Z [06:26:00] 
+2026-11-04T06:26:00.2968752Z [06:26:00] OS: Linux 7.0.0-1017-azure amd64
+2026-11-04T06:26:00.2969301Z [06:26:00] VM information: OpenJDK Runtime Environment 17.0.21+9 Eclipse Adoptium OpenJDK 64-Bit Server VM 17.0.21+9
+2026-11-04T06:26:00.2970107Z [06:26:00] Please set system property '-Djava.net.preferIPv4Stack=true' to avoid possible problems in mixed environments.
+2026-11-04T06:26:00.3022034Z [06:26:00] Configured plugins:
+2026-11-04T06:26:00.3022758Z [06:26:00]   ^-- None
+2026-11-04T06:26:00.3023365Z [06:26:00] 
+2026-11-04T06:26:00.3025246Z [06:26:00] Configured failure handler: [hnd=StopNodeOrHaltFailureHandler [tryStop=false, timeout=0, super=AbstractFailureHandler [ignoredFailureTypes=UnmodifiableSet [SYSTEM_WORKER_BLOCKED, SYSTEM_CRITICAL_OPERATION_TIMEOUT]]]]
+2026-11-04T06:26:00.3134381Z [06:26:00] Initial heap size is 250MB (should be no less than 512MB, use -Xms512m -Xmx512m).
+2026-11-04T06:26:00.3203214Z [06:26:00] Message queue limit is set to 0 which may lead to potential OOMEs when running cache operations in FULL_ASYNC or PRIMARY_SYNC modes due to message queues growth on sender and receiver sides.
+2026-11-04T06:26:01.6007027Z [06:26:01] Data Regions Started: 3
+2026-11-04T06:26:01.6013799Z [06:26:01] 
+2026-11-04T06:26:01.6014545Z [06:26:01]     ^--   sysMemPlc region [type=internal, persistence=false, lazyAlloc=false,
+2026-11-04T06:26:01.6015490Z [06:26:01]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=40MB]
+2026-11-04T06:26:01.6016380Z [06:26:01]     ^--   default region [type=default, persistence=false, lazyAlloc=true,
+2026-11-04T06:26:01.6017330Z [06:26:01]       ...  initCfg=256MB, maxCfg=3196MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+2026-11-04T06:26:01.6018287Z [06:26:01]     ^--   volatileDsMemPlc region [type=user, persistence=false, lazyAlloc=true,
+2026-11-04T06:26:01.6019304Z [06:26:01]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+2026-11-04T06:26:01.6712936Z [06:26:01] Security status [authentication=off, sandbox=off, tls/ssl=off]
+2026-11-04T06:26:01.6728188Z [06:26:01] Performance suggestions for grid 'ignite-test-plain' (fix if possible)
+2026-11-04T06:26:01.6742324Z [06:26:01] To disable, set -DIGNITE_PERFORMANCE_SUGGESTIONS_DISABLED=true
+2026-11-04T06:26:01.6768241Z [06:26:01]   ^-- Specify JVM heap max size (add '-Xmx<size>[g|G|m|M|k|K]' to JVM options)
+2026-11-04T06:26:01.6808406Z [06:26:01]   ^-- Set max direct memory size if getting 'OOME: Direct buffer memory' (add '-XX:MaxDirectMemorySize=<size>[g|G|m|M|k|K]' to JVM options)
+2026-11-04T06:26:01.6809307Z [06:26:01]   ^-- Speed up flushing of dirty pages by OS (alter vm.dirty_expire_centisecs parameter by setting to 500)
+2026-11-04T06:26:01.6809948Z [06:26:01]   ^-- Reduce pages swapping ratio (set vm.swappiness=10 or less)
+2026-11-04T06:26:01.6810412Z [06:26:01]   ^-- Disable assertions (remove '-ea' from JVM options)
+2026-11-04T06:26:01.6811401Z [06:26:01] Refer to this page for more performance suggestions: https://ignite.apache.org/docs/latest/perf-and-troubleshooting/memory-tuning
+2026-11-04T06:26:01.6812272Z [06:26:01] 
+2026-11-04T06:26:01.6812620Z [06:26:01] 
+2026-11-04T06:26:01.6813229Z [06:26:01] Ignite node started OK (id=695bceaf, instance name=ignite-test-plain)
+2026-11-04T06:26:01.6814093Z [06:26:01] Topology snapshot [ver=1, locNode=695bceaf, servers=1, clients=0, state=ACTIVE, CPUs=4, offheap=3.1GB, heap=3.9GB]
+2026-11-04T06:26:01.6814697Z [06:26:01]   ^-- Baseline [id=0, size=1, online=1, offline=0]
+2026-11-04T06:26:01.7102908Z [06:26:01] Ignite node stopped OK [name=ignite-test-plain, uptime=00:00:00.042]
+2026-11-04T06:26:05.0989407Z Nov 04, 2026 6:26:05 AM org.apache.ignite.logger.java.JavaLogger warning
+2026-11-04T06:26:05.0990216Z WARNING: Failed to resolve default logging config file: config/java.util.logging.properties
+2026-11-04T06:26:05.2812625Z [06:26:05]    __________  ________________ 
+2026-11-04T06:26:05.2842209Z [06:26:05]   /  _/ ___/ |/ /  _/_  __/ __/ 
+2026-11-04T06:26:05.2842778Z [06:26:05]  _/ // (7 7    // /  / / / _/   
+2026-11-04T06:26:05.2843253Z [06:26:05] /___/\___/_/|_/___/ /_/ /x___/  
+2026-11-04T06:26:05.2843696Z [06:26:05] 
+2026-11-04T06:26:05.2844045Z [06:26:05] ver. 2.18.0#20260423-sha1:d49adada
+2026-11-04T06:26:05.2844641Z [06:26:05] 2026 Copyright(C) Apache Software Foundation
+2026-11-04T06:26:05.2845156Z [06:26:05] 
+2026-11-04T06:26:05.2845628Z [06:26:05] Ignite documentation: https://ignite.apache.org
+2026-11-04T06:26:05.2846245Z [06:26:05] 
+2026-11-04T06:26:05.2846587Z [06:26:05] Quiet mode.
+2026-11-04T06:26:05.2852186Z [06:26:05]   ^-- Logging by 'JavaLogger [quiet=true, config=null]'
+2026-11-04T06:26:05.2853311Z [06:26:05]   ^-- To see **FULL** console log here add -DIGNITE_QUIET=false or "-v" to ignite.{sh|bat}
+2026-11-04T06:26:05.2854266Z [06:26:05] 
+2026-11-04T06:26:05.3015618Z [06:26:05] OS: Linux 7.0.0-1017-azure amd64
+2026-11-04T06:26:05.3073037Z [06:26:05] VM information: OpenJDK Runtime Environment 17.0.21+9 Eclipse Adoptium OpenJDK 64-Bit Server VM 17.0.21+9
+2026-11-04T06:26:05.3117203Z [06:26:05] Please set system property '-Djava.net.preferIPv4Stack=true' to avoid possible problems in mixed environments.
+2026-11-04T06:26:05.3752393Z [06:26:05] Configured plugins:
+2026-11-04T06:26:05.3762798Z [06:26:05]   ^-- None
+2026-11-04T06:26:05.3802074Z [06:26:05] 
+2026-11-04T06:26:05.3805989Z [06:26:05] Configured failure handler: [hnd=StopNodeOrHaltFailureHandler [tryStop=false, timeout=0, super=AbstractFailureHandler [ignoredFailureTypes=UnmodifiableSet [SYSTEM_WORKER_BLOCKED, SYSTEM_CRITICAL_OPERATION_TIMEOUT]]]]
+2026-11-04T06:26:05.4052640Z [06:26:05] Initial heap size is 250MB (should be no less than 512MB, use -Xms512m -Xmx512m).
+2026-11-04T06:26:05.5789202Z [06:26:05] Message queue limit is set to 0 which may lead to potential OOMEs when running cache operations in FULL_ASYNC or PRIMARY_SYNC modes due to message queues growth on sender and receiver sides.
+2026-11-04T06:26:07.4690907Z [06:26:07] Data Regions Started: 3
+2026-11-04T06:26:07.4705122Z [06:26:07] 
+2026-11-04T06:26:07.4706041Z [06:26:07]     ^--   sysMemPlc region [type=internal, persistence=false, lazyAlloc=false,
+2026-11-04T06:26:07.4707231Z [06:26:07]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=40MB]
+2026-11-04T06:26:07.4708395Z [06:26:07]     ^--   default region [type=default, persistence=false, lazyAlloc=true,
+2026-11-04T06:26:07.4709560Z [06:26:07]       ...  initCfg=256MB, maxCfg=3196MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+2026-11-04T06:26:07.4710747Z [06:26:07]     ^--   volatileDsMemPlc region [type=user, persistence=false, lazyAlloc=true,
+2026-11-04T06:26:07.4712151Z [06:26:07]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+2026-11-04T06:26:07.7637561Z [06:26:07] Security status [authentication=off, sandbox=off, tls/ssl=off]
+2026-11-04T06:26:07.7638896Z [06:26:07] Performance suggestions for grid 'ignite-server-node' (fix if possible)
+2026-11-04T06:26:07.7640012Z [06:26:07] To disable, set -DIGNITE_PERFORMANCE_SUGGESTIONS_DISABLED=true
+2026-11-04T06:26:07.7641366Z [06:26:07]   ^-- Specify JVM heap max size (add '-Xmx<size>[g|G|m|M|k|K]' to JVM options)
+2026-11-04T06:26:07.7642926Z [06:26:07]   ^-- Set max direct memory size if getting 'OOME: Direct buffer memory' (add '-XX:MaxDirectMemorySize=<size>[g|G|m|M|k|K]' to JVM options)
+2026-11-04T06:26:07.7644648Z [06:26:07]   ^-- Speed up flushing of dirty pages by OS (alter vm.dirty_expire_centisecs parameter by setting to 500)
+2026-11-04T06:26:07.7646000Z [06:26:07]   ^-- Reduce pages swapping ratio (set vm.swappiness=10 or less)
+2026-11-04T06:26:07.7647543Z [06:26:07] Refer to this page for more performance suggestions: https://ignite.apache.org/docs/latest/perf-and-troubleshooting/memory-tuning
+2026-11-04T06:26:07.7649383Z [06:26:07] 
+2026-11-04T06:26:07.7649870Z [06:26:07] 
+2026-11-04T06:26:07.7650605Z [06:26:07] Ignite node started OK (id=7d9ad2f7, instance name=ignite-server-node)
+2026-11-04T06:26:07.8084303Z [06:26:07] Topology snapshot [ver=1, locNode=7d9ad2f7, servers=1, clients=0, state=ACTIVE, CPUs=4, offheap=3.1GB, heap=3.9GB]
+2026-11-04T06:26:07.8099568Z [06:26:07]   ^-- Baseline [id=0, size=1, online=1, offline=0]
+2026-11-04T06:26:07.8576442Z [RESULT] protocolVersion=1, softwareVersion=2, dataLength=15, time=1700000000, bodyLength=15, equals=true
+2026-11-04T06:26:07.8592105Z [VERIFICATION] PASS
+2026-11-04T06:26:07.8929290Z [06:26:07] Ignite node stopped OK [name=ignite-server-node, uptime=00:00:00.129]
+2026-11-04T06:26:08.0346224Z [seed] contained Maven: maven:3.9-eclipse-temurin-17
+2026-11-04T06:26:08.3202810Z mkdir: cannot create directory ‘/root’: Permission denied
+2026-11-04T06:26:08.3203881Z Can not write to /root/.m2/copy_reference_file.log. Wrong volume permissions? Carrying on ...
+2026-11-04T06:26:13.8243916Z Nov 04, 2026 6:26:13 AM org.apache.ignite.logger.java.JavaLogger warning
+2026-11-04T06:26:13.8244990Z WARNING: Failed to resolve default logging config file: config/java.util.logging.properties
+2026-11-04T06:26:14.0255451Z [06:26:14]    __________  ________________ 
+2026-11-04T06:26:14.0256343Z [06:26:14]   /  _/ ___/ |/ /  _/_  __/ __/ 
+2026-11-04T06:26:14.0257363Z [06:26:14]  _/ // (7 7    // /  / / / _/   
+2026-11-04T06:26:14.0257954Z [06:26:14] /___/\___/_/|_/___/ /_/ /x___/  
+2026-11-04T06:26:14.0258883Z [06:26:14] 
+2026-11-04T06:26:14.0259289Z [06:26:14] ver. 2.18.0#20260423-sha1:d49adada
+2026-11-04T06:26:14.0259894Z [06:26:14] 2026 Copyright(C) Apache Software Foundation
+2026-11-04T06:26:14.0260436Z [06:26:14] 
+2026-11-04T06:26:14.0260928Z [06:26:14] Ignite documentation: https://ignite.apache.org
+2026-11-04T06:26:14.0261788Z [06:26:14] 
+2026-11-04T06:26:14.0262109Z [06:26:14] Quiet mode.
+2026-11-04T06:26:14.0304612Z [06:26:14]   ^-- Logging by 'JavaLogger [quiet=true, config=null]'
+2026-11-04T06:26:14.0306013Z [06:26:14]   ^-- To see **FULL** console log here add -DIGNITE_QUIET=false or "-v" to ignite.{sh|bat}
+2026-11-04T06:26:14.0307115Z [06:26:14] 
+2026-11-04T06:26:14.0492815Z [06:26:14] OS: Linux 7.0.0-1017-azure amd64
+2026-11-04T06:26:14.0548137Z [06:26:14] VM information: OpenJDK Runtime Environment 17.0.20+8 Eclipse Adoptium OpenJDK 64-Bit Server VM 17.0.20+8
+2026-11-04T06:26:14.0614862Z [06:26:14] Please set system property '-Djava.net.preferIPv4Stack=true' to avoid possible problems in mixed environments.
+2026-11-04T06:26:14.1342892Z [06:26:14] Configured plugins:
+2026-11-04T06:26:14.1343704Z [06:26:14]   ^-- None
+2026-11-04T06:26:14.1344266Z [06:26:14] 
+2026-11-04T06:26:14.1370499Z [06:26:14] Configured failure handler: [hnd=StopNodeOrHaltFailureHandler [tryStop=false, timeout=0, super=AbstractFailureHandler [ignoredFailureTypes=UnmodifiableSet [SYSTEM_WORKER_BLOCKED, SYSTEM_CRITICAL_OPERATION_TIMEOUT]]]]
+2026-11-04T06:26:14.1672676Z [06:26:14] Initial heap size is 250MB (should be no less than 512MB, use -Xms512m -Xmx512m).
+2026-11-04T06:26:14.3906830Z [06:26:14] Message queue limit is set to 0 which may lead to potential OOMEs when running cache operations in FULL_ASYNC or PRIMARY_SYNC modes due to message queues growth on sender and receiver sides.
+2026-11-04T06:26:16.2853999Z [06:26:16] Data Regions Started: 3
+2026-11-04T06:26:16.2854505Z [06:26:16] 
+2026-11-04T06:26:16.2855098Z [06:26:16]     ^--   sysMemPlc region [type=internal, persistence=false, lazyAlloc=false,
+2026-11-04T06:26:16.2856067Z [06:26:16]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=40MB]
+2026-11-04T06:26:16.2856982Z [06:26:16]     ^--   default region [type=default, persistence=false, lazyAlloc=true,
+2026-11-04T06:26:16.2857903Z [06:26:16]       ...  initCfg=256MB, maxCfg=3196MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+2026-11-04T06:26:16.2858912Z [06:26:16]     ^--   volatileDsMemPlc region [type=user, persistence=false, lazyAlloc=true,
+2026-11-04T06:26:16.2860230Z [06:26:16]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+2026-11-04T06:26:16.6334853Z [06:26:16] Security status [authentication=off, sandbox=off, tls/ssl=off]
+2026-11-04T06:26:16.6342462Z [06:26:16] Performance suggestions for grid 'ignite-test-witness' (fix if possible)
+2026-11-04T06:26:16.6343496Z [06:26:16] To disable, set -DIGNITE_PERFORMANCE_SUGGESTIONS_DISABLED=true
+2026-11-04T06:26:16.6344413Z [06:26:16]   ^-- Specify JVM heap max size (add '-Xmx<size>[g|G|m|M|k|K]' to JVM options)
+2026-11-04T06:26:16.6346591Z [06:26:16]   ^-- Set max direct memory size if getting 'OOME: Direct buffer memory' (add '-XX:MaxDirectMemorySize=<size>[g|G|m|M|k|K]' to JVM options)
+2026-11-04T06:26:16.6348078Z [06:26:16]   ^-- Speed up flushing of dirty pages by OS (alter vm.dirty_expire_centisecs parameter by setting to 500)
+2026-11-04T06:26:16.6349117Z [06:26:16]   ^-- Reduce pages swapping ratio (set vm.swappiness=10 or less)
+2026-11-04T06:26:16.6349628Z [06:26:16]   ^-- Disable assertions (remove '-ea' from JVM options)
+2026-11-04T06:26:16.6350358Z [06:26:16] Refer to this page for more performance suggestions: https://ignite.apache.org/docs/latest/perf-and-troubleshooting/memory-tuning
+2026-11-04T06:26:16.6351735Z [06:26:16] 
+2026-11-04T06:26:16.6352074Z [06:26:16] 
+2026-11-04T06:26:16.6352623Z [06:26:16] Ignite node started OK (id=40dcf701, instance name=ignite-test-witness)
+2026-11-04T06:26:16.6563025Z [06:26:16] Topology snapshot [ver=1, locNode=40dcf701, servers=1, clients=0, state=ACTIVE, CPUs=4, offheap=3.1GB, heap=3.9GB]
+2026-11-04T06:26:16.6582142Z [06:26:16]   ^-- Baseline [id=0, size=1, online=1, offline=0]
+2026-11-04T06:26:16.7453029Z [06:26:16] Ignite node stopped OK [name=ignite-test-witness, uptime=00:00:00.111]
+2026-11-04T06:26:16.8298548Z [06:26:16]    __________  ________________ 
+2026-11-04T06:26:16.8299564Z [06:26:16]   /  _/ ___/ |/ /  _/_  __/ __/ 
+2026-11-04T06:26:16.8300374Z [06:26:16]  _/ // (7 7    // /  / / / _/   
+2026-11-04T06:26:16.8300935Z [06:26:16] /___/\___/_/|_/___/ /_/ /x___/  
+2026-11-04T06:26:16.8301629Z [06:26:16] 
+2026-11-04T06:26:16.8302007Z [06:26:16] ver. 2.18.0#20260423-sha1:d49adada
+2026-11-04T06:26:16.8302591Z [06:26:16] 2026 Copyright(C) Apache Software Foundation
+2026-11-04T06:26:16.8303120Z [06:26:16] 
+2026-11-04T06:26:16.8303633Z [06:26:16] Ignite documentation: https://ignite.apache.org
+2026-11-04T06:26:16.8304186Z [06:26:16] 
+2026-11-04T06:26:16.8304500Z [06:26:16] Quiet mode.
+2026-11-04T06:26:16.8304986Z [06:26:16]   ^-- Logging by 'JavaLogger [quiet=true, config=null]'
+2026-11-04T06:26:16.8305884Z [06:26:16]   ^-- To see **FULL** console log here add -DIGNITE_QUIET=false or "-v" to ignite.{sh|bat}
+2026-11-04T06:26:16.8306635Z [06:26:16] 
+2026-11-04T06:26:16.8306984Z [06:26:16] OS: Linux 7.0.0-1017-azure amd64
+2026-11-04T06:26:16.8307899Z [06:26:16] VM information: OpenJDK Runtime Environment 17.0.20+8 Eclipse Adoptium OpenJDK 64-Bit Server VM 17.0.20+8
+2026-11-04T06:26:16.8314379Z [06:26:16] Please set system property '-Djava.net.preferIPv4Stack=true' to avoid possible problems in mixed environments.
+2026-11-04T06:26:16.8357432Z [06:26:16] Configured plugins:
+2026-11-04T06:26:16.8358040Z [06:26:16]   ^-- None
+2026-11-04T06:26:16.8362171Z [06:26:16] 
+2026-11-04T06:26:16.8364407Z [06:26:16] Configured failure handler: [hnd=StopNodeOrHaltFailureHandler [tryStop=false, timeout=0, super=AbstractFailureHandler [ignoredFailureTypes=UnmodifiableSet [SYSTEM_WORKER_BLOCKED, SYSTEM_CRITICAL_OPERATION_TIMEOUT]]]]
+2026-11-04T06:26:16.8474011Z [06:26:16] Initial heap size is 250MB (should be no less than 512MB, use -Xms512m -Xmx512m).
+2026-11-04T06:26:16.8520750Z [06:26:16] Message queue limit is set to 0 which may lead to potential OOMEs when running cache operations in FULL_ASYNC or PRIMARY_SYNC modes due to message queues growth on sender and receiver sides.
+2026-11-04T06:26:18.1221590Z [06:26:18] Data Regions Started: 3
+2026-11-04T06:26:18.1222410Z [06:26:18] 
+2026-11-04T06:26:18.1223404Z [06:26:18]     ^--   sysMemPlc region [type=internal, persistence=false, lazyAlloc=false,
+2026-11-04T06:26:18.1224334Z [06:26:18]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=40MB]
+2026-11-04T06:26:18.1225163Z [06:26:18]     ^--   default region [type=default, persistence=false, lazyAlloc=true,
+2026-11-04T06:26:18.1226030Z [06:26:18]       ...  initCfg=256MB, maxCfg=3196MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+2026-11-04T06:26:18.1226972Z [06:26:18]     ^--   volatileDsMemPlc region [type=user, persistence=false, lazyAlloc=true,
+2026-11-04T06:26:18.1228186Z [06:26:18]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+2026-11-04T06:26:18.1969335Z [06:26:18] Security status [authentication=off, sandbox=off, tls/ssl=off]
+2026-11-04T06:26:18.1973366Z [06:26:18] Performance suggestions for grid 'ignite-test-plain' (fix if possible)
+2026-11-04T06:26:18.1977862Z [06:26:18] To disable, set -DIGNITE_PERFORMANCE_SUGGESTIONS_DISABLED=true
+2026-11-04T06:26:18.1996121Z [06:26:18]   ^-- Specify JVM heap max size (add '-Xmx<size>[g|G|m|M|k|K]' to JVM options)
+2026-11-04T06:26:18.2006170Z [06:26:18]   ^-- Set max direct memory size if getting 'OOME: Direct buffer memory' (add '-XX:MaxDirectMemorySize=<size>[g|G|m|M|k|K]' to JVM options)
+2026-11-04T06:26:18.2033300Z [06:26:18]   ^-- Speed up flushing of dirty pages by OS (alter vm.dirty_expire_centisecs parameter by setting to 500)
+2026-11-04T06:26:18.2034852Z [06:26:18]   ^-- Reduce pages swapping ratio (set vm.swappiness=10 or less)
+2026-11-04T06:26:18.2036236Z [06:26:18]   ^-- Disable assertions (remove '-ea' from JVM options)
+2026-11-04T06:26:18.2037229Z [06:26:18] Refer to this page for more performance suggestions: https://ignite.apache.org/docs/latest/perf-and-troubleshooting/memory-tuning
+2026-11-04T06:26:18.2037987Z [06:26:18] 
+2026-11-04T06:26:18.2038295Z [06:26:18] 
+2026-11-04T06:26:18.2038735Z [06:26:18] Ignite node started OK (id=b01c797e, instance name=ignite-test-plain)
+2026-11-04T06:26:18.2039526Z [06:26:18] Topology snapshot [ver=1, locNode=b01c797e, servers=1, clients=0, state=ACTIVE, CPUs=4, offheap=3.1GB, heap=3.9GB]
+2026-11-04T06:26:18.2040236Z [06:26:18]   ^-- Baseline [id=0, size=1, online=1, offline=0]
+2026-11-04T06:26:18.2294784Z [06:26:18] Ignite node stopped OK [name=ignite-test-plain, uptime=00:00:00.030]
+2026-11-04T06:26:18.8501430Z mkdir: cannot create directory ‘/root’: Permission denied
+2026-11-04T06:26:18.8503078Z Can not write to /root/.m2/copy_reference_file.log. Wrong volume permissions? Carrying on ...
+2026-11-04T06:26:21.4083929Z Nov 04, 2026 6:26:21 AM org.apache.ignite.logger.java.JavaLogger warning
+2026-11-04T06:26:21.4084998Z WARNING: Failed to resolve default logging config file: config/java.util.logging.properties
+2026-11-04T06:26:21.5923791Z [06:26:21]    __________  ________________ 
+2026-11-04T06:26:21.5925079Z [06:26:21]   /  _/ ___/ |/ /  _/_  __/ __/ 
+2026-11-04T06:26:21.5926201Z [06:26:21]  _/ // (7 7    // /  / / / _/   
+2026-11-04T06:26:21.5926935Z [06:26:21] /___/\___/_/|_/___/ /_/ /x___/  
+2026-11-04T06:26:21.5927646Z [06:26:21] 
+2026-11-04T06:26:21.5928188Z [06:26:21] ver. 2.18.0#20260423-sha1:d49adada
+2026-11-04T06:26:21.5928948Z [06:26:21] 2026 Copyright(C) Apache Software Foundation
+2026-11-04T06:26:21.5929676Z [06:26:21] 
+2026-11-04T06:26:21.5930320Z [06:26:21] Ignite documentation: https://ignite.apache.org
+2026-11-04T06:26:21.5931034Z [06:26:21] 
+2026-11-04T06:26:21.5931757Z [06:26:21] Quiet mode.
+2026-11-04T06:26:21.5975820Z [06:26:21]   ^-- Logging by 'JavaLogger [quiet=true, config=null]'
+2026-11-04T06:26:21.5977550Z [06:26:21]   ^-- To see **FULL** console log here add -DIGNITE_QUIET=false or "-v" to ignite.{sh|bat}
+2026-11-04T06:26:21.5979005Z [06:26:21] 
+2026-11-04T06:26:21.6144377Z [06:26:21] OS: Linux 7.0.0-1017-azure amd64
+2026-11-04T06:26:21.6199434Z [06:26:21] VM information: OpenJDK Runtime Environment 17.0.20+8 Eclipse Adoptium OpenJDK 64-Bit Server VM 17.0.20+8
+2026-11-04T06:26:21.6238845Z [06:26:21] Please set system property '-Djava.net.preferIPv4Stack=true' to avoid possible problems in mixed environments.
+2026-11-04T06:26:21.6838389Z [06:26:21] Configured plugins:
+2026-11-04T06:26:21.6838903Z [06:26:21]   ^-- None
+2026-11-04T06:26:21.6839262Z [06:26:21] 
+2026-11-04T06:26:21.6843617Z [06:26:21] Configured failure handler: [hnd=StopNodeOrHaltFailureHandler [tryStop=false, timeout=0, super=AbstractFailureHandler [ignoredFailureTypes=UnmodifiableSet [SYSTEM_WORKER_BLOCKED, SYSTEM_CRITICAL_OPERATION_TIMEOUT]]]]
+2026-11-04T06:26:21.7162258Z [06:26:21] Initial heap size is 250MB (should be no less than 512MB, use -Xms512m -Xmx512m).
+2026-11-04T06:26:21.9033079Z [06:26:21] Message queue limit is set to 0 which may lead to potential OOMEs when running cache operations in FULL_ASYNC or PRIMARY_SYNC modes due to message queues growth on sender and receiver sides.
+2026-11-04T06:26:23.7564298Z [06:26:23] Data Regions Started: 3
+2026-11-04T06:26:23.7583708Z [06:26:23] 
+2026-11-04T06:26:23.7584728Z [06:26:23]     ^--   sysMemPlc region [type=internal, persistence=false, lazyAlloc=false,
+2026-11-04T06:26:23.7586020Z [06:26:23]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=40MB]
+2026-11-04T06:26:23.7587227Z [06:26:23]     ^--   default region [type=default, persistence=false, lazyAlloc=true,
+2026-11-04T06:26:23.7588393Z [06:26:23]       ...  initCfg=256MB, maxCfg=3196MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+2026-11-04T06:26:23.7589560Z [06:26:23]     ^--   volatileDsMemPlc region [type=user, persistence=false, lazyAlloc=true,
+2026-11-04T06:26:23.7591079Z [06:26:23]       ...  initCfg=40MB, maxCfg=100MB, usedRam=0MB, freeRam=100%, allocRam=0MB]
+2026-11-04T06:26:24.0784714Z [06:26:24] Security status [authentication=off, sandbox=off, tls/ssl=off]
+2026-11-04T06:26:24.0794340Z [06:26:24] Performance suggestions for grid 'ignite-server-node' (fix if possible)
+2026-11-04T06:26:24.0802800Z [06:26:24] To disable, set -DIGNITE_PERFORMANCE_SUGGESTIONS_DISABLED=true
+2026-11-04T06:26:24.0809989Z [06:26:24]   ^-- Specify JVM heap max size (add '-Xmx<size>[g|G|m|M|k|K]' to JVM options)
+2026-11-04T06:26:24.0820464Z [06:26:24]   ^-- Set max direct memory size if getting 'OOME: Direct buffer memory' (add '-XX:MaxDirectMemorySize=<size>[g|G|m|M|k|K]' to JVM options)
+2026-11-04T06:26:24.0822483Z [06:26:24]   ^-- Speed up flushing of dirty pages by OS (alter vm.dirty_expire_centisecs parameter by setting to 500)
+2026-11-04T06:26:24.0823703Z [06:26:24]   ^-- Reduce pages swapping ratio (set vm.swappiness=10 or less)
+2026-11-04T06:26:24.0829560Z [06:26:24] Refer to this page for more performance suggestions: https://ignite.apache.org/docs/latest/perf-and-troubleshooting/memory-tuning
+2026-11-04T06:26:24.0841582Z [06:26:24] 
+2026-11-04T06:26:24.0842286Z [06:26:24] 
+2026-11-04T06:26:24.0847524Z [06:26:24] Ignite node started OK (id=8baae0c0, instance name=ignite-server-node)
+2026-11-04T06:26:24.1114882Z [06:26:24] Topology snapshot [ver=1, locNode=8baae0c0, servers=1, clients=0, state=ACTIVE, CPUs=4, offheap=3.1GB, heap=3.9GB]
+2026-11-04T06:26:24.1136796Z [06:26:24]   ^-- Baseline [id=0, size=1, online=1, offline=0]
+2026-11-04T06:26:24.1625514Z [RESULT] protocolVersion=1, softwareVersion=2, dataLength=15, time=1700000000, bodyLength=15, equals=true
+2026-11-04T06:26:24.1627143Z [VERIFICATION] PASS
+2026-11-04T06:26:24.2018005Z [06:26:24] Ignite node stopped OK [name=ignite-server-node, uptime=00:00:00.121]
+2026-11-04T06:26:24.4457812Z [seed] offline repository holds Ignite 2.18.0 and JUnit 5.8.2 (+ every plugin the reference's lifecycle resolves)
+2026-11-04T06:26:24.4610914Z ##[group]Run .venv/bin/python scripts/certification_maven_repo.py fetch tests/certification/maven_repository.manifest.json "$HOME/.cache/kriya-cert-maven/repo"
+2026-11-04T06:26:24.4613319Z [36;1m.venv/bin/python scripts/certification_maven_repo.py fetch tests/certification/maven_repository.manifest.json "$HOME/.cache/kriya-cert-maven/repo"[0m
+2026-11-04T06:26:24.4645062Z shell: /usr/bin/bash -e {0}
+2026-11-04T06:26:24.4645507Z env:
+2026-11-04T06:26:24.4645983Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:26:24.4647093Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-11-04T06:26:24.4647918Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:26:24.4648632Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:26:24.4649356Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:26:24.4650104Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-11-04T06:26:24.4651033Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:26:24.4652281Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:26:24.4653011Z ##[endgroup]
+2026-11-04T06:27:04.2714090Z [maven-repo] fetch: PASS
+2026-11-04T06:27:04.2891454Z ##[group]Run .venv/bin/python scripts/provision_containment_images.py build
+2026-11-04T06:27:04.2892041Z [36;1m.venv/bin/python scripts/provision_containment_images.py build[0m
+2026-11-04T06:27:04.2913095Z shell: /usr/bin/bash -e {0}
+2026-11-04T06:27:04.2913340Z env:
+2026-11-04T06:27:04.2913613Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:27:04.2914068Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-11-04T06:27:04.2914509Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:27:04.2914895Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:27:04.2915280Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:27:04.2915662Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-11-04T06:27:04.2916086Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:27:04.2916623Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:27:04.2917003Z ##[endgroup]
+2026-11-04T06:28:06.7395954Z [images] provisioned 8 product-built images
+2026-11-04T06:28:06.8858725Z ##[group]Run .venv/bin/python scripts/certification_python_wheels.py provision tests/certification/requirements.release.hashes.txt "$HOME/.cache/kriya-cert-wheels"
+2026-11-04T06:28:06.8860059Z [36;1m.venv/bin/python scripts/certification_python_wheels.py provision tests/certification/requirements.release.hashes.txt "$HOME/.cache/kriya-cert-wheels"[0m
+2026-11-04T06:28:06.8882152Z shell: /usr/bin/bash -e {0}
+2026-11-04T06:28:06.8882415Z env:
+2026-11-04T06:28:06.8882696Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:28:06.8883144Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-11-04T06:28:06.8883603Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:28:06.8883997Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:28:06.8884383Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:28:06.8884767Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-11-04T06:28:06.8885230Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:28:06.8885723Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:28:06.8886104Z ##[endgroup]
+2026-11-04T06:28:07.4822776Z Collecting annotated-types==0.8.0 (from -r tests/certification/requirements.release.hashes.txt (line 2))
+2026-11-04T06:28:07.4837227Z   Using cached annotated_types-0.8.0-py3-none-any.whl (13 kB)
+2026-11-04T06:28:07.5062732Z Collecting anyio==4.14.2 (from -r tests/certification/requirements.release.hashes.txt (line 5))
+2026-11-04T06:28:07.5076595Z   Using cached anyio-4.14.2-py3-none-any.whl (125 kB)
+2026-11-04T06:28:07.5477138Z Collecting astroid==4.0.4 (from -r tests/certification/requirements.release.hashes.txt (line 8))
+2026-11-04T06:28:07.5491677Z   Using cached astroid-4.0.4-py3-none-any.whl (276 kB)
+2026-11-04T06:28:07.5689995Z Collecting attrs==26.1.0 (from -r tests/certification/requirements.release.hashes.txt (line 11))
+2026-11-04T06:28:07.5702979Z   Using cached attrs-26.1.0-py3-none-any.whl (67 kB)
+2026-11-04T06:28:07.5877461Z Collecting build==1.5.0 (from -r tests/certification/requirements.release.hashes.txt (line 14))
+2026-11-04T06:28:07.5891376Z   Using cached build-1.5.0-py3-none-any.whl (26 kB)
+2026-11-04T06:28:07.6289262Z Collecting certifi==2026.7.22 (from -r tests/certification/requirements.release.hashes.txt (line 17))
+2026-11-04T06:28:07.6302828Z   Using cached certifi-2026.7.22-py3-none-any.whl (136 kB)
+2026-11-04T06:28:07.7335983Z Collecting cffi==2.1.0 (from -r tests/certification/requirements.release.hashes.txt (line 20))
+2026-11-04T06:28:07.7350092Z   Using cached cffi-2.1.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (221 kB)
+2026-11-04T06:28:07.7554276Z Collecting click==8.4.2 (from -r tests/certification/requirements.release.hashes.txt (line 121))
+2026-11-04T06:28:07.7567931Z   Using cached click-8.4.2-py3-none-any.whl (119 kB)
+2026-11-04T06:28:08.1417983Z Collecting coverage==7.16.2 (from -r tests/certification/requirements.release.hashes.txt (line 124))
+2026-11-04T06:28:08.1432490Z   Using cached coverage-7.16.2-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (258 kB)
+2026-11-04T06:28:08.3522130Z Collecting cryptography==49.0.0 (from -r tests/certification/requirements.release.hashes.txt (line 246))
+2026-11-04T06:28:08.3536613Z   Using cached cryptography-49.0.0-cp311-abi3-manylinux_2_34_x86_64.whl (4.7 MB)
+2026-11-04T06:28:08.3758185Z Collecting dill==0.4.1 (from -r tests/certification/requirements.release.hashes.txt (line 293))
+2026-11-04T06:28:08.3770661Z   Using cached dill-0.4.1-py3-none-any.whl (120 kB)
+2026-11-04T06:28:08.3908482Z Collecting distro==1.9.0 (from -r tests/certification/requirements.release.hashes.txt (line 296))
+2026-11-04T06:28:08.3920477Z   Using cached distro-1.9.0-py3-none-any.whl (20 kB)
+2026-11-04T06:28:08.4070577Z Collecting execnet==2.1.2 (from -r tests/certification/requirements.release.hashes.txt (line 299))
+2026-11-04T06:28:08.4084520Z   Using cached execnet-2.1.2-py3-none-any.whl (40 kB)
+2026-11-04T06:28:08.4218386Z Collecting h11==0.16.0 (from -r tests/certification/requirements.release.hashes.txt (line 302))
+2026-11-04T06:28:08.4230625Z   Using cached h11-0.16.0-py3-none-any.whl (37 kB)
+2026-11-04T06:28:08.4445082Z Collecting httpcore==1.0.9 (from -r tests/certification/requirements.release.hashes.txt (line 305))
+2026-11-04T06:28:08.4459698Z   Using cached httpcore-1.0.9-py3-none-any.whl (78 kB)
+2026-11-04T06:28:08.4638101Z Collecting httpcore2==2.9.1 (from -r tests/certification/requirements.release.hashes.txt (line 308))
+2026-11-04T06:28:08.4652055Z   Using cached httpcore2-2.9.1-py3-none-any.whl (82 kB)
+2026-11-04T06:28:08.4886393Z Collecting httpx==0.28.1 (from -r tests/certification/requirements.release.hashes.txt (line 311))
+2026-11-04T06:28:08.4901392Z   Using cached httpx-0.28.1-py3-none-any.whl (73 kB)
+2026-11-04T06:28:08.5057556Z Collecting httpx2==2.9.1 (from -r tests/certification/requirements.release.hashes.txt (line 314))
+2026-11-04T06:28:08.5071468Z   Using cached httpx2-2.9.1-py3-none-any.whl (91 kB)
+2026-11-04T06:28:08.5257297Z Collecting idna==3.18 (from -r tests/certification/requirements.release.hashes.txt (line 317))
+2026-11-04T06:28:08.5270728Z   Using cached idna-3.18-py3-none-any.whl (65 kB)
+2026-11-04T06:28:08.5408804Z Collecting iniconfig==2.3.0 (from -r tests/certification/requirements.release.hashes.txt (line 320))
+2026-11-04T06:28:08.5421452Z   Using cached iniconfig-2.3.0-py3-none-any.whl (7.5 kB)
+2026-11-04T06:28:08.5838134Z Collecting isort==9.0.1 (from -r tests/certification/requirements.release.hashes.txt (line 323))
+2026-11-04T06:28:08.5851830Z   Using cached isort-9.0.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.7 MB)
+2026-11-04T06:28:08.6050264Z Collecting jinja2==3.1.6 (from -r tests/certification/requirements.release.hashes.txt (line 361))
+2026-11-04T06:28:08.6063983Z   Using cached jinja2-3.1.6-py3-none-any.whl (134 kB)
+2026-11-04T06:28:08.6953888Z Collecting jiter==0.16.0 (from -r tests/certification/requirements.release.hashes.txt (line 364))
+2026-11-04T06:28:08.6968635Z   Using cached jiter-0.16.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (343 kB)
+2026-11-04T06:28:08.7227435Z Collecting jsonschema==4.26.0 (from -r tests/certification/requirements.release.hashes.txt (line 470))
+2026-11-04T06:28:08.7240432Z   Using cached jsonschema-4.26.0-py3-none-any.whl (90 kB)
+2026-11-04T06:28:08.7409727Z Collecting jsonschema-specifications==2025.9.1 (from -r tests/certification/requirements.release.hashes.txt (line 473))
+2026-11-04T06:28:08.7423280Z   Using cached jsonschema_specifications-2025.9.1-py3-none-any.whl (18 kB)
+2026-11-04T06:28:08.7953418Z Collecting markupsafe==3.0.3 (from -r tests/certification/requirements.release.hashes.txt (line 476))
+2026-11-04T06:28:08.7968381Z   Using cached markupsafe-3.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (22 kB)
+2026-11-04T06:28:08.8092468Z Collecting mccabe==0.7.0 (from -r tests/certification/requirements.release.hashes.txt (line 566))
+2026-11-04T06:28:08.8108284Z   Using cached mccabe-0.7.0-py2.py3-none-any.whl (7.3 kB)
+2026-11-04T06:28:08.8320252Z Collecting mcp==2.0.0 (from -r tests/certification/requirements.release.hashes.txt (line 569))
+2026-11-04T06:28:08.8334840Z   Using cached mcp-2.0.0-py3-none-any.whl (349 kB)
+2026-11-04T06:28:08.8496209Z Collecting mcp-types==2.0.0 (from -r tests/certification/requirements.release.hashes.txt (line 572))
+2026-11-04T06:28:08.8508273Z   Using cached mcp_types-2.0.0-py3-none-any.whl (69 kB)
+2026-11-04T06:28:08.8633377Z Collecting mypy-extensions==1.1.0 (from -r tests/certification/requirements.release.hashes.txt (line 575))
+2026-11-04T06:28:08.8646462Z   Using cached mypy_extensions-1.1.0-py3-none-any.whl (5.0 kB)
+2026-11-04T06:28:09.0467100Z Collecting numpy==2.5.1 (from -r tests/certification/requirements.release.hashes.txt (line 578))
+2026-11-04T06:28:09.0482410Z   Using cached numpy-2.5.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.7 MB)
+2026-11-04T06:28:09.1422461Z Collecting openai==2.50.0 (from -r tests/certification/requirements.release.hashes.txt (line 623))
+2026-11-04T06:28:09.1435844Z   Using cached openai-2.50.0-py3-none-any.whl (1.7 MB)
+2026-11-04T06:28:09.1788766Z Collecting opentelemetry-api==1.44.0 (from -r tests/certification/requirements.release.hashes.txt (line 626))
+2026-11-04T06:28:09.1801447Z   Using cached opentelemetry_api-1.44.0-py3-none-any.whl (60 kB)
+2026-11-04T06:28:09.1976737Z Collecting packaging==26.2 (from -r tests/certification/requirements.release.hashes.txt (line 629))
+2026-11-04T06:28:09.1988407Z   Using cached packaging-26.2-py3-none-any.whl (100 kB)
+2026-11-04T06:28:09.2263444Z Collecting pip-tools==7.6.0 (from -r tests/certification/requirements.release.hashes.txt (line 632))
+2026-11-04T06:28:09.2276331Z   Using cached pip_tools-7.6.0-py3-none-any.whl (74 kB)
+2026-11-04T06:28:09.2810190Z Collecting platformdirs==4.11.15 (from -r tests/certification/requirements.release.hashes.txt (line 635))
+2026-11-04T06:28:09.2822426Z   Using cached platformdirs-4.11.15-py3-none-any.whl (26 kB)
+2026-11-04T06:28:09.2955580Z Collecting pluggy==1.6.0 (from -r tests/certification/requirements.release.hashes.txt (line 638))
+2026-11-04T06:28:09.2967200Z   Using cached pluggy-1.6.0-py3-none-any.whl (20 kB)
+2026-11-04T06:28:09.3263380Z Collecting prompt-toolkit==3.0.53 (from -r tests/certification/requirements.release.hashes.txt (line 641))
+2026-11-04T06:28:09.3280714Z   Using cached prompt_toolkit-3.0.53-py3-none-any.whl (392 kB)
+2026-11-04T06:28:09.3419957Z Collecting pycparser==3.0 (from -r tests/certification/requirements.release.hashes.txt (line 644))
+2026-11-04T06:28:09.3431644Z   Using cached pycparser-3.0-py3-none-any.whl (48 kB)
+2026-11-04T06:28:09.4450845Z Collecting pydantic==2.13.4 (from -r tests/certification/requirements.release.hashes.txt (line 647))
+2026-11-04T06:28:09.4464288Z   Using cached pydantic-2.13.4-py3-none-any.whl (472 kB)
+2026-11-04T06:28:10.1100187Z Collecting pydantic-core==2.46.4 (from -r tests/certification/requirements.release.hashes.txt (line 650))
+2026-11-04T06:28:10.1114342Z   Using cached pydantic_core-2.46.4-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+2026-11-04T06:28:10.1348264Z Collecting pygments==2.20.0 (from -r tests/certification/requirements.release.hashes.txt (line 771))
+2026-11-04T06:28:10.1360648Z   Using cached pygments-2.20.0-py3-none-any.whl (1.2 MB)
+2026-11-04T06:28:10.1572820Z Collecting pyjwt==2.13.0 (from -r tests/certification/requirements.release.hashes.txt (line 774))
+2026-11-04T06:28:10.1584321Z   Using cached pyjwt-2.13.0-py3-none-any.whl (31 kB)
+2026-11-04T06:28:10.1954902Z Collecting pylint==4.0.9 (from -r tests/certification/requirements.release.hashes.txt (line 777))
+2026-11-04T06:28:10.1967614Z   Using cached pylint-4.0.9-py3-none-any.whl (542 kB)
+2026-11-04T06:28:10.2126770Z Collecting pyproject-hooks==1.2.0 (from -r tests/certification/requirements.release.hashes.txt (line 780))
+2026-11-04T06:28:10.2138457Z   Using cached pyproject_hooks-1.2.0-py3-none-any.whl (10 kB)
+2026-11-04T06:28:10.2499297Z Collecting pytest==9.1.1 (from -r tests/certification/requirements.release.hashes.txt (line 783))
+2026-11-04T06:28:10.2512139Z   Using cached pytest-9.1.1-py3-none-any.whl (386 kB)
+2026-11-04T06:28:10.2745886Z Collecting pytest-asyncio==1.4.0 (from -r tests/certification/requirements.release.hashes.txt (line 786))
+2026-11-04T06:28:10.2757898Z   Using cached pytest_asyncio-1.4.0-py3-none-any.whl (16 kB)
+2026-11-04T06:28:10.2952009Z Collecting pytest-testmon==2.2.0 (from -r tests/certification/requirements.release.hashes.txt (line 789))
+2026-11-04T06:28:10.2964043Z   Using cached pytest_testmon-2.2.0-py3-none-any.whl (25 kB)
+2026-11-04T06:28:10.3160074Z Collecting pytest-xdist==3.8.0 (from -r tests/certification/requirements.release.hashes.txt (line 792))
+2026-11-04T06:28:10.3172171Z   Using cached pytest_xdist-3.8.0-py3-none-any.whl (46 kB)
+2026-11-04T06:28:10.3327387Z Collecting python-multipart==0.0.32 (from -r tests/certification/requirements.release.hashes.txt (line 795))
+2026-11-04T06:28:10.3339223Z   Using cached python_multipart-0.0.32-py3-none-any.whl (30 kB)
+2026-11-04T06:28:10.3667810Z Collecting pyyaml==6.0.3 (from -r tests/certification/requirements.release.hashes.txt (line 798))
+2026-11-04T06:28:10.3680178Z   Using cached pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (807 kB)
+2026-11-04T06:28:10.3948596Z Collecting referencing==0.37.0 (from -r tests/certification/requirements.release.hashes.txt (line 872))
+2026-11-04T06:28:10.3960837Z   Using cached referencing-0.37.0-py3-none-any.whl (26 kB)
+2026-11-04T06:28:10.6320795Z Collecting rpds-py==2026.6.3 (from -r tests/certification/requirements.release.hashes.txt (line 875))
+2026-11-04T06:28:10.6334215Z   Using cached rpds_py-2026.6.3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (366 kB)
+2026-11-04T06:28:10.9927513Z Collecting ruff==0.16.0 (from -r tests/certification/requirements.release.hashes.txt (line 992))
+2026-11-04T06:28:10.9941853Z   Using cached ruff-0.16.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (11.4 MB)
+2026-11-04T06:28:11.1160732Z Collecting setuptools==83.0.0 (from -r tests/certification/requirements.release.hashes.txt (line 1011))
+2026-11-04T06:28:11.1175025Z   Using cached setuptools-83.0.0-py3-none-any.whl (1.0 MB)
+2026-11-04T06:28:11.1445554Z Collecting six==1.16.0 (from -r tests/certification/requirements.release.hashes.txt (line 1014))
+2026-11-04T06:28:11.1881770Z   Downloading six-1.16.0-py2.py3-none-any.whl (11 kB)
+2026-11-04T06:28:11.2031413Z Collecting sniffio==1.3.1 (from -r tests/certification/requirements.release.hashes.txt (line 1017))
+2026-11-04T06:28:11.2043588Z   Using cached sniffio-1.3.1-py3-none-any.whl (10 kB)
+2026-11-04T06:28:11.2252164Z Collecting sse-starlette==3.4.6 (from -r tests/certification/requirements.release.hashes.txt (line 1020))
+2026-11-04T06:28:11.2264032Z   Using cached sse_starlette-3.4.6-py3-none-any.whl (16 kB)
+2026-11-04T06:28:11.2589596Z Collecting starlette==1.3.1 (from -r tests/certification/requirements.release.hashes.txt (line 1023))
+2026-11-04T06:28:11.2601692Z   Using cached starlette-1.3.1-py3-none-any.whl (73 kB)
+2026-11-04T06:28:11.2806122Z Collecting tomlkit==0.15.1 (from -r tests/certification/requirements.release.hashes.txt (line 1026))
+2026-11-04T06:28:11.2817778Z   Using cached tomlkit-0.15.1-py3-none-any.whl (49 kB)
+2026-11-04T06:28:11.3142468Z Collecting tqdm==4.70.0 (from -r tests/certification/requirements.release.hashes.txt (line 1029))
+2026-11-04T06:28:11.3155486Z   Using cached tqdm-4.70.0-py3-none-any.whl (80 kB)
+2026-11-04T06:28:11.3621557Z Collecting tree-sitter==0.25.2 (from -r tests/certification/requirements.release.hashes.txt (line 1032))
+2026-11-04T06:28:11.3635116Z   Using cached tree_sitter-0.25.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (635 kB)
+2026-11-04T06:28:11.3797696Z Collecting tree-sitter-java==0.23.5 (from -r tests/certification/requirements.release.hashes.txt (line 1069))
+2026-11-04T06:28:11.3810338Z   Using cached tree_sitter_java-0.23.5-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (84 kB)
+2026-11-04T06:28:11.3969076Z Collecting tree-sitter-python==0.25.0 (from -r tests/certification/requirements.release.hashes.txt (line 1078))
+2026-11-04T06:28:11.3981406Z   Using cached tree_sitter_python-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (108 kB)
+2026-11-04T06:28:11.4110702Z Collecting truststore==0.10.4 (from -r tests/certification/requirements.release.hashes.txt (line 1088))
+2026-11-04T06:28:11.4122756Z   Using cached truststore-0.10.4-py3-none-any.whl (18 kB)
+2026-11-04T06:28:11.4299222Z Collecting typing-extensions==4.16.0 (from -r tests/certification/requirements.release.hashes.txt (line 1091))
+2026-11-04T06:28:11.4311011Z   Using cached typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+2026-11-04T06:28:11.4431891Z Collecting typing-inspection==0.4.2 (from -r tests/certification/requirements.release.hashes.txt (line 1094))
+2026-11-04T06:28:11.4443242Z   Using cached typing_inspection-0.4.2-py3-none-any.whl (14 kB)
+2026-11-04T06:28:11.4735674Z Collecting uvicorn==0.51.0 (from -r tests/certification/requirements.release.hashes.txt (line 1097))
+2026-11-04T06:28:11.4746678Z   Using cached uvicorn-0.51.0-py3-none-any.whl (73 kB)
+2026-11-04T06:28:11.4976349Z Collecting wcwidth==0.8.2 (from -r tests/certification/requirements.release.hashes.txt (line 1100))
+2026-11-04T06:28:11.4987936Z   Using cached wcwidth-0.8.2-py3-none-any.whl (323 kB)
+2026-11-04T06:28:11.5228905Z Collecting wheel==0.47.0 (from -r tests/certification/requirements.release.hashes.txt (line 1103))
+2026-11-04T06:28:11.5240683Z   Using cached wheel-0.47.0-py3-none-any.whl (32 kB)
+2026-11-04T06:28:11.6151568Z Saved /home/runner/.cache/kriya-cert-wheels/annotated_types-0.8.0-py3-none-any.whl
+2026-11-04T06:28:11.6154591Z Saved /home/runner/.cache/kriya-cert-wheels/anyio-4.14.2-py3-none-any.whl
+2026-11-04T06:28:11.6159605Z Saved /home/runner/.cache/kriya-cert-wheels/astroid-4.0.4-py3-none-any.whl
+2026-11-04T06:28:11.6163196Z Saved /home/runner/.cache/kriya-cert-wheels/attrs-26.1.0-py3-none-any.whl
+2026-11-04T06:28:11.6166532Z Saved /home/runner/.cache/kriya-cert-wheels/build-1.5.0-py3-none-any.whl
+2026-11-04T06:28:11.6170330Z Saved /home/runner/.cache/kriya-cert-wheels/certifi-2026.7.22-py3-none-any.whl
+2026-11-04T06:28:11.6175127Z Saved /home/runner/.cache/kriya-cert-wheels/cffi-2.1.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+2026-11-04T06:28:11.6178623Z Saved /home/runner/.cache/kriya-cert-wheels/click-8.4.2-py3-none-any.whl
+2026-11-04T06:28:11.6183735Z Saved /home/runner/.cache/kriya-cert-wheels/coverage-7.16.2-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl
+2026-11-04T06:28:11.6201595Z Saved /home/runner/.cache/kriya-cert-wheels/cryptography-49.0.0-cp311-abi3-manylinux_2_34_x86_64.whl
+2026-11-04T06:28:11.6205422Z Saved /home/runner/.cache/kriya-cert-wheels/dill-0.4.1-py3-none-any.whl
+2026-11-04T06:28:11.6208761Z Saved /home/runner/.cache/kriya-cert-wheels/distro-1.9.0-py3-none-any.whl
+2026-11-04T06:28:11.6212684Z Saved /home/runner/.cache/kriya-cert-wheels/execnet-2.1.2-py3-none-any.whl
+2026-11-04T06:28:11.6216114Z Saved /home/runner/.cache/kriya-cert-wheels/h11-0.16.0-py3-none-any.whl
+2026-11-04T06:28:11.6219652Z Saved /home/runner/.cache/kriya-cert-wheels/httpcore-1.0.9-py3-none-any.whl
+2026-11-04T06:28:11.6223641Z Saved /home/runner/.cache/kriya-cert-wheels/httpcore2-2.9.1-py3-none-any.whl
+2026-11-04T06:28:11.6227073Z Saved /home/runner/.cache/kriya-cert-wheels/httpx-0.28.1-py3-none-any.whl
+2026-11-04T06:28:11.6230645Z Saved /home/runner/.cache/kriya-cert-wheels/httpx2-2.9.1-py3-none-any.whl
+2026-11-04T06:28:11.6234582Z Saved /home/runner/.cache/kriya-cert-wheels/idna-3.18-py3-none-any.whl
+2026-11-04T06:28:11.6237783Z Saved /home/runner/.cache/kriya-cert-wheels/iniconfig-2.3.0-py3-none-any.whl
+2026-11-04T06:28:11.6246878Z Saved /home/runner/.cache/kriya-cert-wheels/isort-9.0.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+2026-11-04T06:28:11.6250174Z Saved /home/runner/.cache/kriya-cert-wheels/jinja2-3.1.6-py3-none-any.whl
+2026-11-04T06:28:11.6255138Z Saved /home/runner/.cache/kriya-cert-wheels/jiter-0.16.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+2026-11-04T06:28:11.6258524Z Saved /home/runner/.cache/kriya-cert-wheels/jsonschema-4.26.0-py3-none-any.whl
+2026-11-04T06:28:11.6262353Z Saved /home/runner/.cache/kriya-cert-wheels/jsonschema_specifications-2025.9.1-py3-none-any.whl
+2026-11-04T06:28:11.6265975Z Saved /home/runner/.cache/kriya-cert-wheels/markupsafe-3.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+2026-11-04T06:28:11.6268943Z Saved /home/runner/.cache/kriya-cert-wheels/mccabe-0.7.0-py2.py3-none-any.whl
+2026-11-04T06:28:11.6273796Z Saved /home/runner/.cache/kriya-cert-wheels/mcp-2.0.0-py3-none-any.whl
+2026-11-04T06:28:11.6277435Z Saved /home/runner/.cache/kriya-cert-wheels/mcp_types-2.0.0-py3-none-any.whl
+2026-11-04T06:28:11.6280622Z Saved /home/runner/.cache/kriya-cert-wheels/mypy_extensions-1.1.0-py3-none-any.whl
+2026-11-04T06:28:11.6334342Z Saved /home/runner/.cache/kriya-cert-wheels/numpy-2.5.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+2026-11-04T06:28:11.6343175Z Saved /home/runner/.cache/kriya-cert-wheels/openai-2.50.0-py3-none-any.whl
+2026-11-04T06:28:11.6346686Z Saved /home/runner/.cache/kriya-cert-wheels/opentelemetry_api-1.44.0-py3-none-any.whl
+2026-11-04T06:28:11.6350230Z Saved /home/runner/.cache/kriya-cert-wheels/packaging-26.2-py3-none-any.whl
+2026-11-04T06:28:11.6354275Z Saved /home/runner/.cache/kriya-cert-wheels/pip_tools-7.6.0-py3-none-any.whl
+2026-11-04T06:28:11.6357725Z Saved /home/runner/.cache/kriya-cert-wheels/platformdirs-4.11.15-py3-none-any.whl
+2026-11-04T06:28:11.6361027Z Saved /home/runner/.cache/kriya-cert-wheels/pluggy-1.6.0-py3-none-any.whl
+2026-11-04T06:28:11.6365869Z Saved /home/runner/.cache/kriya-cert-wheels/prompt_toolkit-3.0.53-py3-none-any.whl
+2026-11-04T06:28:11.6369217Z Saved /home/runner/.cache/kriya-cert-wheels/pycparser-3.0-py3-none-any.whl
+2026-11-04T06:28:11.6374514Z Saved /home/runner/.cache/kriya-cert-wheels/pydantic-2.13.4-py3-none-any.whl
+2026-11-04T06:28:11.6384694Z Saved /home/runner/.cache/kriya-cert-wheels/pydantic_core-2.46.4-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+2026-11-04T06:28:11.6391510Z Saved /home/runner/.cache/kriya-cert-wheels/pygments-2.20.0-py3-none-any.whl
+2026-11-04T06:28:11.6395035Z Saved /home/runner/.cache/kriya-cert-wheels/pyjwt-2.13.0-py3-none-any.whl
+2026-11-04T06:28:11.6399911Z Saved /home/runner/.cache/kriya-cert-wheels/pylint-4.0.9-py3-none-any.whl
+2026-11-04T06:28:11.6403927Z Saved /home/runner/.cache/kriya-cert-wheels/pyproject_hooks-1.2.0-py3-none-any.whl
+2026-11-04T06:28:11.6408380Z Saved /home/runner/.cache/kriya-cert-wheels/pytest-9.1.1-py3-none-any.whl
+2026-11-04T06:28:11.6412187Z Saved /home/runner/.cache/kriya-cert-wheels/pytest_asyncio-1.4.0-py3-none-any.whl
+2026-11-04T06:28:11.6415608Z Saved /home/runner/.cache/kriya-cert-wheels/pytest_testmon-2.2.0-py3-none-any.whl
+2026-11-04T06:28:11.6419058Z Saved /home/runner/.cache/kriya-cert-wheels/pytest_xdist-3.8.0-py3-none-any.whl
+2026-11-04T06:28:11.6423145Z Saved /home/runner/.cache/kriya-cert-wheels/python_multipart-0.0.32-py3-none-any.whl
+2026-11-04T06:28:11.6429044Z Saved /home/runner/.cache/kriya-cert-wheels/pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+2026-11-04T06:28:11.6432695Z Saved /home/runner/.cache/kriya-cert-wheels/referencing-0.37.0-py3-none-any.whl
+2026-11-04T06:28:11.6437226Z Saved /home/runner/.cache/kriya-cert-wheels/rpds_py-2026.6.3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+2026-11-04T06:28:11.6474914Z Saved /home/runner/.cache/kriya-cert-wheels/ruff-0.16.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+2026-11-04T06:28:11.6481047Z Saved /home/runner/.cache/kriya-cert-wheels/setuptools-83.0.0-py3-none-any.whl
+2026-11-04T06:28:11.6484599Z Saved /home/runner/.cache/kriya-cert-wheels/six-1.16.0-py2.py3-none-any.whl
+2026-11-04T06:28:11.6487842Z Saved /home/runner/.cache/kriya-cert-wheels/sniffio-1.3.1-py3-none-any.whl
+2026-11-04T06:28:11.6491448Z Saved /home/runner/.cache/kriya-cert-wheels/sse_starlette-3.4.6-py3-none-any.whl
+2026-11-04T06:28:11.6494968Z Saved /home/runner/.cache/kriya-cert-wheels/starlette-1.3.1-py3-none-any.whl
+2026-11-04T06:28:11.6498422Z Saved /home/runner/.cache/kriya-cert-wheels/tomlkit-0.15.1-py3-none-any.whl
+2026-11-04T06:28:11.6502567Z Saved /home/runner/.cache/kriya-cert-wheels/tqdm-4.70.0-py3-none-any.whl
+2026-11-04T06:28:11.6508285Z Saved /home/runner/.cache/kriya-cert-wheels/tree_sitter-0.25.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+2026-11-04T06:28:11.6512296Z Saved /home/runner/.cache/kriya-cert-wheels/tree_sitter_java-0.23.5-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+2026-11-04T06:28:11.6516271Z Saved /home/runner/.cache/kriya-cert-wheels/tree_sitter_python-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl
+2026-11-04T06:28:11.6519158Z Saved /home/runner/.cache/kriya-cert-wheels/truststore-0.10.4-py3-none-any.whl
+2026-11-04T06:28:11.6523241Z Saved /home/runner/.cache/kriya-cert-wheels/typing_extensions-4.16.0-py3-none-any.whl
+2026-11-04T06:28:11.6526504Z Saved /home/runner/.cache/kriya-cert-wheels/typing_inspection-0.4.2-py3-none-any.whl
+2026-11-04T06:28:11.6529955Z Saved /home/runner/.cache/kriya-cert-wheels/uvicorn-0.51.0-py3-none-any.whl
+2026-11-04T06:28:11.6534782Z Saved /home/runner/.cache/kriya-cert-wheels/wcwidth-0.8.2-py3-none-any.whl
+2026-11-04T06:28:11.6538150Z Saved /home/runner/.cache/kriya-cert-wheels/wheel-0.47.0-py3-none-any.whl
+2026-11-04T06:28:11.6545297Z Successfully downloaded annotated-types anyio astroid attrs build certifi cffi click coverage cryptography dill distro execnet h11 httpcore httpcore2 httpx httpx2 idna iniconfig isort jinja2 jiter jsonschema jsonschema-specifications markupsafe mccabe mcp mcp-types mypy-extensions numpy openai opentelemetry-api packaging pip-tools platformdirs pluggy prompt-toolkit pycparser pydantic pydantic-core pygments pyjwt pylint pyproject-hooks pytest pytest-asyncio pytest-testmon pytest-xdist python-multipart pyyaml referencing rpds-py ruff setuptools six sniffio sse-starlette starlette tomlkit tqdm tree-sitter tree-sitter-java tree-sitter-python truststore typing-extensions typing-inspection uvicorn wcwidth wheel
+2026-11-04T06:28:11.9148188Z ##[group]Run set -euo pipefail
+2026-11-04T06:28:11.9148548Z [36;1mset -euo pipefail[0m
+2026-11-04T06:28:11.9148835Z [36;1mmkdir -p "$HOME/kriya-bench"[0m
+2026-11-04T06:28:11.9149206Z [36;1mgit init -q "$HOME/kriya-bench/spring-framework-petclinic"[0m
+2026-11-04T06:28:11.9149627Z [36;1mcd "$HOME/kriya-bench/spring-framework-petclinic"[0m
+2026-11-04T06:28:11.9150160Z [36;1mgit remote add origin https://github.com/spring-petclinic/spring-framework-petclinic.git[0m
+2026-11-04T06:28:11.9150757Z [36;1mgit fetch -q --depth 1 origin 09351b3ee0bd5aec2d480c0280e84700978f56d3[0m
+2026-11-04T06:28:11.9151729Z [36;1mgit checkout -q FETCH_HEAD[0m
+2026-11-04T06:28:11.9152120Z [36;1mtest "$(git rev-parse HEAD)" = 09351b3ee0bd5aec2d480c0280e84700978f56d3[0m
+2026-11-04T06:28:11.9172827Z shell: /usr/bin/bash -e {0}
+2026-11-04T06:28:11.9173070Z env:
+2026-11-04T06:28:11.9173335Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:28:11.9173882Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-11-04T06:28:11.9174310Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:28:11.9174687Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:28:11.9175063Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:28:11.9175441Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-11-04T06:28:11.9175867Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:28:11.9176344Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:28:11.9176733Z ##[endgroup]
+2026-11-04T06:28:12.4335565Z ##[group]Run scripts/certify.sh certification-out/ci
+2026-11-04T06:28:12.4336305Z [36;1mscripts/certify.sh certification-out/ci[0m
+2026-11-04T06:28:12.4367278Z shell: /usr/bin/bash -e {0}
+2026-11-04T06:28:12.4367725Z env:
+2026-11-04T06:28:12.4368212Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:28:12.4369042Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-11-04T06:28:12.4369832Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:28:12.4370580Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:28:12.4371632Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T06:28:12.4372392Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-11-04T06:28:12.4373221Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:28:12.4374129Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T06:28:12.4374905Z ##[endgroup]
+2026-11-04T06:28:18.5105164Z [certify] environment: RECORDED {  "docker_client": "28.0.4",  "docker_server": "28.0.4",  "git": "git version 2.56.0",  "git_revision": "04ac1fdc63d6cd3691686ac9365ce3d8d49500d4",  "gradle": "Welcome to Gradle 9.8.2!",  "java": "op
+2026-11-04T06:28:19.9483405Z [certify] release_identity: RECORDED 7dd7e273f3dd7118f86af718250d38d369b0095b3ade9de4c0e72db0c1fdf106
+2026-11-04T06:29:18.2192477Z [certify] static: PASS 
+2026-11-04T06:29:19.5565518Z [certify] maven_repository: PASS content digest c557384d52b7d3f196b3a79c3477a0441068717117dfd4560948d417bd25dec3 served on 0.0.0.0:36707
+2026-11-04T06:29:21.9500229Z [certify] python_wheelhouse: PASS {"hashed_requirements_sha256": "b4583335692ccfa8aa19e9387f8c8beb186f83745e1057654195e13eb710fd58", "wheelhouse_files": "70", "wheelhouse_sha256": "d998578dcaeeb88bc4b36df38cd470ad6ecad75c2867d4d4894cfc283f4b493e"} index on 0.0.0.0:38463
+2026-11-04T06:29:23.1659877Z [certify] product_images: PASS 11 lines; ids recorded (provision: scripts/provision_containment_images.py build)
+2026-11-04T06:31:17.0092971Z [certify] collection: PASS [collection-audit] PASS: 19914 selected / 45 deselected
+2026-11-04T06:32:23.5172301Z [certify] perf_probe: PASS 3 classes; see perf-probe/perf-probe.json
+2026-11-04T07:50:52.4784751Z [certify] pytest: FAIL [shards] FAIL: 4 failed, 19907 passed, 2 skipped, 1 errors across 4 shards (merge audit OK)
+2026-11-04T07:50:52.7445508Z [certify] maven_served: PASS 36971 requests, 1744 distinct files, 0 bytes-differ refusals; statuses {'200': 36907, '404': 64}
+2026-11-04T07:50:52.8362173Z [certify] python_served: PASS 322 requests, 7 distinct files, 0 bytes-differ refusals; statuses {'200': 322}
+2026-11-04T07:50:52.9260337Z [certify] images_unchanged: PASS no product image was built or rebuilt during the run
+2026-11-04T07:50:53.2876822Z [certify] tier_execution: FAIL population identical: yes; [tier-execution] FAIL: {"docker": {"failed": 1, "missing": 0, "passed": 285, "skipped": 0}, "gradle_container": {"failed": 0, "missing": 0, "passed": 5, "skipped": 0}, "jvm": {"failed": 2, "missing": 0, "passed": 86, "skipped": 0}, "live_static_analysis": {"failed": 0, "missing": 0, "passed": 11, "skipped": 0}, "real_toolchain": {"failed": 0, "missing": 0, "passed": 5, "skipped": 0}}   - jvm: tests/test_demo_v2_spring_ignite.py::test_post_check_passes_on_the_reference_and_leaves_the_project_untouched -> failed 
+2026-11-04T07:50:53.3468733Z [certify] scanner: PASS semgrep 1.178.0; live_static_analysis tier passed in the canonical run
+2026-11-04T07:50:53.8696837Z [certify] images: PASS [pinned-images] 10 present, 0 missing
+2026-11-04T07:51:17.2923345Z [certify] release: PASS 
+2026-11-04T07:51:20.9720278Z [certify] doctor: RECORDED production doctor JSON archived (mode: packaged_defaults)
+2026-11-04T07:51:21.0551300Z [certify] NOT_CERTIFIED
+2026-11-04T07:51:21.0551823Z   - pytest: FAIL
+2026-11-04T07:51:21.0552243Z   - tier_execution: FAIL
+2026-11-04T07:51:21.0552699Z   - pytest: 1 unexpected skip(s)
+2026-11-04T07:51:21.2032564Z ##[error]Process completed with exit code 1.
+2026-11-04T07:51:21.2119554Z ##[group]Run actions/upload-artifact@v4
+2026-11-04T07:51:21.2119850Z with:
+2026-11-04T07:51:21.2120057Z   name: production-certification
+2026-11-04T07:51:21.2120322Z   path: certification-out/ci
+2026-11-04T07:51:21.2120569Z   retention-days: 30
+2026-11-04T07:51:21.2120785Z   if-no-files-found: warn
+2026-11-04T07:51:21.2121011Z   compression-level: 6
+2026-11-04T07:51:21.2121573Z   overwrite: false
+2026-11-04T07:51:21.2121801Z   include-hidden-files: false
+2026-11-04T07:51:21.2122036Z env:
+2026-11-04T07:51:21.2122289Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T07:51:21.2122731Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-11-04T07:51:21.2123160Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T07:51:21.2123555Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T07:51:21.2123966Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-11-04T07:51:21.2124409Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-11-04T07:51:21.2124855Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T07:51:21.2125341Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-04T07:51:21.2125716Z ##[endgroup]
+2026-11-04T07:51:21.3934958Z (node:860840) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-04T07:51:21.3936297Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-04T07:51:21.4256163Z With the provided path, there will be 88 files uploaded
+2026-11-04T07:51:21.4265233Z Artifact name is valid!
+2026-11-04T07:51:21.4265983Z Root directory input is valid!
+2026-11-04T07:51:21.9122049Z Beginning upload of artifact content to blob storage
+2026-11-04T07:51:22.7008094Z (node:860840) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-11-04T07:51:23.5177682Z Uploaded bytes 5620829
+2026-11-04T07:51:23.5904923Z Finished uploading artifact content to blob storage!
+2026-11-04T07:51:23.5905893Z SHA256 digest of uploaded artifact zip is 06db5631f164b9fc99c3c4fcda08609af10224bd23b20859ba607bd2dba749ab
+2026-11-04T07:51:23.5907767Z Finalizing artifact upload
+2026-11-04T07:51:24.0827406Z Artifact production-certification.zip successfully finalized. Artifact ID 13305237132
+2026-11-04T07:51:24.0828527Z Artifact production-certification has been successfully uploaded! Final size is 5620829 bytes. Artifact ID is 13305237132
+2026-11-04T07:51:24.0836356Z Artifact download URL: https://github.com/snanduri7/kriya/actions/runs/41785193323/artifacts/13305237132
+2026-11-04T07:51:24.1132380Z Post job cleanup.
+2026-11-04T07:51:24.2628110Z (node:860852) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-04T07:51:24.2630439Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-04T07:51:24.2913834Z Post job cleanup.
+2026-11-04T07:51:24.3998703Z [command]/usr/bin/git version
+2026-11-04T07:51:24.4052102Z git version 2.56.0
+2026-11-04T07:51:24.4102587Z Temporarily overriding HOME='/home/runner/work/_temp/cd101f29-7b60-4a03-a1c9-ba3f4b02cf57' before making global git config changes
+2026-11-04T07:51:24.4108301Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-04T07:51:24.4109798Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/kriya/kriya
+2026-11-04T07:51:24.4200304Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-04T07:51:24.4259455Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-04T07:51:24.4800825Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-04T07:51:24.4839508Z http.https://github.com/.extraheader
+2026-11-04T07:51:24.4877056Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-11-04T07:51:24.4955286Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-04T07:51:24.5392727Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-04T07:51:24.5435001Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-04T07:51:24.5911810Z Cleaning up orphan processes
+2026-11-04T07:51:24.6447795Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-java@v4, actions/setup-python@v5, actions/upload-artifact@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

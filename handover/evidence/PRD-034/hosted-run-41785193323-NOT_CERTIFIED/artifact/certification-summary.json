@@ -1,0 +1,369 @@
+{
+  "collection": {
+    "deselected": 45,
+    "deselected_ids": [
+      "tests/test_live_generate_json.py::test_real_generate_emits_one_json_result",
+      "tests/test_live_prd011_toolchain_parity.py::test_live_java17_and_python_projects_record_exact_container_toolchains",
+      "tests/test_live_prd012_egress_injection.py::test_repository_injected_destination_stays_unreachable_for_a_real_model",
+      "tests/test_live_prd013_016_model_runtime.py::test_prd013_fingerprint_is_stable_and_drift_invalidates_qualification",
+      "tests/test_live_prd013_016_model_runtime.py::test_prd014_full_qualification_campaign_reports_every_case",
+      "tests/test_live_prd013_016_model_runtime.py::test_prd015_normalized_result_matches_the_raw_response",
+      "tests/test_live_prd013_016_model_runtime.py::test_prd016_adaptive_policy_serves_a_declared_larger_tier",
+      "tests/test_live_prd013_016_model_runtime.py::test_prd016_budget_against_the_real_tokenizer_and_the_served_window",
+      "tests/test_live_prd017_019_model_roles.py::test_prd017_a_real_fallback_hop_is_recomputed_for_the_fallback_runtime",
+      "tests/test_live_prd017_019_model_roles.py::test_prd018_doctor_identifies_shared_and_independent_real_runtimes",
+      "tests/test_live_prd017_019_model_roles.py::test_prd019_routing_over_two_real_runtimes_is_deterministic",
+      "tests/test_live_prd020_024_batch5.py::test_prd020_lineage_survives_model_paraphrase",
+      "tests/test_live_prd020_024_batch5.py::test_prd021_planner_sees_the_grounded_owner",
+      "tests/test_live_prd020_024_batch5.py::test_prd022_duplicate_owner_first_and_second_attempt",
+      "tests/test_live_prd020_024_batch5.py::test_prd024_auto_does_not_baseline_a_docstring_edit_for_its_test_reference_alone",
+      "tests/test_live_prd020_024_batch5.py::test_prd024_pre_existing_failure_is_not_a_new_regression",
+      "tests/test_live_prd022_redirect_chain.py::test_prd022_a_real_redirect_is_followed_by_the_owner_scoped_corrective_retry",
+      "tests/test_live_prd025_029_batch6.py::test_live_prd025_bounded_package_keeps_middle_failure",
+      "tests/test_live_prd025_029_batch6.py::test_live_prd025_capture_loss_can_never_pass",
+      "tests/test_live_prd025_029_batch6.py::test_live_prd026_ineffective_repair_terminates",
+      "tests/test_live_prd025_029_batch6.py::test_live_prd027_certification_with_the_real_embedder",
+      "tests/test_live_prd025_029_batch6.py::test_live_prd027_developer_prompt_receives_golden_evidence",
+      "tests/test_live_prd025_029_batch6.py::test_live_prd028_member_authority_is_revision_bound_and_in_scope",
+      "tests/test_live_prd025_029_batch6.py::test_live_prd029_authorized_api_change_is_bound_to_its_commit",
+      "tests/test_live_prd025_029_batch6.py::test_live_prd029_targeted_required_contract_change_is_committed_and_bound",
+      "tests/test_live_prd032_chaos.py::test_live_ineffective_retry_is_bounded",
+      "tests/test_live_prd032_chaos.py::test_live_malformed_response_is_never_accepted_and_recovery_is_bounded",
+      "tests/test_live_prd032_chaos.py::test_live_repository_prompt_injection_crosses_no_boundary",
+      "tests/test_live_prd033_metrics.py::test_live_task_set_metrics_are_reproducible_and_identity_keyed",
+      "tests/test_live_prd035_certification.py::test_c10_malicious_repository_instruction",
+      "tests/test_live_prd035_certification.py::test_c11_static_analysis_enabled",
+      "tests/test_live_prd035_certification.py::test_c1_simple_bug_fix",
+      "tests/test_live_prd035_certification.py::test_c2_multi_file_feature",
+      "tests/test_live_prd035_certification.py::test_c3_brownfield_extension",
+      "tests/test_live_prd035_certification.py::test_c4_exact_requirement_compliance",
+      "tests/test_live_prd035_certification.py::test_c5_targeted_retry",
+      "tests/test_live_prd035_certification.py::test_c6_configured_fallback_transition",
+      "tests/test_live_prd035_certification.py::test_c7_contained_compile_and_test",
+      "tests/test_live_prd035_certification.py::test_c8_pre_post_full_regression",
+      "tests/test_live_prd035_certification.py::test_c9_resume_safety",
+      "tests/test_live_production_doctor.py::test_production_doctor_fingerprints_the_real_runtime_and_withholds_name_based_qualification",
+      "tests/test_live_smoke.py::test_ask_answers_a_question_about_the_repo_without_crashing",
+      "tests/test_live_smoke.py::test_doctor_connects_to_a_real_local_llm_and_embedding_server",
+      "tests/test_live_smoke.py::test_generate_meets_the_smoke_contract",
+      "tests/test_live_smoke.py::test_plan_milestones_runs_the_real_planner_without_crashing"
+    ],
+    "floors": {
+      "docker": 283,
+      "gradle_container": 5,
+      "jvm": 86,
+      "live_static_analysis": 11,
+      "real_toolchain": 5
+    },
+    "ok": true,
+    "problems": [],
+    "selected": 19914,
+    "selected_args": [
+      "-o",
+      "addopts=",
+      "-m",
+      "not live_model",
+      "--collect-only",
+      "-q",
+      "-p",
+      "no:cacheprovider",
+      "--collection-census=/home/runner/work/kriya/kriya/certification-out/ci/collection/selected.json"
+    ],
+    "selection": "not live_model",
+    "tiers_all": {
+      "docker": 287,
+      "gradle_container": 5,
+      "jvm": 88,
+      "live_model": 45,
+      "live_static_analysis": 11,
+      "real_toolchain": 5
+    },
+    "tiers_selected": {
+      "docker": 286,
+      "gradle_container": 5,
+      "jvm": 88,
+      "live_static_analysis": 11,
+      "real_toolchain": 5
+    },
+    "total": 19959
+  },
+  "doctor": {
+    "failed_required": [
+      "profile.production"
+    ],
+    "production_ready": false,
+    "statuses": {
+      "FAIL": 1,
+      "PASS": 24,
+      "UNAVAILABLE": 5,
+      "WARN": 4
+    }
+  },
+  "doctor_mode": {
+    "config": "",
+    "mode": "packaged_defaults",
+    "trust_file": "",
+    "workspace": ""
+  },
+  "environment": {
+    "docker_client": "28.0.4",
+    "docker_server": "28.0.4",
+    "git": "git version 2.56.0",
+    "git_revision": "04ac1fdc63d6cd3691686ac9365ce3d8d49500d4",
+    "gradle": "Welcome to Gradle 9.8.2!",
+    "java": "openjdk version \"17.0.21\" 2026-10-20",
+    "machine": "x86_64",
+    "maven": "Apache Maven 3.9.9 (8e8579a9e76f7d015ee5ec7bfcdc97d260186937)",
+    "os": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+    "pip_freeze_sha256": "c0e9ea40e326bf6eacd78656f23be12e66a8fdc36eae6e198b940b811fe9166d",
+    "python": "3.12.15",
+    "python_executable": "/home/runner/work/kriya/kriya/.venv/bin/python",
+    "semgrep": "1.178.0",
+    "uid_is_root": false
+  },
+  "maven_repository": {
+    "attested": true,
+    "bytes_differ_refusals": 0,
+    "files": 1773,
+    "manifest_content_digest": "c557384d52b7d3f196b3a79c3477a0441068717117dfd4560948d417bd25dec3",
+    "not_in_manifest_requests": [
+      "",
+      "org/apache/maven/plugins/maven-metadata.xml.md5",
+      "org/apache/maven/plugins/maven-metadata.xml.sha1",
+      "org/codehaus/mojo/exec-maven-plugin/maven-metadata.xml.md5",
+      "org/codehaus/mojo/exec-maven-plugin/maven-metadata.xml.sha1",
+      "org/codehaus/mojo/maven-metadata.xml.md5",
+      "org/codehaus/mojo/maven-metadata.xml.sha1",
+      "org/kriya/nonexistent/kriya-definitely-not-a-real-artifact/4.13.2/kriya-definitely-not-a-real-artifact-4.13.2.jar",
+      "org/kriya/nonexistent/kriya-definitely-not-a-real-artifact/4.13.2/kriya-definitely-not-a-real-artifact-4.13.2.pom",
+      "org/kriya/outside/thing/1.0/thing-1.0.pom"
+    ],
+    "requests": 36971,
+    "served_paths": 1744,
+    "status_counts": {
+      "200": 36907,
+      "404": 64
+    }
+  },
+  "platform_pending": [],
+  "problems": [
+    "pytest: FAIL",
+    "tier_execution: FAIL",
+    "pytest: 1 unexpected skip(s)"
+  ],
+  "python_wheelhouse": {
+    "hashed_requirements_sha256": "b4583335692ccfa8aa19e9387f8c8beb186f83745e1057654195e13eb710fd58",
+    "wheelhouse_files": "70",
+    "wheelhouse_sha256": "d998578dcaeeb88bc4b36df38cd470ad6ecad75c2867d4d4894cfc283f4b493e"
+  },
+  "release_identity": {
+    "containment": {
+      "backend": "oci",
+      "runtime_version": "28.0.4"
+    },
+    "digest": "7dd7e273f3dd7118f86af718250d38d369b0095b3ade9de4c0e72db0c1fdf106",
+    "environment": {
+      "architecture": "x86_64",
+      "os": "linux",
+      "python": "3.12.15"
+    },
+    "kriya": {
+      "dirty": false,
+      "revision": "04ac1fdc63d6cd3691686ac9365ce3d8d49500d4"
+    },
+    "platform": {
+      "capabilities": [
+        [
+          "file_lock_crash_safe",
+          "enforced",
+          "posix-flock"
+        ],
+        [
+          "posix_rlimit_as",
+          "enforced",
+          "posix-setrlimit"
+        ],
+        [
+          "posix_rlimit_cpu",
+          "enforced",
+          "posix-setrlimit"
+        ],
+        [
+          "process_tree_termination",
+          "enforced",
+          "posix-process-group"
+        ],
+        [
+          "uid_gid_identity",
+          "enforced",
+          "posix-uid-gid"
+        ]
+      ],
+      "family": "posix",
+      "providers": {
+        "host_identity": "posix-uid-gid",
+        "process_control": "posix-process-group",
+        "resource_limits": "posix-setrlimit",
+        "workspace_lock": "posix-flock"
+      }
+    },
+    "version": 1
+  },
+  "stages": {
+    "collection": {
+      "detail": "[collection-audit] PASS: 19914 selected / 45 deselected",
+      "stage": "collection",
+      "status": "PASS"
+    },
+    "doctor": {
+      "detail": "production doctor JSON archived (mode: packaged_defaults)",
+      "stage": "doctor",
+      "status": "RECORDED"
+    },
+    "environment": {
+      "detail": "{  \"docker_client\": \"28.0.4\",  \"docker_server\": \"28.0.4\",  \"git\": \"git version 2.56.0\",  \"git_revision\": \"04ac1fdc63d6cd3691686ac9365ce3d8d49500d4\",  \"gradle\": \"Welcome to Gradle 9.8.2!\",  \"java\": \"op",
+      "stage": "environment",
+      "status": "RECORDED"
+    },
+    "images": {
+      "detail": "[pinned-images] 10 present, 0 missing",
+      "stage": "images",
+      "status": "PASS"
+    },
+    "images_unchanged": {
+      "detail": "no product image was built or rebuilt during the run",
+      "stage": "images_unchanged",
+      "status": "PASS"
+    },
+    "maven_repository": {
+      "detail": "content digest c557384d52b7d3f196b3a79c3477a0441068717117dfd4560948d417bd25dec3 served on 0.0.0.0:36707",
+      "stage": "maven_repository",
+      "status": "PASS"
+    },
+    "maven_served": {
+      "detail": "36971 requests, 1744 distinct files, 0 bytes-differ refusals; statuses {'200': 36907, '404': 64}",
+      "stage": "maven_served",
+      "status": "PASS"
+    },
+    "perf_probe": {
+      "detail": "3 classes; see perf-probe/perf-probe.json",
+      "stage": "perf_probe",
+      "status": "PASS"
+    },
+    "product_images": {
+      "detail": "11 lines; ids recorded (provision: scripts/provision_containment_images.py build)",
+      "stage": "product_images",
+      "status": "PASS"
+    },
+    "pytest": {
+      "detail": "[shards] FAIL: 4 failed, 19907 passed, 2 skipped, 1 errors across 4 shards (merge audit OK)",
+      "stage": "pytest",
+      "status": "FAIL"
+    },
+    "python_served": {
+      "detail": "322 requests, 7 distinct files, 0 bytes-differ refusals; statuses {'200': 322}",
+      "stage": "python_served",
+      "status": "PASS"
+    },
+    "python_wheelhouse": {
+      "detail": "{\"hashed_requirements_sha256\": \"b4583335692ccfa8aa19e9387f8c8beb186f83745e1057654195e13eb710fd58\", \"wheelhouse_files\": \"70\", \"wheelhouse_sha256\": \"d998578dcaeeb88bc4b36df38cd470ad6ecad75c2867d4d4894cfc283f4b493e\"} index on 0.0.0.0:38463",
+      "stage": "python_wheelhouse",
+      "status": "PASS"
+    },
+    "release": {
+      "detail": "",
+      "stage": "release",
+      "status": "PASS"
+    },
+    "release_identity": {
+      "detail": "7dd7e273f3dd7118f86af718250d38d369b0095b3ade9de4c0e72db0c1fdf106",
+      "stage": "release_identity",
+      "status": "RECORDED"
+    },
+    "scanner": {
+      "detail": "semgrep 1.178.0; live_static_analysis tier passed in the canonical run",
+      "stage": "scanner",
+      "status": "PASS"
+    },
+    "static": {
+      "detail": "",
+      "stage": "static",
+      "status": "PASS"
+    },
+    "tier_execution": {
+      "detail": "population identical: yes; [tier-execution] FAIL: {\"docker\": {\"failed\": 1, \"missing\": 0, \"passed\": 285, \"skipped\": 0}, \"gradle_container\": {\"failed\": 0, \"missing\": 0, \"passed\": 5, \"skipped\": 0}, \"jvm\": {\"failed\": 2, \"missing\": 0, \"passed\": 86, \"skipped\": 0}, \"live_static_analysis\": {\"failed\": 0, \"missing\": 0, \"passed\": 11, \"skipped\": 0}, \"real_toolchain\": {\"failed\": 0, \"missing\": 0, \"passed\": 5, \"skipped\": 0}}   - jvm: tests/test_demo_v2_spring_ignite.py::test_post_check_passes_on_the_reference_and_leaves_the_project_untouched -> failed ",
+      "stage": "tier_execution",
+      "status": "FAIL"
+    }
+  },
+  "status": "NOT_CERTIFIED",
+  "thresholds": null,
+  "tier_execution": {
+    "not_applicable": [
+      {
+        "equivalent": "tests/test_kup_write_boundary_portable.py::test_acquisition_writes_only_under_the_snapshot_directory_and_inspection_writes_nothing",
+        "equivalent_outcome": "passed",
+        "id": "tests/test_kup_write_boundary.py::test_acquisition_writes_only_source_sidecars_and_the_snapshot_directory_and_inspection_writes_nothing",
+        "platform": "linux"
+      },
+      {
+        "equivalent": "tests/test_kup_write_boundary_portable.py::test_negative_control_without_the_fixed_bytecode_suppression_the_recorder_sees_pyc_writes",
+        "equivalent_outcome": "passed",
+        "id": "tests/test_kup_write_boundary.py::test_negative_control_without_the_fixed_bytecode_suppression_a_fresh_install_attempts_pyc_writes",
+        "platform": "linux"
+      }
+    ],
+    "ok": false,
+    "per_tier": {
+      "docker": {
+        "failed": 1,
+        "missing": 0,
+        "passed": 285,
+        "skipped": 0
+      },
+      "gradle_container": {
+        "failed": 0,
+        "missing": 0,
+        "passed": 5,
+        "skipped": 0
+      },
+      "jvm": {
+        "failed": 2,
+        "missing": 0,
+        "passed": 86,
+        "skipped": 0
+      },
+      "live_static_analysis": {
+        "failed": 0,
+        "missing": 0,
+        "passed": 11,
+        "skipped": 0
+      },
+      "real_toolchain": {
+        "failed": 0,
+        "missing": 0,
+        "passed": 5,
+        "skipped": 0
+      }
+    },
+    "platform_pending": [],
+    "problems": [
+      "jvm: tests/test_demo_v2_spring_ignite.py::test_post_check_passes_on_the_reference_and_leaves_the_project_untouched -> failed",
+      "jvm: tests/test_demo_v2_spring_ignite.py::test_post_check_rejects_a_program_that_prints_the_line_without_ignite -> failed",
+      "docker: tests/test_s3_execution_views.py::test_real_oci_two_gates_on_an_execution_copy_and_a_gate_in_a_view_never_put_a_git_into_the_origin -> failed"
+    ]
+  },
+  "tiers": {
+    "pytest": {
+      "junit": {
+        "errors": 1,
+        "failures": 4,
+        "passed": 19907,
+        "skipped": 2,
+        "tests": 19914
+      },
+      "skipped": 3,
+      "unexpected_skips": 1
+    }
+  }
+}

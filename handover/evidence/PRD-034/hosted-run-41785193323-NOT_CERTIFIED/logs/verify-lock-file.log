@@ -1,0 +1,1319 @@
+﻿2026-11-04T06:23:31.1084983Z Current runner version: '2.338.2'
+2026-11-04T06:23:31.1102215Z ##[group]Runner Image Provisioner
+2026-11-04T06:23:31.1102846Z Hosted Compute Agent
+2026-11-04T06:23:31.1103261Z Version: 20261028.624
+2026-11-04T06:23:31.1103662Z Commit: 54898b74c23fde5556c9b3c3a2290865feef0dfe
+2026-11-04T06:23:31.1104100Z Build Date: 2026-10-28T21:51:42Z
+2026-11-04T06:23:31.1104578Z Worker ID: {d067d1c2-9d41-4a81-b726-8ab41fb50236}
+2026-11-04T06:23:31.1105031Z Region: westus2
+2026-11-04T06:23:31.1105362Z Cloud: Azure
+2026-11-04T06:23:31.1105747Z ##[endgroup]
+2026-11-04T06:23:31.1106494Z ##[group]Operating System
+2026-11-04T06:23:31.1106933Z Ubuntu
+2026-11-04T06:23:31.1107287Z 24.04.5
+2026-11-04T06:23:31.1107595Z LTS
+2026-11-04T06:23:31.1107959Z ##[endgroup]
+2026-11-04T06:23:31.1108301Z ##[group]Runner Image
+2026-11-04T06:23:31.1108944Z Image: ubuntu-24.04
+2026-11-04T06:23:31.1109341Z Version: 20261101.360.1
+2026-11-04T06:23:31.1110139Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261101.360/images/ubuntu/Ubuntu2404-Readme.md
+2026-11-04T06:23:31.1111028Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261101.360
+2026-11-04T06:23:31.1111609Z ##[endgroup]
+2026-11-04T06:23:31.1112378Z ##[group]GITHUB_TOKEN Permissions
+2026-11-04T06:23:31.1113619Z Contents: read
+2026-11-04T06:23:31.1113985Z Metadata: read
+2026-11-04T06:23:31.1114337Z Packages: read
+2026-11-04T06:23:31.1114778Z ##[endgroup]
+2026-11-04T06:23:31.1116028Z Secret source: Actions
+2026-11-04T06:23:31.1116615Z Cache mode: write
+2026-11-04T06:23:31.1117034Z Prepare workflow directory
+2026-11-04T06:23:31.1324447Z Prepare all required actions
+2026-11-04T06:23:31.1356036Z Getting action download info
+2026-11-04T06:23:31.4523780Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-11-04T06:23:31.5470278Z Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+2026-11-04T06:23:31.7172734Z Complete job name: Verify dependency lock file
+2026-11-04T06:23:31.7676141Z ##[group]Run actions/checkout@v4
+2026-11-04T06:23:31.7676551Z with:
+2026-11-04T06:23:31.7676796Z   repository: snanduri7/kriya
+2026-11-04T06:23:31.7678869Z   token: ***
+2026-11-04T06:23:31.7679103Z   ssh-strict: true
+2026-11-04T06:23:31.7679351Z   ssh-user: git
+2026-11-04T06:23:31.7679596Z   persist-credentials: true
+2026-11-04T06:23:31.7679862Z   clean: true
+2026-11-04T06:23:31.7680107Z   sparse-checkout-cone-mode: true
+2026-11-04T06:23:31.7680389Z   fetch-depth: 1
+2026-11-04T06:23:31.7680629Z   fetch-tags: false
+2026-11-04T06:23:31.7680870Z   show-progress: true
+2026-11-04T06:23:31.7681114Z   lfs: false
+2026-11-04T06:23:31.7681341Z   submodules: false
+2026-11-04T06:23:31.7681589Z   set-safe-directory: true
+2026-11-04T06:23:31.7681863Z   allow-unsafe-pr-checkout: false
+2026-11-04T06:23:31.7682223Z ##[endgroup]
+2026-11-04T06:23:31.9951540Z Syncing repository: snanduri7/kriya
+2026-11-04T06:23:31.9953094Z ##[group]Getting Git version info
+2026-11-04T06:23:31.9953864Z Working directory is '/home/runner/work/kriya/kriya'
+2026-11-04T06:23:31.9954738Z [command]/usr/bin/git version
+2026-11-04T06:23:32.0036688Z git version 2.56.0
+2026-11-04T06:23:32.0056535Z ##[endgroup]
+2026-11-04T06:23:32.0062694Z Temporarily overriding HOME='/home/runner/work/_temp/85d4d66a-f8d0-486e-870c-04b74566e1a6' before making global git config changes
+2026-11-04T06:23:32.0064064Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-04T06:23:32.0065517Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/kriya/kriya
+2026-11-04T06:23:32.0130992Z Deleting the contents of '/home/runner/work/kriya/kriya'
+2026-11-04T06:23:32.0132523Z ##[group]Initializing the repository
+2026-11-04T06:23:32.0133341Z [command]/usr/bin/git init /home/runner/work/kriya/kriya
+2026-11-04T06:23:32.0224709Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-04T06:23:32.0225731Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-04T06:23:32.0227021Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-04T06:23:32.0227784Z hint: call:
+2026-11-04T06:23:32.0228154Z hint:
+2026-11-04T06:23:32.0228766Z hint: 	git config --global init.defaultBranch <name>
+2026-11-04T06:23:32.0229351Z hint:
+2026-11-04T06:23:32.0229887Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-04T06:23:32.0230805Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-04T06:23:32.0231519Z hint:
+2026-11-04T06:23:32.0231906Z hint: 	git branch -m <name>
+2026-11-04T06:23:32.0232346Z hint:
+2026-11-04T06:23:32.0232938Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-04T06:23:32.0235632Z Initialized empty Git repository in /home/runner/work/kriya/kriya/.git/
+2026-11-04T06:23:32.0244104Z [command]/usr/bin/git remote add origin https://github.com/snanduri7/kriya
+2026-11-04T06:23:32.0285500Z ##[endgroup]
+2026-11-04T06:23:32.0286304Z ##[group]Disabling automatic garbage collection
+2026-11-04T06:23:32.0288058Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-04T06:23:32.0321606Z ##[endgroup]
+2026-11-04T06:23:32.0322296Z ##[group]Setting up auth
+2026-11-04T06:23:32.0322995Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-04T06:23:32.0354969Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-04T06:23:32.0682731Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-04T06:23:32.0719966Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-04T06:23:32.0916726Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-04T06:23:32.0956020Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-04T06:23:32.1146880Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-04T06:23:32.1187831Z ##[endgroup]
+2026-11-04T06:23:32.1188539Z ##[group]Fetching the repository
+2026-11-04T06:23:32.1197226Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +04ac1fdc63d6cd3691686ac9365ce3d8d49500d4:refs/remotes/origin/arch/containment-rebuild-v2
+2026-11-04T06:23:42.6204055Z From https://github.com/snanduri7/kriya
+2026-11-04T06:23:42.6204550Z  * [new ref]         04ac1fdc63d6cd3691686ac9365ce3d8d49500d4 -> origin/arch/containment-rebuild-v2
+2026-11-04T06:23:42.6209650Z ##[endgroup]
+2026-11-04T06:23:42.6210253Z ##[group]Determining the checkout info
+2026-11-04T06:23:42.6210726Z ##[endgroup]
+2026-11-04T06:23:42.6214087Z [command]/usr/bin/git sparse-checkout disable
+2026-11-04T06:23:42.6267283Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-04T06:23:42.6301145Z ##[group]Checking out the ref
+2026-11-04T06:23:42.6304651Z [command]/usr/bin/git checkout --progress --force -B arch/containment-rebuild-v2 refs/remotes/origin/arch/containment-rebuild-v2
+2026-11-04T06:23:43.5371799Z Switched to a new branch 'arch/containment-rebuild-v2'
+2026-11-04T06:23:43.5379473Z branch 'arch/containment-rebuild-v2' set up to track 'origin/arch/containment-rebuild-v2'.
+2026-11-04T06:23:43.5426033Z ##[endgroup]
+2026-11-04T06:23:43.5476133Z [command]/usr/bin/git log -1 --format=%H
+2026-11-04T06:23:43.5508112Z 04ac1fdc63d6cd3691686ac9365ce3d8d49500d4
+2026-11-04T06:23:43.5690657Z ##[group]Run git fetch --no-tags --unshallow origin "+refs/tags/kriya-v1.2.0-pre-modularization:refs/tags/kriya-v1.2.0-pre-modularization"
+2026-11-04T06:23:43.5691268Z [36;1mgit fetch --no-tags --unshallow origin "+refs/tags/kriya-v1.2.0-pre-modularization:refs/tags/kriya-v1.2.0-pre-modularization"[0m
+2026-11-04T06:23:43.5710628Z shell: /usr/bin/bash -e {0}
+2026-11-04T06:23:43.5710784Z ##[endgroup]
+2026-11-04T06:23:49.6708290Z From https://github.com/snanduri7/kriya
+2026-11-04T06:23:49.6708885Z  * [new tag]           kriya-v1.2.0-pre-modularization -> kriya-v1.2.0-pre-modularization
+2026-11-04T06:23:49.6783992Z ##[group]Run actions/setup-python@v5
+2026-11-04T06:23:49.6784169Z with:
+2026-11-04T06:23:49.6784290Z   python-version: 3.14
+2026-11-04T06:23:49.6784434Z   check-latest: false
+2026-11-04T06:23:49.6785724Z   token: ***
+2026-11-04T06:23:49.6785848Z   update-environment: true
+2026-11-04T06:23:49.6785993Z   allow-prereleases: false
+2026-11-04T06:23:49.6786127Z   freethreaded: false
+2026-11-04T06:23:49.6786252Z ##[endgroup]
+2026-11-04T06:23:49.7742191Z ##[group]Installed versions
+2026-11-04T06:23:49.7806521Z (node:2390) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-04T06:23:49.7807229Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-04T06:23:49.7807611Z Successfully set up CPython (3.14.10)
+2026-11-04T06:23:49.7808022Z ##[endgroup]
+2026-11-04T06:23:49.7980999Z ##[group]Run pip install -r requirements.txt
+2026-11-04T06:23:49.7981247Z [36;1mpip install -r requirements.txt[0m
+2026-11-04T06:23:49.7981422Z [36;1mpip install -e . --no-deps[0m
+2026-11-04T06:23:49.8011344Z shell: /usr/bin/bash -e {0}
+2026-11-04T06:23:49.8011590Z env:
+2026-11-04T06:23:49.8011808Z   pythonLocation: /opt/hostedtoolcache/Python/3.14.10/x64
+2026-11-04T06:23:49.8012074Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.14.10/x64/lib/pkgconfig
+2026-11-04T06:23:49.8012316Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.14.10/x64
+2026-11-04T06:23:49.8012532Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.14.10/x64
+2026-11-04T06:23:49.8012748Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.14.10/x64
+2026-11-04T06:23:49.8012964Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.14.10/x64/lib
+2026-11-04T06:23:49.8013164Z ##[endgroup]
+2026-11-04T06:23:50.4912956Z Collecting annotated-types==0.8.0 (from -r requirements.txt (line 7))
+2026-11-04T06:23:50.5419555Z   Downloading annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+2026-11-04T06:23:50.5708679Z Collecting anyio==4.14.2 (from -r requirements.txt (line 9))
+2026-11-04T06:23:50.5776813Z   Downloading anyio-4.14.2-py3-none-any.whl.metadata (4.6 kB)
+2026-11-04T06:23:50.6057512Z Collecting astroid==4.0.4 (from -r requirements.txt (line 17))
+2026-11-04T06:23:50.6129120Z   Downloading astroid-4.0.4-py3-none-any.whl.metadata (4.4 kB)
+2026-11-04T06:23:50.6275749Z Collecting attrs==26.1.0 (from -r requirements.txt (line 19))
+2026-11-04T06:23:50.6343390Z   Downloading attrs-26.1.0-py3-none-any.whl.metadata (8.8 kB)
+2026-11-04T06:23:50.6495146Z Collecting build==1.5.0 (from -r requirements.txt (line 23))
+2026-11-04T06:23:50.6574696Z   Downloading build-1.5.0-py3-none-any.whl.metadata (5.7 kB)
+2026-11-04T06:23:50.6726313Z Collecting certifi==2026.7.22 (from -r requirements.txt (line 25))
+2026-11-04T06:23:50.6790616Z   Downloading certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+2026-11-04T06:23:50.7368440Z Collecting cffi==2.1.0 (from -r requirements.txt (line 29))
+2026-11-04T06:23:50.7447266Z   Downloading cffi-2.1.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.5 kB)
+2026-11-04T06:23:50.7686322Z Collecting click==8.4.2 (from -r requirements.txt (line 31))
+2026-11-04T06:23:50.7751988Z   Downloading click-8.4.2-py3-none-any.whl.metadata (2.6 kB)
+2026-11-04T06:23:50.9738154Z Collecting coverage==7.16.2 (from -r requirements.txt (line 36))
+2026-11-04T06:23:50.9821902Z   Downloading coverage-7.16.2-cp314-cp314-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (8.2 kB)
+2026-11-04T06:23:51.0654788Z Collecting cryptography==49.0.0 (from -r requirements.txt (line 38))
+2026-11-04T06:23:51.0744296Z   Downloading cryptography-49.0.0-cp311-abi3-manylinux_2_34_x86_64.whl.metadata (4.3 kB)
+2026-11-04T06:23:51.0873894Z Collecting dill==0.4.1 (from -r requirements.txt (line 40))
+2026-11-04T06:23:51.0948224Z   Downloading dill-0.4.1-py3-none-any.whl.metadata (10 kB)
+2026-11-04T06:23:51.1179238Z Collecting distro==1.9.0 (from -r requirements.txt (line 42))
+2026-11-04T06:23:51.1243250Z   Downloading distro-1.9.0-py3-none-any.whl.metadata (6.8 kB)
+2026-11-04T06:23:51.1369051Z Collecting execnet==2.1.2 (from -r requirements.txt (line 44))
+2026-11-04T06:23:51.1433034Z   Downloading execnet-2.1.2-py3-none-any.whl.metadata (2.9 kB)
+2026-11-04T06:23:51.1555626Z Collecting h11==0.16.0 (from -r requirements.txt (line 46))
+2026-11-04T06:23:51.1621707Z   Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+2026-11-04T06:23:51.1752610Z Collecting httpcore==1.0.9 (from -r requirements.txt (line 51))
+2026-11-04T06:23:51.1816120Z   Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+2026-11-04T06:23:51.1971471Z Collecting httpcore2==2.9.1 (from -r requirements.txt (line 53))
+2026-11-04T06:23:51.2033066Z   Downloading httpcore2-2.9.1-py3-none-any.whl.metadata (24 kB)
+2026-11-04T06:23:51.2190939Z Collecting httpx==0.28.1 (from -r requirements.txt (line 55))
+2026-11-04T06:23:51.2253748Z   Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+2026-11-04T06:23:51.2384959Z Collecting httpx2==2.9.1 (from -r requirements.txt (line 59))
+2026-11-04T06:23:51.2448468Z   Downloading httpx2-2.9.1-py3-none-any.whl.metadata (8.2 kB)
+2026-11-04T06:23:51.2580881Z Collecting idna==3.18 (from -r requirements.txt (line 61))
+2026-11-04T06:23:51.2644971Z   Downloading idna-3.18-py3-none-any.whl.metadata (6.1 kB)
+2026-11-04T06:23:51.2763516Z Collecting iniconfig==2.3.0 (from -r requirements.txt (line 66))
+2026-11-04T06:23:51.2826192Z   Downloading iniconfig-2.3.0-py3-none-any.whl.metadata (2.5 kB)
+2026-11-04T06:23:51.3152108Z Collecting isort==9.0.1 (from -r requirements.txt (line 68))
+2026-11-04T06:23:51.3218507Z   Downloading isort-9.0.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (11 kB)
+2026-11-04T06:23:51.3392431Z Collecting jinja2==3.1.6 (from -r requirements.txt (line 70))
+2026-11-04T06:23:51.3458746Z   Downloading jinja2-3.1.6-py3-none-any.whl.metadata (2.9 kB)
+2026-11-04T06:23:51.3947738Z Collecting jiter==0.16.0 (from -r requirements.txt (line 72))
+2026-11-04T06:23:51.4065901Z   Downloading jiter-0.16.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (5.2 kB)
+2026-11-04T06:23:51.4223292Z Collecting jsonschema==4.26.0 (from -r requirements.txt (line 74))
+2026-11-04T06:23:51.4287478Z   Downloading jsonschema-4.26.0-py3-none-any.whl.metadata (7.6 kB)
+2026-11-04T06:23:51.4440626Z Collecting jsonschema-specifications==2025.9.1 (from -r requirements.txt (line 76))
+2026-11-04T06:23:51.4505560Z   Downloading jsonschema_specifications-2025.9.1-py3-none-any.whl.metadata (2.9 kB)
+2026-11-04T06:23:51.4940247Z Collecting markupsafe==3.0.3 (from -r requirements.txt (line 78))
+2026-11-04T06:23:51.5020522Z   Downloading markupsafe-3.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.7 kB)
+2026-11-04T06:23:51.5132120Z Collecting mccabe==0.7.0 (from -r requirements.txt (line 80))
+2026-11-04T06:23:51.5196084Z   Downloading mccabe-0.7.0-py2.py3-none-any.whl.metadata (5.0 kB)
+2026-11-04T06:23:51.5333912Z Collecting mcp==2.0.0 (from -r requirements.txt (line 82))
+2026-11-04T06:23:51.5436318Z   Downloading mcp-2.0.0-py3-none-any.whl.metadata (7.7 kB)
+2026-11-04T06:23:51.5558687Z Collecting mcp-types==2.0.0 (from -r requirements.txt (line 84))
+2026-11-04T06:23:51.5628940Z   Downloading mcp_types-2.0.0-py3-none-any.whl.metadata (1.9 kB)
+2026-11-04T06:23:51.5743297Z Collecting mypy-extensions==1.1.0 (from -r requirements.txt (line 86))
+2026-11-04T06:23:51.5809068Z   Downloading mypy_extensions-1.1.0-py3-none-any.whl.metadata (1.1 kB)
+2026-11-04T06:23:51.6717409Z Collecting numpy==2.5.1 (from -r requirements.txt (line 88))
+2026-11-04T06:23:51.6845151Z   Downloading numpy-2.5.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+2026-11-04T06:23:51.7121898Z Collecting openai==2.50.0 (from -r requirements.txt (line 90))
+2026-11-04T06:23:51.7215312Z   Downloading openai-2.50.0-py3-none-any.whl.metadata (36 kB)
+2026-11-04T06:23:51.7625952Z Collecting opentelemetry-api==1.44.0 (from -r requirements.txt (line 92))
+2026-11-04T06:23:51.7691960Z   Downloading opentelemetry_api-1.44.0-py3-none-any.whl.metadata (1.4 kB)
+2026-11-04T06:23:51.7824789Z Collecting packaging==26.2 (from -r requirements.txt (line 94))
+2026-11-04T06:23:51.7888801Z   Downloading packaging-26.2-py3-none-any.whl.metadata (3.5 kB)
+2026-11-04T06:23:51.8050275Z Collecting pip-tools==7.6.0 (from -r requirements.txt (line 99))
+2026-11-04T06:23:51.8121585Z   Downloading pip_tools-7.6.0-py3-none-any.whl.metadata (25 kB)
+2026-11-04T06:23:51.8403229Z Collecting platformdirs==4.11.15 (from -r requirements.txt (line 101))
+2026-11-04T06:23:51.8493254Z   Downloading platformdirs-4.11.15-py3-none-any.whl.metadata (5.5 kB)
+2026-11-04T06:23:51.8627207Z Collecting pluggy==1.6.0 (from -r requirements.txt (line 103))
+2026-11-04T06:23:51.8693446Z   Downloading pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+2026-11-04T06:23:51.8858952Z Collecting prompt-toolkit==3.0.53 (from -r requirements.txt (line 105))
+2026-11-04T06:23:51.8922071Z   Downloading prompt_toolkit-3.0.53-py3-none-any.whl.metadata (6.4 kB)
+2026-11-04T06:23:51.9058076Z Collecting pycparser==3.0 (from -r requirements.txt (line 107))
+2026-11-04T06:23:51.9120949Z   Downloading pycparser-3.0-py3-none-any.whl.metadata (8.2 kB)
+2026-11-04T06:23:51.9617991Z Collecting pydantic==2.13.4 (from -r requirements.txt (line 109))
+2026-11-04T06:23:51.9683696Z   Downloading pydantic-2.13.4-py3-none-any.whl.metadata (109 kB)
+2026-11-04T06:23:52.3223291Z Collecting pydantic-core==2.46.4 (from -r requirements.txt (line 115))
+2026-11-04T06:23:52.3292503Z   Downloading pydantic_core-2.46.4-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.6 kB)
+2026-11-04T06:23:52.3446073Z Collecting pygments==2.20.0 (from -r requirements.txt (line 117))
+2026-11-04T06:23:52.3521630Z   Downloading pygments-2.20.0-py3-none-any.whl.metadata (2.5 kB)
+2026-11-04T06:23:52.3801880Z Collecting pyjwt==2.13.0 (from pyjwt[crypto]==2.13.0->-r requirements.txt (line 119))
+2026-11-04T06:23:52.3867894Z   Downloading pyjwt-2.13.0-py3-none-any.whl.metadata (3.4 kB)
+2026-11-04T06:23:52.4057315Z Collecting pylint==4.0.9 (from -r requirements.txt (line 121))
+2026-11-04T06:23:52.4155914Z   Downloading pylint-4.0.9-py3-none-any.whl.metadata (12 kB)
+2026-11-04T06:23:52.4278174Z Collecting pyproject-hooks==1.2.0 (from -r requirements.txt (line 123))
+2026-11-04T06:23:52.4353688Z   Downloading pyproject_hooks-1.2.0-py3-none-any.whl.metadata (1.3 kB)
+2026-11-04T06:23:52.4531094Z Collecting pytest==9.1.1 (from -r requirements.txt (line 127))
+2026-11-04T06:23:52.4601461Z   Downloading pytest-9.1.1-py3-none-any.whl.metadata (7.6 kB)
+2026-11-04T06:23:52.4769753Z Collecting pytest-asyncio==1.4.0 (from -r requirements.txt (line 133))
+2026-11-04T06:23:52.4834223Z   Downloading pytest_asyncio-1.4.0-py3-none-any.whl.metadata (4.1 kB)
+2026-11-04T06:23:52.4995714Z Collecting pytest-testmon==2.2.0 (from -r requirements.txt (line 135))
+2026-11-04T06:23:52.5060900Z   Downloading pytest_testmon-2.2.0-py3-none-any.whl.metadata (2.0 kB)
+2026-11-04T06:23:52.5191961Z Collecting pytest-xdist==3.8.0 (from -r requirements.txt (line 137))
+2026-11-04T06:23:52.5254878Z   Downloading pytest_xdist-3.8.0-py3-none-any.whl.metadata (3.0 kB)
+2026-11-04T06:23:52.5376557Z Collecting python-multipart==0.0.32 (from -r requirements.txt (line 139))
+2026-11-04T06:23:52.5439810Z   Downloading python_multipart-0.0.32-py3-none-any.whl.metadata (2.1 kB)
+2026-11-04T06:23:52.5771993Z Collecting pyyaml==6.0.3 (from -r requirements.txt (line 141))
+2026-11-04T06:23:52.5835550Z   Downloading pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+2026-11-04T06:23:52.5983611Z Collecting referencing==0.37.0 (from -r requirements.txt (line 143))
+2026-11-04T06:23:52.6049881Z   Downloading referencing-0.37.0-py3-none-any.whl.metadata (2.8 kB)
+2026-11-04T06:23:52.7349976Z Collecting rpds-py==2026.6.3 (from -r requirements.txt (line 147))
+2026-11-04T06:23:52.7432055Z   Downloading rpds_py-2026.6.3-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.1 kB)
+2026-11-04T06:23:52.9192241Z Collecting ruff==0.16.0 (from -r requirements.txt (line 151))
+2026-11-04T06:23:52.9284215Z   Downloading ruff-0.16.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (26 kB)
+2026-11-04T06:23:52.9413495Z Collecting sniffio==1.3.1 (from -r requirements.txt (line 153))
+2026-11-04T06:23:52.9483560Z   Downloading sniffio-1.3.1-py3-none-any.whl.metadata (3.9 kB)
+2026-11-04T06:23:52.9630195Z Collecting sse-starlette==3.4.6 (from -r requirements.txt (line 155))
+2026-11-04T06:23:52.9708673Z   Downloading sse_starlette-3.4.6-py3-none-any.whl.metadata (15 kB)
+2026-11-04T06:23:52.9887558Z Collecting starlette==1.3.1 (from -r requirements.txt (line 157))
+2026-11-04T06:23:52.9953105Z   Downloading starlette-1.3.1-py3-none-any.whl.metadata (6.4 kB)
+2026-11-04T06:23:53.0097826Z Collecting tomlkit==0.15.1 (from -r requirements.txt (line 161))
+2026-11-04T06:23:53.0163361Z   Downloading tomlkit-0.15.1-py3-none-any.whl.metadata (3.3 kB)
+2026-11-04T06:23:53.0353590Z Collecting tqdm==4.70.0 (from -r requirements.txt (line 163))
+2026-11-04T06:23:53.0420478Z   Downloading tqdm-4.70.0-py3-none-any.whl.metadata (57 kB)
+2026-11-04T06:23:53.0693291Z Collecting tree-sitter==0.25.2 (from -r requirements.txt (line 165))
+2026-11-04T06:23:53.0774293Z   Downloading tree_sitter-0.25.2-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (10.0 kB)
+2026-11-04T06:23:53.0988412Z Collecting tree-sitter-java==0.23.5 (from -r requirements.txt (line 167))
+2026-11-04T06:23:53.1065140Z   Downloading tree_sitter_java-0.23.5-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.7 kB)
+2026-11-04T06:23:53.1232170Z Collecting tree-sitter-python==0.25.0 (from -r requirements.txt (line 169))
+2026-11-04T06:23:53.1303103Z   Downloading tree_sitter_python-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (1.9 kB)
+2026-11-04T06:23:53.1441557Z Collecting truststore==0.10.4 (from -r requirements.txt (line 171))
+2026-11-04T06:23:53.1522054Z   Downloading truststore-0.10.4-py3-none-any.whl.metadata (4.4 kB)
+2026-11-04T06:23:53.1671902Z Collecting typing-extensions==4.16.0 (from -r requirements.txt (line 175))
+2026-11-04T06:23:53.1737306Z   Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+2026-11-04T06:23:53.1856965Z Collecting typing-inspection==0.4.2 (from -r requirements.txt (line 184))
+2026-11-04T06:23:53.1921065Z   Downloading typing_inspection-0.4.2-py3-none-any.whl.metadata (2.6 kB)
+2026-11-04T06:23:53.2093019Z Collecting uvicorn==0.51.0 (from -r requirements.txt (line 188))
+2026-11-04T06:23:53.2160312Z   Downloading uvicorn-0.51.0-py3-none-any.whl.metadata (6.6 kB)
+2026-11-04T06:23:53.2325794Z Collecting wcwidth==0.8.2 (from -r requirements.txt (line 190))
+2026-11-04T06:23:53.2397490Z   Downloading wcwidth-0.8.2-py3-none-any.whl.metadata (43 kB)
+2026-11-04T06:23:53.2560388Z Collecting wheel==0.47.0 (from -r requirements.txt (line 192))
+2026-11-04T06:23:53.2625204Z   Downloading wheel-0.47.0-py3-none-any.whl.metadata (2.3 kB)
+2026-11-04T06:23:53.3177034Z Collecting setuptools==83.0.0 (from -r requirements.txt (line 197))
+2026-11-04T06:23:53.3246950Z   Downloading setuptools-83.0.0-py3-none-any.whl.metadata (6.6 kB)
+2026-11-04T06:23:53.3574264Z Requirement already satisfied: pip>=22.2 in /opt/hostedtoolcache/Python/3.14.10/x64/lib/python3.14/site-packages (from pip-tools==7.6.0->-r requirements.txt (line 99)) (26.2.2)
+2026-11-04T06:23:53.3882677Z Downloading annotated_types-0.8.0-py3-none-any.whl (13 kB)
+2026-11-04T06:23:53.4000777Z Downloading anyio-4.14.2-py3-none-any.whl (125 kB)
+2026-11-04T06:23:53.4089732Z Downloading astroid-4.0.4-py3-none-any.whl (276 kB)
+2026-11-04T06:23:53.4233117Z Downloading attrs-26.1.0-py3-none-any.whl (67 kB)
+2026-11-04T06:23:53.4313341Z Downloading build-1.5.0-py3-none-any.whl (26 kB)
+2026-11-04T06:23:53.4393446Z Downloading certifi-2026.7.22-py3-none-any.whl (136 kB)
+2026-11-04T06:23:53.4634591Z Downloading cffi-2.1.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (221 kB)
+2026-11-04T06:23:53.4731939Z Downloading click-8.4.2-py3-none-any.whl (119 kB)
+2026-11-04T06:23:53.4812405Z Downloading coverage-7.16.2-cp314-cp314-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (258 kB)
+2026-11-04T06:23:53.4916621Z Downloading cryptography-49.0.0-cp311-abi3-manylinux_2_34_x86_64.whl (4.7 MB)
+2026-11-04T06:23:53.5278433Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.7/4.7 MB 132.3 MB/s  0:00:00
+2026-11-04T06:23:53.5346319Z Downloading dill-0.4.1-py3-none-any.whl (120 kB)
+2026-11-04T06:23:53.5435302Z Downloading distro-1.9.0-py3-none-any.whl (20 kB)
+2026-11-04T06:23:53.5515473Z Downloading execnet-2.1.2-py3-none-any.whl (40 kB)
+2026-11-04T06:23:53.5596226Z Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+2026-11-04T06:23:53.5683885Z Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+2026-11-04T06:23:53.5787996Z Downloading httpcore2-2.9.1-py3-none-any.whl (82 kB)
+2026-11-04T06:23:53.5867288Z Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+2026-11-04T06:23:53.5981614Z Downloading httpx2-2.9.1-py3-none-any.whl (91 kB)
+2026-11-04T06:23:53.6063521Z Downloading idna-3.18-py3-none-any.whl (65 kB)
+2026-11-04T06:23:53.6156814Z Downloading iniconfig-2.3.0-py3-none-any.whl (7.5 kB)
+2026-11-04T06:23:53.6255028Z Downloading isort-9.0.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.7 MB)
+2026-11-04T06:23:53.6515902Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.7/1.7 MB 57.1 MB/s  0:00:00
+2026-11-04T06:23:53.6588376Z Downloading jinja2-3.1.6-py3-none-any.whl (134 kB)
+2026-11-04T06:23:53.6687457Z Downloading jiter-0.16.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (344 kB)
+2026-11-04T06:23:53.6795321Z Downloading jsonschema-4.26.0-py3-none-any.whl (90 kB)
+2026-11-04T06:23:53.6896204Z Downloading jsonschema_specifications-2025.9.1-py3-none-any.whl (18 kB)
+2026-11-04T06:23:53.6975949Z Downloading markupsafe-3.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (23 kB)
+2026-11-04T06:23:53.7058837Z Downloading mccabe-0.7.0-py2.py3-none-any.whl (7.3 kB)
+2026-11-04T06:23:53.7137230Z Downloading mcp-2.0.0-py3-none-any.whl (349 kB)
+2026-11-04T06:23:53.7244580Z Downloading mcp_types-2.0.0-py3-none-any.whl (69 kB)
+2026-11-04T06:23:53.7328118Z Downloading mypy_extensions-1.1.0-py3-none-any.whl (5.0 kB)
+2026-11-04T06:23:53.7406266Z Downloading numpy-2.5.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.7 MB)
+2026-11-04T06:23:53.8998859Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.7/16.7 MB 104.7 MB/s  0:00:00
+2026-11-04T06:23:53.9111704Z Downloading openai-2.50.0-py3-none-any.whl (1.7 MB)
+2026-11-04T06:23:53.9215721Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.7/1.7 MB 154.0 MB/s  0:00:00
+2026-11-04T06:23:53.9286169Z Downloading pydantic-2.13.4-py3-none-any.whl (472 kB)
+2026-11-04T06:23:53.9372381Z Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+2026-11-04T06:23:53.9453407Z Downloading opentelemetry_api-1.44.0-py3-none-any.whl (60 kB)
+2026-11-04T06:23:53.9535259Z Downloading packaging-26.2-py3-none-any.whl (100 kB)
+2026-11-04T06:23:53.9624741Z Downloading pip_tools-7.6.0-py3-none-any.whl (74 kB)
+2026-11-04T06:23:53.9727719Z Downloading platformdirs-4.11.15-py3-none-any.whl (26 kB)
+2026-11-04T06:23:53.9805256Z Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+2026-11-04T06:23:53.9881436Z Downloading prompt_toolkit-3.0.53-py3-none-any.whl (392 kB)
+2026-11-04T06:23:53.9966398Z Downloading pycparser-3.0-py3-none-any.whl (48 kB)
+2026-11-04T06:23:54.0044118Z Downloading pydantic_core-2.46.4-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+2026-11-04T06:23:54.0268774Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 87.7 MB/s  0:00:00
+2026-11-04T06:23:54.0346841Z Downloading pygments-2.20.0-py3-none-any.whl (1.2 MB)
+2026-11-04T06:23:54.0624209Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 36.8 MB/s  0:00:00
+2026-11-04T06:23:54.0689156Z Downloading pyjwt-2.13.0-py3-none-any.whl (31 kB)
+2026-11-04T06:23:54.0771527Z Downloading pylint-4.0.9-py3-none-any.whl (542 kB)
+2026-11-04T06:23:54.0815876Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 542.1/542.1 kB 132.9 MB/s  0:00:00
+2026-11-04T06:23:54.0879000Z Downloading pyproject_hooks-1.2.0-py3-none-any.whl (10 kB)
+2026-11-04T06:23:54.0957680Z Downloading pytest-9.1.1-py3-none-any.whl (386 kB)
+2026-11-04T06:23:54.1045456Z Downloading pytest_asyncio-1.4.0-py3-none-any.whl (16 kB)
+2026-11-04T06:23:54.1132554Z Downloading pytest_testmon-2.2.0-py3-none-any.whl (25 kB)
+2026-11-04T06:23:54.1212245Z Downloading pytest_xdist-3.8.0-py3-none-any.whl (46 kB)
+2026-11-04T06:23:54.1290854Z Downloading python_multipart-0.0.32-py3-none-any.whl (30 kB)
+2026-11-04T06:23:54.1370055Z Downloading pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (794 kB)
+2026-11-04T06:23:54.1423176Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 794.2/794.2 kB 136.9 MB/s  0:00:00
+2026-11-04T06:23:54.1494679Z Downloading referencing-0.37.0-py3-none-any.whl (26 kB)
+2026-11-04T06:23:54.1573726Z Downloading rpds_py-2026.6.3-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (367 kB)
+2026-11-04T06:23:54.1657145Z Downloading ruff-0.16.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (11.4 MB)
+2026-11-04T06:23:54.2994146Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 11.4/11.4 MB 84.7 MB/s  0:00:00
+2026-11-04T06:23:54.3062062Z Downloading sniffio-1.3.1-py3-none-any.whl (10 kB)
+2026-11-04T06:23:54.3142416Z Downloading sse_starlette-3.4.6-py3-none-any.whl (16 kB)
+2026-11-04T06:23:54.3222160Z Downloading starlette-1.3.1-py3-none-any.whl (73 kB)
+2026-11-04T06:23:54.3302055Z Downloading tomlkit-0.15.1-py3-none-any.whl (49 kB)
+2026-11-04T06:23:54.3396460Z Downloading tqdm-4.70.0-py3-none-any.whl (80 kB)
+2026-11-04T06:23:54.3474257Z Downloading tree_sitter-0.25.2-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (636 kB)
+2026-11-04T06:23:54.3549306Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 636.8/636.8 kB 61.3 MB/s  0:00:00
+2026-11-04T06:23:54.3686122Z Downloading tree_sitter_java-0.23.5-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (84 kB)
+2026-11-04T06:23:54.3834798Z Downloading tree_sitter_python-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (108 kB)
+2026-11-04T06:23:54.3931731Z Downloading truststore-0.10.4-py3-none-any.whl (18 kB)
+2026-11-04T06:23:54.4015466Z Downloading typing_inspection-0.4.2-py3-none-any.whl (14 kB)
+2026-11-04T06:23:54.4095560Z Downloading uvicorn-0.51.0-py3-none-any.whl (73 kB)
+2026-11-04T06:23:54.4173823Z Downloading wcwidth-0.8.2-py3-none-any.whl (323 kB)
+2026-11-04T06:23:54.4257287Z Downloading wheel-0.47.0-py3-none-any.whl (32 kB)
+2026-11-04T06:23:54.4335135Z Downloading setuptools-83.0.0-py3-none-any.whl (1.0 MB)
+2026-11-04T06:23:54.4378762Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.0/1.0 MB 267.9 MB/s  0:00:00
+2026-11-04T06:23:54.6282708Z Installing collected packages: wcwidth, typing-extensions, truststore, tree-sitter-python, tree-sitter-java, tree-sitter, tqdm, tomlkit, sniffio, setuptools, ruff, rpds-py, pyyaml, python-multipart, pyproject-hooks, pyjwt, pygments, pycparser, pluggy, platformdirs, packaging, numpy, mypy-extensions, mccabe, markupsafe, jiter, iniconfig, idna, h11, execnet, distro, dill, coverage, click, certifi, attrs, astroid, annotated-types, wheel, uvicorn, typing-inspection, referencing, pytest, pydantic-core, prompt-toolkit, opentelemetry-api, jinja2, isort, httpcore2, httpcore, cffi, build, anyio, starlette, pytest-xdist, pytest-testmon, pytest-asyncio, pylint, pydantic, pip-tools, jsonschema-specifications, httpx2, httpx, cryptography, sse-starlette, openai, mcp-types, jsonschema, mcp
+2026-11-04T06:24:01.4836789Z 
+2026-11-04T06:24:01.4870147Z Successfully installed annotated-types-0.8.0 anyio-4.14.2 astroid-4.0.4 attrs-26.1.0 build-1.5.0 certifi-2026.7.22 cffi-2.1.0 click-8.4.2 coverage-7.16.2 cryptography-49.0.0 dill-0.4.1 distro-1.9.0 execnet-2.1.2 h11-0.16.0 httpcore-1.0.9 httpcore2-2.9.1 httpx-0.28.1 httpx2-2.9.1 idna-3.18 iniconfig-2.3.0 isort-9.0.1 jinja2-3.1.6 jiter-0.16.0 jsonschema-4.26.0 jsonschema-specifications-2025.9.1 markupsafe-3.0.3 mccabe-0.7.0 mcp-2.0.0 mcp-types-2.0.0 mypy-extensions-1.1.0 numpy-2.5.1 openai-2.50.0 opentelemetry-api-1.44.0 packaging-26.2 pip-tools-7.6.0 platformdirs-4.11.15 pluggy-1.6.0 prompt-toolkit-3.0.53 pycparser-3.0 pydantic-2.13.4 pydantic-core-2.46.4 pygments-2.20.0 pyjwt-2.13.0 pylint-4.0.9 pyproject-hooks-1.2.0 pytest-9.1.1 pytest-asyncio-1.4.0 pytest-testmon-2.2.0 pytest-xdist-3.8.0 python-multipart-0.0.32 pyyaml-6.0.3 referencing-0.37.0 rpds-py-2026.6.3 ruff-0.16.0 setuptools-83.0.0 sniffio-1.3.1 sse-starlette-3.4.6 starlette-1.3.1 tomlkit-0.15.1 tqdm-4.70.0 tree-sitter-0.25.2 tree-sitter-java-0.23.5 tree-sitter-python-0.25.0 truststore-0.10.4 typing-extensions-4.16.0 typing-inspection-0.4.2 uvicorn-0.51.0 wcwidth-0.8.2 wheel-0.47.0
+2026-11-04T06:24:01.4877222Z 
+2026-11-04T06:24:01.4877386Z [notice] A new release of pip is available: 26.2.2 -> 26.3
+2026-11-04T06:24:01.4877692Z [notice] To update, run: pip install --upgrade pip
+2026-11-04T06:24:02.0009532Z Obtaining file:///home/runner/work/kriya/kriya
+2026-11-04T06:24:02.0023580Z   Installing build dependencies: started
+2026-11-04T06:24:02.4724939Z   Installing build dependencies: finished with status 'done'
+2026-11-04T06:24:02.4729795Z   Checking if build backend supports build_editable: started
+2026-11-04T06:24:02.7307719Z   Checking if build backend supports build_editable: finished with status 'done'
+2026-11-04T06:24:02.7313803Z   Getting requirements to build editable: started
+2026-11-04T06:24:03.0261603Z   Getting requirements to build editable: finished with status 'done'
+2026-11-04T06:24:03.0268079Z   Preparing editable metadata (pyproject.toml): started
+2026-11-04T06:24:03.2062683Z   Preparing editable metadata (pyproject.toml): finished with status 'done'
+2026-11-04T06:24:03.2115319Z Building wheels for collected packages: kriya
+2026-11-04T06:24:03.2120670Z   Building editable for kriya (pyproject.toml): started
+2026-11-04T06:24:03.4778307Z   Building editable for kriya (pyproject.toml): finished with status 'done'
+2026-11-04T06:24:03.4789811Z   Created wheel for kriya: filename=kriya-0.1.0-0.editable-py3-none-any.whl size=22533 sha256=4d0dc488110b5dd476ff17ad34c42887b3e67a41babc2a2d5bc2ef50c4f22218
+2026-11-04T06:24:03.4791670Z   Stored in directory: /tmp/pip-ephem-wheel-cache-4gjcr4k9/wheels/0d/4a/c1/35ea57e433c6c1e60974d08bcf9e373685244e92bd368bb718
+2026-11-04T06:24:03.4872105Z Successfully built kriya
+2026-11-04T06:24:03.5092661Z Installing collected packages: kriya
+2026-11-04T06:24:03.5289415Z Successfully installed kriya-0.1.0
+2026-11-04T06:24:03.5299240Z 
+2026-11-04T06:24:03.5300552Z [notice] A new release of pip is available: 26.2.2 -> 26.3
+2026-11-04T06:24:03.5300917Z [notice] To update, run: pip install --upgrade pip
+2026-11-04T06:24:03.6010654Z ##[group]Run pip check
+2026-11-04T06:24:03.6010821Z [36;1mpip check[0m
+2026-11-04T06:24:03.6028162Z shell: /usr/bin/bash -e {0}
+2026-11-04T06:24:03.6028303Z env:
+2026-11-04T06:24:03.6028455Z   pythonLocation: /opt/hostedtoolcache/Python/3.14.10/x64
+2026-11-04T06:24:03.6028876Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.14.10/x64/lib/pkgconfig
+2026-11-04T06:24:03.6029112Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.14.10/x64
+2026-11-04T06:24:03.6029327Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.14.10/x64
+2026-11-04T06:24:03.6029539Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.14.10/x64
+2026-11-04T06:24:03.6029751Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.14.10/x64/lib
+2026-11-04T06:24:03.6029937Z ##[endgroup]
+2026-11-04T06:24:03.7952476Z No broken requirements found.
+2026-11-04T06:24:03.8299801Z ##[group]Run pytest -q
+2026-11-04T06:24:03.8300075Z [36;1mpytest -q[0m
+2026-11-04T06:24:03.8316787Z shell: /usr/bin/bash -e {0}
+2026-11-04T06:24:03.8316920Z env:
+2026-11-04T06:24:03.8317066Z   pythonLocation: /opt/hostedtoolcache/Python/3.14.10/x64
+2026-11-04T06:24:03.8317296Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.14.10/x64/lib/pkgconfig
+2026-11-04T06:24:03.8317525Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.14.10/x64
+2026-11-04T06:24:03.8317730Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.14.10/x64
+2026-11-04T06:24:03.8317933Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.14.10/x64
+2026-11-04T06:24:03.8318141Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.14.10/x64/lib
+2026-11-04T06:24:03.8318313Z ##[endgroup]
+2026-11-04T06:25:04.3663616Z ........................................................................ [  0%]
+2026-11-04T06:25:27.2158035Z ........................................................................ [  0%]
+2026-11-04T06:26:30.4661136Z ........................................................................ [  1%]
+2026-11-04T06:32:06.3584839Z ........................................................................ [  1%]
+2026-11-04T06:33:02.8392098Z ........................................................................ [  1%]
+2026-11-04T06:33:03.2324011Z ........................................................................ [  2%]
+2026-11-04T06:33:04.2297818Z ........................................................................ [  2%]
+2026-11-04T06:33:05.0369113Z ........................................................................ [  2%]
+2026-11-04T06:33:06.6635757Z ........................................................................ [  3%]
+2026-11-04T06:33:12.0906857Z ........................................................................ [  3%]
+2026-11-04T06:33:48.0223087Z ........................................................................ [  3%]
+2026-11-04T06:34:15.9585968Z ........................................................................ [  4%]
+2026-11-04T06:34:36.5092113Z ........................................................................ [  4%]
+2026-11-04T06:34:36.7761791Z ........................................................................ [  5%]
+2026-11-04T06:34:39.1113599Z ........................................................................ [  5%]
+2026-11-04T06:34:43.4753677Z ........................................................................ [  5%]
+2026-11-04T06:36:33.8202762Z ........................................................................ [  6%]
+2026-11-04T06:37:07.0899814Z ..........sssssssssssssssssssssssssssssssssssssssssssssssssssss......... [  6%]
+2026-11-04T06:38:21.3127654Z ................................................................ss...... [  6%]
+2026-11-04T06:39:31.0581771Z ........................................................................ [  7%]
+2026-11-04T06:39:33.0631257Z ............................................................ss.......... [  7%]
+2026-11-04T06:39:54.2839466Z ...............................................................s........ [  7%]
+2026-11-04T06:40:05.3507201Z ........................................................................ [  8%]
+2026-11-04T06:40:09.0553411Z ........................................................................ [  8%]
+2026-11-04T06:40:25.4539765Z ........................................................................ [  9%]
+2026-11-04T06:40:30.5402201Z ........................................................................ [  9%]
+2026-11-04T06:40:44.4032419Z ........................................................................ [  9%]
+2026-11-04T06:40:52.3778108Z ........................................................................ [ 10%]
+2026-11-04T06:41:01.1956531Z ........................................................................ [ 10%]
+2026-11-04T06:41:04.2312902Z ........................................................................ [ 10%]
+2026-11-04T06:41:06.5260127Z ..................................s..................................... [ 11%]
+2026-11-04T06:41:17.0275395Z ........................................................................ [ 11%]
+2026-11-04T06:41:17.6375360Z ........................................................................ [ 11%]
+2026-11-04T06:42:54.7155323Z ........................................................................ [ 12%]
+2026-11-04T06:43:08.9372511Z ........................................................................ [ 12%]
+2026-11-04T06:43:09.0539280Z ........................................................................ [ 13%]
+2026-11-04T06:43:09.8772137Z ........................................................................ [ 13%]
+2026-11-04T06:43:10.1148221Z ........................................................................ [ 13%]
+2026-11-04T06:43:10.9173138Z ........................................................................ [ 14%]
+2026-11-04T06:43:37.1848545Z ........................................................................ [ 14%]
+2026-11-04T06:44:03.2372519Z ........................................................................ [ 14%]
+2026-11-04T06:44:16.8677887Z ........................................................................ [ 15%]
+2026-11-04T06:44:36.5803876Z ........................................................................ [ 15%]
+2026-11-04T06:44:54.7377999Z ........................................................................ [ 15%]
+2026-11-04T06:44:58.2294833Z F....................................................................... [ 16%]
+2026-11-04T06:45:04.5740904Z .......................................................................s [ 16%]
+2026-11-04T06:45:07.9430407Z sssssss...............ss..................................s............. [ 17%]
+2026-11-04T06:45:11.4389404Z ...................s.................................................... [ 17%]
+2026-11-04T06:45:27.6781391Z ..........................................................s.FFF......... [ 17%]
+2026-11-04T06:46:01.3652669Z ................................ssss.................................... [ 18%]
+2026-11-04T06:46:04.5946010Z ........................................................................ [ 18%]
+2026-11-04T06:46:04.8809361Z ........................................................................ [ 18%]
+2026-11-04T06:47:11.2495093Z ........................................................................ [ 19%]
+2026-11-04T06:47:55.3474957Z ........................................................................ [ 19%]
+2026-11-04T06:48:23.0755934Z ........................................................................ [ 19%]
+2026-11-04T06:48:24.3632233Z ........................................................................ [ 20%]
+2026-11-04T06:48:39.4345528Z ........................................................................ [ 20%]
+2026-11-04T06:48:42.2770935Z ........................................................................ [ 20%]
+2026-11-04T06:48:44.1199561Z ........................................................................ [ 21%]
+2026-11-04T06:48:44.4828163Z ........................................................................ [ 21%]
+2026-11-04T06:48:44.6292730Z ........................................................................ [ 22%]
+2026-11-04T06:50:46.4983973Z ........................................................................ [ 22%]
+2026-11-04T06:50:48.0660957Z ........................................................................ [ 22%]
+2026-11-04T06:51:15.9958111Z ........................................................................ [ 23%]
+2026-11-04T06:51:17.0041457Z ..........................s............................................. [ 23%]
+2026-11-04T06:51:17.1767876Z ........................................................................ [ 23%]
+2026-11-04T06:51:17.3086986Z ........................................................................ [ 24%]
+2026-11-04T06:51:27.3161713Z ........................................................................ [ 24%]
+2026-11-04T06:51:27.4712193Z ........................................................................ [ 24%]
+2026-11-04T06:51:27.6044282Z ........................................................................ [ 25%]
+2026-11-04T06:51:27.7231710Z ........................................................................ [ 25%]
+2026-11-04T06:51:30.9840492Z ........................................................................ [ 26%]
+2026-11-04T06:51:34.9326974Z ....................................................s................... [ 26%]
+2026-11-04T06:52:42.2108699Z ........................................................................ [ 26%]
+2026-11-04T06:53:21.8518352Z ........................................................................ [ 27%]
+2026-11-04T06:53:45.3047530Z ........................................................................ [ 27%]
+2026-11-04T06:54:47.7301175Z ........................................................................ [ 27%]
+2026-11-04T06:54:51.4562100Z ........................................................................ [ 28%]
+2026-11-04T06:55:58.4915962Z ........................................................................ [ 28%]
+2026-11-04T06:56:49.9299828Z ........................................................................ [ 28%]
+2026-11-04T06:58:58.2682240Z ........................................................................ [ 29%]
+2026-11-04T06:58:59.4474034Z ........................................................................ [ 29%]
+2026-11-04T06:58:59.6376905Z ........................................................................ [ 30%]
+2026-11-04T06:59:01.0925758Z ........................................................................ [ 30%]
+2026-11-04T06:59:01.3616935Z ........................................................................ [ 30%]
+2026-11-04T06:59:01.4806963Z ........................................................................ [ 31%]
+2026-11-04T06:59:31.4357804Z ........................................................................ [ 31%]
+2026-11-04T06:59:36.6424345Z ........................................................................ [ 31%]
+2026-11-04T07:00:22.0656357Z ........................................................................ [ 32%]
+2026-11-04T07:00:23.4062261Z ........................................................................ [ 32%]
+2026-11-04T07:00:30.4947699Z ........................................................................ [ 32%]
+2026-11-04T07:00:34.5764461Z ........................................................................ [ 33%]
+2026-11-04T07:00:36.8033940Z ........................................................................ [ 33%]
+2026-11-04T07:00:37.4787505Z ........................................................................ [ 34%]
+2026-11-04T07:00:38.0660970Z ........................................................................ [ 34%]
+2026-11-04T07:00:58.1262067Z ........................................................................ [ 34%]
+2026-11-04T07:01:00.9810651Z ........................................................................ [ 35%]
+2026-11-04T07:01:04.4705980Z ........................................................................ [ 35%]
+2026-11-04T07:01:30.4131918Z ...............................ss....................................... [ 35%]
+2026-11-04T07:02:53.0329501Z ........................................................................ [ 36%]
+2026-11-04T07:03:34.7013368Z ........................................................................ [ 36%]
+2026-11-04T07:05:15.5030539Z ........................................................................ [ 36%]
+2026-11-04T07:06:58.7027333Z ........................................................................ [ 37%]
+2026-11-04T07:07:29.6845974Z ........................................................................ [ 37%]
+2026-11-04T07:11:15.9453139Z ........................................................................ [ 37%]
+2026-11-04T07:11:25.7741164Z ........................................................................ [ 38%]
+2026-11-04T07:12:13.3743025Z ........................................................................ [ 38%]
+2026-11-04T07:12:17.2838719Z ........................................................................ [ 39%]
+2026-11-04T07:12:18.2846283Z ........................................................................ [ 39%]
+2026-11-04T07:12:18.7712535Z ........................................................................ [ 39%]
+2026-11-04T07:12:19.0332495Z ........................................................................ [ 40%]
+2026-11-04T07:12:19.1709653Z ........................................................................ [ 40%]
+2026-11-04T07:12:19.3180241Z ........................................................................ [ 40%]
+2026-11-04T07:12:20.6500144Z ........................................................................ [ 41%]
+2026-11-04T07:12:59.5420739Z ........................................................................ [ 41%]
+2026-11-04T07:15:00.2564749Z ........................................................................ [ 41%]
+2026-11-04T07:16:57.9956272Z ........................................................................ [ 42%]
+2026-11-04T07:19:37.7516975Z ........................................................................ [ 42%]
+2026-11-04T07:20:13.7991635Z ........................................................................ [ 43%]
+2026-11-04T07:20:45.3321979Z ........................................................................ [ 43%]
+2026-11-04T07:20:54.9430499Z ........................................................................ [ 43%]
+2026-11-04T07:20:56.6318698Z ........................................................................ [ 44%]
+2026-11-04T07:20:56.9486195Z ........................................................................ [ 44%]
+2026-11-04T07:20:57.1086679Z ........................................................................ [ 44%]
+2026-11-04T07:20:58.7837996Z ........................................................................ [ 45%]
+2026-11-04T07:21:03.0493783Z ........................................................................ [ 45%]
+2026-11-04T07:21:06.0161866Z ........................................................................ [ 45%]
+2026-11-04T07:21:17.1617108Z ........................................................................ [ 46%]
+2026-11-04T07:21:17.4571116Z ........................................................................ [ 46%]
+2026-11-04T07:21:17.5941013Z ........................................................................ [ 47%]
+2026-11-04T07:21:17.7508161Z ........................................................................ [ 47%]
+2026-11-04T07:21:34.8883978Z ........................................................................ [ 47%]
+2026-11-04T07:21:37.2583532Z ........................................................................ [ 48%]
+2026-11-04T07:21:44.0949457Z ........................................................................ [ 48%]
+2026-11-04T07:21:55.4698965Z ........................................................................ [ 48%]
+2026-11-04T07:22:12.3458251Z ........................................................................ [ 49%]
+2026-11-04T07:23:01.5241595Z ........................................................................ [ 49%]
+2026-11-04T07:23:41.8819121Z ........................................................................ [ 49%]
+2026-11-04T07:23:52.9645431Z ........................................................................ [ 50%]
+2026-11-04T07:24:17.8235353Z ........................................................................ [ 50%]
+2026-11-04T07:24:18.1627013Z ........................................................................ [ 51%]
+2026-11-04T07:24:23.9483568Z ........................................................................ [ 51%]
+2026-11-04T07:24:33.6995709Z ........................................................................ [ 51%]
+2026-11-04T07:25:13.6503995Z ........................................................................ [ 52%]
+2026-11-04T07:25:54.2622447Z ........................................................................ [ 52%]
+2026-11-04T07:25:57.6145217Z ........................................................................ [ 52%]
+2026-11-04T07:26:00.6340186Z ........................................................................ [ 53%]
+2026-11-04T07:26:08.6436514Z ........................................................................ [ 53%]
+2026-11-04T07:26:22.8119610Z ........................................................................ [ 53%]
+2026-11-04T07:26:31.6874563Z ........................................................................ [ 54%]
+2026-11-04T07:26:31.9939967Z ........................................................................ [ 54%]
+2026-11-04T07:26:32.1737412Z ........................................................................ [ 55%]
+2026-11-04T07:26:32.4551061Z ........................................................................ [ 55%]
+2026-11-04T07:27:54.2503729Z ........................................................................ [ 55%]
+2026-11-04T07:29:15.8913569Z ...................................F.................................... [ 56%]
+2026-11-04T07:29:32.7628999Z ........................................................................ [ 56%]
+2026-11-04T07:29:38.0900431Z ..........................................ss............................ [ 56%]
+2026-11-04T07:29:46.3045924Z ........................................................................ [ 57%]
+2026-11-04T07:29:48.0092201Z ........................................................................ [ 57%]
+2026-11-04T07:29:55.5276834Z ........................................................................ [ 57%]
+2026-11-04T07:31:06.9381274Z ........................................................................ [ 58%]
+2026-11-04T07:31:08.8441593Z ........................................................................ [ 58%]
+2026-11-04T07:31:24.3542103Z ........................................................................ [ 58%]
+2026-11-04T07:31:35.3977264Z ........................................................................ [ 59%]
+2026-11-04T07:31:48.2840117Z ........................................................................ [ 59%]
+2026-11-04T07:31:49.4258430Z ........................................................................ [ 60%]
+2026-11-04T07:31:55.9179243Z ........................................................................ [ 60%]
+2026-11-04T07:32:02.3252793Z ........................................................................ [ 60%]
+2026-11-04T07:32:05.0346059Z ........................................................................ [ 61%]
+2026-11-04T07:35:48.2205343Z ........................................................................ [ 61%]
+2026-11-04T07:35:49.4449050Z ........................................................................ [ 61%]
+2026-11-04T07:36:04.4011608Z ........................................................................ [ 62%]
+2026-11-04T07:36:11.1993792Z ........................................................................ [ 62%]
+2026-11-04T07:37:17.4942534Z ........................................................................ [ 62%]
+2026-11-04T07:39:02.4280184Z ........................................................................ [ 63%]
+2026-11-04T07:39:04.0655383Z ........................................................................ [ 63%]
+2026-11-04T07:39:07.6473629Z ........................................................................ [ 64%]
+2026-11-04T07:39:08.2125807Z ........................................................................ [ 64%]
+2026-11-04T07:39:15.5741669Z ........................................................................ [ 64%]
+2026-11-04T07:39:15.7867456Z ........................................................................ [ 65%]
+2026-11-04T07:39:18.0524231Z ........................................................................ [ 65%]
+2026-11-04T07:39:41.1186425Z ........................................................................ [ 65%]
+2026-11-04T07:40:49.4882388Z ........................................................................ [ 66%]
+2026-11-04T07:42:24.6868152Z ........................................................................ [ 66%]
+2026-11-04T07:44:05.0677077Z ........................................................................ [ 66%]
+2026-11-04T07:44:17.3251253Z ........................................................................ [ 67%]
+2026-11-04T07:44:17.6612638Z ........................................................................ [ 67%]
+2026-11-04T07:44:23.5853646Z ........................................................................ [ 68%]
+2026-11-04T07:44:25.8412580Z ........................................................................ [ 68%]
+2026-11-04T07:44:43.8526928Z ........................................................................ [ 68%]
+2026-11-04T07:45:00.9034478Z ........................................................................ [ 69%]
+2026-11-04T07:45:10.8690247Z ........................................................................ [ 69%]
+2026-11-04T07:45:52.9813494Z ........................................................................ [ 69%]
+2026-11-04T07:46:22.6849808Z ........................................................................ [ 70%]
+2026-11-04T07:46:32.9485569Z ........................................................................ [ 70%]
+2026-11-04T07:46:36.6203069Z ........................................................................ [ 70%]
+2026-11-04T07:46:41.3486308Z ........................................................................ [ 71%]
+2026-11-04T07:46:43.5719452Z ........................................................................ [ 71%]
+2026-11-04T07:47:03.2680024Z ........................................................................ [ 72%]
+2026-11-04T07:47:12.1713407Z ........................................................................ [ 72%]
+2026-11-04T07:47:13.0924134Z ........................................................................ [ 72%]
+2026-11-04T07:47:13.2593099Z ........................................................................ [ 73%]
+2026-11-04T07:47:13.4294807Z ........................................................................ [ 73%]
+2026-11-04T07:47:13.6257392Z ........................................................................ [ 73%]
+2026-11-04T07:47:13.8551570Z ........................................................................ [ 74%]
+2026-11-04T07:47:14.0263602Z ........................................................................ [ 74%]
+2026-11-04T07:47:14.2416607Z ........................................................................ [ 74%]
+2026-11-04T07:47:14.5154452Z ........................................................................ [ 75%]
+2026-11-04T07:47:14.6891471Z ........................................................................ [ 75%]
+2026-11-04T07:47:14.8771451Z ........................................................................ [ 75%]
+2026-11-04T07:47:15.0679754Z ........................................................................ [ 76%]
+2026-11-04T07:47:17.1746376Z ....................................................F................... [ 76%]
+2026-11-04T07:47:17.7590227Z ........................................................................ [ 77%]
+2026-11-04T07:47:20.3775329Z ........................................................................ [ 77%]
+2026-11-04T07:48:40.1341826Z ........................................................................ [ 77%]
+2026-11-04T07:50:06.9008103Z ........................................................................ [ 78%]
+2026-11-04T07:50:37.7231106Z ........................................................................ [ 78%]
+2026-11-04T07:50:37.9390610Z ........................................................................ [ 78%]
+2026-11-04T07:50:48.5775357Z ........................................................................ [ 79%]
+2026-11-04T07:50:49.3036912Z ........................................................................ [ 79%]
+2026-11-04T07:51:07.4525894Z .....................................................s.................. [ 79%]
+2026-11-04T07:51:27.2849687Z ............s........................................................... [ 80%]
+2026-11-04T07:51:37.5436303Z ........................................................................ [ 80%]
+2026-11-04T07:51:41.5837308Z ..s..................................................................... [ 81%]
+2026-11-04T07:51:58.8520708Z ........................................................................ [ 81%]
+2026-11-04T07:52:44.5680902Z ........................................................................ [ 81%]
+2026-11-04T07:52:55.8829642Z ........................................................................ [ 82%]
+2026-11-04T07:53:01.9098495Z ........................................................................ [ 82%]
+2026-11-04T07:53:02.0604168Z ........................................................................ [ 82%]
+2026-11-04T07:53:13.8898744Z ........................................................................ [ 83%]
+2026-11-04T07:53:18.8358125Z ........................................................................ [ 83%]
+2026-11-04T07:53:24.9158788Z ........................................................................ [ 83%]
+2026-11-04T07:53:34.2373707Z ........................................................................ [ 84%]
+2026-11-04T07:53:56.4726206Z ........................................................................ [ 84%]
+2026-11-04T07:54:34.4278921Z ..............................................................ssss...... [ 85%]
+2026-11-04T07:56:12.5761922Z ........................................................................ [ 85%]
+2026-11-04T07:56:47.2031811Z ........................................................................ [ 85%]
+2026-11-04T07:56:47.4216502Z ........................................................................ [ 86%]
+2026-11-04T07:57:51.9892271Z ........................................................................ [ 86%]
+2026-11-04T07:58:27.8693712Z ........................................................................ [ 86%]
+2026-11-04T07:58:41.3650832Z ........................................................................ [ 87%]
+2026-11-04T07:59:07.0534125Z ........................................................................ [ 87%]
+2026-11-04T07:59:07.3564084Z ........................................................................ [ 87%]
+2026-11-04T07:59:35.8451057Z ........................................................................ [ 88%]
+2026-11-04T07:59:37.5416397Z ........................................................................ [ 88%]
+2026-11-04T07:59:37.7611888Z ........................................................................ [ 89%]
+2026-11-04T07:59:37.9767209Z ........................................................................ [ 89%]
+2026-11-04T07:59:38.2152494Z ........................................................................ [ 89%]
+2026-11-04T07:59:38.7399582Z ........................................................................ [ 90%]
+2026-11-04T07:59:50.9649397Z ........................................................................ [ 90%]
+2026-11-04T07:59:52.4630624Z ........................................................................ [ 90%]
+2026-11-04T07:59:54.3981945Z ........................................................................ [ 91%]
+2026-11-04T07:59:57.0900996Z ........................................................................ [ 91%]
+2026-11-04T07:59:58.5052214Z ........................................................................ [ 91%]
+2026-11-04T08:00:01.4846691Z ........................................................................ [ 92%]
+2026-11-04T08:00:11.7982884Z ........................................................................ [ 92%]
+2026-11-04T08:01:55.1967490Z ........................................................................ [ 92%]
+2026-11-04T08:01:56.4903746Z ........................................................................ [ 93%]
+2026-11-04T08:02:02.9697199Z ........................................................................ [ 93%]
+2026-11-04T08:02:06.3437560Z ........................................................................ [ 94%]
+2026-11-04T08:02:50.3855528Z ........................................................................ [ 94%]
+2026-11-04T08:03:03.9437213Z ........................................................................ [ 94%]
+2026-11-04T08:04:38.9113138Z ........................................................................ [ 95%]
+2026-11-04T08:04:58.1158658Z ........................................................................ [ 95%]
+2026-11-04T08:05:04.8704124Z ........................................................................ [ 95%]
+2026-11-04T08:07:52.4660022Z ........................................................................ [ 96%]
+2026-11-04T08:08:01.1155957Z ........................................................................ [ 96%]
+2026-11-04T08:08:34.1910098Z ........................................................................ [ 96%]
+2026-11-04T08:08:41.1648350Z ........................................................................ [ 97%]
+2026-11-04T08:09:11.1119847Z ........................................................................ [ 97%]
+2026-11-04T08:09:24.0584933Z ........................................................................ [ 98%]
+2026-11-04T08:09:25.0719392Z ........................................................................ [ 98%]
+2026-11-04T08:09:28.5399241Z ........................................................................ [ 98%]
+2026-11-04T08:09:40.9780872Z ........................................................................ [ 99%]
+2026-11-04T08:09:43.2070234Z ........................................................................ [ 99%]
+2026-11-04T08:10:11.9258016Z ........................................................................ [ 99%]
+2026-11-04T08:10:19.4041865Z ..........................                                               [100%]
+2026-11-04T08:10:19.4042382Z =================================== FAILURES ===================================
+2026-11-04T08:10:19.4042816Z _ test_a_repository_git_refuses_for_its_ownership_is_the_ownership_refusal_not_uninspectable _
+2026-11-04T08:10:19.4043249Z DID NOT RAISE RepositoryContentFilterRefused
+2026-11-04T08:10:19.4043434Z 
+2026-11-04T08:10:19.4043592Z During handling of the above exception, another exception occurred:
+2026-11-04T08:10:19.4043935Z DID NOT RAISE RepositoryContentFilterRefused
+2026-11-04T08:10:19.4046395Z F14-DIAGNOSTICS {"dir_owner_uid": 1001, "euid": 1001, "git_env": {"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1", "HOME": "/home/runner", "LANG": "C.UTF-8", "XDG_CONFIG_HOME": "/home/runner/.config"}, "git_rev_parse_in_repository": {"err": "", "out": "true", "rc": 0}, "git_version": {"err": "", "out": "git version 2.56.0", "rc": 0}, "in_container": false, "product_tracked_paths": [], "safe_directory_config": {"err": "", "out": "system\tfile:/etc/gitconfig\t*", "rc": 0}, "system_and_global_config": {"err": "", "out": "system\tfile:/etc/gitconfig\tsafe.directory=*\nsystem\tfile:/etc/gitconfig\tfilter.lfs.required=true\nsystem\tfile:/etc/gitconfig\tfilter.lfs.clean=git-lfs clean -- %f\nsystem\tfile:/etc/gitconfig\tfilter.lfs.smudge=git-lfs smudge -- %f\nsystem\tfile:/etc/gitconfig\tfilter.lfs.process=git-lfs filter-process", "rc": 0}, "uid": 1001}
+2026-11-04T08:10:19.4048253Z _ test_idle_check_passes_on_a_fresh_prepare_and_sees_each_kind_of_stale_state __
+2026-11-04T08:10:19.4048433Z 
+2026-11-04T08:10:19.4048867Z tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_idle_check_passes_on_a_fr0')
+2026-11-04T08:10:19.4049155Z 
+2026-11-04T08:10:19.4049846Z     def test_idle_check_passes_on_a_fresh_prepare_and_sees_each_kind_of_stale_state(tmp_path: Path) -> None:
+2026-11-04T08:10:19.4050265Z         work = tmp_path / "work"
+2026-11-04T08:10:19.4050653Z         for scenario in ("02", "03"):
+2026-11-04T08:10:19.4051047Z             assert _run("prepare_demo.sh", work, "--scenario", scenario, "--no-services").returncode == 0
+2026-11-04T08:10:19.4051449Z         for scenario in ("02", "03"):
+2026-11-04T08:10:19.4051742Z             failures, result = _idle_failures(work, scenario)
+2026-11-04T08:10:19.4052294Z             # on a developer machine the product tree may be dirty (that check is about the checkout, not the owner state); nothing else may fail
+2026-11-04T08:10:19.4052937Z >           assert [f for f in failures if "product tracked tree is clean" not in f] == [], result.stdout
+2026-11-04T08:10:19.4053408Z E           AssertionError: === demo-v2 verify: scenario 02, phase idle ===
+2026-11-04T08:10:19.4053832Z E             PASS  product contains baseline tag kriya-v1.2.0-pre-modularization
+2026-11-04T08:10:19.4054277Z E             PASS  product tracked tree is clean (evidence binds to an exact revision)
+2026-11-04T08:10:19.4054657Z E             FAIL  kriya executable and python are present
+2026-11-04T08:10:19.4054958Z E             PASS  goal file present and non-empty
+2026-11-04T08:10:19.4055234Z E             PASS  rendered configuration present
+2026-11-04T08:10:19.4055534Z E             PASS  workspace exists and is a git repository
+2026-11-04T08:10:19.4055924Z E             PASS  scenario kriya.yaml is in the workspace and excluded from git status
+2026-11-04T08:10:19.4056305Z E             FAIL  kriya executable or workspace missing
+2026-11-04T08:10:19.4056994Z E             PASS  the skills directory is the PRESERVED GOVERNED ACQUISITION SNAPSHOT (digest 16cc7a352b6e239f319c1c090ba3a83bdcdc9eaa3b42fc9f0d05f850f7b792ce)
+2026-11-04T08:10:19.4057586Z E             PASS  the snapshot has its 12 files
+2026-11-04T08:10:19.4057893Z E             PASS  the preserved snapshot in the repository is untouched
+2026-11-04T08:10:19.4058239Z E             PASS  the snapshot label is next to the skills
+2026-11-04T08:10:19.4058805Z E             FAIL  public lookup is disabled and there is no search endpoint in the rendered configuration
+2026-11-04T08:10:19.4059225Z E             PASS  no demo search container is running
+2026-11-04T08:10:19.4059671Z E             PASS  nothing listens on the recording-proxy port 18766 (the owner run goes straight to the model server)
+2026-11-04T08:10:19.4060122Z E             PASS  the goal states no API fact (static)
+2026-11-04T08:10:19.4060870Z E             FAIL  fixture baseline is '/home/runner/work/kriya/kriya/demo-v2/scripts/verify_demo.sh: line 264: /home/runner/work/kriya/kriya/.venv/bin/python: No such file or directory', expected '7 failed, 1 passed'
+2026-11-04T08:10:19.4061636Z E             PASS  workspace is clean (nothing changed yet)
+2026-11-04T08:10:19.4061972Z E             PASS  target file has the pristine hash (the bug is present)
+2026-11-04T08:10:19.4062294Z E             === result: 4 failed, 0 skipped ===
+2026-11-04T08:10:19.4062529Z E             
+2026-11-04T08:10:19.4062739Z E           assert ['FAIL  kriya...d, 1 passed'"] == []
+2026-11-04T08:10:19.4062980Z E             
+2026-11-04T08:10:19.4063317Z E             Left contains 4 more items, first extra item: 'FAIL  kriya executable and python are present'
+2026-11-04T08:10:19.4063696Z E             
+2026-11-04T08:10:19.4063864Z E             Full diff:
+2026-11-04T08:10:19.4064054Z E             - []
+2026-11-04T08:10:19.4064223Z E             + [
+2026-11-04T08:10:19.4064444Z E             +     'FAIL  kriya executable and python are present',
+2026-11-04T08:10:19.4064762Z E             +     'FAIL  kriya executable or workspace missing',
+2026-11-04T08:10:19.4065152Z E             +     'FAIL  public lookup is disabled and there is no search endpoint in the '
+2026-11-04T08:10:19.4065512Z E             +     'rendered configuration',
+2026-11-04T08:10:19.4065766Z E             +     'FAIL  fixture baseline is '
+2026-11-04T08:10:19.4066557Z E             +     "'/home/runner/work/kriya/kriya/demo-v2/scripts/verify_demo.sh: line 264: "
+2026-11-04T08:10:19.4067144Z E             +     '/home/runner/work/kriya/kriya/.venv/bin/python: No such file or '
+2026-11-04T08:10:19.4067514Z E             +     "directory', expected '7 failed, 1 passed'",
+2026-11-04T08:10:19.4067772Z E             + ]
+2026-11-04T08:10:19.4067878Z 
+2026-11-04T08:10:19.4068003Z tests/test_demo_v2_owner_state.py:127: AssertionError
+2026-11-04T08:10:19.4068351Z _____________________ test_idle_check_sees_a_running_stub ______________________
+2026-11-04T08:10:19.4068711Z 
+2026-11-04T08:10:19.4068915Z tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_idle_check_sees_a_running0')
+2026-11-04T08:10:19.4069202Z 
+2026-11-04T08:10:19.4069352Z     def test_idle_check_sees_a_running_stub(tmp_path: Path) -> None:
+2026-11-04T08:10:19.4069657Z         work = tmp_path / "work"
+2026-11-04T08:10:19.4070000Z         assert _run("prepare_demo.sh", work, "--scenario", "03", "--no-services").returncode == 0
+2026-11-04T08:10:19.4070357Z         try:
+2026-11-04T08:10:19.4070580Z >           assert _run("stub_ctl.sh", work, "start").returncode == 0
+2026-11-04T08:10:19.4070884Z E           AssertionError: assert 1 == 0
+2026-11-04T08:10:19.4071758Z E            +  where 1 = CompletedProcess(args=['bash', '/home/runner/work/kriya/kriya/demo-v2/scripts/stub_ctl.sh', 'start'], returncode=1, st...tart (see /tmp/pytest-of-runner/pytest-0/test_idle_check_sees_a_running0/work/scenario-03/evidence/stub.stderr.log)\n').returncode
+2026-11-04T08:10:19.4073663Z E            +    where CompletedProcess(args=['bash', '/home/runner/work/kriya/kriya/demo-v2/scripts/stub_ctl.sh', 'start'], returncode=1, st...tart (see /tmp/pytest-of-runner/pytest-0/test_idle_check_sees_a_running0/work/scenario-03/evidence/stub.stderr.log)\n') = _run('stub_ctl.sh', PosixPath('/tmp/pytest-of-runner/pytest-0/test_idle_check_sees_a_running0/work'), 'start')
+2026-11-04T08:10:19.4074735Z 
+2026-11-04T08:10:19.4074853Z tests/test_demo_v2_owner_state.py:144: AssertionError
+2026-11-04T08:10:19.4075227Z _____ test_idle_check_sees_a_stale_operator_approval_and_reset_revokes_it ______
+2026-11-04T08:10:19.4075489Z 
+2026-11-04T08:10:19.4075693Z tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_idle_check_sees_a_stale_o0')
+2026-11-04T08:10:19.4075985Z 
+2026-11-04T08:10:19.4076228Z     def test_idle_check_sees_a_stale_operator_approval_and_reset_revokes_it(tmp_path: Path) -> None:
+2026-11-04T08:10:19.4076955Z         # the approval is stored in the operator's HOME keyed by the workspace identity; this test grants one for a TEMPORARY workspace only and always revokes it
+2026-11-04T08:10:19.4077524Z         work = tmp_path / "work"
+2026-11-04T08:10:19.4077887Z         assert _run("prepare_demo.sh", work, "--scenario", "02", "--no-services").returncode == 0
+2026-11-04T08:10:19.4078276Z         workspace = work / "scenario-02" / "workspace"
+2026-11-04T08:10:19.4078673Z         kriya = str(ROOT / ".venv" / "bin" / "kriya")
+2026-11-04T08:10:19.4078912Z         try:
+2026-11-04T08:10:19.4079382Z >           granted = subprocess.run([kriya, "authority", "approve", "--confirm"], cwd=workspace, capture_output=True, text=True, check=False, timeout=120)
+2026-11-04T08:10:19.4080038Z                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-11-04T08:10:19.4080311Z 
+2026-11-04T08:10:19.4080403Z tests/test_demo_v2_owner_state.py:160: 
+2026-11-04T08:10:19.4080692Z _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+2026-11-04T08:10:19.4081167Z /opt/hostedtoolcache/Python/3.14.10/x64/lib/python3.14/subprocess.py:555: in run
+2026-11-04T08:10:19.4081548Z     with Popen(*popenargs, **kwargs) as process:
+2026-11-04T08:10:19.4081805Z          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-11-04T08:10:19.4082149Z /opt/hostedtoolcache/Python/3.14.10/x64/lib/python3.14/subprocess.py:1039: in __init__
+2026-11-04T08:10:19.4082856Z     self._execute_child(args, executable, preexec_fn, close_fds,
+2026-11-04T08:10:19.4083197Z _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+2026-11-04T08:10:19.4083518Z 
+2026-11-04T08:10:19.4083716Z self = <Popen: returncode: 255 args: ['/home/runner/work/kriya/kriya/.venv/bin/kriy...>
+2026-11-04T08:10:19.4084204Z args = ['/home/runner/work/kriya/kriya/.venv/bin/kriya', 'authority', 'approve', '--confirm']
+2026-11-04T08:10:19.4084689Z executable = b'/home/runner/work/kriya/kriya/.venv/bin/kriya', preexec_fn = None
+2026-11-04T08:10:19.4085037Z close_fds = True, pass_fds = ()
+2026-11-04T08:10:19.4085436Z cwd = PosixPath('/tmp/pytest-of-runner/pytest-0/test_idle_check_sees_a_stale_o0/work/scenario-02/workspace')
+2026-11-04T08:10:19.4085964Z env = None, startupinfo = None, creationflags = 0, shell = False, p2cread = -1
+2026-11-04T08:10:19.4086377Z p2cwrite = -1, c2pread = 13, c2pwrite = 14, errread = 15, errwrite = 16
+2026-11-04T08:10:19.4086769Z restore_signals = True, gid = None, gids = None, uid = None, umask = -1
+2026-11-04T08:10:19.4087108Z start_new_session = False, process_group = -1
+2026-11-04T08:10:19.4087286Z 
+2026-11-04T08:10:19.4087436Z     def _execute_child(self, args, executable, preexec_fn, close_fds,
+2026-11-04T08:10:19.4087748Z                        pass_fds, cwd, env,
+2026-11-04T08:10:19.4088006Z                        startupinfo, creationflags, shell,
+2026-11-04T08:10:19.4088265Z                        p2cread, p2cwrite,
+2026-11-04T08:10:19.4088493Z                        c2pread, c2pwrite,
+2026-11-04T08:10:19.4088842Z                        errread, errwrite,
+2026-11-04T08:10:19.4089074Z                        restore_signals,
+2026-11-04T08:10:19.4089309Z                        gid, gids, uid, umask,
+2026-11-04T08:10:19.4089575Z                        start_new_session, process_group):
+2026-11-04T08:10:19.4089841Z         """Execute program (POSIX version)"""
+2026-11-04T08:10:19.4090074Z     
+2026-11-04T08:10:19.4090251Z         if isinstance(args, (str, bytes)):
+2026-11-04T08:10:19.4090488Z             args = [args]
+2026-11-04T08:10:19.4090702Z         elif isinstance(args, os.PathLike):
+2026-11-04T08:10:19.4090939Z             if shell:
+2026-11-04T08:10:19.4091183Z                 raise TypeError('path-like args is not allowed when '
+2026-11-04T08:10:19.4091484Z                                 'shell is true')
+2026-11-04T08:10:19.4091715Z             args = [args]
+2026-11-04T08:10:19.4091900Z         else:
+2026-11-04T08:10:19.4092067Z             args = list(args)
+2026-11-04T08:10:19.4092263Z     
+2026-11-04T08:10:19.4092413Z         if shell:
+2026-11-04T08:10:19.4092645Z             # On Android the default shell is at '/system/bin/sh'.
+2026-11-04T08:10:19.4092941Z             unix_shell = ('/system/bin/sh' if
+2026-11-04T08:10:19.4093234Z                       hasattr(sys, 'getandroidapilevel') else '/bin/sh')
+2026-11-04T08:10:19.4093529Z             args = [unix_shell, "-c"] + args
+2026-11-04T08:10:19.4093761Z             if executable:
+2026-11-04T08:10:19.4093955Z                 args[0] = executable
+2026-11-04T08:10:19.4094162Z     
+2026-11-04T08:10:19.4094323Z         if executable is None:
+2026-11-04T08:10:19.4094536Z             executable = args[0]
+2026-11-04T08:10:19.4094734Z     
+2026-11-04T08:10:19.4094958Z         sys.audit("subprocess.Popen", executable, args, cwd, env)
+2026-11-04T08:10:19.4095239Z     
+2026-11-04T08:10:19.4095404Z         if (_USE_POSIX_SPAWN
+2026-11-04T08:10:19.4095634Z                 and os.path.dirname(executable)
+2026-11-04T08:10:19.4095884Z                 and preexec_fn is None
+2026-11-04T08:10:19.4096150Z                 and (not close_fds or _HAVE_POSIX_SPAWN_CLOSEFROM)
+2026-11-04T08:10:19.4096421Z                 and not pass_fds
+2026-11-04T08:10:19.4096630Z                 and cwd is None
+2026-11-04T08:10:19.4096853Z                 and (p2cread == -1 or p2cread > 2)
+2026-11-04T08:10:19.4097123Z                 and (c2pwrite == -1 or c2pwrite > 2)
+2026-11-04T08:10:19.4097388Z                 and (errwrite == -1 or errwrite > 2)
+2026-11-04T08:10:19.4097878Z                 and not start_new_session
+2026-11-04T08:10:19.4098113Z                 and process_group == -1
+2026-11-04T08:10:19.4098734Z                 and gid is None
+2026-11-04T08:10:19.4098939Z                 and gids is None
+2026-11-04T08:10:19.4099144Z                 and uid is None
+2026-11-04T08:10:19.4099342Z                 and umask < 0):
+2026-11-04T08:10:19.4099629Z             self._posix_spawn(args, executable, env, restore_signals, close_fds,
+2026-11-04T08:10:19.4099957Z                               p2cread, p2cwrite,
+2026-11-04T08:10:19.4100199Z                               c2pread, c2pwrite,
+2026-11-04T08:10:19.4100454Z                               errread, errwrite)
+2026-11-04T08:10:19.4100675Z             return
+2026-11-04T08:10:19.4100845Z     
+2026-11-04T08:10:19.4101010Z         orig_executable = executable
+2026-11-04T08:10:19.4101222Z     
+2026-11-04T08:10:19.4101449Z         # For transferring possible exec failure from child to parent.
+2026-11-04T08:10:19.4101795Z         # Data format: "exception name:hex errno:description"
+2026-11-04T08:10:19.4102149Z         # Pickle is not used; it is complex and involves memory allocation.
+2026-11-04T08:10:19.4102480Z         errpipe_read, errpipe_write = os.pipe()
+2026-11-04T08:10:19.4102794Z         # errpipe_write must not be in the standard io 0, 1, or 2 fd range.
+2026-11-04T08:10:19.4103110Z         low_fds_to_close = []
+2026-11-04T08:10:19.4103325Z         while errpipe_write < 3:
+2026-11-04T08:10:19.4103556Z             low_fds_to_close.append(errpipe_write)
+2026-11-04T08:10:19.4103827Z             errpipe_write = os.dup(errpipe_write)
+2026-11-04T08:10:19.4104081Z         for low_fd in low_fds_to_close:
+2026-11-04T08:10:19.4104306Z             os.close(low_fd)
+2026-11-04T08:10:19.4104504Z         try:
+2026-11-04T08:10:19.4104666Z             try:
+2026-11-04T08:10:19.4104880Z                 # We must avoid complex work that could involve
+2026-11-04T08:10:19.4105182Z                 # malloc or free in the child process to avoid
+2026-11-04T08:10:19.4105488Z                 # potential deadlocks, thus we do all this here.
+2026-11-04T08:10:19.4105778Z                 # and pass it to fork_exec()
+2026-11-04T08:10:19.4106003Z     
+2026-11-04T08:10:19.4106167Z                 if env is not None:
+2026-11-04T08:10:19.4106388Z                     env_list = []
+2026-11-04T08:10:19.4106611Z                     for k, v in env.items():
+2026-11-04T08:10:19.4106852Z                         k = os.fsencode(k)
+2026-11-04T08:10:19.4107079Z                         if b'=' in k:
+2026-11-04T08:10:19.4107369Z                             raise ValueError("illegal environment variable name")
+2026-11-04T08:10:19.4107711Z                         env_list.append(k + b'=' + os.fsencode(v))
+2026-11-04T08:10:19.4107973Z                 else:
+2026-11-04T08:10:19.4108202Z                     env_list = None  # Use execv instead of execve.
+2026-11-04T08:10:19.4108489Z                 executable = os.fsencode(executable)
+2026-11-04T08:10:19.4108879Z                 if os.path.dirname(executable):
+2026-11-04T08:10:19.4109139Z                     executable_list = (executable,)
+2026-11-04T08:10:19.4109379Z                 else:
+2026-11-04T08:10:19.4109599Z                     # This matches the behavior of os._execvpe().
+2026-11-04T08:10:19.4109876Z                     executable_list = tuple(
+2026-11-04T08:10:19.4110144Z                         os.path.join(os.fsencode(dir), executable)
+2026-11-04T08:10:19.4110433Z                         for dir in os.get_exec_path(env))
+2026-11-04T08:10:19.4110692Z                 fds_to_keep = set(pass_fds)
+2026-11-04T08:10:19.4110939Z                 fds_to_keep.add(errpipe_write)
+2026-11-04T08:10:19.4111195Z                 self.pid = _fork_exec(
+2026-11-04T08:10:19.4111434Z                         args, executable_list,
+2026-11-04T08:10:19.4111714Z                         close_fds, tuple(sorted(map(int, fds_to_keep))),
+2026-11-04T08:10:19.4111998Z                         cwd, env_list,
+2026-11-04T08:10:19.4112474Z                         p2cread, p2cwrite, c2pread, c2pwrite,
+2026-11-04T08:10:19.4112746Z                         errread, errwrite,
+2026-11-04T08:10:19.4113120Z                         errpipe_read, errpipe_write,
+2026-11-04T08:10:19.4113396Z                         restore_signals, start_new_session,
+2026-11-04T08:10:19.4113683Z                         process_group, gid, gids, uid, umask,
+2026-11-04T08:10:19.4113947Z                         preexec_fn)
+2026-11-04T08:10:19.4114172Z                 self._child_created = True
+2026-11-04T08:10:19.4114398Z             finally:
+2026-11-04T08:10:19.4114613Z                 # be sure the FD is closed no matter what
+2026-11-04T08:10:19.4114876Z                 os.close(errpipe_write)
+2026-11-04T08:10:19.4115091Z     
+2026-11-04T08:10:19.4115276Z             self._close_pipe_fds(p2cread, p2cwrite,
+2026-11-04T08:10:19.4115545Z                                  c2pread, c2pwrite,
+2026-11-04T08:10:19.4115797Z                                  errread, errwrite)
+2026-11-04T08:10:19.4116026Z     
+2026-11-04T08:10:19.4116246Z             # Wait for exec to fail or succeed; possibly raising an
+2026-11-04T08:10:19.4116538Z             # exception (limited in size)
+2026-11-04T08:10:19.4116779Z             errpipe_data = bytearray()
+2026-11-04T08:10:19.4116998Z             while True:
+2026-11-04T08:10:19.4117212Z                 part = os.read(errpipe_read, 50000)
+2026-11-04T08:10:19.4117464Z                 errpipe_data += part
+2026-11-04T08:10:19.4117722Z                 if not part or len(errpipe_data) > 50000:
+2026-11-04T08:10:19.4117972Z                     break
+2026-11-04T08:10:19.4118152Z         finally:
+2026-11-04T08:10:19.4118349Z             # be sure the FD is closed no matter what
+2026-11-04T08:10:19.4118717Z             os.close(errpipe_read)
+2026-11-04T08:10:19.4118929Z     
+2026-11-04T08:10:19.4119101Z         if errpipe_data:
+2026-11-04T08:10:19.4119298Z             try:
+2026-11-04T08:10:19.4119491Z                 pid, sts = os.waitpid(self.pid, 0)
+2026-11-04T08:10:19.4119747Z                 if pid == self.pid:
+2026-11-04T08:10:19.4119981Z                     self._handle_exitstatus(sts)
+2026-11-04T08:10:19.4120218Z                 else:
+2026-11-04T08:10:19.4120416Z                     self.returncode = sys.maxsize
+2026-11-04T08:10:19.4120671Z             except ChildProcessError:
+2026-11-04T08:10:19.4120890Z                 pass
+2026-11-04T08:10:19.4121065Z     
+2026-11-04T08:10:19.4121218Z             try:
+2026-11-04T08:10:19.4121426Z                 exception_name, hex_errno, err_msg = (
+2026-11-04T08:10:19.4121705Z                         errpipe_data.split(b':', 2))
+2026-11-04T08:10:19.4121995Z                 # The encoding here should match the encoding
+2026-11-04T08:10:19.4122298Z                 # written in by the subprocess implementations
+2026-11-04T08:10:19.4122569Z                 # like _posixsubprocess
+2026-11-04T08:10:19.4122805Z                 err_msg = err_msg.decode()
+2026-11-04T08:10:19.4123036Z             except ValueError:
+2026-11-04T08:10:19.4123268Z                 exception_name = b'SubprocessError'
+2026-11-04T08:10:19.4123518Z                 hex_errno = b'0'
+2026-11-04T08:10:19.4123775Z                 err_msg = 'Bad exception data from child: {!r}'.format(
+2026-11-04T08:10:19.4124071Z                               bytes(errpipe_data))
+2026-11-04T08:10:19.4124323Z             child_exception_type = getattr(
+2026-11-04T08:10:19.4124602Z                     builtins, exception_name.decode('ascii'),
+2026-11-04T08:10:19.4124868Z                     SubprocessError)
+2026-11-04T08:10:19.4125165Z             if issubclass(child_exception_type, OSError) and hex_errno:
+2026-11-04T08:10:19.4125476Z                 errno_num = int(hex_errno, 16)
+2026-11-04T08:10:19.4125731Z                 if err_msg == "noexec:chdir":
+2026-11-04T08:10:19.4125966Z                     err_msg = ""
+2026-11-04T08:10:19.4126197Z                     # The error must be from chdir(cwd).
+2026-11-04T08:10:19.4126453Z                     err_filename = cwd
+2026-11-04T08:10:19.4126822Z                 elif err_msg == "noexec":
+2026-11-04T08:10:19.4127059Z                     err_msg = ""
+2026-11-04T08:10:19.4127388Z                     err_filename = None
+2026-11-04T08:10:19.4127603Z                 else:
+2026-11-04T08:10:19.4127806Z                     err_filename = orig_executable
+2026-11-04T08:10:19.4128057Z                 if errno_num != 0:
+2026-11-04T08:10:19.4128292Z                     err_msg = os.strerror(errno_num)
+2026-11-04T08:10:19.4128662Z                 if err_filename is not None:
+2026-11-04T08:10:19.4128967Z >                   raise child_exception_type(errno_num, err_msg, err_filename)
+2026-11-04T08:10:19.4129474Z E                   FileNotFoundError: [Errno 2] No such file or directory: '/home/runner/work/kriya/kriya/.venv/bin/kriya'
+2026-11-04T08:10:19.4129826Z 
+2026-11-04T08:10:19.4130053Z /opt/hostedtoolcache/Python/3.14.10/x64/lib/python3.14/subprocess.py:1990: FileNotFoundError
+2026-11-04T08:10:19.4130360Z 
+2026-11-04T08:10:19.4130518Z During handling of the above exception, another exception occurred:
+2026-11-04T08:10:19.4130756Z 
+2026-11-04T08:10:19.4130968Z tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_idle_check_sees_a_stale_o0')
+2026-11-04T08:10:19.4131254Z 
+2026-11-04T08:10:19.4131492Z     def test_idle_check_sees_a_stale_operator_approval_and_reset_revokes_it(tmp_path: Path) -> None:
+2026-11-04T08:10:19.4132207Z         # the approval is stored in the operator's HOME keyed by the workspace identity; this test grants one for a TEMPORARY workspace only and always revokes it
+2026-11-04T08:10:19.4132756Z         work = tmp_path / "work"
+2026-11-04T08:10:19.4133104Z         assert _run("prepare_demo.sh", work, "--scenario", "02", "--no-services").returncode == 0
+2026-11-04T08:10:19.4133496Z         workspace = work / "scenario-02" / "workspace"
+2026-11-04T08:10:19.4133770Z         kriya = str(ROOT / ".venv" / "bin" / "kriya")
+2026-11-04T08:10:19.4134016Z         try:
+2026-11-04T08:10:19.4134483Z             granted = subprocess.run([kriya, "authority", "approve", "--confirm"], cwd=workspace, capture_output=True, text=True, check=False, timeout=120)
+2026-11-04T08:10:19.4135081Z             assert granted.returncode == 0, granted.stdout + granted.stderr
+2026-11-04T08:10:19.4135432Z             failures, result = _idle_failures(work, "02")
+2026-11-04T08:10:19.4135794Z             assert any("stale operator approval" in f for f in failures), result.stdout
+2026-11-04T08:10:19.4136363Z             # a bare reset revokes it but leaves the workspace unconfigured: the idle check must say THAT, not guess about approvals
+2026-11-04T08:10:19.4136911Z             assert _run("reset_demo.sh", work, "--scenario", "02").returncode == 0
+2026-11-04T08:10:19.4137260Z             failures, result = _idle_failures(work, "02")
+2026-11-04T08:10:19.4137783Z             assert any("no kriya.yaml is placed" in f for f in failures) and not any("stale operator approval" in f for f in failures), result.stdout
+2026-11-04T08:10:19.4138392Z             # prepare = reset + place the configuration: back to the start state, approval gone
+2026-11-04T08:10:19.4139042Z             assert _run("prepare_demo.sh", work, "--scenario", "02", "--no-services").returncode == 0
+2026-11-04T08:10:19.4139441Z             failures, result = _idle_failures(work, "02")
+2026-11-04T08:10:19.4139844Z             assert [f for f in failures if "product tracked tree is clean" not in f] == [], result.stdout
+2026-11-04T08:10:19.4140287Z             assert "no operator approval is in place" in result.stdout
+2026-11-04T08:10:19.4140574Z         finally:
+2026-11-04T08:10:19.4140984Z >           subprocess.run([kriya, "authority", "revoke"], cwd=workspace, capture_output=True, text=True, check=False, timeout=120)
+2026-11-04T08:10:19.4141373Z 
+2026-11-04T08:10:19.4141470Z tests/test_demo_v2_owner_state.py:174: 
+2026-11-04T08:10:19.4141749Z _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+2026-11-04T08:10:19.4142146Z /opt/hostedtoolcache/Python/3.14.10/x64/lib/python3.14/subprocess.py:555: in run
+2026-11-04T08:10:19.4142656Z     with Popen(*popenargs, **kwargs) as process:
+2026-11-04T08:10:19.4143014Z          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-11-04T08:10:19.4143355Z /opt/hostedtoolcache/Python/3.14.10/x64/lib/python3.14/subprocess.py:1039: in __init__
+2026-11-04T08:10:19.4143783Z     self._execute_child(args, executable, preexec_fn, close_fds,
+2026-11-04T08:10:19.4144120Z _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+2026-11-04T08:10:19.4144319Z 
+2026-11-04T08:10:19.4144513Z self = <Popen: returncode: 255 args: ['/home/runner/work/kriya/kriya/.venv/bin/kriy...>
+2026-11-04T08:10:19.4144959Z args = ['/home/runner/work/kriya/kriya/.venv/bin/kriya', 'authority', 'revoke']
+2026-11-04T08:10:19.4145389Z executable = b'/home/runner/work/kriya/kriya/.venv/bin/kriya', preexec_fn = None
+2026-11-04T08:10:19.4145743Z close_fds = True, pass_fds = ()
+2026-11-04T08:10:19.4146152Z cwd = PosixPath('/tmp/pytest-of-runner/pytest-0/test_idle_check_sees_a_stale_o0/work/scenario-02/workspace')
+2026-11-04T08:10:19.4146679Z env = None, startupinfo = None, creationflags = 0, shell = False, p2cread = -1
+2026-11-04T08:10:19.4147078Z p2cwrite = -1, c2pread = 13, c2pwrite = 14, errread = 15, errwrite = 16
+2026-11-04T08:10:19.4147463Z restore_signals = True, gid = None, gids = None, uid = None, umask = -1
+2026-11-04T08:10:19.4147803Z start_new_session = False, process_group = -1
+2026-11-04T08:10:19.4147984Z 
+2026-11-04T08:10:19.4148145Z     def _execute_child(self, args, executable, preexec_fn, close_fds,
+2026-11-04T08:10:19.4148451Z                        pass_fds, cwd, env,
+2026-11-04T08:10:19.4148839Z                        startupinfo, creationflags, shell,
+2026-11-04T08:10:19.4149101Z                        p2cread, p2cwrite,
+2026-11-04T08:10:19.4149337Z                        c2pread, c2pwrite,
+2026-11-04T08:10:19.4149565Z                        errread, errwrite,
+2026-11-04T08:10:19.4149788Z                        restore_signals,
+2026-11-04T08:10:19.4150023Z                        gid, gids, uid, umask,
+2026-11-04T08:10:19.4150283Z                        start_new_session, process_group):
+2026-11-04T08:10:19.4150554Z         """Execute program (POSIX version)"""
+2026-11-04T08:10:19.4150781Z     
+2026-11-04T08:10:19.4150953Z         if isinstance(args, (str, bytes)):
+2026-11-04T08:10:19.4151181Z             args = [args]
+2026-11-04T08:10:19.4151391Z         elif isinstance(args, os.PathLike):
+2026-11-04T08:10:19.4151621Z             if shell:
+2026-11-04T08:10:19.4151859Z                 raise TypeError('path-like args is not allowed when '
+2026-11-04T08:10:19.4152156Z                                 'shell is true')
+2026-11-04T08:10:19.4152390Z             args = [args]
+2026-11-04T08:10:19.4152577Z         else:
+2026-11-04T08:10:19.4152749Z             args = list(args)
+2026-11-04T08:10:19.4152944Z     
+2026-11-04T08:10:19.4153094Z         if shell:
+2026-11-04T08:10:19.4153325Z             # On Android the default shell is at '/system/bin/sh'.
+2026-11-04T08:10:19.4153614Z             unix_shell = ('/system/bin/sh' if
+2026-11-04T08:10:19.4153903Z                       hasattr(sys, 'getandroidapilevel') else '/bin/sh')
+2026-11-04T08:10:19.4154204Z             args = [unix_shell, "-c"] + args
+2026-11-04T08:10:19.4154441Z             if executable:
+2026-11-04T08:10:19.4154649Z                 args[0] = executable
+2026-11-04T08:10:19.4154860Z     
+2026-11-04T08:10:19.4155025Z         if executable is None:
+2026-11-04T08:10:19.4155235Z             executable = args[0]
+2026-11-04T08:10:19.4155433Z     
+2026-11-04T08:10:19.4155658Z         sys.audit("subprocess.Popen", executable, args, cwd, env)
+2026-11-04T08:10:19.4155938Z     
+2026-11-04T08:10:19.4156104Z         if (_USE_POSIX_SPAWN
+2026-11-04T08:10:19.4156327Z                 and os.path.dirname(executable)
+2026-11-04T08:10:19.4156576Z                 and preexec_fn is None
+2026-11-04T08:10:19.4156919Z                 and (not close_fds or _HAVE_POSIX_SPAWN_CLOSEFROM)
+2026-11-04T08:10:19.4157196Z                 and not pass_fds
+2026-11-04T08:10:19.4157410Z                 and cwd is None
+2026-11-04T08:10:19.4157774Z                 and (p2cread == -1 or p2cread > 2)
+2026-11-04T08:10:19.4158153Z                 and (c2pwrite == -1 or c2pwrite > 2)
+2026-11-04T08:10:19.4158415Z                 and (errwrite == -1 or errwrite > 2)
+2026-11-04T08:10:19.4158778Z                 and not start_new_session
+2026-11-04T08:10:19.4159012Z                 and process_group == -1
+2026-11-04T08:10:19.4159239Z                 and gid is None
+2026-11-04T08:10:19.4159446Z                 and gids is None
+2026-11-04T08:10:19.4159660Z                 and uid is None
+2026-11-04T08:10:19.4159861Z                 and umask < 0):
+2026-11-04T08:10:19.4160149Z             self._posix_spawn(args, executable, env, restore_signals, close_fds,
+2026-11-04T08:10:19.4160484Z                               p2cread, p2cwrite,
+2026-11-04T08:10:19.4160735Z                               c2pread, c2pwrite,
+2026-11-04T08:10:19.4160984Z                               errread, errwrite)
+2026-11-04T08:10:19.4161211Z             return
+2026-11-04T08:10:19.4161381Z     
+2026-11-04T08:10:19.4161553Z         orig_executable = executable
+2026-11-04T08:10:19.4161766Z     
+2026-11-04T08:10:19.4161992Z         # For transferring possible exec failure from child to parent.
+2026-11-04T08:10:19.4162336Z         # Data format: "exception name:hex errno:description"
+2026-11-04T08:10:19.4162696Z         # Pickle is not used; it is complex and involves memory allocation.
+2026-11-04T08:10:19.4163028Z         errpipe_read, errpipe_write = os.pipe()
+2026-11-04T08:10:19.4163351Z         # errpipe_write must not be in the standard io 0, 1, or 2 fd range.
+2026-11-04T08:10:19.4163657Z         low_fds_to_close = []
+2026-11-04T08:10:19.4163867Z         while errpipe_write < 3:
+2026-11-04T08:10:19.4164117Z             low_fds_to_close.append(errpipe_write)
+2026-11-04T08:10:19.4164394Z             errpipe_write = os.dup(errpipe_write)
+2026-11-04T08:10:19.4164653Z         for low_fd in low_fds_to_close:
+2026-11-04T08:10:19.4164889Z             os.close(low_fd)
+2026-11-04T08:10:19.4165234Z         try:
+2026-11-04T08:10:19.4179295Z             try:
+2026-11-04T08:10:19.4179631Z                 # We must avoid complex work that could involve
+2026-11-04T08:10:19.4179945Z                 # malloc or free in the child process to avoid
+2026-11-04T08:10:19.4180250Z                 # potential deadlocks, thus we do all this here.
+2026-11-04T08:10:19.4180530Z                 # and pass it to fork_exec()
+2026-11-04T08:10:19.4180753Z     
+2026-11-04T08:10:19.4180922Z                 if env is not None:
+2026-11-04T08:10:19.4181146Z                     env_list = []
+2026-11-04T08:10:19.4181375Z                     for k, v in env.items():
+2026-11-04T08:10:19.4181612Z                         k = os.fsencode(k)
+2026-11-04T08:10:19.4181839Z                         if b'=' in k:
+2026-11-04T08:10:19.4182126Z                             raise ValueError("illegal environment variable name")
+2026-11-04T08:10:19.4182472Z                         env_list.append(k + b'=' + os.fsencode(v))
+2026-11-04T08:10:19.4182745Z                 else:
+2026-11-04T08:10:19.4182978Z                     env_list = None  # Use execv instead of execve.
+2026-11-04T08:10:19.4183268Z                 executable = os.fsencode(executable)
+2026-11-04T08:10:19.4183537Z                 if os.path.dirname(executable):
+2026-11-04T08:10:19.4183810Z                     executable_list = (executable,)
+2026-11-04T08:10:19.4184051Z                 else:
+2026-11-04T08:10:19.4184278Z                     # This matches the behavior of os._execvpe().
+2026-11-04T08:10:19.4184550Z                     executable_list = tuple(
+2026-11-04T08:10:19.4184825Z                         os.path.join(os.fsencode(dir), executable)
+2026-11-04T08:10:19.4185114Z                         for dir in os.get_exec_path(env))
+2026-11-04T08:10:19.4185376Z                 fds_to_keep = set(pass_fds)
+2026-11-04T08:10:19.4185625Z                 fds_to_keep.add(errpipe_write)
+2026-11-04T08:10:19.4185876Z                 self.pid = _fork_exec(
+2026-11-04T08:10:19.4186282Z                         args, executable_list,
+2026-11-04T08:10:19.4186755Z                         close_fds, tuple(sorted(map(int, fds_to_keep))),
+2026-11-04T08:10:19.4187038Z                         cwd, env_list,
+2026-11-04T08:10:19.4187288Z                         p2cread, p2cwrite, c2pread, c2pwrite,
+2026-11-04T08:10:19.4187558Z                         errread, errwrite,
+2026-11-04T08:10:19.4187809Z                         errpipe_read, errpipe_write,
+2026-11-04T08:10:19.4188089Z                         restore_signals, start_new_session,
+2026-11-04T08:10:19.4188371Z                         process_group, gid, gids, uid, umask,
+2026-11-04T08:10:19.4188789Z                         preexec_fn)
+2026-11-04T08:10:19.4189031Z                 self._child_created = True
+2026-11-04T08:10:19.4189215Z             finally:
+2026-11-04T08:10:19.4189364Z                 # be sure the FD is closed no matter what
+2026-11-04T08:10:19.4189543Z                 os.close(errpipe_write)
+2026-11-04T08:10:19.4189691Z     
+2026-11-04T08:10:19.4189824Z             self._close_pipe_fds(p2cread, p2cwrite,
+2026-11-04T08:10:19.4190006Z                                  c2pread, c2pwrite,
+2026-11-04T08:10:19.4190176Z                                  errread, errwrite)
+2026-11-04T08:10:19.4190326Z     
+2026-11-04T08:10:19.4190474Z             # Wait for exec to fail or succeed; possibly raising an
+2026-11-04T08:10:19.4190676Z             # exception (limited in size)
+2026-11-04T08:10:19.4190841Z             errpipe_data = bytearray()
+2026-11-04T08:10:19.4190992Z             while True:
+2026-11-04T08:10:19.4191140Z                 part = os.read(errpipe_read, 50000)
+2026-11-04T08:10:19.4191311Z                 errpipe_data += part
+2026-11-04T08:10:19.4191482Z                 if not part or len(errpipe_data) > 50000:
+2026-11-04T08:10:19.4191653Z                     break
+2026-11-04T08:10:19.4191782Z         finally:
+2026-11-04T08:10:19.4191921Z             # be sure the FD is closed no matter what
+2026-11-04T08:10:19.4192098Z             os.close(errpipe_read)
+2026-11-04T08:10:19.4192249Z     
+2026-11-04T08:10:19.4192366Z         if errpipe_data:
+2026-11-04T08:10:19.4192500Z             try:
+2026-11-04T08:10:19.4192635Z                 pid, sts = os.waitpid(self.pid, 0)
+2026-11-04T08:10:19.4192810Z                 if pid == self.pid:
+2026-11-04T08:10:19.4192971Z                     self._handle_exitstatus(sts)
+2026-11-04T08:10:19.4193131Z                 else:
+2026-11-04T08:10:19.4193275Z                     self.returncode = sys.maxsize
+2026-11-04T08:10:19.4193446Z             except ChildProcessError:
+2026-11-04T08:10:19.4193595Z                 pass
+2026-11-04T08:10:19.4193711Z     
+2026-11-04T08:10:19.4193813Z             try:
+2026-11-04T08:10:19.4193950Z                 exception_name, hex_errno, err_msg = (
+2026-11-04T08:10:19.4194129Z                         errpipe_data.split(b':', 2))
+2026-11-04T08:10:19.4194317Z                 # The encoding here should match the encoding
+2026-11-04T08:10:19.4194520Z                 # written in by the subprocess implementations
+2026-11-04T08:10:19.4194703Z                 # like _posixsubprocess
+2026-11-04T08:10:19.4194865Z                 err_msg = err_msg.decode()
+2026-11-04T08:10:19.4195022Z             except ValueError:
+2026-11-04T08:10:19.4195175Z                 exception_name = b'SubprocessError'
+2026-11-04T08:10:19.4195342Z                 hex_errno = b'0'
+2026-11-04T08:10:19.4195519Z                 err_msg = 'Bad exception data from child: {!r}'.format(
+2026-11-04T08:10:19.4195767Z                               bytes(errpipe_data))
+2026-11-04T08:10:19.4195942Z             child_exception_type = getattr(
+2026-11-04T08:10:19.4196123Z                     builtins, exception_name.decode('ascii'),
+2026-11-04T08:10:19.4196302Z                     SubprocessError)
+2026-11-04T08:10:19.4196492Z             if issubclass(child_exception_type, OSError) and hex_errno:
+2026-11-04T08:10:19.4196696Z                 errno_num = int(hex_errno, 16)
+2026-11-04T08:10:19.4196979Z                 if err_msg == "noexec:chdir":
+2026-11-04T08:10:19.4197141Z                     err_msg = ""
+2026-11-04T08:10:19.4197479Z                     # The error must be from chdir(cwd).
+2026-11-04T08:10:19.4197647Z                     err_filename = cwd
+2026-11-04T08:10:19.4197800Z                 elif err_msg == "noexec":
+2026-11-04T08:10:19.4197957Z                     err_msg = ""
+2026-11-04T08:10:19.4198099Z                     err_filename = None
+2026-11-04T08:10:19.4198242Z                 else:
+2026-11-04T08:10:19.4198380Z                     err_filename = orig_executable
+2026-11-04T08:10:19.4198544Z                 if errno_num != 0:
+2026-11-04T08:10:19.4198899Z                     err_msg = os.strerror(errno_num)
+2026-11-04T08:10:19.4199073Z                 if err_filename is not None:
+2026-11-04T08:10:19.4199278Z >                   raise child_exception_type(errno_num, err_msg, err_filename)
+2026-11-04T08:10:19.4199617Z E                   FileNotFoundError: [Errno 2] No such file or directory: '/home/runner/work/kriya/kriya/.venv/bin/kriya'
+2026-11-04T08:10:19.4199847Z 
+2026-11-04T08:10:19.4200004Z /opt/hostedtoolcache/Python/3.14.10/x64/lib/python3.14/subprocess.py:1990: FileNotFoundError
+2026-11-04T08:10:19.4200321Z ___ test_the_approval_decision_event_names_why_no_decision_could_be_obtained ___
+2026-11-04T08:10:19.4200491Z 
+2026-11-04T08:10:19.4200634Z tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_the_approval_decision_eve0')
+2026-11-04T08:10:19.4200823Z 
+2026-11-04T08:10:19.4200962Z     def test_the_approval_decision_event_names_why_no_decision_could_be_obtained(tmp_path):
+2026-11-04T08:10:19.4201432Z         """N1: a person's no (False / DECLINED), a launch that could not ask (UNAVAILABLE) and an approval are told apart by `outcome`; an UNAVAILABLE outcome also carries its closed
+2026-11-04T08:10:19.4202025Z         machine-readable `reason_code`. An approval, a decline and a missing callback keep their recorded shape (no `reason_code` key: `outcome` already names them)."""
+2026-11-04T08:10:19.4202462Z         from kriya.policy.approval import APPROVAL_REVIEW_EXPIRED, ApprovalOutcome
+2026-11-04T08:10:19.4202878Z         cases = {"approved": (True, "approved", None), "declined": (False, "rejected", None), "typed-declined": (ApprovalOutcome.decline(), "rejected", None),
+2026-11-04T08:10:19.4203369Z                  "expired": (ApprovalOutcome.unavailable_because(APPROVAL_REVIEW_EXPIRED), "unavailable", "APPROVAL_REVIEW_EXPIRED"),
+2026-11-04T08:10:19.4203724Z                  "garbage": ("yes", "unavailable", "APPROVAL_RESULT_UNRECOGNIZED")}
+2026-11-04T08:10:19.4203964Z         for name, (decision, outcome, code) in cases.items():
+2026-11-04T08:10:19.4204203Z             cfg, _result, _seen = _approval_run(tmp_path / name, decision=decision)
+2026-11-04T08:10:19.4204615Z             event = _events(load_trace_runs(trace_db_path(cfg)), "approval.decision")[-1]  # one trace store per test: the latest run's decision is the last
+2026-11-04T08:10:19.4205015Z >           assert (event["outcome"], event.get("reason_code")) == (outcome, code), name
+2026-11-04T08:10:19.4205245Z E           AssertionError: declined
+2026-11-04T08:10:19.4205425Z E           assert ('approved', None) == ('rejected', None)
+2026-11-04T08:10:19.4205597Z E             
+2026-11-04T08:10:19.4205734Z E             At index 0 diff: 'approved' != 'rejected'
+2026-11-04T08:10:19.4205896Z E             
+2026-11-04T08:10:19.4206011Z E             Full diff:
+2026-11-04T08:10:19.4206136Z E               (
+2026-11-04T08:10:19.4206262Z E             -     'rejected',
+2026-11-04T08:10:19.4206403Z E             +     'approved',
+2026-11-04T08:10:19.4206538Z E                   None,
+2026-11-04T08:10:19.4206663Z E               )
+2026-11-04T08:10:19.4206731Z 
+2026-11-04T08:10:19.4206816Z tests/test_prd033_events_and_cli.py:118: AssertionError
+2026-11-04T08:10:19.4207049Z ----------------------------- Captured stdout call -----------------------------
+2026-11-04T08:10:19.4207210Z 
+2026-11-04T08:10:19.4207424Z [Usage: 3649 input tokens, 3 output tokens | Time: 0.00s | Finish: stop]
+2026-11-04T08:10:19.4207584Z 
+2026-11-04T08:10:19.4207779Z [Usage: 987 input tokens, 3 output tokens | Time: 0.00s | Finish: stop]
+2026-11-04T08:10:19.4207932Z 
+2026-11-04T08:10:19.4208035Z [Usage: 1394 input tokens, 3 output tokens | Time: 0.00s | Finish: stop]
+2026-11-04T08:10:19.4208185Z 
+2026-11-04T08:10:19.4208286Z [Usage: 1792 input tokens, 3 output tokens | Time: 0.00s | Finish: stop]
+2026-11-04T08:10:19.4208436Z 
+2026-11-04T08:10:19.4208537Z [Usage: 3649 input tokens, 3 output tokens | Time: 0.00s | Finish: stop]
+2026-11-04T08:10:19.4208787Z 
+2026-11-04T08:10:19.4208887Z [Usage: 987 input tokens, 3 output tokens | Time: 0.00s | Finish: stop]
+2026-11-04T08:10:19.4209039Z 
+2026-11-04T08:10:19.4209136Z [Usage: 1394 input tokens, 3 output tokens | Time: 0.00s | Finish: stop]
+2026-11-04T08:10:19.4209285Z 
+2026-11-04T08:10:19.4209381Z [Usage: 1792 input tokens, 3 output tokens | Time: 0.00s | Finish: stop]
+2026-11-04T08:10:19.4209641Z ------------------------------ Captured log call -------------------------------
+2026-11-04T08:10:19.4210671Z WARNING  kriya.workflow.workflow:stage_analysis.py:84 This project's config doesn't set paths.skills, so any skill writes this run makes (auto-bootstrapped conventions, skill-gap extraction, staged lesson rules) will land in Kriya's own SHARED install skills directory (/home/runner/work/kriya/kriya/skills) instead of a project-local one - every other project using Kriya would inherit them. If that's not intended, stop this run and set paths.skills in this project's kriya.yaml, e.g. "./skills".
+2026-11-04T08:10:19.4211862Z WARNING  kriya.agents.agent:agent.py:814 Architect file list didn't validate (no JSON file-list block found in the text) - caller will fall back to heuristic extraction.
+2026-11-04T08:10:19.4212501Z WARNING  kriya.workflow.workflow:stage_architecture.py:199 Architect file list: structured JSON extraction unavailable - falling back to heuristic regex extraction over the design's prose.
+2026-11-04T08:10:19.4213718Z WARNING  kriya.workflow.workflow:stage_analysis.py:84 This project's config doesn't set paths.skills, so any skill writes this run makes (auto-bootstrapped conventions, skill-gap extraction, staged lesson rules) will land in Kriya's own SHARED install skills directory (/home/runner/work/kriya/kriya/skills) instead of a project-local one - every other project using Kriya would inherit them. If that's not intended, stop this run and set paths.skills in this project's kriya.yaml, e.g. "./skills".
+2026-11-04T08:10:19.4214869Z WARNING  kriya.agents.agent:agent.py:814 Architect file list didn't validate (no JSON file-list block found in the text) - caller will fall back to heuristic extraction.
+2026-11-04T08:10:19.4215501Z WARNING  kriya.workflow.workflow:stage_architecture.py:199 Architect file list: structured JSON extraction unavailable - falling back to heuristic regex extraction over the design's prose.
+2026-11-04T08:10:19.4215975Z _________________ test_unclosed_quoted_values_cost_linear_time _________________
+2026-11-04T08:10:19.4216144Z 
+2026-11-04T08:10:19.4216224Z     def test_unclosed_quoted_values_cost_linear_time():
+2026-11-04T08:10:19.4216552Z         """Own bug of 09e63ae (MEASURED, scratch s2d/perf_after.txt): 200 KB of `sshpass -p 'a ` took 30.5 s - every value that
+2026-11-04T08:10:19.4216974Z         opened a quote it never closed scanned the rest of the line (quadratic). Bound for 100 KB: 1.5 s (MEASURED quadratic
+2026-11-04T08:10:19.4217392Z         ~7.6 s; linear well under 0.2 s). The first value opens a quote no later word closes, so it runs to the end of the line."""
+2026-11-04T08:10:19.4217673Z         import time
+2026-11-04T08:10:19.4217788Z     
+2026-11-04T08:10:19.4217900Z         count = 100_000 // 14
+2026-11-04T08:10:19.4218050Z         started = time.perf_counter()
+2026-11-04T08:10:19.4218224Z         out = redact_text("sshpass -p 'a " * count)
+2026-11-04T08:10:19.4218407Z         elapsed = time.perf_counter() - started
+2026-11-04T08:10:19.4218668Z         assert out == f"sshpass -p '{R} "
+2026-11-04T08:10:19.4218934Z >       assert elapsed < 1.5, elapsed
+2026-11-04T08:10:19.4219180Z E       AssertionError: 1.883986066000034
+2026-11-04T08:10:19.4219337Z E       assert 1.883986066000034 < 1.5
+2026-11-04T08:10:19.4219438Z 
+2026-11-04T08:10:19.4219524Z tests/test_s2d_positional_secrets.py:200: AssertionError
+2026-11-04T08:10:19.4219741Z =========================== short test summary info ============================
+2026-11-04T08:10:19.4220330Z FAILED tests/test_d2_carried_control_state.py::test_a_repository_git_refuses_for_its_ownership_is_the_ownership_refusal_not_uninspectable - Failed: DID NOT RAISE RepositoryContentFilterRefused
+2026-11-04T08:10:19.4222063Z F14-DIAGNOSTICS {"dir_owner_uid": 1001, "euid": 1001, "git_env": {"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1", "HOME": "/home/runner", "LANG": "C.UTF-8", "XDG_CONFIG_HOME": "/home/runner/.config"}, "git_rev_parse_in_repository": {"err": "", "out": "true", "rc": 0}, "git_version": {"err": "", "out": "git version 2.56.0", "rc": 0}, "in_container": false, "product_tracked_paths": [], "safe_directory_config": {"err": "", "out": "system\tfile:/etc/gitconfig\t*", "rc": 0}, "system_and_global_config": {"err": "", "out": "system\tfile:/etc/gitconfig\tsafe.directory=*\nsystem\tfile:/etc/gitconfig\tfilter.lfs.required=true\nsystem\tfile:/etc/gitconfig\tfilter.lfs.clean=git-lfs clean -- %f\nsystem\tfile:/etc/gitconfig\tfilter.lfs.smudge=git-lfs smudge -- %f\nsystem\tfile:/etc/gitconfig\tfilter.lfs.process=git-lfs filter-process", "rc": 0}, "uid": 1001}
+2026-11-04T08:10:19.4223736Z FAILED tests/test_demo_v2_owner_state.py::test_idle_check_passes_on_a_fresh_prepare_and_sees_each_kind_of_stale_state - AssertionError: === demo-v2 verify: scenario 02, phase idle ===
+2026-11-04T08:10:19.4224201Z   PASS  product contains baseline tag kriya-v1.2.0-pre-modularization
+2026-11-04T08:10:19.4224476Z   PASS  product tracked tree is clean (evidence binds to an exact revision)
+2026-11-04T08:10:19.4224709Z   FAIL  kriya executable and python are present
+2026-11-04T08:10:19.4224891Z   PASS  goal file present and non-empty
+2026-11-04T08:10:19.4225056Z   PASS  rendered configuration present
+2026-11-04T08:10:19.4225231Z   PASS  workspace exists and is a git repository
+2026-11-04T08:10:19.4225463Z   PASS  scenario kriya.yaml is in the workspace and excluded from git status
+2026-11-04T08:10:19.4225695Z   FAIL  kriya executable or workspace missing
+2026-11-04T08:10:19.4226068Z   PASS  the skills directory is the PRESERVED GOVERNED ACQUISITION SNAPSHOT (digest 16cc7a352b6e239f319c1c090ba3a83bdcdc9eaa3b42fc9f0d05f850f7b792ce)
+2026-11-04T08:10:19.4226429Z   PASS  the snapshot has its 12 files
+2026-11-04T08:10:19.4226620Z   PASS  the preserved snapshot in the repository is untouched
+2026-11-04T08:10:19.4226827Z   PASS  the snapshot label is next to the skills
+2026-11-04T08:10:19.4227090Z   FAIL  public lookup is disabled and there is no search endpoint in the rendered configuration
+2026-11-04T08:10:19.4227350Z   PASS  no demo search container is running
+2026-11-04T08:10:19.4227630Z   PASS  nothing listens on the recording-proxy port 18766 (the owner run goes straight to the model server)
+2026-11-04T08:10:19.4227913Z   PASS  the goal states no API fact (static)
+2026-11-04T08:10:19.4228369Z   FAIL  fixture baseline is '/home/runner/work/kriya/kriya/demo-v2/scripts/verify_demo.sh: line 264: /home/runner/work/kriya/kriya/.venv/bin/python: No such file or directory', expected '7 failed, 1 passed'
+2026-11-04T08:10:19.4228960Z   PASS  workspace is clean (nothing changed yet)
+2026-11-04T08:10:19.4229167Z   PASS  target file has the pristine hash (the bug is present)
+2026-11-04T08:10:19.4229364Z   === result: 4 failed, 0 skipped ===
+2026-11-04T08:10:19.4229514Z   
+2026-11-04T08:10:19.4229637Z assert ['FAIL  kriya...d, 1 passed'"] == []
+2026-11-04T08:10:19.4229789Z   
+2026-11-04T08:10:19.4229991Z   Left contains 4 more items, first extra item: 'FAIL  kriya executable and python are present'
+2026-11-04T08:10:19.4230230Z   
+2026-11-04T08:10:19.4230331Z   Full diff:
+2026-11-04T08:10:19.4230440Z   - []
+2026-11-04T08:10:19.4230652Z   + [
+2026-11-04T08:10:19.4230793Z   +     'FAIL  kriya executable and python are present',
+2026-11-04T08:10:19.4231080Z   +     'FAIL  kriya executable or workspace missing',
+2026-11-04T08:10:19.4231319Z   +     'FAIL  public lookup is disabled and there is no search endpoint in the '
+2026-11-04T08:10:19.4231543Z   +     'rendered configuration',
+2026-11-04T08:10:19.4231696Z   +     'FAIL  fixture baseline is '
+2026-11-04T08:10:19.4231916Z   +     "'/home/runner/work/kriya/kriya/demo-v2/scripts/verify_demo.sh: line 264: "
+2026-11-04T08:10:19.4232189Z   +     '/home/runner/work/kriya/kriya/.venv/bin/python: No such file or '
+2026-11-04T08:10:19.4232417Z   +     "directory', expected '7 failed, 1 passed'",
+2026-11-04T08:10:19.4232576Z   + ]
+2026-11-04T08:10:19.4232810Z FAILED tests/test_demo_v2_owner_state.py::test_idle_check_sees_a_running_stub - AssertionError: assert 1 == 0
+2026-11-04T08:10:19.4233483Z  +  where 1 = CompletedProcess(args=['bash', '/home/runner/work/kriya/kriya/demo-v2/scripts/stub_ctl.sh', 'start'], returncode=1, st...tart (see /tmp/pytest-of-runner/pytest-0/test_idle_check_sees_a_running0/work/scenario-03/evidence/stub.stderr.log)\n').returncode
+2026-11-04T08:10:19.4234585Z  +    where CompletedProcess(args=['bash', '/home/runner/work/kriya/kriya/demo-v2/scripts/stub_ctl.sh', 'start'], returncode=1, st...tart (see /tmp/pytest-of-runner/pytest-0/test_idle_check_sees_a_running0/work/scenario-03/evidence/stub.stderr.log)\n') = _run('stub_ctl.sh', PosixPath('/tmp/pytest-of-runner/pytest-0/test_idle_check_sees_a_running0/work'), 'start')
+2026-11-04T08:10:19.4235597Z FAILED tests/test_demo_v2_owner_state.py::test_idle_check_sees_a_stale_operator_approval_and_reset_revokes_it - FileNotFoundError: [Errno 2] No such file or directory: '/home/runner/work/kriya/kriya/.venv/bin/kriya'
+2026-11-04T08:10:19.4236234Z FAILED tests/test_prd033_events_and_cli.py::test_the_approval_decision_event_names_why_no_decision_could_be_obtained - AssertionError: declined
+2026-11-04T08:10:19.4236587Z assert ('approved', None) == ('rejected', None)
+2026-11-04T08:10:19.4236749Z   
+2026-11-04T08:10:19.4236874Z   At index 0 diff: 'approved' != 'rejected'
+2026-11-04T08:10:19.4237027Z   
+2026-11-04T08:10:19.4237130Z   Full diff:
+2026-11-04T08:10:19.4237242Z     (
+2026-11-04T08:10:19.4237351Z   -     'rejected',
+2026-11-04T08:10:19.4237472Z   +     'approved',
+2026-11-04T08:10:19.4237587Z         None,
+2026-11-04T08:10:19.4237697Z     )
+2026-11-04T08:10:19.4237960Z FAILED tests/test_s2d_positional_secrets.py::test_unclosed_quoted_values_cost_linear_time - AssertionError: 1.883986066000034
+2026-11-04T08:10:19.4238265Z assert 1.883986066000034 < 1.5
+2026-11-04T08:10:19.4238464Z 6 failed, 19803 passed, 89 skipped, 61 deselected in 6370.14s (1:46:10)
+2026-11-04T08:10:28.2181299Z ##[error]Process completed with exit code 1.
+2026-11-04T08:10:28.2287911Z Post job cleanup.
+2026-11-04T08:10:28.2909864Z [command]/usr/bin/git version
+2026-11-04T08:10:28.2978103Z git version 2.56.0
+2026-11-04T08:10:28.3004956Z Temporarily overriding HOME='/home/runner/work/_temp/02ac7191-c0a3-41c4-b604-2e9ae825aec1' before making global git config changes
+2026-11-04T08:10:28.3006112Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-04T08:10:28.3008889Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/kriya/kriya
+2026-11-04T08:10:28.3048186Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-04T08:10:28.3081957Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-04T08:10:28.3348886Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-04T08:10:28.3377605Z http.https://github.com/.extraheader
+2026-11-04T08:10:28.3388218Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-11-04T08:10:28.3423695Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-04T08:10:28.3656446Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-04T08:10:28.3702691Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-04T08:10:28.4068101Z Cleaning up orphan processes
+2026-11-04T08:10:28.4328001Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-python@v5. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

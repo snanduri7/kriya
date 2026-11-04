@@ -1,0 +1,51 @@
+{
+  "certification_mode": true,
+  "not_applicable": [
+    {
+      "equivalent": "tests/test_kup_write_boundary_portable.py::test_acquisition_writes_only_under_the_snapshot_directory_and_inspection_writes_nothing",
+      "nodeid": "tests/test_kup_write_boundary.py::test_acquisition_writes_only_source_sidecars_and_the_snapshot_directory_and_inspection_writes_nothing",
+      "reason": "needs macOS sandbox-exec and the unified log"
+    },
+    {
+      "equivalent": "tests/test_kup_write_boundary_portable.py::test_negative_control_without_the_fixed_bytecode_suppression_the_recorder_sees_pyc_writes",
+      "nodeid": "tests/test_kup_write_boundary.py::test_negative_control_without_the_fixed_bytecode_suppression_a_fresh_install_attempts_pyc_writes",
+      "reason": "needs macOS sandbox-exec and the unified log"
+    }
+  ],
+  "platform": "linux",
+  "platform_pending": [],
+  "skipped": 3,
+  "skips": [
+    {
+      "allowlisted": null,
+      "expired_entry": null,
+      "kind": "skip",
+      "nodeid": "tests/test_demo_v2_owner_state.py::test_reset_all_is_idempotent_and_leaves_no_service",
+      "not_applicable": null,
+      "phase": "setup",
+      "platform_pending": null,
+      "reason": "scenario 01's fixture source is not available on this machine"
+    },
+    {
+      "allowlisted": null,
+      "expired_entry": null,
+      "kind": "skip",
+      "nodeid": "tests/test_kup_write_boundary.py::test_acquisition_writes_only_source_sidecars_and_the_snapshot_directory_and_inspection_writes_nothing",
+      "not_applicable": "tests/test_kup_write_boundary_portable.py::test_acquisition_writes_only_under_the_snapshot_directory_and_inspection_writes_nothing",
+      "phase": "setup",
+      "platform_pending": null,
+      "reason": "needs macOS sandbox-exec and the unified log"
+    },
+    {
+      "allowlisted": null,
+      "expired_entry": null,
+      "kind": "skip",
+      "nodeid": "tests/test_kup_write_boundary.py::test_negative_control_without_the_fixed_bytecode_suppression_a_fresh_install_attempts_pyc_writes",
+      "not_applicable": "tests/test_kup_write_boundary_portable.py::test_negative_control_without_the_fixed_bytecode_suppression_the_recorder_sees_pyc_writes",
+      "phase": "setup",
+      "platform_pending": null,
+      "reason": "needs macOS sandbox-exec and the unified log"
+    }
+  ],
+  "unexpected": 1
+}

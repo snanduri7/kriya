@@ -1,0 +1,17 @@
+{"stage": "environment", "status": "RECORDED", "detail": "{  \"docker_client\": \"28.0.4\",  \"docker_server\": \"28.0.4\",  \"git\": \"git version 2.56.0\",  \"git_revision\": \"04ac1fdc63d6cd3691686ac9365ce3d8d49500d4\",  \"gradle\": \"Welcome to Gradle 9.8.2!\",  \"java\": \"op"}
+{"stage": "release_identity", "status": "RECORDED", "detail": "7dd7e273f3dd7118f86af718250d38d369b0095b3ade9de4c0e72db0c1fdf106"}
+{"stage": "static", "status": "PASS", "detail": ""}
+{"stage": "maven_repository", "status": "PASS", "detail": "content digest c557384d52b7d3f196b3a79c3477a0441068717117dfd4560948d417bd25dec3 served on 0.0.0.0:36707"}
+{"stage": "python_wheelhouse", "status": "PASS", "detail": "{\"hashed_requirements_sha256\": \"b4583335692ccfa8aa19e9387f8c8beb186f83745e1057654195e13eb710fd58\", \"wheelhouse_files\": \"70\", \"wheelhouse_sha256\": \"d998578dcaeeb88bc4b36df38cd470ad6ecad75c2867d4d4894cfc283f4b493e\"} index on 0.0.0.0:38463"}
+{"stage": "product_images", "status": "PASS", "detail": "11 lines; ids recorded (provision: scripts/provision_containment_images.py build)"}
+{"stage": "collection", "status": "PASS", "detail": "[collection-audit] PASS: 19914 selected / 45 deselected"}
+{"stage": "perf_probe", "status": "PASS", "detail": "3 classes; see perf-probe/perf-probe.json"}
+{"stage": "pytest", "status": "FAIL", "detail": "[shards] FAIL: 4 failed, 19907 passed, 2 skipped, 1 errors across 4 shards (merge audit OK)"}
+{"stage": "maven_served", "status": "PASS", "detail": "36971 requests, 1744 distinct files, 0 bytes-differ refusals; statuses {'200': 36907, '404': 64}"}
+{"stage": "python_served", "status": "PASS", "detail": "322 requests, 7 distinct files, 0 bytes-differ refusals; statuses {'200': 322}"}
+{"stage": "images_unchanged", "status": "PASS", "detail": "no product image was built or rebuilt during the run"}
+{"stage": "tier_execution", "status": "FAIL", "detail": "population identical: yes; [tier-execution] FAIL: {\"docker\": {\"failed\": 1, \"missing\": 0, \"passed\": 285, \"skipped\": 0}, \"gradle_container\": {\"failed\": 0, \"missing\": 0, \"passed\": 5, \"skipped\": 0}, \"jvm\": {\"failed\": 2, \"missing\": 0, \"passed\": 86, \"skipped\": 0}, \"live_static_analysis\": {\"failed\": 0, \"missing\": 0, \"passed\": 11, \"skipped\": 0}, \"real_toolchain\": {\"failed\": 0, \"missing\": 0, \"passed\": 5, \"skipped\": 0}}   - jvm: tests/test_demo_v2_spring_ignite.py::test_post_check_passes_on_the_reference_and_leaves_the_project_untouched -> failed "}
+{"stage": "scanner", "status": "PASS", "detail": "semgrep 1.178.0; live_static_analysis tier passed in the canonical run"}
+{"stage": "images", "status": "PASS", "detail": "[pinned-images] 10 present, 0 missing"}
+{"stage": "release", "status": "PASS", "detail": ""}
+{"stage": "doctor", "status": "RECORDED", "detail": "production doctor JSON archived (mode: packaged_defaults)"}
