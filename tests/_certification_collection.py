@@ -20,7 +20,7 @@ import sys
 import xml.etree.ElementTree as ElementTree
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
-from _certification import platform_satisfied, required_platform
+from _certification import declared_not_applicable, platform_satisfied, required_platform
 
 CANONICAL_SELECTION = "not live_model"
 DESELECTABLE_TIER = "live_model"  # the ONLY tier the canonical selection may leave out
@@ -42,7 +42,8 @@ def census_record(nodeid: str, markers: Iterable[Any], needs_docker: bool) -> Di
     markers = list(markers)  # item.iter_markers() is a generator: both reads below need it
     names = sorted({marker.name for marker in markers})
     reasons = sorted({str(marker.kwargs.get("reason", "")) for marker in markers if marker.name in ("skip", "skipif")} - {""})
-    return {"id": nodeid, "markers": names, "skip_reasons": reasons, "docker": bool(needs_docker), "requires_platform": required_platform(markers)}
+    return {"id": nodeid, "markers": names, "skip_reasons": reasons, "docker": bool(needs_docker), "requires_platform": required_platform(markers),
+            "not_applicable_on": declared_not_applicable(markers)}
 
 
 def tiers_of(record: Mapping[str, Any]) -> List[str]:
@@ -144,7 +145,17 @@ def executed(selected_census: Mapping[str, Any], outcomes: Mapping[Any, str],
     per_tier: Dict[str, Dict[str, int]] = {tier: {"passed": 0, "skipped": 0, "failed": 0, "missing": 0} for tier in floors}
     problems: List[str] = []
     pending: List[Dict[str, str]] = []
+    not_applicable: List[Dict[str, str]] = []
+    known = {record["id"] for record in selected_census["tests"]}
     for record in selected_census["tests"]:
+        declared = record.get("not_applicable_on")
+        if declared and platform_satisfied(declared["platform"], platform):
+            # NOT APPLICABLE here: the mechanism is another platform's; the invariant must be proved by the named equivalent, which must be in the census and PASSED
+            equivalent = declared["equivalent"]
+            outcome = outcomes.get(_junit_key(equivalent), "missing") if equivalent in known else "not in the census"
+            if outcome != "passed":
+                problems.append(f"not applicable on {declared['platform']}: {record['id']} -> its equivalent {equivalent} is {outcome}")
+            not_applicable.append({"id": record["id"], "platform": declared["platform"], "equivalent": equivalent, "equivalent_outcome": outcome})
         required = record.get("requires_platform")
         if required:
             status = outcomes.get(_junit_key(record["id"]), "missing")
@@ -163,7 +174,7 @@ def executed(selected_census: Mapping[str, Any], outcomes: Mapping[Any, str],
     for tier, counts in per_tier.items():
         if counts["passed"] < max(1, floors[tier]):
             problems.append(f"mandatory tier {tier!r}: {counts['passed']} passed < floor {max(1, floors[tier])}")
-    return {"ok": not problems, "problems": problems, "per_tier": per_tier, "platform_pending": pending}
+    return {"ok": not problems, "problems": problems, "per_tier": per_tier, "platform_pending": pending, "not_applicable": not_applicable}
 
 
 def render_audit(report: Mapping[str, Any]) -> str:

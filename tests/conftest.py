@@ -776,22 +776,26 @@ def _audit_skip(item, report):
     unallowlisted one becomes a failure."""
     if not (report.skipped or hasattr(report, "wasxfail")):
         return
-    from _certification import match_skip, platform_satisfied, required_platform, skip_reason
+    from _certification import match_skip, not_applicable_equivalent, platform_satisfied, required_platform, skip_reason
 
     reason = str(getattr(report, "wasxfail", "")) or skip_reason(report.longrepr)
     entry, expired = match_skip(item.config.stash[_ALLOWLIST], item.nodeid, reason)
     allowed = entry is not None and not expired
     # A skip of a test that is mandatory on ANOTHER platform is PENDING evidence, not an allowed skip: it never counts as a pass (see
     # tests/_certification.py). On the required platform the same skip is unexpected like any other.
-    required = required_platform(list(item.iter_markers()))
+    markers = list(item.iter_markers())
+    required = required_platform(markers)
     pending = required is not None and not platform_satisfied(required)
+    # NOT APPLICABLE here (the mechanism is another platform's): an explicit, typed disposition naming the test that proves the invariant on THIS platform. Not an allowlist
+    # entry; the execution audit requires the named equivalent to have passed.
+    not_applicable = not_applicable_equivalent(markers)
     item.config.stash[_SKIPS].append({
         "nodeid": item.nodeid, "phase": report.when, "reason": reason,
         "kind": "xfail" if hasattr(report, "wasxfail") else "skip",
         "allowlisted": entry.id if allowed else None, "expired_entry": entry.id if expired else None,
-        "platform_pending": required if pending else None,
+        "platform_pending": required if pending else None, "not_applicable": not_applicable,
     })
-    if _certification_mode(item.config) and not allowed and not pending:
+    if _certification_mode(item.config) and not allowed and not pending and not_applicable is None:
         report.outcome = "failed"
         report.longrepr = (f"UNEXPECTED SKIP in certification mode: {reason}"
                            + (f" (allowlist entry {entry.id} expired)" if expired else ""))

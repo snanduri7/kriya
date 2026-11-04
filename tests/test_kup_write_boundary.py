@@ -17,7 +17,8 @@ the child's PID and classified by path:
 * negative control: the same fresh tree WITHOUT PYTHONDONTWRITEBYTECODE shows ``__pycache__`` write attempts, so the
   detector is proven able to see what the production policy suppresses.
 
-Skipped where sandbox-exec or the unified log is unavailable (not macOS). Raw evidence (every denial line, the
+Skipped where sandbox-exec or the unified log is unavailable (not macOS). On Linux that skip is NOT_APPLICABLE_ON_LINUX, not an unexpected skip: each test names the
+platform-neutral test that proves the same invariant there (tests/test_kup_write_boundary_portable.py; ``not_applicable_on`` in tests/_certification.py). Raw evidence (every denial line, the
 inventories) is written next to the test's temporary directory and printed on failure.
 """
 from __future__ import annotations
@@ -123,6 +124,7 @@ def isolated(tmp_path):
             "fresh": fresh, "env": env, "cwd": cwd}
 
 
+@pytest.mark.not_applicable_on("linux", equivalent="tests/test_kup_write_boundary_portable.py::test_acquisition_writes_only_under_the_snapshot_directory_and_inspection_writes_nothing")
 def test_acquisition_writes_only_source_sidecars_and_the_snapshot_directory_and_inspection_writes_nothing(isolated):
     st = isolated
     runs, pids = [], set()
@@ -178,6 +180,7 @@ def test_acquisition_writes_only_source_sidecars_and_the_snapshot_directory_and_
     # run lives in handover/evidence/KUP/.
 
 
+@pytest.mark.not_applicable_on("linux", equivalent="tests/test_kup_write_boundary_portable.py::test_negative_control_without_the_fixed_bytecode_suppression_the_recorder_sees_pyc_writes")
 def test_negative_control_without_the_fixed_bytecode_suppression_a_fresh_install_attempts_pyc_writes(isolated):
     """Proves the policy, two ways: the SAME fresh tree and the production environment minus PYTHONDONTWRITEBYTECODE
     (1) OUTSIDE the sandbox, in a scratch copy, makes the interpreter write __pycache__ into the install tree - the
