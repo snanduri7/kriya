@@ -1,0 +1,12 @@
+# Historical private-fixture evidence: removed from the active tree (metadata-only manifest)
+
+Owner ruling 2026-11-05 (PRD-036 freeze). The canary baseline of the earlier PRD-036 line is the PRIVATE scenario-01 fixture (commit `0d7a09136cfec0851...`, tree `16188cde...`, target-file sha256 `a15b6ba2...`; third-party source, no redistribution right established). Its canary
+runs archived raw payloads (workspace diffs, stdout, run records) under `evidence/`. They are NOT part of the active candidate tree any more.
+
+- **70 files, 475585 bytes**, found MECHANICALLY: run artifacts (`workspace-diff.txt`, `git-diff.txt`, `stdout.json`, `run-records/*`) in any evidence run directory in which at least one file carries fixture SOURCE text (not a path mention), plus the
+  other files there that carry such text. Classes: {'run-record': 28, 'stdout': 20, 'workspace-diff': 20, 'evidence-with-source-text': 2}. Directories: {'evidence/PRD-036/canary': 7, 'evidence/PRD-036/rc2': 3, 'evidence/PRD-036/rc4-canary-failed-stale-worktree': 7, 'evidence/PRD-036/rc5': 7, 'evidence/PRD-036/rc6': 7, 'evidence/PRD-036/rc7': 7, 'evidence/PRD-036/rc8': 7, 'evidence/STATE-MACHINE-HARDENING/attempt-1-33998645': 7, 'evidence/STATE-MACHINE-HARDENING/attempt-2-0ef71721': 7, 'evidence/STATE-MACHINE-HARDENING/canary': 7, 'handover/evidence/BATCH5': 4}.
+- `HISTORICAL_FIXTURE_EVIDENCE_MANIFEST.csv` lists each removed file by path and Git blob SHA-1 (no content). The blobs remain in Git history; restoring one is `git show <blob>`.
+- Verdict/identity metadata (`canary.json`, `before/after.json`, doctor JSON, timelines, release-candidate files, ...) is retained: it names the authorised target path and carries digests and pass/fail only.
+- **Not done here (separate owner disposition):** Git history is NOT rewritten and no remote is force-pushed. The material was published before the standing rule and remains in `origin/main` history and in the old line's tags. See registry row `CERT-HISTORICAL-FIXTURE-EVIDENCE-EXPOSURE-001`.
+- Reviewed and retained (incidental, not raw fixture source): short identifier/snippet mentions in tests, `demo-v2` scripts (a synthetic stub), `docs/assurance`, `kriya/analyzer/java_members.py` (a docstring example) and UI-text captures in `handover/DEMO-V2/evidence`.
+- Guard: `tests/test_private_fixture_hygiene.py` fails if any such payload reappears in a tracked evidence directory or any manifest blob is tracked again.
