@@ -1,0 +1,18 @@
+{"stage": "maven_toolchain", "status": "PASS", "detail": "{\"archive_sha512\": \"908b1501bfb420bf7c8affb855534a9c407fd6099367bfb9f2f2dcb8e9799102bffb84518cde74c679bd76870247c6528683abdd620581bffa90f95d92d175aa\", \"archive_url\": \"https://archive.apache.org/dist/maven/maven-3/3.10.0/binaries/apache-maven-3.10.0-bin.tar.gz\", \"maven_home\": \"/home/runner/kriya-maven-authority\", \"tree_sha256\": \"45d9be390ef2d8f4993661e5b172a7a852bf7e2da6cac451da9041d222e0596a\", \"version\": \"3.10.0\", \"version_banner\": \"Apache Maven 3.10.0 (c43a36b8d67be7e0805a411bc0898af1a51f5472)\"}"}
+{"stage": "environment", "status": "RECORDED", "detail": "{  \"container_maven\": {    \"maven:3.9-eclipse-temurin-17\": \"Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)\",    \"maven:3.9-eclipse-temurin-21\": \"Apache Maven 3.9.16 (2bdd9fddda4b155ebf"}
+{"stage": "release_identity", "status": "RECORDED", "detail": "f740a2adfe459f271144802fb2cf46ad9785a0330d78d3448831470b507abf5b"}
+{"stage": "static", "status": "PASS", "detail": ""}
+{"stage": "maven_repository", "status": "PASS", "detail": "content digest 8b12496df2f87eaf89b0f40375b3881dd3ccb7634829e699b0d5806d9874337d served on 0.0.0.0:35645"}
+{"stage": "python_wheelhouse", "status": "PASS", "detail": "{\"hashed_requirements_sha256\": \"b4583335692ccfa8aa19e9387f8c8beb186f83745e1057654195e13eb710fd58\", \"wheelhouse_files\": \"70\", \"wheelhouse_sha256\": \"d998578dcaeeb88bc4b36df38cd470ad6ecad75c2867d4d4894cfc283f4b493e\"} index on 0.0.0.0:59639"}
+{"stage": "product_images", "status": "PASS", "detail": "11 lines; ids recorded (provision: scripts/provision_containment_images.py build)"}
+{"stage": "collection", "status": "PASS", "detail": "[collection-audit] PASS: 20062 selected / 45 deselected"}
+{"stage": "perf_probe", "status": "PASS", "detail": "3 classes; see perf-probe/perf-probe.json"}
+{"stage": "pytest", "status": "PASS", "detail": "[shards] PASS: 0 failed, 20059 passed, 3 skipped, 0 errors across 4 shards (merge audit OK)"}
+{"stage": "maven_served", "status": "PASS", "detail": "36971 requests, 1744 distinct files, 0 bytes-differ refusals; statuses {'200': 36907, '404': 64}"}
+{"stage": "python_served", "status": "PASS", "detail": "322 requests, 7 distinct files, 0 bytes-differ refusals; statuses {'200': 322}"}
+{"stage": "images_unchanged", "status": "PASS", "detail": "no product image was built or rebuilt during the run"}
+{"stage": "tier_execution", "status": "PASS", "detail": "[tier-execution] PASS: {\"docker\": {\"failed\": 0, \"missing\": 0, \"passed\": 286, \"skipped\": 0}, \"gradle_container\": {\"failed\": 0, \"missing\": 0, \"passed\": 5, \"skipped\": 0}, \"jvm\": {\"failed\": 0, \"missing\": 0, \"passed\": 88, \"skipped\": 0}, \"live_static_analysis\": {\"failed\": 0, \"missing\": 0, \"passed\": 11, \"skipped\": 0}, \"real_toolchain\": {\"failed\": 0, \"missing\": 0, \"passed\": 5, \"skipped\": 0}}"}
+{"stage": "scanner", "status": "PASS", "detail": "semgrep 1.178.0; live_static_analysis tier passed in the canonical run"}
+{"stage": "images", "status": "PASS", "detail": "[pinned-images] 10 present, 0 missing"}
+{"stage": "release", "status": "PASS", "detail": ""}
+{"stage": "doctor", "status": "RECORDED", "detail": "production doctor JSON archived (mode: packaged_defaults)"}

@@ -1,0 +1,38 @@
+{
+  "contract": "kriya.private-fixture-evidence.v1",
+  "evidence_digest": "674900a866a2747960749acca46143536920d634c3d891a16bcf8e5b8a019680",
+  "executable": {
+    "command": "pytest -o addopts= tests/test_demo_v2_owner_state.py::test_reset_all_is_idempotent_and_leaves_no_service",
+    "implementation": "CPython",
+    "machine": "arm64",
+    "platform": "darwin",
+    "python": "3.14.6"
+  },
+  "finished": "2026-11-05T03:02:07Z",
+  "fixture": {
+    "bundle_sha256": "3534c5d6fb027243f10b7df0e6aa6ada008c146ab5625566293469a5ced1cfb8",
+    "fixture_commit": "0d7a09136cfec085156308d706d53b091ecd3cde",
+    "fixture_tree": "16188cde879c40fc1630fb10970996887e68279d",
+    "target_file": "src/main/java/com/myapp/service/driver/DefaultDriverService.java",
+    "target_sha256": "a15b6ba2c20bafafeea108b073adb1824bb538cc456dfd78400b8e79122944bb"
+  },
+  "gate": "PRD034-F9B-SCENARIO01",
+  "kriya": {
+    "config_files": {
+      "demo-v2/fixtures/brownfield-spring/fixture.env": "5081fc74c768ff5364199f563c563636603f5fc4e8520124cf511d4d22ccf833",
+      "demo-v2/scenarios/01-normal-coding/config/kriya.template.yaml": "a6f1157a2e323f06337d1a5e54926141b88b9dc550b48bcfbc4d925c6c8627cd",
+      "pyproject.toml": "8a85d592f37034e12bd07d3807ddc6cc987ffde9826aae2e1ed34708cdc9717a",
+      "requirements.txt": "019149544bedbb3115001f8b673ce9de7376c538d7aeb5fdcdaf8c69c3637c92",
+      "tests/certification/private_fixtures.json": "a07cbc1d282a44540096b7e3aa1684ad6053bf435682a15ef94fb8dd7f62f7cd"
+    },
+    "config_identity": "0dbaaa451367ca6200913695babbef7cade7483eac572924a0985531dec52de1",
+    "head": "230e54fa0eb0c6af60a94964b6f99be5fb26b63f",
+    "tree": "c738e61db29097cfbe857c8364144850506d2ce6"
+  },
+  "pytest_exit_code": 0,
+  "pytest_summary": "1 passed in 22.58s",
+  "results": {
+    "tests/test_demo_v2_owner_state.py::test_reset_all_is_idempotent_and_leaves_no_service": "passed"
+  },
+  "started": "2026-11-05T03:01:43Z"
+}

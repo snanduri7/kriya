@@ -1,0 +1,28 @@
+{
+  "certification_mode": true,
+  "external_private_fixture": [
+    {
+      "gate": "PRD034-F9B-SCENARIO01",
+      "nodeid": "tests/test_demo_v2_owner_state.py::test_reset_all_is_idempotent_and_leaves_no_service",
+      "reason": "scenario 01's fixture source is not available on this machine"
+    }
+  ],
+  "not_applicable": [],
+  "platform": "linux",
+  "platform_pending": [],
+  "skipped": 1,
+  "skips": [
+    {
+      "allowlisted": null,
+      "expired_entry": null,
+      "external_private_fixture": "PRD034-F9B-SCENARIO01",
+      "kind": "skip",
+      "nodeid": "tests/test_demo_v2_owner_state.py::test_reset_all_is_idempotent_and_leaves_no_service",
+      "not_applicable": null,
+      "phase": "setup",
+      "platform_pending": null,
+      "reason": "scenario 01's fixture source is not available on this machine"
+    }
+  ],
+  "unexpected": 0
+}

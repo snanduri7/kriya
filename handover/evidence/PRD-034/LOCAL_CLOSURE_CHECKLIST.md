@@ -1,5 +1,7 @@
 # PRD-034 local closure checklist (owner ruling 2026-11-04, section 5)
 
+**SUPERSEDED 2026-11-05 - PRD-034 CLOSED / CERTIFIED.** Hosted run 41941002477 on `230e54f` returned `HOSTED_PASS_PRIVATE_FIXTURE_REQUIRED` (0 failed, 20,059 passed, 3 skipped; every ordinary CI job green), and the private F9b gate, run once on the same frozen HEAD, bound to it with `final: CERTIFIED`. Evidence: `hosted-run-41941002477-HOSTED_PASS-CERTIFIED/`. The registry rows below that this checklist lists as open were reconciled in `handover/BACKLOG_REGISTRY.csv` (CERT-LINUX-HOST-EVIDENCE-001, CERT-DOCKER-VENV-VISIBILITY-001, the Maven rows and the F9b provenance row are CLOSED; CERT-OWNER-DEATH-MASK-SCRATCH-001 stays an optional P3). The text below is the historical pre-hosted state.
+
 **Status: `LOCAL_COMPLETE / HOSTED_LINUX_REQUIRED` - NOT CLOSED.** The local state is the owner's `INCOMPLETE_PLATFORM/ENVIRONMENT EVIDENCE` shape (ruling section 3), not a clean local C3: no single local run produced a CERTIFIED sharded C3 (attempt 1: 19,854/19,855; attempt 2: 19,853/19,855 - both failures in the exclusive Docker shard, one mechanism, root cause UNKNOWN, fail-closed). PRD-034 closes only after hosted Linux evidence is consumed (ruling section 9).
 
 Executable revision for everything below: `9d88ff820e24c2c6a811ef3b35a9cf4316811c68` (branch `arch/containment-rebuild-v2`); the commits after it change only `handover/` (this file, registry rows, evidence). `kriya/` last changed in `139eba9` (`service_runtime._cleanup`). `refs/kriya/verified` = `7eddc5d6e255`. Nothing is pushed.
