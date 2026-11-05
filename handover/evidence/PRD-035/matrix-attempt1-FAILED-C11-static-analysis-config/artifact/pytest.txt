@@ -1,0 +1,102 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: ~/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2
+configfile: pyproject.toml
+plugins: xdist-3.8.0, asyncio-1.4.0, anyio-4.14.2, testmon-2.2.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 11 items
+
+tests/test_live_prd035_certification.py ..........F                      [100%]
+
+=================================== FAILURES ===================================
+_______________________ test_c11_static_analysis_enabled _______________________
+
+case = <test_live_prd035_certification.Case object at 0x10f7e64e0>
+
+    @certification_case("C11", "static_analysis_enabled")
+    def test_c11_static_analysis_enabled(case):
+        from kriya.config.config import StaticAnalysisConfig
+    
+        case.config.static_analysis = StaticAnalysisConfig(
+            enabled=True, provider="semgrep", requirement="required",
+            providers={"semgrep": {"version": PINNED_SEMGREP, "rule_packs": [str(SEMGREP_RULES)]}},
+        )
+        ws = git_workspace(case.tmp_path, {
+            "calc.py": "def add(a, b):\n    return a + b\n",
+            "test_calc.py": "from calc import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n",
+        })
+        result = case.run(ws, "Add a function sub(a, b) returning a - b to calc.py.")
+        passed = case.hidden_tests(ws, "from calc import sub\ndef test_sub():\n    assert sub(5, 3) == 2\n")
+        evidence_ids = [i for r in scan_run_records(str(ws)).records for i in (r.verification_evidence_ids or [])]
+        bound = [i for i in evidence_ids if i.startswith("static_analysis:")]
+>       case.finish(result, ws, hidden_acceptance_passed=passed, static_analysis_evidence_bound=bool(bound))
+
+tests/test_live_prd035_certification.py:408: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <test_live_prd035_certification.Case object at 0x10f7e64e0>
+result = {'plan': '# Kriya Plan: Add sub function to calc.py\n\n## Step-by-Step Implementation\n\n1. **Identify the target file...": null\n}\n```', 'design': '{\n  "files": [\n    "calc.py"\n  ]\n}', 'files': ['calc.py'], 'unchanged_files': [], ...}
+workspace = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-5438/test_c11_static_analysis_enabl0/ws')
+required = True
+evidence = {'hidden_acceptance_passed': False, 'static_analysis_evidence_bound': False}
+
+    def finish(self, result, workspace, *, required=True, **evidence):
+        """Record the case (always, pass or fail) and assert success."""
+        metrics = derive_metrics(load_trace_runs(trace_db_path(self.config)))
+        generation = metrics["outcomes"]["generation"]
+        roles = {}
+        for row in metrics["model_protocol"]:
+            entry = roles.setdefault(row["role"], {"runtime_digests": set(), "settings_digests": set(),
+                                                   "models": set(), "prompt_tokens": 0, "completion_tokens": 0,
+                                                   "calls": 0})
+            entry["runtime_digests"].add(row["runtime_digest"])
+            entry["settings_digests"].add(row["inference_settings_digest"])
+            entry["models"].update(row["models"])
+            for key in ("prompt_tokens", "completion_tokens", "calls"):
+                entry[key] += row[key]
+        records = scan_run_records(str(workspace)).records
+        self.record.update({
+            "final_success": result.get("quality_gates_passed") is True,
+            "failure_category": result.get("failure_category") or result.get("status"),
+            "first_pass_compile": generation["first_pass_compile"],
+            "retries": {k: v.get("value") for k, v in generation["retries"].items()},
+            "fallback_transitions": generation["fallback_transitions"].get("value"),
+            "roles": {role: {k: sorted(v) if isinstance(v, set) else v for k, v in entry.items()}
+                      for role, entry in sorted(roles.items())},
+            "tokens": {"input": sum(r["prompt_tokens"] for r in roles.values()),
+                       "output": sum(r["completion_tokens"] for r in roles.values())},
+            "context_window": self.config.llm.context_window, "max_tokens": self.config.llm.max_tokens,
+            "static_analysis": (result.get("static_analysis") or {}).get("outcome"),
+            "commit_results": [c.get("result") for r in records for c in r.commits],
+            "lifecycles": [r.lifecycle_state.value for r in records],
+            **evidence,
+        })
+        self.request.node.user_properties.append(("model_certification_case", self.record))
+        if required:
+>           assert self.record["final_success"], f"{self.case_id} did not succeed: {self.record['failure_category']}"
+E           AssertionError: C11 did not succeed: static_analysis_unavailable
+E           assert False
+
+tests/test_live_prd035_certification.py:124: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+[Usage: 2757 input tokens, 818 output tokens | Time: 34.77s | Finish: stop]
+
+[Usage: 1553 input tokens, 15 output tokens | Time: 1.90s | Finish: stop]
+
+[Usage: 1842 input tokens, 45 output tokens | Time: 5.04s | Finish: stop]
+
+[Usage: 1016 input tokens, 120 output tokens | Time: 5.33s | Finish: stop]
+
+[Usage: 1852 input tokens, 275 output tokens | Time: 12.98s | Finish: stop]
+------------------------------ Captured log call -------------------------------
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 1: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 0/4 + targeted 0/3: STATIC_ANALYSIS_UNAVAILABLE: reason codes CONTAINMENT_UNAVAILABLE
+ERROR    kriya.workflow.recovery_coordinator:recovery_coordinator.py:272 Quality Gates stopped early - STATIC_ANALYSIS_UNAVAILABLE: reason codes CONTAINMENT_UNAVAILABLE
+- generated xml file: ~/WorkingDirectory/AI/ClaudeCode/Kriya-rebuild-v2/certification-out/prd035-matrix-attempt1/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_live_prd035_certification.py::test_c11_static_analysis_enabled
+================== 1 failed, 10 passed in 1717.52s (0:28:37) ===================

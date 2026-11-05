@@ -1,0 +1,4 @@
+C11 as written (no image, no containment backend)          backend=<kriya.tools.containment_oci.OCIContainmentBackend object> image_set=False -> containment is required but providers.semgrep.image is not set (no host fallback)
+C11 + pinned image only                                    backend=<kriya.tools.containment_oci.OCIContainmentBackend object> image_set=True  -> READY (containment can be attempted)
+C11 + pinned image + autonomy oci containment (as C7)      backend=<kriya.tools.containment_oci.OCIContainmentBackend object> image_set=True  -> READY (containment can be attempted)
+C11 + oci containment only (no image)                      backend=<kriya.tools.containment_oci.OCIContainmentBackend object> image_set=False -> containment is required but providers.semgrep.image is not set (no host fallback)

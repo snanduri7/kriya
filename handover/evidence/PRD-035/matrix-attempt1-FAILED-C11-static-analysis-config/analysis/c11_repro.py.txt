@@ -1,0 +1,37 @@
+"""Offline reproduction of the PRD-035 C11 static-analysis precondition. No model, no container, no network."""
+import os, sys, tempfile
+sys.path.insert(0, "tests")
+from pathlib import Path
+import _live_identity as li
+from kriya.config.config import StaticAnalysisConfig, load_config
+from kriya.static_analysis.adapters.semgrep import SemgrepAdapter, SemgrepSettings
+from kriya.static_analysis.service import execution_context
+RULES = Path("tests/fixtures/static_analysis/semgrep/1.178.0/rules").resolve()
+IMAGE = "semgrep/semgrep@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b"
+def harness_config():
+    tmp = tempfile.mkdtemp(); op = os.path.join(tmp, "operator.yaml"); open(op, "w").write("{}\n")
+    cfg = load_config(op); li.bind_primary(cfg)
+    cfg.autonomy.mode = "guardrails"; cfg.autonomy.run_verification_enabled = False    # exactly qualified_live_config()
+    return cfg
+def ready(cfg, label):
+    ws = tempfile.mkdtemp()
+    ctx = execution_context(cfg, ws)
+    settings = SemgrepSettings(**cfg.static_analysis.providers["semgrep"])
+    verdict = SemgrepAdapter(settings, ctx)._containment_ready()
+    print(f"{label:<58} backend={ctx.containment_backend!r:<8} image_set={settings.image is not None!s:<5} -> {verdict or 'READY (containment can be attempted)'}")
+# 1. C11 EXACTLY as written in tests/test_live_prd035_certification.py
+c = harness_config()
+c.static_analysis = StaticAnalysisConfig(enabled=True, provider="semgrep", requirement="required", providers={"semgrep": {"version": "1.178.0", "rule_packs": [str(RULES)]}})
+ready(c, "C11 as written (no image, no containment backend)")
+# 2. + the pinned image only
+c = harness_config()
+c.static_analysis = StaticAnalysisConfig(enabled=True, provider="semgrep", requirement="required", providers={"semgrep": {"version": "1.178.0", "rule_packs": [str(RULES)], "image": IMAGE}})
+ready(c, "C11 + pinned image only")
+# 3. + containment as C7 sets it
+c = harness_config(); c.autonomy.contained_execution_required = True; c.autonomy.containment_backend = "oci"
+c.static_analysis = StaticAnalysisConfig(enabled=True, provider="semgrep", requirement="required", providers={"semgrep": {"version": "1.178.0", "rule_packs": [str(RULES)], "image": IMAGE}})
+ready(c, "C11 + pinned image + autonomy oci containment (as C7)")
+# 4. containment only, no image
+c = harness_config(); c.autonomy.contained_execution_required = True; c.autonomy.containment_backend = "oci"
+c.static_analysis = StaticAnalysisConfig(enabled=True, provider="semgrep", requirement="required", providers={"semgrep": {"version": "1.178.0", "rule_packs": [str(RULES)]}})
+ready(c, "C11 + oci containment only (no image)")

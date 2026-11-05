@@ -1,0 +1,20 @@
+{
+  "bound_to": {
+    "case_set_version": 1,
+    "commit": "69015c6ecfc66a437e2adb85981bc59be7000ab1",
+    "config_sha256": "076e48ac125c8df3a7383c47ba771c03a9cf3a2641f29bd0d368bb5933c83d4e",
+    "environment_digest": "sha256:79b6104aefaf54c6484de3be25b8f9eabd3733798742db7dbf1a91bd1d4ab2d9",
+    "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+    "kriya_tree": "850b2a1712e36333cc77488c39a3d18ac31f859b",
+    "plugins_tree": "2e9704960ea243568df0e56e62073c10a13914a4",
+    "report_digest": "c03ee581b3898448364307b66043fb681766a44ba3bdb479d97bafe049e6467e",
+    "runtime_fingerprint": "c3df7a695741d406dce387bee68117f4bcf9817be736886b75af021d6bf1420a",
+    "tree": "8a50c05457d23094cd22cc3500d7b13a19a84425"
+  },
+  "problems": [
+    "report_not_certified_on_the_target_tier",
+    "not_all_eleven_cases_passed",
+    "record_not_certified"
+  ],
+  "verdict": "REFUSED"
+}
