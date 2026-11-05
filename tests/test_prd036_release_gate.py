@@ -10,6 +10,8 @@
 - The live harness takes its model bindings from the release config exactly
   as load_config merges them.
 - The canary verdict and the final gate pass only when every criterion does.
+- Deterministic certification is the PRD-034 authority chain (hosted Linux certification + the exact private F9b gate, re-verified from the
+  artifacts), bound to the candidate's commit, tree and certification-config identity; it is NOT compared with the full candidate digest.
 """
 import importlib.util
 import json
@@ -614,6 +616,30 @@ def gate():
     return _script("prd036_gate")
 
 
+REAL_HOSTED = Path(__file__).parent.parent / "handover" / "evidence" / "PRD-034" / "hosted-run-41941002477-HOSTED_PASS-CERTIFIED"
+FLOORS = {"docker": 283, "gradle_container": 5, "jvm": 86, "live_static_analysis": 11, "real_toolchain": 5}
+
+
+def _certificate(revision):
+    """The deterministic-certification evidence in the shape ``collect_certificate`` returns (hosted artifact + private F9b record, re-verified)."""
+    tiers = {name: {"failed": 0, "missing": 0, "passed": floor + 1, "skipped": 0} for name, floor in FLOORS.items()}
+    node = "tests/test_demo_v2_owner_state.py::test_reset_all_is_idempotent_and_leaves_no_service"
+    return {
+        "final": {"contract": "kriya.final-certification.v1", "status": "CERTIFIED", "problems": [], "hosted_revision": revision,
+                  "gate": "PRD034-F9B-SCENARIO01", "private_evidence_digest": "digest-1"},
+        "record": {"contract": "kriya.private-fixture-evidence.v1", "gate": "PRD034-F9B-SCENARIO01", "evidence_digest": "digest-1",
+                   "pytest_exit_code": 0, "results": {node: "passed"},
+                   "kriya": {"head": revision, "tree": "tree-" + revision[:4], "config_identity": "cfg-" + revision[:4]}},
+        "summary": {"status": "HOSTED_PASS_PRIVATE_FIXTURE_REQUIRED", "collection": {"floors": dict(FLOORS)},
+                    "tier_execution": {"ok": True, "problems": [], "per_tier": tiers},
+                    "tiers": {"pytest": {"junit": {"failures": 0, "errors": 0, "passed": 20059}, "unexpected_skips": 0}},
+                    "stages": {"scanner": {"status": "PASS"}, "release": {"status": "PASS"}}},
+        "release_identity": {"kriya": {"revision": revision, "dirty": False}},
+        "environment": {"git_revision": revision},
+        "git_tree": "tree-" + revision[:4], "git_config_identity": "cfg-" + revision[:4],
+    }
+
+
 def _gate_inputs(gate):
     candidate = _sealed()
     trials = [{"trial": n, "outcome": mc.CERTIFIED, "reasons": [], "streak_after": n,
@@ -622,10 +648,7 @@ def _gate_inputs(gate):
     job = lambda name: {"name": name, "conclusion": "success"}  # noqa: E731 - a one-line fixture builder
     return {
         "candidate": {**candidate, "release": {**candidate["release"], "digest": "rel"}},
-        "certification": {"status": "CERTIFIED", "problems": [], "release_identity": {"digest": "rel"},
-                          "stages": {"release": {"status": "PASS"}},
-                          "tiers": {"pytest": {"junit": {"failures": 0, "errors": 0, "passed": 7000}, "unexpected_skips": 0},
-                                    "scanner": {"junit": {"failures": 0, "errors": 0, "passed": 27}}}},
+        "certificate": _certificate("a" * 40),
         "canary": {"verdict": "PASS", "checks": {f"run{n}.production_ready_{when}": {"passed": True}
                                                   for n in (1, 2) for when in ("before", "after")}},
         "canary_candidate_digest": candidate["digest"],
@@ -649,18 +672,49 @@ def _set(inputs, key, value):
 
 
 @pytest.mark.parametrize("mutate,criterion", [
-    (lambda i: i["certification"].update(status="FAILED"), "deterministic_certification"),
-    (lambda i: i["certification"]["tiers"]["pytest"].update(unexpected_skips=1), "deterministic_certification"),
-    (lambda i: i["certification"]["tiers"]["scanner"]["junit"].update(passed=0), "scanner_executed"),
-    (lambda i: i["certification"]["stages"]["release"].update(status="FAIL"), "release_stage"),
-    (lambda i: i["certification"]["release_identity"].update(digest="other"), "certified_candidate_identity"),
+    # --- deterministic certification: the PRD-034 chain, bound to the candidate (owner ruling 2026-11-05) ---
+    (lambda i: i["certificate"]["final"].update(status="NOT_CERTIFIED"), "deterministic_certificate_final"),
+    (lambda i: i["certificate"]["final"].update(problems=["private record differs"]), "deterministic_certificate_final"),
+    (lambda i: i["certificate"]["final"].update(contract="other"), "deterministic_certificate_final"),
+    (lambda i: i["candidate"]["release"]["kriya"].update(revision="b" * 40), "certificate_bound_to_candidate_revision"),      # wrong candidate revision
+    (lambda i: i["certificate"]["release_identity"]["kriya"].update(revision="c" * 40), "certificate_bound_to_candidate_revision"),  # hosted certificate from another revision
+    (lambda i: i["certificate"]["environment"].update(git_revision="c" * 40), "certificate_bound_to_candidate_revision"),
+    (lambda i: i["certificate"]["final"].update(hosted_revision="c" * 40), "certificate_bound_to_candidate_revision"),
+    (lambda i: i["certificate"]["record"]["kriya"].update(head="c" * 40), "certificate_bound_to_candidate_revision"),
+    (lambda i: i["certificate"]["release_identity"]["kriya"].update(dirty=True), "certificate_bound_to_candidate_revision"),
+    (lambda i: i["certificate"]["record"]["kriya"].update(tree="other"), "certificate_bound_to_candidate_tree"),
+    (lambda i: i["certificate"].update(git_tree=None), "certificate_bound_to_candidate_tree"),
+    (lambda i: i["certificate"]["record"]["kriya"].update(config_identity="other"), "certificate_bound_to_config_identity"),   # wrong config digest
+    (lambda i: i["certificate"].update(git_config_identity=None), "certificate_bound_to_config_identity"),
+    (lambda i: i["certificate"].update(record={}), "private_gate_bound_to_candidate"),                                         # missing private record
+    (lambda i: i["certificate"]["final"].update(private_evidence_digest="other"), "private_gate_bound_to_candidate"),          # private-gate mismatch
+    (lambda i: i["certificate"]["final"].update(gate="OTHER"), "private_gate_bound_to_candidate"),
+    (lambda i: i["certificate"]["record"].update(pytest_exit_code=1), "private_gate_bound_to_candidate"),
+    (lambda i: next(iter(i["certificate"]["record"]["results"])) and i["certificate"]["record"]["results"].update(
+        {k: "failed" for k in i["certificate"]["record"]["results"]}), "private_gate_bound_to_candidate"),
+    (lambda i: i["certificate"]["summary"]["tier_execution"]["per_tier"]["live_static_analysis"].update(passed=0), "scanner_execution_proved"),  # scanner evidence missing
+    (lambda i: i["certificate"]["summary"]["tier_execution"]["per_tier"].pop("live_static_analysis"), "scanner_execution_proved"),
+    (lambda i: i["certificate"]["summary"]["stages"]["scanner"].update(status="FAIL"), "scanner_execution_proved"),
+    (lambda i: i["certificate"]["summary"]["collection"]["floors"].pop("live_static_analysis"), "scanner_execution_proved"),
+    (lambda i: i["certificate"]["summary"]["tier_execution"]["per_tier"]["docker"].update(passed=10), "hosted_mandatory_tiers_passed"),
+    (lambda i: i["certificate"]["summary"]["tier_execution"]["per_tier"]["jvm"].update(failed=1), "hosted_mandatory_tiers_passed"),
+    (lambda i: i["certificate"]["summary"]["tier_execution"]["per_tier"]["jvm"].update(missing=1), "hosted_mandatory_tiers_passed"),
+    (lambda i: i["certificate"]["summary"]["tier_execution"]["per_tier"]["real_toolchain"].update(skipped=1), "hosted_mandatory_tiers_passed"),
+    (lambda i: i["certificate"]["summary"]["tier_execution"]["per_tier"].pop("docker"), "hosted_mandatory_tiers_passed"),
+    (lambda i: i["certificate"]["summary"]["tier_execution"].update(ok=False), "hosted_mandatory_tiers_passed"),
+    (lambda i: i["certificate"]["summary"]["tiers"]["pytest"].update(unexpected_skips=1), "hosted_mandatory_tiers_passed"),
+    (lambda i: i["certificate"]["summary"]["tiers"]["pytest"]["junit"].update(failures=1), "hosted_mandatory_tiers_passed"),
+    (lambda i: i["certificate"]["summary"].update(collection={}), "hosted_mandatory_tiers_passed"),
+    (lambda i: i["certificate"]["summary"]["stages"]["release"].update(status="FAIL"), "release_stage_hosted"),
+    (lambda i: i["certificate"].update(summary={}), "hosted_mandatory_tiers_passed"),
     (lambda i: i["canary"].update(verdict="FAIL"), "canary"),
     (lambda i: _set(i, "canary_candidate_digest", "other"), "canary"),
     (lambda i: i["canary"]["checks"]["run2.production_ready_after"].update(passed=False), "production_doctor_ready"),
     (lambda i: i["canary"].update(checks={}), "production_doctor_ready"),
     (lambda i: i["streak"].update(status="IN_PROGRESS"), "live_streak"),
     (lambda i: i["streak"]["trials"][1].update(outcome=mc.FAILED), "live_streak"),
-    (lambda i: i["streak"]["trials"][0].update(candidate_digest="other"), "live_streak"),
+    (lambda i: i["streak"]["trials"][0].update(candidate_digest="other"), "live_streak"),             # candidate digest drift during the streak
+    (lambda i: i["streak"]["trials"][2].update(candidate_digest="other"), "live_streak"),
     (lambda i: i["streak"]["trials"][2]["cases"].pop(), "live_streak"),
     (lambda i: i["streak"]["trials"][2]["cases"][0].update(verdict="FAILED"), "live_streak"),
     (lambda i: i["trial_evidence_present"].update({2: False}), "live_streak"),
@@ -676,6 +730,58 @@ def test_any_failed_criterion_blocks_release(gate, mutate, criterion):
     mutate(inputs)
     report = gate.evaluate(inputs)
     assert report["result"] == "NOT_VERIFIED" and not report["criteria"][criterion]["passed"]
+
+
+def test_the_hosted_certificate_is_not_compared_with_the_full_candidate_digest(gate):
+    """Different identity domains: a hosted certificate whose release-identity digest differs from the candidate's is fine."""
+    inputs = _gate_inputs(gate)
+    inputs["certificate"]["release_identity"]["digest"] = "a-linux-hosted-release-identity-digest"
+    inputs["candidate"]["release"]["digest"] = "a-macos-candidate-release-digest"
+    report = gate.evaluate(inputs)
+    assert report["result"] == "VERIFIED", {k: c for k, c in report["criteria"].items() if not c["passed"]}
+    assert not any("digest" in name for name in report["criteria"] if name.startswith(("certificate", "deterministic", "hosted")))
+
+
+def test_the_obsolete_local_certify_sh_summary_is_no_longer_an_input(gate):
+    inputs = _gate_inputs(gate)
+    assert "certification" not in inputs and "certificate" in inputs
+    assert not {"deterministic_certification", "scanner_executed", "release_stage", "certified_candidate_identity"} & set(gate.evaluate(inputs)["criteria"])
+
+
+def test_the_real_prd034_hosted_evidence_satisfies_the_certificate_criteria_at_its_own_revision_only(gate):
+    """The curated hosted run 41941002477 + private F9b record (handover/evidence/PRD-034): the canonical-equivalent criteria hold on the REAL
+    artifact shapes at revision 230e54f, and fail for any other candidate revision."""
+    artifact, record = REAL_HOSTED / "artifact", json.loads((REAL_HOSTED / "private-gate" / "record.json").read_text())
+    revision = "230e54fa0eb0c6af60a94964b6f99be5fb26b63f"
+    certificate = {
+        "final": json.loads((REAL_HOSTED / "private-gate" / "final.json").read_text()), "record": record,
+        "summary": json.loads((artifact / "certification-summary.json").read_text()),
+        "release_identity": json.loads((artifact / "release-identity.json").read_text()),
+        "environment": json.loads((artifact / "environment.json").read_text()),
+        # what `git rev-parse 230e54f^{tree}` and the certification-config identity at that revision are (also asserted by verify_binding at certification time)
+        "git_tree": "c738e61db29097cfbe857c8364144850506d2ce6", "git_config_identity": record["kriya"]["config_identity"],
+    }
+    inputs = _gate_inputs(gate)
+    inputs["candidate"]["release"]["kriya"]["revision"] = revision
+    inputs["certificate"] = certificate
+    criteria = gate.evaluate(inputs)["criteria"]
+    mine = ("deterministic_certificate_final", "certificate_bound_to_candidate_revision", "certificate_bound_to_candidate_tree",
+            "certificate_bound_to_config_identity", "hosted_mandatory_tiers_passed", "scanner_execution_proved", "release_stage_hosted",
+            "private_gate_bound_to_candidate")
+    assert {name: criteria[name]["passed"] for name in mine} == {name: True for name in mine}, {n: criteria[n] for n in mine if not criteria[n]["passed"]}
+    inputs["candidate"]["release"]["kriya"]["revision"] = "d" * 40
+    other = gate.evaluate(inputs)["criteria"]
+    assert not other["certificate_bound_to_candidate_revision"]["passed"] and not other["private_gate_bound_to_candidate"]["passed"]
+
+
+def test_unreadable_certificate_evidence_is_a_refusal_with_a_reason_never_a_crash_or_a_pass(gate, tmp_path):
+    record = tmp_path / "record.json"
+    record.write_text(json.dumps({"contract": "kriya.private-fixture-evidence.v1", "kriya": {}}))
+    certificate = gate.collect_certificate(str(tmp_path / "no-such-hosted-dir"), str(record), "0" * 40)
+    assert certificate["final"]["status"] == "NOT_CERTIFIED" and certificate["final"]["problems"] and certificate["summary"] == {}
+    inputs = _gate_inputs(gate)
+    inputs["certificate"] = certificate
+    assert gate.evaluate(inputs)["result"] == "NOT_VERIFIED"
 
 
 @pytest.mark.parametrize("path,evidence", [
