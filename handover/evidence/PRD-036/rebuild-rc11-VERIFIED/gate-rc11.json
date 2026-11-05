@@ -1,0 +1,137 @@
+{
+  "candidate": "85d18ecdac428a7eb1e319e01987fd52fd1d7d432b723919616dce0e585fac3c",
+  "criteria": {
+    "canary": {
+      "failed": [],
+      "passed": true,
+      "verdict": "PASS"
+    },
+    "canary_authority_bound": {
+      "changes": [],
+      "error": null,
+      "passed": true,
+      "recomputed_from_files": "1788f26e76de402b97d711743093acd87ba4eb52faacdf261fac39b357d2c644",
+      "sealed_in_candidate": "1788f26e76de402b97d711743093acd87ba4eb52faacdf261fac39b357d2c644",
+      "used_by_canary": "1788f26e76de402b97d711743093acd87ba4eb52faacdf261fac39b357d2c644"
+    },
+    "certificate_bound_to_candidate_revision": {
+      "passed": true,
+      "revisions": {
+        "candidate": "b32976245f84018fa732072012bc302d4349b7ac",
+        "final_verdict": "b32976245f84018fa732072012bc302d4349b7ac",
+        "hosted_environment": "b32976245f84018fa732072012bc302d4349b7ac",
+        "hosted_release_identity": "b32976245f84018fa732072012bc302d4349b7ac",
+        "private_record": "b32976245f84018fa732072012bc302d4349b7ac"
+      }
+    },
+    "certificate_bound_to_candidate_tree": {
+      "git_tree_of_candidate": "48f9343acd5b5d95ca2c3d25365a06f322b5aa18",
+      "passed": true,
+      "private_record": "48f9343acd5b5d95ca2c3d25365a06f322b5aa18"
+    },
+    "certificate_bound_to_config_identity": {
+      "passed": true,
+      "private_record": "0dbaaa451367ca6200913695babbef7cade7483eac572924a0985531dec52de1",
+      "recomputed_at_candidate": "0dbaaa451367ca6200913695babbef7cade7483eac572924a0985531dec52de1"
+    },
+    "deterministic_certificate_final": {
+      "gate": "PRD034-F9B-SCENARIO01",
+      "passed": true,
+      "problems": [],
+      "status": "CERTIFIED"
+    },
+    "evidence_only_since_candidate": {
+      "changed": [],
+      "offending": [],
+      "passed": true
+    },
+    "hosted_ci_at_candidate": {
+      "passed": true,
+      "runs": [
+        {
+          "head": "b32976245f84018fa732072012bc302d4349b7ac",
+          "not_successful": {},
+          "ok": true,
+          "required_not_successful": [],
+          "run": 42000651013
+        }
+      ]
+    },
+    "hosted_mandatory_tiers_passed": {
+      "passed": true,
+      "pytest": {
+        "junit": {
+          "errors": 0,
+          "failures": 0,
+          "passed": 20201,
+          "skipped": 3,
+          "tests": 20204
+        },
+        "skipped": 3,
+        "unexpected_skips": 0
+      },
+      "tier_execution_ok": true,
+      "tiers_not_met": []
+    },
+    "live_streak": {
+      "contradictions": [],
+      "missing_evidence": [],
+      "passed": true,
+      "streak": 3,
+      "trials": [
+        {
+          "outcome": "CERTIFIED",
+          "streak_after": 1,
+          "trial": 1
+        },
+        {
+          "outcome": "CERTIFIED",
+          "streak_after": 2,
+          "trial": 2
+        },
+        {
+          "outcome": "CERTIFIED",
+          "streak_after": 3,
+          "trial": 3
+        }
+      ]
+    },
+    "no_open_p0_p1": {
+      "open": [],
+      "passed": true
+    },
+    "private_gate_bound_to_candidate": {
+      "gate": "PRD034-F9B-SCENARIO01",
+      "head": "b32976245f84018fa732072012bc302d4349b7ac",
+      "passed": true
+    },
+    "production_doctor_ready": {
+      "checks": {
+        "run1.production_ready_after": true,
+        "run1.production_ready_before": true,
+        "run2.production_ready_after": true,
+        "run2.production_ready_before": true
+      },
+      "passed": true
+    },
+    "release_stage_hosted": {
+      "passed": true
+    },
+    "scanner_execution_proved": {
+      "live_static_analysis": {
+        "failed": 0,
+        "missing": 0,
+        "passed": 11,
+        "skipped": 0
+      },
+      "passed": true,
+      "scanner_stage": "PASS"
+    },
+    "tracked_tree_clean": {
+      "changes": [],
+      "passed": true
+    }
+  },
+  "result": "VERIFIED",
+  "revision": "b32976245f84018fa732072012bc302d4349b7ac"
+}

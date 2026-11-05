@@ -1,0 +1,26 @@
+{
+  "status": "CERTIFIED",
+  "path": "/Users/sriramnanduri/.kriya/certifications/streaks/85d18ecdac428a7eb1e319e01987fd52fd1d7d432b723919616dce0e585fac3c.json",
+  "streak": 3,
+  "required": 3,
+  "trials": [
+    {
+      "trial": 1,
+      "outcome": "CERTIFIED",
+      "streak_after": 1,
+      "reasons": []
+    },
+    {
+      "trial": 2,
+      "outcome": "CERTIFIED",
+      "streak_after": 2,
+      "reasons": []
+    },
+    {
+      "trial": 3,
+      "outcome": "CERTIFIED",
+      "streak_after": 3,
+      "reasons": []
+    }
+  ]
+}

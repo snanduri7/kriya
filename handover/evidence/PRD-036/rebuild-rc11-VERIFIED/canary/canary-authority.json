@@ -1,0 +1,108 @@
+{
+  "acceptance": {
+    "cases": {
+      "REQ-1": [
+        "com.myapp.service.KriyaAcceptanceTest.deleteOfAnExistingDriverHandsTheDriverMarkedDeletedToTheRepository",
+        "com.myapp.service.KriyaAcceptanceTest.theDeletedFlagIsNotOnlyHeldInMemoryAfterDeleteReturns",
+        "com.myapp.service.KriyaAcceptanceTest.theSoftDeleteIsPersistedForAnotherDriverInAnotherState"
+      ],
+      "REQ-2": [
+        "com.myapp.service.KriyaAcceptanceTest.theDriverIsSavedAfterDeletedHasBeenSetToTrue",
+        "com.myapp.service.KriyaAcceptanceTest.theDriverIsSavedThroughTheDriverRepositoryExactlyOnceAndNoOtherWriteIsUsed",
+        "com.myapp.service.KriyaAcceptanceTest.theSavedDriverIsTheOneTheRepositoryReturnedForTheId"
+      ],
+      "REQ-3": [],
+      "REQ-4": []
+    },
+    "digest": "db3facf177adbb4e4bd7dd15ded3b475ed0e294c9433bd065fde7fc047a28372",
+    "sha256": "db3facf177adbb4e4bd7dd15ded3b475ed0e294c9433bd065fde7fc047a28372"
+  },
+  "approval": {
+    "digest": "3a40ecd88c471f7b5b5e464ddd09b6de6447d4836a9bc4f9e0ceca6a1bec5d45",
+    "requirement_ids": [
+      "REQ-1",
+      "REQ-2"
+    ],
+    "sha256": "3a40ecd88c471f7b5b5e464ddd09b6de6447d4836a9bc4f9e0ceca6a1bec5d45"
+  },
+  "baseline_revision": "0d7a09136cfec085156308d706d53b091ecd3cde",
+  "digest": "1788f26e76de402b97d711743093acd87ba4eb52faacdf261fac39b357d2c644",
+  "expect": "src/main/java/com/myapp/service/driver/DefaultDriverService.java",
+  "goal": {
+    "identity": "d163b5f3c68248795200cc45731cd181e442bd42e115a271950208c4480c0bbc",
+    "sha256": "bd57aa20d0268748db33b80f7976736a09b908a045c7d5f133048e8944426e1d"
+  },
+  "mapping": {
+    "entries": [
+      {
+        "authority": "acceptance_approval",
+        "closure_sha256": "e4030e0d579f00fb5e19a260b44afd67a0540cb7bf12af905560bf695d421a5e",
+        "deterministic_closers": [],
+        "requirement_id": "REQ-1"
+      },
+      {
+        "authority": "acceptance_approval",
+        "closure_sha256": "ff0e6a3ee2329c6015340ac7ac6ec370980b3d051643ace07b399f84ae05f78a",
+        "deterministic_closers": [],
+        "requirement_id": "REQ-2"
+      },
+      {
+        "authority": "verification_authority",
+        "closure_sha256": "01b87ffe465edda67f789d6fa78536773a650d4cdb1613ab09af8ce9049bf3e3",
+        "deterministic_closers": [
+          "api_preservation"
+        ],
+        "requirement_id": "REQ-3"
+      },
+      {
+        "authority": "deterministic",
+        "closure_sha256": "dfa3509cbb58d9b33f93fc02e6ba8bfd7247d5f83335066909b45ea289ef68fb",
+        "deterministic_closers": [
+          "mutation_scope"
+        ],
+        "requirement_id": "REQ-4"
+      }
+    ],
+    "sha256": "f12bd78bdb274e05a3849625e862c9d4d841405c02ef5db70ee5da03bb0b2654"
+  },
+  "requirements": {
+    "contract_digest": "03e9075a87e81206c0f339d5b90b947072ffeda3eab50f4d3132191abaa4fa3b",
+    "entries": [
+      {
+        "id": "REQ-1",
+        "kind": "requirement",
+        "text_sha256": "5ea55595a39df7fa19369b0db085c35f609a59cad26e19b5d9da5c64daba6e6e"
+      },
+      {
+        "id": "REQ-2",
+        "kind": "requirement",
+        "text_sha256": "1b4668213f7cc579bebfe8592e8f72ec5cbc4edc52e93b05b76e0229251944c9"
+      },
+      {
+        "id": "REQ-3",
+        "kind": "constraint",
+        "text_sha256": "f8c224edd1b93a0bf9f85e147e9d3a96295c656c5f75348935861b9e08bd0a7f"
+      },
+      {
+        "id": "REQ-4",
+        "kind": "constraint",
+        "text_sha256": "f72af6972819ecdd3822bc38f310fa0ed803398847c256048e2e62ef86f0b92a"
+      }
+    ],
+    "set_digest": "5da2c0bf5f3cf311d71651108cb30ef37613ffc2166f901c787c4853a841aae8",
+    "sha256": "03e9075a87e81206c0f339d5b90b947072ffeda3eab50f4d3132191abaa4fa3b"
+  },
+  "verification_authority": {
+    "assets": {
+      "oracle/base/DefaultDriverService.java": "a15b6ba2c20bafafeea108b073adb1824bb538cc456dfd78400b8e79122944bb",
+      "oracle/verify.sh": "b5e53d1b6f35e334de9401d66bbf90929bd8131aaa6c884a54a45fe342c8d9a0"
+    },
+    "authority_id": "prd036-canary-req3-oracle",
+    "digest": "d174607773d8ccf1010cc623618d1d08286110c84dc93ca0ec15372bb155731a",
+    "manifest_sha256": "d174607773d8ccf1010cc623618d1d08286110c84dc93ca0ec15372bb155731a",
+    "requirement_ids": [
+      "REQ-3"
+    ]
+  },
+  "version": 1
+}

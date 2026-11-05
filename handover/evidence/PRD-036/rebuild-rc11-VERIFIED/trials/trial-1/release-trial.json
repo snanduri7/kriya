@@ -1,0 +1,60 @@
+{
+  "candidate_digest": "85d18ecdac428a7eb1e319e01987fd52fd1d7d432b723919616dce0e585fac3c",
+  "case_set_version": 1,
+  "cases": [
+    {
+      "case_id": "C1",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C2",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C3",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C4",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C5",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C6",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C7",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C8",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C9",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C10",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C11",
+      "verdict": "PASSED"
+    }
+  ],
+  "ended": "2026-11-05T15:21:30Z",
+  "evidence": "/Users/sriramnanduri/kriya-private/prd036-rc10/trials/trial-1",
+  "outcome": "CERTIFIED",
+  "reasons": [],
+  "recorded_at": "2026-11-05T15:21:33+00:00",
+  "report_digest": "3af3ea4dfd7902df4b32ec549b7c69213c697cb9bafa45d2b9595d8fca9fb9b1",
+  "revision": "b32976245f84018fa732072012bc302d4349b7ac",
+  "started": "2026-11-05T14:49:06Z",
+  "streak_after": 1,
+  "trial": 1
+}
