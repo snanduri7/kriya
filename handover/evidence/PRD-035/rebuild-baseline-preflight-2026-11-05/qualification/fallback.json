@@ -1,0 +1,2822 @@
+{
+  "adapter_version": "kriya-openai-compat/3",
+  "cases": [
+    {
+      "capability": "plain_completion",
+      "elapsed_seconds": 10.217,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32455,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "unverified",
+            "served_context_window": null
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 64,
+          "min_output_tokens": 64,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 64,
+          "prompt_tokens": 57,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 30,
+          "requested_max_tokens": 64,
+          "required_tokens": 377,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 64,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "requested_per_request"
+        },
+        "completion_tokens": 2,
+        "content": "READY",
+        "content_chars": 5,
+        "elapsed_seconds": 10.195,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "max_tokens": 64,
+        "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "output_truncated": false,
+        "parser_status": "not_applicable",
+        "policy": {
+          "max_tokens": 64,
+          "source": "model_qualification.cases.plain_completion.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "first_request",
+          "prefix_shared_chars": 0
+        },
+        "prompt_tokens": 30,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "unverified",
+              "served_context_window": null
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 10194
+            },
+            "dispatched_bytes": 61,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 30,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 1.5
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1,
+                "provenance": "server_model_config"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "load_ms": 9816,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "prompt_eval_ms": 280
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "reported_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "requested_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "runtime_fingerprint": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "finish_reason_stop",
+      "elapsed_seconds": 0.258,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32456,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 256,
+          "min_output_tokens": 256,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 256,
+          "prompt_tokens": 56,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 30,
+          "requested_max_tokens": 256,
+          "required_tokens": 568,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 256,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 3,
+        "content_chars": 6,
+        "elapsed_seconds": 0.249,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "max_tokens": 256,
+        "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "output_truncated": false,
+        "parser_status": "not_applicable",
+        "policy": {
+          "max_tokens": 256,
+          "source": "model_qualification.cases.finish_reason_stop.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "user",
+          "prefix_shared_chars": 26
+        },
+        "prompt_tokens": 30,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 248
+            },
+            "dispatched_bytes": 59,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 30,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 1.5
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1,
+                "provenance": "server_model_config"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "load_ms": 1,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "prompt_eval_ms": 162
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "reported_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "requested_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "runtime_fingerprint": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "structured_json",
+      "elapsed_seconds": 1.013,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32432,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 256,
+          "min_output_tokens": 256,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 256,
+          "prompt_tokens": 80,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 49,
+          "requested_max_tokens": 256,
+          "required_tokens": 592,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 256,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 19,
+        "content_chars": 34,
+        "elapsed_seconds": 1.003,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "max_tokens": 256,
+        "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "output_truncated": false,
+        "parsed": {
+          "count": 3,
+          "status": "ok"
+        },
+        "parser_status": "ok",
+        "policy": {
+          "max_tokens": 256,
+          "source": "model_qualification.cases.structured_json.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "system",
+          "prefix_shared_chars": 4
+        },
+        "prompt_tokens": 49,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": true,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 1003
+            },
+            "dispatched_bytes": 118,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 49,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 1.5
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1,
+                "provenance": "server_model_config"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "load_ms": 1,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "prompt_eval_ms": 228
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "reported_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "requested_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "runtime_fingerprint": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "multiline_json",
+      "elapsed_seconds": 2.084,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32375,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 512,
+          "min_output_tokens": 512,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 512,
+          "prompt_tokens": 137,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 83,
+          "requested_max_tokens": 512,
+          "required_tokens": 905,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 512,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 42,
+        "content": "def greet(name):\n    message = f\"Hello, {name}!\"\n    return message",
+        "content_chars": 116,
+        "elapsed_seconds": 2.075,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "max_tokens": 512,
+        "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "output_truncated": false,
+        "parser_status": "ok",
+        "policy": {
+          "max_tokens": 512,
+          "source": "model_qualification.cases.multiline_json.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "user",
+          "prefix_shared_chars": 47
+        },
+        "prompt_tokens": 83,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": true,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 2075
+            },
+            "dispatched_bytes": 253,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 83,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 1.5
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1,
+                "provenance": "server_model_config"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "load_ms": 3,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "prompt_eval_ms": 248
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "reported_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "requested_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "runtime_fingerprint": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "native_tool_calls",
+      "elapsed_seconds": 0.0,
+      "evidence": {
+        "reason": "the capability profile disables native tool calls; not measured"
+      },
+      "measured": {},
+      "status": "UNAVAILABLE"
+    },
+    {
+      "capability": "multiple_tool_calls",
+      "elapsed_seconds": 0.0,
+      "evidence": {
+        "reason": "the capability profile disables native tool calls; not measured"
+      },
+      "measured": {},
+      "status": "UNAVAILABLE"
+    },
+    {
+      "capability": "tool_argument_integrity",
+      "elapsed_seconds": 0.0,
+      "evidence": {
+        "reason": "the capability profile disables native tool calls; not measured"
+      },
+      "measured": {},
+      "status": "UNAVAILABLE"
+    },
+    {
+      "capability": "streaming_assembly",
+      "elapsed_seconds": 2.801,
+      "evidence": {
+        "assembled_matches_result": true,
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32441,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 256,
+          "min_output_tokens": 256,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 256,
+          "prompt_tokens": 71,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 40,
+          "requested_max_tokens": 256,
+          "required_tokens": 583,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 256,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 51,
+        "content_chars": 50,
+        "delta_count": 31,
+        "elapsed_seconds": 2.787,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "max_tokens": 256,
+        "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "output_truncated": false,
+        "parser_status": "not_applicable",
+        "policy": {
+          "max_tokens": 256,
+          "source": "model_qualification.cases.streaming_assembly.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "system",
+          "prefix_shared_chars": 4
+        },
+        "prompt_tokens": 40,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 2786
+            },
+            "dispatched_bytes": 97,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 40,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 1.5
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1,
+                "provenance": "server_model_config"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": true,
+          "tools": false
+        },
+        "provider_metadata": {
+          "load_ms": 1,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "prompt_eval_ms": 265
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "reported_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "requested_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "runtime_fingerprint": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "output_truncation",
+      "elapsed_seconds": 1.074,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32452,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 16,
+          "min_output_tokens": 16,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 16,
+          "prompt_tokens": 60,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 38,
+          "requested_max_tokens": 16,
+          "required_tokens": 332,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 16,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 16,
+        "content_chars": 15,
+        "elapsed_seconds": 1.064,
+        "finish_reason": "length",
+        "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "max_tokens": 16,
+        "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "output_truncated": true,
+        "parser_status": "not_applicable",
+        "prefix_reuse": {
+          "prefix_break": "system",
+          "prefix_shared_chars": 10
+        },
+        "prompt_tokens": 38,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 1063
+            },
+            "dispatched_bytes": 70,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 38,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 1.5
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1,
+                "provenance": "server_model_config"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "load_ms": 1,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "prompt_eval_ms": 239
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "reported_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "requested_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "runtime_fingerprint": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "runtime_fingerprint_exact": true,
+        "status": "OUTPUT_TRUNCATED",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "reasoning_behavior",
+      "elapsed_seconds": 0.487,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32426,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 2048,
+          "min_output_tokens": 1024,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 2048,
+          "prompt_tokens": 86,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 56,
+          "requested_max_tokens": 2048,
+          "required_tokens": 1366,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 2048,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 3,
+        "content": "85",
+        "content_chars": 2,
+        "elapsed_seconds": 0.471,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "max_tokens": 2048,
+        "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "output_truncated": false,
+        "parser_status": "not_applicable",
+        "policy": {
+          "max_tokens": 2048,
+          "source": "model_qualification.cases.reasoning_behavior.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "system",
+          "prefix_shared_chars": 10
+        },
+        "prompt_tokens": 56,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 471
+            },
+            "dispatched_bytes": 133,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 56,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 1.5
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1,
+                "provenance": "server_model_config"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "load_ms": 1,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "prompt_eval_ms": 278
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "reported_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "requested_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "runtime_fingerprint": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": [],
+        "visible_content_has_think_tags": false
+      },
+      "measured": {
+        "reasoning_observed": false
+      },
+      "status": "PASS"
+    },
+    {
+      "capability": "full_file_raw_content",
+      "elapsed_seconds": 4.861,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32120,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 1024,
+          "min_output_tokens": 1024,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 1024,
+          "prompt_tokens": 392,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 249,
+          "requested_max_tokens": 1024,
+          "required_tokens": 1672,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 1024,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 91,
+        "content_chars": 261,
+        "defines_slugify": true,
+        "elapsed_seconds": 4.852,
+        "fence_preserved": true,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "max_tokens": 1024,
+        "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "output_truncated": false,
+        "parser_status": "not_applicable",
+        "parses": true,
+        "payload_exact": true,
+        "policy": {
+          "max_tokens": 1024,
+          "source": "model_qualification.cases.full_file_raw_content.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "system",
+          "prefix_shared_chars": 10
+        },
+        "prompt_tokens": 249,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 4851
+            },
+            "dispatched_bytes": 876,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 249,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 1.5
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1,
+                "provenance": "server_model_config"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "protocol_reason_code": null,
+        "provider_metadata": {
+          "load_ms": 1,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "prompt_eval_ms": 460
+        },
+        "raw_had_fence": false,
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "reported_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "requested_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "response_protocol": "structured",
+        "runtime_fingerprint": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "anchored_edit_protocol",
+      "elapsed_seconds": 6.89,
+      "evidence": {
+        "analysis": true,
+        "applied": true,
+        "applied_parses_and_changed": true,
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32067,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 1024,
+          "min_output_tokens": 1024,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 1024,
+          "prompt_tokens": 445,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 269,
+          "requested_max_tokens": 1024,
+          "required_tokens": 1725,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 1024,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 120,
+        "content_chars": 420,
+        "convention_kept": true,
+        "edit_count": 1,
+        "elapsed_seconds": 6.876,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "max_tokens": 1024,
+        "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "output_truncated": false,
+        "parser_status": "not_applicable",
+        "policy": {
+          "max_tokens": 1024,
+          "source": "model_qualification.cases.anchored_edit_protocol.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "system",
+          "prefix_shared_chars": 35
+        },
+        "prompt_tokens": 269,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 6875
+            },
+            "dispatched_bytes": 1010,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 269,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 1.5
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1,
+                "provenance": "server_model_config"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "protocol_reason_code": null,
+        "provider_metadata": {
+          "load_ms": 1,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "prompt_eval_ms": 452
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "reported_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "requested_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "response_protocol": "structured",
+        "runtime_fingerprint": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "structured_redirect",
+      "elapsed_seconds": 12.114,
+      "evidence": {
+        "no_redirect_when_the_defect_is_here": true,
+        "policy": {
+          "max_tokens": 1024,
+          "source": "model_qualification.cases.anchored_edit_protocol.max_tokens"
+        },
+        "probes": {
+          "elsewhere": {
+            "completion": {
+              "backend_error": null,
+              "backend_status": "ok",
+              "budget": {
+                "approximate": true,
+                "considered_tiers": [
+                  {
+                    "fits": true,
+                    "room": 31858,
+                    "source": "preferred",
+                    "tokens": 32768
+                  }
+                ],
+                "context_expanded": false,
+                "context_state": {
+                  "budget_context_window": 32768,
+                  "requested_context_window": 32768,
+                  "served_context_provenance": "server_observed",
+                  "served_context_window": 32768
+                },
+                "context_window": 32768,
+                "counting_method": "default_byte_bound",
+                "exact": false,
+                "expected_output_tokens": null,
+                "hard_context_ceiling": 262144,
+                "hard_output_ceiling": null,
+                "max_tokens": 1024,
+                "min_output_tokens": 1024,
+                "output_expanded": false,
+                "output_grounding": null,
+                "output_reduced": false,
+                "policy_mode": "strict",
+                "preferred_context_window": 32768,
+                "preferred_output_tokens": 1024,
+                "prompt_tokens": 654,
+                "qualification_source": "preferred",
+                "reasoning_allowance": 0,
+                "reasoning_reserve_source": null,
+                "reported_prompt_tokens": 426,
+                "requested_max_tokens": 1024,
+                "required_tokens": 1934,
+                "safety_margin": 256,
+                "satisfiable": true,
+                "selected_context_window": 32768,
+                "selected_output_tokens": 1024,
+                "selection_reason": "fits_preferred",
+                "tier_note": "strict policy: the preferred window is the limit",
+                "under_predicted": false,
+                "window_source": "served_observed"
+              },
+              "completion_tokens": 105,
+              "content_chars": 404,
+              "elapsed_seconds": 5.856,
+              "finish_reason": "stop",
+              "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+              "max_tokens": 1024,
+              "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "output_truncated": false,
+              "parser_status": "not_applicable",
+              "prefix_reuse": {
+                "prefix_break": "system",
+                "prefix_shared_chars": 213
+              },
+              "prompt_tokens": 426,
+              "protocol": {
+                "empty_content_floor_retry": false,
+                "json_mode": false,
+                "json_schema": false,
+                "provider_contract": {
+                  "adapter": "ollama_native",
+                  "context": {
+                    "budget_context_window": 32768,
+                    "requested_context_window": 32768,
+                    "served_context_provenance": "server_observed",
+                    "served_context_window": 32768
+                  },
+                  "deadline": {
+                    "configured_transport_timeout_ms": 900000,
+                    "deadline_bound": false,
+                    "deadline_source": null,
+                    "effective_request_timeout_ms": 900000,
+                    "elapsed_request_ms": 5856
+                  },
+                  "dispatched_bytes": 1537,
+                  "inference_deadline_bound": false,
+                  "prompt_consumption": "consistent",
+                  "prompt_tokens_reported": 426,
+                  "proxy_policy": "direct",
+                  "sdk_max_retries": 0,
+                  "served_context_observation": {
+                    "reason": null,
+                    "status": "observed",
+                    "window": 32768
+                  },
+                  "served_context_window_after_call": 32768,
+                  "settings": {
+                    "context_window": {
+                      "effective": 32768,
+                      "provenance": "request"
+                    },
+                    "min_p": {
+                      "effective": 0,
+                      "provenance": "server_model_config"
+                    },
+                    "presence_penalty": {
+                      "effective": null,
+                      "provenance": "unverified",
+                      "server_config_observed": 1.5
+                    },
+                    "reasoning": {
+                      "effective": "none",
+                      "provenance": "request"
+                    },
+                    "repeat_penalty": {
+                      "effective": 1,
+                      "provenance": "server_model_config"
+                    },
+                    "temperature": {
+                      "effective": 0.7,
+                      "provenance": "request"
+                    },
+                    "top_k": {
+                      "effective": 20,
+                      "provenance": "request"
+                    },
+                    "top_p": {
+                      "effective": 0.8,
+                      "provenance": "request"
+                    }
+                  },
+                  "timeout_seconds": {
+                    "connect": 10.0,
+                    "read": 900.0
+                  }
+                },
+                "reasoning_model": false,
+                "response_format_dropped": false,
+                "streaming": false,
+                "tools": false
+              },
+              "provider_metadata": {
+                "load_ms": 1,
+                "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+                "prompt_eval_ms": 564
+              },
+              "reasoning_chars": 0,
+              "reasoning_present": false,
+              "reasoning_source": null,
+              "reported_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "runtime_fingerprint": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+              "runtime_fingerprint_exact": true,
+              "status": "OK",
+              "tokens_estimated": false,
+              "tool_call_count": 0,
+              "tool_call_sources": []
+            },
+            "outcome_kind": "no_change",
+            "protocol_reason_code": null,
+            "protocol_valid": true,
+            "redirect_from": "src/report.py",
+            "redirect_to": "src/pricing.py",
+            "status": "OK"
+          },
+          "here": {
+            "completion": {
+              "backend_error": null,
+              "backend_status": "ok",
+              "budget": {
+                "approximate": true,
+                "considered_tiers": [
+                  {
+                    "fits": true,
+                    "room": 31873,
+                    "source": "preferred",
+                    "tokens": 32768
+                  }
+                ],
+                "context_expanded": false,
+                "context_state": {
+                  "budget_context_window": 32768,
+                  "requested_context_window": 32768,
+                  "served_context_provenance": "server_observed",
+                  "served_context_window": 32768
+                },
+                "context_window": 32768,
+                "counting_method": "default_byte_bound",
+                "exact": false,
+                "expected_output_tokens": null,
+                "hard_context_ceiling": 262144,
+                "hard_output_ceiling": null,
+                "max_tokens": 1024,
+                "min_output_tokens": 1024,
+                "output_expanded": false,
+                "output_grounding": null,
+                "output_reduced": false,
+                "policy_mode": "strict",
+                "preferred_context_window": 32768,
+                "preferred_output_tokens": 1024,
+                "prompt_tokens": 639,
+                "qualification_source": "preferred",
+                "reasoning_allowance": 0,
+                "reasoning_reserve_source": null,
+                "reported_prompt_tokens": 408,
+                "requested_max_tokens": 1024,
+                "required_tokens": 1919,
+                "safety_margin": 256,
+                "satisfiable": true,
+                "selected_context_window": 32768,
+                "selected_output_tokens": 1024,
+                "selection_reason": "fits_preferred",
+                "tier_note": "strict policy: the preferred window is the limit",
+                "under_predicted": false,
+                "window_source": "served_observed"
+              },
+              "completion_tokens": 118,
+              "content_chars": 394,
+              "elapsed_seconds": 6.207,
+              "finish_reason": "stop",
+              "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+              "max_tokens": 1024,
+              "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "output_truncated": false,
+              "parser_status": "not_applicable",
+              "prefix_reuse": {
+                "prefix_break": "user",
+                "prefix_shared_chars": 1186
+              },
+              "prompt_tokens": 408,
+              "protocol": {
+                "empty_content_floor_retry": false,
+                "json_mode": false,
+                "json_schema": false,
+                "provider_contract": {
+                  "adapter": "ollama_native",
+                  "context": {
+                    "budget_context_window": 32768,
+                    "requested_context_window": 32768,
+                    "served_context_provenance": "server_observed",
+                    "served_context_window": 32768
+                  },
+                  "deadline": {
+                    "configured_transport_timeout_ms": 900000,
+                    "deadline_bound": false,
+                    "deadline_source": null,
+                    "effective_request_timeout_ms": 900000,
+                    "elapsed_request_ms": 6206
+                  },
+                  "dispatched_bytes": 1503,
+                  "inference_deadline_bound": false,
+                  "prompt_consumption": "consistent",
+                  "prompt_tokens_reported": 408,
+                  "proxy_policy": "direct",
+                  "sdk_max_retries": 0,
+                  "served_context_observation": {
+                    "reason": null,
+                    "status": "observed",
+                    "window": 32768
+                  },
+                  "served_context_window_after_call": 32768,
+                  "settings": {
+                    "context_window": {
+                      "effective": 32768,
+                      "provenance": "request"
+                    },
+                    "min_p": {
+                      "effective": 0,
+                      "provenance": "server_model_config"
+                    },
+                    "presence_penalty": {
+                      "effective": null,
+                      "provenance": "unverified",
+                      "server_config_observed": 1.5
+                    },
+                    "reasoning": {
+                      "effective": "none",
+                      "provenance": "request"
+                    },
+                    "repeat_penalty": {
+                      "effective": 1,
+                      "provenance": "server_model_config"
+                    },
+                    "temperature": {
+                      "effective": 0.7,
+                      "provenance": "request"
+                    },
+                    "top_k": {
+                      "effective": 20,
+                      "provenance": "request"
+                    },
+                    "top_p": {
+                      "effective": 0.8,
+                      "provenance": "request"
+                    }
+                  },
+                  "timeout_seconds": {
+                    "connect": 10.0,
+                    "read": 900.0
+                  }
+                },
+                "reasoning_model": false,
+                "response_format_dropped": false,
+                "streaming": false,
+                "tools": false
+              },
+              "provider_metadata": {
+                "load_ms": 2,
+                "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+                "prompt_eval_ms": 590
+              },
+              "reasoning_chars": 0,
+              "reasoning_present": false,
+              "reasoning_source": null,
+              "reported_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "runtime_fingerprint": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+              "runtime_fingerprint_exact": true,
+              "status": "OK",
+              "tokens_estimated": false,
+              "tool_call_count": 0,
+              "tool_call_sources": []
+            },
+            "outcome_kind": "edits",
+            "protocol_reason_code": null,
+            "protocol_valid": true,
+            "redirect_from": null,
+            "redirect_to": null,
+            "status": "OK"
+          }
+        },
+        "redirects_when_the_defect_is_elsewhere": true,
+        "response_protocol": "structured"
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "malformed_output_recovery",
+      "elapsed_seconds": 2.039,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32414,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 512,
+          "min_output_tokens": 512,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 512,
+          "prompt_tokens": 98,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 58,
+          "requested_max_tokens": 512,
+          "required_tokens": 866,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 512,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 42,
+        "content_chars": 134,
+        "elapsed_seconds": 2.027,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "max_tokens": 512,
+        "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "output_truncated": false,
+        "parser_status": "not_applicable",
+        "policy": {
+          "max_tokens": 512,
+          "source": "model_qualification.cases.malformed_output_recovery.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "system",
+          "prefix_shared_chars": 10
+        },
+        "prompt_tokens": 58,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 2026
+            },
+            "dispatched_bytes": 165,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 58,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 1.5
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1,
+                "provenance": "server_model_config"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "load_ms": 1,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "prompt_eval_ms": 229
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "recovered": [
+          "a.py",
+          "b.py",
+          "c.py"
+        ],
+        "reported_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "requested_model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+        "runtime_fingerprint": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "timeout_semantics",
+      "elapsed_seconds": 0.028,
+      "evidence": {
+        "backend_error": "ConnectTimeout: ",
+        "status": "TIMEOUT"
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "cancellation_semantics",
+      "elapsed_seconds": 0.668,
+      "evidence": {
+        "cancelled_raised": true,
+        "endpoint_healthy_after": "OK",
+        "policy": {
+          "first_delta_timeout_seconds": 120.0,
+          "health_check_max_tokens": 64,
+          "max_settle_seconds": 10.0,
+          "max_tokens": 1024,
+          "source": "model_qualification.cases.cancellation_semantics.max_tokens"
+        },
+        "recorded_status": "CANCELLED",
+        "settle_seconds": 0.002
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "endpoint_error_semantics",
+      "elapsed_seconds": 0.08,
+      "evidence": {
+        "backend_error": "NativeRuntimeError: HTTP 404: model 'kriya-qualification-no-such-model:0' not found",
+        "status": "BACKEND_ERROR"
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "endpoint_restart_semantics",
+      "elapsed_seconds": 0.0,
+      "evidence": {
+        "reason": "not exercised live: restarting the operator's model server is out of scope for an automatic qualification; connection-refused classification is covered by fixture tests"
+      },
+      "measured": {},
+      "status": "UNAVAILABLE"
+    },
+    {
+      "capability": "tokenizer_measurement",
+      "elapsed_seconds": 2.705,
+      "evidence": {
+        "ascii_bytes_per_token": {
+          "indented": 4.9143,
+          "java": 4.1613,
+          "json": 1.8725,
+          "python": 3.2583,
+          "stacktrace": 3.1832,
+          "xml": 2.6562
+        },
+        "consumption_bytes_per_token": {
+          "indented": 1.4571,
+          "java": 3.6452,
+          "json": 1.2416,
+          "python": 3.0083,
+          "stacktrace": 3.0763,
+          "xml": 2.5562
+        },
+        "non_ascii_bytes_per_token": 3.5432,
+        "policy": {
+          "bytes_per_token_margin": 0.9,
+          "source": "model_qualification.measurement.bytes_per_token_margin"
+        },
+        "reported_prompt_tokens": {
+          "indented": 105,
+          "java": 124,
+          "json": 149,
+          "python": 120,
+          "stacktrace": 131,
+          "unicode": 77,
+          "xml": 160
+        }
+      },
+      "measured": {
+        "bytes_per_token_ceiling": 8.0,
+        "bytes_per_token_floor": 1.6852,
+        "non_ascii_bytes_per_token_floor": 3.1889
+      },
+      "status": "PASS"
+    },
+    {
+      "capability": "over_context_refusal",
+      "elapsed_seconds": 1.244,
+      "evidence": {
+        "context_window": 32768,
+        "provider_context_window": 32768,
+        "provider_prompt_tokens": 40973,
+        "reason_code": "PROVIDER_PROMPT_TRUNCATED",
+        "refused": true,
+        "target_prompt_tokens": 40960
+      },
+      "measured": {},
+      "status": "PASS"
+    }
+  ],
+  "developer_response_protocol": "kriya_sentinel_v2",
+  "environment": {
+    "accelerator_backend": "metal",
+    "accelerator_count": 1,
+    "accelerator_memory_class_gib": 64,
+    "accelerator_model": "Apple M1 Max",
+    "architecture": "arm64",
+    "digest": "sha256:79b6104aefaf54c6484de3be25b8f9eabd3733798742db7dbf1a91bd1d4ab2d9",
+    "exact": true,
+    "inference_runtime": "ollama/0.40.14",
+    "os": "darwin",
+    "runtime_parallelism": "unavailable",
+    "schema_version": 1,
+    "system_memory_class_gib": 64,
+    "unified_memory": true
+  },
+  "environment_evidence": {
+    "sha256:79b6104aefaf54c6484de3be25b8f9eabd3733798742db7dbf1a91bd1d4ab2d9": {
+      "cases": [
+        {
+          "capability": "context_capacity",
+          "elapsed_seconds": 82.656,
+          "evidence": {
+            "context_window": 32768,
+            "fill_ratio": 0.9897,
+            "finish_reason": "stop",
+            "first_marker_recalled": true,
+            "last_marker_recalled": true,
+            "policy": {
+              "headroom_source": "model_qualification.cases.context_capacity.headroom_tokens",
+              "headroom_tokens": 384,
+              "max_tokens": 64,
+              "min_fill_ratio": 0.9,
+              "request_timeout_seconds": 600.0,
+              "source": "model_qualification.cases.context_capacity.max_tokens"
+            },
+            "reported_prompt_tokens": 32430,
+            "served_context_window": 32768,
+            "target_prompt_tokens": 32384,
+            "temperature": 0.0
+          },
+          "measured": {},
+          "status": "PASS"
+        }
+      ],
+      "environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:79b6104aefaf54c6484de3be25b8f9eabd3733798742db7dbf1a91bd1d4ab2d9",
+        "exact": true,
+        "inference_runtime": "ollama/0.40.14",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "qualified_at": "2026-11-05T05:07:14.352021+00:00"
+    }
+  },
+  "fingerprint": {
+    "adapter_version": "kriya-ollama-native/3",
+    "alias": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "artifact_digest": "sha256:0314ad2492d1fc443c33fc3026689db99374337a7c18887b44a865264b35ab78",
+    "chat_template": "renderer:qwen3.5",
+    "configured_context_window": 32768,
+    "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+    "effective_context_window": 32768,
+    "endpoint": "http://localhost:11434/v1",
+    "exact": true,
+    "family": "qwen35moe",
+    "kriya_protocol": "capabilities-sha256:79f62ca38cabb90c262dfc92b80b9ba16aaa6dca0da99daf79cdd9f4da28e324",
+    "missing_components": [],
+    "model_context_length": 262144,
+    "model_format": "gguf",
+    "parameter_size": "36.0B",
+    "probe_errors": [],
+    "provider": "ollama",
+    "provider_version": "0.40.14",
+    "quantization": "Q4_K_M",
+    "runtime_parameters_digest": "sha256:cd54bdaeb88708484c8730a3948f9eb8ec993746a727e88ef5dc5b4733393f8f",
+    "schema_version": 1,
+    "served_capabilities": [
+      "completion",
+      "thinking",
+      "tools",
+      "vision"
+    ],
+    "server_parameters": [
+      "min_p 0",
+      "num_ctx 32768",
+      "presence_penalty 1.5",
+      "repeat_penalty 1",
+      "temperature 1",
+      "top_k 20",
+      "top_p 0.95"
+    ],
+    "tokenizer_digest": "sha256:3f1a2932b98cd5a39553f0336164ef55c8a6333722c1a6058735b3fdabd795d9",
+    "tokenizer_identity": "gpt2/qwen35",
+    "tool_call_parser": "parser:qwen3.5",
+    "weights_digest": "sha256:3f87bb0b360974ed352d5259efb632059b0a52f06dab044491d2de2e7c5e5f77"
+  },
+  "fingerprint_digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+  "identity_stability": {
+    "baseline_digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+    "cases_completed": [
+      "plain_completion",
+      "finish_reason_stop",
+      "structured_json",
+      "multiline_json",
+      "native_tool_calls",
+      "multiple_tool_calls",
+      "tool_argument_integrity",
+      "streaming_assembly",
+      "output_truncation",
+      "reasoning_behavior",
+      "full_file_raw_content",
+      "anchored_edit_protocol",
+      "structured_redirect",
+      "malformed_output_recovery",
+      "timeout_semantics",
+      "cancellation_semantics",
+      "endpoint_error_semantics",
+      "endpoint_restart_semantics",
+      "tokenizer_measurement",
+      "context_capacity",
+      "over_context_refusal"
+    ],
+    "change": null,
+    "observations": [
+      {
+        "boundary": "start",
+        "capability": null,
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 0,
+        "observed_at": "2026-11-05T05:04:50.624814+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "plain_completion",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 1,
+        "observed_at": "2026-11-05T05:04:50.877464+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "plain_completion",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 2,
+        "observed_at": "2026-11-05T05:05:01.407879+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "finish_reason_stop",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 3,
+        "observed_at": "2026-11-05T05:05:01.700903+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "finish_reason_stop",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 4,
+        "observed_at": "2026-11-05T05:05:02.194057+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "structured_json",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 5,
+        "observed_at": "2026-11-05T05:05:02.483173+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "structured_json",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 6,
+        "observed_at": "2026-11-05T05:05:03.868238+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "multiline_json",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 7,
+        "observed_at": "2026-11-05T05:05:04.257716+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "multiline_json",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 8,
+        "observed_at": "2026-11-05T05:05:06.649629+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "native_tool_calls",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 9,
+        "observed_at": "2026-11-05T05:05:06.978448+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "native_tool_calls",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 10,
+        "observed_at": "2026-11-05T05:05:07.285558+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "multiple_tool_calls",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 11,
+        "observed_at": "2026-11-05T05:05:07.588625+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "multiple_tool_calls",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 12,
+        "observed_at": "2026-11-05T05:05:07.844421+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "tool_argument_integrity",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 13,
+        "observed_at": "2026-11-05T05:05:08.155246+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "tool_argument_integrity",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 14,
+        "observed_at": "2026-11-05T05:05:08.406189+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "streaming_assembly",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 15,
+        "observed_at": "2026-11-05T05:05:08.664564+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "streaming_assembly",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 16,
+        "observed_at": "2026-11-05T05:05:11.715359+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "output_truncation",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 17,
+        "observed_at": "2026-11-05T05:05:11.947153+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "output_truncation",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 18,
+        "observed_at": "2026-11-05T05:05:13.337320+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "reasoning_behavior",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 19,
+        "observed_at": "2026-11-05T05:05:13.602375+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "reasoning_behavior",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 20,
+        "observed_at": "2026-11-05T05:05:14.394270+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "full_file_raw_content",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 21,
+        "observed_at": "2026-11-05T05:05:14.629268+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "full_file_raw_content",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 22,
+        "observed_at": "2026-11-05T05:05:19.907868+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "anchored_edit_protocol",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 23,
+        "observed_at": "2026-11-05T05:05:20.238732+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "anchored_edit_protocol",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 24,
+        "observed_at": "2026-11-05T05:05:27.464560+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "structured_redirect",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 25,
+        "observed_at": "2026-11-05T05:05:27.734215+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "structured_redirect",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 26,
+        "observed_at": "2026-11-05T05:05:40.107716+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "malformed_output_recovery",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 27,
+        "observed_at": "2026-11-05T05:05:40.396668+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "malformed_output_recovery",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 28,
+        "observed_at": "2026-11-05T05:05:42.720348+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "timeout_semantics",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 29,
+        "observed_at": "2026-11-05T05:05:42.983658+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "timeout_semantics",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 30,
+        "observed_at": "2026-11-05T05:05:43.308534+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "cancellation_semantics",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 31,
+        "observed_at": "2026-11-05T05:05:43.585549+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "cancellation_semantics",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 32,
+        "observed_at": "2026-11-05T05:05:44.498162+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "endpoint_error_semantics",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 33,
+        "observed_at": "2026-11-05T05:05:44.735188+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "endpoint_error_semantics",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 34,
+        "observed_at": "2026-11-05T05:05:45.115258+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "endpoint_restart_semantics",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 35,
+        "observed_at": "2026-11-05T05:05:45.349124+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "endpoint_restart_semantics",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 36,
+        "observed_at": "2026-11-05T05:05:45.610094+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "tokenizer_measurement",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 37,
+        "observed_at": "2026-11-05T05:05:45.876296+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "tokenizer_measurement",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 38,
+        "observed_at": "2026-11-05T05:05:48.857036+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "context_capacity",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 39,
+        "observed_at": "2026-11-05T05:05:49.140920+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "context_capacity",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 40,
+        "observed_at": "2026-11-05T05:07:12.170516+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "before_case",
+        "capability": "over_context_refusal",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 41,
+        "observed_at": "2026-11-05T05:07:12.467690+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "after_case",
+        "capability": "over_context_refusal",
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 42,
+        "observed_at": "2026-11-05T05:07:14.032181+00:00",
+        "probe_errors": []
+      },
+      {
+        "boundary": "close",
+        "capability": null,
+        "digest": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+        "exact": true,
+        "index": 43,
+        "observed_at": "2026-11-05T05:07:14.327297+00:00",
+        "probe_errors": []
+      }
+    ],
+    "stable": true
+  },
+  "inference_settings": {
+    "digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+    "extra_body": {
+      "options": {
+        "num_ctx": 32768,
+        "top_k": 20,
+        "top_p": 0.8
+      },
+      "think": false,
+      "truncate": false
+    },
+    "output_ceiling": 16384,
+    "reasoning": false,
+    "server_config": {},
+    "temperature": 0.7,
+    "version": 3
+  },
+  "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+  "kriya_version": "0.1.0",
+  "measured_limits": {
+    "bytes_per_token_ceiling": 8.0,
+    "bytes_per_token_floor": 1.6852,
+    "non_ascii_bytes_per_token_floor": 3.1889,
+    "reasoning_observed": false
+  },
+  "policy_version": "kriya-qualification/9",
+  "qualification_identity": "c62a33cf354bb336aa46b4bc7eee018f488ca59a6ebdfbe3c56887809244efde",
+  "qualification_policy": {
+    "cases": {
+      "anchored_edit_protocol": {
+        "max_tokens": 1024,
+        "reasoning_max_tokens": null
+      },
+      "cancellation_semantics": {
+        "first_delta_timeout_seconds": 120.0,
+        "health_check_max_tokens": 64,
+        "max_settle_seconds": 10.0,
+        "max_tokens": 1024,
+        "reasoning_max_tokens": null
+      },
+      "context_capacity": {
+        "headroom_tokens": 384,
+        "max_tokens": 64,
+        "min_fill_ratio": 0.9,
+        "reasoning_headroom_tokens": null,
+        "reasoning_max_tokens": null,
+        "request_timeout_seconds": 600.0
+      },
+      "finish_reason_stop": {
+        "max_tokens": 256,
+        "reasoning_max_tokens": null
+      },
+      "full_file_raw_content": {
+        "max_tokens": 1024,
+        "reasoning_max_tokens": null
+      },
+      "malformed_output_recovery": {
+        "max_tokens": 512,
+        "reasoning_max_tokens": null
+      },
+      "multiline_json": {
+        "max_tokens": 512,
+        "reasoning_max_tokens": null
+      },
+      "multiple_tool_calls": {
+        "max_tokens": 512,
+        "reasoning_max_tokens": null
+      },
+      "native_tool_calls": {
+        "max_tokens": 256,
+        "reasoning_max_tokens": null
+      },
+      "plain_completion": {
+        "max_tokens": 64,
+        "reasoning_max_tokens": null
+      },
+      "reasoning_behavior": {
+        "max_tokens": 2048,
+        "reasoning_max_tokens": null
+      },
+      "streaming_assembly": {
+        "max_tokens": 256,
+        "reasoning_max_tokens": null
+      },
+      "structured_json": {
+        "max_tokens": 256,
+        "reasoning_max_tokens": null
+      },
+      "tool_argument_integrity": {
+        "max_tokens": 512,
+        "reasoning_max_tokens": null
+      }
+    },
+    "measurement": {
+      "bytes_per_token_margin": 0.9,
+      "reasoning_tokens_headroom": 1.5
+    }
+  },
+  "qualification_policy_digest": "sha256:6bbcbaeb18c13336f32ab20d82fbeb98c7d5ba475d7e094670dde39901ef992f",
+  "qualified_at": "2026-11-05T05:07:14.352021+00:00",
+  "roles": [
+    "developer",
+    "planner"
+  ],
+  "schema_version": 2,
+  "summary": {
+    "FAIL": 0,
+    "PASS": 17,
+    "UNAVAILABLE": 4
+  }
+}
