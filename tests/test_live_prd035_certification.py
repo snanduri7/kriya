@@ -24,16 +24,20 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from _chaos_harness import changed_paths, git_workspace, role_of, snapshot_tree
+from _certification_harness import (
+    developer_model_spy_installed,
+    fails_until_developer_reaches,
+)
+from _certification_harness import fail_first_compiles as _fail_first_compiles
+from _chaos_harness import changed_paths, git_workspace, snapshot_tree
 from _live_identity import qualified_live_config, release_fallback_binding
 
 from kriya.config.config import FallbackModelConfig
 from kriya.control.persistence import scan_run_records
 from kriya.core.execution_environment import environment_for_fingerprint
-from kriya.core.inference_runtime import register_runtime_adapter, runtime_adapter
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.core.model_runtime import OllamaRuntimeAdapter, clear_model_runtime_cache, resolve_configured_model_runtime
+from kriya.core.model_runtime import resolve_configured_model_runtime
 from kriya.core.state_paths import trace_db_path
 from kriya.metrics.derive import derive_metrics
 from kriya.metrics.evidence import load_trace_runs
@@ -128,20 +132,6 @@ def case(request, tmp_path, monkeypatch):
 
 def certification_case(case_id, task_class):
     return pytest.mark.certification_case(case_id, task_class)
-
-
-def _fail_first_compiles(fail_while):
-    """Patch the compile gate: a failure while ``fail_while()`` holds."""
-    from kriya.tools.validate import PolymorphicValidator
-
-    real = PolymorphicValidator.run_compile_check
-
-    def gate(self, *args, **kwargs):
-        if fail_while():
-            return {"success": False, "output": "calc.py:1: error: injected compile failure (certification C5/C6)"}
-        return real(self, *args, **kwargs)
-
-    return patch.object(PolymorphicValidator, "run_compile_check", gate)
 
 
 # --- the matrix ----------------------------------------------------------------------------
@@ -286,19 +276,6 @@ def test_c5_targeted_retry(case):
     assert passed and len(result.get("failure_report") or []) >= 1, retries
 
 
-class _DeveloperModelSpy(OllamaRuntimeAdapter):
-    """The packaged runtime, recording which model each Developer request went to."""
-
-    def __init__(self):
-        super().__init__()
-        self.developer_models = []
-
-    async def complete(self, client, request):
-        if role_of(request) == "developer":
-            self.developer_models.append(request.model)
-        return await super().complete(client, request)
-
-
 @certification_case("C6", "fallback_transition")
 def test_c6_configured_fallback_transition(case):
     case.config.llm_chain = [RELEASE_FALLBACK or FallbackModelConfig(
@@ -310,20 +287,15 @@ def test_c6_configured_fallback_transition(case):
         "calc.py": "def add(a, b):\n    return a + b\n",
         "test_calc.py": "from calc import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n",
     })
-    spy = _DeveloperModelSpy()
-    packaged = runtime_adapter("ollama")
-    register_runtime_adapter(spy)
-    clear_model_runtime_cache()
-    try:
-        # The primary's candidates fail the compile gate until the attempt goes to the fallback.
-        with _fail_first_compiles(lambda: not spy.developer_models or spy.developer_models[-1] != FALLBACK_MODEL):
+    developer_models = []
+    # The primary's candidates fail the compile gate until the attempt goes to the fallback. The spy wraps the adapter the
+    # configuration names (kriya-ollama-native/3 -> ollama_native), not an assumed packaged one.
+    with developer_model_spy_installed(case.config, developer_models):
+        with _fail_first_compiles(fails_until_developer_reaches(developer_models, FALLBACK_MODEL)):
             result = case.run(ws, "Add a function sub(a, b) returning a - b to calc.py.")
-    finally:
-        register_runtime_adapter(packaged)
-        clear_model_runtime_cache()
     passed = case.hidden_tests(ws, "from calc import sub\ndef test_sub():\n    assert sub(5, 3) == 2\n")
-    case.finish(result, ws, hidden_acceptance_passed=passed, developer_models=sorted(set(spy.developer_models)))
-    assert FALLBACK_MODEL in spy.developer_models and passed
+    case.finish(result, ws, hidden_acceptance_passed=passed, developer_models=sorted(set(developer_models)))
+    assert FALLBACK_MODEL in developer_models and passed
     assert case.record["fallback_transitions"] >= 1
 
 
