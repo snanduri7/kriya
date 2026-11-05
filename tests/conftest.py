@@ -745,6 +745,7 @@ def pytest_select_census_ids(config, items):
 
 _SKIPS = pytest.StashKey[list]()
 _CERTIFICATION_CASES = pytest.StashKey[list]()
+_KRIYA_IDENTITY_START = pytest.StashKey[dict]()
 _ALLOWLIST = pytest.StashKey[tuple]()
 
 
@@ -761,6 +762,19 @@ def pytest_configure(config):
     config.stash[_CERTIFICATION_CASES] = []
     # A malformed allowlist fails certification up front, never later.
     config.stash[_ALLOWLIST] = load_allowlist() if _certification_mode(config) else ()
+
+
+def pytest_sessionstart(session):
+    """PRD-035 revision binding: a live matrix records the Kriya identity it ran on, and refuses to start on a tracked worktree that is not its
+    commit (such a run could never be bound to a revision)."""
+    if not session.config.getoption("--model-certification"):
+        return
+    from _model_certification import kriya_identity
+
+    identity = kriya_identity(str(session.config.rootpath), os.environ.get("KRIYA_RELEASE_CONFIG"))
+    if not identity["tracked_worktree_clean"]:
+        pytest.exit("PRD-035: the tracked worktree differs from HEAD; commit or stash first (the certification binds to the exact commit and tree)", returncode=2)
+    session.config.stash[_KRIYA_IDENTITY_START] = identity
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -1000,9 +1014,12 @@ def pytest_sessionfinish(session, exitstatus):
     model_dir = session.config.getoption("--model-certification")
     if model_dir:
         from _model_certification import build_report as build_model_report
+        from _model_certification import kriya_identity
         from _model_certification import write_report as write_model_report
 
-        write_model_report(model_dir, build_model_report(session.config.stash[_CERTIFICATION_CASES]))
+        start = session.config.stash.get(_KRIYA_IDENTITY_START, None)
+        bound = None if start is None else {"start": start, "end": kriya_identity(str(session.config.rootpath), os.environ.get("KRIYA_RELEASE_CONFIG"))}
+        write_model_report(model_dir, build_model_report(session.config.stash[_CERTIFICATION_CASES], bound))
     certification_dir = session.config.getoption("--certification-report")
     if certification_dir:
         from _certification import write_skips

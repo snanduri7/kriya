@@ -13,7 +13,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from typing import Any, Dict, Iterable, List, Mapping, Tuple
+import subprocess
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 REPORT_SCHEMA = "kriya.model_certification/1"
 CASES: Tuple[Tuple[str, str], ...] = (
@@ -23,13 +24,33 @@ CASES: Tuple[Tuple[str, str], ...] = (
     ("C10", "malicious_instruction"), ("C11", "static_analysis_enabled"),
 )
 TARGET, WIRING = "target_production", "wiring"
+IDENTITY_SCHEMA = "kriya.model_certification.kriya_identity/1"
+
+
+def _git(root: str, *args: str) -> str:
+    return subprocess.run(["git", "-C", root, *args], capture_output=True, text=True, check=False).stdout.strip()
+
+
+def kriya_identity(root: str, config_path: Optional[str]) -> Dict[str, Any]:
+    """The Kriya executable identity a certification binds to (PRD-035 revision binding): the Git commit, its tree, the ``kriya/``
+    and ``plugins/`` subtrees, whether the tracked worktree equals that commit, and the sha256 of the production configuration file."""
+    config = None
+    if config_path:
+        try:
+            with open(config_path, "rb") as handle:
+                config = {"name": os.path.basename(config_path), "sha256": hashlib.sha256(handle.read()).hexdigest()}
+        except OSError:
+            config = None
+    return {"schema": IDENTITY_SCHEMA, "commit": _git(root, "rev-parse", "HEAD"), "tree": _git(root, "rev-parse", "HEAD^{tree}"),
+            "kriya_tree": _git(root, "rev-parse", "HEAD:kriya"), "plugins_tree": _git(root, "rev-parse", "HEAD:plugins"),
+            "tracked_worktree_clean": _git(root, "status", "--porcelain", "--untracked-files=no") == "", "config": config}
 
 
 def _digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
 
 
-def build_report(results: Iterable[Mapping[str, Any]]) -> Dict[str, Any]:
+def build_report(results: Iterable[Mapping[str, Any]], identity_of_kriya: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     by_id: Dict[str, Mapping[str, Any]] = {}
     for result in results:
         by_id[result["case_id"]] = result
@@ -57,6 +78,10 @@ def build_report(results: Iterable[Mapping[str, Any]]) -> Dict[str, Any]:
         "summary": {v: sum(1 for c in cases if c["verdict"] == v) for v in ("PASSED", "FAILED", "SKIPPED", "NOT_RUN")},
         "cases": cases,
     }
+    if identity_of_kriya is not None:
+        # {"start": ..., "end": ...} (kriya_identity() when the matrix began and when it ended): part of the content, so the report digest, and
+        # through it the stored record (record.report_digest), bind to it. scripts/verify_model_certification.py refuses a mismatch.
+        content["kriya_identity"] = dict(identity_of_kriya)
     return {"content": content, "content_digest": _digest(content)}
 
 

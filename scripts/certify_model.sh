@@ -52,6 +52,13 @@ key = CertificationKey(model=identity["model"], runtime_digest=identity["runtime
                        case_set_version=CASE_SET_VERSION)
 print(f"[certify-model] {content['status']}: record {save_certification(key, report)}")
 PY
+# PRD-035 revision binding: the report must bind the exact Kriya commit/tree/kriya tree, a clean tracked worktree and the production configuration
+# digest, and the stored record must seal that report. Fail closed (see scripts/verify_model_certification.py).
+if [ -f "$OUT/model-certification.json" ]; then
+  verify_args=(--report "$OUT/model-certification.json" --repo "$PWD" --out "$OUT/revision-binding.json")
+  [ -n "${KRIYA_RELEASE_CONFIG:-}" ] && verify_args+=(--config "$KRIYA_RELEASE_CONFIG")
+  .venv/bin/python scripts/verify_model_certification.py "${verify_args[@]}" || status=1
+fi
 if [ -n "${KRIYA_RELEASE_CANDIDATE:-}" ]; then
   ENDED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   .venv/bin/python scripts/release_candidate.py identity --out "$OUT/release-candidate-after.json"
