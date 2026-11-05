@@ -160,3 +160,65 @@ def test_the_c6_case_uses_the_shared_spy_and_not_the_old_binding():
     c6 = source[source.index("def test_c6_configured_fallback_transition"):source.index('@certification_case("C7"')]
     assert "developer_model_spy_installed(case.config" in c6 and "fails_until_developer_reaches(" in c6
     assert not re.search(r'runtime_adapter\("ollama"\)|_DeveloperModelSpy\(OllamaRuntimeAdapter\)', source)
+
+
+# --- C11: the Semgrep provider needs its digest-pinned image (S8, 6492c78: there is no host provider) -------------------
+#
+# Defect (MEASURED, matrix attempt 1, 2026-11-05): C11 configured only `version` and `rule_packs`; the adapter refuses without `providers.semgrep.image`, so
+# C11 failed `static_analysis_unavailable / CONTAINMENT_UNAVAILABLE` before any commit, whatever the model did. The controls call the adapter's own precondition
+# (`_containment_ready`, which runs before any container) with C11's REAL settings constant: no model, no Docker.
+
+def _semgrep_refusal(settings, tmp_path):
+    from kriya.static_analysis.adapters.semgrep import SemgrepAdapter, SemgrepSettings
+    from kriya.static_analysis.port import ExecutionContext
+    from kriya.tools.containment_oci import OCIContainmentBackend
+
+    context = ExecutionContext(containment_backend=OCIContainmentBackend(), workspace_root=str(tmp_path))
+    return SemgrepAdapter(SemgrepSettings(**settings), context)._containment_ready()  # noqa: SLF001 - the precondition the probe and the scan both enforce
+
+
+def _c11_settings():
+    import test_live_prd035_certification as live
+
+    return live.SEMGREP_PROVIDER_SETTINGS
+
+
+def _authoritative_semgrep_pins():
+    manifest = (Path(__file__).parent / "certification" / "pinned_images.txt").read_text().splitlines()
+    return [line for line in manifest if line.startswith("semgrep/semgrep@sha256:")]
+
+
+def test_the_old_c11_configuration_without_an_image_is_refused_deterministically(tmp_path):
+    old = {key: value for key, value in _c11_settings().items() if key != "image"}  # C11 exactly as it was written on 2026-09-27
+    assert "providers.semgrep.image is not set" in _semgrep_refusal(old, tmp_path)
+
+
+def test_the_corrected_c11_configuration_is_ready(tmp_path):
+    assert _semgrep_refusal(dict(_c11_settings()), tmp_path) is None
+
+
+def test_removing_the_image_from_the_c11_settings_brings_the_refusal_back(tmp_path, monkeypatch):
+    import test_live_prd035_certification as live
+
+    mutated = {key: value for key, value in live.SEMGREP_PROVIDER_SETTINGS.items() if key != "image"}
+    monkeypatch.setattr(live, "SEMGREP_PROVIDER_SETTINGS", mutated)
+    refusal = _semgrep_refusal(dict(_c11_settings()), tmp_path)
+    assert refusal is not None and "image is not set" in refusal
+
+
+@pytest.mark.parametrize("image", ["semgrep/semgrep:1.178.0", "semgrep/semgrep", "semgrep/semgrep@sha256:abc", "semgrep/semgrep@sha256:" + "G" * 64])
+def test_an_unpinned_or_malformed_image_is_refused(tmp_path, image):
+    with pytest.raises(ValueError, match="pinned by digest"):
+        _semgrep_refusal({**_c11_settings(), "image": image}, tmp_path)
+
+
+def test_the_c11_image_equals_the_single_authoritative_pin_in_pinned_images_txt():
+    pins = _authoritative_semgrep_pins()
+    assert len(pins) == 1 and _c11_settings()["image"] == pins[0]
+    assert _c11_settings()["image"] != "semgrep/semgrep@sha256:" + "0" * 64  # a well-formed but wrong digest would not equal the pin
+
+
+def test_the_c11_case_uses_the_shared_settings_constant():
+    source = (Path(__file__).parent / "test_live_prd035_certification.py").read_text()
+    c11 = source[source.index("def test_c11_static_analysis_enabled"):]
+    assert 'providers={"semgrep": dict(SEMGREP_PROVIDER_SETTINGS)}' in c11 and '"rule_packs"' not in c11

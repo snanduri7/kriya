@@ -14,6 +14,7 @@ event evidence. It never checks model prose. It records its per-case
 metrics through the PRD-033 deriver over its own persisted trace rows.
 """
 import asyncio
+import importlib.util
 import json
 import os
 import subprocess
@@ -51,6 +52,18 @@ FALLBACK_MODEL = RELEASE_FALLBACK.model if RELEASE_FALLBACK else os.environ.get(
     "KRIYA_LIVE_FALLBACK_MODEL", "qwen3.6:35b-a3b-q4_K_M")
 PINNED_SEMGREP = "1.178.0"
 SEMGREP_RULES = Path(__file__).parent / "fixtures" / "static_analysis" / "semgrep" / PINNED_SEMGREP / "rules"
+
+
+def _pinned_semgrep_image():
+    """The canonical digest-pinned Semgrep image: the entry of tests/certification/pinned_images.txt, the one source CI pulls and certify.sh verifies."""
+    spec = importlib.util.spec_from_file_location("pinned_images", Path(__file__).resolve().parents[1] / "scripts" / "pinned_images.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return next(line for line in module.pinned_images() if line.startswith("semgrep/semgrep@sha256:"))
+
+
+# S8 (6492c78): Semgrep runs only from its digest-pinned image under containment; the adapter refuses without providers.semgrep.image.
+SEMGREP_PROVIDER_SETTINGS = {"version": PINNED_SEMGREP, "rule_packs": [str(SEMGREP_RULES)], "image": _pinned_semgrep_image()}
 
 
 # --- the case harness ------------------------------------------------------------------
@@ -395,7 +408,7 @@ def test_c11_static_analysis_enabled(case):
 
     case.config.static_analysis = StaticAnalysisConfig(
         enabled=True, provider="semgrep", requirement="required",
-        providers={"semgrep": {"version": PINNED_SEMGREP, "rule_packs": [str(SEMGREP_RULES)]}},
+        providers={"semgrep": dict(SEMGREP_PROVIDER_SETTINGS)},
     )
     ws = git_workspace(case.tmp_path, {
         "calc.py": "def add(a, b):\n    return a + b\n",
