@@ -1,0 +1,44 @@
+"""PRD-035 read-only preflight #2 (release configuration). Contacts only /api/version,tags,show,ps. No inference."""
+import hashlib, json, os, subprocess, sys, tempfile, urllib.request
+sys.path.insert(0, "tests")
+import _live_identity as li
+from kriya.config.config import load_config
+from kriya.core import model_qualification as mq
+from kriya.core.execution_environment import environment_for_fingerprint
+from kriya.core.inference_settings import role_inference_settings
+from kriya.core.model_certification import CASE_SET_VERSION
+from kriya.core.model_runtime import clear_model_runtime_cache, resolve_configured_model_runtime
+from _model_certification import CASES
+CFG = os.environ["KRIYA_RELEASE_CONFIG"]
+sh = lambda *a: subprocess.run(a, capture_output=True, text=True).stdout.strip()
+tmp = tempfile.mkdtemp(); op = os.path.join(tmp, "operator.yaml"); open(op, "w").write("{}\n")
+harness = load_config(op); primary = li.bind_primary(harness)                    # exactly what the matrix harness builds
+fb = li.release_fallback_binding(); harness.llm_chain = [fb]
+prod = load_config(CFG)                                                           # the production operator file itself
+tags = {m["name"]: m for m in json.load(urllib.request.urlopen("http://localhost:11434/api/tags"))["models"]}
+def ident(cfg, model):
+    clear_model_runtime_cache()
+    fp = resolve_configured_model_runtime(cfg, model, fresh=True)
+    st = role_inference_settings(cfg, "developer", model)
+    a = mq.assess(fp, mq.required_capabilities(cfg, "developer", model), settings=st)
+    return fp, st, a
+out = {"production_config": {"path": CFG, "sha256": hashlib.sha256(open(CFG, "rb").read()).hexdigest(),
+                              "llm.model": prod.llm.model, "llm.inference_runtime": prod.llm.inference_runtime,
+                              "llm.context_window_cfg": prod.llm.context_window, "llm.max_tokens": prod.llm.max_tokens,
+                              "llm_chain": [{"model": e.model, "inference_runtime": e.inference_runtime, "context_window": e.context_window} for e in prod.llm_chain],
+                              "agent_llms_keys_ignored_by_harness": sorted((getattr(prod, "agent_llms", None) or {}).keys()) if isinstance(getattr(prod, "agent_llms", None), dict) else str(type(getattr(prod, "agent_llms", None)))}}
+for label, model in (("primary", primary), ("fallback", fb.model)):
+    fp, st, a = ident(harness, model)
+    fpp, stp, ap = ident(prod, model)
+    out[label] = {"model": model, "ollama_artifact_digest_tags": tags[model]["digest"], "fingerprint_artifact_digest": fp.artifact_digest,
+        "weights_digest": fp.weights_digest, "runtime_fingerprint": fp.digest, "exact": fp.exact, "adapter": fp.adapter_version,
+        "effective_context_window": fp.effective_context_window, "inference_settings_digest": st.digest, "qualification": a.status,
+        "same_fingerprint_and_settings_under_production_file": (fpp.digest == fp.digest and stp.digest == st.digest),
+        "provider_version": fp.provider_version, "server_parameters": list(fp.server_parameters) if hasattr(fp, "server_parameters") else None}
+out["primary"]["max_tokens"] = harness.llm.max_tokens
+out["primary"]["environment_digest"] = environment_for_fingerprint(resolve_configured_model_runtime(harness, primary, fresh=True)).digest
+out["case_set_version"] = CASE_SET_VERSION; out["cases"] = [list(c) for c in CASES]
+out["repo"] = {"head": sh("git", "rev-parse", "HEAD"), "tree": sh("git", "rev-parse", "HEAD^{tree}"), "kriya_tree": sh("git", "rev-parse", "HEAD:kriya"),
+               "kriya_tree_prd034_230e54f": sh("git", "rev-parse", "230e54f:kriya"), "dirty_tracked": sh("git", "status", "--porcelain", "--untracked-files=no") or "clean"}
+out["conflicts_with_signed_matrix"] = [] 
+print(json.dumps(out, indent=1, default=str))

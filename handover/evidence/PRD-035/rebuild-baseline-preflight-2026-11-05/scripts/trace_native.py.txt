@@ -1,0 +1,32 @@
+"""PRD-035: trace the native /api/chat request the matrix would send. NO inference: the adapter's complete() is replaced by a recorder that returns a canned reply; only read-only identity endpoints are contacted (/api/version,tags,show,ps)."""
+import asyncio, json, os, sys, tempfile
+sys.path.insert(0, "tests")
+import _live_identity as li
+from kriya.config.config import load_config
+from kriya.core.inference_runtime import ChatResponse, register_runtime_adapter, runtime_adapter
+from kriya.core.llm import LLMClient
+from kriya.core.model_runtime import OllamaNativeRuntimeAdapter, clear_model_runtime_cache, native_request_plan, resolve_configured_model_runtime
+tmp = tempfile.mkdtemp(); op = os.path.join(tmp, "operator.yaml"); open(op, "w").write("{}\n")
+cfg = load_config(op); model = li.bind_primary(cfg)
+captured = []
+class Recorder(OllamaNativeRuntimeAdapter):
+    async def complete(self, client, request):
+        payload = self._payload(request, stream=False)
+        payload["messages"] = f"<{len(payload['messages'])} messages elided>"
+        captured.append({"url": self._url(client), "payload": payload, "request_temperature": request.temperature,
+                         "request_max_tokens": request.max_tokens, "request_extra_body": request.extra_body})
+        return ChatResponse(content="ok", finish_reason="stop", completion_tokens=1, prompt_tokens=10)
+original = runtime_adapter(cfg.llm.inference_runtime or None)
+register_runtime_adapter(Recorder()); clear_model_runtime_cache()
+try:
+    result = asyncio.run(LLMClient(cfg).complete_result("Developer agent", "ping"))
+    status = str(getattr(result, "status", result))
+finally:
+    register_runtime_adapter(original); clear_model_runtime_cache()
+fp = resolve_configured_model_runtime(cfg, model, fresh=True)
+plan = native_request_plan(cfg.llm.extra_body, temperature=cfg.llm.temperature, reasoning_flag=False,
+                           requested_context_window=cfg.llm.context_window or 32768, fingerprint=fp)
+states = [{"setting": s.name, "requested": s.requested, "effective": getattr(s, "effective", None), "provenance": str(getattr(s, "provenance", ""))} for s in plan.states] if hasattr(plan, "states") else str(plan)[:1500]
+print(json.dumps({"call_status": status, "captured_requests": captured, "kriya_setting_provenance": states,
+                  "served_model_parameters": [str(p) for p in (fp.server_parameters if hasattr(fp, "server_parameters") else [])] or "see fingerprint_fields.server_parameters",
+                  "config_llm": {"temperature": cfg.llm.temperature, "extra_body": cfg.llm.extra_body, "max_tokens": cfg.llm.max_tokens, "context_window": cfg.llm.context_window}}, indent=1, default=str))

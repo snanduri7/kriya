@@ -1,0 +1,60 @@
+"""PRD-035 read-only preflight: /api/version,tags,show,ps only. No inference."""
+import json, os, platform, subprocess, sys, tempfile
+sys.path.insert(0, "tests")
+os.environ.setdefault("KRIYA_LIVE_LLM_MODEL", "qwen3-coder:30b-kriya-e52213655394")
+import _live_identity as li
+from kriya.config.config import FallbackModelConfig, load_config
+from kriya.core import model_qualification as mq
+from kriya.core.execution_environment import environment_for_fingerprint
+from kriya.core.inference_settings import role_inference_settings
+from kriya.core.model_certification import CASE_SET_VERSION, CertificationKey, certification_status
+from kriya.core.model_runtime import clear_model_runtime_cache, resolve_configured_model_runtime
+
+def sh(*a):
+    try: return subprocess.run(a,capture_output=True,text=True,timeout=60).stdout.strip().splitlines()[0]
+    except Exception as e: return f"UNAVAILABLE: {e}"
+out = {}
+tmp = tempfile.mkdtemp()
+cfg = load_config(os.path.join(tmp, "none.yaml")) if False else None
+op = os.path.join(tmp, "operator.yaml"); open(op, "w").write("{}\n")
+cfg = load_config(op)
+model = li.bind_primary(cfg)
+clear_model_runtime_cache()
+fp = resolve_configured_model_runtime(cfg, model, fresh=True)
+settings = role_inference_settings(cfg, "developer", model)
+assess = mq.assess(fp, mq.required_capabilities(cfg, "developer", model), settings=settings)
+env = environment_for_fingerprint(fp)
+out["primary"] = dict(model=model, base_url=cfg.llm.base_url, runtime_fingerprint=fp.digest, exact=fp.exact,
+    adapter=fp.adapter_version, effective_context_window=fp.effective_context_window,
+    max_tokens=cfg.llm.max_tokens, configured_context_window=cfg.llm.context_window,
+    inference_settings_digest=settings.digest, qualification=assess.status,
+    problems=li.identity_problems(fp, assess), environment_digest=env.digest, environment=env.to_dict(),
+    fingerprint_fields={k: (v if not isinstance(v,(dict,list)) else str(v)[:200]) for k, v in fp.to_dict().items()} if hasattr(fp,"to_dict") else str(fp)[:600])
+# fallback (C6 config as the test builds it)
+fb = FallbackModelConfig(model="qwen3.6:35b-a3b-q4_K_M", base_url=cfg.llm.base_url, api_key=cfg.llm.api_key, context_window=32768, temperature=0.7,
+    extra_body={"reasoning_effort": "none", "options": {"num_ctx": 32768, "top_p": 0.8, "top_k": 20}})
+try:
+    cfg.llm_chain = [fb]
+    clear_model_runtime_cache()
+    ffp = resolve_configured_model_runtime(cfg, fb.model, fresh=True)
+    fset = role_inference_settings(cfg, "developer", fb.model)
+    fa = mq.assess(ffp, mq.required_capabilities(cfg, "developer", fb.model), settings=fset)
+    out["fallback"] = dict(model=fb.model, runtime_fingerprint=ffp.digest, exact=ffp.exact, adapter=ffp.adapter_version,
+        effective_context_window=ffp.effective_context_window, inference_settings_digest=fset.digest, qualification=fa.status,
+        config=dict(context_window=fb.context_window, temperature=fb.temperature, extra_body=fb.extra_body))
+except Exception as e:
+    out["fallback"] = {"error": repr(e)}
+key = CertificationKey(model=model, runtime_digest=fp.digest, inference_settings_digest=settings.digest,
+                       environment_digest=env.digest, case_set_version=CASE_SET_VERSION)
+out["case_set_version"] = CASE_SET_VERSION
+try: out["existing_certification_status_for_this_key"] = str(certification_status(key))[:300]
+except Exception as e: out["existing_certification_status_for_this_key"] = f"ERR {e!r}"
+out["host"] = dict(platform=platform.platform(), machine=platform.machine(), python=sys.version.split()[0],
+    sysctl_model=sh("sysctl","-n","hw.model"), chip=sh("sysctl","-n","machdep.cpu.brand_string"), mem_bytes=sh("sysctl","-n","hw.memsize"),
+    java=sh("java","-version") if False else subprocess.run(["java","-version"],capture_output=True,text=True).stderr.splitlines()[0:1],
+    mvn=sh("mvn","-v"), docker=sh("docker","version","--format","{{.Server.Version}}"), semgrep=sh(".venv/bin/semgrep","--version"),
+    ollama=sh("ollama","--version"), macos=sh("sw_vers","-productVersion"))
+out["repo"] = dict(head=sh("git","rev-parse","HEAD"), tree=sh("git","rev-parse","HEAD^{tree}"),
+    kriya_tree_230e54f=sh("git","rev-parse","230e54f:kriya"), kriya_tree_head=sh("git","rev-parse","HEAD:kriya"),
+    dirty_tracked=subprocess.run(["git","status","--porcelain","--untracked-files=no"],capture_output=True,text=True).stdout.strip() or "clean")
+print(json.dumps(out, indent=1, default=str))

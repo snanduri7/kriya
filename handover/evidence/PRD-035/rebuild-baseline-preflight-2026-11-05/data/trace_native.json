@@ -1,0 +1,59 @@
+Served context window of qwen3-coder:30b-kriya-e52213655394 after the call is unverified (not_loaded: None)
+
+[Usage: 10 input tokens, 1 output tokens | Time: 0.02s | Finish: stop]
+{
+ "call_status": "CompletionStatus.OK",
+ "captured_requests": [
+  {
+   "url": "http://localhost:11434/api/chat",
+   "payload": {
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "messages": "<2 messages elided>",
+    "stream": false,
+    "options": {
+     "num_ctx": 32768,
+     "top_k": 20,
+     "top_p": 0.8,
+     "temperature": 0.7,
+     "num_predict": 16384
+    },
+    "truncate": false,
+    "think": false
+   },
+   "request_temperature": 0.7,
+   "request_max_tokens": 16384,
+   "request_extra_body": {
+    "truncate": false,
+    "think": false,
+    "options": {
+     "num_ctx": 32768,
+     "top_k": 20,
+     "top_p": 0.8
+    }
+   }
+  }
+ ],
+ "kriya_setting_provenance": "ProviderRequestPlan(wire_body={'truncate': False, 'think': False, 'options': {'num_ctx': 32768, 'top_k': 20, 'top_p': 0.8}}, settings=(SettingState(name='context_window', requested=32768, effective=32768, provenance=<Provenance.REQUEST: 'request'>, support=<Support.SUPPORTED: 'supported'>, server_config_observed=None), SettingState(name='min_p', requested=None, effective=None, provenance=<Provenance.UNVERIFIED: 'unverified'>, support=<Support.SUPPORTED: 'supported'>, server_config_observed=None), SettingState(name='presence_penalty', requested=None, effective=None, provenance=<Provenance.UNVERIFIED: 'unverified'>, support=<Support.UNSUPPORTED: 'unsupported'>, server_config_observed=None), SettingState(name='reasoning', requested='none', effective='none', provenance=<Provenance.REQUEST: 'request'>, support=<Support.SUPPORTED: 'supported'>, server_config_observed=None), SettingState(name='repeat_penalty', requested=None, effective=1.05, provenance=<Provenance.SERVER_MODEL_CONFIG: 'server_model_config'>, support=<Support.SUPPORTED: 'supported'>, server_config_observed=None), SettingState(name='temperature', requested=0.7, effective=0.7, provenance=<Provenance.REQUEST: 'request'>, support=<Support.SUPPORTED: 'supported'>, server_config_observed=None), SettingState(name='top_k', requested=20, effective=20, provenance=<Provenance.REQUEST: 'request'>, support=<Support.SUPPORTED: 'supported'>, server_config_observed=None), SettingState(name='top_p', requested=0.8, effective=0.8, prov",
+ "served_model_parameters": [
+  "num_ctx 32768",
+  "repeat_penalty 1.05",
+  "stop \"<|endoftext|>\"",
+  "stop \"<|im_end|>\"",
+  "stop \"<|im_start|>\"",
+  "temperature 0.7",
+  "top_k 20",
+  "top_p 0.8"
+ ],
+ "config_llm": {
+  "temperature": 0.7,
+  "extra_body": {
+   "options": {
+    "num_ctx": 32768,
+    "top_p": 0.8,
+    "top_k": 20
+   }
+  },
+  "max_tokens": 16384,
+  "context_window": 32768
+ }
+}

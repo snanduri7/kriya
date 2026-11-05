@@ -1,0 +1,109 @@
+{
+ "primary": {
+  "model": "qwen3-coder:30b-kriya-e52213655394",
+  "base_url": "http://localhost:11434/v1",
+  "runtime_fingerprint": "0a6c8f43d663ffc3c39bcfdba61463719bdefe7f9e12522d2f767bb950830252",
+  "exact": true,
+  "adapter": "kriya-openai-compat/3",
+  "effective_context_window": 32768,
+  "max_tokens": 16384,
+  "configured_context_window": 32768,
+  "inference_settings_digest": "sha256:9e929b038e293a2c9a7caee18d9e0de3f14ff5fcf398d19cf2de977625315e5e",
+  "qualification": "MISSING",
+  "problems": [
+   "developer qualification is MISSING",
+   "runtime adapter 'kriya-openai-compat/3' != 'kriya-ollama-native/3'"
+  ],
+  "environment_digest": "sha256:79b6104aefaf54c6484de3be25b8f9eabd3733798742db7dbf1a91bd1d4ab2d9",
+  "environment": {
+   "os": "darwin",
+   "architecture": "arm64",
+   "inference_runtime": "ollama/0.40.14",
+   "accelerator_backend": "metal",
+   "accelerator_model": "Apple M1 Max",
+   "accelerator_count": 1,
+   "accelerator_memory_class_gib": 64,
+   "system_memory_class_gib": 64,
+   "unified_memory": true,
+   "runtime_parallelism": "unavailable",
+   "schema_version": 1,
+   "digest": "sha256:79b6104aefaf54c6484de3be25b8f9eabd3733798742db7dbf1a91bd1d4ab2d9",
+   "exact": true
+  },
+  "fingerprint_fields": {
+   "alias": "qwen3-coder:30b-kriya-e52213655394",
+   "endpoint": "http://localhost:11434/v1",
+   "provider": "ollama",
+   "provider_version": "0.40.14",
+   "artifact_digest": "sha256:141e95d786b871df832f727594b8229e6bd91097e1701738085661521ab00086",
+   "weights_digest": "sha256:1194192cf2a187eb02722edcc3f77b11d21f537048ce04b67ccf8ba78863006a",
+   "model_format": "gguf",
+   "family": "qwen3moe",
+   "parameter_size": "30.5B",
+   "quantization": "Q4_K_M",
+   "chat_template": "renderer:qwen3-coder",
+   "tool_call_parser": "parser:qwen3-coder",
+   "tokenizer_identity": "gpt2/qwen2",
+   "tokenizer_digest": "sha256:5e50ba4472f20e5cf4e76414c33b6937086a022a4f4ce7be4eba80472199bf6b",
+   "runtime_parameters_digest": "sha256:e78bb89813de74d2f001c9811a2e0a47f5de88bd4fd90f0a5ece1f6c07847645",
+   "served_capabilities": "['completion', 'tools']",
+   "server_parameters": "['num_ctx 32768', 'repeat_penalty 1.05', 'stop \"<|endoftext|>\"', 'stop \"<|im_end|>\"', 'stop \"<|im_start|>\"', 'temperature 0.7', 'top_k 20', 'top_p 0.8']",
+   "model_context_length": 262144,
+   "configured_context_window": 32768,
+   "effective_context_window": 32768,
+   "kriya_protocol": "capabilities-sha256:14c4e497e2628e2640513fe81e767d1c6910db77d2a4e866e6f77648c5aee3a0",
+   "adapter_version": "kriya-openai-compat/3",
+   "schema_version": 1,
+   "digest": "0a6c8f43d663ffc3c39bcfdba61463719bdefe7f9e12522d2f767bb950830252",
+   "exact": true,
+   "missing_components": "[]",
+   "probe_errors": "[]"
+  }
+ },
+ "fallback": {
+  "model": "qwen3.6:35b-a3b-q4_K_M",
+  "runtime_fingerprint": "f04dd0321412ae14040f8412591e883825b382e78f4173cc8908ec849f2f40b8",
+  "exact": true,
+  "adapter": "kriya-openai-compat/3",
+  "effective_context_window": null,
+  "inference_settings_digest": "sha256:9e929b038e293a2c9a7caee18d9e0de3f14ff5fcf398d19cf2de977625315e5e",
+  "qualification": "MISSING",
+  "config": {
+   "context_window": 32768,
+   "temperature": 0.7,
+   "extra_body": {
+    "reasoning_effort": "none",
+    "options": {
+     "num_ctx": 32768,
+     "top_p": 0.8,
+     "top_k": 20
+    }
+   }
+  }
+ },
+ "case_set_version": 1,
+ "existing_certification_status_for_this_key": "{'status': 'MISSING'}",
+ "host": {
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "python": "3.14.6",
+  "sysctl_model": "MacBookPro18,2",
+  "chip": "Apple M1 Max",
+  "mem_bytes": "68719476736",
+  "java": [
+   "openjdk version \"17.0.10\" 2024-01-16"
+  ],
+  "mvn": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)",
+  "docker": "27.5.1",
+  "semgrep": "UNAVAILABLE: [Errno 2] No such file or directory: '.venv/bin/semgrep'",
+  "ollama": "ollama version is 0.40.14",
+  "macos": "27.0.1"
+ },
+ "repo": {
+  "head": "996a558629ce4be2d87bb543d018eeec3dfbdc8f",
+  "tree": "8fd4c22e500b059f4275e7da91b0070d4fed7453",
+  "kriya_tree_230e54f": "850b2a1712e36333cc77488c39a3d18ac31f859b",
+  "kriya_tree_head": "850b2a1712e36333cc77488c39a3d18ac31f859b",
+  "dirty_tracked": "clean"
+ }
+}
