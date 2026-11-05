@@ -1,0 +1,136 @@
+{
+ "production_config": {
+  "path": "~/.kriya/operator/graphify-qwen3coder-native-production.yaml",
+  "sha256": "076e48ac125c8df3a7383c47ba771c03a9cf3a2641f29bd0d368bb5933c83d4e",
+  "llm.model": "qwen3-coder:30b-kriya-e52213655394",
+  "llm.inference_runtime": "ollama_native",
+  "llm.context_window_cfg": 32768,
+  "llm.max_tokens": 16384,
+  "llm_chain": [
+   {
+    "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "inference_runtime": "ollama_native",
+    "context_window": 32768
+   }
+  ],
+  "agent_llms_keys_ignored_by_harness": "<class 'kriya.config.config.AgentRolesConfig'>"
+ },
+ "primary": {
+  "model": "qwen3-coder:30b-kriya-e52213655394",
+  "ollama_artifact_digest_tags": "141e95d786b871df832f727594b8229e6bd91097e1701738085661521ab00086",
+  "fingerprint_artifact_digest": "sha256:141e95d786b871df832f727594b8229e6bd91097e1701738085661521ab00086",
+  "weights_digest": "sha256:1194192cf2a187eb02722edcc3f77b11d21f537048ce04b67ccf8ba78863006a",
+  "runtime_fingerprint": "c3df7a695741d406dce387bee68117f4bcf9817be736886b75af021d6bf1420a",
+  "exact": true,
+  "adapter": "kriya-ollama-native/3",
+  "effective_context_window": 32768,
+  "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+  "qualification": "MISSING",
+  "same_fingerprint_and_settings_under_production_file": true,
+  "provider_version": "0.40.14",
+  "server_parameters": [
+   "num_ctx 32768",
+   "repeat_penalty 1.05",
+   "stop \"<|endoftext|>\"",
+   "stop \"<|im_end|>\"",
+   "stop \"<|im_start|>\"",
+   "temperature 0.7",
+   "top_k 20",
+   "top_p 0.8"
+  ],
+  "max_tokens": 16384,
+  "environment_digest": "sha256:79b6104aefaf54c6484de3be25b8f9eabd3733798742db7dbf1a91bd1d4ab2d9"
+ },
+ "fallback": {
+  "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+  "ollama_artifact_digest_tags": "0314ad2492d1fc443c33fc3026689db99374337a7c18887b44a865264b35ab78",
+  "fingerprint_artifact_digest": "sha256:0314ad2492d1fc443c33fc3026689db99374337a7c18887b44a865264b35ab78",
+  "weights_digest": "sha256:3f87bb0b360974ed352d5259efb632059b0a52f06dab044491d2de2e7c5e5f77",
+  "runtime_fingerprint": "595304688a6fe3971af9b610c1fc91d0284bb0c838f610c5994913b5ee5d9879",
+  "exact": true,
+  "adapter": "kriya-ollama-native/3",
+  "effective_context_window": 32768,
+  "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+  "qualification": "MISSING",
+  "same_fingerprint_and_settings_under_production_file": true,
+  "provider_version": "0.40.14",
+  "server_parameters": [
+   "min_p 0",
+   "num_ctx 32768",
+   "presence_penalty 1.5",
+   "repeat_penalty 1",
+   "temperature 1",
+   "top_k 20",
+   "top_p 0.95"
+  ]
+ },
+ "case_set_version": 1,
+ "cases": [
+  [
+   "C1",
+   "bug_fix"
+  ],
+  [
+   "C2",
+   "multi_file_feature"
+  ],
+  [
+   "C3",
+   "brownfield_extension"
+  ],
+  [
+   "C4",
+   "exact_requirement"
+  ],
+  [
+   "C5",
+   "targeted_retry"
+  ],
+  [
+   "C6",
+   "fallback_transition"
+  ],
+  [
+   "C7",
+   "contained_compile_test"
+  ],
+  [
+   "C8",
+   "pre_post_regression"
+  ],
+  [
+   "C9",
+   "resume_safety"
+  ],
+  [
+   "C10",
+   "malicious_instruction"
+  ],
+  [
+   "C11",
+   "static_analysis_enabled"
+  ]
+ ],
+ "repo": {
+  "head": "bf018dcfa98c0e5bd63fc7b8503508fcca636d1a",
+  "tree": "109b3cb8cc08fb8fcff2b6bf07c0c4469bba7ed1",
+  "kriya_tree": "850b2a1712e36333cc77488c39a3d18ac31f859b",
+  "kriya_tree_prd034_230e54f": "850b2a1712e36333cc77488c39a3d18ac31f859b",
+  "dirty_tracked": "clean"
+ },
+ "conflicts_with_signed_matrix": [],
+ "checks": {
+  "primary_fingerprint_as_expected": true,
+  "fallback_fingerprint_as_expected": true,
+  "primary_qualification_QUALIFIED": false,
+  "fallback_qualification_QUALIFIED": false,
+  "both_native_3_ctx_32768": true,
+  "settings_digest_as_expected": true,
+  "environment_digest_as_expected": true,
+  "production_config_sha_as_expected": true,
+  "kriya_tree_is_the_prd034_certified_tree": true,
+  "tracked_worktree_clean": true,
+  "eleven_cases_version_1": true
+ },
+ "READY_FOR_THE_SINGLE_MATRIX": false
+}

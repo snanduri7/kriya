@@ -41,3 +41,15 @@ Environment digest `sha256:79b6104aefaf54c6484de3be25b8f9eabd3733798742db7dbf1a9
 
 ## Next (owner)
 Qualify both models on Ollama 0.40.14, re-run the preflight, then run the single matrix attempt. Commands are in the hand-over message.
+
+## Owner rulings recorded (2026-11-05)
+- **Terminal PRD-035 environment evidence (accepted):** the actual path is `/api/chat`; `temperature`, `top_p`, `top_k`, `num_ctx`, `num_predict` and `think` are explicit in the request; Ollama 0.40.14's `/v1` omitted-sampler change therefore does not alter this PRD-035 native request; the inherited model parameters (`repeat_penalty`, stop tokens; for the fallback also `presence_penalty` and `min_p`) remain part of the served-model/runtime identity (they are in the fingerprint's `server_parameters`). `/v1` compatibility work is not reopened.
+- **C6 harness fix (`57b881d`) accepted** as harness-only; offline controls and mutation proof sufficient; PRD-034 remains closed.
+- `kriya/` and `plugins/` are byte-identical to the PRD-034 certified product tree (`kriya/` tree `850b2a1712e36333cc77488c39a3d18ac31f859b`, `plugins/` tree `2e9704960ea243568df0e56e62073c10a13914a4`).
+
+## Revision binding (commit `bf018dc`)
+Traced: the record key and report named no Kriya revision. The existing evidence extension point is the content-digested report, which the stored record already seals (`record.report_digest`, sealed by `record_digest`). The Kriya identity (commit, tree, `kriya/` tree, `plugins/` tree, tracked-worktree-clean at start and end, sha256 of the production config) is therefore bound INTO the report content, and `scripts/verify_model_certification.py` (run by `scripts/certify_model.sh`) refuses any mismatch. No product change, no record-schema bump, no second identity system. A standalone `kriya-identity.txt` is NOT used. Controls: `tests/test_prd035_revision_binding.py` (23 tests; each negative control changes one field, re-digests and re-seals so only the binding check can catch it; disabling any of 7 verifier checks fails a test).
+Known limit (unchanged, product code): `kriya model certification` reports CURRENT by key alone; the revision-bound verdict is `revision-binding.json` from the verifier.
+
+## Final gate before the single matrix
+`scripts/preflight3_final_gate.py.txt` prints the expected-values block and `READY_FOR_THE_SINGLE_MATRIX` only when every identity is as expected and both qualifications are QUALIFIED. `data/preflight3-pre-qualification.json` is its output before the owner's qualification: every check true except the two qualifications.
