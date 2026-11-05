@@ -15,6 +15,9 @@ every criterion passes, each named with its evidence:
   static-analysis tier is proved from the hosted evidence's canonical equivalent (``tier_execution.per_tier.live_static_analysis``
   plus the ``scanner`` stage), not from a field spelling; and every identity field the two authorities share matches exactly.
   The hosted certificate and the full candidate digest are DIFFERENT identity domains and are not compared with each other;
+- canary authority: the operator's requirement/acceptance authority (requirements, acceptance suite, approval, verification authority and the
+  original-goal -> requirement mapping) is sealed into the candidate digest; the gate RECOMPUTES it from the files through Kriya's own loaders and it
+  must equal the candidate's and the one the canary ran with;
 - production doctor: PRODUCTION_READY=true on the release config, before and
   after the canary run;
 - canary PASS on the same candidate (its candidate digest);
@@ -126,6 +129,13 @@ def evaluate(inputs: Mapping[str, Any]) -> Dict[str, Any]:
     criterion("canary", canary.get("verdict") == "PASS" and inputs["canary_candidate_digest"] == candidate["digest"],
               verdict=canary.get("verdict"), failed=[k for k, c in (canary.get("checks") or {}).items()
                                                     if not c.get("passed")])
+    authority = inputs.get("canary_authority") or {}
+    sealed = candidate.get("canary_authority") or {}
+    criterion("canary_authority_bound",
+              bool(sealed.get("digest")) and not authority.get("error") and not authority.get("changes")
+              and authority.get("recomputed") == sealed.get("digest") and authority.get("canary_run") == sealed.get("digest"),
+              sealed_in_candidate=sealed.get("digest"), recomputed_from_files=authority.get("recomputed"),
+              used_by_canary=authority.get("canary_run"), changes=authority.get("changes"), error=authority.get("error"))
     checks = canary.get("checks") or {}
     readiness = {name: c.get("passed") for name, c in checks.items()
                  if name.endswith(("production_ready_before", "production_ready_after"))}
@@ -211,6 +221,19 @@ def collect_certificate(hosted_dir: str, record_path: str, revision: str) -> Dic
             "git_tree": expected.get("tree"), "git_config_identity": expected.get("config_identity")}
 
 
+def collect_canary_authority(args: argparse.Namespace, candidate: Mapping[str, Any]) -> Dict[str, Any]:
+    """The canary authority RECOMPUTED from the files (Kriya's own loaders), compared with the one sealed into the candidate and the one the canary used."""
+    import prd036_canary_authority as canary_authority
+
+    used_path = os.path.join(args.canary, "canary-authority.json")
+    result: Dict[str, Any] = {"canary_run": _read(used_path).get("digest") if os.path.exists(used_path) else None}
+    try:
+        current = canary_authority.identity(args.canary_authority_dir, args.goal, args.workspace, args.expect)
+    except canary_authority.CanaryAuthorityError as error:
+        return {**result, "error": "; ".join(error.problems)}
+    return {**result, "recomputed": current["digest"], "changes": canary_authority.compare(candidate.get("canary_authority") or {}, current)}
+
+
 def collect(args: argparse.Namespace) -> Dict[str, Any]:
     candidate = _read(args.candidate)
     revision = candidate["release"]["kriya"]["revision"]
@@ -221,6 +244,7 @@ def collect(args: argparse.Namespace) -> Dict[str, Any]:
     return {
         "candidate": candidate,
         "certificate": certificate,
+        "canary_authority": collect_canary_authority(args, candidate),
         "canary": _read(os.path.join(args.canary, "canary.json")),
         "canary_candidate_digest": _read(os.path.join(args.canary, "release-candidate.json")).get("digest"),
         "streak": streak,
@@ -235,7 +259,7 @@ def collect(args: argparse.Namespace) -> Dict[str, Any]:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    for name in ("--candidate", "--hosted-certification", "--private-record", "--canary", "--out"):
+    for name in ("--candidate", "--hosted-certification", "--private-record", "--canary", "--canary-authority-dir", "--goal", "--workspace", "--expect", "--out"):
         parser.add_argument(name, required=True)
     parser.add_argument("--hosted", action="append")
     args = parser.parse_args(argv)

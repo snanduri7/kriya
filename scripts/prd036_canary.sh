@@ -14,7 +14,9 @@
 # KRIYA_RELEASE_TRUST_FILE, KRIYA_RELEASE_WORKSPACE (the approved canary
 # workspace; reset here to the baseline), KRIYA_CANARY_BASELINE (the baseline
 # git repository), KRIYA_CANARY_GOAL (goal file), KRIYA_CANARY_EXPECT (the one
-# path the goal authorizes changing).
+# path the goal authorizes changing), KRIYA_CANARY_AUTHORITY_DIR (the operator's
+# requirement/acceptance authority for the goal, private, sealed into the
+# candidate digest; see scripts/prd036_canary_authority.py).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
@@ -23,7 +25,7 @@ KRIYA="$ROOT/.venv/bin/kriya"
 OUT="${1:?usage: prd036_canary.sh OUT_DIR}"
 mkdir -p "$OUT" && OUT="$(cd "$OUT" && pwd)"
 for v in KRIYA_RELEASE_CANDIDATE KRIYA_RELEASE_CONFIG KRIYA_RELEASE_TRUST_FILE KRIYA_RELEASE_WORKSPACE \
-         KRIYA_CANARY_BASELINE KRIYA_CANARY_GOAL KRIYA_CANARY_EXPECT; do
+         KRIYA_CANARY_BASELINE KRIYA_CANARY_GOAL KRIYA_CANARY_EXPECT KRIYA_CANARY_AUTHORITY_DIR; do
   [ -n "${!v:-}" ] || { echo "[canary] $v is not set" >&2; exit 2; }
 done
 WS="$KRIYA_RELEASE_WORKSPACE"
@@ -43,6 +45,13 @@ fi
 "$PY" scripts/release_candidate.py check --recorded "$KRIYA_RELEASE_CANDIDATE" > "$OUT/release-candidate-check.json" \
   || { cat "$OUT/release-candidate-check.json"; echo "[canary] the frozen release candidate is not CURRENT" >&2; exit 2; }
 cp "$KRIYA_RELEASE_CANDIDATE" "$OUT/release-candidate.json"
+# The canary authority (requirements, acceptance, approval, verification authority, mapping) is a release-gate input: it is recomputed from the
+# files through Kriya's own loaders and must equal the one sealed into the frozen candidate. Anything else refuses before any run.
+"$PY" scripts/prd036_canary_authority.py check --dir "$KRIYA_CANARY_AUTHORITY_DIR" --goal "$KRIYA_CANARY_GOAL" --workspace "$WS" \
+    --expect "$KRIYA_CANARY_EXPECT" --candidate "$KRIYA_RELEASE_CANDIDATE" --out "$OUT/canary-authority.json" > "$OUT/canary-authority-check.json" \
+  || { cat "$OUT/canary-authority-check.json"; echo "[canary] the canary authority is not the one the frozen candidate sealed" >&2; exit 2; }
+AUTH_FLAGS=()
+while IFS= read -r flag; do AUTH_FLAGS+=("$flag"); done < <("$PY" scripts/prd036_canary_authority.py flags --dir "$KRIYA_CANARY_AUTHORITY_DIR")
 kriya_cli() { ( cd "$WS" && "$KRIYA" --config "$KRIYA_RELEASE_CONFIG" --trust-file "$KRIYA_RELEASE_TRUST_FILE" "$@" ); }
 
 run_pass() {  # run_pass N START...: one full canary run into $OUT/run-N (START: --fresh | --continues-from DIR)
@@ -50,11 +59,11 @@ run_pass() {  # run_pass N START...: one full canary run into $OUT/run-N (START:
   shift
   local START=("$@")
   mkdir -p "$RUN"
-  cp "$OUT/release-candidate-check.json" "$OUT/release-candidate.json" "$RUN/"
+  cp "$OUT/release-candidate-check.json" "$OUT/release-candidate.json" "$OUT/canary-authority.json" "$RUN/"
   kriya_cli doctor --production --json > "$RUN/doctor-before.json" 2> "$RUN/doctor-before.stderr.txt"
   "$PY" scripts/prd036_canary.py snapshot "$WS" "$RUN/before.json" || return 2
   echo "[canary] $(date -u +%Y-%m-%dT%H:%M:%SZ) run $N start (baseline $BASE_SHA)" | tee "$RUN/timeline.txt"
-  kriya_cli generate -f "$KRIYA_CANARY_GOAL" -y --json > "$RUN/stdout.json" 2> "$RUN/stderr.log"
+  kriya_cli generate -f "$KRIYA_CANARY_GOAL" "${AUTH_FLAGS[@]}" -y --json > "$RUN/stdout.json" 2> "$RUN/stderr.log"
   echo $? > "$RUN/exit_code"
   echo "[canary] $(date -u +%Y-%m-%dT%H:%M:%SZ) run $N end (exit $(cat "$RUN/exit_code"))" | tee -a "$RUN/timeline.txt"
   "$PY" scripts/prd036_canary.py snapshot "$WS" "$RUN/after.json" || return 2

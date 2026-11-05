@@ -274,6 +274,12 @@ def verdict(evidence: str, workspace: str, expect_changed: List[str], expected_s
         check(f"independent_{name.replace('-', '_')}", code == 0, exit_code=code)
     candidate = _read(os.path.join(evidence, "release-candidate-check.json"))
     check("release_candidate_current", candidate.get("status") == "CURRENT", changes=candidate.get("changes"))
+    # The operator authority the run used is the one sealed into the frozen candidate (its digest is part of the candidate digest).
+    authority_path = os.path.join(evidence, "canary-authority.json")
+    used = _read(authority_path).get("digest") if os.path.exists(authority_path) else None
+    sealed = ((_read(os.path.join(evidence, "release-candidate.json")).get("canary_authority") or {}).get("digest")
+              if os.path.exists(os.path.join(evidence, "release-candidate.json")) else None)
+    check("canary_authority_bound", bool(used) and used == sealed, used=used, sealed_in_candidate=sealed)
     # Before the run, and after it (the run builds the code index, so the
     # context-recall certification becomes required).
     for name in ("doctor-before", "doctor-after"):

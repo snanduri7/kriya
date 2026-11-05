@@ -23,6 +23,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tests"))
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 from _model_certification import CASES  # noqa: E402 - the live matrix's own case table, after sys.path
 
@@ -48,7 +49,21 @@ def current_identity() -> dict:
                                 _required("KRIYA_RELEASE_WORKSPACE"))
     os.chdir(workspace)
     cfg = load_config(config, trust_file=trust)
-    return release_candidate_identity(cfg, config, case_set=case_set_identity(mc.CASE_SET_VERSION, CASES))
+    identity = release_candidate_identity(cfg, config, case_set=case_set_identity(mc.CASE_SET_VERSION, CASES))
+    if os.environ.get("KRIYA_CANARY_AUTHORITY_DIR"):
+        # The canary's operator authority (requirements, acceptance, approval, verification authority and the original-goal -> requirement
+        # mapping) is a release-gate input: it joins the candidate digest, so changing any of it makes this a different candidate.
+        import prd036_canary_authority as canary_authority  # noqa: PLC0415 - scripts/ sibling, after sys.path
+
+        from kriya.core.release_identity import (
+            _digest as candidate_digest,  # noqa: PLC0415 - the candidate's own digest function
+        )
+
+        authority = canary_authority.identity(_required("KRIYA_CANARY_AUTHORITY_DIR"), _required("KRIYA_CANARY_GOAL"), workspace,
+                                              os.environ.get("KRIYA_CANARY_EXPECT", ""))
+        material = {**{k: v for k, v in identity.items() if k != "digest"}, "canary_authority": authority}
+        identity = {**material, "digest": candidate_digest(material)}
+    return identity
 
 
 def _read(path: str) -> dict:

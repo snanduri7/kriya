@@ -463,6 +463,8 @@ def canary(tmp_path, monkeypatch):
         "before.json": json.dumps(snap),
         "after.json": json.dumps({**snap, "tracked_changes": [" M src/A.java"]}),
         "release-candidate-check.json": json.dumps({"status": "CURRENT", "changes": []}),
+        "release-candidate.json": json.dumps({"digest": "cand", "canary_authority": {"digest": "authority-1"}}),
+        "canary-authority.json": json.dumps({"digest": "authority-1"}),
         "doctor-before.json": json.dumps({"production_ready": True, "checks": []}),
         "doctor-after.json": json.dumps({"production_ready": True, "checks": []}),
     }
@@ -488,6 +490,25 @@ def test_a_clean_production_canary_passes(canary):
 def _edit(evidence, name, **changes):
     path = evidence / name
     path.write_text(json.dumps({**json.loads(path.read_text()), **changes}))
+
+
+@pytest.mark.parametrize("name,text", [
+    ("canary-authority.json", json.dumps({"digest": "authority-2"})),                 # the run used another authority than the frozen candidate sealed
+    ("canary-authority.json", json.dumps({})),                                         # no digest recorded
+    ("release-candidate.json", json.dumps({"digest": "cand"})),                       # the candidate seals no canary authority
+    ("release-candidate.json", json.dumps({"digest": "cand", "canary_authority": {"digest": "authority-9"}})),
+])
+def test_a_canary_whose_authority_is_not_the_one_sealed_in_the_candidate_fails(canary, name, text):
+    _module, evidence, _workspace = canary
+    (evidence / name).write_text(text)
+    report = _verdict(canary)
+    assert report["verdict"] == "FAIL" and not report["checks"]["canary_authority_bound"]["passed"]
+
+
+def test_a_canary_without_the_authority_record_fails(canary):
+    _module, evidence, _workspace = canary
+    (evidence / "canary-authority.json").unlink()
+    assert not _verdict(canary)["checks"]["canary_authority_bound"]["passed"]
 
 
 @pytest.mark.parametrize("mutate,check", [
@@ -647,11 +668,12 @@ def _gate_inputs(gate):
               for n in (1, 2, 3)]
     job = lambda name: {"name": name, "conclusion": "success"}  # noqa: E731 - a one-line fixture builder
     return {
-        "candidate": {**candidate, "release": {**candidate["release"], "digest": "rel"}},
+        "candidate": {**candidate, "canary_authority": {"digest": "auth-1"}, "release": {**candidate["release"], "digest": "rel"}},
         "certificate": _certificate("a" * 40),
         "canary": {"verdict": "PASS", "checks": {f"run{n}.production_ready_{when}": {"passed": True}
                                                   for n in (1, 2) for when in ("before", "after")}},
         "canary_candidate_digest": candidate["digest"],
+        "canary_authority": {"recomputed": "auth-1", "canary_run": "auth-1", "changes": []},
         "streak": {"status": mc.CERTIFIED, "streak": 3, "trials": trials},
         "trial_evidence_present": {1: True, 2: True, 3: True},
         "hosted": [{"databaseId": 1, "headSha": "a" * 40,
@@ -707,6 +729,16 @@ def _set(inputs, key, value):
     (lambda i: i["certificate"]["summary"].update(collection={}), "hosted_mandatory_tiers_passed"),
     (lambda i: i["certificate"]["summary"]["stages"]["release"].update(status="FAIL"), "release_stage_hosted"),
     (lambda i: i["certificate"].update(summary={}), "hosted_mandatory_tiers_passed"),
+    # --- the canary authority is a release-gate input: sealed in the candidate, recomputed from the files, and the one the canary ran with ---
+    (lambda i: i["candidate"].pop("canary_authority"), "canary_authority_bound"),                       # not sealed into the candidate
+    (lambda i: i["canary_authority"].update(recomputed="auth-2"), "canary_authority_bound"),            # requirements/acceptance/approval changed after freeze
+    (lambda i: i["canary_authority"].update(changes=["acceptance"]), "canary_authority_bound"),         # acceptance source changed
+    (lambda i: i["canary_authority"].update(changes=["approval"]), "canary_authority_bound"),           # wrong approval
+    (lambda i: i["canary_authority"].update(recomputed=None, error="required artifact missing: acceptance-approval.json"), "canary_authority_bound"),
+    (lambda i: i["canary_authority"].update(recomputed=None, error="mapping: requirement ids differ"), "canary_authority_bound"),   # REQ mapping mismatch
+    (lambda i: i["canary_authority"].update(canary_run="auth-2"), "canary_authority_bound"),            # the canary ran with another authority
+    (lambda i: i["canary_authority"].update(canary_run=None), "canary_authority_bound"),
+    (lambda i: i.pop("canary_authority"), "canary_authority_bound"),
     (lambda i: i["canary"].update(verdict="FAIL"), "canary"),
     (lambda i: _set(i, "canary_candidate_digest", "other"), "canary"),
     (lambda i: i["canary"]["checks"]["run2.production_ready_after"].update(passed=False), "production_doctor_ready"),
