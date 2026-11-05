@@ -127,7 +127,7 @@ def _git_baseline(repo):
     """The fixture repository as Git's own committed baseline (the membership authority and the bound-tree copy both need a work tree)."""
     for args in (["init", "-q"], ["config", "user.email", "live@kriya.test"], ["config", "user.name", "Kriya Live"], ["add", "-A"],
                  ["commit", "-q", "-m", "baseline"]):
-        subprocess.run(["git", *args], cwd=repo, check=True)
+        subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=repo, check=True)
 
 
 def live_identity_problems(fingerprint, assessment, expected_window):
@@ -464,7 +464,7 @@ async def test_live_prd029_authorized_api_change_is_bound_to_its_commit(cfg, tmp
         (repo / "tests" / "test_checkout.py").write_text(_TEST)
         for args in (["init", "-q"], ["config", "user.email", "t@example.com"], ["config", "user.name", "t"],
                      ["add", "-A"], ["commit", "-q", "-m", "base"]):
-            subprocess.run(["git", *args], cwd=repo, check=True)
+            subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=repo, check=True)
         goal = ("In pricing, change the method named total to take a second parameter tax_rate "
                 "with default 0.0 and return the sum multiplied by (1 + tax_rate).")
         engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
@@ -525,7 +525,7 @@ def write_targeted_prd029_repo(repo, overrides=None):
         (repo / path).write_text(content, encoding="utf-8")
     for args in (["init", "-q"], ["config", "user.email", "t@example.com"], ["config", "user.name", "t"],
                  ["add", "-A"], ["commit", "-q", "-m", "base"]):
-        subprocess.run(["git", *args], cwd=repo, check=True)
+        subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=repo, check=True)
 
 
 @pytest.mark.asyncio

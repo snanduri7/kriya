@@ -49,7 +49,7 @@ FROZEN_TESTS_GOAL = EXAMPLES + "\nEvery existing test must keep passing unchange
 
 
 def _git(cwd, *args):
-    return subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *args], cwd=cwd,
+    return subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=cwd,
                           capture_output=True, text=True, check=True).stdout.strip()
 
 

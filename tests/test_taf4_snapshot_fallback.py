@@ -35,7 +35,7 @@ TRACKED = ("a.py", "pkg/b.py", "README.md")
 
 
 def _git(cwd, *args):
-    return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=cwd, check=True, capture_output=True,
+    return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=cwd, check=True, capture_output=True,
                           text=True, stdin=subprocess.DEVNULL).stdout
 
 

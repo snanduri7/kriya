@@ -45,7 +45,7 @@ def _init_git_repo(path):
     subprocess.run(["git", "config", "user.name", "Kriya CI"], cwd=path, check=True)
     (path / "README.md").write_text("live smoke test scratch project\n")
     subprocess.run(["git", "add", "-A"], cwd=path, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=path, check=True)
+    subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "commit", "-q", "-m", "initial"], cwd=path, check=True)
 
 
 def _write_config(path):
@@ -143,7 +143,7 @@ def test_ask_answers_a_question_about_the_repo_without_crashing(tmp_path):
     _write_config(tmp_path)
     (tmp_path / "main.py").write_text("def greet(name):\n    return f'hello, {name}'\n")
     subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "add main.py"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "commit", "-q", "-m", "add main.py"], cwd=tmp_path, check=True)
 
     result = _run_kriya(["ask", "what does the greet function do?"], cwd=tmp_path, timeout=120)
 
@@ -179,7 +179,7 @@ def test_plan_milestones_runs_the_real_planner_without_crashing(tmp_path):
         "<project><groupId>test</groupId><artifactId>app</artifactId><version>1.0</version></project>"
     )
     subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "add pom.xml"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "commit", "-q", "-m", "add pom.xml"], cwd=tmp_path, check=True)
     goal = (
         "Create one Maven application that reads a message, stores it, "
         "and exposes the stored value."

@@ -45,7 +45,7 @@ def _core():
 # =====================================================================================================================
 
 def git(cwd, *args) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
+    return subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
 
 
 def _init(path: Path, branch: str, who: str) -> None:

@@ -1,0 +1,37 @@
+import json, sys, os, collections, re
+C=sys.argv[1]
+maint=set()
+with open(C+"/trace.jsonl") as f:
+    for line in f:
+        if '"child_start"' in line and '"maintenance"' in line:
+            d=json.loads(line)
+            if d["argv"][:2]==["git","maintenance"]: maint.add(d["sid"])
+print("maintenance child_start sids:", len(maint))
+wt={}; start={}
+with open(C+"/trace.jsonl") as f:
+    for line in f:
+        if '"def_repo"' in line:
+            i=line.find('"sid":"'); sid=line[i+7:line.find('"',i+7)]
+            if sid in maint:
+                d=json.loads(line)
+                if d.get("repo")==1 and sid not in wt: wt[sid]=d["worktree"]
+        elif '"event":"start"' in line:
+            i=line.find('"sid":"'); sid=line[i+7:line.find('"',i+7)]
+            if sid in maint: start[sid]=json.loads(line)["argv"]
+repos=collections.defaultdict(list)
+for sid in maint:
+    repos[os.path.realpath(wt.get(sid,"<none>"))].append(start.get(sid))
+print("repos with maintenance:", len(repos), "without worktree:", sum(1 for s in maint if s not in wt))
+json.dump({r:[a for a in v] for r,v in repos.items()}, open(C+"/t2_maint_repos.json","w"))
+# tripwire records
+recs=[json.loads(l) for l in open(C+"/overlaps.jsonl")]
+commits=[r for r in recs if r["kind"]=="commit"]
+unguarded={os.path.realpath(r["repository"]) for r in commits if not r["guarded"]}
+guarded={os.path.realpath(r["repository"]) for r in commits if r["guarded"]}
+allseen=unguarded|guarded
+t2=set(repos)
+print("t2 maint repos:",len(t2)," tripwire unguarded:",len(unguarded)," guarded:",len(guarded))
+print("t2 maintenance in repo tripwire never saw at all:", len(t2-allseen))
+print("t2 maintenance in repo tripwire saw as GUARDED-only:", len((t2&guarded)-unguarded))
+print("tripwire unguarded but t2 shows no maintenance:", len(unguarded-t2))
+json.dump({"t2_not_seen":sorted(t2-allseen),"t2_guarded_only":sorted((t2&guarded)-unguarded),"unguarded_no_t2":sorted(unguarded-t2)}, open(C+"/reconcile.json","w"))

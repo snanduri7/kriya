@@ -6304,7 +6304,7 @@ def _init_git_repo(path):
     subprocess.run(["git", "config", "user.name", "test"], cwd=path, capture_output=True)
     (path / "README.md").write_text("seed")
     subprocess.run(["git", "add", "README.md"], cwd=path, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=path, capture_output=True)
+    subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "commit", "-m", "seed"], cwd=path, capture_output=True)
 
 
 @pytest.mark.asyncio

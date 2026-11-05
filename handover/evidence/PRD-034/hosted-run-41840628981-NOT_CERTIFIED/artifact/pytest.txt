@@ -1,0 +1,5 @@
+[exclusive] 397 passed, 19638 deselected in 4778.34s (1:19:38)
+[ordinary-1] 1 failed, 6252 passed, 2 skipped, 13780 deselected in 4888.47s (1:21:28)
+[ordinary-2] 1 failed, 7042 passed, 1 skipped, 12991 deselected in 4586.04s (1:16:26)
+[ordinary-3] 6294 passed, 13741 deselected in 4607.23s (1:16:47)
+[shards] FAIL: 2 failed, 19985 passed, 3 skipped, 0 errors across 4 shards (merge audit OK)

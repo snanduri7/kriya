@@ -1,0 +1,24 @@
+fixture_helper,"observer(first, census attribution)",product_origin,overlap_records,distinct_tests,distinct_repositories
+tests/test_repair_003_p1_2_suite_preservation_attribution.py:_git,tests/test_repair_003_p1_2_suite_preservation_attribution.py:_candidate,False,23,23,22
+tests/test_s18c_read_root_identity.py:git,tests/test_oi164_control_object_identity.py:<genexpr>,False,21,21,9
+tests/test_s19e_honest_refusal.py:_git,tests/test_s19e_honest_refusal.py:_tree,False,21,21,16
+tests/test_live_smoke_contract.py:workspace,tests/_live_smoke_contract.py:workspace_snapshot,False,20,20,15
+tests/test_s18c_read_root_identity.py:git,kriya/policy/filesystem.py:_walk,False,14,14,13
+tests/_chaos_harness.py:git,tests/test_plat039_trusted_control_paths.py:test_a_generation_run_never_writes_a_trusted_control_path,False,7,7,4
+tests/_chaos_harness.py:git,tests/test_lr_r1_m1_equivalence.py:_tree,False,6,6,4
+tests/test_w33_u3_scoped_snapshot_projection.py:_git,tests/test_w33_u3_scoped_snapshot_projection.py:<genexpr>,False,6,4,6
+tests/test_backend_final_closure_005_partial_no_change.py:_git,tests/test_backend_final_closure_005_partial_no_change.py:_candidate,False,5,5,2
+tests/test_backend_final_closure_005_partial_no_change.py:_git,kriya/workflow/workflow.py:exported,False,5,5,5
+tests/test_verification_contract_003_baseline.py:_git,kriya/workflow/workflow.py:exported,False,5,5,5
+tests/test_enforce_verified_no_change.py:_git,tests/test_lr_r1_m1_equivalence.py:_tree,False,5,5,4
+tests/test_logging_location.py:_git_workspace,tests/test_logging_location.py:_tree,False,3,3,3
+tests/_chaos_harness.py:git,kriya/policy/filesystem.py:_walk,False,2,2,2
+tests/test_taf4_snapshot_fallback.py:_git,tests/_perf_probe_plugin.py:__init__,False,1,1,1
+tests/test_file_integrity_contract_001b.py:test_planner_fenced_blocks_never_become_repository_files,tests/test_file_integrity_contract_001b.py:test_planner_fenced_blocks_never_become_repository_files,True,1,1,1
+tests/_chaos_harness.py:git,tests/test_plat039_trusted_control_paths.py:<genexpr>,False,1,1,1
+tests/test_r5_r6_bound_tree_copy.py:_git,kriya/workflow/workflow.py:exported,False,1,1,1
+tests/_chaos_harness.py:git,tests/test_reg_r1_workflow_reproducer.py:test_reg_r1_the_baselines_own_run_leaves_the_repository_untouched_so_stability_is_measured,False,1,1,1
+tests/test_repair_orchestrator.py:_family_coordinated,tests/test_repair_orchestrator.py:<genexpr>,False,1,1,1
+tests/test_taf4_snapshot_fallback.py:_git,tests/test_taf4_snapshot_fallback.py:<genexpr>,False,1,1,1
+tests/_chaos_harness.py:git,tests/test_w33_u3_scoped_snapshot_projection.py:<genexpr>,False,1,1,1
+tests/test_workflow_controller_enforce.py:_init_git_repo,tests/test_workflow_controller_enforce.py:_workspace_bytes,False,1,1,1

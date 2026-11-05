@@ -1,0 +1,24 @@
+{
+ "trace2_repos_with_maintenance": 3004,
+ "trace2_maintenance_repos_unseen_by_tripwire": [
+  "sriramnanduri/pytest-5348/popen-gw1/test_prepare_no_services_never0/work/scenario-03/workspace",
+  "sriramnanduri/pytest-5348/popen-gw3/test_reset_all_is_idempotent_a0/work/scenario-02/workspace",
+  "sriramnanduri/pytest-5348/popen-gw3/test_reset_all_is_idempotent_a0/work/scenario-03/workspace",
+  "sriramnanduri/pytest-5348/popen-gw3/test_reset_really_discards_wha0/work/scenario-02/workspace",
+  "sriramnanduri/pytest-5348/popen-gw4/test_idle_check_passes_on_a_fr0/work/scenario-02/workspace",
+  "sriramnanduri/pytest-5348/popen-gw4/test_idle_check_passes_on_a_fr0/work/scenario-03/workspace",
+  "sriramnanduri/pytest-5348/popen-gw4/test_idle_check_sees_a_stale_o0/work/scenario-02/workspace",
+  "sriramnanduri/pytest-5348/popen-gw6/test_idle_check_sees_a_running0/work/scenario-03/workspace",
+  "sriramnanduri/pytest-5348/popen-gw6/test_reset_is_idempotent_for_o0/work/scenario-02/workspace",
+  "sriramnanduri/pytest-5348/popen-gw6/test_reset_is_idempotent_for_o0/work/scenario-03/workspace",
+  "sriramnanduri/pytest-5348/popen-gw7/test_the_snapshot_copy_is_the_0/work/scenario-02/workspace"
+ ],
+ "tripwire_unguarded_without_trace2_maintenance": [
+  "sriramnanduri/pytest-5348/popen-gw2/test_every_fixture_repository_0/logging",
+  "sriramnanduri/pytest-5348/popen-gw5/test_a_genuine_bootstrap_commi0/plain",
+  "sriramnanduri/pytest-5348/popen-gw5/test_a_plain_folder_whose_boot0/plain",
+  "sriramnanduri/pytest-5348/popen-gw6/test_every_fixture_repository_0/s19e/owner",
+  "sriramnanduri/pytest-5348/popen-gw6/test_negative_control_a_plain_0/plain"
+ ],
+ "trace2_maintenance_in_repos_the_tripwire_saw_only_as_guarded": 0
+}

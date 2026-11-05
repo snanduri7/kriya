@@ -581,7 +581,7 @@ TEST_SUB = "from calc import sub\n\n\ndef test_sub():\n    assert sub(3, 1) == 2
 
 
 def git(workspace: Union[str, Path], *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=str(workspace), check=True, capture_output=True, text=True).stdout
+    return subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=str(workspace), check=True, capture_output=True, text=True).stdout
 
 
 def git_workspace(root: Union[str, Path], files: Mapping[str, str], name: str = "ws") -> Path:

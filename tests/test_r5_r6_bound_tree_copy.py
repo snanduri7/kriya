@@ -41,7 +41,7 @@ GITIGNORE = "/target/classes/\n__pycache__/\n.gradle/\n*.log\n"
 
 
 def _git(root, *args):
-    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=root, check=True, capture_output=True, text=True).stdout
+    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=root, check=True, capture_output=True, text=True).stdout
 
 
 def _write(root, relpath, text):

@@ -34,7 +34,7 @@ def workspace(tmp_path):
     subprocess.run(["git", "init", "-q"], cwd=ws, check=True)
     (ws / "README.md").write_text("scratch\n")
     subprocess.run(["git", "add", "-A"], cwd=ws, check=True)
-    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], cwd=ws, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "commit", "-qm", "init"], cwd=ws, check=True)
     (ws / "kriya.yaml").write_text("llm: {}\n")
     return ws
 

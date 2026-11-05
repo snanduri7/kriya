@@ -68,7 +68,7 @@ def _git_workspace(path):
     (path / "README.md").write_text("hello\n", encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=path, check=True)
     subprocess.run(
-        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], cwd=path, check=True,
+        ["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], cwd=path, check=True,
     )
     return path
 

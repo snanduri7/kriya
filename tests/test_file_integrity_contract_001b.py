@@ -7,6 +7,7 @@ the authorized writer.
 """
 import asyncio
 
+import pytest
 from _real_oci import REAL_OCI_MAVEN
 
 from kriya.config import AppConfig
@@ -58,6 +59,7 @@ def _engine(calls):
     return WorkflowEngine(Kernel(config=config), llm)
 
 
+@pytest.mark.git_quiescence_product_commit      # Kriya's own greenfield bootstrap commit (product code) leaves detached maintenance; this test lists .git only to EXCLUDE it (line 72) and reads no .git bytes
 def test_planner_fenced_blocks_never_become_repository_files(tmp_path):
     # Reproduced at 2e8b09f: the Developer was never called, config.yaml held
     # the Planner's "export TOOL_HOME=/tmp/tool" and the run passed its gates
@@ -136,7 +138,6 @@ import subprocess  # noqa: E402
 from pathlib import Path  # noqa: E402
 from unittest.mock import patch  # noqa: E402
 
-import pytest  # noqa: E402
 from test_file_integrity_contract_001 import _binding, _git, _tree, _verification_gate_named  # noqa: E402
 
 

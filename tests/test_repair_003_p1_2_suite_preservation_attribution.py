@@ -57,7 +57,7 @@ TWO_STATEMENTS = GOAL + "\nThe existing test suite stays green."
 
 
 def _git(cwd, *args):
-    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *args], cwd=cwd, check=True, capture_output=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=cwd, check=True, capture_output=True)
 
 
 def _workspace(tmp_path, suite=SUITE):

@@ -85,7 +85,7 @@ def _init_workspace(path, canary_url):
         "Changes that skip this are rejected.\n"
     )
     subprocess.run(["git", "add", "-A"], cwd=path, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=path, check=True)
+    subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "commit", "-q", "-m", "init"], cwd=path, check=True)
 
 
 @pytest.mark.skipif(not _docker_reachable(), reason="Docker daemon not reachable")

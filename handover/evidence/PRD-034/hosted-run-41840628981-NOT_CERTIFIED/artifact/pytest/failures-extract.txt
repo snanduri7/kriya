@@ -1,0 +1,76 @@
+### tests.test_s19e_honest_refusal::test_a_dubiously_owned_repository_is_the_ownership_refusal_and_nothing_is_written[committed]  [failure]
+AssertionError: the refused repository was written (the greenfield bootstrap ran)
+assert {'a.py': '9e2...3a3e95c', ...} == {'a.py': '9e2...3a3e95c', ...}
+  
+  Omitting 27 identical items, use -vv to show
+  Right contains 1 more item:
+  {'.git/objects/maintenance.lock': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'}
+  
+  Full diff:
+    {
+        'a.py': '9e26bf369911c45c243c684147b23fc9e1dcfcf257d299a1c632016a6fcd33f4',
+        '.git/COMMIT_EDITMSG': '06111c6797d5e5932b792d0c3afdf13bc912ba44af806058bbca4770d8915305',
+        '.git/HEAD': '28d25bf82af4c0e2b72f50959b2beb859e3
+tmp_path = PosixPath('/tmp/kriya-cert.6oZra2/s2/pytest-of-runner/pytest-0/test_a_dubiously_owned_reposit0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fa2b1a6a6c0>
+commit = True
+
+    @pytest.mark.parametrize("commit", [True, False], ids=["committed", "no-commit"])
+    def test_a_dubiously_owned_repository_is_the_ownership_refusal_and_nothing_is_written(tmp_path, monkeypatch, commit):
+        from kriya.workflow import worktree
+    
+        repo = _repository(tmp_path, commit=commit)
+        before = _tree(repo)
+        _owned_elsewhere(monkeypatch)
+        with pytest.raises(RepositoryContentFilterRefused) as raised:
+            worktree.create_git_worktree(str(repo))
+        _assert_ownership_refusal(raised, repo)
+        monkeypatch.delenv("GIT_TEST_ASSUME_DIFFERENT_OWNER")
+>       assert _tree(repo) == before, "the refused repository was written (the greenfield bootstrap ran)"
+E       AssertionError: the refused repository was written (the greenfield bootstrap ran)
+E       assert {'a.py': '9e2...3a3e95c', ...} == {'a.py': '9e2...3a3e95c', ...}
+E         
+E         Omitting 27 identical items, use -vv to show
+E         Right contains 1 more item:
+E         {'.git/objects/maintenance.lock': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'}
+E         
+E         Full diff:
+E           {
+E               'a.py': '9e26bf369911c45c243c684147b23fc9e1dcfcf257d299a1c632016a6fcd33f4',
+E               '.git/COMMIT_EDITMSG': '06111c6797d5e5932b792d0c3afdf13bc912ba44af806058bbca4770d8915305',
+E               '.git/HEAD': '28d25bf82af4c0e2b72f50959b2beb859e3e60b9630a5e8c603dad4ddb2b6e80',
+E               '.git/index': '07a3839bc1200a6cc480842dee1809bc55fffbea5a7dfa7b17946384a3a3e95c',
+E               '.git/description': '85ab6c163d43a17ea9cf7788308bca1466f1b0a8d1cc92e26e9bf63da4062aee',
+E               '.git/config': 'cfe7ba1238c9a78be7535d7c63bcaf5a4d5011d46b07c9b45d3bbf7d6c312dfe',
+E               '.git/hooks/push-to-checkout.sample': 'a53d0741798b287c6dd7afa64aee473f305e65d3f49463bb9d7408ec3b12bf5f',
+E               '.git/hooks/prepare-commit-msg.sample': 'e9ddcaa4189fddd25ed97fc8c789eca7b6ca16390b2392ae3276f0c8e1aa4619',
+E               '.git/hooks/sendemail-validate.sample': '44ebfc923dc5466bc009602f0ecf067b9c65459abfe8868ddc49b78e6ced7a92',
+E               '.git/hooks/fsmonitor-watchman.sample': '9159720099ad5595b8e66645cbfd47763c1e920f46e0b50ae75e642bbec57ef0',
+E               '.git/hooks/pre-merge-commit.sample': 'd3825a703379
+
+### tests.test_prd034_maven_authority_001::test_a_decoy_mvn_earlier_on_the_path_and_inside_the_fixed_base_cannot_override_the_authority  [failure]
+AssertionError: /tmp/kriya-cert.6oZra2/s3/pytest-of-runner/pytest-0/test_a_decoy_mvn_earlier_on_th0/authority/bin/mvn: 2: dirname: not found
+  PATH=/tmp/kriya-cert.6oZra2/s3/pytest-of-runner/pytest-0/test_a_decoy_mvn_earlier_on_th0/authority/bin:/tmp/kriya-cert.6oZra2/s3/pytest-of-runner/pytest-0/test_a_decoy_mvn_earlier_on_th0/base-bin
+  Apache Maven 3.10.0 (c43a36b8d67be7e0805a411bc0898af1a51f5472)
+  
+assert 141 == 0
+ +  where 141 = CompletedProcess(args=['bash', '-c', 'set -u; source \'/home/runner/work/kriya/kriya/demo-v2/scripts/_common.sh\'; res...a-cert.6oZra2/s3/pytest-of-runner/pytest
+tmp_path = PosixPath('/tmp/kriya-cert.6oZra2/s3/pytest-of-runner/pytest-0/test_a_decoy_mvn_earlier_on_th0')
+
+    def test_a_decoy_mvn_earlier_on_the_path_and_inside_the_fixed_base_cannot_override_the_authority(tmp_path):
+        home, _pin_obj, _record, archive = _provisioned(tmp_path)
+        verifier = _verifier_with_test_pin(tmp_path, tmp_path / "pin.json")
+        decoy_ambient, decoy_base = _decoy(tmp_path / "ambient-bin"), _decoy(tmp_path / "base-bin")
+        env = {"PATH": f"{decoy_ambient}:{os.environ['PATH']}", "HOME": str(tmp_path), "MAVEN_HOME": str(home), "KRIYA_MAVEN_VERIFY_PY": str(verifier), "DEMO_V2_APP_BASE_PATH": str(decoy_base)}
+        done = _bash('resolve_maven_authority || { echo "ERR: $MAVEN_AUTHORITY_ERROR"; exit 9; }; echo "PATH=$(app_path)"; PATH="$(app_path)" authority_mvn -v | head -1; '
+                     'echo "bare-mvn-resolves-to: $(PATH="$(app_path)" command -v mvn)"; '
+                     'PATH="$AMBIENT_FIRST:$PATH" authority_mvn -v | head -1', env={**env, "AMBIENT_FIRST": str(decoy_ambient)})
+>       assert done.returncode == 0, done.stderr + done.stdout
+E       AssertionError: /tmp/kriya-cert.6oZra2/s3/pytest-of-runner/pytest-0/test_a_decoy_mvn_earlier_on_th0/authority/bin/mvn: 2: dirname: not found
+E         PATH=/tmp/kriya-cert.6oZra2/s3/pytest-of-runner/pytest-0/test_a_decoy_mvn_earlier_on_th0/authority/bin:/tmp/kriya-cert.6oZra2/s3/pytest-of-runner/pytest-0/test_a_decoy_mvn_earlier_on_th0/base-bin
+E         Apache Maven 3.10.0 (c43a36b8d67be7e0805a411bc0898af1a51f5472)
+E         
+E       assert 141 == 0
+E        +  where 141 = CompletedProcess(args=['bash', '-c', 'set -u; source \'/home/runner/work/kriya/kriya/demo-v2/scripts/_common.sh\'; res...a-cert.6oZra2/s3/pytest-of-runner/pytest-0/test_a_decoy_mvn_earlier_on_th0/authority/bin/mvn: 2: dirname: not found\n').returncode
+
+tests/test_prd034_maven_authority_001.py:277: AssertionError

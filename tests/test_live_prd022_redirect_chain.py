@@ -90,7 +90,7 @@ def _seed_repo(root):
     for args in (["init", "-q"], ["config", "user.email", "live@kriya.test"], ["config", "user.name", "Kriya Live"]):
         subprocess.run(["git", *args], cwd=root, check=True)
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
-    subprocess.run(["git", "commit", "-qm", "seed"], cwd=root, check=True)
+    subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "commit", "-qm", "seed"], cwd=root, check=True)
 
 
 def _workspace_files(root):

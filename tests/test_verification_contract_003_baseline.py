@@ -28,7 +28,7 @@ CALC_WRONG = "def lower(s):\n    return s.upper()\n\n\ndef upper(s):\n    return
 
 
 def _git(cwd, *args):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+    return subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
 
 
 def _workspace(tmp_path, calc):

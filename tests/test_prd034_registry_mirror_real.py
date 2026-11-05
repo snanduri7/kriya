@@ -69,7 +69,7 @@ def _compile_greenfield(tmp_path, mirror_url):
     ws = tmp_path / "ws"
     (ws / "src/main/java/demo").mkdir(parents=True)  # (tmp_path is created here)
     for args in (["init", "-q"], ["config", "user.email", "t@x"], ["config", "user.name", "t"], ["commit", "-q", "--allow-empty", "-m", "init"]):
-        subprocess.run(["git", *args], cwd=ws, check=True, capture_output=True)
+        subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=ws, check=True, capture_output=True)
     (ws / "pom.xml").write_text(
         '<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>'
         "<groupId>demo</groupId><artifactId>demo</artifactId><version>1</version><properties>"

@@ -1,0 +1,14 @@
+"""Mutation: remove every `-c maintenance.auto=false` / `-c gc.auto=0` pair from every git argv started by the test process (restores the defect in every fixture helper at once)."""
+import os, subprocess
+_orig = subprocess.Popen.__init__
+def _mut(self, args, *rest, **kw):
+    if isinstance(args, (list, tuple)) and args and os.path.basename(str(args[0])) == "git":
+        kept, skip = [], False
+        for i, t in enumerate(args):
+            if skip: skip = False; continue
+            if t == "-c" and i + 1 < len(args) and str(args[i + 1]) in ("maintenance.auto=false", "gc.auto=0"):
+                skip = True; continue
+            kept.append(t)
+        args = kept
+    _orig(self, args, *rest, **kw)
+subprocess.Popen.__init__ = _mut

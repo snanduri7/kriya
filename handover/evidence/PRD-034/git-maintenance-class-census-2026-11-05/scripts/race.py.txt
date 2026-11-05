@@ -1,0 +1,24 @@
+import os, sys, subprocess, tempfile, time, hashlib, shutil
+from multiprocessing import Pool
+GUARD = ["-c","maintenance.auto=false","-c","gc.auto=0"]
+def snap(root):
+    out={}
+    for d,dirs,names in os.walk(root):
+        for n in names+dirs:
+            p=os.path.join(d,n)
+            try: out[os.path.relpath(p,root)]=os.stat(p).st_mtime_ns if os.path.isdir(p) else hashlib.sha256(open(p,'rb').read()).hexdigest()
+            except OSError: out[os.path.relpath(p,root)]="gone"
+    return out
+def one(args):
+    guarded,i=args
+    r=tempfile.mkdtemp(prefix="race-"); g=GUARD if guarded else []
+    def git(*a): subprocess.run(["git",*g,"-c","user.name=t","-c","user.email=t@t",*a],cwd=r,check=True,capture_output=True)
+    open(os.path.join(r,"f"),"w").write("x"); git("init","-q"); git("add","-A"); git("commit","-qm","c")
+    a=snap(r); time.sleep(0.03); b=snap(r)
+    shutil.rmtree(r,ignore_errors=True)
+    return a!=b
+if __name__=="__main__":
+    n=int(sys.argv[1]); w=int(sys.argv[2])
+    for guarded in (False,True):
+        with Pool(w) as p: res=p.map(one,[(guarded,i) for i in range(n)],chunksize=4)
+        print("guarded" if guarded else "UNGUARDED", "snapshots that differed:", sum(res), "of", n, flush=True)

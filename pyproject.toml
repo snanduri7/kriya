@@ -91,6 +91,8 @@ testpaths = ["tests"]
 # form had to export PYTHONPATH=$PWD by hand (TEST-HARNESS-001, 2026-10-07).
 pythonpath = ["."]
 markers = [
+    "git_quiescence_exempt: the tripwire's own tests only (tests/test_git_quiescence_tripwire.py): they commit an UNGUARDED fixture on purpose to prove tests/_git_quiescence.py sees it",
+    "git_quiescence_product_commit: the repository this test lists had its unguarded `git commit` launched by PRODUCT (kriya/) code and the test reads no .git bytes - the product's git is the owner's decision (CERT-GIT-MAINTENANCE-CLASS-001); a marker with no product-origin overlap behind it fails",
     "live_model: requires a real local LLM/embedding endpoint - excluded by default (see tests/test_live_smoke.py), run explicitly with `pytest -m live_model`",
     "chaos: PRD-032 chaos scenario (tests/_chaos_harness.py::SCENARIOS id as the marker argument) - deterministic cases run by default; `pytest -m chaos --chaos-report DIR` writes the chaos report",
     "live_target: a live_model test that needs the qualified TARGET production identity (the operator's machine: KRIYA_LIVE_LLM_MODEL, default qwen3-coder:30b); CI wiring smoke runs `-m \"live_model and not live_target\"`",

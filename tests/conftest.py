@@ -20,6 +20,7 @@ import shutil
 import sys
 import tempfile
 
+import _git_quiescence  # CERT-GIT-MAINTENANCE-CLASS-001: installs the audit hooks the tripwire fixture below reads
 import pytest
 from _authority_isolation import (
     _authority_home_isolation as _authority_home_isolation,  # session fixture, registered here
@@ -27,6 +28,8 @@ from _authority_isolation import (
 
 from kriya.core.logging_setup import ENV_LOG_DIR
 from kriya.core.state_paths import ENV_STATE_DIR
+
+_git_quiescence.install()
 
 # CERT-TMP-GROWTH-001: pytest's basetemp is a numbered directory every per-test directory is created in. Left in place, a full run piles up ~5 entries per
 # test (47,724 after ~9,700 tests) and kriya.platform.filesystem_semantics.canonical_spelling lists every ancestor of a workspace path in full, so each
@@ -1020,3 +1023,20 @@ def pytest_sessionfinish(session, exitstatus):
            "selection": session.config.getoption("-m") or "",
            "exit_status": int(session.exitstatus)}
     write_report(directory, build_report(session.config.stash[RESULTS], SCENARIOS, SUPPORTING_SUITES, run))
+
+
+@pytest.fixture(autouse=True)
+def _git_maintenance_cannot_race_a_repository_snapshot(request):
+    """CERT-GIT-MAINTENANCE-CLASS-001 (tests/_git_quiescence.py): a test that lists ``.git`` / ``.git/objects`` of a repository whose fixture commit left git's detached auto-maintenance
+    unguarded fails here, naming the helper. Derived from what the test actually ran; nothing to keep up to date. ``@pytest.mark.git_quiescence_exempt`` is for the tripwire's own tests only
+    (tests/test_git_quiescence_tripwire.py pins that)."""
+    _git_quiescence.begin_test(request.node.nodeid)
+    yield
+    if _git_quiescence.mode().startswith("report:"):          # the census mode: record, never fail
+        _git_quiescence.report(_git_quiescence.violations_of_current_test(), _git_quiescence.mode()[len("report:"):], _git_quiescence.new_commit_records(request.node.nodeid))
+        return
+    if request.node.get_closest_marker("git_quiescence_exempt") or request.node.stash.get(_TEST_FAILED, False):
+        return
+    messages = _git_quiescence.judge(_git_quiescence.violations_of_current_test(), bool(request.node.get_closest_marker(_git_quiescence.PRODUCT_MARKER)))
+    if messages:
+        pytest.fail("\n".join(messages), pytrace=False)

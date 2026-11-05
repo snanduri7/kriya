@@ -1,0 +1,13 @@
+{
+ "commit_records": 3262,
+ "repos_with_a_commit_class_git": 3261,
+ "repos_unguarded": 2998,
+ "repos_guarded": 264,
+ "unguarded_distinct_helper_files_or_functions": 357,
+ "product_origin_unguarded_repos": 302,
+ "overlap_records": 152,
+ "overlap_repositories": 119,
+ "overlap_tests": 149,
+ "overlap_groups": 23,
+ "overlap_product_origin": 1
+}

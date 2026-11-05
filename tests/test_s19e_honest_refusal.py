@@ -82,7 +82,7 @@ def _isolated_git(scratch_dir, monkeypatch):
 
 
 def _git(cwd, *args: str) -> str:
-    return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", *args], cwd=cwd,
+    return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=cwd,
                           check=True, capture_output=True, text=True, stdin=subprocess.DEVNULL).stdout
 
 

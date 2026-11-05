@@ -30,7 +30,7 @@ CONTROL = {".kriya-scoped-snapshot"}
 
 
 def _git(cwd, *args):
-    return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, check=True)
+    return subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=str(cwd), capture_output=True, text=True, check=True)
 
 
 def _put(root, rel, text="x\n"):

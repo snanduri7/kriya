@@ -64,7 +64,7 @@ JUDGMENT_CRITERION = {"id": "ac1", "description": "pet types are cached", "metho
 
 
 def _git(repo, *args):
-    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *args], cwd=repo, check=True,
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=repo, check=True,
                    capture_output=True)
 
 

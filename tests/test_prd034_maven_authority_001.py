@@ -40,19 +40,21 @@ def _module():
 tool = _module()
 
 
-def _mvn_script(banner: str = BANNER, home_line: str = "") -> str:
-    """A shell script that behaves like `mvn -v` for the parts the verifier reads: the banner and the installation it really runs ('Maven home')."""
+def _mvn_script(banner: str = BANNER, home_line: str = "", pause: float = 0) -> str:
+    """A shell script that behaves like `mvn -v` for the parts the verifier reads: the banner and the installation it really runs ('Maven home').
+    ``pause`` (absolute /bin/sleep: the scripts' PATH may hide `sleep`) delays everything after the banner, as a real JVM's later output is delayed."""
+    wait = f"/bin/sleep {pause}\n" if pause else ""
     return ("#!/bin/sh\nhere=\"$(cd \"$(dirname \"$0\")/..\" && pwd -P)\"\n"
-            f"echo '{banner}'\necho \"Maven home: {home_line or '$here'}\"\necho 'Java version: 17'\n")
+            f"echo '{banner}'\n{wait}echo \"Maven home: {home_line or '$here'}\"\necho 'Java version: 17'\n")
 
 
-def _archive(path: Path, *, banner: str = BANNER, home_line: str = "", extra=None, root: str = "apache-maven-3.10.0") -> Path:
+def _archive(path: Path, *, banner: str = BANNER, home_line: str = "", extra=None, root: str = "apache-maven-3.10.0", pause: float = 0) -> Path:
     with tarfile.open(path, "w:gz") as tar:
         def add(name, data: bytes, mode=0o644):
             info = tarfile.TarInfo(name)
             info.size, info.mode = len(data), mode
             tar.addfile(info, io.BytesIO(data))
-        add(f"{root}/bin/mvn", _mvn_script(banner, home_line).encode(), 0o755)
+        add(f"{root}/bin/mvn", _mvn_script(banner, home_line, pause).encode(), 0o755)
         add(f"{root}/lib/maven-core.jar", b"jar-bytes")
         for name, data in (extra or {}).items():
             add(name, data)
@@ -267,13 +269,16 @@ def _decoy(directory: Path) -> Path:
 
 
 def test_a_decoy_mvn_earlier_on_the_path_and_inside_the_fixed_base_cannot_override_the_authority(tmp_path):
-    home, _pin_obj, _record, archive = _provisioned(tmp_path)
+    """Hosted run 41840628981 (MEASURED, ordinary-2): this test ended with exit 141 after the first banner. `_common.sh` sets `pipefail`; a multi-line writer piped into `head -1`
+    is killed by SIGPIPE whenever `head` exits before the writer's later lines (a race on a loaded runner). Its first line is read with `sed -n 1p` (which drains the pipe),
+    and the authority's `mvn -v` is made SLOW after the banner so the old `| head -1` pattern fails here every time, not once in a while."""
+    home, _pin_obj, _record, archive = _provisioned(tmp_path, pause=0.3)
     verifier = _verifier_with_test_pin(tmp_path, tmp_path / "pin.json")
     decoy_ambient, decoy_base = _decoy(tmp_path / "ambient-bin"), _decoy(tmp_path / "base-bin")
     env = {"PATH": f"{decoy_ambient}:{os.environ['PATH']}", "HOME": str(tmp_path), "MAVEN_HOME": str(home), "KRIYA_MAVEN_VERIFY_PY": str(verifier), "DEMO_V2_APP_BASE_PATH": str(decoy_base)}
-    done = _bash('resolve_maven_authority || { echo "ERR: $MAVEN_AUTHORITY_ERROR"; exit 9; }; echo "PATH=$(app_path)"; PATH="$(app_path)" authority_mvn -v | head -1; '
+    done = _bash('resolve_maven_authority || { echo "ERR: $MAVEN_AUTHORITY_ERROR"; exit 9; }; echo "PATH=$(app_path)"; PATH="$(app_path)" authority_mvn -v | sed -n 1p; '
                  'echo "bare-mvn-resolves-to: $(PATH="$(app_path)" command -v mvn)"; '
-                 'PATH="$AMBIENT_FIRST:$PATH" authority_mvn -v | head -1', env={**env, "AMBIENT_FIRST": str(decoy_ambient)})
+                 'PATH="$AMBIENT_FIRST:$PATH" authority_mvn -v | sed -n 1p', env={**env, "AMBIENT_FIRST": str(decoy_ambient)})
     assert done.returncode == 0, done.stderr + done.stdout
     out = done.stdout.splitlines()
     assert out[0].startswith(f"PATH={home.resolve()}/bin:"), out

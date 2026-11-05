@@ -112,11 +112,28 @@ def _kup_repo(tmp_path):
     return kup_repo(tmp_path / "kup")
 
 
-@pytest.mark.parametrize("builder", [_named_test_base, _b2c_workspace, _kup_repo], ids=["named_test_oracle_harness.make_base", "b2c_fixtures.maven_workspace", "kup_workspace._repo"])
+def _s19e_repository(tmp_path):
+    from test_s19e_honest_refusal import _repository
+    (tmp_path / "s19e").mkdir()
+    return _repository(tmp_path / "s19e", commit=True)
+
+
+def _logging_location_workspace(tmp_path):
+    from test_logging_location import _git_workspace
+    return _git_workspace(tmp_path / "logging")
+
+
+@pytest.mark.parametrize("builder", [_named_test_base, _b2c_workspace, _kup_repo, _s19e_repository, _logging_location_workspace],
+                         ids=["named_test_oracle_harness.make_base", "b2c_fixtures.maven_workspace", "kup_workspace._repo", "s19e_honest_refusal._repository", "logging_location._git_workspace"])
 def test_every_fixture_repository_that_is_snapshotted_leaves_no_background_git_maintenance_behind(tmp_path, monkeypatch, builder):
     """Run 41812207261 (hosted, Linux git 2.56.0): `make_base` was the SECOND fixture builder with the oi142 race (`.git/objects` mtime moved by ~1 ms between two snapshots with no
-    Kriya write). The sweep of every helper that commits a fixture repository which a test then snapshots found the same unguarded commit in these three; each must start no
+    Kriya write). The sweep of every helper that commits a fixture repository which a test then snapshots found the same unguarded commit in these three; hosted run 41840628981 then failed
+    `test_s19e_honest_refusal::...[committed]` (`.git/objects/maintenance.lock` present in the `before` snapshot only) - a FOURTH helper the by-hand sweep had missed, and the sweep of
+    every snapshot that includes `.git` ("including .git", `mtime_ns` over a repository) found a FIFTH, `test_logging_location._git_workspace`; each must start no
     `git maintenance` (git's own trace2 `child_start` events; the negative control above shows an unguarded commit does)."""
+    for role in ("AUTHOR", "COMMITTER"):         # a host with no global git identity (a hosted runner, a container) must not fail the fixture's own commit
+        monkeypatch.setenv(f"GIT_{role}_NAME", "t")
+        monkeypatch.setenv(f"GIT_{role}_EMAIL", "t@t")
     trace = tmp_path / "trace2.jsonl"
     monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
     builder(tmp_path)

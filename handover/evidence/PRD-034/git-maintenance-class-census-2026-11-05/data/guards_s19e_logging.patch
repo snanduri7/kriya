@@ -1,0 +1,26 @@
+diff --git a/tests/test_logging_location.py b/tests/test_logging_location.py
+index 234e8cc..15bcb9a 100644
+--- a/tests/test_logging_location.py
++++ b/tests/test_logging_location.py
+@@ -68,7 +68,7 @@ def _git_workspace(path):
+     (path / "README.md").write_text("hello\n", encoding="utf-8")
+     subprocess.run(["git", "add", "-A"], cwd=path, check=True)
+     subprocess.run(
+-        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], cwd=path, check=True,
++        ["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], cwd=path, check=True,
+     )
+     return path
+ 
+diff --git a/tests/test_s19e_honest_refusal.py b/tests/test_s19e_honest_refusal.py
+index 695661b..d8f23ea 100644
+--- a/tests/test_s19e_honest_refusal.py
++++ b/tests/test_s19e_honest_refusal.py
+@@ -82,7 +82,7 @@ def _isolated_git(scratch_dir, monkeypatch):
+ 
+ 
+ def _git(cwd, *args: str) -> str:
+-    return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", *args], cwd=cwd,
++    return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=cwd,
+                           check=True, capture_output=True, text=True, stdin=subprocess.DEVNULL).stdout
+ 
+ 

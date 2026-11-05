@@ -657,7 +657,7 @@ def _family_coordinated(tmp_path):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text(content, encoding="utf-8")
     for git_args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "initial"]):
-        subprocess.run(["git", *git_args], cwd=tmp_path, check=True)                # the brownfield guards need the Git-backed membership (a standalone folder is refused)
+        subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *git_args], cwd=tmp_path, check=True)                # the brownfield guards need the Git-backed membership (a standalone folder is refused)
     workspace = str(tmp_path)
     cfg = _config(chain=False)
     ledger = ObligationLedger()
