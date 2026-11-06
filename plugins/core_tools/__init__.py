@@ -93,11 +93,18 @@ def _authorized_read(invocation: ModelToolInvocation, path: str, *, in_owner: bo
     owner workspace when ``in_owner``), then authorized by AuthorizedFileReader over the invocation's roots (canonical
     containment, symlinks resolved, credential stores) - the same reader whichever root the path landed in."""
     target = invocation.resolve(path, in_owner=in_owner)
+    _authorize_read_target(invocation, target)
+    return target
+
+
+def _authorize_read_target(invocation: ModelToolInvocation, target: str, *, identities: Optional[ControlObjectIdentities] = None) -> None:
+    """THE read authority for one resolved path (WAVE8 OI-172): containment, symlinks and credential stores through AuthorizedFileReader, then the
+    PLAT-039 control-object rule. Every model-authored read of a path - the filesystem tool, blame's file AND the files a planned ``git diff`` would
+    print - asks this one function, so no content-bearing form can answer with bytes a direct read of the same path would refuse."""
     AuthorizedFileReader(invocation.roots[0], invocation.roots[1:]).raise_if_denied(target)
-    if _is_control_path(invocation, target, identities=ControlObjectIdentities(invocation.roots)):
+    if _is_control_path(invocation, target, identities=identities or ControlObjectIdentities(invocation.roots)):
         raise PolicyDeniedError(request=ActionRequest(action_type=ActionType.READ_FILE, target=target),
                                 result=trusted_control_path_read_denial(target))
-    return target
 
 
 def _is_control_path(invocation: ModelToolInvocation, target: str, *, identities: ControlObjectIdentities) -> bool:
@@ -540,7 +547,40 @@ class GitTool(BaseTool):
         self._require_own_repository_view(root, sub, base_revision=separate)
         if sub in self._TRACKED_CONTENT_SUBCOMMANDS:
             self._refuse_control_aliases(root, invocation)
+            self._refuse_unreadable_changed_paths(root, invocation)
         return args
+
+    def _refuse_unreadable_changed_paths(self, root: str, invocation: ModelToolInvocation) -> None:
+        """WAVE8 OI-172: a planned diff prints the CONTENT of every changed tracked path (added lines, removed lines of a deleted or renamed file), so each
+        such path must be one a direct model read would be allowed to open - judged by the same function (``_authorize_read_target``: credential stores,
+        containment, control paths). MEASURED before the fix: a modified tracked ``deploy.pem`` was denied (SENSITIVE_PATH_DENIED) as a read yet its bytes
+        came out of ``git diff``. The first refused path refuses the whole call before git prints anything, naming that path only; a changed-path listing
+        git cannot give whole refuses too (fail closed). Not an output filter: the content never leaves git."""
+        roots = invocation.roots or (root,)
+        scoped = invocation if invocation.roots else None
+        for relative in self._changed_paths(root):
+            target = os.path.join(root, relative)
+            if scoped is not None:
+                _authorize_read_target(scoped, target)
+            else:
+                AuthorizedFileReader(roots[0], roots[1:]).raise_if_denied(target)
+
+    def _changed_paths(self, root: str) -> List[str]:
+        """The tracked paths the planned diff prints (``git diff --name-only -z``, renames split into both names): spawned exactly as the diff is (same
+        controller, profile, folder and no external diff/textconv), after the same content-filter refusal the diff itself makes - listing a changed path
+        compares content, which a repository-defined clean filter would otherwise run."""
+        refuse_repository_content_filters(root)
+        profile = ContainmentProfile(trust_class=TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE, workspace_path=root,
+                                     resolved_env=git_environment(child_environment()))
+        listed = ProcessController().run(
+            git_argv(["git", "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", "--no-textconv", "--submodule=short"]), cwd=root,
+            timeout=self._GIT_COMMAND_TIMEOUT_SECONDS, containment_profile=profile, containment_backend=resolve_containment_backend("none"),
+        )
+        if listed.returncode != 0 or listed.timeout or listed.stdout_truncated:
+            raise ToolExecutionError(
+                f"the changed paths of {root!r} could not be listed, so whether the diff would print the content of a credential store cannot be "
+                "established. Nothing was run.")
+        return list(dict.fromkeys(name for name in listed.stdout.split("\0") if name))
 
     def _refuse_control_aliases(self, root: str, invocation: ModelToolInvocation) -> None:
         """OI-164 (TIP-CLOSE C): a planned diff prints the working-tree bytes of every modified tracked path, so a

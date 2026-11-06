@@ -190,7 +190,7 @@ GIT_LAUNCHES: Dict[str, int] = {
     "kriya/distribution.py": 1, "kriya/production_doctor.py": 2, "kriya/repository/git.py": 3, "kriya/repository/snapshot.py": 4,
     "kriya/skills/run_shadow.py": 1, "kriya/skills/skill.py": 3, "kriya/static_analysis/operator_scan.py": 1, "kriya/tools/git_metadata.py": 2,
     "kriya/workflow/checkpoint.py": 8, "kriya/workflow/named_test_oracle.py": 3, "kriya/workflow/worktree.py": 19,
-    "plugins/core_tools/__init__.py": 3,
+    "plugins/core_tools/__init__.py": 4,   # WAVE8 OI-172: + GitTool._changed_paths (a read-only `git diff --name-only -z` listing, same shape as _tracked_paths)
 }
 
 # Every ContainmentProfile(...) construction in production: what the profile mounts. S1: whether a profile reaches the namespace creation is NOT a
@@ -208,6 +208,7 @@ PROFILE_BUILDERS: Dict[Tuple[str, str], str] = {
     ("kriya/tools/dependency_execution.py", "_acquisition_profile"): UNREFERENCED,
     ("kriya/tools/dependency_execution.py", "_execution_profile"): UNREFERENCED,
     ("plugins/core_tools/__init__.py", "GitTool._tracked_paths"): TRUSTED_NULL,
+    ("plugins/core_tools/__init__.py", "GitTool._changed_paths"): TRUSTED_NULL,   # WAVE8 OI-172: the changed-path listing before a planned diff (trusted infrastructure, no backend)
     ("plugins/core_tools/__init__.py", "GitTool._require_own_repository_view"): TRUSTED_NULL,
     ("plugins/core_tools/__init__.py", "GitTool._run_in"): TRUSTED_NULL,
 }
