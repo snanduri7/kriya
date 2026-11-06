@@ -4,6 +4,7 @@ import { CONFIG_APPROVAL_BLOCKER } from './ConfigApproval';
 import { CurrentRun } from './CurrentRun';
 import { ProjectSetupCard } from './ProjectSetup';
 import { ProjectMemoryCard } from './ProjectMemory';
+import { SecurityCard } from './SecurityCard';
 import { CapabilityStrip, type ComposedCell } from './CapabilityStrip';
 import { GoalComposer } from './GoalComposer';
 import { PreflightSummary, ProjectFacts, ReadinessChecklist, checklist, preflightBody, summarizeReadiness } from './Readiness';
@@ -54,6 +55,7 @@ function ProjectHome() {
       {ex.run ? <CurrentRun /> : ex.available ? <GoalComposer summary={summary} onDetails={showDetails} onRecheck={recheck} /> : <section aria-label="Start a run"><h2>What do you want Kriya to do?</h2><p className="muted" role="status">This host cannot start a run.</p></section>}
       <RecentRuns />
       {pre?.memory ? <ProjectMemoryCard memory={pre.memory} /> : null}
+      {pre?.security ? <SecurityCard rows={pre.health ?? []} demonstrations={pre.security.demonstrations} /> : null}
       <details className="ck-setup" open={detailsOpen} onToggle={(e) => setDetailsOpen((e.currentTarget as HTMLDetailsElement).open)}>
         <summary>Project details</summary>
         {pre ? <ProjectFacts pre={pre} probe={probe} /> : ex.available ? preflightBody(ex.preflight) : null}

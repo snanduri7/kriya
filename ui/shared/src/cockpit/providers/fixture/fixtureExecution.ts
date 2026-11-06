@@ -16,6 +16,8 @@ export interface FixtureExecutionOptions {
   memory?: ProjectMemory;
   /** Scripted project health rows (DEV/TEST ONLY): the `health` block of `execution.preflight`; absent = an older Kriya that reports none. */
   health?: NonNullable<ExecutionPreflight['health']>;
+  /** Scripted security demonstration rows (DEV/TEST ONLY): the `security` block of `execution.preflight`; absent = an older Kriya that reports none. */
+  security?: NonNullable<ExecutionPreflight['security']>;
   /** How the next launch ends (default 'success'). */
   outcome?: FixtureOutcome;
   /** The RunRecord's commit result of a successful run (default COMMITTED; the real controlled body records NO_COMMIT). */
@@ -287,6 +289,7 @@ export class FixtureExecution {
       toolchains: { tools: [{ tool: 'python3', available: true, path: '/usr/bin/python3' }, git, { tool: 'java', available: false, path: null }, { tool: 'mvn', available: false, path: null }], note: 'Visibility under this process\'s own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs.' },
       ...(this.options.memory ? { memory: this.options.memory as unknown as Json } : {}),
       ...(this.options.health ? { health: this.options.health as unknown as Json } : {}),
+      ...(this.options.security ? { security: this.options.security as unknown as Json } : {}),
     };
   }
 

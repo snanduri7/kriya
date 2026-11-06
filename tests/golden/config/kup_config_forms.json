@@ -554,6 +554,82 @@
     "run_active": false,
     "status": "CLEAN"
    },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
+   },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
     "directory": null,
@@ -719,6 +795,82 @@
     "run_active": false,
     "status": "CLEAN"
    },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
+   },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
     "directory": "<TMP>/outside/state",
@@ -869,6 +1021,82 @@
    "recovery": {
     "run_active": false,
     "status": "CLEAN"
+   },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
    },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
@@ -1021,6 +1249,82 @@
     "run_active": false,
     "status": "CLEAN"
    },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
+   },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
     "directory": null,
@@ -1164,6 +1468,82 @@
    "recovery": {
     "run_active": false,
     "status": "CLEAN"
+   },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
    },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
@@ -1868,6 +2248,82 @@
     "run_active": false,
     "status": "CLEAN"
    },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
+   },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
     "directory": null,
@@ -2033,6 +2489,82 @@
     "run_active": false,
     "status": "CLEAN"
    },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
+   },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
     "directory": "<TMP>/outside/state",
@@ -2176,6 +2708,82 @@
    "recovery": {
     "run_active": false,
     "status": "CLEAN"
+   },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
    },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
@@ -2321,6 +2929,82 @@
     "run_active": false,
     "status": "CLEAN"
    },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
+   },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
     "directory": null,
@@ -2464,6 +3148,82 @@
    "recovery": {
     "run_active": false,
     "status": "CLEAN"
+   },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
    },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
@@ -2742,6 +3502,82 @@
     "run_active": false,
     "status": "CLEAN"
    },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
+   },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
     "directory": null,
@@ -2907,6 +3743,82 @@
     "run_active": false,
     "status": "CLEAN"
    },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
+   },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
     "directory": "<TMP>/outside/state",
@@ -3057,6 +3969,82 @@
    "recovery": {
     "run_active": false,
     "status": "CLEAN"
+   },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
    },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
@@ -3209,6 +4197,82 @@
     "run_active": false,
     "status": "CLEAN"
    },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
+   },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
     "directory": null,
@@ -3352,6 +4416,82 @@
    "recovery": {
     "run_active": false,
     "status": "CLEAN"
+   },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
    },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
@@ -3630,6 +4770,82 @@
     "run_active": false,
     "status": "CLEAN"
    },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
+   },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
     "directory": null,
@@ -3795,6 +5011,82 @@
     "run_active": false,
     "status": "CLEAN"
    },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
+   },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
     "directory": "<TMP>/outside/state",
@@ -3938,6 +5230,82 @@
    "recovery": {
     "run_active": false,
     "status": "CLEAN"
+   },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
    },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
@@ -4083,6 +5451,82 @@
     "run_active": false,
     "status": "CLEAN"
    },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
+   },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",
     "directory": null,
@@ -4226,6 +5670,82 @@
    "recovery": {
     "run_active": false,
     "status": "CLEAN"
+   },
+   "security": {
+    "demonstrations": [
+     {
+      "authority": "filesystem.within_workspace_allowed",
+      "explanation": "A write inside the authorized project scope is permitted - the protections decide, they do not refuse everything.",
+      "id": "write_inside_scope",
+      "outcome": "ALLOWED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_WITHIN_WORKSPACE_ALLOWED",
+      "requested": "write src/app.py inside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The path resolves outside every authorized writable root, so no write is made.",
+      "id": "write_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Write-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write a file outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.outside_scope",
+      "explanation": "The link is resolved before the decision: where it really leads is outside the project.",
+      "id": "write_through_symlink",
+      "outcome": "BLOCKED",
+      "protection": "Symlink containment",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_WRITABLE_ROOTS",
+      "requested": "write through a symlink that points outside the project"
+     },
+     {
+      "authority": "filesystem.authorized_writer.trusted_control_path",
+      "explanation": "Kriya's control state is not a model-writable location; it is written only by Kriya's own control store.",
+      "id": "write_control_state",
+      "outcome": "BLOCKED",
+      "protection": "Private-state protection",
+      "reason_code": "TRUSTED_CONTROL_PATH_DENIED",
+      "requested": "overwrite Kriya's own run records (.kriya/control)"
+     },
+     {
+      "authority": "filesystem.sensitive_path_denied",
+      "explanation": "Credential-bearing file names are never a target of a generated write.",
+      "id": "write_credential_file",
+      "outcome": "BLOCKED",
+      "protection": "Sensitive-content protection",
+      "reason_code": "SENSITIVE_PATH_DENIED",
+      "requested": "write a credential-named file (.env)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.hard_link_outside_scope",
+      "explanation": "A file with a name outside the readable roots is the same file: it is refused by identity, not by name.",
+      "id": "read_through_hard_link",
+      "outcome": "BLOCKED",
+      "protection": "Hard-link containment",
+      "reason_code": "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file whose other name lives outside the project (a hard link)"
+     },
+     {
+      "authority": "filesystem.authorized_reader.outside_scope",
+      "explanation": "The path resolves outside every authorized readable root, so nothing is read.",
+      "id": "read_outside_scope",
+      "outcome": "BLOCKED",
+      "protection": "Read-scope enforcement",
+      "reason_code": "PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+      "requested": "read a file outside the project"
+     },
+     {
+      "authority": "kriya.foundation.redaction.redact_text",
+      "explanation": "The credential-shaped string (40 characters) is removed before anything is stored or shown; the stored text carries a redaction marker instead.",
+      "id": "redact_secret",
+      "outcome": "REDACTED",
+      "protection": "Credential redaction",
+      "reason_code": "SECRET_REDACTED",
+      "requested": "record evidence that contains a credential-shaped string"
+     }
+    ]
    },
    "state": {
     "cockpit_directory": "<TMP>/outside/state",

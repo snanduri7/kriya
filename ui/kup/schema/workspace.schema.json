@@ -155,6 +155,7 @@
           },
           "additionalProperties": true
         },
+        "security": { "$ref": "#/$defs/SecurityEvidence", "description": "Security demonstration (additive; absent from an older Kriya): the file protections run against a disposable folder, each row the canonical owner's own decision." },
         "health": { "type": "array", "items": { "$ref": "#/$defs/HealthRow" }, "description": "Project health rows (additive; absent from an older Kriya): capabilities no other answer states, each with a closed state, a reason code and the configuration fields / observations that decided it." },
         "memory": { "$ref": "#/$defs/ProjectMemory", "description": "VERIFIED PROJECT MEMORY of the folder's repository, read now (additive; absent from an older Kriya)." },
         "interaction": {
@@ -204,6 +205,64 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "SecurityDemonstration": {
+      "description": "One protection shown by running it: the canonical owner's own decision (BLOCKED, ALLOWED or REDACTED) about a situation built in a disposable folder, with its typed reason code and the rule that made it. No path, no content and no secret is carried.",
+      "type": "object",
+      "required": [
+        "id",
+        "protection",
+        "requested",
+        "outcome",
+        "reason_code",
+        "authority",
+        "explanation"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "protection": {
+          "type": "string"
+        },
+        "requested": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "BLOCKED",
+            "ALLOWED",
+            "REDACTED"
+          ]
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "authority": {
+          "type": "string"
+        },
+        "explanation": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "SecurityEvidence": {
+      "description": "The security demonstration of a preflight: the rows, in presentation order.",
+      "type": "object",
+      "required": [
+        "demonstrations"
+      ],
+      "properties": {
+        "demonstrations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SecurityDemonstration"
           }
         }
       },

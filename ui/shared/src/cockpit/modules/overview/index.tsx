@@ -1,4 +1,4 @@
-import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, primaryVerification, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, RunMemoryLine, useExecution, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
+import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, primaryVerification, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, BeforeAfter, RunMemoryLine, useExecution, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
 
 const OUTCOME = { success: { mark: '✓', words: 'Run completed' }, failure: { mark: '✕', words: 'Run failed' }, in_progress: { mark: '●', words: 'Run not finished' } } as const;
 
@@ -26,6 +26,9 @@ function Overview() {
               <h3 className="ck-result-head"><span aria-hidden="true">{ctx.status ? outcome.mark : '•'}</span> {ctx.status ? outcome.words : 'Outcome not recorded'}</h3>
               <p className="ck-result-goal">{goalTitle(ctx.displayGoal)}</p>
               {ctx.status === 'success' ? <p>Your change was recorded as complete.</p> : null}
+
+              <BeforeAfter request={goalTitle(ctx.displayGoal)} files={files} groups={groups ? groups.groups : null}
+                concluded={records ? ofKind(records, 'attempt.concluded').map((r) => payloadOf(r).succeeded === true) : []} opened={records ? ofKind(records, 'attempt.opened').length : 0} />
 
               <h3>What changed</h3>
               {files === null ? <p className="muted">The changed files come from this run&apos;s evidence, which is not readable here (see Technical status).</p>

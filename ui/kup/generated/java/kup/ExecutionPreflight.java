@@ -26,6 +26,7 @@ public class ExecutionPreflight {
     private Model model;
     private boolean ready;
     private ExecutionPreflightRecovery recovery;
+    private Security security;
     private ExecutionPreflightState state;
     private Toolchains toolchains;
     private ExecutionPreflightWorkspace workspace;
@@ -78,6 +79,15 @@ public class ExecutionPreflight {
     public ExecutionPreflightRecovery getRecovery() { return recovery; }
     @JsonProperty("recovery")
     public void setRecovery(ExecutionPreflightRecovery value) { this.recovery = value; }
+
+    /**
+     * Security demonstration (additive; absent from an older Kriya): the file protections run
+     * against a disposable folder, each row the canonical owner's own decision.
+     */
+    @JsonProperty("security")
+    public Security getSecurity() { return security; }
+    @JsonProperty("security")
+    public void setSecurity(Security value) { this.security = value; }
 
     @JsonProperty("state")
     public ExecutionPreflightState getState() { return state; }

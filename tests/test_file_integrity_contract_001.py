@@ -905,6 +905,8 @@ _AUDITED_WRITE_SITES = {
     # (never into a source tree) and removes it; validate.py copies Kriya's staged acceptance directory into that view and the
     # runner's declared outputs back (S8: the host venv seal and its integrity module are gone).
     "kriya/tools/gate_view.py": 3,
+    # product/demo-72h: kriya/policy/security_demonstration.py writes ONE decoy file and one hard link inside its own TemporaryDirectory, to ask the file protections about them - never the workspace.
+    "kriya/policy/security_demonstration.py": 2,
     "kriya/tools/validate.py": 8, "kriya/workflow/checkpoint.py": 1, "kriya/workflow/context_certification.py": 3,
     "kriya/workflow/deterministic_failure_diagnostic.py": 2, "kriya/workflow/edit_safety.py": 0,
     "kriya/workflow/milestone_completion.py": 1, "kriya/workflow/proposal_store.py": 3,

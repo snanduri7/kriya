@@ -32,6 +32,7 @@ SITES: Dict[Tuple[str, str], str] = {
     ("kriya/tools/validate.py", "_stage_declared_directory"): VALIDATOR_OWNED,
     ("kriya/tools/validate.py", "check_java_toolchain"): NOT_A_VALIDATOR_TREE,
     ("kriya/core/model_qualification.py", "case_anchored_edit_protocol"): NOT_A_VALIDATOR_TREE,
+    ("kriya/policy/security_demonstration.py", "demonstrate"): NOT_A_VALIDATOR_TREE,        # product/demo-72h: a disposable folder of decoys the file protections are ASKED about; no validator runs in it
     ("kriya/production_doctor.py", "_check_candidate_isolation"): NOT_A_VALIDATOR_TREE,
     ("kriya/production_doctor.py", "_check_no_host_fallback"): NOT_A_VALIDATOR_TREE,
     ("kriya/production_doctor.py", "probe_oci_containment"): NOT_A_VALIDATOR_TREE,

@@ -252,6 +252,10 @@ class RunService:
 
         _state, folder_cfg, _authority, _failure = resolved.as_load_in()
         data["health"] = capability_rows(folder_cfg, state_directory=data["state"]["directory"])
+        # SECURITY DEMONSTRATION: the file protections run against a disposable folder, so the cockpit can show REAL refusals with their typed reasons (kriya/policy/security_demonstration.py).
+        from kriya.policy.security_demonstration import demonstrate
+
+        data["security"] = {"demonstrations": demonstrate()}
         return data
 
     def build_preflight(self, ctx: RequestContext, workspace: str, cockpit_state_directory: Optional[str], *,

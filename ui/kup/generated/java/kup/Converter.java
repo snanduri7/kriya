@@ -29,6 +29,7 @@
 //     ExecutionPreflight data = Converter.ExecutionPreflightFromJsonString(jsonString);
 //     ProjectMemory data = Converter.ProjectMemoryFromJsonString(jsonString);
 //     HealthRow data = Converter.HealthRowFromJsonString(jsonString);
+//     SecurityDemonstration data = Converter.SecurityDemonstrationFromJsonString(jsonString);
 //     LaunchStatus data = Converter.LaunchStatusFromJsonString(jsonString);
 //     WorkspaceCreate data = Converter.WorkspaceCreateFromJsonString(jsonString);
 //     ConfigurationApprovalStatus data = Converter.ConfigurationApprovalStatusFromJsonString(jsonString);
@@ -264,6 +265,14 @@ public class Converter {
 
     public static String HealthRowToJsonString(HealthRow obj) throws JsonProcessingException {
         return getHealthRowObjectWriter().writeValueAsString(obj);
+    }
+
+    public static SecurityDemonstration SecurityDemonstrationFromJsonString(String json) throws IOException {
+        return getSecurityDemonstrationObjectReader().readValue(json);
+    }
+
+    public static String SecurityDemonstrationToJsonString(SecurityDemonstration obj) throws JsonProcessingException {
+        return getSecurityDemonstrationObjectWriter().writeValueAsString(obj);
     }
 
     public static LaunchStatus LaunchStatusFromJsonString(String json) throws IOException {
@@ -1135,6 +1144,37 @@ public class Converter {
     private static ObjectWriter getHealthRowObjectWriter() {
         if (HealthRowWriter == null) instantiateHealthRowMapper();
         return HealthRowWriter;
+    }
+
+    private static ObjectReader SecurityDemonstrationReader;
+    private static ObjectWriter SecurityDemonstrationWriter;
+
+    private static void instantiateSecurityDemonstrationMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        SecurityDemonstrationReader = mapper.readerFor(SecurityDemonstration.class);
+        SecurityDemonstrationWriter = mapper.writerFor(SecurityDemonstration.class);
+    }
+
+    private static ObjectReader getSecurityDemonstrationObjectReader() {
+        if (SecurityDemonstrationReader == null) instantiateSecurityDemonstrationMapper();
+        return SecurityDemonstrationReader;
+    }
+
+    private static ObjectWriter getSecurityDemonstrationObjectWriter() {
+        if (SecurityDemonstrationWriter == null) instantiateSecurityDemonstrationMapper();
+        return SecurityDemonstrationWriter;
     }
 
     private static ObjectReader LaunchStatusReader;

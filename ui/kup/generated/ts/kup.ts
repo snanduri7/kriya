@@ -637,6 +637,7 @@ export interface ExecutionPreflight {
     note: string;
     [k: string]: unknown;
   };
+  security?: SecurityEvidence;
   /**
    * Project health rows (additive; absent from an older Kriya): capabilities no other answer states, each with a closed state, a reason code and the configuration fields / observations that decided it.
    */
@@ -655,6 +656,26 @@ export interface ExecutionPreflight {
     note: string;
     [k: string]: unknown;
   };
+  [k: string]: unknown;
+}
+/**
+ * Security demonstration (additive; absent from an older Kriya): the file protections run against a disposable folder, each row the canonical owner's own decision.
+ */
+export interface SecurityEvidence {
+  demonstrations: SecurityDemonstration[];
+  [k: string]: unknown;
+}
+/**
+ * One protection shown by running it: the canonical owner's own decision (BLOCKED, ALLOWED or REDACTED) about a situation built in a disposable folder, with its typed reason code and the rule that made it. No path, no content and no secret is carried.
+ */
+export interface SecurityDemonstration {
+  id: string;
+  protection: string;
+  requested: string;
+  outcome: 'BLOCKED' | 'ALLOWED' | 'REDACTED';
+  reason_code: string;
+  authority: string;
+  explanation: string;
   [k: string]: unknown;
 }
 /**
@@ -748,6 +769,10 @@ export interface MemoryRun {
 // ---- HealthRow (workspace.schema.json#/$defs/HealthRow) ----
 /**
  * One capability of a folder with its state (AVAILABLE, DEGRADED, UNAVAILABLE, NOT_REQUIRED, UNKNOWN), a closed reason code and the evidence that decided it. Derived from the resolved configuration or a read-only observation, never from a claim about a run.
+ */
+// ---- SecurityDemonstration (workspace.schema.json#/$defs/SecurityDemonstration) ----
+/**
+ * One protection shown by running it: the canonical owner's own decision (BLOCKED, ALLOWED or REDACTED) about a situation built in a disposable folder, with its typed reason code and the rule that made it. No path, no content and no secret is carried.
  */
 // ---- LaunchStatus (workspace.schema.json#/$defs/LaunchStatus) ----
 /**
