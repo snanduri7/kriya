@@ -139,10 +139,11 @@ class RunEntry:
     refreshed: Tuple[str, ...]
     reused: Tuple[str, ...]
     rejected: int
+    evidence_run_id: Optional[str] = None      # the control-plane run id the run's evidence store and RunRecord carry (what the cockpit knows the run by)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"run_id": self.run_id, "at": self.at, "outcome": self.outcome, "learned": list(self.learned), "refreshed": list(self.refreshed),
-                "reused": list(self.reused), "rejected": self.rejected}
+                "reused": list(self.reused), "rejected": self.rejected, "evidence_run_id": self.evidence_run_id}
 
 
 @dataclass(frozen=True)
@@ -345,7 +346,8 @@ def project(workspace_path: str) -> Projection:
                           learned_run_id=str(raw.get("learned_run_id") or ""), learned_at=str(raw.get("learned_at") or ""),
                           confirmed_runs=int(raw.get("confirmed_runs") or 0), reused_runs=int(raw.get("reused_runs") or 0)))
     runs = tuple(RunEntry(run_id=str(r.get("run_id") or ""), at=str(r.get("at") or ""), outcome=str(r.get("outcome") or ""), learned=tuple(r.get("learned") or ()),
-                          refreshed=tuple(r.get("refreshed") or ()), reused=tuple(r.get("reused") or ()), rejected=int(r.get("rejected") or 0))
+                          refreshed=tuple(r.get("refreshed") or ()), reused=tuple(r.get("reused") or ()), rejected=int(r.get("rejected") or 0),
+                          evidence_run_id=r.get("evidence_run_id") if isinstance(r.get("evidence_run_id"), str) else None)
                  for r in (document.get("runs") or []) if isinstance(r, dict))
     rejected = tuple(r for r in (document.get("rejected") or []) if isinstance(r, dict))
     return Projection(repository=identity, store_state=state, store_detail=detail, facts=tuple(facts), rejected=rejected, runs=runs)
@@ -378,7 +380,7 @@ def _ordered_gates(gates: Iterable[str]) -> List[str]:
 
 
 def observe_run(workspace_path: str, *, run_id: str, success: bool, passed_gates: Sequence[str], written_files: Sequence[str] = (),
-                reused: Sequence[str] = ()) -> RunEntry:
+                reused: Sequence[str] = (), evidence_run_id: Optional[str] = None) -> RunEntry:
     """OBSERVE + VERIFY + STORE for one finished run, then return what happened. ``success`` is the run's authoritative terminal status; ``passed_gates`` are the gate
     types its own deterministic evidence names as PASSED. Observational: the caller ignores a failure to write, and the run's result is never altered by it."""
     root = os.path.realpath(workspace_path)
@@ -422,7 +424,7 @@ def observe_run(workspace_path: str, *, run_id: str, success: bool, passed_gates
         if kind in facts and isinstance(facts[kind], dict):
             facts[kind]["reused_runs"] = int(facts[kind].get("reused_runs") or 0) + 1
     entry = RunEntry(run_id=run_id, at=now, outcome="learned" if verified else "rejected", learned=tuple(learned), refreshed=tuple(refreshed),
-                     reused=tuple(sorted(set(reused))), rejected=rejected_now)
+                     reused=tuple(sorted(set(reused))), rejected=rejected_now, evidence_run_id=evidence_run_id)
     runs.append(entry.to_dict())
     document = {"schema_version": SCHEMA_VERSION, "repository": workspace_identity(workspace_path), "facts": facts,
                 "rejected": rejected[-MAX_REJECTED_KEPT:], "runs": runs[-MAX_RUNS_KEPT:]}
@@ -431,6 +433,30 @@ def observe_run(workspace_path: str, *, run_id: str, success: bool, passed_gates
     os.makedirs(os.path.dirname(path), exist_ok=True)
     write_control_file(workspace_path, path, text, expected_revision=read_file_revision(path))
     return entry
+
+
+def control_run_id_since(workspace_path: str, since_iso: str) -> Optional[str]:
+    """The control-plane run id (the id the run's evidence store and RunRecord carry) of the NEWEST RunRecord of this repository created at or after ``since_iso`` (the moment the
+    finished run's process started). One run owns a repository at a time, so the newest record created during this process is this run's. None when none can be read."""
+    directory = os.path.join(control_roots(workspace_path)[1], "control", "runs")
+    try:
+        since = datetime.fromisoformat(since_iso)
+        names = sorted(os.listdir(directory))
+    except (OSError, ValueError):
+        return None
+    best: Optional[Tuple[datetime, str]] = None
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        data, _reason = _read_regular_file(directory, name, limit=MAX_EVIDENCE_FILE_BYTES * 4)
+        try:
+            record = json.loads(data.decode("utf-8")) if data else None
+            created, run_id = datetime.fromisoformat(record["created_at"]), record["run_id"]
+        except (ValueError, KeyError, TypeError, AttributeError):
+            continue
+        if isinstance(run_id, str) and created >= since and (best is None or created > best[0]):
+            best = (created, run_id)
+    return best[1] if best else None
 
 
 def passed_gate_types(result: Dict[str, Any]) -> List[str]:

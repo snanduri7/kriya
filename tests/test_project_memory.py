@@ -115,7 +115,7 @@ def test_the_next_verified_run_replaces_a_stale_fact_and_the_old_value_is_not_ke
     learn(repo, run_id="run-2")
     facts = {f.kind: f for f in pm.project(str(repo)).facts}
     assert facts["java_release"].value == "21" and facts["java_release"].status == pm.STATUS_CURRENT and facts["java_release"].learned_run_id == "run-2"
-    assert "17" not in json.dumps([f.to_dict() for f in pm.project(str(repo)).facts if f.kind == "java_release"])
+    assert '"value": "17"' not in json.dumps([f.to_dict() for f in pm.project(str(repo)).facts if f.kind == "java_release"])   # the old VALUE is gone (a timestamp may legitimately contain "17")
 
 
 def test_an_unchanged_fact_is_confirmed_not_relearned(repo):
@@ -276,3 +276,42 @@ def test_a_failure_inside_memory_never_stops_the_run_and_is_shown(repo, monkeypa
 def test_a_failed_run_is_observed_as_rejected_through_the_cli_seam(repo, capsys):
     cli._remember_project(str(repo), {"run_id": "r1", "quality_gates_passed": False, "generation_metrics": {"terminal_status": "failed"}}, ())
     assert "learned 0, reused 0, rejected" in capsys.readouterr().err and pm.project(str(repo)).facts == ()
+
+
+# ---------------------------------------------------------------------------------------------------------------- the id the cockpit knows a run by
+
+def _record(repo, run_id, created):
+    directory = os.path.join(os.path.dirname(pm.store_path(str(repo))), "..", "runs")
+    os.makedirs(directory, exist_ok=True)
+    with open(os.path.join(directory, f"{run_id}.json"), "w") as handle:
+        json.dump({"run_id": run_id, "created_at": created}, handle)
+
+
+def test_the_entry_carries_the_newest_control_run_created_during_the_process(repo):
+    _record(repo, "20261106T100000-aaaaaaaa", "2026-11-06T10:00:00+00:00")        # an earlier run
+    _record(repo, "20261106T110000-bbbbbbbb", "2026-11-06T11:00:00+00:00")
+    _record(repo, "20261106T110500-cccccccc", "2026-11-06T11:05:00+00:00")
+    assert pm.control_run_id_since(str(repo), "2026-11-06T10:59:00+00:00") == "20261106T110500-cccccccc"
+    assert pm.control_run_id_since(str(repo), "2026-11-06T11:06:00+00:00") is None           # nothing created since: no guess
+    entry = learn(repo, evidence_run_id=pm.control_run_id_since(str(repo), "2026-11-06T10:59:00+00:00"))
+    assert entry.evidence_run_id == "20261106T110500-cccccccc"
+    assert pm.project(str(repo)).runs[-1].evidence_run_id == "20261106T110500-cccccccc"
+
+
+def test_unreadable_or_foreign_run_records_are_skipped_and_a_missing_directory_is_none(repo):
+    assert pm.control_run_id_since(str(repo), "2026-01-01T00:00:00+00:00") is None
+    directory = os.path.join(os.path.dirname(pm.store_path(str(repo))), "..", "runs")
+    os.makedirs(directory)
+    open(os.path.join(directory, "bad.json"), "w").write("{not json")
+    open(os.path.join(directory, "other.json"), "w").write(json.dumps({"run_id": 7, "created_at": "2026-11-06T11:00:00+00:00"}))
+    open(os.path.join(directory, "notjson.txt"), "w").write("x")
+    assert pm.control_run_id_since(str(repo), "2026-01-01T00:00:00+00:00") is None
+    assert pm.control_run_id_since(str(repo), "not a time") is None
+
+
+def test_the_cli_seam_passes_the_start_time_so_the_entry_can_name_the_control_run(repo, capsys):
+    _record(repo, "20261106T120000-dddddddd", "2026-11-06T12:00:00+00:00")
+    result = {"run_id": "r1", "quality_gates_passed": True, "generation_metrics": {"terminal_status": "success"}, "files": ["A.java"], "deterministic_gate_evidence": [{"type": "compile", "passed": True}]}
+    cli._remember_project(str(repo), result, (), "2026-11-06T11:59:00+00:00")
+    capsys.readouterr()
+    assert pm.project(str(repo)).runs[-1].evidence_run_id == "20261106T120000-dddddddd"

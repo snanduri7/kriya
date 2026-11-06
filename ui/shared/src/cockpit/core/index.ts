@@ -35,6 +35,6 @@ export * from '../design';
 export * from './deep';
 export * from './describe';
 export { ExecutionProvider, useExecution, foldRecords, deriveOutcome, notificationFor, progressCounts, activeReview, activeRuntimeCommandReview, createDecider, createRuntimeCommandDecider, DEFAULT_INTERVALS, NO_PROGRESS, type ExecutionApi, type PendingReview, type PendingRuntimeCommandReview, type DecisionState, type RuntimeDecisionState, type RunView, type RunOutcome, type OutcomeKind, type RunProgress, type BriefRecord, type PreflightState, type StartRefusal, type RunStage, type RunTiming, type PollIntervals } from './execution';
-export { RunMemoryLine } from './RunMemoryLine';
+export { RunMemoryLine, memoryRunIdOf } from './RunMemoryLine';
 export { BeforeAfter, recoveryText, summaryRows } from './BeforeAfter';
 export { RunCapabilityStrip, runCapabilityCells, type RunCapabilityInput, type RunCell } from './RunCapabilityStrip';

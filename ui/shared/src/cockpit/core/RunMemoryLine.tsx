@@ -5,7 +5,7 @@ import type { ProjectMemory } from '../../model/kup';
  * Nothing is shown for a run Kriya recorded no memory entry for (it ran before memory existed, or memory was unreadable) - absence is never presented as "reused nothing".
  */
 export function RunMemoryLine({ memory, runId }: { memory: ProjectMemory | undefined; runId: string }) {
-  const entry = memory?.runs.find((r) => r.run_id === runId);
+  const entry = memory?.runs.find((r) => r.evidence_run_id === runId || r.run_id === runId);
   if (!memory || !entry) return null;
   const names = (ids: readonly string[]): string => ids.map((id) => memory.facts.find((f) => f.id === id)?.label ?? id).join(', ');
   const learned = [...entry.learned, ...entry.refreshed];
@@ -19,4 +19,11 @@ export function RunMemoryLine({ memory, runId }: { memory: ProjectMemory | undef
       </p>
     </>
   );
+}
+
+/** The run id Verified Project Memory uses for a recorded run: the workflow's own id, which every evidence record carries (the trace row's id is a different, shorter identifier);
+ * the trace id only when the evidence records none. */
+export function memoryRunIdOf(records: readonly { run_id?: unknown }[] | null, traceRunId: string): string {
+  const first = records?.find((r) => typeof r.run_id === 'string' && r.run_id !== '');
+  return first ? String(first.run_id) : traceRunId;
 }

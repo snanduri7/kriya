@@ -759,6 +759,10 @@ export interface MemoryRun {
   refreshed: string[];
   reused: string[];
   rejected: number;
+  /**
+   * The control-plane run id the run's evidence store and RunRecord carry (what the cockpit knows the run by); null when it could not be determined.
+   */
+  evidence_run_id?: string | null;
   [k: string]: unknown;
 }
 

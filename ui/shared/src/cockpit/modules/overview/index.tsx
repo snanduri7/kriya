@@ -1,4 +1,4 @@
-import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, primaryVerification, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, BeforeAfter, RunCapabilityStrip, RunMemoryLine, activeSkills, contextFacts, runCapabilityCells, runEventsOf, useExecution, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
+import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, primaryVerification, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, BeforeAfter, RunCapabilityStrip, RunMemoryLine, memoryRunIdOf, activeSkills, contextFacts, runCapabilityCells, runEventsOf, useExecution, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
 
 const OUTCOME = { success: { mark: '✓', words: 'Run completed' }, failure: { mark: '✕', words: 'Run failed' }, in_progress: { mark: '●', words: 'Run not finished' } } as const;
 
@@ -15,6 +15,8 @@ function Overview() {
       {(ctx) => {
         const records = hasData(evidence) ? evidence.data.records : null;
         // capability states are statements about the run's evidence: shown only when that evidence is the verified, sealed chain (an unsealed or unreadable store claims nothing)
+        // Verified Project Memory keys a run by the workflow's own run id, which the run's evidence records carry (the trace row's id is a different, shorter identifier)
+        const memoryRunId = memoryRunIdOf(records, ctx.runId);
         const sealedEvidence = hasData(evidence) && evidence.data.verify?.status === 'VERIFIED' && evidence.data.verify?.sealed === true;
         const changes = records ? changeFacts(records) : null;
         const gates = records ? validationFacts(records) : null;
@@ -37,7 +39,7 @@ function Overview() {
                 authorityRecorded: records ? ofKind(records, 'authority.snapshot').length > 0 : null,
                 skills: activeSkills(hasData(detail) ? detail.data : null),
                 knownTargetFiles: hasData(detail) ? contextFacts(runEventsOf(detail.data), null).knownTargets?.files.length ?? null : null,
-                memoryEntry: memory?.runs.find((r) => r.run_id === ctx.runId) ?? null,
+                memoryEntry: memory?.runs.find((r) => r.evidence_run_id === memoryRunId || r.run_id === memoryRunId) ?? null,
                 health,
               })} /> : null}
               <BeforeAfter request={goalTitle(ctx.displayGoal)} files={files} groups={groups ? groups.groups : null}
@@ -56,7 +58,7 @@ function Overview() {
               {app ? <ApplicationResult app={app} /> : null}
               {groups ? <FormalRequirementDisclosure status={formalRequirementStatus(groups.technical)} /> : null}
 
-              <RunMemoryLine memory={memory} runId={ctx.runId} />
+              <RunMemoryLine memory={memory} runId={memoryRunId} />
 
               <h3>What happened</h3>
               <HumanTimeline entries={humanTimeline(events, ctx.status)} />

@@ -14,6 +14,7 @@ public class RunElement {
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
     private String at;
+    private String evidenceRunid;
     private List<String> learned;
     private RunOutcome outcome;
     private List<String> refreshed;
@@ -25,6 +26,15 @@ public class RunElement {
     public String getAt() { return at; }
     @JsonProperty("at")
     public void setAt(String value) { this.at = value; }
+
+    /**
+     * The control-plane run id the run's evidence store and RunRecord carry (what the cockpit
+     * knows the run by); null when it could not be determined.
+     */
+    @JsonProperty("evidence_run_id")
+    public String getEvidenceRunid() { return evidenceRunid; }
+    @JsonProperty("evidence_run_id")
+    public void setEvidenceRunid(String value) { this.evidenceRunid = value; }
 
     @JsonProperty("learned")
     public List<String> getLearned() { return learned; }

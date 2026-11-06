@@ -2,7 +2,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { ProjectMemory } from '../../model/kup';
-import { RunMemoryLine } from './RunMemoryLine';
+import { RunMemoryLine, memoryRunIdOf } from './RunMemoryLine';
 
 const memory = (over: Partial<ProjectMemory> = {}): ProjectMemory => ({
   schema_version: 1, repository: 'r', store_state: 'OK', store_detail: null, rejected: [], runs: [],
@@ -27,11 +27,26 @@ describe('what memory did for one recorded run', () => {
     expect(text).toContain('Rejected 3.');
   });
 
+  it('finds the entry by the control run id the cockpit knows the run by (the evidence id), as well as by the workflow id', () => {
+    render(<RunMemoryLine memory={memory({ runs: [run({ run_id: 'workflow-id', evidence_run_id: 'evidence-id' })] })} runId="evidence-id" />);
+    expect(screen.getByTestId('run-memory')).toBeTruthy();
+  });
+
   it('shows nothing for a run Kriya recorded no memory entry for, and nothing when memory is absent', () => {
     const a = render(<RunMemoryLine memory={memory({ runs: [run()] })} runId="some-other-run" />);
     expect(a.container.firstChild).toBeNull();
     a.unmount();
     const b = render(<RunMemoryLine memory={undefined} runId="run-2" />);
     expect(b.container.firstChild).toBeNull();
+  });
+});
+
+describe('memoryRunIdOf', () => {
+  it('uses the workflow run id the evidence records carry, not the trace row id', () => {
+    expect(memoryRunIdOf([{ run_id: '20261106T210730-9e041d48' }, { run_id: '20261106T210730-9e041d48' }], '1e51ee67')).toBe('20261106T210730-9e041d48');
+  });
+  it('falls back to the trace id when the evidence is unreadable or carries no run id', () => {
+    expect(memoryRunIdOf(null, '1e51ee67')).toBe('1e51ee67');
+    expect(memoryRunIdOf([{}, { run_id: '' }, { run_id: 7 }], '1e51ee67')).toBe('1e51ee67');
   });
 });

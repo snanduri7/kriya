@@ -7,6 +7,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from typing import Any, Collection, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 import click
@@ -2641,7 +2642,7 @@ def _project_memory_context(workspace_path: str) -> Tuple[str, Tuple[str, ...]]:
     return answer["text"], ids
 
 
-def _remember_project(workspace_path: str, result: Any, reused: Tuple[str, ...]) -> None:
+def _remember_project(workspace_path: str, result: Any, reused: Tuple[str, ...], started_at: Optional[str] = None) -> None:
     """OBSERVE + VERIFY + STORE after a finished run (``ProjectMemoryService.record``). Only a COMPLETED run is observed (a knowledge-gap or needs-review answer is not a run
     outcome); a run that is not a verified success learns nothing and its candidate facts are counted as rejected. Observational: never alters the result or the exit code."""
     if not isinstance(result, dict) or not isinstance(result.get("run_id"), str):
@@ -2650,7 +2651,7 @@ def _remember_project(workspace_path: str, result: Any, reused: Tuple[str, ...])
         from kriya.application import ProjectMemoryService
         from kriya.context import RequestContext
 
-        answer = ProjectMemoryService().record(RequestContext.local(workspace_path), workspace_path, result["run_id"], {"result": result, "reused": list(reused)})
+        answer = ProjectMemoryService().record(RequestContext.local(workspace_path), workspace_path, result["run_id"], {"result": result, "reused": list(reused), "started_at": started_at})
     except Exception as error:  # noqa: BLE001 - observational (asserted by the memory tests); the run's result stands whatever happens here
         click.secho(f"Verified Project Memory not updated: {type(error).__name__}: {error}", fg="yellow", err=True)
         return
@@ -3344,6 +3345,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         # retrieved text travels separately and is fenced as untrusted.
         reference_context = await _learned_reference_context(cfg, goal)
         memory_text, memory_ids = _project_memory_context(os.getcwd())
+        run_started_at = datetime.now(timezone.utc).isoformat()
         reference_context = memory_text + reference_context if memory_text else reference_context
 
         await kernel.start()
@@ -3472,7 +3474,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                     sys.exit(3)
 
         await kernel.stop()
-        _remember_project(os.getcwd(), res, memory_ids)
+        _remember_project(os.getcwd(), res, memory_ids, run_started_at)
 
         click.secho("\n=== Generation Workflow Completed ===", bold=True)
         if res.get("toolchain_warning"):

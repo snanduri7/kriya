@@ -31,14 +31,16 @@ class ProjectMemoryService:
         return {"text": text, "fact_ids": list(ids)}
 
     def record(self, ctx: RequestContext, workspace: str, run_id: str, request: Dict[str, Any]) -> Dict[str, Any]:
-        """``request``: ``{"result": <the run's result dict>, "reused": [<fact ids carried into the run>]}``. Returns ``{"recorded": False, "reason": ...}`` for an answer
+        """``request``: ``{"result": <the run's result dict>, "reused": [<fact ids carried into the run>], "started_at": <ISO time the run's process started>}`` (the last lets the entry carry the control run id the cockpit knows the run by). Returns ``{"recorded": False, "reason": ...}`` for an answer
         that is not a finished run (a knowledge-gap or needs-review answer, a result without the gate verdict)."""
         if not isinstance(request, dict) or not isinstance(request.get("result"), dict):
             raise ApplicationRefusal(INVALID_REQUEST, "request.result must be the run's result", reason="invalid_request")
         result = request["result"]
         if not isinstance(run_id, str) or not run_id or "quality_gates_passed" not in result or result.get("status") in _NOT_RUN_OUTCOMES:
             return {"recorded": False, "reason": NOT_A_COMPLETED_RUN}
+        started_at = request.get("started_at")
         entry = project_memory.observe_run(
             workspace, run_id=run_id, success=project_memory.result_is_verified_success(result), passed_gates=project_memory.passed_gate_types(result),
-            written_files=[str(f) for f in result.get("files") or []], reused=[str(i) for i in request.get("reused") or []])
+            written_files=[str(f) for f in result.get("files") or []], reused=[str(i) for i in request.get("reused") or []],
+            evidence_run_id=project_memory.control_run_id_since(workspace, started_at) if isinstance(started_at, str) else None)
         return {"recorded": True, "reason": None, "entry": entry.to_dict()}

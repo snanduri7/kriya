@@ -468,6 +468,13 @@
         },
         "rejected": {
           "type": "integer"
+        },
+        "evidence_run_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The control-plane run id the run's evidence store and RunRecord carry (what the cockpit knows the run by); null when it could not be determined."
         }
       },
       "additionalProperties": true
