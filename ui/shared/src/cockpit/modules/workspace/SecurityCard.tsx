@@ -6,8 +6,8 @@ type Tone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral';
 
 /** BLOCKED is the protection working (a refusal), so it is shown as a positive, protective state; ALLOWED is the in-scope control; REDACTED is the masking done. */
 const TONE: Record<string, Tone> = { BLOCKED: 'ok', ALLOWED: 'info', REDACTED: 'ok' };
-const ROW_TONE: Record<string, Tone> = { AVAILABLE: 'ok', DEGRADED: 'warn', UNAVAILABLE: 'bad', NOT_REQUIRED: 'neutral', UNKNOWN: 'neutral' };
-const ROW_WORDS: Record<string, string> = { AVAILABLE: 'In force', DEGRADED: 'Degraded', UNAVAILABLE: 'Unavailable', NOT_REQUIRED: 'Not required', UNKNOWN: 'Unknown' };
+const ROW_TONE: Record<string, Tone> = { AVAILABLE: 'ok', DEGRADED: 'warn', UNAVAILABLE: 'bad', NOT_REQUIRED: 'neutral', DISABLED: 'neutral', UNKNOWN: 'neutral' };
+const ROW_WORDS: Record<string, string> = { AVAILABLE: 'In force', DEGRADED: 'Degraded', UNAVAILABLE: 'Unavailable', NOT_REQUIRED: 'Not required', DISABLED: 'Disabled', UNKNOWN: 'Unknown' };
 const PROTECTION_ROWS = ['security', 'private_state'];
 
 /**

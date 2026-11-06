@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { RunCapabilityStrip, runCapabilityCells, type RunCapabilityInput } from './RunCapabilityStrip';
 
 const base = (over: Partial<RunCapabilityInput> = {}): RunCapabilityInput => ({ modelCalls: 4, gates: { total: 4, passed: 4 }, attempts: { opened: 1, concluded: [true] }, authorityRecorded: true, skills: [], knownTargetFiles: 2,
-  memoryEntry: null, health: [{ id: 'lsp', label: 'Language server', state: 'UNAVAILABLE', reason_code: 'JDTLS_NOT_CONTAINABLE', detail: 'd', evidence: ['e'] }, { id: 'lookup', label: 'Outward lookup', state: 'NOT_REQUIRED', reason_code: 'LOOKUP_DISABLED', detail: 'd', evidence: ['e'] }], ...over });
+  memoryEntry: null, health: [{ id: 'lsp', label: 'Language server', state: 'UNAVAILABLE', reason_code: 'JDTLS_NOT_CONTAINABLE', detail: 'd', evidence: ['e'] }, { id: 'lookup', label: 'Outward lookup', state: 'DISABLED', reason_code: 'LOOKUP_DISABLED', detail: 'd', evidence: ['e'] }], ...over });
 const byId = (input: RunCapabilityInput) => Object.fromEntries(runCapabilityCells(input).map((c) => [c.id, c]));
 
 describe('runCapabilityCells', () => {
@@ -21,7 +21,7 @@ describe('runCapabilityCells', () => {
   it('carries the language server and lookup as Kriya\'s project health states, and never as USED', () => {
     const c = byId(base());
     expect(c.lsp).toMatchObject({ state: 'UNAVAILABLE', text: 'JDTLS_NOT_CONTAINABLE' });
-    expect(c.lookup).toMatchObject({ state: 'NOT_REQUIRED', text: 'LOOKUP_DISABLED' });
+    expect(c.lookup).toMatchObject({ state: 'DISABLED', text: 'LOOKUP_DISABLED' });
     expect(byId(base({ health: [{ id: 'lookup', label: 'Outward lookup', state: 'AVAILABLE', reason_code: 'LOOKUP_ENABLED_LOCAL_ONLY', detail: 'd', evidence: ['e'] }] })).lookup).toMatchObject({ state: 'UNKNOWN', text: 'enabled; no lookup is recorded in run evidence' });
   });
   it('shows recovery as used with each attempt\'s outcome when the run needed more than one attempt', () => {

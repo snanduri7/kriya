@@ -7,9 +7,9 @@ import java.util.List;
 
 /**
  * One capability of a folder with its state (AVAILABLE, DEGRADED, UNAVAILABLE,
- * NOT_REQUIRED, UNKNOWN), a closed reason code and the evidence that decided it. Derived
- * from the resolved configuration or a read-only observation, never from a claim about a
- * run.
+ * NOT_REQUIRED, DISABLED, UNKNOWN), a closed reason code and the evidence that decided it.
+ * Derived from the resolved configuration or a read-only observation, never from a claim
+ * about a run.
  */
 public class HealthRow {
     // Added by generate.mjs: unknown properties are preserved verbatim (P-24).

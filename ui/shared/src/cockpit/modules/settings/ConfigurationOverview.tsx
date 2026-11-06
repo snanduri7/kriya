@@ -3,8 +3,8 @@ import type { ExecutionPreflight } from '../../../model/kup';
 
 type Pre = ExecutionPreflight;
 type Tone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral';
-const TONE: Record<string, Tone> = { AVAILABLE: 'ok', DEGRADED: 'warn', UNAVAILABLE: 'bad', NOT_REQUIRED: 'neutral', UNKNOWN: 'neutral' };
-const WORDS: Record<string, string> = { AVAILABLE: 'In force', DEGRADED: 'Degraded', UNAVAILABLE: 'Unavailable', NOT_REQUIRED: 'Off', UNKNOWN: 'Unknown' };
+const TONE: Record<string, Tone> = { AVAILABLE: 'ok', DEGRADED: 'warn', UNAVAILABLE: 'bad', NOT_REQUIRED: 'neutral', DISABLED: 'neutral', UNKNOWN: 'neutral' };
+const WORDS: Record<string, string> = { AVAILABLE: 'In force', DEGRADED: 'Degraded', UNAVAILABLE: 'Unavailable', NOT_REQUIRED: 'Off', DISABLED: 'Off', UNKNOWN: 'Unknown' };
 const ROLE: Record<string, string> = { planner: 'Planner', architect: 'Architect', reviewer: 'Reviewer', run_verifier: 'Run verifier', skill_gap: 'Skill-gap check', spec_compliance: 'Spec compliance' };
 const APPROVALS: Record<string, string> = { change_review: 'Every change is held for your review before it is applied', configured_mode: 'Applied under the configured autonomy mode', unknown: 'Unknown', unavailable: 'Unavailable' };
 

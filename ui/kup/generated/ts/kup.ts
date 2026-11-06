@@ -679,12 +679,12 @@ export interface SecurityDemonstration {
   [k: string]: unknown;
 }
 /**
- * One capability of a folder with its state (AVAILABLE, DEGRADED, UNAVAILABLE, NOT_REQUIRED, UNKNOWN), a closed reason code and the evidence that decided it. Derived from the resolved configuration or a read-only observation, never from a claim about a run.
+ * One capability of a folder with its state (AVAILABLE, DEGRADED, UNAVAILABLE, NOT_REQUIRED, DISABLED, UNKNOWN), a closed reason code and the evidence that decided it. Derived from the resolved configuration or a read-only observation, never from a claim about a run.
  */
 export interface HealthRow {
   id: string;
   label: string;
-  state: 'AVAILABLE' | 'DEGRADED' | 'UNAVAILABLE' | 'NOT_REQUIRED' | 'UNKNOWN';
+  state: 'AVAILABLE' | 'DEGRADED' | 'UNAVAILABLE' | 'NOT_REQUIRED' | 'DISABLED' | 'UNKNOWN';
   reason_code: string;
   detail: string;
   evidence: string[];
@@ -772,7 +772,7 @@ export interface MemoryRun {
  */
 // ---- HealthRow (workspace.schema.json#/$defs/HealthRow) ----
 /**
- * One capability of a folder with its state (AVAILABLE, DEGRADED, UNAVAILABLE, NOT_REQUIRED, UNKNOWN), a closed reason code and the evidence that decided it. Derived from the resolved configuration or a read-only observation, never from a claim about a run.
+ * One capability of a folder with its state (AVAILABLE, DEGRADED, UNAVAILABLE, NOT_REQUIRED, DISABLED, UNKNOWN), a closed reason code and the evidence that decided it. Derived from the resolved configuration or a read-only observation, never from a claim about a run.
  */
 // ---- SecurityDemonstration (workspace.schema.json#/$defs/SecurityDemonstration) ----
 /**

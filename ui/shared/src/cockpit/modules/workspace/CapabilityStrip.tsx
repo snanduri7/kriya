@@ -7,8 +7,8 @@ type Tone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral';
 /** A cell composed from an answer Kriya already gave elsewhere on the page (the model probe, the Skills and Tools catalog): its words are that answer's own. */
 export interface ComposedCell { label: string; tone: Tone; status: string; detail?: string }
 
-const TONE: Record<string, Tone> = { AVAILABLE: 'ok', DEGRADED: 'warn', UNAVAILABLE: 'bad', NOT_REQUIRED: 'neutral', UNKNOWN: 'neutral' };
-const WORDS: Record<string, string> = { AVAILABLE: 'Available', DEGRADED: 'Degraded', UNAVAILABLE: 'Unavailable', NOT_REQUIRED: 'Not required', UNKNOWN: 'Unknown' };
+const TONE: Record<string, Tone> = { AVAILABLE: 'ok', DEGRADED: 'warn', UNAVAILABLE: 'bad', NOT_REQUIRED: 'neutral', DISABLED: 'neutral', UNKNOWN: 'neutral' };
+const WORDS: Record<string, string> = { AVAILABLE: 'Available', DEGRADED: 'Degraded', UNAVAILABLE: 'Unavailable', NOT_REQUIRED: 'Not required', DISABLED: 'Disabled', UNKNOWN: 'Unknown' };
 /** The order of the strip: what Kriya runs on, what it knows, what protects the repository, what proves a result, how it recovers, what it learns. */
 const ORDER = ['model', 'code_intelligence', 'lsp', 'skills', 'tools', 'security', 'private_state', 'lookup', 'verification', 'recovery', 'memory'];
 const SHORT: Record<string, string> = { model: 'Local model', code_intelligence: 'Code intelligence', lsp: 'Language server', skills: 'Skills', tools: 'Tools', security: 'Security',

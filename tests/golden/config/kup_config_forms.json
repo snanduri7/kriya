@@ -705,15 +705,16 @@
      "state": "UNKNOWN"
     },
     {
-     "detail": "Public lookup is off: nothing leaves this machine for knowledge. Enable it only through the operator configuration.",
+     "detail": "Public lookup is off, or no search endpoint is configured: nothing leaves this machine for knowledge. Enable it only through the operator configuration.",
      "evidence": [
       "autonomy.web_lookup_enabled",
+      "search.base_url",
       "autonomy.egress_policy"
      ],
      "id": "lookup",
      "label": "Outward lookup",
      "reason_code": "LOOKUP_DISABLED",
-     "state": "NOT_REQUIRED"
+     "state": "DISABLED"
     },
     {
      "detail": "A goal that asks for observable behaviour is verified by running the generated application in containment.",
@@ -2399,15 +2400,16 @@
      "state": "UNKNOWN"
     },
     {
-     "detail": "Public lookup is off: nothing leaves this machine for knowledge. Enable it only through the operator configuration.",
+     "detail": "Public lookup is off, or no search endpoint is configured: nothing leaves this machine for knowledge. Enable it only through the operator configuration.",
      "evidence": [
       "autonomy.web_lookup_enabled",
+      "search.base_url",
       "autonomy.egress_policy"
      ],
      "id": "lookup",
      "label": "Outward lookup",
      "reason_code": "LOOKUP_DISABLED",
-     "state": "NOT_REQUIRED"
+     "state": "DISABLED"
     },
     {
      "detail": "A goal that asks for observable behaviour is verified by running the generated application in containment.",
@@ -3653,15 +3655,16 @@
      "state": "UNKNOWN"
     },
     {
-     "detail": "Public lookup is off: nothing leaves this machine for knowledge. Enable it only through the operator configuration.",
+     "detail": "Public lookup is off, or no search endpoint is configured: nothing leaves this machine for knowledge. Enable it only through the operator configuration.",
      "evidence": [
       "autonomy.web_lookup_enabled",
+      "search.base_url",
       "autonomy.egress_policy"
      ],
      "id": "lookup",
      "label": "Outward lookup",
      "reason_code": "LOOKUP_DISABLED",
-     "state": "NOT_REQUIRED"
+     "state": "DISABLED"
     },
     {
      "detail": "A goal that asks for observable behaviour is verified by running the generated application in containment.",
@@ -4921,15 +4924,16 @@
      "state": "UNKNOWN"
     },
     {
-     "detail": "Public lookup is off: nothing leaves this machine for knowledge. Enable it only through the operator configuration.",
+     "detail": "Public lookup is off, or no search endpoint is configured: nothing leaves this machine for knowledge. Enable it only through the operator configuration.",
      "evidence": [
       "autonomy.web_lookup_enabled",
+      "search.base_url",
       "autonomy.egress_policy"
      ],
      "id": "lookup",
      "label": "Outward lookup",
      "reason_code": "LOOKUP_DISABLED",
-     "state": "NOT_REQUIRED"
+     "state": "DISABLED"
     },
     {
      "detail": "A goal that asks for observable behaviour is verified by running the generated application in containment.",

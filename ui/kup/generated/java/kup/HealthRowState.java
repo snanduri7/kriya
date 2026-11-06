@@ -6,13 +6,14 @@ import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
 public enum HealthRowState {
-    AVAILABLE, DEGRADED, NOT_REQUIRED, UNAVAILABLE, UNKNOWN;
+    AVAILABLE, DEGRADED, DISABLED, NOT_REQUIRED, UNAVAILABLE, UNKNOWN;
 
     @JsonValue
     public String toValue() {
         switch (this) {
             case AVAILABLE: return "AVAILABLE";
             case DEGRADED: return "DEGRADED";
+            case DISABLED: return "DISABLED";
             case NOT_REQUIRED: return "NOT_REQUIRED";
             case UNAVAILABLE: return "UNAVAILABLE";
             case UNKNOWN: return "UNKNOWN";
@@ -24,6 +25,7 @@ public enum HealthRowState {
     public static HealthRowState forValue(String value) throws IOException {
         if (value.equals("AVAILABLE")) return AVAILABLE;
         if (value.equals("DEGRADED")) return DEGRADED;
+        if (value.equals("DISABLED")) return DISABLED;
         if (value.equals("NOT_REQUIRED")) return NOT_REQUIRED;
         if (value.equals("UNAVAILABLE")) return UNAVAILABLE;
         if (value.equals("UNKNOWN")) return UNKNOWN;

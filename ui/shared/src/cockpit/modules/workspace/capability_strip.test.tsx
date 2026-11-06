@@ -19,10 +19,10 @@ const cell = (id: string) => document.querySelector(`[data-capability="${id}"]`)
 
 describe('the capability strip', () => {
   it('shows each backend row with its state word and carries the reason code, detail and evidence in its title', () => {
-    render(<CapabilityStrip health={[row('security', 'AVAILABLE'), row('lsp', 'UNAVAILABLE'), row('lookup', 'NOT_REQUIRED'), row('private_state', 'DEGRADED')]} composed={{}} memory={undefined} />);
+    render(<CapabilityStrip health={[row('security', 'AVAILABLE'), row('lsp', 'UNAVAILABLE'), row('lookup', 'DISABLED'), row('private_state', 'DEGRADED')]} composed={{}} memory={undefined} />);
     expect(within(cell('security')!).getByText('Available')).toBeTruthy();
     expect(within(cell('lsp')!).getByText('Unavailable')).toBeTruthy();
-    expect(within(cell('lookup')!).getByText('Not required')).toBeTruthy();
+    expect(within(cell('lookup')!).getByText('Disabled')).toBeTruthy();   // a setting that is off is DISABLED, never "not required"
     expect(within(cell('private_state')!).getByText('Degraded')).toBeTruthy();
     expect(cell('security')!.title).toBe('security: security detail (SECURITY_CODE; evidence: autonomy.x)');
   });

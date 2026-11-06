@@ -168,7 +168,7 @@
       "additionalProperties": true
     },
     "HealthRow": {
-      "description": "One capability of a folder with its state (AVAILABLE, DEGRADED, UNAVAILABLE, NOT_REQUIRED, UNKNOWN), a closed reason code and the evidence that decided it. Derived from the resolved configuration or a read-only observation, never from a claim about a run.",
+      "description": "One capability of a folder with its state (AVAILABLE, DEGRADED, UNAVAILABLE, NOT_REQUIRED, DISABLED, UNKNOWN), a closed reason code and the evidence that decided it. Derived from the resolved configuration or a read-only observation, never from a claim about a run.",
       "type": "object",
       "required": [
         "id",
@@ -192,6 +192,7 @@
             "DEGRADED",
             "UNAVAILABLE",
             "NOT_REQUIRED",
+            "DISABLED",
             "UNKNOWN"
           ]
         },

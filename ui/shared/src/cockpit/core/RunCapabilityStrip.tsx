@@ -2,7 +2,7 @@ import { Badge } from '../design';
 import type { ExecutionPreflight, ProjectMemory } from '../../model/kup';
 
 type HealthRow = NonNullable<ExecutionPreflight['health']>[number];
-export type CellState = 'AVAILABLE' | 'USED' | 'ACTIVE' | 'NOT_REQUIRED' | 'UNAVAILABLE' | 'DEGRADED' | 'UNKNOWN';
+export type CellState = 'AVAILABLE' | 'USED' | 'ACTIVE' | 'NOT_REQUIRED' | 'DISABLED' | 'UNAVAILABLE' | 'DEGRADED' | 'UNKNOWN';
 export interface RunCell { id: string; label: string; state: CellState; text: string; evidence: string }
 
 /** What the run recorded, reduced to facts by the existing selectors; null = the evidence could not be read. */
@@ -17,8 +17,8 @@ export interface RunCapabilityInput {
   health: readonly HealthRow[];
 }
 
-const TONE = { AVAILABLE: 'ok', USED: 'ok', ACTIVE: 'ok', NOT_REQUIRED: 'neutral', UNAVAILABLE: 'bad', DEGRADED: 'warn', UNKNOWN: 'neutral' } as const;
-const WORDS: Record<CellState, string> = { AVAILABLE: 'Available', USED: 'Used', ACTIVE: 'Active', NOT_REQUIRED: 'Not required', UNAVAILABLE: 'Unavailable', DEGRADED: 'Degraded', UNKNOWN: 'Not recorded' };
+const TONE = { AVAILABLE: 'ok', USED: 'ok', ACTIVE: 'ok', NOT_REQUIRED: 'neutral', DISABLED: 'neutral', UNAVAILABLE: 'bad', DEGRADED: 'warn', UNKNOWN: 'neutral' } as const;
+const WORDS: Record<CellState, string> = { AVAILABLE: 'Available', USED: 'Used', ACTIVE: 'Active', NOT_REQUIRED: 'Not required', DISABLED: 'Disabled', UNAVAILABLE: 'Unavailable', DEGRADED: 'Degraded', UNKNOWN: 'Not recorded' };
 const fromHealth = (health: readonly HealthRow[], id: string, label: string): RunCell | null => {
   const row = health.find((r) => r.id === id);
   return row ? { id, label, state: row.state as CellState, text: row.reason_code, evidence: `project health: ${row.reason_code}` } : null;

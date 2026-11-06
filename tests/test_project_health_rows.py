@@ -26,7 +26,7 @@ def test_the_packaged_defaults_report_mandatory_containment_verification_and_a_d
     r = rows()
     assert (r["security"]["state"], r["security"]["reason_code"]) == (health.AVAILABLE, "CONTAINMENT_REQUIRED")
     assert "network denied" in r["security"]["detail"] and "no setting that turns this off" in r["security"]["detail"] and "protected paths" in r["security"]["detail"]
-    assert (r["lookup"]["state"], r["lookup"]["reason_code"]) == (health.NOT_REQUIRED, "LOOKUP_DISABLED")
+    assert (r["lookup"]["state"], r["lookup"]["reason_code"]) == (health.DISABLED, "LOOKUP_DISABLED")
     assert (r["verification"]["state"], r["verification"]["reason_code"]) == (health.AVAILABLE, "RUN_VERIFICATION_ENABLED")
     assert (r["recovery"]["state"], r["recovery"]["reason_code"]) == (health.AVAILABLE, "RETRY_BUDGET_CONFIGURED")
     assert (r["code_intelligence"]["state"], r["code_intelligence"]["reason_code"]) == (health.AVAILABLE, "STRUCTURAL_INDEX")
@@ -62,7 +62,7 @@ def test_an_enabled_lookup_is_available_only_under_a_local_only_egress_policy_an
 def test_lookup_enabled_without_a_search_endpoint_is_not_a_lookup_capability():
     """The egress owner's decision needs the flag AND an endpoint; a flag with nowhere to send is reported disabled, never available."""
     row = rows(configured(search_endpoint="", web_lookup_enabled=True, egress_policy="local_only"))["lookup"]
-    assert (row["state"], row["reason_code"]) == (health.NOT_REQUIRED, "LOOKUP_DISABLED") and "no search endpoint" in row["detail"]
+    assert (row["state"], row["reason_code"]) == (health.DISABLED, "LOOKUP_DISABLED") and "no search endpoint" in row["detail"]
 
 
 def test_the_language_server_is_never_available_because_it_has_no_contained_mode():

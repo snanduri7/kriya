@@ -9,6 +9,7 @@ USED / ACTIVE / BLOCKED state needs that run's evidence and is a different proje
   DEGRADED       in force, but weaker than the safe default (the reason code says how)
   UNAVAILABLE    cannot be used here (the reason code says why)
   NOT_REQUIRED   nothing in this folder needs it
+  DISABLED       switched off by a configuration setting - a deliberate choice, not a fault (the reason code names it)
   UNKNOWN        the configuration did not load, or nothing was observed
 
 Honest by construction: containment is MANDATORY with no operator opt-out (the configuration refuses any other value: kriya/config/authority.py ContainmentOptOutError), so
@@ -27,8 +28,9 @@ AVAILABLE = "AVAILABLE"
 DEGRADED = "DEGRADED"
 UNAVAILABLE = "UNAVAILABLE"
 NOT_REQUIRED = "NOT_REQUIRED"
+DISABLED = "DISABLED"
 UNKNOWN = "UNKNOWN"
-STATES = (AVAILABLE, DEGRADED, UNAVAILABLE, NOT_REQUIRED, UNKNOWN)
+STATES = (AVAILABLE, DEGRADED, UNAVAILABLE, NOT_REQUIRED, DISABLED, UNKNOWN)
 CONFIG_UNAVAILABLE = "CONFIG_UNAVAILABLE"
 
 
@@ -68,7 +70,7 @@ def capability_rows(cfg: Optional[Any], *, state_directory: Optional[str]) -> Li
                          "Public lookup is enabled. A lookup is requested only when a run finds a public-knowledge gap, the query is sanitized and private repository context is not sent.",
                          ["autonomy.web_lookup_enabled", "search.base_url", "autonomy.egress_policy"]))
     else:
-        rows.append(_row("lookup", "Outward lookup", NOT_REQUIRED, "LOOKUP_DISABLED",
+        rows.append(_row("lookup", "Outward lookup", DISABLED, "LOOKUP_DISABLED",
                          "Public lookup is off, or no search endpoint is configured: nothing leaves this machine for knowledge. Enable it only through the operator configuration.",
                          ["autonomy.web_lookup_enabled", "search.base_url", "autonomy.egress_policy"]))
 
