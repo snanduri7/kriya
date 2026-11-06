@@ -280,11 +280,11 @@ def test_a_failed_run_is_observed_as_rejected_through_the_cli_seam(repo, capsys)
 
 # ---------------------------------------------------------------------------------------------------------------- the id the cockpit knows a run by
 
-def _record(repo, run_id, created):
+def _record(repo, run_id, created, updated=None):
     directory = os.path.join(os.path.dirname(pm.store_path(str(repo))), "..", "runs")
     os.makedirs(directory, exist_ok=True)
     with open(os.path.join(directory, f"{run_id}.json"), "w") as handle:
-        json.dump({"run_id": run_id, "created_at": created}, handle)
+        json.dump({"run_id": run_id, "created_at": created, **({"updated_at": updated} if updated else {})}, handle)
 
 
 def test_the_entry_carries_the_newest_control_run_created_during_the_process(repo):
@@ -296,6 +296,15 @@ def test_the_entry_carries_the_newest_control_run_created_during_the_process(rep
     entry = learn(repo, evidence_run_id=pm.control_run_id_since(str(repo), "2026-11-06T10:59:00+00:00"))
     assert entry.evidence_run_id == "20261106T110500-cccccccc"
     assert pm.project(str(repo)).runs[-1].evidence_run_id == "20261106T110500-cccccccc"
+
+
+def test_a_run_record_created_before_the_process_started_but_updated_during_it_is_this_runs(repo):
+    """MEASURED in the real Electron run (2026-11-07): the app-launched process creates its RunRecord (19:53:49) BEFORE ``run_workflow`` takes its start time and updates it
+    until the run ends (19:55:41); keying on creation time found nothing, so the entry named no control run and the cockpit showed no per-run Learning."""
+    _record(repo, "20261106T100000-aaaaaaaa", "2026-11-06T10:00:00+00:00", "2026-11-06T10:03:00+00:00")     # an earlier, finished run
+    _record(repo, "20261107T012347-89a7ef64", "2026-11-06T19:53:49+00:00", "2026-11-06T19:55:41+00:00")     # this run: created before, updated during
+    assert pm.control_run_id_since(str(repo), "2026-11-06T19:54:30+00:00") == "20261107T012347-89a7ef64"
+    assert pm.control_run_id_since(str(repo), "2026-11-06T19:56:00+00:00") is None                          # nothing touched since: no guess
 
 
 def test_unreadable_or_foreign_run_records_are_skipped_and_a_missing_directory_is_none(repo):

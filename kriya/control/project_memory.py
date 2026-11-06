@@ -436,8 +436,10 @@ def observe_run(workspace_path: str, *, run_id: str, success: bool, passed_gates
 
 
 def control_run_id_since(workspace_path: str, since_iso: str) -> Optional[str]:
-    """The control-plane run id (the id the run's evidence store and RunRecord carry) of the NEWEST RunRecord of this repository created at or after ``since_iso`` (the moment the
-    finished run's process started). One run owns a repository at a time, so the newest record created during this process is this run's. None when none can be read."""
+    """The control-plane run id (the id the run's evidence store and RunRecord carry) of the RunRecord of this repository LAST UPDATED at or after ``since_iso`` (the moment the
+    finished run's process started). One run owns a repository at a time, so a record touched during this process is this run's. It is keyed on the update time, not creation:
+    a cockpit-launched process creates its RunRecord before the workflow takes its start time (MEASURED 2026-11-07) but keeps updating it until the run ends. A record with no
+    update time falls back to its creation time. None when none can be read."""
     directory = os.path.join(control_roots(workspace_path)[1], "control", "runs")
     try:
         since = datetime.fromisoformat(since_iso)
@@ -451,11 +453,11 @@ def control_run_id_since(workspace_path: str, since_iso: str) -> Optional[str]:
         data, _reason = _read_regular_file(directory, name, limit=MAX_EVIDENCE_FILE_BYTES * 4)
         try:
             record = json.loads(data.decode("utf-8")) if data else None
-            created, run_id = datetime.fromisoformat(record["created_at"]), record["run_id"]
+            touched, run_id = datetime.fromisoformat(record.get("updated_at") or record["created_at"]), record["run_id"]
         except (ValueError, KeyError, TypeError, AttributeError):
             continue
-        if isinstance(run_id, str) and created >= since and (best is None or created > best[0]):
-            best = (created, run_id)
+        if isinstance(run_id, str) and touched >= since and (best is None or touched > best[0]):
+            best = (touched, run_id)
     return best[1] if best else None
 
 
