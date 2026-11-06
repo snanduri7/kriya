@@ -1,4 +1,4 @@
-import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, primaryVerification, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, BeforeAfter, RunMemoryLine, useExecution, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
+import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, primaryVerification, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, BeforeAfter, RunCapabilityStrip, RunMemoryLine, activeSkills, contextFacts, runCapabilityCells, runEventsOf, useExecution, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
 
 const OUTCOME = { success: { mark: '✓', words: 'Run completed' }, failure: { mark: '✕', words: 'Run failed' }, in_progress: { mark: '●', words: 'Run not finished' } } as const;
 
@@ -7,12 +7,15 @@ function Overview() {
   const run = useRunContext();
   const execution = useExecution();
   const memory = execution.preflight.state === 'ready' ? execution.preflight.data.memory : undefined;
+  const health = execution.preflight.state === 'ready' ? execution.preflight.data.health ?? [] : [];
   const evidence = useRunEvidence();
   const detail = useRunDetail();
   return (
     <AvailabilityView value={run}>
       {(ctx) => {
         const records = hasData(evidence) ? evidence.data.records : null;
+        // capability states are statements about the run's evidence: shown only when that evidence is the verified, sealed chain (an unsealed or unreadable store claims nothing)
+        const sealedEvidence = hasData(evidence) && evidence.data.verify?.status === 'VERIFIED' && evidence.data.verify?.sealed === true;
         const changes = records ? changeFacts(records) : null;
         const gates = records ? validationFacts(records) : null;
         const files: ChangedFile[] | null = changes ? changes.map((c) => ({ path: c.path, additions: c.linesAdded, deletions: c.linesRemoved, changeType: c.kind === 'ADDED' || c.kind === 'CREATED' ? 'added' as const : null })) : null;
@@ -27,6 +30,16 @@ function Overview() {
               <p className="ck-result-goal">{goalTitle(ctx.displayGoal)}</p>
               {ctx.status === 'success' ? <p>Your change was recorded as complete.</p> : null}
 
+              {sealedEvidence ? <RunCapabilityStrip cells={runCapabilityCells({
+                modelCalls: records ? ofKind(records, 'model.response').length : null,
+                gates: records ? { total: ofKind(records, 'gate.result').length, passed: ofKind(records, 'gate.result').filter((r) => payloadOf(r).success === true).length } : null,
+                attempts: records ? { opened: ofKind(records, 'attempt.opened').length, concluded: ofKind(records, 'attempt.concluded').map((r) => payloadOf(r).succeeded === true) } : null,
+                authorityRecorded: records ? ofKind(records, 'authority.snapshot').length > 0 : null,
+                skills: activeSkills(hasData(detail) ? detail.data : null),
+                knownTargetFiles: hasData(detail) ? contextFacts(runEventsOf(detail.data), null).knownTargets?.files.length ?? null : null,
+                memoryEntry: memory?.runs.find((r) => r.run_id === ctx.runId) ?? null,
+                health,
+              })} /> : null}
               <BeforeAfter request={goalTitle(ctx.displayGoal)} files={files} groups={groups ? groups.groups : null}
                 concluded={records ? ofKind(records, 'attempt.concluded').map((r) => payloadOf(r).succeeded === true) : []} opened={records ? ofKind(records, 'attempt.opened').length : 0} />
 

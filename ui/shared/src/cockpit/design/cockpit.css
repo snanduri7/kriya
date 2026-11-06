@@ -225,3 +225,4 @@
 .ck-before-after dl { display: grid; grid-template-columns: max-content 1fr; gap: var(--ck-s-1) var(--ck-s-3); margin: 0; }
 .ck-before-after dt { color: var(--ck-muted); } .ck-before-after dd { margin: 0; } .ck-before-after .ck-ba-row { display: contents; }
 .ck-before-after [data-status="passed"] strong { color: var(--ck-ok); } .ck-before-after [data-status="failed"] strong { color: var(--ck-bad); }
+.ck-strip li[data-state="UNKNOWN"] { opacity: 0.75; }

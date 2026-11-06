@@ -18,6 +18,19 @@ describe('Overview', () => {
     expect(await screen.findByText(/Unfinished \(the trace row says in_progress; this is not a claim that a run is active\)/)).toBeInTheDocument(); // the stored-status row keeps its caveat
     expect(screen.getByText('Run not finished')).toBeInTheDocument(); // and the summary says only that it did not finish
   });
+  it('a verified run states its capabilities from its own evidence, with the request, delivery and attempts summary above the technical layer', async () => {
+    renderModule(overviewModule, { runId: 'fx-brownfield-modify' });
+    const strip = await screen.findByTestId('run-capability-strip');
+    expect(strip.querySelector('[data-capability="verify"]')?.getAttribute('data-state')).toBe('USED');
+    expect(strip.querySelector('[data-capability="security"]')?.getAttribute('data-state')).toBe('ACTIVE');
+    expect(await screen.findByTestId('before-after')).toBeInTheDocument();
+    expect(document.querySelector('[data-row="Recovery"]')).not.toBeNull();
+  });
+  it('an unsealed run claims no capability: the strip is absent', async () => {
+    renderModule(overviewModule, { runId: 'fx-unsealed' });
+    await screen.findByText('Run not finished');
+    expect(screen.queryByTestId('run-capability-strip')).toBeNull();
+  });
   it('a pruned run still shows the run row and says the evidence is pruned', async () => {
     renderModule(overviewModule, { runId: 'fx-pruned' });
     expect(await screen.findByText('Evidence pruned by retention')).toBeInTheDocument();
