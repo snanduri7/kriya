@@ -359,6 +359,8 @@ def gate_output_roots(cmd: List[str], cwd: str) -> List[str]:
     return []
 
 
+# Attempts to create the project venv from nothing before the gate reports PYTHON_ENVIRONMENT_UNAVAILABLE (WAVE8-PY-RUNTIME-ONLY-VENV-BOOTSTRAP-001).
+VENV_CREATION_ATTEMPTS = 2
 RUNTIME_VERIFICATION_GATE = "runtime_verification"
 # FS-1C2 B2-a: the operator acceptance file (PolymorphicValidator.run_acceptance).
 ACCEPTANCE_GATE = "acceptance"
@@ -923,20 +925,29 @@ class PolymorphicValidator:
             self.venv_recreations += 1
 
         if not venv_present(venv_python_host):
-            if self._gate_view is not None:
-                os.makedirs(venv_dir_host, exist_ok=True)  # the mount target of the origin venv (see _venv_mounts); Kriya-owned, inside the origin's .kriya
-            try:
-                create_res = self._run_cmd_with_timeout(
-                    [create_interpreter, "-m", "venv", create_target], cwd=self.workspace_path, timeout=60, venv_writable=True,
-                )
-                if create_res["returncode"] != 0 or not venv_present(venv_python_host):
-                    self._venv_creation_error = (f"`{create_interpreter} -m venv` exited {create_res['returncode']}: "
-                                                 f"{create_res['stderr']}")
-                    logger.warning(f"Failed to create project-local venv at {venv_dir_host}: {self._venv_creation_error}")
-                    return None, None
-            except Exception as e:
-                self._venv_creation_error = f"`{create_interpreter} -m venv` could not be invoked: {e}"
-                logger.warning(f"Failed to create project-local venv at {venv_dir_host}: {self._venv_creation_error}")
+            # WAVE8-PY-RUNTIME-ONLY-VENV-BOOTSTRAP-001: the environment is created HERE, by whichever gate needs it first (a runtime-only plan has no earlier test gate to
+            # do it), and creation is a container run over a freshly made bind-mount target - an infrastructure step that can fail transiently under load (MEASURED: two
+            # runtime-only runs failed with `ensurepip` exit 1 / an empty venv, the same goal then passed with no change, and the identical container run succeeded
+            # 12 of 12 when repeated on a quiet host). So creation gets ONE bounded retry from nothing - the partial directory is removed and the mount target remade - and
+            # still fails closed, with BOTH attempts' errors, when the second attempt fails too. Nothing about WHAT is verified changes: a venv that exists is used as before.
+            errors: List[str] = []
+            for attempt in range(1, VENV_CREATION_ATTEMPTS + 1):
+                if attempt > 1:
+                    shutil.rmtree(venv_dir_host, ignore_errors=True)
+                if self._gate_view is not None:
+                    os.makedirs(venv_dir_host, exist_ok=True)  # the mount target of the origin venv (see _venv_mounts); Kriya-owned, inside the origin's .kriya
+                try:
+                    create_res = self._run_cmd_with_timeout(
+                        [create_interpreter, "-m", "venv", create_target], cwd=self.workspace_path, timeout=60, venv_writable=True,
+                    )
+                    if create_res["returncode"] == 0 and venv_present(venv_python_host):
+                        break
+                    errors.append(f"`{create_interpreter} -m venv` exited {create_res['returncode']}: {create_res['stderr']}")
+                except Exception as e:
+                    errors.append(f"`{create_interpreter} -m venv` could not be invoked: {e}")
+                logger.warning(f"Failed to create project-local venv at {venv_dir_host} (attempt {attempt} of {VENV_CREATION_ATTEMPTS}): {errors[-1]}")
+            else:
+                self._venv_creation_error = " | ".join(f"attempt {n}: {e}" for n, e in enumerate(errors, 1)) if len(errors) > 1 else errors[0]
                 return None, None
         self._venv_creation_error = None
 
