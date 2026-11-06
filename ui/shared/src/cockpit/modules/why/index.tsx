@@ -1,5 +1,5 @@
 import {
-  AvailabilityView, Badge, OPEN_TARGETS, Panel, attemptFor, attemptOutcomes, diagnoses, fallbacks, firstFailedGate, gateRows, recoveries, runClosure, useDispatch, useModuleSelection, useRunContext,
+  AvailabilityView, Badge, OPEN_TARGETS, Panel, attemptFor, attemptOutcomes, diagnoses, expectedBaselineFailures, fallbacks, firstFailedGate, gateRows, recoveries, runClosure, useDispatch, useModuleSelection, useRunContext,
   useRunEvidence, type DiagnosisFacts, type EvidenceClass, type ModuleDefinition, type RunEvidence,
 } from '../../core';
 
@@ -30,6 +30,7 @@ function Why({ data, failureCategory }: { data: RunEvidence; failureCategory: st
   const closure = runClosure(records);
   const gates = gateRows(records).filter((g) => g.attempt === target || g.attempt === null);
   const failedGate = firstFailedGate(gates);
+  const baselineFailures = expectedBaselineFailures(gates);
   const dx = diagnoses(records).filter((d) => d.attempt === target || target === null);
   const rec = recoveries(records).filter((r) => r.attempt === target || target === null);
   const fb = fallbacks(records).filter((f) => f.attempt === target || target === null);
@@ -50,6 +51,7 @@ function Why({ data, failureCategory }: { data: RunEvidence; failureCategory: st
         </p>
         {failureCategory ? <p className="muted" style={{ margin: '4px 0 0' }}>Stored failure category: <span className="mono">{failureCategory}</span></p> : null}
       </Panel>
+      {baselineFailures.length ? <p className="muted" role="note" data-testid="expected-baseline-failure">{baselineFailures.map((g) => `Record ${g.seq}: ${g.type} failed when run against the ORIGINAL code (declared purpose: ${GATE_PURPOSE_WORDS[g.purpose ?? ''] ?? g.purpose}). That is the baseline the change is compared with, not a failure of the change.`).join(' ')}</p> : null}
       {!failed ? <p className="muted">No failure is recorded for this attempt.</p> : (
         <>
           {gates.length ? (

@@ -74,7 +74,14 @@ export function gateRows(records: readonly EvidenceRecord[]): GateRow[] {
   return rows;
 }
 
-export const firstFailedGate = (rows: readonly GateRow[]): GateRow | null => rows.find((g) => g.success === false) ?? null;
+/**
+ * The first gate that failed AS A VERDICT ON THE CHANGE. A gate Kriya's orchestrator declared to be the named-test closure's run on the ORIGINAL code (`named_test_closure_base_run`) is
+ * expected to fail when the bug the request names is still there - that failure is the baseline, not a failure of the change - so it never counts here (it is returned separately by
+ * ``expectedBaselineFailures``). The distinction rests on the backend-declared purpose alone; a gate with no declared purpose is judged as before.
+ */
+export const firstFailedGate = (rows: readonly GateRow[]): GateRow | null => rows.find((g) => g.success === false && g.purpose !== BASE_RUN_PURPOSE) ?? null;
+export const BASE_RUN_PURPOSE = 'named_test_closure_base_run';
+export const expectedBaselineFailures = (rows: readonly GateRow[]): GateRow[] => rows.filter((g) => g.success === false && g.purpose === BASE_RUN_PURPOSE);
 
 // ------------------------------------------------------------------ candidate changes
 
