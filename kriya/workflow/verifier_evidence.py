@@ -33,6 +33,10 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from kriya.workflow.verification_authority import (
+    EXPECTED_NONZERO_EXIT_GROUNDED as EXPECTED_NONZERO_EXIT_GROUNDED,  # WAVE8 OI-90: defined in the pure vocabulary module
+)
+
 EVIDENCE_EXTRACTION_VERSION = "verifier-evidence/1"
 
 
@@ -58,7 +62,6 @@ CAPTURE_LOSS_UNRESOLVED = "CAPTURE_LOSS_UNRESOLVED"
 # Deterministic (runtime) reason codes.
 TIMEOUT_AUTHORITATIVE = "TIMEOUT_AUTHORITATIVE"
 NONZERO_EXIT_AUTHORITATIVE = "NONZERO_EXIT_AUTHORITATIVE"
-EXPECTED_NONZERO_EXIT_GROUNDED = "EXPECTED_NONZERO_EXIT_GROUNDED"
 DETERMINISTIC_PROCESS_EXIT = "DETERMINISTIC_PROCESS_EXIT"
 
 # Signature kinds, in window-priority order. Every kind except ``error`` is

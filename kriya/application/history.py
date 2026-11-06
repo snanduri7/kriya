@@ -73,6 +73,24 @@ def _blocked_reason(gate_outcomes: List[Any]) -> Optional[str]:
     return None
 
 
+def _exit_is_acceptable(gate: Dict[str, Any], exit_code: Optional[int]) -> bool:
+    """Whether the recorded exit of the application's last step is consistent with a PASSED gate: exit 0, or a non-zero exit the gate's OWN recorded runtime
+    disposition grounds as the expected behaviour (WAVE8 OI-90). The disposition is the authoritative owner's record (``verifier_evidence.apply_runtime_disposition``:
+    ``deterministic_reason == EXPECTED_NONZERO_EXIT_GROUNDED`` only when the goal itself declared that exit and the application launched, ``final == PASS``);
+    this projection reads it and never decides it. A non-zero exit WITHOUT that grounded record stays a failure, and an unknown exit never passes."""
+    if exit_code == 0:
+        return True
+    if exit_code is None:
+        return False
+    from kriya.workflow.verification_authority import (
+        EXPECTED_NONZERO_EXIT_GROUNDED,  # lazy: the KUP read path loads no kernel module at import
+    )
+
+    disposition = gate.get("runtime_disposition")
+    return (isinstance(disposition, dict) and disposition.get("deterministic_reason") == EXPECTED_NONZERO_EXIT_GROUNDED
+            and disposition.get("final") == "PASS")
+
+
 def application_outcome(gate_outcomes: Any) -> Dict[str, Any]:
     """The projection for one run's recorded gate outcomes (a list of dicts, or whatever the column held)."""
     if not isinstance(gate_outcomes, list):
@@ -98,7 +116,7 @@ def application_outcome(gate_outcomes: Any) -> Dict[str, Any]:
     timed_out = bool(last.get("timed_out")) or gate.get("type") == "run_verification_hung"
     return {
         "status": STATUS_EXECUTED,
-        "succeeded": gate.get("success") is True and exit_code == 0 and not timed_out,
+        "succeeded": gate.get("success") is True and _exit_is_acceptable(gate, exit_code) and not timed_out,
         "attempt": gate.get("attempt") if isinstance(gate.get("attempt"), int) else None,
         "command": _command(last.get("command")),
         "commands": [c for c in (_command(s.get("command")) for s in steps) if c is not None],

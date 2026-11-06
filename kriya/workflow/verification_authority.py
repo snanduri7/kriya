@@ -8,6 +8,11 @@ classified here.
 from pathlib import Path
 from typing import List, Optional
 
+# The deterministic runtime reason code that records a non-zero exit the goal itself declared as expected (set only by
+# verifier_evidence.apply_runtime_disposition). Defined HERE - the pure verification-authority vocabulary the KUP read path may already import - so the history
+# projection reads the owner's record by its name without a new dependency edge (WAVE8 OI-90); verifier_evidence re-exports it.
+EXPECTED_NONZERO_EXIT_GROUNDED = "EXPECTED_NONZERO_EXIT_GROUNDED"
+
 _MAVEN_LIFECYCLE_GOALS = {
     "validate", "compile", "test", "package", "verify", "install",
     "test-compile", "clean",
