@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { KeyValue, Panel, useCapabilities, useProvider, useWorkspace, type ModuleDefinition } from '../../core';
+import { KeyValue, Panel, useCapabilities, useExecution, useProvider, useWorkspace, type ModuleDefinition } from '../../core';
+import { ConfigurationOverview } from './ConfigurationOverview';
 
 // The workspace is not a setting: it is chosen with Open Folder (the host only accepts folders the person chose).
 const FIELDS = [['configDirectory', 'Configuration directory'], ['kriyaExecutable', 'Kriya executable']] as const;
@@ -19,7 +20,11 @@ function Settings() {
   const ws = useWorkspace();
   const caps = useCapabilities();
   const others = ws.recent.filter((p) => p !== ws.current?.path);
+  const execution = useExecution();
+  const pre = execution.preflight.state === 'ready' ? execution.preflight.data : null;
   return (
+    <div style={{ display: 'grid', gap: 8 }}>
+    {pre ? <ConfigurationOverview pre={pre} /> : null}
     <Panel title="Settings">
       <KeyValue items={FIELDS.map(([key, label]) => [label, (
         <span key={key} aria-label={label}>
@@ -53,6 +58,7 @@ function Settings() {
         )}
       </section>
     </Panel>
+    </div>
   );
 }
 
