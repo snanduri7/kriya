@@ -14,7 +14,7 @@ import java.util.List;
  * command fingerprint the decision must carry. Never a stdin or environment VALUE; `files`
  * does not exist on this shape.
  */
-public class WorkspaceSchema {
+public class PendingApprovalClass {
     // Added by generate.mjs: unknown properties are preserved verbatim (P-24).
     private final java.util.Map<String, Object> additionalProperties = new java.util.LinkedHashMap<>();
     @JsonAnyGetter

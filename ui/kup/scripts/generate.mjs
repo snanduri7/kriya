@@ -43,6 +43,8 @@ const TYPES = [
   ['WorkspaceStatus', 'workspace.schema.json', '#'],
   ['WorkspaceDescribe', 'workspace.schema.json', '#/$defs/WorkspaceDescribe'],
   ['ExecutionPreflight', 'workspace.schema.json', '#/$defs/ExecutionPreflight'],
+  ['ProjectMemory', 'workspace.schema.json', '#/$defs/ProjectMemory'],
+  ['HealthRow', 'workspace.schema.json', '#/$defs/HealthRow'],
   ['LaunchStatus', 'workspace.schema.json', '#/$defs/LaunchStatus'],
   ['WorkspaceCreate', 'workspace.schema.json', '#/$defs/WorkspaceCreate'],
   ['ConfigurationApprovalStatus', 'workspace.schema.json', '#/$defs/ConfigurationApprovalStatus'],

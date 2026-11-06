@@ -155,11 +155,322 @@
           },
           "additionalProperties": true
         },
+        "health": { "type": "array", "items": { "$ref": "#/$defs/HealthRow" }, "description": "Project health rows (additive; absent from an older Kriya): capabilities no other answer states, each with a closed state, a reason code and the configuration fields / observations that decided it." },
+        "memory": { "$ref": "#/$defs/ProjectMemory", "description": "VERIFIED PROJECT MEMORY of the folder's repository, read now (additive; absent from an older Kriya)." },
         "interaction": {
           "type": "object",
           "required": ["approvals", "knowledge_policy", "note"],
           "properties": { "approvals": { "type": "string", "enum": ["change_review", "configured_mode", "unknown", "unavailable"], "description": "change_review: a change is held for the person's review (human-in-the-loop). configured_mode: the resolved configuration selects another autonomy mode (shown, never changed by the app). unknown: the configuration could not be resolved." }, "autonomy_mode": { "type": ["string", "null"], "description": "The autonomy mode of the resolved configuration, verbatim." }, "knowledge_policy": { "type": "string" }, "note": { "type": "string" } },
           "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "HealthRow": {
+      "description": "One capability of a folder with its state (AVAILABLE, DEGRADED, UNAVAILABLE, NOT_REQUIRED, UNKNOWN), a closed reason code and the evidence that decided it. Derived from the resolved configuration or a read-only observation, never from a claim about a run.",
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "state",
+        "reason_code",
+        "detail",
+        "evidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "AVAILABLE",
+            "DEGRADED",
+            "UNAVAILABLE",
+            "NOT_REQUIRED",
+            "UNKNOWN"
+          ]
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "MemoryCounts": {
+      "type": "object",
+      "required": [
+        "current",
+        "stale",
+        "rejected_total",
+        "learned_last_run",
+        "reused_last_run",
+        "rejected_last_run"
+      ],
+      "properties": {
+        "current": {
+          "type": "integer"
+        },
+        "stale": {
+          "type": "integer"
+        },
+        "rejected_total": {
+          "type": "integer"
+        },
+        "learned_last_run": {
+          "type": "integer"
+        },
+        "reused_last_run": {
+          "type": "integer"
+        },
+        "rejected_last_run": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": true
+    },
+    "MemoryEvidence": {
+      "type": "object",
+      "required": [
+        "kind",
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "file",
+            "extension_present"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "MemoryFact": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "value",
+        "status",
+        "stale_reason",
+        "evidence",
+        "learned_run_id",
+        "learned_at",
+        "confirmed_runs",
+        "reused_runs",
+        "why"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "CURRENT",
+            "STALE"
+          ]
+        },
+        "stale_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "EVIDENCE_CHANGED, EVIDENCE_MISSING or EVIDENCE_UNREADABLE when STALE."
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MemoryEvidence"
+          }
+        },
+        "learned_run_id": {
+          "type": "string"
+        },
+        "learned_at": {
+          "type": "string"
+        },
+        "confirmed_runs": {
+          "type": "integer"
+        },
+        "reused_runs": {
+          "type": "integer"
+        },
+        "why": {
+          "type": "string",
+          "description": "\"Why does Kriya know this?\": the provenance, from the stored record only."
+        }
+      },
+      "additionalProperties": true
+    },
+    "MemoryRejection": {
+      "type": "object",
+      "required": [
+        "run_id",
+        "kind",
+        "reason",
+        "at"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "RUN_NOT_VERIFIED",
+            "UNSAFE_VALUE"
+          ]
+        },
+        "at": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "MemoryRun": {
+      "type": "object",
+      "required": [
+        "run_id",
+        "at",
+        "outcome",
+        "learned",
+        "refreshed",
+        "reused",
+        "rejected"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "learned",
+            "rejected"
+          ]
+        },
+        "learned": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "refreshed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reused": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rejected": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": true
+    },
+    "ProjectMemory": {
+      "description": "VERIFIED PROJECT MEMORY (product/demo-72h): safe, validated facts about ONE repository, a read-only PROJECTION of verified run evidence onto the repository as it is now. A fact is CURRENT only while every evidence file still has the digest it was learned from; otherwise it is STALE with a reason code and is never reused. Carries no commands and no secrets; repository-scoped.",
+      "type": "object",
+      "required": [
+        "schema_version",
+        "repository",
+        "store_state",
+        "store_detail",
+        "counts",
+        "facts",
+        "rejected",
+        "runs"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer"
+        },
+        "repository": {
+          "type": "string",
+          "description": "The repository identity (the workspace authority's digest)."
+        },
+        "store_state": {
+          "type": "string",
+          "enum": [
+            "OK",
+            "ABSENT",
+            "STORE_UNREADABLE",
+            "STORE_TOO_LARGE",
+            "STORE_SCHEMA_UNSUPPORTED",
+            "STORE_FOREIGN_REPOSITORY"
+          ]
+        },
+        "store_detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "counts": {
+          "$ref": "#/$defs/MemoryCounts"
+        },
+        "facts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MemoryFact"
+          }
+        },
+        "rejected": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MemoryRejection"
+          }
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MemoryRun"
+          }
         }
       },
       "additionalProperties": true

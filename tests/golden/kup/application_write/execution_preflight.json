@@ -17,11 +17,103 @@
    "source": "packaged_default",
    "status": "loaded"
   },
+  "health": [
+   {
+    "detail": "Verification commands run only in an isolating container with the network denied - there is no setting that turns this off; writes are limited to the authorized scope; credential-bearing files are protected paths; secrets are redacted from evidence.",
+    "evidence": [
+     "configuration load: a non-mandatory containment value is refused (ContainmentOptOutError)",
+     "kriya/tools/containment.py"
+    ],
+    "id": "security",
+    "label": "Security",
+    "reason_code": "CONTAINMENT_REQUIRED",
+    "state": "AVAILABLE"
+   },
+   {
+    "detail": "Kriya's run state directory is this user's own and closed to others.",
+    "evidence": [
+     "observed: the state directory's owner and mode"
+    ],
+    "id": "private_state",
+    "label": "Private state",
+    "reason_code": "PRIVATE_STATE_VERIFIED",
+    "state": "AVAILABLE"
+   },
+   {
+    "detail": "Public lookup is off: nothing leaves this machine for knowledge. Enable it only through the operator configuration.",
+    "evidence": [
+     "autonomy.web_lookup_enabled",
+     "autonomy.egress_policy"
+    ],
+    "id": "lookup",
+    "label": "Outward lookup",
+    "reason_code": "LOOKUP_DISABLED",
+    "state": "NOT_REQUIRED"
+   },
+   {
+    "detail": "A goal that asks for observable behaviour is verified by running the generated application in containment.",
+    "evidence": [
+     "autonomy.run_verification_enabled"
+    ],
+    "id": "verification",
+    "label": "Runtime verification",
+    "reason_code": "RUN_VERIFICATION_ENABLED",
+    "state": "AVAILABLE"
+   },
+   {
+    "detail": "A failed attempt is diagnosed and retried against the exact failure; a run with no progress stops after 2 consecutive attempts.",
+    "evidence": [
+     "autonomy.max_consecutive_no_progress_attempts"
+    ],
+    "id": "recovery",
+    "label": "Recovery",
+    "reason_code": "RETRY_BUDGET_CONFIGURED",
+    "state": "AVAILABLE"
+   },
+   {
+    "detail": "The Java language server (jdtls) imports the project's build on the host and has no contained mode, so Kriya never starts it; code understanding comes from the structural index below.",
+    "evidence": [
+     "configuration load: containment is mandatory",
+     "kriya/tools/lsp.py"
+    ],
+    "id": "lsp",
+    "label": "Language server",
+    "reason_code": "JDTLS_NOT_CONTAINABLE",
+    "state": "UNAVAILABLE"
+   },
+   {
+    "detail": "Kriya indexes the repository structurally (symbols, references, implementations) and uses it to localize a change; it does not depend on a language server.",
+    "evidence": [
+     "kriya/code_intel"
+    ],
+    "id": "code_intelligence",
+    "label": "Code intelligence",
+    "reason_code": "STRUCTURAL_INDEX",
+    "state": "AVAILABLE"
+   }
+  ],
   "interaction": {
    "approvals": "change_review",
    "autonomy_mode": "human-in-the-loop",
    "knowledge_policy": "strict",
    "note": "A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you."
+  },
+  "memory": {
+   "counts": {
+    "current": 0,
+    "learned_last_run": 0,
+    "rejected_last_run": 0,
+    "rejected_total": 0,
+    "reused_last_run": 0,
+    "stale": 0
+   },
+   "facts": [],
+   "rejected": [],
+   "repository": "<WSID>",
+   "runs": [],
+   "schema_version": 1,
+   "store_detail": null,
+   "store_state": "ABSENT"
   },
   "model": {
    "context_window": 32768,

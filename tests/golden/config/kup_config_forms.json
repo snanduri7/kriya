@@ -467,11 +467,86 @@
     "source": "unreadable",
     "status": "failed"
    },
+   "health": [
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    }
+   ],
    "interaction": {
     "approvals": "unknown",
     "autonomy_mode": null,
     "knowledge_policy": "strict",
     "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<MALFORMED>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": null,
    "ready": false,
@@ -531,11 +606,103 @@
     "source": "auto_discovered_cwd",
     "status": "loaded"
    },
+   "health": [
+    {
+     "detail": "Verification commands run only in an isolating container with the network denied - there is no setting that turns this off; writes are limited to the authorized scope; credential-bearing files are protected paths; secrets are redacted from evidence.",
+     "evidence": [
+      "configuration load: a non-mandatory containment value is refused (ContainmentOptOutError)",
+      "kriya/tools/containment.py"
+     ],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONTAINMENT_REQUIRED",
+     "state": "AVAILABLE"
+    },
+    {
+     "detail": "No state directory exists yet; the first run creates it private.",
+     "evidence": [
+      "observed: the state directory's owner and mode"
+     ],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "STATE_DIRECTORY_NOT_CREATED",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "Public lookup is off: nothing leaves this machine for knowledge. Enable it only through the operator configuration.",
+     "evidence": [
+      "autonomy.web_lookup_enabled",
+      "autonomy.egress_policy"
+     ],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "LOOKUP_DISABLED",
+     "state": "NOT_REQUIRED"
+    },
+    {
+     "detail": "A goal that asks for observable behaviour is verified by running the generated application in containment.",
+     "evidence": [
+      "autonomy.run_verification_enabled"
+     ],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "RUN_VERIFICATION_ENABLED",
+     "state": "AVAILABLE"
+    },
+    {
+     "detail": "A failed attempt is diagnosed and retried against the exact failure; a run with no progress stops after 2 consecutive attempts.",
+     "evidence": [
+      "autonomy.max_consecutive_no_progress_attempts"
+     ],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "RETRY_BUDGET_CONFIGURED",
+     "state": "AVAILABLE"
+    },
+    {
+     "detail": "The Java language server (jdtls) imports the project's build on the host and has no contained mode, so Kriya never starts it; code understanding comes from the structural index below.",
+     "evidence": [
+      "configuration load: containment is mandatory",
+      "kriya/tools/lsp.py"
+     ],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "JDTLS_NOT_CONTAINABLE",
+     "state": "UNAVAILABLE"
+    },
+    {
+     "detail": "Kriya indexes the repository structurally (symbols, references, implementations) and uses it to localize a change; it does not depend on a language server.",
+     "evidence": [
+      "kriya/code_intel"
+     ],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "STRUCTURAL_INDEX",
+     "state": "AVAILABLE"
+    }
+   ],
    "interaction": {
     "approvals": "change_review",
     "autonomy_mode": "human-in-the-loop",
     "knowledge_policy": "strict",
     "note": "A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<PLAIN>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": {
     "context_window": 32768,
@@ -616,11 +783,86 @@
     "source": "auto_discovered_cwd",
     "status": "refused"
    },
+   "health": [
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    }
+   ],
    "interaction": {
     "approvals": "unknown",
     "autonomy_mode": null,
     "knowledge_policy": "strict",
     "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<PROTECTED>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": null,
    "ready": false,
@@ -692,11 +934,86 @@
     "source": "auto_discovered_cwd",
     "status": "refused"
    },
+   "health": [
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    }
+   ],
    "interaction": {
     "approvals": "unknown",
     "autonomy_mode": null,
     "knowledge_policy": "strict",
     "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<REFUSED>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": null,
    "ready": false,
@@ -761,11 +1078,86 @@
     "source": "unreadable",
     "status": "failed"
    },
+   "health": [
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    }
+   ],
    "interaction": {
     "approvals": "unknown",
     "autonomy_mode": null,
     "knowledge_policy": "strict",
     "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<STATE_RELATIVE>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": null,
    "ready": false,
@@ -1389,11 +1781,86 @@
     "source": "unreadable",
     "status": "failed"
    },
+   "health": [
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    }
+   ],
    "interaction": {
     "approvals": "unknown",
     "autonomy_mode": null,
     "knowledge_policy": "strict",
     "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<MALFORMED>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": null,
    "ready": false,
@@ -1453,11 +1920,103 @@
     "source": "auto_discovered_cwd",
     "status": "loaded"
    },
+   "health": [
+    {
+     "detail": "Verification commands run only in an isolating container with the network denied - there is no setting that turns this off; writes are limited to the authorized scope; credential-bearing files are protected paths; secrets are redacted from evidence.",
+     "evidence": [
+      "configuration load: a non-mandatory containment value is refused (ContainmentOptOutError)",
+      "kriya/tools/containment.py"
+     ],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONTAINMENT_REQUIRED",
+     "state": "AVAILABLE"
+    },
+    {
+     "detail": "No state directory exists yet; the first run creates it private.",
+     "evidence": [
+      "observed: the state directory's owner and mode"
+     ],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "STATE_DIRECTORY_NOT_CREATED",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "Public lookup is off: nothing leaves this machine for knowledge. Enable it only through the operator configuration.",
+     "evidence": [
+      "autonomy.web_lookup_enabled",
+      "autonomy.egress_policy"
+     ],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "LOOKUP_DISABLED",
+     "state": "NOT_REQUIRED"
+    },
+    {
+     "detail": "A goal that asks for observable behaviour is verified by running the generated application in containment.",
+     "evidence": [
+      "autonomy.run_verification_enabled"
+     ],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "RUN_VERIFICATION_ENABLED",
+     "state": "AVAILABLE"
+    },
+    {
+     "detail": "A failed attempt is diagnosed and retried against the exact failure; a run with no progress stops after 2 consecutive attempts.",
+     "evidence": [
+      "autonomy.max_consecutive_no_progress_attempts"
+     ],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "RETRY_BUDGET_CONFIGURED",
+     "state": "AVAILABLE"
+    },
+    {
+     "detail": "The Java language server (jdtls) imports the project's build on the host and has no contained mode, so Kriya never starts it; code understanding comes from the structural index below.",
+     "evidence": [
+      "configuration load: containment is mandatory",
+      "kriya/tools/lsp.py"
+     ],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "JDTLS_NOT_CONTAINABLE",
+     "state": "UNAVAILABLE"
+    },
+    {
+     "detail": "Kriya indexes the repository structurally (symbols, references, implementations) and uses it to localize a change; it does not depend on a language server.",
+     "evidence": [
+      "kriya/code_intel"
+     ],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "STRUCTURAL_INDEX",
+     "state": "AVAILABLE"
+    }
+   ],
    "interaction": {
     "approvals": "change_review",
     "autonomy_mode": "human-in-the-loop",
     "knowledge_policy": "strict",
     "note": "A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<PLAIN>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": {
     "context_window": 32768,
@@ -1531,11 +2090,86 @@
     "source": "auto_discovered_cwd",
     "status": "failed"
    },
+   "health": [
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    }
+   ],
    "interaction": {
     "approvals": "unknown",
     "autonomy_mode": null,
     "knowledge_policy": "strict",
     "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<PROTECTED>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": null,
    "ready": false,
@@ -1600,11 +2234,86 @@
     "source": "auto_discovered_cwd",
     "status": "failed"
    },
+   "health": [
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    }
+   ],
    "interaction": {
     "approvals": "unknown",
     "autonomy_mode": null,
     "knowledge_policy": "strict",
     "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<REFUSED>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": null,
    "ready": false,
@@ -1669,11 +2378,86 @@
     "source": "unreadable",
     "status": "failed"
    },
+   "health": [
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    }
+   ],
    "interaction": {
     "approvals": "unknown",
     "autonomy_mode": null,
     "knowledge_policy": "strict",
     "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<STATE_RELATIVE>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": null,
    "ready": false,
@@ -1871,11 +2655,86 @@
     "source": "unreadable",
     "status": "failed"
    },
+   "health": [
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    }
+   ],
    "interaction": {
     "approvals": "unknown",
     "autonomy_mode": null,
     "knowledge_policy": "strict",
     "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<MALFORMED>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": null,
    "ready": false,
@@ -1935,11 +2794,103 @@
     "source": "auto_discovered_cwd",
     "status": "loaded"
    },
+   "health": [
+    {
+     "detail": "Verification commands run only in an isolating container with the network denied - there is no setting that turns this off; writes are limited to the authorized scope; credential-bearing files are protected paths; secrets are redacted from evidence.",
+     "evidence": [
+      "configuration load: a non-mandatory containment value is refused (ContainmentOptOutError)",
+      "kriya/tools/containment.py"
+     ],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONTAINMENT_REQUIRED",
+     "state": "AVAILABLE"
+    },
+    {
+     "detail": "No state directory exists yet; the first run creates it private.",
+     "evidence": [
+      "observed: the state directory's owner and mode"
+     ],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "STATE_DIRECTORY_NOT_CREATED",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "Public lookup is off: nothing leaves this machine for knowledge. Enable it only through the operator configuration.",
+     "evidence": [
+      "autonomy.web_lookup_enabled",
+      "autonomy.egress_policy"
+     ],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "LOOKUP_DISABLED",
+     "state": "NOT_REQUIRED"
+    },
+    {
+     "detail": "A goal that asks for observable behaviour is verified by running the generated application in containment.",
+     "evidence": [
+      "autonomy.run_verification_enabled"
+     ],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "RUN_VERIFICATION_ENABLED",
+     "state": "AVAILABLE"
+    },
+    {
+     "detail": "A failed attempt is diagnosed and retried against the exact failure; a run with no progress stops after 2 consecutive attempts.",
+     "evidence": [
+      "autonomy.max_consecutive_no_progress_attempts"
+     ],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "RETRY_BUDGET_CONFIGURED",
+     "state": "AVAILABLE"
+    },
+    {
+     "detail": "The Java language server (jdtls) imports the project's build on the host and has no contained mode, so Kriya never starts it; code understanding comes from the structural index below.",
+     "evidence": [
+      "configuration load: containment is mandatory",
+      "kriya/tools/lsp.py"
+     ],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "JDTLS_NOT_CONTAINABLE",
+     "state": "UNAVAILABLE"
+    },
+    {
+     "detail": "Kriya indexes the repository structurally (symbols, references, implementations) and uses it to localize a change; it does not depend on a language server.",
+     "evidence": [
+      "kriya/code_intel"
+     ],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "STRUCTURAL_INDEX",
+     "state": "AVAILABLE"
+    }
+   ],
    "interaction": {
     "approvals": "change_review",
     "autonomy_mode": "human-in-the-loop",
     "knowledge_policy": "strict",
     "note": "A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<PLAIN>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": {
     "context_window": 32768,
@@ -2020,11 +2971,86 @@
     "source": "auto_discovered_cwd",
     "status": "refused"
    },
+   "health": [
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    }
+   ],
    "interaction": {
     "approvals": "unknown",
     "autonomy_mode": null,
     "knowledge_policy": "strict",
     "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<PROTECTED>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": null,
    "ready": false,
@@ -2096,11 +3122,86 @@
     "source": "auto_discovered_cwd",
     "status": "refused"
    },
+   "health": [
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    }
+   ],
    "interaction": {
     "approvals": "unknown",
     "autonomy_mode": null,
     "knowledge_policy": "strict",
     "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<REFUSED>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": null,
    "ready": false,
@@ -2165,11 +3266,86 @@
     "source": "unreadable",
     "status": "failed"
    },
+   "health": [
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    }
+   ],
    "interaction": {
     "approvals": "unknown",
     "autonomy_mode": null,
     "knowledge_policy": "strict",
     "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<STATE_RELATIVE>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": null,
    "ready": false,
@@ -2367,11 +3543,86 @@
     "source": "unreadable",
     "status": "failed"
    },
+   "health": [
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    }
+   ],
    "interaction": {
     "approvals": "unknown",
     "autonomy_mode": null,
     "knowledge_policy": "strict",
     "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<MALFORMED>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": null,
    "ready": false,
@@ -2431,11 +3682,103 @@
     "source": "auto_discovered_cwd",
     "status": "loaded"
    },
+   "health": [
+    {
+     "detail": "Verification commands run only in an isolating container with the network denied - there is no setting that turns this off; writes are limited to the authorized scope; credential-bearing files are protected paths; secrets are redacted from evidence.",
+     "evidence": [
+      "configuration load: a non-mandatory containment value is refused (ContainmentOptOutError)",
+      "kriya/tools/containment.py"
+     ],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONTAINMENT_REQUIRED",
+     "state": "AVAILABLE"
+    },
+    {
+     "detail": "No state directory exists yet; the first run creates it private.",
+     "evidence": [
+      "observed: the state directory's owner and mode"
+     ],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "STATE_DIRECTORY_NOT_CREATED",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "Public lookup is off: nothing leaves this machine for knowledge. Enable it only through the operator configuration.",
+     "evidence": [
+      "autonomy.web_lookup_enabled",
+      "autonomy.egress_policy"
+     ],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "LOOKUP_DISABLED",
+     "state": "NOT_REQUIRED"
+    },
+    {
+     "detail": "A goal that asks for observable behaviour is verified by running the generated application in containment.",
+     "evidence": [
+      "autonomy.run_verification_enabled"
+     ],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "RUN_VERIFICATION_ENABLED",
+     "state": "AVAILABLE"
+    },
+    {
+     "detail": "A failed attempt is diagnosed and retried against the exact failure; a run with no progress stops after 2 consecutive attempts.",
+     "evidence": [
+      "autonomy.max_consecutive_no_progress_attempts"
+     ],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "RETRY_BUDGET_CONFIGURED",
+     "state": "AVAILABLE"
+    },
+    {
+     "detail": "The Java language server (jdtls) imports the project's build on the host and has no contained mode, so Kriya never starts it; code understanding comes from the structural index below.",
+     "evidence": [
+      "configuration load: containment is mandatory",
+      "kriya/tools/lsp.py"
+     ],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "JDTLS_NOT_CONTAINABLE",
+     "state": "UNAVAILABLE"
+    },
+    {
+     "detail": "Kriya indexes the repository structurally (symbols, references, implementations) and uses it to localize a change; it does not depend on a language server.",
+     "evidence": [
+      "kriya/code_intel"
+     ],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "STRUCTURAL_INDEX",
+     "state": "AVAILABLE"
+    }
+   ],
    "interaction": {
     "approvals": "change_review",
     "autonomy_mode": "human-in-the-loop",
     "knowledge_policy": "strict",
     "note": "A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<PLAIN>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": {
     "context_window": 32768,
@@ -2509,11 +3852,86 @@
     "source": "auto_discovered_cwd",
     "status": "failed"
    },
+   "health": [
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    }
+   ],
    "interaction": {
     "approvals": "unknown",
     "autonomy_mode": null,
     "knowledge_policy": "strict",
     "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<PROTECTED>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": null,
    "ready": false,
@@ -2578,11 +3996,86 @@
     "source": "auto_discovered_cwd",
     "status": "failed"
    },
+   "health": [
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    }
+   ],
    "interaction": {
     "approvals": "unknown",
     "autonomy_mode": null,
     "knowledge_policy": "strict",
     "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<REFUSED>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": null,
    "ready": false,
@@ -2647,11 +4140,86 @@
     "source": "unreadable",
     "status": "failed"
    },
+   "health": [
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "security",
+     "label": "Security",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "private_state",
+     "label": "Private state",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lookup",
+     "label": "Outward lookup",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "verification",
+     "label": "Runtime verification",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "recovery",
+     "label": "Recovery",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "lsp",
+     "label": "Language server",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    },
+    {
+     "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+     "evidence": [],
+     "id": "code_intelligence",
+     "label": "Code intelligence",
+     "reason_code": "CONFIG_UNAVAILABLE",
+     "state": "UNKNOWN"
+    }
+   ],
    "interaction": {
     "approvals": "unknown",
     "autonomy_mode": null,
     "knowledge_policy": "strict",
     "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+   },
+   "memory": {
+    "counts": {
+     "current": 0,
+     "learned_last_run": 0,
+     "rejected_last_run": 0,
+     "rejected_total": 0,
+     "reused_last_run": 0,
+     "stale": 0
+    },
+    "facts": [],
+    "rejected": [],
+    "repository": "<STATE_RELATIVE>_ID",
+    "runs": [],
+    "schema_version": 1,
+    "store_detail": null,
+    "store_state": "ABSENT"
    },
    "model": null,
    "ready": false,

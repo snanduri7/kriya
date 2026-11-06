@@ -20,7 +20,9 @@ public class ExecutionPreflight {
 
     private List<ExecutionPreflightBlocker> blockers;
     private ExecutionPreflightConfiguration configuration;
+    private List<HealthRow> health;
     private Interaction interaction;
+    private ProjectMemory memory;
     private Model model;
     private boolean ready;
     private ExecutionPreflightRecovery recovery;
@@ -38,10 +40,29 @@ public class ExecutionPreflight {
     @JsonProperty("configuration")
     public void setConfiguration(ExecutionPreflightConfiguration value) { this.configuration = value; }
 
+    /**
+     * Project health rows (additive; absent from an older Kriya): capabilities no other answer
+     * states, each with a closed state, a reason code and the configuration fields /
+     * observations that decided it.
+     */
+    @JsonProperty("health")
+    public List<HealthRow> getHealth() { return health; }
+    @JsonProperty("health")
+    public void setHealth(List<HealthRow> value) { this.health = value; }
+
     @JsonProperty("interaction")
     public Interaction getInteraction() { return interaction; }
     @JsonProperty("interaction")
     public void setInteraction(Interaction value) { this.interaction = value; }
+
+    /**
+     * VERIFIED PROJECT MEMORY of the folder's repository, read now (additive; absent from an
+     * older Kriya).
+     */
+    @JsonProperty("memory")
+    public ProjectMemory getMemory() { return memory; }
+    @JsonProperty("memory")
+    public void setMemory(ProjectMemory value) { this.memory = value; }
 
     @JsonProperty("model")
     public Model getModel() { return model; }

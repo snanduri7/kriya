@@ -29,11 +29,86 @@
    "source": "auto_discovered_cwd",
    "status": "refused"
   },
+  "health": [
+   {
+    "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+    "evidence": [],
+    "id": "security",
+    "label": "Security",
+    "reason_code": "CONFIG_UNAVAILABLE",
+    "state": "UNKNOWN"
+   },
+   {
+    "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+    "evidence": [],
+    "id": "private_state",
+    "label": "Private state",
+    "reason_code": "CONFIG_UNAVAILABLE",
+    "state": "UNKNOWN"
+   },
+   {
+    "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+    "evidence": [],
+    "id": "lookup",
+    "label": "Outward lookup",
+    "reason_code": "CONFIG_UNAVAILABLE",
+    "state": "UNKNOWN"
+   },
+   {
+    "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+    "evidence": [],
+    "id": "verification",
+    "label": "Runtime verification",
+    "reason_code": "CONFIG_UNAVAILABLE",
+    "state": "UNKNOWN"
+   },
+   {
+    "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+    "evidence": [],
+    "id": "recovery",
+    "label": "Recovery",
+    "reason_code": "CONFIG_UNAVAILABLE",
+    "state": "UNKNOWN"
+   },
+   {
+    "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+    "evidence": [],
+    "id": "lsp",
+    "label": "Language server",
+    "reason_code": "CONFIG_UNAVAILABLE",
+    "state": "UNKNOWN"
+   },
+   {
+    "detail": "The folder's configuration did not load, so nothing can be said about this yet.",
+    "evidence": [],
+    "id": "code_intelligence",
+    "label": "Code intelligence",
+    "reason_code": "CONFIG_UNAVAILABLE",
+    "state": "UNKNOWN"
+   }
+  ],
   "interaction": {
    "approvals": "unknown",
    "autonomy_mode": null,
    "knowledge_policy": "strict",
    "note": "The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run instead of being approved for you."
+  },
+  "memory": {
+   "counts": {
+    "current": 0,
+    "learned_last_run": 0,
+    "rejected_last_run": 0,
+    "rejected_total": 0,
+    "reused_last_run": 0,
+    "stale": 0
+   },
+   "facts": [],
+   "rejected": [],
+   "repository": "<REFUSED_WSID>",
+   "runs": [],
+   "schema_version": 1,
+   "store_detail": null,
+   "store_state": "ABSENT"
   },
   "model": null,
   "ready": false,

@@ -300,7 +300,8 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     const r = await h.start({ workspace: ws, goal: 'g' });
     await untilExited(h);
     const record = JSON.parse(readFileSync(join(dirOf(ws), `${r.launch_id}.json`), 'utf8')) as Json;
-    const strip = (p: Json) => { const { state, ...rest } = p; return { ...rest, state: { directory: state.directory, source: state.source } }; };
+    // `memory` (Verified Project Memory) and `health` (project health rows) are host-side reads added to execution.preflight AFTER the resolution; the launched process records the resolution only.
+    const strip = (p: Json) => { const { state, memory: _memory, health: _health, ...rest } = p; return { ...rest, state: { directory: state.directory, source: state.source } }; };
     expect(strip(record.preflight)).toEqual(strip(before));
     expect(before.configuration.source).toBe('auto_discovered_cwd');
     expect(before.model.context_window).toBe(12345);

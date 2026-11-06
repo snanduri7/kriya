@@ -39,6 +39,31 @@ def _current_uid() -> int:
     return platform_services().host_identity.current().uid
 
 
+PRIVATE = "private"
+NOT_PRIVATE = "not_private"
+MISSING = "missing"
+UNSAFE = "unsafe"
+
+
+def inspect_private_directory(path: str) -> str:
+    """READ-ONLY observation of a private-store directory (nothing is created, tightened or followed): ``private`` (this user's own real directory with no group/other
+    access), ``not_private`` (this user's own directory a group or other can enter - the next run tightens it), ``missing``, or ``unsafe`` (a symlink, not a directory, or
+    another owner's; a run refuses it). On a platform without POSIX modes the observation is ``private`` only for an existing own directory."""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return MISSING
+    except OSError:
+        return UNSAFE
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        return UNSAFE
+    if not _active():
+        return PRIVATE
+    if info.st_uid != _current_uid():
+        return UNSAFE
+    return PRIVATE if stat.S_IMODE(info.st_mode) & 0o077 == 0 else NOT_PRIVATE
+
+
 def ensure_private_directory(path: str, *, create: bool = True) -> bool:
     """``path`` is, on return, a real directory owned by this user with mode 0700. Created (mode 0700 via ``chmod`` after ``mkdir``, so neither a restrictive
     nor a permissive umask changes it) when missing and ``create``; a wider one this user owns is tightened. Returns True when it exists afterwards (False only

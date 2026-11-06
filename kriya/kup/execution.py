@@ -45,6 +45,8 @@ def _load_in(workspace: str):
 def preflight(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     _requested, workspace = validated_workspace(request)
     data = client.runs.preflight(client.context(workspace_root=workspace, request_id=request_id), cfg, workspace, tool_visibility=tool_visibility)
+    # VERIFIED PROJECT MEMORY (product/demo-72h): the repository's memory read NOW, additive to the preflight (a projection of verified run evidence; kriya/application/memory.py).
+    data["memory"] = client.memory.view(client.context(workspace_root=workspace, request_id=request_id), workspace)
     cockpit_state = data["state"]["cockpit_directory"]
     return envelope("execution.preflight", request_id, data=data, source=source_block(cockpit_state, client.history.location(client.context(workspace_root=None, request_id=request_id), cfg).trace_database, None), consistency=live_consistency())
 

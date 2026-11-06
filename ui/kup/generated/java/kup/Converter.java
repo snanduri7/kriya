@@ -27,6 +27,8 @@
 //     WorkspaceStatus data = Converter.WorkspaceStatusFromJsonString(jsonString);
 //     WorkspaceDescribe data = Converter.WorkspaceDescribeFromJsonString(jsonString);
 //     ExecutionPreflight data = Converter.ExecutionPreflightFromJsonString(jsonString);
+//     ProjectMemory data = Converter.ProjectMemoryFromJsonString(jsonString);
+//     HealthRow data = Converter.HealthRowFromJsonString(jsonString);
 //     LaunchStatus data = Converter.LaunchStatusFromJsonString(jsonString);
 //     WorkspaceCreate data = Converter.WorkspaceCreateFromJsonString(jsonString);
 //     ConfigurationApprovalStatus data = Converter.ConfigurationApprovalStatusFromJsonString(jsonString);
@@ -246,6 +248,22 @@ public class Converter {
 
     public static String ExecutionPreflightToJsonString(ExecutionPreflight obj) throws JsonProcessingException {
         return getExecutionPreflightObjectWriter().writeValueAsString(obj);
+    }
+
+    public static ProjectMemory ProjectMemoryFromJsonString(String json) throws IOException {
+        return getProjectMemoryObjectReader().readValue(json);
+    }
+
+    public static String ProjectMemoryToJsonString(ProjectMemory obj) throws JsonProcessingException {
+        return getProjectMemoryObjectWriter().writeValueAsString(obj);
+    }
+
+    public static HealthRow HealthRowFromJsonString(String json) throws IOException {
+        return getHealthRowObjectReader().readValue(json);
+    }
+
+    public static String HealthRowToJsonString(HealthRow obj) throws JsonProcessingException {
+        return getHealthRowObjectWriter().writeValueAsString(obj);
     }
 
     public static LaunchStatus LaunchStatusFromJsonString(String json) throws IOException {
@@ -1055,6 +1073,68 @@ public class Converter {
     private static ObjectWriter getExecutionPreflightObjectWriter() {
         if (ExecutionPreflightWriter == null) instantiateExecutionPreflightMapper();
         return ExecutionPreflightWriter;
+    }
+
+    private static ObjectReader ProjectMemoryReader;
+    private static ObjectWriter ProjectMemoryWriter;
+
+    private static void instantiateProjectMemoryMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        ProjectMemoryReader = mapper.readerFor(ProjectMemory.class);
+        ProjectMemoryWriter = mapper.writerFor(ProjectMemory.class);
+    }
+
+    private static ObjectReader getProjectMemoryObjectReader() {
+        if (ProjectMemoryReader == null) instantiateProjectMemoryMapper();
+        return ProjectMemoryReader;
+    }
+
+    private static ObjectWriter getProjectMemoryObjectWriter() {
+        if (ProjectMemoryWriter == null) instantiateProjectMemoryMapper();
+        return ProjectMemoryWriter;
+    }
+
+    private static ObjectReader HealthRowReader;
+    private static ObjectWriter HealthRowWriter;
+
+    private static void instantiateHealthRowMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        HealthRowReader = mapper.readerFor(HealthRow.class);
+        HealthRowWriter = mapper.writerFor(HealthRow.class);
+    }
+
+    private static ObjectReader getHealthRowObjectReader() {
+        if (HealthRowReader == null) instantiateHealthRowMapper();
+        return HealthRowReader;
+    }
+
+    private static ObjectWriter getHealthRowObjectWriter() {
+        if (HealthRowWriter == null) instantiateHealthRowMapper();
+        return HealthRowWriter;
     }
 
     private static ObjectReader LaunchStatusReader;

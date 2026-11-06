@@ -3,8 +3,10 @@ import { Badge, CopyText, KeyValue, Panel, hasData, useExecution, useWorkspace, 
 import { CONFIG_APPROVAL_BLOCKER } from './ConfigApproval';
 import { CurrentRun } from './CurrentRun';
 import { ProjectSetupCard } from './ProjectSetup';
+import { ProjectMemoryCard } from './ProjectMemory';
+import { CapabilityStrip, type ComposedCell } from './CapabilityStrip';
 import { GoalComposer } from './GoalComposer';
-import { PreflightSummary, ProjectFacts, ReadinessChecklist, preflightBody, summarizeReadiness } from './Readiness';
+import { PreflightSummary, ProjectFacts, ReadinessChecklist, checklist, preflightBody, summarizeReadiness } from './Readiness';
 import { RecentRuns } from './RecentRuns';
 import { useRunSetup } from './runSetup';
 import { ModelRouting, SkillsSummary, ToolsSummary } from './SetupSections';
@@ -28,6 +30,13 @@ function ProjectHome() {
   const unverified = hasData(context) && context.data.skills ? context.data.skills.items.filter((k) => !k.verified).length : 0;
   const mcp = hasData(context) && context.data.tools ? context.data.tools.mcp_servers.length : null;
   const showDetails = () => setDetailsOpen(true);
+  // The strip's model / Skills / Tools cells are this page's own backend answers (the model probe and the catalog), passed through in their own words.
+  const modelCell = pre ? checklist(pre, probe).find((r) => r.label === 'Model server') ?? null : null;
+  const composed: Record<string, ComposedCell | null> = {
+    model: modelCell ? { label: 'Model server', tone: modelCell.tone, status: modelCell.status, detail: modelCell.detail } : null,
+    skills: skillCount === null ? null : { label: 'Skills', tone: unverified ? 'warn' : 'ok', status: `${skillCount}${unverified ? ` · ${unverified} unverified` : ''}` },
+    tools: mcp === null ? null : { label: 'Tools', tone: 'info', status: `${mcp} MCP server${mcp === 1 ? '' : 's'}` },
+  };
   // The only thing between the person and Start Run is an approval they can give here.
   const actionOnly = ex.canApproveConfiguration && summary.state === 'blocked' && summary.blockers.length > 0 && summary.blockers.every((b) => b.code === CONFIG_APPROVAL_BLOCKER);
   // State A: a folder with no configuration file. Setup is recommended, never required (the folder is already runnable on the defaults).
@@ -40,9 +49,11 @@ function ProjectHome() {
         <span className="grow" />
         {ex.run ? null : summary.state === 'ready' ? <Badge tone="ok">✓ Ready</Badge> : actionOnly ? <Badge tone="warn">Action required</Badge> : summary.state === 'blocked' || summary.state === 'error' ? <Badge tone="bad">Cannot start</Badge> : null}
       </div>
+      {pre?.health ? <CapabilityStrip health={pre.health} composed={composed} memory={pre.memory} /> : null}
       {unconfigured ? <ProjectSetupCard model={pre.model?.model ?? null} fallbacks={pre.model?.fallback_chain ?? []} onCreated={recheck} /> : null}
       {ex.run ? <CurrentRun /> : ex.available ? <GoalComposer summary={summary} onDetails={showDetails} onRecheck={recheck} /> : <section aria-label="Start a run"><h2>What do you want Kriya to do?</h2><p className="muted" role="status">This host cannot start a run.</p></section>}
       <RecentRuns />
+      {pre?.memory ? <ProjectMemoryCard memory={pre.memory} /> : null}
       <details className="ck-setup" open={detailsOpen} onToggle={(e) => setDetailsOpen((e.currentTarget as HTMLDetailsElement).open)}>
         <summary>Project details</summary>
         {pre ? <ProjectFacts pre={pre} probe={probe} /> : ex.available ? preflightBody(ex.preflight) : null}

@@ -22,7 +22,7 @@ public class Launch {
     private List<History> history;
     private String launchid;
     private Map<String, Object> options;
-    private WorkspaceSchema pendingApproval;
+    private PendingApprovalClass pendingApproval;
     private LaunchPhase phase;
     private Map<String, Object> process;
     private String requestedAt;
@@ -89,9 +89,9 @@ public class Launch {
      * BEFORE the run continues.
      */
     @JsonProperty("pending_approval")
-    public WorkspaceSchema getPendingApproval() { return pendingApproval; }
+    public PendingApprovalClass getPendingApproval() { return pendingApproval; }
     @JsonProperty("pending_approval")
-    public void setPendingApproval(WorkspaceSchema value) { this.pendingApproval = value; }
+    public void setPendingApproval(PendingApprovalClass value) { this.pendingApproval = value; }
 
     @JsonProperty("phase")
     public LaunchPhase getPhase() { return phase; }

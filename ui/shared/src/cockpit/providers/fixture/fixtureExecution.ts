@@ -7,11 +7,15 @@
  * The host-process side (`ExecutionHostPort`) reports only the process, exactly like the real host.
  */
 import type { ExecutionHostPort, NotifyRequest, NotifyResult } from '../../../host/HostAdapter';
-import type { ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, ConfigurationApprovalStatus, DecideApprovalRequest, DecideApprovalResult, DecideRuntimeCommandRequest, DecideRuntimeCommandResult, ExecutionState, StartRunResult } from '../../../model/kup';
+import type { ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, ConfigurationApprovalStatus, DecideApprovalRequest, DecideApprovalResult, DecideRuntimeCommandRequest, DecideRuntimeCommandResult, ExecutionPreflight, ExecutionState, ProjectMemory, StartRunResult } from '../../../model/kup';
 
 export type FixtureOutcome = 'success' | 'failure' | 'died' | 'refused' | 'never_recorded' | 'approval_required' | 'stuck_starting' | 'success_after_stale_read' | 'success_with_declined' | 'review' | 'runtime_review';
 
 export interface FixtureExecutionOptions {
+  /** Scripted VERIFIED PROJECT MEMORY (DEV/TEST ONLY): the `memory` block of `execution.preflight` for every folder; absent = an older Kriya that reports none. */
+  memory?: ProjectMemory;
+  /** Scripted project health rows (DEV/TEST ONLY): the `health` block of `execution.preflight`; absent = an older Kriya that reports none. */
+  health?: NonNullable<ExecutionPreflight['health']>;
   /** How the next launch ends (default 'success'). */
   outcome?: FixtureOutcome;
   /** The RunRecord's commit result of a successful run (default COMMITTED; the real controlled body records NO_COMMIT). */
@@ -281,6 +285,8 @@ export class FixtureExecution {
       recovery: { status: 'CLEAN', run_active: false },
       interaction: facts.approvals === 'configured_mode' ? { approvals: 'configured_mode', autonomy_mode: 'autonomous', knowledge_policy: 'strict', note: 'This folder\'s configuration sets the autonomy mode to \'autonomous\': a routine change is not held for review by this configuration.' } : { approvals: 'change_review', autonomy_mode: 'human-in-the-loop', knowledge_policy: 'strict', note: 'A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you.' },
       toolchains: { tools: [{ tool: 'python3', available: true, path: '/usr/bin/python3' }, git, { tool: 'java', available: false, path: null }, { tool: 'mvn', available: false, path: null }], note: 'Visibility under this process\'s own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs.' },
+      ...(this.options.memory ? { memory: this.options.memory as unknown as Json } : {}),
+      ...(this.options.health ? { health: this.options.health as unknown as Json } : {}),
     };
   }
 

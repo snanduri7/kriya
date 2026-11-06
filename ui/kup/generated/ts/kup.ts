@@ -637,6 +637,11 @@ export interface ExecutionPreflight {
     note: string;
     [k: string]: unknown;
   };
+  /**
+   * Project health rows (additive; absent from an older Kriya): capabilities no other answer states, each with a closed state, a reason code and the configuration fields / observations that decided it.
+   */
+  health?: HealthRow[];
+  memory?: ProjectMemory;
   interaction: {
     /**
      * change_review: a change is held for the person's review (human-in-the-loop). configured_mode: the resolved configuration selects another autonomy mode (shown, never changed by the app). unknown: the configuration could not be resolved.
@@ -652,7 +657,98 @@ export interface ExecutionPreflight {
   };
   [k: string]: unknown;
 }
+/**
+ * One capability of a folder with its state (AVAILABLE, DEGRADED, UNAVAILABLE, NOT_REQUIRED, UNKNOWN), a closed reason code and the evidence that decided it. Derived from the resolved configuration or a read-only observation, never from a claim about a run.
+ */
+export interface HealthRow {
+  id: string;
+  label: string;
+  state: 'AVAILABLE' | 'DEGRADED' | 'UNAVAILABLE' | 'NOT_REQUIRED' | 'UNKNOWN';
+  reason_code: string;
+  detail: string;
+  evidence: string[];
+  [k: string]: unknown;
+}
+/**
+ * VERIFIED PROJECT MEMORY of the folder's repository, read now (additive; absent from an older Kriya).
+ */
+export interface ProjectMemory {
+  schema_version: number;
+  /**
+   * The repository identity (the workspace authority's digest).
+   */
+  repository: string;
+  store_state:
+    'OK' | 'ABSENT' | 'STORE_UNREADABLE' | 'STORE_TOO_LARGE' | 'STORE_SCHEMA_UNSUPPORTED' | 'STORE_FOREIGN_REPOSITORY';
+  store_detail: string | null;
+  counts: MemoryCounts;
+  facts: MemoryFact[];
+  rejected: MemoryRejection[];
+  runs: MemoryRun[];
+  [k: string]: unknown;
+}
+export interface MemoryCounts {
+  current: number;
+  stale: number;
+  rejected_total: number;
+  learned_last_run: number;
+  reused_last_run: number;
+  rejected_last_run: number;
+  [k: string]: unknown;
+}
+export interface MemoryFact {
+  id: string;
+  kind: string;
+  label: string;
+  value: string;
+  status: 'CURRENT' | 'STALE';
+  /**
+   * EVIDENCE_CHANGED, EVIDENCE_MISSING or EVIDENCE_UNREADABLE when STALE.
+   */
+  stale_reason: string | null;
+  evidence: MemoryEvidence[];
+  learned_run_id: string;
+  learned_at: string;
+  confirmed_runs: number;
+  reused_runs: number;
+  /**
+   * "Why does Kriya know this?": the provenance, from the stored record only.
+   */
+  why: string;
+  [k: string]: unknown;
+}
+export interface MemoryEvidence {
+  kind: 'file' | 'extension_present';
+  path: string;
+  sha256: string | null;
+  [k: string]: unknown;
+}
+export interface MemoryRejection {
+  run_id: string;
+  kind: string;
+  reason: 'RUN_NOT_VERIFIED' | 'UNSAFE_VALUE';
+  at: string;
+  [k: string]: unknown;
+}
+export interface MemoryRun {
+  run_id: string;
+  at: string;
+  outcome: 'learned' | 'rejected';
+  learned: string[];
+  refreshed: string[];
+  reused: string[];
+  rejected: number;
+  [k: string]: unknown;
+}
 
+// ---- ProjectMemory (workspace.schema.json#/$defs/ProjectMemory) ----
+/**
+ * VERIFIED PROJECT MEMORY (product/demo-72h): safe, validated facts about ONE repository, a read-only PROJECTION of verified run evidence onto the repository as it is now. A fact is CURRENT only while every evidence file still has the digest it was learned from; otherwise it is STALE with a reason code and is never reused. Carries no commands and no secrets; repository-scoped.
+ */
+// ---- HealthRow (workspace.schema.json#/$defs/HealthRow) ----
+/**
+ * One capability of a folder with its state (AVAILABLE, DEGRADED, UNAVAILABLE, NOT_REQUIRED, UNKNOWN), a closed reason code and the evidence that decided it. Derived from the resolved configuration or a read-only observation, never from a claim about a run.
+ */
 // ---- LaunchStatus (workspace.schema.json#/$defs/LaunchStatus) ----
 /**
  * data of `launch.status` (GUI M6): one desktop launch read back from durable records only (launch record, RunRecord, attempt-evidence store, workspace run lock). `liveness` is DERIVED; no outcome is ever inferred from a process exit.

@@ -205,3 +205,14 @@
 .ck-activity ol, .ck-activity ul { margin: var(--ck-s-2) 0 0; padding-left: var(--ck-s-4); }
 .ck-activity li[data-tone="bad"] { color: var(--ck-bad, inherit); }
 .ck-project-name { margin: 0 0 var(--ck-s-2); font-size: var(--ck-t-state); font-weight: 600; }
+/* Capability strip and Verified Project Memory (product/demo-72h): presentation only; every word in them is a field of Kriya's execution.preflight answer. */
+.ck-strip { margin: var(--ck-s-2) 0 var(--ck-s-3); }
+.ck-strip ul { display: flex; flex-wrap: wrap; gap: var(--ck-s-2); margin: 0; padding: 0; list-style: none; }
+.ck-strip li { display: inline-flex; align-items: center; gap: var(--ck-s-1); padding: 3px 8px; border: 1px solid var(--ck-line); border-radius: 999px; background: var(--ck-panel); cursor: default; }
+.ck-strip-label { color: var(--ck-muted); }
+.ck-memory { margin: var(--ck-s-3) 0; padding: var(--ck-s-3); border: 1px solid var(--ck-line); border-radius: 6px; background: var(--ck-panel); }
+.ck-memory h2 { margin: 0 0 var(--ck-s-1); }
+.ck-memory-counts strong { font-variant-numeric: tabular-nums; }
+.ck-memory-facts { margin: var(--ck-s-2) 0 0; padding: 0; list-style: none; }
+.ck-memory-facts li { padding: var(--ck-s-1) 0; border-top: 1px solid var(--ck-line); }
+.ck-memory-facts li[data-status="STALE"] { opacity: 0.85; }

@@ -154,7 +154,6 @@ class Projection:
     facts: Tuple[Fact, ...] = ()
     rejected: Tuple[Dict[str, Any], ...] = ()
     runs: Tuple[RunEntry, ...] = ()
-    checked_at: str = ""
 
     def current(self) -> Tuple[Fact, ...]:
         return tuple(f for f in self.facts if f.status == STATUS_CURRENT)
@@ -171,7 +170,7 @@ class Projection:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"schema_version": SCHEMA_VERSION, "repository": self.repository, "store_state": self.store_state, "store_detail": self.store_detail,
-                "checked_at": self.checked_at, "counts": self.counts(), "facts": [f.to_dict() for f in self.facts],
+                "counts": self.counts(), "facts": [f.to_dict() for f in self.facts],
                 "rejected": list(self.rejected), "runs": [r.to_dict() for r in self.runs]}
 
 
@@ -349,7 +348,7 @@ def project(workspace_path: str) -> Projection:
                           refreshed=tuple(r.get("refreshed") or ()), reused=tuple(r.get("reused") or ()), rejected=int(r.get("rejected") or 0))
                  for r in (document.get("runs") or []) if isinstance(r, dict))
     rejected = tuple(r for r in (document.get("rejected") or []) if isinstance(r, dict))
-    return Projection(repository=identity, store_state=state, store_detail=detail, facts=tuple(facts), rejected=rejected, runs=runs, checked_at=_now())
+    return Projection(repository=identity, store_state=state, store_detail=detail, facts=tuple(facts), rejected=rejected, runs=runs)
 
 
 # --------------------------------------------------------------------------------------------------------------------------------------- REUSE

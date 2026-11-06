@@ -244,7 +244,15 @@ class RunService:
             cockpit_state, _source = resolve_state_directory(cfg)
         except StateDirectoryError as error:
             raise ApplicationRefusal(CONFIG_LOAD_FAILED, str(error)) from error
-        return build_preflight(workspace, cockpit_state, resolved=self._config.resolve(ctx), tool_visibility=tool_visibility)
+        resolved = self._config.resolve(ctx)
+        data = build_preflight(workspace, cockpit_state, resolved=resolved, tool_visibility=tool_visibility)
+        # Project health (product/demo-72h): the capability rows no other answer states, from the folder's RESOLVED configuration - the read side only; the launch record
+        # keeps the resolution alone (a launched process re-derives nothing from these).
+        from kriya.application.readiness import capability_rows
+
+        _state, folder_cfg, _authority, _failure = resolved.as_load_in()
+        data["health"] = capability_rows(folder_cfg, state_directory=data["state"]["directory"])
+        return data
 
     def build_preflight(self, ctx: RequestContext, workspace: str, cockpit_state_directory: Optional[str], *,
                         tool_visibility: ToolVisibility) -> Dict[str, Any]:
