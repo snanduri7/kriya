@@ -23,6 +23,7 @@ from kriya.code_intel.model import CALLABLE_KINDS
 # during modularization, and callers (tests, review_context.py, spikes) still
 # import it from here. Ruff keeps these; remove one only with its last caller.
 from kriya.config.environment import expand_user
+from kriya.control.control_store import ensure_private_roots
 from kriya.control.launch_approval import REVIEW_SECTION_HEADER
 from kriya.control.persistence import UnreadableRunRecordError, load_run_record
 from kriya.control.run_coordinator import (
@@ -2424,6 +2425,9 @@ class WorkflowEngine:
         contract, never a caller bug silently degrading into "use only
         SOME predetermined values." None for all three (the default)
         preserves today's exact behavior for every other caller."""
+        # WAVE8 OI-134/OI-154: before any run state is written, every private root (state directory, authority home, Kriya's home, the workspace's .kriya
+        # control/checkpoints) is a directory only this user can enter - a legacy wider one this user owns is tightened, another owner's is refused.
+        ensure_private_roots(workspace_path, self.kernel.config)
         if work_unit is None:
             call_args = {name: value for name, value in locals().items() if name not in ("self", "work_unit")}
             from kriya.workflow.plan_executor import execute_direct_goal

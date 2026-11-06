@@ -16,7 +16,7 @@ This module imports nothing from Kriya (it is the leaf every layer may read: DEP
 from __future__ import annotations
 
 import os
-from typing import Dict, Optional, Protocol, runtime_checkable
+from typing import Dict, Optional, Protocol, Tuple, runtime_checkable
 
 # The name of the Kriya directory: the user's ``~/.kriya`` (the homes below) and, beneath a workspace, ``<workspace>/.kriya`` (the
 # directory STATE keeps its control records in; CONFIG's paths.state rule refers to it: kriya/config/resolution.py).
@@ -132,6 +132,12 @@ def authority_home(environment: Optional[Environment] = None) -> str:
     """``KRIYA_AUTHORITY_HOME`` (not expanded), else ``~/.kriya/authority``."""
     override = _env(environment).variable(AUTHORITY_HOME)
     return override if override else kriya_home("authority", environment=environment)
+
+
+def kriya_private_homes(environment: Optional[Environment] = None) -> Tuple[str, str]:
+    """(Kriya's home ``~/.kriya``, the authority home): the two Kriya-owned directories that must be private (WAVE8 OI-134/154;
+    kriya/control/control_store.py::ensure_private_roots). Kriya's home is the parent of the default state directory (no second home builder)."""
+    return os.path.dirname(default_state_dir(environment)), os.path.realpath(authority_home(environment))
 
 
 def mcp_approval_home(environment: Optional[Environment] = None) -> str:

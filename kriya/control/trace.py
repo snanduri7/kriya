@@ -6,6 +6,7 @@ from typing import Optional
 
 from kriya.core.db import get_connection
 from kriya.foundation.redaction import redact_text, redact_value
+from kriya.platform.private_store import ensure_private_file
 
 
 class TraceLogger:
@@ -27,6 +28,10 @@ class TraceLogger:
         self.db_path = os.path.abspath(db_path)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self.init_db()
+        # WAVE8 OI-134/154: the history database (and the -wal/-shm files SQLite derives from its mode) is a private store file: 0600, this user's own
+        # (a legacy 0644 one is tightened, another owner's refused; kriya/platform/private_store.py).
+        for suffix in ("", "-wal", "-shm"):
+            ensure_private_file(self.db_path + suffix)
 
     def _connect(self):
         return closing(get_connection(self.db_path))

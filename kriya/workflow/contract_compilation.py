@@ -35,10 +35,11 @@ import hashlib
 import json
 import os
 import re
-import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from kriya.platform.private_store import ensure_private_directories, ensure_private_file
+from kriya.repository.atomic_write import atomic_write_file
 from kriya.workflow.requirement_scopes import (
     MIGRATION,
     NON_CLAIM,
@@ -850,13 +851,13 @@ def seal_verification_contract(contract: VerificationContract, state_root: str) 
     """Store the contract content-addressed under Kriya's state directory
     (never the workspace) and return the path; idempotent for the same digest."""
     store = contract_store(state_root)
-    os.makedirs(store, exist_ok=True)
+    ensure_private_directories(state_root, store)   # WAVE8 OI-134/154: the contract text (goal-derived, digest-bound bytes) sits in a private directory
     stored = os.path.join(store, f"{contract.digest}.json")
     if not os.path.isfile(stored):
-        temporary = f"{stored}.{uuid.uuid4().hex}.tmp"
-        with open(temporary, "w", encoding="utf-8") as handle:
-            json.dump(contract.to_dict(), handle, sort_keys=True, indent=1, default=str)
-        os.replace(temporary, stored)
+        # the canonical writer, private (0600, durable, atomic); content-addressed, so an identical concurrent write is the same bytes
+        atomic_write_file(stored, json.dumps(contract.to_dict(), sort_keys=True, indent=1, default=str), private=True)
+    else:
+        ensure_private_file(stored)   # a contract stored by an earlier Kriya is tightened (this user's own) or refused (anyone else's)
     return stored
 
 

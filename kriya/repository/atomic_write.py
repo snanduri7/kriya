@@ -69,7 +69,7 @@ def _audit_write_file(full_path: str, workspace_path: Optional[str] = None) -> N
 
 def atomic_write_file(
     full_path: str, content: str, workspace_path: Optional[str] = None,
-    *, content_bytes: Optional[bytes] = None, durable: bool = False, mode: Optional[int] = None,
+    *, content_bytes: Optional[bytes] = None, durable: bool = False, mode: Optional[int] = None, private: bool = False,
 ) -> None:
     """Writes `content` to `full_path` atomically - via a temp file in the SAME
     directory, then os.replace() (atomic on both POSIX and Windows NTFS) - so a
@@ -89,6 +89,8 @@ def atomic_write_file(
     root cause. With this, the file on disk is always EITHER the complete old
     content OR the complete new content, never an in-between state, regardless
     of when the kill lands.
+
+    ``private=True`` (WAVE8 OI-134/154): the file is a private Kriya store file - mode 0600 from creation, never replacing another owner's file.
 
     WAVE8 OI-03: the write is also DURABLE (see durable_atomic_write_bytes): a power loss or crash after this returns cannot leave the
     destination renamed-but-empty. The contract is the OS/filesystem one (fsync + rename + directory fsync); on macOS ``os.fsync`` is not
@@ -113,6 +115,13 @@ def atomic_write_file(
     # and leaves the destination intact (before the replace) or visible-but-not-known-durable (after it). ``durable`` is kept as an
     # accepted argument for source compatibility only: a non-durable write no longer exists, so callers carry no durability code.
     del durable
+    if private:
+        # WAVE8 OI-134/OI-154: a private Kriya store file (kriya/platform/private_store.py): created 0600 beside the target BEFORE the replace (so the bytes are never
+        # visible wider), and an existing target must be this user's own regular file - another owner's artifact is refused, never replaced.
+        from kriya.platform.private_store import PRIVATE_FILE_MODE, require_own_replaceable
+
+        require_own_replaceable(full_path)
+        mode = PRIVATE_FILE_MODE
     durable_atomic_write_bytes(full_path, data, mode=mode)
 
 

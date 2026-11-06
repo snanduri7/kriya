@@ -260,6 +260,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_s19q1_content_filter_refusal.py': ('S', 'M'),
  'tests/test_s1_toolbox_authority.py': ('N', 'C'),
  'tests/test_s20_evidence_redaction.py': ('S', 'M'),
+ 'tests/test_wave8_private_stores.py': ('S', 'M'),
  'tests/test_s2_canonical_containment_decision.py': ('N', 'C'),
  'tests/test_s3_config_authority_enabling_fields.py': ('S', 'M'),
  'tests/test_s3_execution_views.py': ('N', 'C'),

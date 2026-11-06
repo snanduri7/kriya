@@ -26,6 +26,8 @@ from kriya.context.workspace_identity import (
     validate_ownership,
 )
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
+from kriya.platform.private_store import ensure_private_directories
+from kriya.repository.atomic_write import atomic_write_file
 
 logger = logging.getLogger(__name__)
 
@@ -105,9 +107,8 @@ def compute_config_fingerprint(config_dict: Dict[str, Any]) -> str:
 def save_checkpoint(workspace_path: str, run_id: str, data: Dict[str, Any]) -> None:
     d = _checkpoints_dir(workspace_path)
     try:
-        os.makedirs(d, exist_ok=True)
+        ensure_private_directories(os.path.dirname(d), d)   # .kriya and .kriya/checkpoints: private (WAVE8 OI-134)
         path = checkpoint_path(workspace_path, run_id)
-        tmp_path = path + ".tmp"
         payload = dict(data)
         payload["run_id"] = run_id
         payload["saved_at"] = time.time()
@@ -125,9 +126,8 @@ def save_checkpoint(workspace_path: str, run_id: str, data: Dict[str, Any]) -> N
                 "run_id": context.run_id,
                 "revision": context.record_revision,
             }
-        with open(tmp_path, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2)
-        os.replace(tmp_path, path)
+        # WAVE8 OI-134/154: a checkpoint holds the run's exact candidate files (resume rewrites them): the canonical writer, private (0600, durable, atomic).
+        atomic_write_file(path, json.dumps(payload, indent=2), private=True)
         logger.info(f"Checkpoint saved (run_id={run_id}, stage={data.get('stage')}): {path}")
     except WorkspaceOwnershipError:
         raise

@@ -170,7 +170,7 @@ def read_file_revision(full_path: str) -> str:
 
 def commit_revision_grounded_file(
     full_path: str, content: str, expected_revision: str,
-    workspace_path: Optional[str] = None, *, content_bytes: Optional[bytes] = None, durable: bool = False,
+    workspace_path: Optional[str] = None, *, content_bytes: Optional[bytes] = None, durable: bool = False, private: bool = False,
 ) -> str:
     """Atomically commit a fully staged file only if its base is unchanged.
 
@@ -190,7 +190,7 @@ def commit_revision_grounded_file(
     mode = os.stat(full_path).st_mode & 0o7777 if os.path.exists(full_path) else None
     # WAVE8 OI-03: every atomic write is durable (kriya/repository/atomic_write.py), so the mode is always set on the temp file BEFORE the replace
     # and covered by the same fsync as the content; ``durable`` is accepted for source compatibility only.
-    atomic_write_file(full_path, content, workspace_path=workspace_path, content_bytes=data, durable=durable, mode=mode)
+    atomic_write_file(full_path, content, workspace_path=workspace_path, content_bytes=data, durable=durable, mode=mode, private=private)
     return raw_digest(data)
 
 

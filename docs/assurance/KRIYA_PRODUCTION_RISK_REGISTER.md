@@ -1311,6 +1311,8 @@ which these two fixes do not cover.
 **OBS-003 — Secret redaction in logs/traces/evidence**
 Language Scope: LANGUAGE_NEUTRAL · Deployment Relevance: REQUIRED · Effective Evidence Level: E0 · Disposition: NEEDS_EVIDENCE first (confirm absence precisely before assuming NEEDS_IMPLEMENTATION — not done this pass).
 
+WAVE8 implementation evidence (2026-11-06; the requirement is unchanged and stays REQUIRED): redact-at-write for every store no digest binds (S20/S20r, one redactor), owner-only private stores for every digest-bound store (kriya/platform/private_store.py; tests/test_wave8_private_stores.py), attached-credential redaction (NEW-1) and a safe endpoint in persisted preflight/qualification records (OI-156). Handover: handover/WAVE8/CORRECTION_CAMPAIGN_2026-11-06.md.
+
 **OBS-004 — Explicit run/subtask resource budgets** (new, KRP-024)
 Language Scope: LANGUAGE_NEUTRAL · Requirement Authority: `KRP_REQUIREMENT` (KRP-024) + `DEPLOYMENT_ENVELOPE` §4 (DE-03 unattended autonomy needs bounded resource consumption to be safe — a runaway retry loop or unbounded process time is exactly the kind of thing that becomes dangerous without supervision) · Deployment Relevance: REQUIRED · Current mechanism: scattered limits exist (`generation_time_budget_seconds`, sandbox CPU/memory limits, retry ceilings) but no single governing budget object · Effective Evidence Level: E1 · Disposition: NEEDS_IMPLEMENTATION.
 

@@ -57,7 +57,7 @@ MODULES: Dict[str, Module] = {
     "PLATFORM": Module(
         owner_paths=("kriya/platform/",),
         public=("kriya.platform", "kriya.platform.services", "kriya.platform.capabilities",
-                "kriya.platform.filesystem_semantics"),
+                "kriya.platform.filesystem_semantics", "kriya.platform.private_store"),
         layer=0),
     "CONTEXT": Module(
         owner_paths=("kriya/context/",),
