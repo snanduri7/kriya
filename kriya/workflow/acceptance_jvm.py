@@ -56,8 +56,6 @@ import uuid
 import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-from kriya.config.environment import expand_user
-from kriya.config.environment import state_dir as environment_state_dir
 from kriya.repository.bound_tree import BoundTreeError, copy_bound_tree
 from kriya.tools import test_execution
 from kriya.tools.containment import declare_execution_copy
@@ -197,9 +195,9 @@ def parse_java_acceptance(source: bytes) -> Tuple[Tuple[Any, ...], Dict[str, str
 # ------------------------------------------------------------ execution
 
 def _state_root() -> str:
-    from kriya.core.state_paths import default_state_directory
+    from kriya.core.state_paths import ambient_state_directory  # WAVE8 OI-02: the one state-location authority
 
-    return os.path.realpath(expand_user(environment_state_dir() or default_state_directory()))
+    return ambient_state_directory()
 
 
 def _file_digest(path: str) -> Optional[str]:

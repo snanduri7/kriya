@@ -66,17 +66,28 @@ def _absolute(value: str, origin: str) -> str:
     return os.path.realpath(expanded)
 
 
-def resolve_state_directory(cfg, environment: Optional[Environment] = None) -> Tuple[str, str]:
-    """(directory, source) with precedence env > config > default. Pure."""
+def ambient_state_directory(environment: Optional[Environment] = None) -> str:
+    """The state directory for code with NO ``AppConfig`` in scope (a gate cache, a JVM acceptance staging root, a model-runtime record store):
+    ``KRIYA_STATE_DIR`` (absolute, ``~`` expanded; a relative value is refused, never resolved against the working directory) else ``~/.kriya/state``.
+    WAVE8 OI-02: this is the ONE place the environment/default location is decided; ``resolve_state_directory`` composes it and no other module reads
+    ``KRIYA_STATE_DIR`` or the default location itself (tripwire: tests/test_wave8_state_directory_authority.py). Code that HAS a configuration asks
+    ``resolve_state_directory(cfg)``, which also honours ``paths.state``. Raises ``StateDirectoryError``. Pure."""
     env_value = environment_state_dir(environment)
     if env_value:
-        return _absolute(env_value, ENV_STATE_DIR), STATE_DIR_SOURCE_ENV
+        return _absolute(env_value, ENV_STATE_DIR)
+    return os.path.realpath(default_state_directory(environment))
+
+
+def resolve_state_directory(cfg, environment: Optional[Environment] = None) -> Tuple[str, str]:
+    """(directory, source) with precedence env > config > default. Pure."""
+    if environment_state_dir(environment):
+        return ambient_state_directory(environment), STATE_DIR_SOURCE_ENV
     configured = getattr(cfg.paths, "state", None)
     if configured is not None:
         # load_config() already made this absolute (anchored at the config
         # file's directory); a directly built AppConfig must do the same.
         return _absolute(configured, "paths.state"), STATE_DIR_SOURCE_CONFIG
-    return os.path.realpath(default_state_directory(environment)), STATE_DIR_SOURCE_DEFAULT
+    return ambient_state_directory(environment), STATE_DIR_SOURCE_DEFAULT
 
 
 def trace_db_path(cfg) -> str:

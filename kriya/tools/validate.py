@@ -15,8 +15,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 
 from kriya.capabilities import BUILD_ADAPTERS, GRADLE, JAVA, JAVAC, PIP, PYTHON, build_adapter_for_tool
 from kriya.config.config import AutonomyConfig
-from kriya.config.environment import KRIYA_DIRECTORY_NAME, expand_user
-from kriya.config.environment import state_dir as environment_state_dir
+from kriya.config.environment import KRIYA_DIRECTORY_NAME
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
@@ -583,9 +582,9 @@ class PolymorphicValidator:
 
     @staticmethod
     def _state_root() -> str:
-        from kriya.core.state_paths import default_state_directory
+        from kriya.core.state_paths import ambient_state_directory  # WAVE8 OI-02: the one state-location authority
 
-        return os.path.realpath(expand_user(environment_state_dir() or default_state_directory()))
+        return ambient_state_directory()
 
     def _origin_root(self) -> str:
         """The tree this validator belongs to, also while a gate executes in a view of it: what the execution-environment inputs
@@ -1413,13 +1412,12 @@ class PolymorphicValidator:
         ContainmentSetupError: the gate refuses, never runs unverified)."""
         if not getattr(self.autonomy_cfg, "git_metadata_export", False):
             return None
-        from kriya.core.state_paths import default_state_directory
         from kriya.tools.git_metadata import bound_git_metadata
 
         cache = self._git_metadata_mounts
         key = os.path.realpath(mounted_workspace)
         if key not in cache:
-            state_root = os.path.realpath(expand_user(environment_state_dir() or default_state_directory()))
+            state_root = self._state_root()
             cache[key] = bound_git_metadata(mounted_workspace=mounted_workspace,
                                             original_workspace=self.original_workspace_path,
                                             state_root=state_root, enabled=True)
