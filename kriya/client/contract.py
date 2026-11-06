@@ -115,9 +115,16 @@ class HealthPort(Protocol):
     def capabilities(self, ctx: "RequestContext", cfg: Optional["AppConfig"] = None) -> "_application.Capabilities": ...
 
 
+class MemoryPort(Protocol):
+    def view(self, ctx: "RequestContext", workspace: str) -> Dict[str, Any]: ...
+    def reference(self, ctx: "RequestContext", workspace: str) -> Dict[str, Any]: ...
+    def record(self, ctx: "RequestContext", workspace: str, run_id: str, request: Dict[str, Any]) -> Dict[str, Any]: ...
+
+
 PORTS: Mapping[str, type] = {
     "projects": ProjectsPort, "runs": RunsPort, "reviews": ReviewsPort, "configuration": ConfigurationPort,
     "models": ModelsPort, "skills": SkillsPort, "tools": ToolsPort, "evidence": EvidencePort, "history": HistoryPort, "health": HealthPort,
+    "memory": MemoryPort,
 }
 
 # (port, method, parameter) -> the slice that replaces it with a transportable value. Closed: the contract suite fails on an unlisted
@@ -150,9 +157,10 @@ class KriyaClient(Protocol):
     evidence: EvidencePort
     history: HistoryPort
     health: HealthPort
+    memory: MemoryPort
 
     def context(self, *, workspace_root: Optional[str], request_id: Optional[str] = None) -> "RequestContext": ...
 
 
 __all__ = ["ConfigurationPort", "EvidencePort", "HealthPort", "HistoryPort", "KriyaClient", "LOCAL_ONLY_PARAMETERS",
-           "ModelsPort", "PORTS", "ProjectsPort", "ReviewsPort", "RunsPort", "SkillsPort", "ToolsPort"]
+           "MemoryPort", "ModelsPort", "PORTS", "ProjectsPort", "ReviewsPort", "RunsPort", "SkillsPort", "ToolsPort"]

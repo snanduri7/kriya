@@ -31,6 +31,7 @@ _EXPORTS = {
     "admit_repository_read": "kriya.application.project",
     "ModelService": "kriya.application.model",
     "HealthService": "kriya.application.health",
+    "ProjectMemoryService": "kriya.application.memory",
     "Capabilities": "kriya.application.health",
     "ConfigurationService": "kriya.application.configuration",
     "ReviewService": "kriya.application.review",

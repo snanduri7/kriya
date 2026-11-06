@@ -90,7 +90,8 @@ MODULES: Dict[str, Module] = {
                 # lock probe and the launch records/phases are the STATE answers APPLICATION and the KERNEL read.
                 "kriya.control.trace", "kriya.control.recovery", "kriya.control.run_ownership", "kriya.control.launch",
                 "kriya.control.ownership_audit",  # D2 M4: the controller's read-only ownership preflight
-                "kriya.control.history.port"),
+                "kriya.control.history.port",
+                "kriya.control.project_memory"),  # product/demo-72h: VERIFIED PROJECT MEMORY, the STATE answer ProjectMemoryService reads and writes
         layer=2),
     "EVIDENCE": Module(
         owner_paths=("kriya/core/attempt_evidence/",),

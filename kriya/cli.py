@@ -2623,6 +2623,42 @@ async def _learned_reference_context(cfg: AppConfig, query: str) -> str:
     return retrieval.render()
 
 
+def _project_memory_context(workspace_path: str) -> Tuple[str, Tuple[str, ...]]:
+    """VERIFIED PROJECT MEMORY (kriya/control/project_memory.py through ``ProjectMemoryService``): the CURRENT, re-checked facts of THIS repository as reference text and
+    the ids they carry. Same trust as learned knowledge: the caller hands the text to ``reference_context`` (fenced as untrusted, never joined to the goal). Memory can
+    only add reference material - it never blocks, alters or authorizes a run - so a failure to read it is shown and the run goes on without it."""
+    try:
+        from kriya.application import ProjectMemoryService
+        from kriya.context import RequestContext
+
+        answer = ProjectMemoryService().reference(RequestContext.local(workspace_path), workspace_path)
+    except Exception as error:  # noqa: BLE001 - memory is reference material only; any failure to read it must not stop a run (asserted by the memory tests)
+        click.secho(f"Verified Project Memory not used: {type(error).__name__}: {error}", fg="yellow", err=True)
+        return "", ()
+    ids = tuple(answer["fact_ids"])
+    if ids:
+        click.secho(f"Verified Project Memory loaded: {len(ids)} fact(s) re-checked against the current files.", dim=True, err=True)
+    return answer["text"], ids
+
+
+def _remember_project(workspace_path: str, result: Any, reused: Tuple[str, ...]) -> None:
+    """OBSERVE + VERIFY + STORE after a finished run (``ProjectMemoryService.record``). Only a COMPLETED run is observed (a knowledge-gap or needs-review answer is not a run
+    outcome); a run that is not a verified success learns nothing and its candidate facts are counted as rejected. Observational: never alters the result or the exit code."""
+    if not isinstance(result, dict) or not isinstance(result.get("run_id"), str):
+        return
+    try:
+        from kriya.application import ProjectMemoryService
+        from kriya.context import RequestContext
+
+        answer = ProjectMemoryService().record(RequestContext.local(workspace_path), workspace_path, result["run_id"], {"result": result, "reused": list(reused)})
+    except Exception as error:  # noqa: BLE001 - observational (asserted by the memory tests); the run's result stands whatever happens here
+        click.secho(f"Verified Project Memory not updated: {type(error).__name__}: {error}", fg="yellow", err=True)
+        return
+    if answer["recorded"]:
+        entry = answer["entry"]
+        click.secho(f"Verified Project Memory: learned {len(entry['learned']) + len(entry['refreshed'])}, reused {len(entry['reused'])}, rejected {entry['rejected']}.", dim=True, err=True)
+
+
 async def _dispatch_milestones(we: "WorkflowEngine", cfg: AppConfig, run_state: Any, workspace_path: str, **kwargs: Any) -> Dict[str, Any]:
     """MA7-C4 (2026-08-25 external review) - the milestone-DAG counterpart
     to _dispatch_generation above, closing the architectural split its own
@@ -3307,6 +3343,8 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         # AUTH-GOAL-CONTAMINATION-001: `goal` stays the user's exact words;
         # retrieved text travels separately and is fenced as untrusted.
         reference_context = await _learned_reference_context(cfg, goal)
+        memory_text, memory_ids = _project_memory_context(os.getcwd())
+        reference_context = memory_text + reference_context if memory_text else reference_context
 
         await kernel.start()
         res = await _dispatch_generation(
@@ -3434,7 +3472,8 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                     sys.exit(3)
 
         await kernel.stop()
-        
+        _remember_project(os.getcwd(), res, memory_ids)
+
         click.secho("\n=== Generation Workflow Completed ===", bold=True)
         if res.get("toolchain_warning"):
             # Shown regardless of pass/fail - a version mismatch that didn't bite

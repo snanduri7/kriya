@@ -36,6 +36,7 @@ class LocalKriyaClient:
     evidence = property(lambda self: self._services.evidence)
     history = property(lambda self: self._services.history)
     health = property(lambda self: self._services.health)
+    memory = property(lambda self: self._services.memory)
 
     def context(self, *, workspace_root: Optional[str], request_id: Optional[str] = None) -> RequestContext:
         """The context of one request of this client: ``RequestContext.local`` (never the process working directory), with this principal."""

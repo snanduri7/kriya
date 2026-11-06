@@ -1,6 +1,6 @@
 """``application.compose()`` (slice B4; MODULE-CONTRACTS §15): the application services of one process, composed ONCE.
 
-``ApplicationServices`` holds the eleven services the client boundary exposes. Each service is constructed on first use (and then kept),
+``ApplicationServices`` holds the services the client boundary exposes. Each service is constructed on first use (and then kept),
 so a one-shot command such as ``kriya traces --json`` still imports only the domain modules of the operation it answers - the lazy-import
 property the KUP read path has had since B2 (``kriya/application/__init__.py``). The services hold no per-request state: every method
 takes the ``RequestContext`` and the resolved configuration of that request, so one composition serves every request of the process and
@@ -25,12 +25,13 @@ if TYPE_CHECKING:  # annotations only: each service module is imported when the 
     from kriya.application.evidence import EvidenceService
     from kriya.application.health import HealthService
     from kriya.application.history import HistoryService
+    from kriya.application.memory import ProjectMemoryService
     from kriya.application.model import ModelService
     from kriya.application.project import ProjectService
     from kriya.application.review import ReviewService
     from kriya.application.run import RunService
 
-SERVICE_NAMES = ("projects", "runs", "reviews", "configuration", "models", "skills", "tools", "evidence", "history", "health")
+SERVICE_NAMES = ("projects", "runs", "reviews", "configuration", "models", "skills", "tools", "evidence", "history", "health", "memory")
 
 
 class ApplicationServices:
@@ -79,6 +80,11 @@ class ApplicationServices:
     def evidence(self) -> "EvidenceService":
         from kriya.application.evidence import EvidenceService
         return EvidenceService()
+
+    @cached_property
+    def memory(self) -> "ProjectMemoryService":
+        from kriya.application.memory import ProjectMemoryService
+        return ProjectMemoryService()
 
     @cached_property
     def history(self) -> "HistoryService":
