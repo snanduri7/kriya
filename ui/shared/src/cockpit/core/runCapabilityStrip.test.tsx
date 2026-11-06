@@ -18,6 +18,11 @@ describe('runCapabilityCells', () => {
     expect(c.recovery).toMatchObject({ state: 'NOT_REQUIRED', text: 'the first attempt was the only attempt' });
     expect(c.memory).toMatchObject({ state: 'USED', text: 'reused 3 · learned 2 · rejected 1' });
   });
+  it('a run with no authority snapshot (a create-only run records none) is Not recorded, never inferred ACTIVE from its file changes', () => {
+    const c = byId(base({ authorityRecorded: false }));
+    expect(c.security).toMatchObject({ state: 'UNKNOWN', evidence: 'authority.snapshot record' });
+    expect(c.security?.text).toContain('only a run that edits existing files records one');
+  });
   it('carries the language server and lookup as Kriya\'s project health states, and never as USED', () => {
     const c = byId(base());
     expect(c.lsp).toMatchObject({ state: 'UNAVAILABLE', text: 'JDTLS_NOT_CONTAINABLE' });
