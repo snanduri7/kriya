@@ -1,10 +1,12 @@
-import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, primaryVerification, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
+import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, primaryVerification, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, RunMemoryLine, useExecution, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
 
 const OUTCOME = { success: { mark: '✓', words: 'Run completed' }, failure: { mark: '✕', words: 'Run failed' }, in_progress: { mark: '●', words: 'Run not finished' } } as const;
 
 /** The result of one recorded run, in meaning: what was asked, what happened, what changed, whether it works, what the application printed. Identifiers and mechanism sit under Technical status. */
 function Overview() {
   const run = useRunContext();
+  const execution = useExecution();
+  const memory = execution.preflight.state === 'ready' ? execution.preflight.data.memory : undefined;
   const evidence = useRunEvidence();
   const detail = useRunDetail();
   return (
@@ -37,6 +39,8 @@ function Overview() {
 
               {app ? <ApplicationResult app={app} /> : null}
               {groups ? <FormalRequirementDisclosure status={formalRequirementStatus(groups.technical)} /> : null}
+
+              <RunMemoryLine memory={memory} runId={ctx.runId} />
 
               <h3>What happened</h3>
               <HumanTimeline entries={humanTimeline(events, ctx.status)} />
