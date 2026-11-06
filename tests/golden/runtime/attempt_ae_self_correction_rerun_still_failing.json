@@ -24,7 +24,7 @@
      "pytest"
     ]
    ],
-   "deterministic_result": "PASS",
+   "deterministic_result": "FAIL",
    "failed_content": {},
    "file_locations": [],
    "graded_by": "process_exit",
@@ -192,7 +192,7 @@
       "pytest"
      ]
     ],
-    "deterministic_result": "PASS",
+    "deterministic_result": "FAIL",
     "failed_content": {},
     "file_locations": [],
     "graded_by": "process_exit",

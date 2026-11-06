@@ -773,7 +773,7 @@ def test_the_candidate_gate_names_keep_their_call_shape_on_attempt():
 E9_ATTEMPT_CALLABLES = {
     "_classify_grounded_contract_verdict": "(output, worktree_path, files_written)",
     "async _resolve_runtime_verification_grade": "(ctx, state, contract_verdict, grade_kwargs, *, run_result=None)",
-    "_deterministic_result_provenance_field": "(verification_authority)",
+    "_deterministic_result_provenance_field": "(verification_authority, passed)",  # WAVE8 OI-56: the projection takes the authoritative verdict
     "_prepare_finite_command_runtime_artifacts": "(resolved_run_commands, validator, ctx, state)",
     "_raise_runtime_verification_infrastructure_failure": "(state, run_result, commands)",
     "_raise_candidate_runtime_entrypoint_failure": "(state, run_result, commands, entrypoint)",

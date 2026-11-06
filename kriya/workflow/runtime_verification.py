@@ -318,20 +318,21 @@ async def _resolve_runtime_verification_grade(
     return grade, "llm_over_distrusted_evidence"
 
 
-def _deterministic_result_provenance_field(verification_authority: str) -> Optional[str]:
-    """VER-006 provenance (Task 4): before this, gate_outcome's own
-    `deterministic_result` field was `"PASS"` for `verification_authority ==
-    "process_exit"` and `None` for EVERY other authority - including both
-    genuine ABSENT (no marker ever existed, ordinary LLM grading) and
-    INDETERMINATE_DISTRUSTED (a marker existed and was explicitly rejected,
-    then force-overridden to non-PASS) alike, destroying the distinction a
-    second time even after _classify_grounded_contract_verdict() itself
-    stopped collapsing it. `"llm_over_distrusted_evidence"` (this module's
-    own new verification_authority value) now maps to its own distinct
-    `"DISTRUSTED"` value instead; ordinary `"llm"` (ABSENT) and `"contract"`
-    stay exactly as before - unchanged legacy behavior for both."""
+def _deterministic_result_provenance_field(verification_authority: str, passed: bool) -> Optional[str]:
+    """The ``deterministic_result`` projection of a runtime-verification gate outcome (VER-006 provenance, completed by WAVE8 OI-56).
+
+    ONE authority, multiple projections: ``passed`` is the AUTHORITATIVE verdict of the gate (the grade that decides ``success``), and
+    the projection is derived from it - never a second authority. Before OI-56 the process-exit authority projected ``"PASS"`` whatever the
+    verdict, so a FAILED deterministic test/build outcome was recorded (and shown by the GUI Inspector) as ``deterministic_result: "PASS"``
+    next to ``success: false``.
+
+    ``process_exit`` (the exit status of a deterministic test/compile command sequence IS the verdict): ``"PASS"`` only when ``passed is True``,
+    otherwise ``"FAIL"`` (fail-closed: anything that is not an explicit True never reads PASS). ``llm_over_distrusted_evidence`` is its own
+    ``"DISTRUSTED"`` (a marker existed and was rejected, then forced non-PASS). Every other authority (ordinary ``llm`` = ABSENT, ``contract``)
+    projects ``None``: no deterministic verdict exists. NOT_RUN / NOT_APPLICABLE / BLOCKED record no such outcome at all, so they can never
+    collapse into PASS or FAIL here."""
     if verification_authority == "process_exit":
-        return "PASS"
+        return "PASS" if passed is True else "FAIL"
     if verification_authority == "llm_over_distrusted_evidence":
         return "DISTRUSTED"
     return None
@@ -1819,7 +1820,7 @@ async def _execute_runtime_verification_directly(
         failure_outcome.update({
             "graded_by": verification_authority, "commands": resolved_run_commands,
             "steps": run_res.get("steps", []),
-            "deterministic_result": deps._deterministic_result_provenance_field(verification_authority),
+            "deterministic_result": deps._deterministic_result_provenance_field(verification_authority, grade["passed"]),
             **deps.runtime_evidence_outcome_fields(grade),
         })
         state.record_gate_outcome(failure_outcome)
@@ -1830,7 +1831,7 @@ async def _execute_runtime_verification_directly(
         "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}",
         "graded_by": verification_authority, "commands": resolved_run_commands,
         "steps": run_res.get("steps", []),
-        "deterministic_result": deps._deterministic_result_provenance_field(verification_authority),
+        "deterministic_result": deps._deterministic_result_provenance_field(verification_authority, grade["passed"]),
         **deps.runtime_evidence_outcome_fields(grade),
         **execution_evidence(run_res),
     })
@@ -2301,7 +2302,7 @@ async def _approve_and_execute_runtime_verification(
                 "graded_by": verification_authority,
                 "commands": resolved_run_commands,
                 "steps": run_res.get("steps", []),
-                "deterministic_result": deps._deterministic_result_provenance_field(verification_authority),
+                "deterministic_result": deps._deterministic_result_provenance_field(verification_authority, grade["passed"]),
                 **deps.runtime_evidence_outcome_fields(grade),
             })
             state.record_gate_outcome(failure_outcome)
@@ -2324,7 +2325,7 @@ async def _approve_and_execute_runtime_verification(
             "graded_by": verification_authority,
             "commands": resolved_run_commands,
             "steps": run_res.get("steps", []),
-            "deterministic_result": deps._deterministic_result_provenance_field(verification_authority),
+            "deterministic_result": deps._deterministic_result_provenance_field(verification_authority, grade["passed"]),
             **deps.runtime_evidence_outcome_fields(grade),
         }
         if self_correction_result is not None and self_correction_result.resolved:

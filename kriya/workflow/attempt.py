@@ -1796,9 +1796,9 @@ async def _resolve_runtime_verification_grade(
     return await runtime_verification._resolve_runtime_verification_grade(_runtime_deps(), ctx, state, contract_verdict, grade_kwargs, run_result=run_result)
 
 
-def _deterministic_result_provenance_field(verification_authority: str) -> Optional[str]:
-    """The body is kriya/workflow/runtime_verification.py (E9)."""
-    return runtime_verification._deterministic_result_provenance_field(verification_authority)
+def _deterministic_result_provenance_field(verification_authority: str, passed: bool) -> Optional[str]:
+    """The body is kriya/workflow/runtime_verification.py (E9); ``passed`` is the gate's authoritative verdict (WAVE8 OI-56)."""
+    return runtime_verification._deterministic_result_provenance_field(verification_authority, passed)
 
 
 def _record_self_correction_scope_conflict(

@@ -1426,8 +1426,11 @@ def test_python_runtime_grounding_reads_the_real_tree_and_never_outside_it(tmp_p
 
 def test_the_deterministic_result_provenance_field():
     field = attempt._deterministic_result_provenance_field
-    assert [field(a) for a in ("process_exit", "llm_over_distrusted_evidence", "llm", "contract", "x")] == [
+    # WAVE8 OI-56: the projection follows the AUTHORITATIVE verdict (``passed``); a failed process-exit outcome is FAIL, never PASS
+    assert [field(a, True) for a in ("process_exit", "llm_over_distrusted_evidence", "llm", "contract", "x")] == [
         "PASS", "DISTRUSTED", None, None, None]
+    assert [field(a, False) for a in ("process_exit", "llm_over_distrusted_evidence", "llm", "contract", "x")] == [
+        "FAIL", "DISTRUSTED", None, None, None]
 
 
 # ============================================================================= ordering pins (capture ON)

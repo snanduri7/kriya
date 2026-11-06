@@ -262,10 +262,11 @@ async def test_absent_evidence_grader_exception_propagates_unchanged():
 # --- 8: distrust provenance survives into the runtime outcome field --------
 
 def test_deterministic_result_provenance_distinguishes_absent_from_distrusted():
-    assert _deterministic_result_provenance_field("llm") is None  # ABSENT, unchanged legacy value
-    assert _deterministic_result_provenance_field("llm_over_distrusted_evidence") == "DISTRUSTED"
-    assert _deterministic_result_provenance_field("process_exit") == "PASS"
-    assert _deterministic_result_provenance_field("contract") is None
+    assert _deterministic_result_provenance_field("llm", False) is None  # ABSENT, unchanged legacy value
+    assert _deterministic_result_provenance_field("llm_over_distrusted_evidence", False) == "DISTRUSTED"
+    assert _deterministic_result_provenance_field("process_exit", True) == "PASS"
+    assert _deterministic_result_provenance_field("process_exit", False) == "FAIL"  # WAVE8 OI-56
+    assert _deterministic_result_provenance_field("contract", False) is None
 
 
 # --- 13: exact live shape end-to-end ---------------------------------------
