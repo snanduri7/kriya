@@ -240,6 +240,80 @@ _RUNNABLE_PRODUCES_RE = re.compile(
     r"\brunnable\b(?:\s+[^\s.;!?]+){0,3}?\s+(?:and|,)\s+(?:also\s+)?(?:produces?|prints?|outputs?|displays?|emits?)\b",
     re.IGNORECASE,
 )
+# WAVE8 OI-93 (WAVE8-OI93-RUNTIME-INTENT-FALSE-SUCCESS-001, MEASURED at d7afeb0): "Create a Java project. It prints hello world when executed." reached terminal success without the
+# application ever running, because the clauses above need an executable NOUN as the grammatical subject and "It" repeats none. The defect is discourse/context loss, not a missing word
+# list. EXECUTION-CONDITION clause: an observable effect (prints / outputs / displays / emits / echoes / responds with / writes to stdout; "returns" only with an executable noun in
+# view) stated together with an execution TRIGGER ("when executed / run / launched / started", "once it runs", "on execution", "at runtime"; "when invoked" only with an executable noun
+# in view, because "invoked" is also how a function call is described). The clause is read against the NEAREST subject noun in front of the effect verb: an executable noun
+# (application, CLI, script, ...) or no noun at all (a pronoun, an ellipsis, "a Maven project, that prints ...") makes it a runtime obligation; a code-construct noun (function, method,
+# class, API, endpoint, library, test, ...) does not, because "the method returns 0 when invoked with empty input" is verified by a unit test and has no standalone entrypoint.
+# It is NOT a second intent engine: it feeds the same per-sentence decision, so negation (whole goal, first), documentation framing, the repair relative clause and "runnable alone" apply
+# to it unchanged. Only the executable-noun requirement is replaced by the nearest-subject reading.
+_EXECUTION_TRIGGER_RE = re.compile(
+    r"\b(?:when(?:ever)?|once|after|upon|as\s+soon\s+as|if)\b(?:\s+[\w'-]+){0,3}?\s+(?P<verb>executed|run|ran|launched|started|executes|runs|launches|starts|invoked)\b"
+    r"|\b(?:on|upon)\s+(?:execution|launch|start-?up)\b|\bat\s+runtime\b",
+    re.IGNORECASE,
+)
+_OBSERVABLE_EFFECT_RE = re.compile(
+    r"\b(?:prints?|outputs?|displays?|emits?|echoe?s?|responds?\s+with|writes?\s+(?:\S+\s+){0,3}?to\s+(?:stdout|standard\s+output|the\s+console))\b",
+    re.IGNORECASE,
+)
+_RETURN_EFFECT_RE = re.compile(r"\breturns?\b", re.IGNORECASE)
+_REQUIREMENT_MODAL_RE = re.compile(r"\b(?:so|should|must|will|shall|needs?\s+to|has\s+to)\b", re.IGNORECASE)
+_CODE_CONSTRUCT_NOUN_RE = re.compile(
+    r"\b(?:function|functions|method|methods|class|classes|interface|api|apis|endpoint|endpoints|library|module|package|component|handler|helper|constructor|callback|lambda|"
+    r"getter|setter|trait|enum|query|procedure|routine|operation|property|field|test|tests|record|bean|controller|repository)\b", re.IGNORECASE)
+_EXECUTABLE_NOUN_RE = re.compile(rf"\b{_EXECUTABLE_SUBJECT}\b", re.IGNORECASE)
+_SUBJECT_WINDOW_TOKENS = 8
+_ANAPHORIC_SUBJECT_RE = re.compile(r"\s*(?:it|this|that|they|which)\b", re.IGNORECASE)
+
+
+def _nearest_subject_kind(before_effect: str) -> str:
+    """"executable", "construct" or "none": which kind of noun is nearest in front of an effect verb (the last few words, never across a sentence)."""
+    window = " ".join(before_effect.split()[-_SUBJECT_WINDOW_TOKENS:])
+    last: Dict[str, int] = {"executable": -1, "construct": -1}
+    for kind, regex in (("executable", _EXECUTABLE_NOUN_RE), ("construct", _CODE_CONSTRUCT_NOUN_RE)):
+        for match in regex.finditer(window):
+            last[kind] = max(last[kind], match.start())
+    if last["executable"] < 0 and last["construct"] < 0:
+        return "none"
+    return "executable" if last["executable"] > last["construct"] else "construct"
+
+
+def _antecedent_kind(prior_sentence: str) -> str:
+    """What a sentence-initial pronoun most plausibly refers to: the previous sentence's nearest subject. A prior sentence that names an executable artifact anywhere in
+    its closing words counts as executable even when a code construct is also named (the uncertain reading errs toward verifying, never toward a false success)."""
+    window = " ".join((prior_sentence or "").split()[-_SUBJECT_WINDOW_TOKENS:])
+    if _EXECUTABLE_NOUN_RE.search(window):
+        return "executable"
+    return "construct" if _CODE_CONSTRUCT_NOUN_RE.search(window) else "none"
+
+
+def _execution_condition_clause(sentence: str, prior_sentence: str, *, repair_sentence: bool) -> bool:
+    """An observable effect + an execution trigger about an executable artifact (see the OI-93 note above)."""
+    trigger = _EXECUTION_TRIGGER_RE.search(sentence)
+    if trigger is None:
+        return False
+    invoked = (trigger.group("verb") or "").lower() == "invoked"
+    for strong, regex in ((True, _OBSERVABLE_EFFECT_RE), (False, _RETURN_EFFECT_RE)):
+        for match in regex.finditer(sentence):
+            before = sentence[:match.start()]
+            if _DOCUMENTATION_FRAMING_RE.search(before):
+                continue
+            if repair_sentence and not _REQUIREMENT_MODAL_RE.search(before):
+                continue                                     # "fix the bug where the app prints x when executed" describes the defect; "fix it so it prints x when run" states the requirement
+            kind = _nearest_subject_kind(before)
+            if kind == "none" and _ANAPHORIC_SUBJECT_RE.match(sentence):
+                kind = _antecedent_kind(prior_sentence)         # "Add a helper function. It prints x when executed." - "It" is the function
+            if kind == "construct":
+                continue
+            executable_in_view = kind == "executable" or bool(_EXECUTABLE_NOUN_RE.search(prior_sentence or "")) or bool(_EXECUTABLE_NOUN_RE.search(sentence))
+            if (not strong or invoked) and not executable_in_view:
+                continue
+            return True
+    return False
+
+
 # A documentation sentence ahead of the subject ("document how ...", "add a comment noting that the program will print ...") is about text, not about the artifact running.
 _DOCUMENTATION_FRAMING_RE = re.compile(
     r"\b(?:comment|comments|javadoc|docstring|readme|documentation|document|describe|describing|explain|explaining|note|noting"
@@ -255,7 +329,7 @@ _RELATIVE_CLAUSE_RE = re.compile(r"\b(?:that|which)\s+(?:prints|outputs|displays
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n\s*\n|\n\s*(?:[-*\u2022]|\d+[.)])\s+")
 
 
-def _sentence_requires_runtime_behavior(sentence: str) -> bool:
+def _sentence_requires_runtime_behavior(sentence: str, prior_sentence: str = "") -> bool:
     if _RUNTIME_EXECUTION_CONTEXT_RE.search(_HOW_TO_RUN_RE.sub(" ", sentence)):
         return True
     repair_sentence = bool(_REPAIR_LEAD_RE.search(sentence))
@@ -266,6 +340,8 @@ def _sentence_requires_runtime_behavior(sentence: str) -> bool:
             if repair_sentence and _RELATIVE_CLAUSE_RE.search(match.group(0)):
                 continue
             return True
+    if _execution_condition_clause(sentence, prior_sentence, repair_sentence=repair_sentence):
+        return True
     runnable = _RUNNABLE_PRODUCES_RE.search(sentence)
     return bool(runnable) and not _DOCUMENTATION_FRAMING_RE.search(sentence[:runnable.start()])
 
@@ -281,7 +357,8 @@ def goal_requires_runtime_behavior(goal: str) -> bool:
     text = goal or ""
     if _RUNTIME_VERIFICATION_NEGATED_RE.search(text):
         return False
-    return any(_sentence_requires_runtime_behavior(s) for s in _SENTENCE_SPLIT_RE.split(text) if s.strip())
+    sentences = [s for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
+    return any(_sentence_requires_runtime_behavior(s, sentences[i - 1] if i else "") for i, s in enumerate(sentences))
 
 
 def output_confirms_nonzero_test_execution(output: str) -> bool:
