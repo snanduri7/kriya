@@ -98,7 +98,7 @@ function RunsList() {
       {snapshotId === null && session.status.state === 'unavailable' && session.status.reason === 'store_absent' ? (
         <div className="ck-state" data-testid="no-history">
           <strong>{active ? 'No completed runs yet.' : 'No runs yet.'}</strong>
-          Nothing has been recorded for this project. Work starts on the Project page.
+          {' '}Kriya's history has not been read in this window yet: no published history snapshot exists, so runs recorded by another process (a command-line run, another window) are not shown. Use "Check for history again" to read it. Work starts on the Project page.
           <div><button type="button" className="ck-primary" onClick={() => go(PROJECT_PAGE)}>Go to Project</button>{' '}<button type="button" className="ck-quiet" title="Ask Kriya for a new consistent snapshot of its history" onClick={() => void session.acquire()}>Check for history again</button></div>
         </div>
       ) : null}

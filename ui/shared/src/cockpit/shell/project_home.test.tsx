@@ -3,9 +3,15 @@
  * understands the outcome - without documentation. These tests walk that journey through the real shell over the scripted fixture host; every word about the run still comes
  * from the records the host serves. Layout that needs real pixels (Start Run visible at 1280x800) is measured in the Electron smoke, not here: jsdom does no layout.
  */
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { renderWorkspaceShell } from '../testing/harness';
+import { initialSelection } from '../../state/selection';
+import { createCockpitRegistry } from '../composition';
+import { createSelectionStore } from '../core';
+import { FixtureHost } from '../providers/fixture';
+import { HostProvider } from '../providers/hostProvider';
+import { FAST_POLL, renderWorkspaceShell } from '../testing/harness';
+import { AppShell } from './AppShell';
 
 const goTo = (name: string) => fireEvent.click(within(screen.getByRole('navigation', { name: 'Destinations' })).getByRole('button', { name }));
 const rail = () => screen.getByRole('navigation', { name: 'Destinations' });
@@ -228,6 +234,21 @@ describe('K. The outcome is understood without opening diagnostics', () => {
 });
 
 describe('L/O. Runs is history; the existing diagnostics are one level deeper, not removed', () => {
+  it('before any history snapshot exists, Runs does not claim nothing was recorded: it says the history has not been read and offers the refresh (MEASURED against a real backend run: a CLI run was invisible until Refresh)', async () => {
+    const host = new FixtureHost({ workspace: '/fixture/empty' });
+    const everything = host.query.bind(host);
+    host.query = async (request) => { // the store has no published snapshot yet: the real backend's snapshot.list answers with an empty list
+      const envelope = await everything(request);
+      return request.operation === 'snapshot.list' && envelope.data ? { ...envelope, data: { ...(envelope.data as object), snapshots: [] } } : envelope;
+    };
+    render(<AppShell provider={new HostProvider(host, 'fixture')} registry={createCockpitRegistry()} selection={createSelectionStore({ ...initialSelection })} viewportWidth={1440} pollIntervals={FAST_POLL} initialPage="runs" />);
+    const note = await screen.findByTestId('no-history');
+    expect(note).toHaveTextContent(/history has not been read in this window yet/);
+    expect(note).toHaveTextContent(/no published history snapshot exists/);
+    expect(note).toHaveTextContent(/another process/);
+    expect(note).not.toHaveTextContent(/Nothing has been recorded/);
+    expect(screen.getByRole('button', { name: 'Check for history again' })).toBeInTheDocument();
+  });
   it('with no recorded run, Runs says "No runs yet." and offers Go to Project, which goes there', async () => {
     renderWorkspaceShell({ page: 'runs', fixture: { workspace: '/fixture/empty' } });
     await screen.findByRole('navigation', { name: 'Destinations' });

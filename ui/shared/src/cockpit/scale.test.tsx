@@ -49,7 +49,7 @@ describe('a long history', () => {
     await waitFor(() => expect(screen.getAllByRole('button', { name: /Historic goal 2999/ }).length).toBe(1));
     fireEvent.change(screen.getByRole('searchbox', { name: 'Filter runs' }), { target: { value: 'zz-no-such-run' } });
     await waitFor(() => expect(screen.queryAllByRole('button', { name: /Succeeded|Failed/ })).toHaveLength(0));
-  });
+  }, 30000); // same margin as its siblings below: 6.4 s MEASURED under whole-suite parallel load (5 s default timed out), 2/2 pass in isolation; no assertion changed
 
   it('a very long goal and a goal with shell metacharacters are shown as plain text, bounded in layout', async () => {
     const host = new FixtureHost({ workspace: '/fixture/workspace', scenarios: manyRuns(120) });
