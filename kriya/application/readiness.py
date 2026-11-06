@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from kriya.platform import private_store
+from kriya.policy.egress import web_lookup_allowed
 from kriya.tools.containment import CONTAINMENT_REQUIRED
 
 AVAILABLE = "AVAILABLE"
@@ -62,13 +63,14 @@ def capability_rows(cfg: Optional[Any], *, state_directory: Optional[str]) -> Li
     rows.append(_row("private_state", "Private state", private_state[0], private_state[1], private_state[2], ["observed: the state directory's owner and mode"]))
 
     egress = auto.egress_policy
-    if auto.web_lookup_enabled:
+    if web_lookup_allowed(cfg):     # the egress owner's one decision (enabled AND a search endpoint configured); this module never reads the flag itself
         rows.append(_row("lookup", "Outward lookup", DEGRADED if egress != "local_only" else AVAILABLE, "LOOKUP_ENABLED_" + ("LOCAL_ONLY" if egress == "local_only" else "EGRESS_OPEN"),
                          "Public lookup is enabled. A lookup is requested only when a run finds a public-knowledge gap, the query is sanitized and private repository context is not sent.",
-                         ["autonomy.web_lookup_enabled", "autonomy.egress_policy"]))
+                         ["autonomy.web_lookup_enabled", "search.base_url", "autonomy.egress_policy"]))
     else:
-        rows.append(_row("lookup", "Outward lookup", NOT_REQUIRED, "LOOKUP_DISABLED", "Public lookup is off: nothing leaves this machine for knowledge. Enable it only through the operator configuration.",
-                         ["autonomy.web_lookup_enabled", "autonomy.egress_policy"]))
+        rows.append(_row("lookup", "Outward lookup", NOT_REQUIRED, "LOOKUP_DISABLED",
+                         "Public lookup is off, or no search endpoint is configured: nothing leaves this machine for knowledge. Enable it only through the operator configuration.",
+                         ["autonomy.web_lookup_enabled", "search.base_url", "autonomy.egress_policy"]))
 
     rows.append(_row("verification", "Runtime verification", AVAILABLE if auto.run_verification_enabled else UNAVAILABLE,
                      "RUN_VERIFICATION_ENABLED" if auto.run_verification_enabled else "RUN_VERIFICATION_DISABLED",

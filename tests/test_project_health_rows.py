@@ -17,9 +17,9 @@ def rows(cfg=None, state_directory=None):
     return {r["id"]: r for r in health.capability_rows(AppConfig() if cfg is None else cfg, state_directory=state_directory)}
 
 
-def configured(**autonomy):
+def configured(search_endpoint="http://search.example:8080", **autonomy):
     cfg = AppConfig()
-    return cfg.model_copy(update={"autonomy": cfg.autonomy.model_copy(update=autonomy)})
+    return cfg.model_copy(update={"autonomy": cfg.autonomy.model_copy(update=autonomy), "search": cfg.search.model_copy(update={"base_url": search_endpoint})})
 
 
 def test_the_packaged_defaults_report_mandatory_containment_verification_and_a_disabled_lookup():
@@ -57,6 +57,12 @@ def test_an_enabled_lookup_is_available_only_under_a_local_only_egress_policy_an
     assert "sanitized" in local["detail"] and "private repository context is not sent" in local["detail"]
     open_policy = rows(configured(web_lookup_enabled=True, egress_policy="unrestricted"))["lookup"]
     assert (open_policy["state"], open_policy["reason_code"]) == (health.DEGRADED, "LOOKUP_ENABLED_EGRESS_OPEN")
+
+
+def test_lookup_enabled_without_a_search_endpoint_is_not_a_lookup_capability():
+    """The egress owner's decision needs the flag AND an endpoint; a flag with nowhere to send is reported disabled, never available."""
+    row = rows(configured(search_endpoint="", web_lookup_enabled=True, egress_policy="local_only"))["lookup"]
+    assert (row["state"], row["reason_code"]) == (health.NOT_REQUIRED, "LOOKUP_DISABLED") and "no search endpoint" in row["detail"]
 
 
 def test_the_language_server_is_never_available_because_it_has_no_contained_mode():

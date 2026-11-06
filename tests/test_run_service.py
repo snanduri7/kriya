@@ -54,7 +54,9 @@ def _ctx(ws: str) -> RequestContext:
 def test_preflight_through_the_service_is_the_kup_answer(ws):
     data = RunService().preflight(_ctx(ws), AppConfig(), ws, tool_visibility=execution.tool_visibility)
     envelope = run_kup_operation(AppConfig(), {"operation": "execution.preflight", "workspace": ws})
-    assert envelope["error"] is None and envelope["data"] == data
+    assert envelope["error"] is None
+    # the KUP answer is the service's document plus the repository's verified project memory, read now (kriya/kup/execution.py)
+    assert envelope["data"] == {**data, "memory": envelope["data"]["memory"]} and "counts" in envelope["data"]["memory"]
     assert data["ready"] is True and data["toolchains"]["tools"] == TOOLS, "the tool probe handed in is the one reported"
     assert envelope["source"]["state_directory"] == data["state"]["cockpit_directory"]
 
@@ -64,7 +66,9 @@ def test_the_launched_process_document_is_the_preflight_seen_from_nowhere(ws):
     seen = RunService().preflight(_ctx(ws), AppConfig(), ws, tool_visibility=execution.tool_visibility)
     own = RunService().build_preflight(_ctx(ws), ws, None, tool_visibility=execution.tool_visibility)
     assert own["state"]["cockpit_directory"] is None and own["state"]["observable_by_cockpit"] is None
-    assert {k: v for k, v in own.items() if k != "state"} == {k: v for k, v in seen.items() if k != "state"}
+    read_side_only = {"state", "health", "security"}      # the cockpit's own additions: a launched process re-derives none of them (RunService.preflight)
+    assert {k: v for k, v in own.items() if k not in read_side_only} == {k: v for k, v in seen.items() if k not in read_side_only}
+    assert {"health", "security"} <= set(seen) and not {"health", "security"} & set(own)
 
 
 def test_an_unusable_cockpit_state_directory_is_a_typed_refusal_on_the_wire(ws, monkeypatch):
