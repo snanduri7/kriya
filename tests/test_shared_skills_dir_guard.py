@@ -35,7 +35,7 @@ def test_is_accidental_shared_skills_write_allows_project_local_dir(tmp_path):
     assert is_accidental_shared_skills_write(project_skills, str(tmp_path)) is False
 
 
-def test_analyze_warns_when_skills_dir_resolves_to_shared_install(tmp_path):
+def test_analyze_refuses_a_new_skill_when_skills_dir_resolves_to_shared_install(tmp_path):
     """Regression test for a real incident caught live during this validation pass:
     running `kriya analyze` against a scratch project whose config didn't override
     paths.skills silently wrote a new auto-generated skill into the REAL Kriya
@@ -76,10 +76,11 @@ def test_analyze_warns_when_skills_dir_resolves_to_shared_install(tmp_path):
 
     assert "EMBEDDING_UNAVAILABLE" not in res.output, res.output
     assert "SHARED install skills directory" in res.output
-    # Confirms the warning fired for the RIGHT reason (the guard's real
-    # comparison logic), not a coincidence - the skill still gets written to
-    # the fake dir, never the real repo's own skills/.
-    assert (fake_install_skills_dir / f"auto-{project_dir.name}").exists()
+    # WAVE8 OI-120 (was: "the skill still gets written to the fake dir" after a warning only): the Skills owner now REFUSES a new skill in the
+    # shared install directory for an unrelated workspace (the MA7.4 rule every other Skills write already followed), so the incident this
+    # guard exists for cannot happen at all; the analysis itself still completes and the message says how to fix the configuration.
+    assert "Auto-generated skill not written" in res.output and "paths.skills" in res.output
+    assert list(fake_install_skills_dir.iterdir()) == [], "nothing may be created in the shared install skills directory"
 
 
 def _write_fake_skill(skills_dir, skill_name, verified_context="original-real-value"):

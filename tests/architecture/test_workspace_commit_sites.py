@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "kriya"
 
 WRITER_CALLEES = frozenset({
-    "_set_skill_yaml_field", "_set_skill_yaml_fields", "create_skill_skeleton", "record_conflict_resolution", "record_rule_provenance",
+    "_set_skill_yaml_field", "_set_skill_yaml_fields", "create_skill_skeleton", "create_skill", "record_conflict_resolution", "record_rule_provenance",
     "mark_rules_verified", "mark_verified", "mark_unverified", "mark_gap_acknowledged", "_write_skill_extraction",
     "_stage_skill_conflicts", "stage_facts", "promote_staged", "record_direct_fact", "apply_held_verifications",
     "git_commit_if_tracked", "git_commit_paths", "generate_skill_template", "persist_run_learning",
@@ -153,9 +153,17 @@ CALLER_SITES: Dict[Tuple[str, str, str], Site] = {
     ("kriya/skills/skill.py", "SkillEngine.apply_held_verifications", "mark_rules_verified"): Site(
         "SkillEngine", "<skills>/<skill>/rule provenance", SKILLS_IN_REPO, True, True, POST_TERMINAL, POST_TERMINAL, "no", "none",
         "VERIFICATION", "SAFE", "closed", "The only in-run caller of mark_rules_verified (P-B)."),
-    ("kriya/skills/skill.py", "SkillEngine.create_skill_skeleton", "git_commit_if_tracked"): Site(
+    ("kriya/skills/skill.py", "SkillEngine.create_skill", "git_commit_if_tracked"): Site(
         "SkillEngine", "<skills>/<new skill>/", SKILLS_IN_REPO, True, True, "see callers", "see callers", "see callers", "see callers",
-        "FUNNEL", "CHAIN", "closed", "Reached from the two stage rows above and `kriya skills create`."),
+        "FUNNEL", "CHAIN", "closed", "Reached from create_skill_skeleton (the two stage rows above and `kriya skills create`) only; the analyzer bootstrap passes commit_message=None and commits nothing (WAVE8 OI-120)."),
+    ("kriya/skills/skill.py", "SkillEngine.create_skill_skeleton", "create_skill"): Site(
+        "SkillEngine", "<skills>/<new skill>/", SKILLS_IN_REPO, True, True, "see callers", "see callers", "see callers", "see callers",
+        "FUNNEL", "CHAIN", "closed", "The skeleton path of the one Skills creation function (WAVE8 OI-120); same callers as before."),
+    ("kriya/analyzer/analyzer.py", "RepositoryAnalyzer.index_repository", "create_skill"): Site(
+        "analyzer conventions bootstrap (`kriya analyze`; generate with autonomy.auto_index_missing_dependency_graph)", "<skills>/auto-<slug>/ (3 files)",
+        SKILLS_IN_REPO, True, False, PRE_SANDBOX, PRE_SANDBOX, "no", "the skill registry the run loads right after this one-time pre-run index", "LEARNING",
+        "RUN_LOCAL_DEFER_DURABILITY", "closed",
+        "WAVE8 OI-120: writes files through the Skills owner's create_skill with commit_message=None, exactly as the old plain-open writer did (no repository commit, so no HEAD move in the bound window); refused for the shared install directory."),
     ("kriya/skills/skill.py", "mark_rules_verified", "git_commit_if_tracked"): Site(
         "skills subsystem", "<skills>/<skill>/rule provenance", SKILLS_IN_REPO, True, True, "see callers", "see callers", "see callers",
         "see callers", "FUNNEL", "CHAIN", "closed", "Reached only from apply_held_verifications."),

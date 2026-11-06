@@ -15,6 +15,7 @@ from kriya.analyzer.analyzer import RepositoryModel
 from kriya.config.environment import child_environment
 from kriya.platform import git_argv, git_environment
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
+from kriya.repository.atomic_write import atomic_write_file
 from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
 from kriya.skills.run_shadow import RunShadow, is_shadow_path
 from kriya.skills.run_shadow import (
@@ -28,6 +29,10 @@ def get_global_skills_dir() -> str:
     skills/ folder) - not any project-local skills override."""
     kriya_install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     return os.path.join(kriya_install_dir, "skills")
+
+class SkillWriteRefused(RuntimeError):
+    """A skill write the Skills owner refuses (it would land in the shared install skills directory for an unrelated workspace)."""
+
 
 def is_accidental_shared_skills_write(skills_dir: str, workspace_path: str) -> bool:
     """True when a write to skills_dir is about to land in Kriya's own shared/global
@@ -704,42 +709,62 @@ class SkillEngine:
         tag_lower = tag.lower()
         return [s for s in self._skills.values() if any(t.lower() == tag_lower for t in s.tags)]
 
-    def create_skill_skeleton(self, name: str) -> str:
-        """Creates folder structure and default files for a new skill."""
+    @staticmethod
+    def _safe_skill_name(name: str) -> str:
         import re
         safe_name = re.sub(r'[^a-z0-9-_]+', '-', name.lower()).strip('-')
         if not safe_name:
             raise ValueError(f"Invalid skill name '{name}'.")
+        return safe_name
 
-        skill_path = os.path.join(self.skills_dir, safe_name)
+    def skill_path_for(self, name: str) -> str:
+        """Where a NEW skill called ``name`` would be created (the sanitized folder under ``skills_dir``). Pure."""
+        return os.path.join(self.skills_dir, self._safe_skill_name(name))
+
+    def new_skill_refusal(self, name: str) -> Optional[str]:
+        """Why a NEW skill called ``name`` may not be created here (None = it may): the target is Kriya's own shared install skills directory
+        and the workspace is a different project (MA7.4). The one predicate ``create_skill`` enforces; a caller may ask first to avoid
+        spending work (a model call) on a skill that will be refused."""
+        if is_accidental_shared_skills_write(self.skills_dir, self.workspace_path):
+            return (f"Refusing to create skill '{name}': {os.path.abspath(self.skills_dir)} is Kriya's own SHARED install skills directory and "
+                    f"this workspace ({self.workspace_path}) is a different project; every other project would inherit it. Set paths.skills in "
+                    "this project's kriya.yaml (for example \"./skills\") and run again.")
+        return None
+
+    @staticmethod
+    def _write_skill_file(path: str, text: str) -> None:
+        """The ONE way the Skills owner writes a skill file (WAVE8 OI-120): the canonical atomic, durable writer."""
+        atomic_write_file(path, text)
+
+    def create_skill_skeleton(self, name: str) -> str:
+        """Creates folder structure and default files for a new skill."""
+        safe_name = self._safe_skill_name(name)
+        return self.create_skill(
+            name, {"name": name, "description": f"Custom template skill for {name}.", "category": "General", "tags": [safe_name]},
+            f"# instructions for {name}\n\nAdd guidelines here.\n", "# Add architectural rules here (one per line)\n",
+            commit_message=f"Kriya: create skill skeleton '{name}'")
+
+    def create_skill(self, name: str, metadata: Dict[str, Any], instructions: str, rules_text: str, *, commit_message: Optional[str]) -> str:
+        """Creates ONE new skill folder (skill.yaml, instructions.md, rules.txt, examples/) - the Skills owner's only creation path, used
+        by the skeleton command AND by the analyzer's conventions bootstrap (WAVE8 OI-120: model-derived text no longer reaches a skill
+        through a second, plain-``open()`` writer). ``commit_message=None`` writes the files only and commits NOTHING (the analyzer's
+        bootstrap never committed into the repository mid-run and still does not). Refuses an existing skill, and - like every other Skills write (MA7.4) - a write that
+        would land in Kriya's own shared install skills directory for an unrelated workspace. Every file goes through the canonical
+        atomic writer. The new skill is unverified: a workspace skill cannot attest itself."""
+        skill_path = self.skill_path_for(name)
         if os.path.exists(skill_path):
-            raise FileExistsError(f"Skill '{safe_name}' already exists at {skill_path}")
-
+            raise FileExistsError(f"Skill '{os.path.basename(skill_path)}' already exists at {skill_path}")
+        refusal = self.new_skill_refusal(name)
+        if refusal is not None:
+            raise SkillWriteRefused(refusal)
         os.makedirs(skill_path, exist_ok=True)
         os.makedirs(os.path.join(skill_path, "examples"), exist_ok=True)
-
-        # Write skill.yaml
-        yaml_content = {
-            "name": name,
-            "description": f"Custom template skill for {name}.",
-            "category": "General",
-            "tags": [safe_name]
-        }
-        with open(os.path.join(skill_path, "skill.yaml"), "w", encoding="utf-8") as f:
-            yaml.safe_dump(yaml_content, f, default_flow_style=False)
-
-        # Write instructions.md
-        instructions_content = f"# instructions for {name}\n\nAdd guidelines here.\n"
-        with open(os.path.join(skill_path, "instructions.md"), "w", encoding="utf-8") as f:
-            f.write(instructions_content)
-
-        # Write rules.txt
-        rules_content = "# Add architectural rules here (one per line)\n"
-        with open(os.path.join(skill_path, "rules.txt"), "w", encoding="utf-8") as f:
-            f.write(rules_content)
-
-        logger.info(f"Created skill skeleton for '{name}' at {skill_path}")
-        git_commit_if_tracked(skill_path, f"Kriya: create skill skeleton '{name}'")
+        self._write_skill_file(os.path.join(skill_path, "skill.yaml"), yaml.safe_dump(metadata, default_flow_style=False))
+        self._write_skill_file(os.path.join(skill_path, "instructions.md"), instructions)
+        self._write_skill_file(os.path.join(skill_path, "rules.txt"), rules_text)
+        logger.info(f"Created skill '{name}' at {skill_path}")
+        if commit_message is not None:
+            git_commit_if_tracked(skill_path, commit_message)
         return skill_path
 
     def _resolve_skill(self, skill_name: str) -> Optional[Skill]:
@@ -790,8 +815,7 @@ class SkillEngine:
                 with open(yaml_path, "r", encoding="utf-8") as f:
                     meta = yaml.safe_load(f) or {}
             meta.update(fields)
-            with open(yaml_path, "w", encoding="utf-8") as f:
-                yaml.safe_dump(meta, f, default_flow_style=False)
+            self._write_skill_file(yaml_path, yaml.safe_dump(meta, default_flow_style=False))
             for field, value in fields.items():
                 setattr(skill, field, value)
             self.last_write_committed = git_commit_if_tracked(yaml_path, commit_message)

@@ -1136,22 +1136,21 @@ class RepositoryAnalyzer:
             repo_slug = "root"
             
         skills_dir = getattr(cfg.paths, "skills", "./skills")
-        auto_skill_dir = os.path.join(skills_dir, f"auto-{repo_slug}")
+        # WAVE8 OI-120: the Skills owner is the only writer of a skill (kriya/skills/skill.py::SkillEngine.create_skill, through the canonical
+        # atomic writer, with its shared-install-directory refusal); this method hands it the extracted text and writes nothing itself.
+        from kriya.skills.skill import SkillEngine, SkillWriteRefused
+
+        skill_engine = SkillEngine(skills_dir, load_global=False, load_cwd=False, workspace_path=self.root_path)
+        auto_skill_name = f"auto-{repo_slug}"
+        auto_skill_dir = skill_engine.skill_path_for(auto_skill_name)
 
         if not os.path.exists(auto_skill_dir):
             import click
-            import yaml
 
-            from kriya.skills.skill import is_accidental_shared_skills_write
-            if is_accidental_shared_skills_write(skills_dir, self.root_path):
-                click.secho(
-                    f"\nWarning: this project's config doesn't set paths.skills, so it's about to "
-                    f"write a new auto-generated skill into Kriya's own SHARED install skills "
-                    f"directory ({os.path.abspath(skills_dir)}) instead of a project-local one - "
-                    f"every other project using Kriya would inherit this. If that's not intended, "
-                    f"stop now and set paths.skills in this project's kriya.yaml, e.g. \"./skills\".",
-                    fg="red", bold=True, err=True,
-                )
+            refusal = skill_engine.new_skill_refusal(auto_skill_name)
+            if refusal is not None:  # no model call is spent on a skill the Skills owner will refuse
+                click.secho(f"\nAuto-generated skill not written: {refusal}", fg="red", bold=True, err=True)
+                return report
 
             from kriya.agents.extractor import ConventionsExtractorAgent
             from kriya.core.llm import LLMClient
@@ -1193,29 +1192,24 @@ class RepositoryAnalyzer:
                 res = await extractor.extract_conventions(struct_str, samples_str, stream_callback=extractor_stream)
                 click.echo(err=True)
                 
-                os.makedirs(auto_skill_dir, exist_ok=True)
-                os.makedirs(os.path.join(auto_skill_dir, "examples"), exist_ok=True)
-                
                 yaml_content = {
-                    "name": f"auto-{repo_slug}",
+                    "name": auto_skill_name,
                     "description": res.get("description", f"Auto-generated conventions for {repo_slug}"),
                     "category": "Auto-Generated",
                     "tags": [repo_slug, "auto-generated"]
                 }
-                with open(os.path.join(auto_skill_dir, "skill.yaml"), "w", encoding="utf-8") as f:
-                    yaml.safe_dump(yaml_content, f, default_flow_style=False)
-                    
-                with open(os.path.join(auto_skill_dir, "instructions.md"), "w", encoding="utf-8") as f:
-                    f.write(res.get("instructions", "# Auto-conventions\n"))
-                    
                 rules_text = "\n".join(res.get("rules", ["Follow project conventions."]))
-                with open(os.path.join(auto_skill_dir, "rules.txt"), "w", encoding="utf-8") as f:
-                    f.write(rules_text)
-                    
+                auto_skill_dir = skill_engine.create_skill(
+                    auto_skill_name, yaml_content, res.get("instructions", "# Auto-conventions\n"), rules_text,
+                    commit_message=None)  # as before: the bootstrap writes files and never commits into the repository (a mid-run HEAD move)
+
                 click.secho(f"Success: Auto-generated engineering skill created for repository '{repo_slug}'!", fg="green", err=True)
                 click.echo("You can inspect and tweak the conventions at:", err=True)
                 click.echo(f"  - Rules: [rules.txt](file://{os.path.abspath(os.path.join(auto_skill_dir, 'rules.txt'))})", err=True)
                 click.echo(f"  - Instructions: [instructions.md](file://{os.path.abspath(os.path.join(auto_skill_dir, 'instructions.md'))})", err=True)
+            except SkillWriteRefused as ex:
+                logger.warning(f"Auto-generated skill not written: {ex}")
+                click.secho(f"Auto-generated skill not written: {ex}", fg="red", bold=True, err=True)
             except Exception as ex:
                 logger.error(f"Failed to auto-generate skill conventions: {ex}", exc_info=True)
                 click.secho(f"Failed to auto-generate skill conventions: {ex}", fg="red", err=True)
