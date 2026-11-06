@@ -38,6 +38,12 @@ Two entry points, one rule set:
     - ``Bearer``/``Basic`` credentials; an ``Authorization``/``Proxy-Authorization`` header value of any scheme
       (``Token``, ``Digest`` with its parameter list); a ``Cookie``/``Set-Cookie`` header value;
     - a secret-bearing argv flag and its separate value (``--password x``; ``-u user:password`` keeps the user);
+    - WAVE8 NEW-1: the ATTACHED forms of the ``user:password`` flags - ``--user=user:pw``, ``--proxy-user=user:pw``,
+      ``-uuser:pw`` / ``-Uuser:pw`` (also inside a short-option bundle, ``-sSuuser:pw``, and quoted, ``-u'user:pw'``), and the
+      separate value after a bundle ending in ``u`` (``-sSu user:pw``) - the part after the first colon is hidden, in free text
+      and in an argv list element alike (so ``commands_carry_secret`` sees them); the attached SHORT form needs a
+      ``user:password`` value (``-unique`` carries none). ``--oauth2-bearer=<token>`` is hidden by the name rule (``bearer`` is a
+      secret last word). Recorded over-redaction (fail-closed): ``-u1000:1000`` / ``-menu:x``;
     - ``name=value`` / ``name: value`` pairs (spaces around the separator, a ``%3D``/``%3A`` separator, a quoted
       name as in JSON or a Python repr, a JVM ``-Dname=``) whose NAME is secret-bearing by the same word rule as
       ``is_secret_key``; a quoted value is hidden whole (spaces included), a bare value up to whitespace, a quote,
@@ -94,7 +100,7 @@ REDACTED = "***REDACTED***"
 # Last word of a key (snake/kebab/camel split, lower-cased) that makes the key secret-bearing.
 _SECRET_LAST_WORDS = frozenset({
     "password", "passwd", "pwd", "passphrase", "secret", "token", "credential", "credentials", "authorization",
-    "apikey", "cookie",
+    "apikey", "cookie", "bearer",
 })
 # Last TWO words joined (``api_key``, ``ApiKey``, ``private-key``, ``ssh_key``) that make the key secret-bearing.
 _SECRET_LAST_PAIRS = frozenset({"apikey", "accesskey", "privatekey", "secretkey", "authkey", "sshkey"})
@@ -147,6 +153,15 @@ _COOKIE_HEADER = re.compile(r"(?i)(?<![A-Za-z0-9_\-])((?:set-)?cookie(?:\\?[\"']
 # An argv flag followed by its value as the next word: ``--password x``, ``-u user:password``.
 _FLAG_VALUE = re.compile(r"(?<!\S)(?P<flag>--?(?P<name>[A-Za-z][A-Za-z0-9_\-]*))(?P<gap>[ \t]+)"
                          r"(?P<value>'[^'\n]*'|\"[^\"\n]*\"|(?!-)[^\s'\"\\]+)")
+# WAVE8 NEW-1 (the attached forms of the ``user:password`` flags). ``_FLAG_VALUE`` reads the SEPARATE form (``-u user:pw``,
+# ``--user user:pw``); curl also takes the value attached: ``--user=user:pw`` / ``--proxy-user=user:pw`` and ``-uuser:pw`` /
+# ``-Uuser:pw`` (also inside a short-option bundle, ``-sSuuser:pw``, and quoted, ``-u'user:pw'``). The ``=`` long form needs
+# no colon to be seen as the flag (the value is read by ``_user_value`` like every user-flag value); the attached SHORT
+# form is recognised only when the value is a ``user:password`` (a colon and a non-empty password): ``-unique`` carries none.
+# Recorded over-redaction (fail-closed, like the separate form's ``-u 1000:1000``): ``-u1000:1000``, ``-menu:x``.
+_USER_VALUE = r"'[^'\n]*'|\"[^\"\n]*\"|[^\s'\"\\]+"
+_ATTACHED_USER_LONG = re.compile(rf"(?<!\S)(?P<flag>--(?:user|proxy-user)=)(?P<value>{_USER_VALUE})")
+_ATTACHED_USER_SHORT = re.compile(r"(?<!\S)(?P<flag>-[A-Za-z]{0,6}[uU])(?P<value>'[^'\n]*:[^'\n]+'|\"[^\"\n]*:[^\"\n]+\"|[^\s'\"\\]*:[^\s'\"\\]+)")
 # A name followed by a separator. Only the name and the separator are consumed, so a candidate whose name is not secret
 # never hides a later pair (``foo=password=x``). ``-D`` is a JVM system property prefix, not part of the name. S2c (OI-144
 # (3)): a percent-escape of a NAME character (letter, digit, ``_ - .``) is part of the name (``%70assword``, ``api%5Fkey``)
@@ -477,9 +492,32 @@ def _user_value(value: str) -> str:
     return f"{user}:{REDACTED}" if colon and password else value
 
 
+_SHORT_BUNDLE_ENDING_IN_USER = re.compile(r"[A-Za-z]{0,6}[uU]")
+
+
+def _is_user_flag(flag: str, name: str) -> bool:
+    """True for a flag whose separate value is ``user:password``: ``-u``/``-U``, ``--user``, ``--proxy-user`` and a short-option
+    bundle ending in ``u`` (``-sSu user:pw``: the value belongs to the last option of the bundle)."""
+    if name.lower() in _USER_FLAGS:
+        return True
+    return not flag.startswith("--") and bool(_SHORT_BUNDLE_ENDING_IN_USER.fullmatch(name))
+
+
+def _quoted_user_value(value: str) -> str:
+    """``_user_value`` for a value that may be quoted (``'user:pw'`` / ``"user:pw"``): the quotes stay, the password goes."""
+    for opening in ("\"", "'"):
+        if len(value) >= 2 and value.startswith(opening) and value.endswith(opening):
+            return f"{opening}{_user_value(value[1:-1])}{opening}"
+    return _user_value(value)
+
+
+def _attached_user(match: Match) -> str:
+    return f"{match.group('flag')}{_quoted_user_value(match.group('value'))}"
+
+
 def _flag_value(match: Match) -> str:
     name, value = match.group("name"), match.group("value")
-    if name.lower() in _USER_FLAGS:
+    if _is_user_flag(match.group("flag"), name):
         hidden = _user_value(value)
     elif _is_secret_name(name):
         hidden = _hidden_value(value)
@@ -545,6 +583,8 @@ def redact_text(text: str) -> str:
     redacted = _AUTHORIZATION_HEADER.sub(_authorization, redacted)
     redacted = _COOKIE_HEADER.sub(lambda m: f"{m.group(1)}{REDACTED}", redacted)
     redacted = _FLAG_VALUE.sub(_flag_value, redacted)
+    redacted = _ATTACHED_USER_LONG.sub(_attached_user, redacted)
+    redacted = _ATTACHED_USER_SHORT.sub(_attached_user, redacted)
     redacted = _redact_commands(redacted)
     redacted = _redact_pairs(redacted)
     for pattern in _SHAPED_SECRETS:
@@ -594,13 +634,14 @@ def _flag_name(item: Any) -> Optional[str]:
 def _redact_list(items: Any) -> List[Any]:
     out: List[Any] = []
     flag: Optional[str] = None
+    raw_flag: Optional[str] = None
     # S2d: an argv's positional secrets, read through the command's own grammar (the list read WHOLE, like a flag pair).
     hidden = _secret_positions([item if isinstance(item, str) else "" for item in items])
     for position, item in enumerate(items):
         if position in hidden:
             out.append(item[:hidden[position]] + REDACTED)
         elif flag is not None and isinstance(item, str) and item and not item.startswith("-"):
-            if flag.lower() in _USER_FLAGS:
+            if _is_user_flag(raw_flag or "", flag):
                 out.append(redact_text(_user_value(item)))
             elif _is_secret_name(flag):
                 out.append(REDACTED)
@@ -609,6 +650,7 @@ def _redact_list(items: Any) -> List[Any]:
         else:
             out.append(redact_value(item))
         flag = _flag_name(item)
+        raw_flag = item if flag is not None else None
     return out
 
 
