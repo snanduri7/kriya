@@ -77,10 +77,12 @@ def ensure_private_roots(workspace_path: str, cfg: Any) -> None:
 
     home, authority = kriya_private_homes()
     state = resolve_state_directory(cfg)[0]
-    for path in (authority, state):
-        ensure_private_directory(path)
     # Kriya's home is tightened only when Kriya's own state actually lives under it (the default layout): a run whose state and authority homes are
-    # elsewhere (an operator override, a test) does not reach into a home directory it does not use.
+    # elsewhere (an operator override, a test) does not reach into a home directory it does not use. It is validated FIRST (WAVE8 private-store ordering):
+    # an existing home that is a symlink or another owner's directory refuses before anything is created beneath it - a mkdir below a symlinked home would
+    # create directories inside whatever the link names, a location this user never validated. A missing home is created private as the parent of the state.
     if any(path_relation(home, path) is PathRelation.WITHIN for path in (authority, state)):
         ensure_private_directory(home, create=False)
+    for path in (authority, state):
+        ensure_private_directory(path)
     ensure_private_control_roots(workspace_path)

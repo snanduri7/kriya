@@ -131,3 +131,7 @@ def test_a_symlinked_kriya_home_is_refused_and_the_link_target_is_never_chmodded
         control_store.ensure_private_roots(str(repo), AppConfig())
     assert stat.S_IMODE(os.lstat(elsewhere).st_mode) == 0o755, "a chmod must never follow the link"
     assert os.path.islink(home / ".kriya")
+    # MEASURED before the reorder: authority/ and state/ (0700) had already been created INSIDE the link target when the refusal came. The home is now validated
+    # before anything is created beneath it, so a target this user never validated is not mutated at all.
+    assert os.listdir(elsewhere) == []
+    assert not (repo / ".kriya").exists()
