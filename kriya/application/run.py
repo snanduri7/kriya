@@ -38,7 +38,7 @@ from kriya.control.persistence import UnreadableRunRecordError, load_launch_reco
 from kriya.control.recovery import STATUS_CLEAN, STATUS_RUN_ACTIVE, assess_recovery
 from kriya.control.run_ownership import probe_run_lock
 from kriya.core.state_paths import StateDirectoryError, resolve_state_directory, trace_db_path
-from kriya.foundation.redaction import redact_value
+from kriya.foundation.redaction import redact_value, safe_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,9 @@ def _model_identity(cfg) -> Dict[str, Any]:
         override = getattr(getattr(cfg.agent_llms, role, None), "llm", None)
         if override is not None:
             roles[role] = override.model
-    return {"provider": llm.provider, "model": llm.model, "endpoint": llm.base_url, "context_window": llm.context_window,
+    # WAVE8 OI-156: the preflight reaches the 0600 launch record and execution.preflight, so it carries the endpoint as it may be SHOWN
+    # (scheme, host, port, path: the one display rule of the redaction owner); the runtime keeps the original in memory (cfg.llm.base_url).
+    return {"provider": llm.provider, "model": llm.model, "endpoint": safe_endpoint(llm.base_url), "context_window": llm.context_window,
             "fallback_chain": [entry.model for entry in cfg.llm_chain], "role_overrides": roles}
 
 

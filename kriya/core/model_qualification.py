@@ -95,6 +95,7 @@ from kriya.core.qualification_identity import (
     IdentityObserver,
     QualificationIdentityGuard,
 )
+from kriya.foundation.redaction import safe_endpoint
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 # /3 (MODEL-QUAL-IDENTITY-001): records are keyed by runtime + inference
@@ -1366,7 +1367,7 @@ async def _context_capacity(llm, model, ctx, opened: List[Any]):
         # This case talks to the endpoint directly (not through LLMClient's
         # egress check), so it refuses a non-local endpoint itself.
         return CaseResult("", UNAVAILABLE, {"reason": "context capacity is only probed on a local endpoint",
-                                            "endpoint": base_url})
+                                            "endpoint": safe_endpoint(base_url)})
     # The model's own endpoint and key (the timeout case's client factory),
     # not necessarily the primary binding's.
     policy = _policy(ctx).cases.context_capacity
@@ -1477,7 +1478,7 @@ async def _over_context_refusal(llm, model, ctx, opened: List[Any]):
     base_url = ctx.get("base_url")
     if base_url and not is_local_url(base_url):
         return CaseResult("", UNAVAILABLE, {"reason": "over-context refusal is only probed on a local endpoint",
-                                            "endpoint": base_url})
+                                            "endpoint": safe_endpoint(base_url)})
     factory = ctx.get("client_factory")
     if factory is not None:
         opened.append(factory(_policy(ctx).cases.context_capacity.request_timeout_seconds))
