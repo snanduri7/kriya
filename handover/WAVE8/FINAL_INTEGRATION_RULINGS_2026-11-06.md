@@ -1,0 +1,103 @@
+# Wave-8 owner rulings applied (2026-11-06): clean host, OI-170 fixed, final focused gates
+
+Supersedes the OI-170, OI-166, OI-105, OI-61 and symlinked-home statements of `FINAL_INTEGRATION_PREFLIGHT_2026-11-06.md` (kept as the pre-ruling record). Evidence labels: MEASURED / TRACED / INFERRED / CONFIRMED / UNKNOWN.
+Nothing here is pushed, tagged or frozen. `refs/kriya/verified` is rc11 `b32976245f84018fa732072012bc302d4349b7ac`; the release line is `9f41876d4758170faca53f6988e7840d177a5a25`.
+
+## 1. Load contamination removed
+- Evidence captured before stopping (MEASURED, saved outside the repo under the session scratchpad `container-evidence/`): `docker inspect`, `docker top`, `docker stats`, `docker ps -a`, `docker volume ls`, the container's `run.sh`, `overlap_tests.txt`, `ov_GUARDED.jsonl`, `ov_MUTATED.jsonl`.
+- Container: id `1140954679d1`, name `kriya-linux-ctr`, image `kriya-linux-repro` (Ubuntu 24.04 label), created/started 2026-11-04T04:55:08Z, restart policy `no`, `sleep infinity` with docker-in-docker; mounts: named volumes `kriya-linux-dind-lib`, `kriya-linux-runner-home`, and a bind of an earlier session's scratchpad `repro-src`.
+- Provenance (TRACED from its own files): a Linux contention repro by the earlier Wave-8/CI-investigation session (originSession `cb3a0647`): `run.sh <label>` runs the 149 tests of `overlap_tests.txt` five times with `-n 10 --dist loadgroup` and `KRIYA_GIT_QUIESCENCE=report:/tmp/ov_<label>.jsonl`, while 6 `while :; do :; done` loops generate CPU load (`GUARDED` vs `MUTATED` variants). It had been running that load for about 1 d 6 h per loop.
+- Action: copied the small evidence files out, then `docker stop` (exit 137). NOT removed: its writable layer holds 33,089 entries and the two reports above are not otherwise preserved in the repository, so per the ruling it stays stopped and intact until its provenance is accepted (a stopped container costs nothing; the two named volumes survive a removal either way).
+- Effect (MEASURED): load average 94 -> 14 within about a minute of stopping; it then decayed to the residual macOS daemons (`fseventsd`, `mediaanalysisd`, Spotlight) before the timing below.
+
+## 2. Commits on the correction branch since the preflight (`e3d738d`)
+`2114bfd` OI-170 fix + 23 tests (+ one OI-164 pin update); `33f51a6` private-home ordering fix; this document and registry rows (next commit). Pre-existing: 13 campaign commits to `a9d8c30`, `8d8dd02` host-layout test, `e3d738d` preflight docs.
+
+## 3. OI-170 (owner ruling: RELEASE BLOCKER, fixed at the canonical owner)
+- Observation (MEASURED on the unfixed bytes, e3d738d): a hard link inside the root to a file outside every root was read, parsed by ast, returned by search and printed by a planned `git diff` as an ordinary file (`tool_output='OI170_OUTSIDE_SECRET_BYTES'`). 16 of the 22 reproducer tests were red.
+- Producer (TRACED): `AuthorizedFileReader.authorize` (`kriya/policy/filesystem.py`), the one read containment every model-authored read, search hit, ast parse, blame and planned-diff path asks, judged only the path (`is_within_scope`, realpath).
+- Fix: after the reader's own path containment, a regular file with more than one link is admitted only if the readable roots hold ALL of its names (`st_nlink` vs the names counted per `(st_dev, st_ino)` by one lazy per-operation walk of the roots; each directory once; symlinks not followed). Otherwise typed refusal `HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS`; an unreadable tree or unknown identity fails closed. Single-link files, directories and missing paths never pay for it. No global multi-link refusal, no second containment engine.
+- Required proof, all MEASURED:
+  - reproducer fails before / refuses after: 16/22 red -> 23/23 green (3 outside objects x 3 views x read/ast/search; planned diff in 2 views);
+  - ordinary in-root hard links stay usable: 3 names in a root, names spread over owner and candidate, in all 3 views;
+  - one inside + one outside, and three names with two inside: refused;
+  - hard links to `.git` and Kriya control state stay refused with the OI-164 code (`TRUSTED_CONTROL_PATH_DENIED`); the OI-164 suite (57) is green;
+  - symlinks unchanged (`PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS` for an outside link; an in-root symlink to a multi-link file works);
+  - write authority unchanged: `kriya/policy/filesystem.py`'s writer is untouched and a test pins that the writer's decision for a linked name equals that for a plain one; TRACED that every Kriya write replaces the directory entry (`atomic_write_file`), so an outside object's bytes are not rewritten through the link;
+  - mutants: 8/8 killed (census always accounts, off-by-one, fail-open incomplete census, reader skips the census, directories counted twice, unknown identity fails open, census cached across instances, single-link treated as multi-link).
+- Behaviour change (owner to know): a multi-link file with a name outside every readable root (for example a pnpm store link) is no longer readable through the planned read tools. Hard links whose names are all inside the roots are unchanged.
+- One existing pin updated, not weakened: `test_an_incomplete_index_refuses_every_multi_link_target_but_no_single_link_one` now accepts either typed refusal code for an unreadable tree (the reader's name accounting refuses first); it still requires a typed FAILED with no output and a readable single-link file.
+- Registry: `WAVE8-OI170-OUTSIDE-HARD-LINK-READ-001` P1 CLOSED.
+
+## 4. Symlinked `~/.kriya` (ruling item 8): promoted and fixed
+- Trace (TRACED + MEASURED): `ensure_private_roots` created `authority/` and `state/` before validating Kriya's home; `ensure_private_directory` does not validate an existing parent and calls `os.mkdir`, which follows a symlinked parent. MEASURED (scratch HOME, link to a user-owned directory): both directories were created inside the link target before the refusal. For a link to a directory the user can write but does not own, the same two empty user-owned directories would be created there: creation before trust validation, so the ruling's promotion rule applied. Nothing pre-existing and foreign is ever adopted or chmodded (the uid and symlink checks run before any chmod), and no data was written.
+- Fix: validate the home first (when Kriya's state lives under it); a missing home is still created private as the parent of the state. Same typed error. Original symptom re-measured: the link target stays empty and the workspace `.kriya` is never created. Mutation (old order restored) is killed by the host-layout test. Registry `WAVE8-PRIVATE-HOME-SYMLINK-REFUSAL-001` CLOSED (commit `33f51a6`).
+
+## 5. OI-105: `attempt.closed` is NOT release/result authority (cheap consumer trace, MEASURED by search)
+- Producer: `kriya/core/attempt_evidence/scope.py:358` (emit); kind list `model.py:53`; payload `outcome` + `candidate_gates_passed` from `decision_evidence.py:89`.
+- Backend consumers of the event or its payload: none. Searched `kriya/kup`, `kriya/metrics`, `kriya/application`, `kriya/control`, `kriya/core/model_certification.py`, `scripts/`. Every other `candidate_gates_passed` hit reads the live `state.candidate_gates_succeeded` (`outcome.py:277`, `retry_strategy.py:536`), not the event.
+- Certification/release: `scripts/release_candidate.py`, `prd036_gate.py` and `kriya/core/release_candidate.py` consume the candidate identity, trial reports and the final result; none reads `attempt.closed`.
+- UI (`ui/shared/src/cockpit`): the terminal state comes from `run.outcome` (KUP result) and `run.closed.terminal_status` (`runPhase.ts:63-65`, `selectors.ts` `runClosure`); `attempt.closed` is used only to (a) count open attempts for the live phase label (`runPhase.ts:87`, VALIDATING/REPAIRING), (b) annotate an attempt as "(closed <outcome>)" beside the attempt's own conclusion, which comes from `attempt.concluded`, and (c) display the payload (`describe.ts`, `timeline`). No final outcome is derived from it.
+- Held/deferred gates still control the final result: the final truth is `outcome.py` / terminal gate state, unchanged.
+- Meaning, as documented now: `attempt.closed` records that `run_attempt` returned (an attempt lifecycle boundary), with the gate state known AT THAT POINT; in HITL it is emitted before the held gates run, so `candidate_gates_passed` may read false for an attempt whose held gates later passed. It is lifecycle/audit telemetry, never final result authority.
+- Disposition: P3 lifecycle/audit semantics residual (registry row `EVIDENCE-HELD-GATES-001`, already P3, unchanged). Non-blocking for rc12. No lifecycle redesign.
+
+## 6. Other owner rulings recorded
+- OI-166: INTENTIONAL RELEASE-BOUNDARY CONTRACT (registry `OI-166-UI-RELEASE-BOUNDARY-CONTRACT-001`, CLOSED as a contract). The UI never recomputes backend truth.
+- OI-93: stays OPEN P3, not FIXED_VERIFIED, not an intentional contract. Re-measured at the Wave-8 tip: `goal_requires_runtime_behavior` is still False for "prints hello world when executed" and three sibling phrasings; the PRD-036 canary goal is detected. Non-blocking for rc12 because the miss ends as an honest "not fully verified" success, not a false success. Note: the registry row that carries it (`GREENFIELD-RUNTIME-VERIFICATION-DROPPED-001`) is typed P2 TRACKED_IN_OPEN_ITEMS; the owner's label is P3 for the residual. I did not change the registry row's priority silently; owner to confirm.
+- test_s7: PRE-EXISTING TEST-COMMAND / HARNESS ENVIRONMENT P3 (accepted). The canonical suite runs with `env -u PYTHONPATH`.
+
+## 7. Untracked residue (ruling item 10): mechanical proof
+- Candidate identity: `kriya/core/release_candidate.py:127-140` hashes `release_identity` (git `rev-parse HEAD`, `status --porcelain --untracked-files=no`, `kriya/core/release_identity.py:80`), the production config file, the model identities and the case set. It walks no directory.
+- Cleanliness: the release worktree reports 0 lines for `git status --porcelain --untracked-files=no` (MEASURED); the 44 untracked entries (86 files) are not seen by it.
+- Packaging: setuptools `find` with `include = ["kriya*", "plugins.core_tools*", "skills"]`; `MANIFEST.in` grafts `plugins/core_tools`, `scripts`, `skills`, `tests` and verifies the sdist against tracked files. MEASURED: 0 of the 86 untracked files lie under any packaged tree. `handover/` and `certification-out/` are in none.
+- Scanners/guards: the only walkers found read `tests/` or `kriya/`; the hygiene test reads `git ls-files`. No release bundle builder reads those paths.
+- Conclusion: untracked residue does not block rc12 and is not part of candidate reproducibility. Nothing was committed, deleted or opened beyond file-name listings.
+
+## 8. New P3 found while cleaning the tree
+Three bytecode files are TRACKED (`handover/BACKEND-READINESS-V2/gate-certification/__pycache__/oracle_preflight.cpython-312/313/314.pyc`) though `.gitignore` lists `__pycache__/`. MEASURED: a focused test run rewrote the `-314` file, dirtying the tracked tree. They are restored with `git checkout` before each cleanliness check. Registry `WAVE8-TRACKED-BYTECODE-001` (P3 OPEN): a hygiene `git rm --cached`, outside every product tree. Not done here (no campaign expansion); the owner may take it with the freeze.
+
+## 9. Focused and static gates on the OI-170 tip (MEASURED)
+- Non-Docker preflight at `e3d738d` (before the OI-170 fix): 460 passed.
+- Focused/adjacent/security/architecture set after the OI-170 fix: 2,414 passed, 1 failed (the OI-164 pin above, then updated) -> the two OI-164 files 57 passed; `tests/test_wave8_private_store_host_layout.py` + `tests/test_wave8_private_stores.py` 38 passed.
+- `ruff check .` clean; `pylint kriya plugins/core_tools tests` exit 0.
+
+## 10. Docker controls on the clean host (MEASURED)
+`tests/test_r3_dependency_cache_poisoning.py`, `tests/test_s3_execution_views.py`, `tests/test_oi142_gate_view_oci.py`, `tests/test_b3_human_acceptance.py`, run serially (`-n 0`, `env -u PYTHONPATH`, `-rs`) after `kriya-linux-ctr` was stopped and load had fallen to about 14: **104 passed in 674.6 s, 0 failed, 0 skipped**, exit 0; `docker ps` shows no container left behind. The earlier "docker/load flakes" are therefore terminally classified as the CPU saturation of section 1 (environment), not product behaviour. The exact IDs that failed in the 95b257b run were not preserved, so whole files were run; log and junit are in the session scratchpad `docker-controls/`.
+
+## 11. OI-61: one controlled import timing (MEASURED, 2026-11-06 about 16:17)
+Method: `python -c "import kriya.cli"` from a `git archive` copy of each commit (same shared-venv interpreter, `PYTHONPATH` unset), 2 discarded warm-ups then 15 runs per tree with the order alternated each round. Host: load average 5.1 / 8.8 / 18.9 before and 5.0 / 8.2 / 18.1 after (the 1-minute figure is residual macOS daemons; the stopped container is not running). The spread is tight (median within 1-5% of best), so the comparison is usable but this is not an idle machine.
+
+| tree | median | best | vs a91157f median | vs 9f41876 median |
+|---|---|---|---|---|
+| a91157f (the row's original baseline) | 0.848 s | 0.838 s | - | - |
+| 9f41876 (release line = rc11 code) | 0.935 s | 0.900 s | +10.3% | - |
+| Wave-8 tip (33f51a6) | 0.933 s | 0.912 s | +10.1% | -0.2% (best +1.3%) |
+
+Reading: the Wave-8 correction line adds no measurable import cost (-0.2% median, one extra module, `kriya.platform.private_store`). The +10% (about +87 ms of a 0.85 s import) against the old a91157f baseline is already present in the VERIFIED rc11 line; it exceeds the row's own historical +3% closure criterion and has the same origin as before (modularization and application/KUP growth, E14-P lazy registration never built). The earlier "+7.8% under load" figure is superseded. Disposition proposed: NON-BLOCKING RESIDUAL, measured; not FIXED_VERIFIED. The owner decides whether +87 ms against the old baseline is "materially outside the accepted envelope"; if yes it is a pre-existing rc11 condition, not something this campaign introduced, and the ruling asks to stop before rc12 in that case.
+
+## 12. The 14 rows: final proposal table (every status is a PROPOSAL except where an owner ruling is named)
+"W8 code" = does the correction line change the code the row is about. "Blocker?" = unresolved correctness false success / security-authority bypass / evidence-final-truth lie / durability failure / explicit release-requirement violation.
+
+| Row | Status / disposition | Evidence | Actual product impact | Release invariant | W8 code | Blocker? |
+|---|---|---|---|---|---|---|
+| OI-166 UI in release boundary | INTENTIONAL RELEASE-BOUNDARY CONTRACT (owner ruling), registry `OI-166-UI-RELEASE-BOUNDARY-CONTRACT-001` CLOSED as a contract | TRACED: `ci.yml` has no npm step; `ui/` is a separate branch deliverable | none for the backend release; UI never recomputes backend truth | none | no | no |
+| OI-170 hard link outside every root | FIXED (owner ruling: blocker) commit `2114bfd`, registry P1 CLOSED | MEASURED red/green, 8/8 mutants killed, section 3 | the outside-object read path is closed; pnpm-style store links outside the roots are now refused | read authority | YES (the fix) | no (closed) |
+| OI-174 bootstrap `git init` residue | INTENTIONAL, test-pinned (`test_s19e_honest_refusal.py:520-535`) | MEASURED + TRACED | an empty `.git` in a foreign-owned folder when the commit is refused; no content, no authority effect | none | no | no |
+| OI-175 origin-in-repository filter rule | INTENTIONAL (keep refusing) | TRACED: no Kriya merge/pull site | over-refusal only, fail closed | none | no | no |
+| OI-125 Scenario-04 rehearsal vs the PRD-036 canary | PROPOSAL: the PRD-036 canary is the sole signed live gate on the rebuilt baseline | TRACED (no Scenario-04 reference in the PRD-036 design/closure) | process only | explicit release requirement IF the owner still requires Scenario-04 before the tag | no | **needs the owner's one-line confirmation**; if Scenario-04 is still required it is an unmet requirement, not a code defect |
+| OI-126 readiness claims | PROPOSAL: the release asserts only PRD-034/035/036; second provider, two-context isolation, decision-owner table, soak are FUTURE_FEATURE | TRACED, partial pins | matters only if the release asserts those claims | claim scope | no | no, if the claim scope is as stated; owner to confirm |
+| OI-114 preserve upstream accepted work | INTENTIONAL for this release, P3 future row | TRACED (`retry_strategy.py:1460-1473`); restore-on-stop INFERRED | fail-closed, no false success, accepted work not committed | none violated | no | no |
+| OI-76 repair attempt all-or-nothing | INTENTIONAL, test-pinned contract | MEASURED (`test_candidate_transaction.py:164-227`) | convergence cost only | none | no | no |
+| OI-81 empty skill folder clears the knowledge-gap advisory | ACCEPT + P3 future (needs the skill-verification-authority decision) | MEASURED | an acknowledgeable advisory is cleared by an unverified folder name; no authority granted; Scenario 04 relies on it (owner-accepted 2026-10-16) | none (advisory) | no | no |
+| OI-93 runtime-intent detector breadth | OPEN P3 (owner ruling), not fixed, not intentional | MEASURED again at the tip: still False for 4 phrasings; canary goal True | honest "not fully verified" success, never a false success | evidence truth preserved | no | no (capability/classification limit, fail-safe) |
+| OI-104 retention of review-diff sidecars / launch records | P3 policy `REVIEW-DIFF-SIDECAR-RETENTION-001` | TRACED | unbounded retention, now owner-only 0700/0600 | privacy/retention | partly (private stores) | no |
+| OI-105 HITL `attempt.closed` placement | P3 lifecycle/audit semantics residual (owner ruling: not release authority); meaning documented in section 5 | consumer trace, MEASURED by search | audit field only; no backend, certification or UI-final-outcome consumer | none (final truth is the terminal gate / final result) | no | no |
+| OI-106 stale ledger snapshot after held gates | P3 (fail-closed resume discards an approved candidate) | TRACED, reviewer reproduction not re-run; the OI-106 lines are not in the diff (only OI-97 baseline hunks in the same files) | regeneration and re-review; no data loss | durability/resume only, fail-closed | files yes, the row's lines no | no |
+| OI-61 CLI import time | NON-BLOCKING RESIDUAL, measured (section 11) | MEASURED, interleaved, low load | +87 ms vs the old baseline, pre-existing in rc11; Wave-8 delta -0.2% | none | one module added | no, unless the owner rules +10% outside the envelope |
+
+Zero-release-blocker assertion (as of this document, before the final suite): no known row is an unresolved correctness false success, authority bypass, evidence lie or durability failure. The two owner confirmations that remain are OI-125 (is Scenario-04 still a pre-tag requirement) and OI-61 (is +87 ms vs the old baseline inside the envelope); neither is a code defect. The assertion is final only after the single full suite below is clean.
+
+## 13. Final HEAD identity and the single full suite
+Recorded in the evidence-only commit that follows the run (section 14, written after the result).
+
