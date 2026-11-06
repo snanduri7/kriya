@@ -941,7 +941,8 @@ _AUDITED_WRITE_SITES = {
 # copy_bound_paths primitive in kriya/repository/bound_tree.py, and one cleanup rmtree was added (the partial sandbox after a refused copy).
 _WRITER_MODULES = {"kriya/repository/atomic_write.py", "kriya/repository/commit.py", "kriya/workflow/worktree.py",
                    "kriya/workflow/file_integrity.py"}
-_WRITER_MODULE_SITES = {"kriya/repository/atomic_write.py": 11, "kriya/repository/commit.py": 10,
+# WAVE8 OI-03: every atomic write is durable, so the non-durable temp-write/replace path and its duplicate primitives are gone; atomic_write.py is 9 (was 11) and the set is 34. Fewer sites, one writer.
+_WRITER_MODULE_SITES = {"kriya/repository/atomic_write.py": 9, "kriya/repository/commit.py": 10,
                         "kriya/workflow/worktree.py": 11, "kriya/workflow/file_integrity.py": 2}
 
 

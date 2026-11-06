@@ -45,10 +45,10 @@ class Faults:
         real_atomic = commit_module.atomic_write_file
         self.declared = False
 
-        def declaring(full_path, content, workspace_path=None, *, content_bytes=None, durable=False, mode=None):
+        def declaring(full_path, content, workspace_path=None, *, content_bytes=None, durable=False, mode=None, private=False):
             self.declared = bool(durable)
             try:
-                return real_atomic(full_path, content, workspace_path=workspace_path, content_bytes=content_bytes, durable=durable, mode=mode)
+                return real_atomic(full_path, content, workspace_path=workspace_path, content_bytes=content_bytes, durable=durable, mode=mode, private=private)
             finally:
                 self.declared = False
 

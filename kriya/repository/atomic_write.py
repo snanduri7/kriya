@@ -208,7 +208,9 @@ def _atomic_write_bytes(full_path: str, content: bytes) -> None:
 def _fsync_directory(path: str, *, strict: bool = False) -> None:
     """Metadata durability of a directory entry. Best-effort by default (platforms that cannot fsync a directory are tolerated); ``strict=True`` is for an
     authoritative durable transition (D1) and lets every error propagate - it may never swallow one."""
-    if os.name == "nt":  # no directory fsync on Windows (a directory cannot be opened for it); see durable_atomic_write_bytes
+    from kriya.platform.filesystem_semantics import directory_fsync_supported
+
+    if not directory_fsync_supported():  # no directory fsync on Windows (a directory cannot be opened for it); see durable_atomic_write_bytes
         return
     try:
         descriptor = os.open(path, os.O_RDONLY)

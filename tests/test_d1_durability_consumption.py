@@ -48,11 +48,24 @@ class DirectoryFsyncOutage:
         self.files_down = False
         self.directory_attempts = 0
         real_fsync = os.fsync
+        real_write = atomic_write.durable_atomic_write_bytes
+        self.in_writer = False
+
+        def writer(path, data, *, mode=None):
+            # WAVE8 OI-03: every write now fsyncs its directory and fails closed (DurableWriteError) under an outage, so the outage models the READER's confirmation only;
+            # the writer's own failure is injected explicitly (Faults) and covered by tests/test_wave8_durable_writer_contract.py
+            self.in_writer = True
+            try:
+                return real_write(path, data, mode=mode)
+            finally:
+                self.in_writer = False
+
+        monkeypatch.setattr(atomic_write, "durable_atomic_write_bytes", writer)
 
         def fsync(descriptor):
             if stat.S_ISDIR(os.fstat(descriptor).st_mode):
                 self.directory_attempts += 1
-                if self.down:
+                if self.down and not self.in_writer:
                     raise OSError(errno.EIO, "injected persistent directory fsync outage")
             elif self.files_down:
                 raise OSError(errno.EIO, "injected persistent file fsync outage")

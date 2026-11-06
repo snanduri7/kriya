@@ -23,10 +23,10 @@ OVERRIDE = None   # set by the fixture: a real directory with a JDK ``release`` 
 
 
 @pytest.fixture
-def jdk_mismatch(monkeypatch, tmp_path_factory):
+def jdk_mismatch(monkeypatch, scratch_dir):
     """A machine where java and mvn disagree and the goal names the java side: the override resolves to a fake JDK home."""
     global OVERRIDE
-    home = tmp_path_factory.mktemp("jdk17")
+    home = scratch_dir("jdk17")
     (home / "release").write_text('JAVA_VERSION="17.0.2"\n')
     OVERRIDE = str(home)
     seen = []

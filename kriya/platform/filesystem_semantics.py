@@ -76,6 +76,12 @@ def _existing_prefix(real_path: str) -> Tuple[Optional[str], Optional[os.stat_re
         current = parent
 
 
+def directory_fsync_supported() -> bool:
+    """Whether a directory entry can be made durable with ``fsync`` on its directory. False on Windows (a directory cannot be opened for it);
+    WAVE8 OI-03: ``kriya/repository/atomic_write.py`` asks here instead of naming the OS itself."""
+    return os.name != "nt"
+
+
 def _lexically_within(root: str, target: str) -> bool:
     root, target = fold_name(root), fold_name(target)
     return target == root or target.startswith(root.rstrip(os.sep) + os.sep)

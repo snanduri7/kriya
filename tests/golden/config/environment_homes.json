@@ -834,7 +834,10 @@
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
  "KRIYA_STATE_DIR=relative": {
-  "acceptance_jvm_state_root": "<TMP>/ws/rel/override",
+  "acceptance_jvm_state_root": {
+   "error": "StateDirectoryError",
+   "message": "KRIYA_STATE_DIR must be an absolute path here (got 'rel/override'); Kriya never resolves a state directory against the current working directory."
+  },
   "adjudication_store": "<TMP>/home/.kriya/adjudications/adjudications.json",
   "authority_home": "<TMP>/home/.kriya/authority",
   "authority_local_path": "<TMP>/home/.kriya/authority/<WS>_ID.json",
@@ -842,7 +845,10 @@
   "default_log_directory": "<TMP>/home/.kriya/logs",
   "default_state_directory": "<TMP>/home/.kriya/state",
   "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
-  "model_runtime_fingerprint_store": "<TMP>/ws/rel/override/model_runtimes",
+  "model_runtime_fingerprint_store": {
+   "error": "StateDirectoryError",
+   "message": "KRIYA_STATE_DIR must be an absolute path here (got 'rel/override'); Kriya never resolves a state directory against the current working directory."
+  },
   "qualification_home": "<TMP>/home/.kriya/qualifications",
   "resolve_log_directory": [
    "<TMP>/home/.kriya/logs",
@@ -856,8 +862,14 @@
    "error": "StateDirectoryError",
    "message": "KRIYA_STATE_DIR must be an absolute path here (got 'rel/override'); Kriya never resolves a state directory against the current working directory."
   },
-  "validator_ephemeral_cache_root_gradle": "<TMP>/ws/rel/override/gate-caches",
-  "validator_ephemeral_cache_root_maven": "<TMP>/ws/rel/override/gate-caches",
+  "validator_ephemeral_cache_root_gradle": {
+   "error": "StateDirectoryError",
+   "message": "KRIYA_STATE_DIR must be an absolute path here (got 'rel/override'); Kriya never resolves a state directory against the current working directory."
+  },
+  "validator_ephemeral_cache_root_maven": {
+   "error": "StateDirectoryError",
+   "message": "KRIYA_STATE_DIR must be an absolute path here (got 'rel/override'); Kriya never resolves a state directory against the current working directory."
+  },
   "waiver_store_configured_tilde": "<TMP>/home/w.json",
   "waiver_store_default": "<TMP>/home/.kriya/static_analysis/waivers/<WS>_ID.json"
  },
@@ -870,7 +882,7 @@
   "default_log_directory": "<TMP>/home/.kriya/logs",
   "default_state_directory": "<TMP>/home/.kriya/state",
   "mcp_approval_home": "<TMP>/home/.kriya/mcp_approvals",
-  "model_runtime_fingerprint_store": "<TMP>/ws/~/override/model_runtimes",
+  "model_runtime_fingerprint_store": "<TMP>/home/override/model_runtimes",
   "qualification_home": "<TMP>/home/.kriya/qualifications",
   "resolve_log_directory": [
    "<TMP>/home/.kriya/logs",

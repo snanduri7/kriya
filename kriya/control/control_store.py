@@ -81,6 +81,6 @@ def ensure_private_roots(workspace_path: str, cfg: Any) -> None:
         ensure_private_directory(path)
     # Kriya's home is tightened only when Kriya's own state actually lives under it (the default layout): a run whose state and authority homes are
     # elsewhere (an operator override, a test) does not reach into a home directory it does not use.
-    if any(os.path.commonpath([home, path]) == home for path in (authority, state)):
+    if any(path_relation(home, path) is PathRelation.WITHIN for path in (authority, state)):
         ensure_private_directory(home, create=False)
     ensure_private_control_roots(workspace_path)
