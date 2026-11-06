@@ -541,6 +541,102 @@ class AuthorizedFileWriter:
         )
 
 
+HARD_LINK_OUTSIDE_READABLE_ROOTS = "HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS"
+
+
+class ReadableRootLinkCensus:
+    """WAVE8 OI-170: whether EVERY name of a multi-link file lies inside the readable roots.
+
+    Path containment (``is_within_scope``) judges where a NAME is. A hard link inside a root to a file whose other name is outside every root passes it, and a
+    read of that name then returns the outside object's bytes (MEASURED, OI-170). The identity of the object is the only thing that can tell: a regular file
+    reached through a name inside the roots has ``st_nlink`` names in all; if the roots hold fewer than ``st_nlink`` of them, at least one name is outside
+    every root. The accounting is by ``(st_dev, st_ino)`` (``object_key``), and only a non-directory with more than one link ever pays for it - a single-link file,
+    a directory and a missing path are decided by ``os.stat`` alone, so ordinary trees (including hard-linked ones whose names all lie inside the roots) are
+    unaffected.
+
+    The census is one walk of the roots, built lazily on the first multi-link target and kept for this instance only: callers build an ``AuthorizedFileReader``
+    per operation (a read, a search, a planned diff), so a link made after one operation is judged afresh by the next. Each directory is walked once (a candidate
+    worktree lives under the owner's ``.kriya``: its names are counted once, not once per root); symlinks are never followed (a symlink is not a name of the
+    object, ``os.stat`` of the target already followed it). A directory or entry that cannot be read, or an identity the host does not provide, makes the
+    census incomplete and every multi-link target then fails closed (not accounted for) - the same posture as ``ControlObjectIdentities``.
+
+    It is NOT a second containment engine: it answers one identity question the canonical reader asks after its own path containment decided, and it never
+    sees the write side."""
+
+    def __init__(self, roots: Sequence[str]) -> None:
+        self._roots: Tuple[str, ...] = tuple(roots)
+        self._counts: Optional[Dict[Tuple[int, int], int]] = None
+        self._counted = False
+
+    def accounts_for_every_name(self, target: str) -> bool:
+        """True when ``target`` (symlinks followed, as a read would) is not a multi-link file, or when the roots hold all of its names. False when a name is
+        unaccounted for or the identity cannot be established (fail closed)."""
+        try:
+            result = os.stat(target)
+        except (FileNotFoundError, NotADirectoryError):
+            return True  # nothing to read: the read itself fails
+        except (OSError, ValueError):
+            return False
+        if stat.S_ISDIR(result.st_mode) or result.st_nlink <= 1:
+            return True
+        key = object_key(result)
+        if key is None:
+            return False
+        if not self._counted:
+            self._counts = self._count()
+            self._counted = True
+        if self._counts is None:
+            return False
+        return self._counts.get(key, 0) >= result.st_nlink
+
+    def _count(self) -> Optional[Dict[Tuple[int, int], int]]:
+        """Names per multi-link object across the roots; None when the walk could not be completed."""
+        counts: Dict[Tuple[int, int], int] = {}
+        visited: Set[Tuple[int, int]] = set()
+        stack: List[str] = []
+        for root in self._roots:
+            try:
+                root_key = object_key(os.stat(root))
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError):
+                return None
+            if root_key is None:
+                return None
+            if root_key not in visited:
+                visited.add(root_key)
+                stack.append(root)
+        while stack:
+            directory = stack.pop()
+            try:
+                with os.scandir(directory) as iterator:
+                    entries = list(iterator)
+            except FileNotFoundError:
+                continue  # removed while walking: no names beneath it
+            except (OSError, ValueError):
+                return None
+            for entry in entries:
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                    is_directory = stat.S_ISDIR(info.st_mode)
+                except FileNotFoundError:
+                    continue
+                except (OSError, ValueError):
+                    return None
+                if not is_directory and info.st_nlink <= 1:  # lstat: a symlink is never a directory here (never followed) and its own inode is not any file's key
+                    continue
+                key = object_key(info)
+                if key is None:
+                    return None
+                if is_directory:
+                    if key not in visited:
+                        visited.add(key)
+                        stack.append(entry.path)
+                else:
+                    counts[key] = counts.get(key, 0) + 1
+        return counts
+
+
 class AuthorizedFileReader:
     """DEV-INV-001: the read-side sibling of AuthorizedFileWriter above -
     same composition (make_workspace_scope/is_within_scope for canonical,
@@ -575,6 +671,7 @@ class AuthorizedFileReader:
     def __init__(self, workspace_root: str, extra_readable_roots: Sequence[str] = ()) -> None:
         self._scope = make_workspace_scope(workspace_root, extra_readable_roots)
         self._execution_policy = ExecutionPolicy(sensitive_path_patterns=_ENFORCEMENT_SENSITIVE_PATH_PATTERNS)
+        self._link_census = ReadableRootLinkCensus(self._scope.writable_roots)  # WAVE8 OI-170: per instance, i.e. per operation
 
     def authorize(self, target_path: str) -> PolicyResult:
         if not is_within_scope(self._scope, target_path):
@@ -586,6 +683,18 @@ class AuthorizedFileReader:
                     f"authorized readable root: {self._scope.writable_roots}."
                 ),
                 matched_rule="filesystem.authorized_reader.outside_scope",
+            )
+        if not self._link_census.accounts_for_every_name(target_path):
+            # WAVE8 OI-170: the NAME is inside a root, the OBJECT also has a name that is not (or its names cannot be counted): a hard link must not widen
+            # read authority past the roots. The explanation never names the other names (they are unknown) or the object's content.
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code=HARD_LINK_OUTSIDE_READABLE_ROOTS,
+                explanation=(
+                    f"'{target_path}' is one of several names (hard links) of a file, and not every name lies inside an authorized readable root "
+                    f"({self._scope.writable_roots}), or its names could not be counted: a read through it would reach an object outside them."
+                ),
+                matched_rule="filesystem.authorized_reader.hard_link_outside_scope",
             )
         # Deliberately omits workspace_path here, unlike AuthorizedFileWriter's
         # otherwise-identical delegation - is_within_scope() above is already

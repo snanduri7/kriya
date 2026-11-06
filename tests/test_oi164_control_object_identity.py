@@ -235,7 +235,10 @@ def test_an_incomplete_index_refuses_every_multi_link_target_but_no_single_link_
     os.link(os.path.join(s.owner, "store.txt"), os.path.join(s.owner, "linked.txt"))
     single = _in_view(s, "owner", "filesystem", {"operation": "read", "path": "single.txt"})
     assert single.status == SubtaskStatus.COMPLETED and single.tool_output == "SINGLE\n", single
-    assert _refused(_in_view(s, "owner", "filesystem", {"operation": "read", "path": "linked.txt"}))
+    refused = _in_view(s, "owner", "filesystem", {"operation": "read", "path": "linked.txt"})
+    # WAVE8 OI-170: the reader's name accounting runs before the control rule and cannot walk this unreadable tree either, so it refuses first with its own
+    # typed code; the refusal itself (a typed FAILED, no output) is the contract this test pins, and BOTH codes are closed typed refusals.
+    assert refused.status == SubtaskStatus.FAILED and refused.tool_output is None and refused.reason_codes in (DENIED, ("HARD_LINK_OUTSIDE_AUTHORIZED_READABLE_ROOTS",)), refused
     listing = _in_view(s, "owner", "filesystem", {"operation": "list", "path": "."})
     assert "single.txt" in listing.tool_output and not {"store.txt", "linked.txt"} & set(listing.tool_output)
 
