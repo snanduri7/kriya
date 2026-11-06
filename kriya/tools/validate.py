@@ -379,6 +379,7 @@ def _record_gate_result(name: str, result: Any, started: float, *, error: Option
             "success": result.get("success") if isinstance(result, dict) else None,
             "exit_code": result.get("exit_code", result.get("returncode")) if isinstance(result, dict) else None,
             "timed_out": result.get("timed_out") if isinstance(result, dict) else None,
+            **({"purpose": attempt_evidence_scope.current_gate_purpose()} if attempt_evidence_scope.current_gate_purpose() else {}),   # WHY this gate ran, declared by its orchestrator (absent = not recorded)
             "runtime_artifacts": result.get("runtime_artifacts") if isinstance(result, dict) else None,
             "error_type": type(error).__name__ if error is not None else None,
             **meta,

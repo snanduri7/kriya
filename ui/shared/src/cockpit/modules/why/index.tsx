@@ -5,6 +5,14 @@ import {
 
 const CLASS_TONE: Record<EvidenceClass, 'ok' | 'info' | 'warn' | 'neutral'> = { MEASURED: 'ok', DERIVED_DETERMINISTIC: 'info', MODEL_CLAIMED: 'warn', UNKNOWN: 'neutral' };
 
+/** Kriya's closed gate-purpose vocabulary in plain words (the purpose is declared by the orchestrator that ran the gate and recorded on the gate result; a code added later is shown as itself). */
+const GATE_PURPOSE_WORDS: Record<string, string> = {
+  candidate_verification: 'to check the proposed change before it was accepted',
+  verification_only_unit: 'because this planned step only verifies earlier work; it changes nothing',
+  named_test_closure_base_run: 'to run the tests your request names against the ORIGINAL code, so the result can be compared',
+  named_test_closure_candidate_run: 'to run the same named tests against the proposed change',
+};
+
 function ClassBadge({ d }: { d: DiagnosisFacts }) {
   // The recorded evidence class, exactly; absent means the record carried none (provenance is shown separately, never promoted to a class).
   return d.evidenceClass ? <Badge tone={CLASS_TONE[d.evidenceClass]}>{d.evidenceClass}</Badge> : <Badge>no evidence class recorded</Badge>;
@@ -44,6 +52,13 @@ function Why({ data, failureCategory }: { data: RunEvidence; failureCategory: st
       </Panel>
       {!failed ? <p className="muted">No failure is recorded for this attempt.</p> : (
         <>
+          {gates.length ? (
+            <Panel title="Why these checks ran">
+              <ul aria-label="Check purposes" style={{ margin: 0, paddingLeft: 16 }}>
+                {gates.map((g) => <li key={g.seq} data-gate-purpose={g.purpose ?? 'not_recorded'}><span className="mono">{g.type}</span> (record {g.seq}): {g.purpose ? GATE_PURPOSE_WORDS[g.purpose] ?? <>declared purpose <span className="mono">{g.purpose}</span></> : 'its purpose was not recorded by this version of Kriya'}</li>)}
+              </ul>
+            </Panel>
+          ) : null}
           <Panel title="First failed gate, in recorded order">
             {failedGate ? <p style={{ margin: 0 }}><span className="mono">{failedGate.type}</span> failed{failedGate.exitCode !== null ? ` (exit code ${failedGate.exitCode})` : ''}, record {failedGate.seq}. <button type="button" onClick={() => { dispatch({ type: 'selectGate', gateId: failedGate.id }); dispatch({ type: 'centralTab', tab: OPEN_TARGETS.validation }); }}>Open in Validation</button></p> : <p className="muted" style={{ margin: 0 }}>No failed gate was recorded.</p>}
             {gateSel ? <p className="muted small" style={{ margin: '4px 0 0' }}>Selected gate: <span className="mono">{gateSel}</span></p> : null}

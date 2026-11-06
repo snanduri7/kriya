@@ -72,6 +72,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 from kriya.config.environment import child_environment
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.tomlcompat import tomllib
 from kriya.platform import git_argv, git_environment
 from kriya.repository.git import RepositoryContentFilterRefused, refuse_repository_content_filters
@@ -554,7 +555,8 @@ def judge_named_tests(
             base_check = base_validator(export)
             declare_execution_copy(base_check, export)  # D2 S3 (creator provenance): THIS function made the git-less base export, so it, not the factory, declares it
             base_runner = base_check._test_runner()
-            base_result = base_check.run_tests(target_test=list(named)) if base_runner == runner else None
+            with attempt_evidence_scope.gate_purpose("named_test_closure_base_run"):    # WHY this gate ran, recorded on its gate.result
+                base_result = base_check.run_tests(target_test=list(named)) if base_runner == runner else None
         except RepositoryContentFilterRefused:
             raise                   # TAF-3: a typed S19 refusal reaches the closure's caller as itself, never a verdict
         except Exception as error:  # no base inventory is no evidence (nothing negative was known before this run: the surface judgments above return conclusive codes first; the failure surface of executing test tooling is open-ended, so the catch stays broad - owner decision, counter-evidence packet)
@@ -568,7 +570,8 @@ def judge_named_tests(
     evidence["baseline_report"] = (base_result.get("test_execution") or {}).get("report_files")
 
     try:
-        result = validator.run_tests(target_test=list(named)) or {}
+        with attempt_evidence_scope.gate_purpose("named_test_closure_candidate_run"):
+            result = validator.run_tests(target_test=list(named)) or {}
     except RepositoryContentFilterRefused:
         raise                       # TAF-3: as for the base run
     except Exception as error:  # a runner failure is no evidence either way (same reasoning as the base run: no prior counter-evidence existed to lose)

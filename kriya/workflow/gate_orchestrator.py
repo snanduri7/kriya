@@ -344,6 +344,7 @@ def _require_worktree_matches_candidate(deps: GateDeps, state: RunState, ctx: At
 
 
 
+@attempt_evidence_scope.declares_gate_purpose("verification_only_unit")
 async def _run_verification_only_attempt(deps: GateDeps, state: RunState, ctx: AttemptCtx) -> None:
     """First-class execution path for a verification-only subtask
     (ctx.write_scope_mode == WriteScopeMode.DENY_ALL): executes its own
@@ -514,6 +515,7 @@ def apply_pre_review_candidate_corrections(deps: GateDeps, state: RunState, ctx:
 
 
 
+@attempt_evidence_scope.declares_gate_purpose("candidate_verification")
 async def _run_executing_candidate_gates(
     deps: GateDeps, state: RunState, ctx: AttemptCtx, skipping_candidate_gates: bool, tree_binding: Any, active_code_context: str,
 ) -> None:
@@ -1711,6 +1713,7 @@ async def _run_executing_candidate_gates(
 
 
 
+@attempt_evidence_scope.declares_gate_purpose("candidate_verification")
 async def _run_deferred_executing_gates(
     deps: GateDeps, state: RunState, ctx: AttemptCtx, skipping_candidate_gates: bool, tree_binding: Any, active_code_context: str,
 ) -> None:

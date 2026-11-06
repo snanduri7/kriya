@@ -40,6 +40,8 @@ export interface GateRow {
   id: string;
   /** The gate type EXACTLY as recorded (gate.result.gate or mirror.gate_outcome.type). */
   type: string;
+  /** WHY the gate ran, as Kriya's orchestrator declared it (gate.result.purpose); null = not recorded. Never inferred from the order of records. */
+  purpose: string | null;
   success: boolean | null;
   origin: GateOrigin;
   index: number | null;
@@ -64,7 +66,7 @@ export function gateRows(records: readonly EvidenceRecord[]): GateRow[] {
     const type = str(mirrored ? p.type : p.gate) ?? '(gate type not recorded)';
     const attempt = r.attempt_number ?? null;
     rows.push({
-      seq: r.seq, attempt, id: gateKey(attempt, type, r.seq), type, success: bool(p.success), origin: mirrored ? 'mirrored' : p.stage === 'terminal' ? 'terminal' : 'validator',
+      seq: r.seq, attempt, id: gateKey(attempt, type, r.seq), type, purpose: mirrored ? null : str(p.purpose), success: bool(p.success), origin: mirrored ? 'mirrored' : p.stage === 'terminal' ? 'terminal' : 'validator',
       index: num(p.index), exitCode: num(p.exit_code), durationSeconds: num(p.duration_seconds), timedOut: bool(p.timed_out),
       testSummary: obj(p.test_execution), requirementsVerified: bool(p.requirements_verified), outputKept: Object.keys(r.blobs ?? {}).length > 0,
     });

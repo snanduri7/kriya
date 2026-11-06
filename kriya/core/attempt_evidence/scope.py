@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import functools
+import inspect
 import logging
 import threading
 from collections import Counter
@@ -99,6 +101,11 @@ _ATTEMPT: contextvars.ContextVar[Optional[_AttemptScope]] = contextvars.ContextV
     "attempt_evidence_attempt", default=None)
 _CALL: contextvars.ContextVar[Optional[_CallScope]] = contextvars.ContextVar("attempt_evidence_call", default=None)
 _WIRE: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar("attempt_evidence_wire", default=None)
+
+# WHY a gate ran (product/demo-72h): the orchestrator that CALLS a gate declares its purpose here, so a recorded gate.result carries it and no reader has to infer it from the
+# order of records or from a label. A closed vocabulary; a gate run outside any declared purpose records none ("not recorded"), never a guessed one.
+GATE_PURPOSES = ("candidate_verification", "verification_only_unit", "named_test_closure_base_run", "named_test_closure_candidate_run")
+_GATE_PURPOSE: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("attempt_evidence_gate_purpose", default=None)
 # The most recent logical call this task (or a parent) made: what a parse of
 # its answer, which runs after the call scope closed, refers to.
 _LAST_CALL: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar("attempt_evidence_last_call", default=None)
@@ -160,6 +167,42 @@ def emit(kind: str, payload: Mapping[str, Any], *, content: Optional[Mapping[str
         _observe(kind, payload, seq)
     except Exception as error:  # observational: never alters the run
         logger.warning("Attempt evidence: %s not recorded (%s: %s)", kind, type(error).__name__, error)
+
+
+@contextlib.contextmanager
+def gate_purpose(purpose: str) -> Iterator[None]:
+    """Declare WHY the gates run inside this block (one of ``GATE_PURPOSES``); an unknown purpose is a programming error, never recorded."""
+    if purpose not in GATE_PURPOSES:
+        raise ValueError(f"unknown gate purpose {purpose!r}")
+    token = _GATE_PURPOSE.set(purpose)
+    try:
+        yield
+    finally:
+        _GATE_PURPOSE.reset(token)
+
+
+def declares_gate_purpose(purpose: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Decorator form of ``gate_purpose`` for an orchestrating function (sync or async) whose whole body is the purpose."""
+    def decorate(function: Callable[..., Any]) -> Callable[..., Any]:
+        if inspect.iscoroutinefunction(function):
+            @functools.wraps(function)
+            async def awaited(*args: Any, **kwargs: Any) -> Any:
+                with gate_purpose(purpose):
+                    return await function(*args, **kwargs)
+            awaited.declared_gate_purpose = purpose  # type: ignore[attr-defined]
+            return awaited
+
+        @functools.wraps(function)
+        def called(*args: Any, **kwargs: Any) -> Any:
+            with gate_purpose(purpose):
+                return function(*args, **kwargs)
+        called.declared_gate_purpose = purpose  # type: ignore[attr-defined]
+        return called
+    return decorate
+
+
+def current_gate_purpose() -> Optional[str]:
+    return _GATE_PURPOSE.get()
 
 
 def capture_mode() -> Optional[str]:
