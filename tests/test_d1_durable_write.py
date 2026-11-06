@@ -100,14 +100,22 @@ def test_a_directory_fsync_failure_is_never_swallowed_but_the_default_best_effor
         atomic_write._fsync_directory(str(tmp_path / "missing"), strict=True)
 
 
-def test_the_default_writer_is_unchanged_it_performs_no_fsync_at_all(tmp_path, target, monkeypatch):
+def test_the_default_writer_is_durable_it_performs_the_full_sequence(tmp_path, target, monkeypatch):
+    """WAVE8 OI-03 (was ``..._is_unchanged_it_performs_no_fsync_at_all``, which PINNED the defect): the default ``atomic_write_file`` is the durable path."""
     trace = _Trace(monkeypatch)
     atomic_write_file(str(target), "NEW")
-    assert trace.events == ["replace"] and target.read_text() == "NEW", "durable=False must stay exactly the historical atomic-replace-only behaviour"
+    assert trace.events == ["file_fsync", "replace", "dir_fsync"] and target.read_text() == "NEW"
     assert _leftovers(tmp_path) == []
 
 
-def test_the_durable_flag_flows_through_the_control_state_save_chain(tmp_path, monkeypatch):
+def test_the_default_writer_failure_contract_is_typed_and_leaves_no_temp(tmp_path, target, monkeypatch):
+    _Trace(monkeypatch, fail_fsync_call=1)
+    with pytest.raises(DurableWriteError) as caught:
+        atomic_write_file(str(target), "NEW")
+    assert caught.value.step == "file_fsync" and target.read_text() == "OLD" and _leftovers(tmp_path) == []
+
+
+def test_the_control_state_save_chain_is_durable_by_default_and_with_the_flag(tmp_path, monkeypatch):
     import subprocess
 
     from kriya.control.persistence import control_state_path, load_control_state, save_control_state
@@ -115,8 +123,8 @@ def test_the_durable_flag_flows_through_the_control_state_save_chain(tmp_path, m
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     state = ControlState(schema_version=1, run_id="r1")
     trace = _Trace(monkeypatch)
-    save_control_state(str(tmp_path), state)                       # default: no fsync
-    assert "file_fsync" not in trace.events and "dir_fsync" not in trace.events
+    save_control_state(str(tmp_path), state)                       # WAVE8 OI-03: the default is the full durable sequence too
+    assert trace.events == ["file_fsync", "replace", "dir_fsync"]
     trace.events.clear()
     save_control_state(str(tmp_path), state, durable=True)         # D1: the full durable sequence
     assert trace.events == ["file_fsync", "replace", "dir_fsync"]

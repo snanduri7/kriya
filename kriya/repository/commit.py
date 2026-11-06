@@ -188,10 +188,9 @@ def commit_revision_grounded_file(
         )
     data = content_bytes if content_bytes is not None else content.encode("utf-8")
     mode = os.stat(full_path).st_mode & 0o7777 if os.path.exists(full_path) else None
-    # durable (D1): the mode is set on the temp file BEFORE the replace, so it is covered by the same fsync as the content.
-    atomic_write_file(full_path, content, workspace_path=workspace_path, content_bytes=data, durable=durable, mode=mode if durable else None)
-    if mode is not None and not durable:
-        os.chmod(full_path, mode)
+    # WAVE8 OI-03: every atomic write is durable (kriya/repository/atomic_write.py), so the mode is always set on the temp file BEFORE the replace
+    # and covered by the same fsync as the content; ``durable`` is accepted for source compatibility only.
+    atomic_write_file(full_path, content, workspace_path=workspace_path, content_bytes=data, durable=durable, mode=mode)
     return raw_digest(data)
 
 

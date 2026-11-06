@@ -90,6 +90,10 @@ def atomic_write_file(
     content OR the complete new content, never an in-between state, regardless
     of when the kill lands.
 
+    WAVE8 OI-03: the write is also DURABLE (see durable_atomic_write_bytes): a power loss or crash after this returns cannot leave the
+    destination renamed-but-empty. The contract is the OS/filesystem one (fsync + rename + directory fsync); on macOS ``os.fsync`` is not
+    ``F_FULLFSYNC`` and no claim is made about the drive's own write cache.
+
     Used by both kriya/workflow/attempt.py (the normal per-attempt write path)
     and kriya/workflow/self_correction.py (the micro-loop's own tool-driven
     patch application) - lives here, not in either caller, since both already
@@ -103,14 +107,13 @@ def atomic_write_file(
     platforms, defeating the whole point."""
     _audit_write_file(full_path, workspace_path=workspace_path)
     data = content_bytes if content_bytes is not None else content.encode("utf-8")
-    if durable:
-        # D1: an authoritative lifecycle transition - every step is required and a failure fails the transition (see durable_atomic_write_bytes).
-        durable_atomic_write_bytes(full_path, data, mode=mode)
-        return
-    tmp_path = f"{full_path}.kriya-tmp-{os.getpid()}"
-    with open(tmp_path, "wb") as f:
-        f.write(data)
-    os.replace(tmp_path, full_path)
+    # WAVE8 OI-03 / OI-04 (owner 2026-11-06): EVERY atomic write is crash-durable and the one place that makes it so is
+    # ``durable_atomic_write_bytes``: temp file in the destination directory -> write -> flush -> fsync(temp) -> atomic replace ->
+    # fsync(parent directory) on POSIX; a failure at any step raises ``DurableWriteError`` (an ``OSError``), removes the temp file
+    # and leaves the destination intact (before the replace) or visible-but-not-known-durable (after it). ``durable`` is kept as an
+    # accepted argument for source compatibility only: a non-durable write no longer exists, so callers carry no durability code.
+    del durable
+    durable_atomic_write_bytes(full_path, data, mode=mode)
 
 
 DURABLE_WRITE_STEPS = ("temp_write", "file_fsync", "replace", "directory_fsync")
@@ -131,7 +134,9 @@ def durable_atomic_write_bytes(full_path: str, data: bytes, *, mode: Optional[in
     """The portable crash/restart durability contract for an authoritative transition: temp write -> file fsync -> atomic replace -> parent-directory fsync.
 
     EVERY operation is required: a failure in any of them raises DurableWriteError (a temp file left behind before the replace is removed). This is the OS /
-    filesystem contract of fsync + rename + directory fsync; it makes no claim about physical-media or power-loss persistence beyond it (no F_FULLFSYNC)."""
+    filesystem contract of fsync + rename + directory fsync; it makes no claim about physical-media or power-loss persistence beyond it (no F_FULLFSYNC).
+    WAVE8 OI-03: this is the ONLY write path of ``atomic_write_file`` (no caller opts out). Windows has no directory fsync (``os.open`` of a directory is refused);
+    there the directory step is skipped and the contract is the file fsync + the atomic ``os.replace`` (NTFS journals the rename), stated, not claimed."""
     directory = os.path.dirname(os.path.abspath(full_path))
     tmp_path = f"{full_path}.kriya-durable-{os.getpid()}-{uuid.uuid4().hex[:8]}"
     step = "temp_write"
@@ -188,11 +193,14 @@ def _atomic_write_bytes(full_path: str, content: bytes) -> None:
         with contextlib.suppress(OSError):
             os.unlink(tmp_path)
         raise
+    _fsync_directory(os.path.dirname(os.path.abspath(full_path)))  # WAVE8 OI-03: the restored entry is durable too (best effort: a rollback never masks its cause)
 
 
 def _fsync_directory(path: str, *, strict: bool = False) -> None:
     """Metadata durability of a directory entry. Best-effort by default (platforms that cannot fsync a directory are tolerated); ``strict=True`` is for an
     authoritative durable transition (D1) and lets every error propagate - it may never swallow one."""
+    if os.name == "nt":  # no directory fsync on Windows (a directory cannot be opened for it); see durable_atomic_write_bytes
+        return
     try:
         descriptor = os.open(path, os.O_RDONLY)
     except OSError:

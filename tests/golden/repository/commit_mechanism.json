@@ -3,13 +3,30 @@
   "calls": [
    [
     "open",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "wb"
    ],
    [
+    "fsync",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678"
+   ],
+   [
     "replace",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "<root>/ws/f.txt"
+   ],
+   [
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
    ]
   ],
   "result": null,
@@ -34,13 +51,30 @@
   "calls": [
    [
     "open",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "wb"
    ],
    [
+    "fsync",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678"
+   ],
+   [
     "replace",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "<root>/ws/f.txt"
+   ],
+   [
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
    ]
   ],
   "result": null,
@@ -65,26 +99,39 @@
   "calls": [
    [
     "open",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "wb"
    ],
    [
+    "fsync",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678"
+   ],
+   [
     "replace",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "<root>/ws/f.txt"
    ],
    [
     "FAULT",
     "replace",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "<root>/ws/f.txt"
+   ],
+   [
+    "unlink",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678"
    ]
   ],
   "error": {
-   "cause": null,
-   "class": "OSError",
-   "kriya_mro": [],
-   "message": "injected fault",
+   "cause": [
+    "OSError",
+    "injected fault"
+   ],
+   "class": "DurableWriteError",
+   "kriya_mro": [
+    "DurableWriteError"
+   ],
+   "message": "durable write of '<root>/ws/f.txt' failed at replace: injected fault",
    "reason_code": null
   },
   "tree": [
@@ -100,13 +147,6 @@
     "file",
     "0o640",
     "01d09d19c2139a46aebfb577780d123d7396e97201bc7ead210a2ebff8239dee",
-    null
-   ],
-   [
-    "ws/f.txt.kriya-tmp-<pid>",
-    "file",
-    "0o644",
-    "7aa7a5359173d05b63cfd682e3c38487f3cb4f7f1d60659fe59fab1505977d4c",
     null
    ]
   ]
@@ -527,6 +567,19 @@
     "<root>/ws/crlf.txt"
    ],
    [
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
+   ],
+   [
     "chmod",
     "<root>/ws/crlf.txt",
     "0o644"
@@ -559,6 +612,19 @@
     "<root>/ws/deleted.txt"
    ],
    [
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
+   ],
+   [
     "chmod",
     "<root>/ws/deleted.txt",
     "0o640"
@@ -589,6 +655,19 @@
     "replace",
     "<root>/ws/modified.txt.kriya-rollback-<pid>",
     "<root>/ws/modified.txt"
+   ],
+   [
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
    ],
    [
     "chmod",
@@ -3473,6 +3552,19 @@
     "<root>/ws/crlf.txt"
    ],
    [
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
+   ],
+   [
     "chmod",
     "<root>/ws/crlf.txt",
     "0o644"
@@ -3505,6 +3597,19 @@
     "<root>/ws/deleted.txt"
    ],
    [
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
+   ],
+   [
     "chmod",
     "<root>/ws/deleted.txt",
     "0o640"
@@ -3535,6 +3640,19 @@
     "replace",
     "<root>/ws/modified.txt.kriya-rollback-<pid>",
     "<root>/ws/modified.txt"
+   ],
+   [
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
    ],
    [
     "chmod",
@@ -4944,6 +5062,19 @@
     "<root>/ws/crlf.txt"
    ],
    [
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
+   ],
+   [
     "chmod",
     "<root>/ws/crlf.txt",
     "0o644"
@@ -4974,6 +5105,19 @@
     "replace",
     "<root>/ws/deleted.txt.kriya-rollback-<pid>",
     "<root>/ws/deleted.txt"
+   ],
+   [
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
    ],
    [
     "chmod",
@@ -5625,6 +5769,19 @@
     "<root>/ws/crlf.txt"
    ],
    [
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
+   ],
+   [
     "chmod",
     "<root>/ws/crlf.txt",
     "0o644"
@@ -5657,6 +5814,19 @@
     "<root>/ws/deleted.txt"
    ],
    [
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
+   ],
+   [
     "chmod",
     "<root>/ws/deleted.txt",
     "0o640"
@@ -5687,6 +5857,19 @@
     "replace",
     "<root>/ws/modified.txt.kriya-rollback-<pid>",
     "<root>/ws/modified.txt"
+   ],
+   [
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
    ],
    [
     "chmod",
@@ -7704,18 +7887,30 @@
    ],
    [
     "open",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "wb"
    ],
    [
+    "fsync",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678"
+   ],
+   [
     "replace",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "<root>/ws/f.txt"
    ],
    [
-    "chmod",
-    "<root>/ws/f.txt",
-    "0o640"
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
    ]
   ],
   "result": "679e273f78fc8f8ba114db23c2dce80cc77c91083939825ca830152f2f080d08",
@@ -7745,13 +7940,30 @@
    ],
    [
     "open",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "wb"
    ],
    [
+    "fsync",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678"
+   ],
+   [
     "replace",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "<root>/ws/f.txt"
+   ],
+   [
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
    ]
   ],
   "result": "59134a4054b27a3fc30e1ac81d9b9168dc0561f65982151324a021fe8ce88d06",
@@ -7781,18 +7993,30 @@
    ],
    [
     "open",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "wb"
    ],
    [
+    "fsync",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678"
+   ],
+   [
     "replace",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "<root>/ws/f.txt"
    ],
    [
-    "chmod",
-    "<root>/ws/f.txt",
-    "0o755"
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
    ]
   ],
   "result": "7aa7a5359173d05b63cfd682e3c38487f3cb4f7f1d60659fe59fab1505977d4c",
@@ -7822,26 +8046,39 @@
    ],
    [
     "open",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "wb"
    ],
    [
+    "fsync",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678"
+   ],
+   [
     "replace",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "<root>/ws/f.txt"
    ],
    [
     "FAULT",
     "replace",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "<root>/ws/f.txt"
+   ],
+   [
+    "unlink",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678"
    ]
   ],
   "error": {
-   "cause": null,
-   "class": "OSError",
-   "kriya_mro": [],
-   "message": "injected fault",
+   "cause": [
+    "OSError",
+    "injected fault"
+   ],
+   "class": "DurableWriteError",
+   "kriya_mro": [
+    "DurableWriteError"
+   ],
+   "message": "durable write of '<root>/ws/f.txt' failed at replace: injected fault",
    "reason_code": null
   },
   "tree": [
@@ -7857,13 +8094,6 @@
     "file",
     "0o640",
     "01d09d19c2139a46aebfb577780d123d7396e97201bc7ead210a2ebff8239dee",
-    null
-   ],
-   [
-    "ws/f.txt.kriya-tmp-<pid>",
-    "file",
-    "0o644",
-    "7aa7a5359173d05b63cfd682e3c38487f3cb4f7f1d60659fe59fab1505977d4c",
     null
    ]
   ]
@@ -7952,18 +8182,30 @@
    ],
    [
     "open",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "wb"
    ],
    [
+    "fsync",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678"
+   ],
+   [
     "replace",
-    "<root>/ws/f.txt.kriya-tmp-<pid>",
+    "<root>/ws/f.txt.kriya-durable-<pid>-12345678",
     "<root>/ws/f.txt"
    ],
    [
-    "chmod",
-    "<root>/ws/f.txt",
-    "0o640"
+    "os.open",
+    "<root>/ws",
+    "rdonly"
+   ],
+   [
+    "fsync",
+    "<root>/ws"
+   ],
+   [
+    "close",
+    "<root>/ws"
    ]
   ],
   "result": "7aa7a5359173d05b63cfd682e3c38487f3cb4f7f1d60659fe59fab1505977d4c",

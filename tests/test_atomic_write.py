@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from kriya.repository.atomic_write import DurableWriteError
 from kriya.workflow import edit_safety as es
 from tests._repository_mechanism_harness import Recorder
 
@@ -81,24 +82,27 @@ def test_the_temp_file_lives_beside_the_target_and_replaces_it(tmp_path):
     with Recorder(str(tmp_path)) as recorder:
         es.atomic_write_file(str(target), "new\n")
     calls = recorder.calls()
-    assert calls == [["open", "<root>/sub/target.txt.kriya-tmp-<pid>", "wb"],
-                     ["replace", "<root>/sub/target.txt.kriya-tmp-<pid>", "<root>/sub/target.txt"]]
+    # WAVE8 OI-03: the write is the durable sequence (temp beside the target -> write -> fsync -> replace -> fsync of the directory)
+    temp = "<root>/sub/target.txt.kriya-durable-<pid>-12345678"
+    assert calls[0] == ["open", temp, "wb"] and ["replace", temp, "<root>/sub/target.txt"] in calls
+    assert calls.index(["replace", temp, "<root>/sub/target.txt"]) > 0
     assert target.read_bytes() == b"new\n" and sorted(os.listdir(tmp_path / "sub")) == ["target.txt"]
 
 
-def test_a_failed_replace_leaves_the_target_untouched(tmp_path):
-    """Characterization (current behaviour, see ATOMIC-WRITE-TEMP-LEFTOVER-001): the temp file is NOT removed when the
-    replace fails - unlike the rollback writer, which unlinks its temp file. The target is untouched either way."""
+def test_a_failed_replace_leaves_the_target_untouched_and_no_temp_file(tmp_path):
+    """WAVE8 OI-04 (was the characterization of ATOMIC-WRITE-TEMP-LEFTOVER-001): the temp file IS removed when the replace fails, the failure is
+    a typed DurableWriteError (an OSError) naming the step, and the target is untouched."""
     target = tmp_path / "target.txt"
     target.write_bytes(OLD)
 
     def fault(op, args):
         return OSError("replace failed") if op == "replace" else None
 
-    with pytest.raises(OSError, match="replace failed"), Recorder(str(tmp_path), fault=fault):
+    with pytest.raises(DurableWriteError, match="replace failed") as caught, Recorder(str(tmp_path), fault=fault):
         es.atomic_write_file(str(target), "new\n")
+    assert caught.value.step == "replace" and isinstance(caught.value, OSError)
     assert target.read_bytes() == OLD
-    assert sorted(os.listdir(tmp_path)) == sorted(["target.txt", f"target.txt.kriya-tmp-{os.getpid()}"])
+    assert sorted(os.listdir(tmp_path)) == ["target.txt"]
 
 
 def test_a_grounded_write_keeps_the_existing_mode_and_returns_the_written_bytes_revision(tmp_path):

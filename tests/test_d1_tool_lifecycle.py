@@ -16,6 +16,7 @@ from kriya.control import commit_state
 from kriya.control.persistence import load_control_state
 from kriya.control.state import SUBTASK_STATE_TOOL_STARTED
 from kriya.repository import atomic_write
+from kriya.repository import commit as commit_module
 from kriya.workflow.plan_schema import ExecutionMethod, Subtask
 from kriya.workflow.resume_support import (
     TOOL_COMPLETED_NOT_DURABLE,
@@ -32,16 +33,30 @@ def _plan():
 
 
 class Faults:
-    """Fails exactly one step of exactly one strict durable write (the n-th, counting every call of the durable writer in the run): 1 = the TOOL STARTED transition, 2 = its
-    COMPLETED. The failure is injected at the real OS call (open / fsync / replace) and only while THAT write is executing, so no unrelated fsync in the process is hit."""
+    """Fails exactly one step of exactly one AUTHORITATIVE durable write (the n-th write whose caller declared ``durable=True``): 1 = the TOOL STARTED transition, 2 = its
+    COMPLETED. The failure is injected at the real OS call (open / fsync / replace) and only while THAT write is executing, so no unrelated fsync in the process is hit.
+    WAVE8 OI-03: every atomic write is durable now, so "the n-th call of the durable writer" would also count the run's ordinary control writes; the accounting follows the
+    caller's own declaration (``durable=True`` is still passed by every authoritative transition) instead, which is what the numbering always meant."""
 
     def __init__(self, monkeypatch, *, write, step):
         self.write, self.step, self.index, self.active = write, step, 0, False
         real_write, real_fsync, real_replace, real_open = atomic_write.durable_atomic_write_bytes, os.fsync, os.replace, open
 
+        real_atomic = commit_module.atomic_write_file
+        self.declared = False
+
+        def declaring(full_path, content, workspace_path=None, *, content_bytes=None, durable=False, mode=None):
+            self.declared = bool(durable)
+            try:
+                return real_atomic(full_path, content, workspace_path=workspace_path, content_bytes=content_bytes, durable=durable, mode=mode)
+            finally:
+                self.declared = False
+
         def wrapped(path, data, *, mode=None):
-            self.index += 1
-            self.active = self.index == self.write
+            authoritative = self.declared
+            if authoritative:
+                self.index += 1
+                self.active = self.index == self.write
             try:
                 return real_write(path, data, mode=mode)
             finally:
@@ -64,6 +79,7 @@ class Faults:
                 raise OSError(errno.ENOSPC, "injected temp write failure")
             return real_open(path, mode, *args, **kwargs)
 
+        monkeypatch.setattr(commit_module, "atomic_write_file", declaring)
         monkeypatch.setattr(atomic_write, "durable_atomic_write_bytes", wrapped)
         monkeypatch.setattr(os, "fsync", fsync)
         monkeypatch.setattr(os, "replace", replace)
