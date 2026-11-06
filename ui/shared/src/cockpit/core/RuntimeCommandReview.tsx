@@ -55,6 +55,8 @@ function unableReason(state: Availability<RuntimeCommandReview>): string {
  */
 export function RuntimeCommandReviewCard({ review, launchId }: { review: PendingRuntimeCommandReview; launchId: string }) {
   const ex = useExecution();
+  // what Kriya itself states about verification isolation (its Security health row): this card makes no isolation claim of its own
+  const securityDetail = ex.preflight.state === 'ready' ? ex.preflight.data.health?.find((row) => row.id === 'security')?.detail : undefined;
   const [nonce, setNonce] = useState(0);
   const [changed, setChanged] = useState(false);
   const shown = useRuntimeCommandReview(launchId, review.review_id, nonce);
@@ -81,7 +83,7 @@ export function RuntimeCommandReviewCard({ review, launchId }: { review: Pending
 
       <h4 className="ck-action-sub">Runs in</h4>
       <div data-testid="runtime-runs-in">Kriya isolated worktree</div>
-      <p className="muted small">Kriya runs verification in an isolated worktree. Your project folder is updated only through the normal approved apply path. Before the commands run, Kriya may prepare the project&apos;s build or Python environment in that worktree. The worktree is a separate working copy of your project, not a security sandbox.</p>
+      <p className="muted small">Kriya runs verification in an isolated worktree. Your project folder is updated only through the normal approved apply path. Before the commands run, Kriya may prepare the project&apos;s build or Python environment in that worktree. The worktree is a separate working copy of your project.{securityDetail ? <> <span data-testid="runtime-containment">{securityDetail}</span></> : null}</p>
 
       <h4 className="ck-action-sub">Commands</h4>
       {shown.state === 'loading' ? <p className="muted" role="status">Loading the commands…</p> : null}

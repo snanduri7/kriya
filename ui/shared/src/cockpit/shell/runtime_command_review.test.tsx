@@ -56,6 +56,18 @@ describe('the runtime-command review: the exact commands first, in words a perso
     expect(primary).not.toMatch(/sha256|fingerprint/i);
   });
 
+  it('shows Kriya\'s own Security row about verification isolation when the preflight carries it', async () => {
+    const detail = 'Verification commands run only in an isolating container with the network denied - there is no setting that turns this off.';
+    const withRow = await reachRuntimeReview({ execution: { outcome: 'runtime_review', health: [{ id: 'security', label: 'Security', state: 'AVAILABLE', reason_code: 'CONTAINMENT_REQUIRED', detail, evidence: ['kriya.tools.containment.CONTAINMENT_REQUIRED'] }] } });
+    expect(within(card(withRow.bar)).getByTestId('runtime-containment')).toHaveTextContent(detail);
+  });
+
+  it('makes no isolation claim of its own when the preflight carries no Security row', async () => {
+    const without = await reachRuntimeReview();
+    expect(within(card(without.bar)).queryByTestId('runtime-containment')).toBeNull();
+    expect(card(without.bar)).not.toHaveTextContent(/sandbox|container/i);
+  });
+
   it('names the two actions honestly: NOT "Approve & Continue" (a native confirmation follows), and Reject', async () => {
     const { bar } = await reachRuntimeReview();
     await commands();
@@ -65,7 +77,8 @@ describe('the runtime-command review: the exact commands first, in words a perso
     expect(within(review).queryByRole('button', { name: /Approve/ })).toBeNull();
     expect(within(review).getByTestId('runtime-decision-help')).toHaveTextContent(/opens a confirmation from the application; nothing runs until you confirm there/);
     expect(within(review).getByTestId('runtime-decision-help')).toHaveTextContent(/Reject: Kriya will not run these commands; if this check is required for your goal, the run stops/);   // not "this run ends": an optional check lets the run go on
-    expect(review).toHaveTextContent('not a security sandbox');
+    expect(review).not.toHaveTextContent('not a security sandbox');   // stale since containment became mandatory: the card states no isolation claim of its own
+    expect(review).toHaveTextContent('separate working copy of your project');
     expect(review).not.toHaveTextContent(/Nothing is run until you allow it/);
     expect(cardSource).not.toMatch(/Approve &amp; Continue|Approve & Continue/);
   });
