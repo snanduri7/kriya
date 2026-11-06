@@ -30,7 +30,7 @@ function Overview() {
             <section className="ck-overview" aria-label="Run result" data-status={ctx.status ?? 'unknown'}>
               <h3 className="ck-result-head"><span aria-hidden="true">{ctx.status ? outcome.mark : '•'}</span> {ctx.status ? outcome.words : 'Outcome not recorded'}</h3>
               <p className="ck-result-goal">{goalTitle(ctx.displayGoal)}</p>
-              <ReplayNotice runId={ctx.runId} />
+              <ReplayNotice runId={ctx.runId} status={ctx.status} />
               {ctx.status === 'success' ? <p>Your change was recorded as complete.</p> : null}
 
               {sealedEvidence ? <RunCapabilityStrip cells={runCapabilityCells({
