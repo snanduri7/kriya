@@ -1,4 +1,4 @@
-import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, primaryVerification, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, BeforeAfter, RunCapabilityStrip, RunMemoryLine, memoryRunIdOf, activeSkills, contextFacts, runCapabilityCells, runEventsOf, useExecution, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
+import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, primaryVerification, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, BeforeAfter, RunCapabilityStrip, RunMemoryLine, ReplayNotice, memoryRunIdOf, activeSkills, contextFacts, runCapabilityCells, runEventsOf, useExecution, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
 
 const OUTCOME = { success: { mark: '✓', words: 'Run completed' }, failure: { mark: '✕', words: 'Run failed' }, in_progress: { mark: '●', words: 'Run not finished' } } as const;
 
@@ -30,6 +30,7 @@ function Overview() {
             <section className="ck-overview" aria-label="Run result" data-status={ctx.status ?? 'unknown'}>
               <h3 className="ck-result-head"><span aria-hidden="true">{ctx.status ? outcome.mark : '•'}</span> {ctx.status ? outcome.words : 'Outcome not recorded'}</h3>
               <p className="ck-result-goal">{goalTitle(ctx.displayGoal)}</p>
+              <ReplayNotice runId={ctx.runId} />
               {ctx.status === 'success' ? <p>Your change was recorded as complete.</p> : null}
 
               {sealedEvidence ? <RunCapabilityStrip cells={runCapabilityCells({

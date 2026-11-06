@@ -26,6 +26,13 @@ describe('Overview', () => {
     expect(await screen.findByTestId('before-after')).toBeInTheDocument();
     expect(document.querySelector('[data-row="Recovery"]')).not.toBeNull();
   });
+  it('a recorded run is labelled a replay of that run, read-only, whatever its outcome', async () => {
+    renderModule(overviewModule, { runId: 'fx-brownfield-modify' });
+    expect((await screen.findByTestId('replay-notice')).textContent).toContain('Replay of Run fx-brownfield-modify');
+    renderModule(overviewModule, { runId: 'fx-unsealed' });
+    await screen.findAllByText('Run not finished');
+    expect(screen.getAllByTestId('replay-notice').length).toBeGreaterThan(1);
+  });
   it('an unsealed run claims no capability: the strip is absent', async () => {
     renderModule(overviewModule, { runId: 'fx-unsealed' });
     await screen.findByText('Run not finished');
