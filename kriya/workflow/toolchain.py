@@ -36,6 +36,16 @@ def _check_java_toolchain_mismatch(stack: str) -> Optional[str]:
 _JAVA_VERSION_MENTION_PATTERN = re.compile(r"\bjava\s+(\d{1,2})\b", re.IGNORECASE)
 
 
+def resolve_run_java_home_override(stack: Optional[str], goal: Optional[str]) -> Optional[str]:
+    """The JDK home a run's Maven calls are forced under, or None: ``_resolve_java_home_override(goal)`` for a Java stack with a goal, nothing
+    otherwise. WAVE8 OI-97: the ONE resolution shared by the environment IDENTITY (``resume_fingerprints.toolchain_fingerprint``) and by every
+    validator that EXECUTES under it (the candidate gates and the PRE-mutation baseline), so an identity can never record an override that a run did
+    not execute under."""
+    if goal and stack == "java":
+        return _resolve_java_home_override(goal)
+    return None
+
+
 def _resolve_java_home_override(goal: str) -> Optional[str]:
     """When 'java' and 'mvn' resolve to different JDK major versions AND the
     goal explicitly states a target Java version matching the 'java' side of

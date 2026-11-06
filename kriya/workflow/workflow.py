@@ -1701,15 +1701,17 @@ def _load_full_suite_evidence_for_reuse() -> Callable[..., Any]:
     return full_suite_evidence_for_reuse
 
 
-def _load_baseline_policy() -> Tuple[Callable[..., Any], Callable[..., Any], Callable[..., Any]]:
+def _load_baseline_policy() -> Tuple[Callable[..., Any], Callable[..., Any], Callable[..., Any], Callable[..., Any]]:
     """E5: the Developer loop's function-local import of kriya.workflow.baseline_policy (all-import cycle), done where
-    the loop imported it: (baseline_environment_identity, decide_auto_baseline, effective_baseline_policy)."""
+    the loop imported it: (baseline_environment_identity, decide_auto_baseline, effective_baseline_policy, baseline_validator
+    - WAVE8 OI-97: the validator that executes the baseline under the same toolchain its identity records)."""
     from kriya.workflow.baseline_policy import (
         baseline_environment_identity,
+        baseline_validator,
         decide_auto_baseline,
         effective_baseline_policy,
     )
-    return baseline_environment_identity, decide_auto_baseline, effective_baseline_policy
+    return baseline_environment_identity, decide_auto_baseline, effective_baseline_policy, baseline_validator
 
 
 def _load_fallback_routing() -> Callable[..., Any]:

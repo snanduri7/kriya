@@ -757,12 +757,9 @@ def toolchain_fingerprint(
                 elif os.path.isfile(source):
                     shutil.copyfile(source, os.path.join(overlay, name))
         from kriya.tools.toolchain_identity import resolve_toolchain_selection
+        from kriya.workflow.toolchain import resolve_run_java_home_override
 
-        override = None
-        if goal and stack == "java":
-            from kriya.workflow.toolchain import _resolve_java_home_override
-
-            override = _resolve_java_home_override(goal)
+        override = resolve_run_java_home_override(stack, goal)  # WAVE8 OI-97: the same resolution the baseline and candidate validators execute under
         identity = resolve_toolchain_selection(
             overlay or workspace_path, stack, baseline_path=workspace_path if overlay else None,
             java_home_override=override, declaration_mutable=declaration_mutable,

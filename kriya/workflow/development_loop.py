@@ -249,7 +249,7 @@ async def prepare_development(ctx: StageContext, deps: StageDeps) -> Union[Dict[
     # deterministically, from the route, the planned files and the
     # repository's tests - before the first Developer mutation. A
     # triggered `auto` is as binding as `required`.
-    baseline_environment_identity, decide_auto_baseline, effective_baseline_policy = deps.load_baseline_policy()
+    baseline_environment_identity, decide_auto_baseline, effective_baseline_policy, baseline_validator = deps.load_baseline_policy()
     configured_baseline_policy = autonomy_baseline_cfg.brownfield_full_regression_baseline_policy
     auto_baseline_decision = None
     if configured_baseline_policy == "auto":
@@ -285,9 +285,8 @@ async def prepare_development(ctx: StageContext, deps: StageDeps) -> Union[Dict[
     # The baseline's verification call. REG-R1: the same call replays the
     # untouched baseline for stability, so it runs in the same context.
     def baseline_suite_run(target_test):
-        return PolymorphicValidator(
-            workspace_path, original_workspace_path=workspace_path, autonomy_cfg=autonomy_baseline_cfg,
-        ).run_tests(target_test=target_test)
+        # WAVE8 OI-97: the same toolchain the candidate gates and the recorded baseline identity use (kriya/workflow/baseline_policy.py)
+        return baseline_validator(workspace_path, autonomy_baseline_cfg, goal=goal).run_tests(target_test=target_test)
 
     baseline_capture = deps.capture_brownfield_baselines(
         run_id=run_id,

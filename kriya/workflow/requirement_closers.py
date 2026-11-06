@@ -546,9 +546,11 @@ def close_requirements_by_suite_preservation(
     def untouched_workspace_run(target_test: Optional[Tuple[str, ...]]) -> Dict[str, Any]:
         # The run start's own baseline call (run_generation_workflow's baseline_suite_run): the same validator and
         # config on the untouched workspace, for the capture and for the owner's bounded stability replay.
-        return PolymorphicValidator(
-            workspace_path, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
-        ).run_tests(target_test=target_test)
+        # WAVE8 OI-97: under the SAME toolchain as the candidate run (its JDK override), so the baseline never executes under a different JDK
+        # than the one its environment identity records
+        validator = PolymorphicValidator(workspace_path, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
+        validator.java_home_override = java_home_override
+        return validator.run_tests(target_test=target_test)
 
     baseline_run = baseline_suite_run or untouched_workspace_run
 

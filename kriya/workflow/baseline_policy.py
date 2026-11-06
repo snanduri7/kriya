@@ -181,6 +181,21 @@ def baseline_environment_identity(
                       sort_keys=True, default=str)
 
 
+def baseline_validator(workspace_path: str, autonomy_cfg: Any, *, goal: Optional[str] = None) -> Any:
+    """The validator that runs the PRE-mutation baseline on the untouched workspace, under the SAME toolchain the candidate gates run under.
+
+    WAVE8 OI-97 (owner 2026-11-06): the baseline's recorded environment identity (``baseline_environment_identity``) includes the goal-stated JDK
+    override, but the baseline used to be executed WITHOUT it (JDK from ``mvn``'s own default) while the candidate ran under the override, so PRE and
+    POST carried the same identity although they ran under different JDKs. The override is resolved once (``resolve_run_java_home_override``, the
+    function the identity uses) and set here, so identity and execution agree by construction."""
+    from kriya.tools.validate import PolymorphicValidator
+    from kriya.workflow.toolchain import resolve_run_java_home_override
+
+    validator = PolymorphicValidator(workspace_path, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
+    validator.java_home_override = resolve_run_java_home_override(validator.stack, goal)
+    return validator
+
+
 def verification_policy_identity(autonomy_cfg: Any) -> Dict[str, Any]:
     """The validator settings a full-suite result depends on, plus the
     baseline comparison's own version: part of the environment identity, so
