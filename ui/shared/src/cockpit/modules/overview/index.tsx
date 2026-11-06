@@ -38,7 +38,6 @@ function Overview() {
                 gates: records ? { total: ofKind(records, 'gate.result').length, passed: ofKind(records, 'gate.result').filter((r) => payloadOf(r).success === true).length } : null,
                 attempts: records ? { opened: ofKind(records, 'attempt.opened').length, concluded: ofKind(records, 'attempt.concluded').map((r) => payloadOf(r).succeeded === true) } : null,
                 authorityRecorded: records ? ofKind(records, 'authority.snapshot').length > 0 : null,
-                fileDecisions: records ? ofKind(records, 'candidate.change').filter((r) => typeof payloadOf(r).decision === 'string').length : null,
                 skills: activeSkills(hasData(detail) ? detail.data : null),
                 knownTargetFiles: hasData(detail) ? contextFacts(runEventsOf(detail.data), null).knownTargets?.files.length ?? null : null,
                 memoryEntry: memory?.runs.find((r) => r.evidence_run_id === memoryRunId || r.run_id === memoryRunId) ?? null,

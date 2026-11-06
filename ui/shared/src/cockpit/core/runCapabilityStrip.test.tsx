@@ -18,13 +18,6 @@ describe('runCapabilityCells', () => {
     expect(c.recovery).toMatchObject({ state: 'NOT_REQUIRED', text: 'the first attempt was the only attempt' });
     expect(c.memory).toMatchObject({ state: 'USED', text: 'reused 3 · learned 2 · rejected 1' });
   });
-  it('a run that only created files has no authority snapshot but still names its write-authority decisions; with neither, security is not recorded', () => {
-    const created = byId(base({ authorityRecorded: false, fileDecisions: 2 }));
-    expect(created.security).toMatchObject({ state: 'ACTIVE', text: 'the write authority decided 2 file changes', evidence: 'candidate.change records' });
-    expect(byId(base({ authorityRecorded: false, fileDecisions: 1 })).security?.text).toBe('the write authority decided 1 file change');
-    expect(byId(base({ authorityRecorded: false, fileDecisions: 0 })).security?.state).toBe('UNKNOWN');
-    expect(byId(base({ authorityRecorded: false, fileDecisions: null })).security?.state).toBe('UNKNOWN');
-  });
   it('carries the language server and lookup as Kriya\'s project health states, and never as USED', () => {
     const c = byId(base());
     expect(c.lsp).toMatchObject({ state: 'UNAVAILABLE', text: 'JDTLS_NOT_CONTAINABLE' });

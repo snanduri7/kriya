@@ -11,8 +11,6 @@ export interface RunCapabilityInput {
   gates: { total: number; passed: number } | null;
   attempts: { opened: number; concluded: readonly boolean[] } | null;
   authorityRecorded: boolean | null;
-  /** How many `candidate.change` records carry a write-authority decision (STAGED / REFUSED): a run that only CREATES files records those but no `authority.snapshot` (that one describes edit authority over existing files). */
-  fileDecisions?: number | null;
   skills: readonly string[] | null;
   knownTargetFiles: number | null;
   memoryEntry: ProjectMemory['runs'][number] | null;
@@ -43,10 +41,7 @@ export function runCapabilityCells(input: RunCapabilityInput): RunCell[] {
   cells.push(input.skills === null ? { id: 'skills', label: 'Skills', state: 'UNKNOWN', text: 'not recorded', evidence: 'the run detail\'s active skills' }
     : input.skills.length === 0 ? { id: 'skills', label: 'Skills', state: 'NOT_REQUIRED', text: 'no skill was active', evidence: 'the run detail\'s active skills' }
     : { id: 'skills', label: 'Skills', state: 'USED', text: input.skills.join(', '), evidence: 'the run detail\'s active skills' });
-  const decisions = input.fileDecisions ?? 0;
-  cells.push(input.authorityRecorded ? { id: 'security', label: 'Security', state: 'ACTIVE', text: 'the run\'s authority was recorded and enforced', evidence: 'authority.snapshot record' }
-    : decisions > 0 ? { id: 'security', label: 'Security', state: 'ACTIVE', text: `the write authority decided ${decisions} file change${decisions === 1 ? '' : 's'}`, evidence: 'candidate.change records' }
-    : { id: 'security', label: 'Security', state: 'UNKNOWN', text: 'no authority snapshot recorded', evidence: 'authority.snapshot record' });
+  cells.push({ id: 'security', label: 'Security', state: input.authorityRecorded ? 'ACTIVE' : 'UNKNOWN', text: input.authorityRecorded ? 'the run\'s authority was recorded and enforced' : 'no authority snapshot recorded', evidence: 'authority.snapshot record' });
   const lookup = fromHealth(input.health, 'lookup', 'Outward lookup');
   if (lookup) cells.push({ ...lookup, state: lookup.state === 'AVAILABLE' ? 'UNKNOWN' : lookup.state, text: lookup.state === 'AVAILABLE' ? 'enabled; no lookup is recorded in run evidence' : lookup.text });
   cells.push(input.gates === null || input.gates.total === 0 ? { id: 'verify', label: 'Verify', state: 'UNKNOWN', text: 'no gate result recorded', evidence: 'gate.result records' }
