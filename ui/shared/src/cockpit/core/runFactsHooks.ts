@@ -8,6 +8,7 @@ import { toAvailability, useAsync } from './async';
 import type { ApplicationOutcome } from '../../model/kup';
 import type { Availability } from './availability';
 import { useProvider, useSession } from './context';
+import { runEventsOf } from './deep';
 import { loadLiveRunEvidence, loadRunEvidence, type RunEvidence } from './evidenceClient';
 import { changeFacts, validationFacts, type ChangeFact, type GateFact } from './runFacts';
 
@@ -56,6 +57,23 @@ export function useApplicationOutcome(runId: string | null, ready: boolean): Ava
       if (detail.state !== 'ready' && detail.state !== 'degraded') return detail as Availability<ApplicationOutcome | null>;
       const section = detail.data.application_outcome;
       return { ...detail, data: section && section.availability === 'recorded' ? (section.data ?? null) : null };
+    }, { state: 'loading' });
+  return runId === null ? null : a;
+}
+
+/** Why Kriya refused to START a run, as the repository layer recorded it on the run (`membership_authority.unavailable`): its own reason code and the (bounded) names of the entries in the way. Null when the run has no such event. */
+export interface MembershipStop { code: string; paths: string[] }
+export function useMembershipStop(runId: string | null, ready: boolean): Availability<MembershipStop | null> | null {
+  const provider = useProvider();
+  const snapshotId = useSession().snapshotId;
+  const a = useAsync<MembershipStop | null>(runId === null || !ready || snapshotId === null ? null : `membership-stop:${runId}:${snapshotId}`,
+    async (signal) => {
+      const detail = toAvailability(await provider.runDetail(snapshotId!, runId!, signal));
+      if (detail.state !== 'ready' && detail.state !== 'degraded') return detail as Availability<MembershipStop | null>;
+      const event = (runEventsOf(detail.data) ?? []).filter((e) => e.kind === 'membership_authority.unavailable').pop();
+      const code = event && typeof event.details.membership_reason_code === 'string' ? event.details.membership_reason_code : null;
+      const paths = event && Array.isArray(event.details.paths) ? event.details.paths.filter((p): p is string => typeof p === 'string') : [];
+      return { ...detail, data: code === null ? null : { code, paths } };
     }, { state: 'loading' });
   return runId === null ? null : a;
 }

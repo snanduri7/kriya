@@ -304,6 +304,25 @@ const RUNTIME_STOP_WORDS: Record<string, RuntimeStopWords> = {
 export const runtimeStopWords = (code: string | null | undefined): RuntimeStopWords | null => (code && Object.prototype.hasOwnProperty.call(RUNTIME_STOP_WORDS, code) ? RUNTIME_STOP_WORDS[code]! : null);
 
 /**
+ * A run Kriya refused to START because the repository layer could not tell which files belong to the project (`membership_authority.unavailable`; kriya/repository/bound_tree.py). Only the repository
+ * layer's own reason code, recorded on the run event, selects the words, and the blocking entry NAMES are the ones the backend recorded (bounded there; shown bounded here). Nothing is parsed from text.
+ */
+export interface MembershipStopWords { title: string; body: string; names: string | null; action: string; note: string }
+const MAX_NAMES_SHOWN = 5;
+const MAX_NAME_LENGTH = 60;
+export function membershipStopWords(code: string | null | undefined, paths: readonly string[]): MembershipStopWords | null {
+  if (code !== 'BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY') return null;
+  const shown = paths.slice(0, MAX_NAMES_SHOWN).map((name) => (name.length > MAX_NAME_LENGTH ? `${name.slice(0, MAX_NAME_LENGTH - 1)}…` : name));
+  return {
+    title: "Kriya can't start this new project because the folder already contains files that it does not own.",
+    body: 'Kriya only starts a new project in an empty folder, and it will not guess which of the existing files are part of your project.',
+    names: shown.length === 0 ? null : `In the way: ${shown.join(', ')}${paths.length > shown.length ? ` and ${paths.length - shown.length} more` : ''}`,
+    action: 'Choose an empty folder for a new project, or open this folder as an existing project once it is a Git repository with a first commit (git init, then commit).',
+    note: 'Nothing was generated and nothing in this folder was changed.',
+  };
+}
+
+/**
  * What happened to a run that failed, as a sentence a person can act on. Only the recorded failure category and commit result select the words; the raw record
  * (category, exit code, commit result) stays in the technical reason. Categories this table does not know get the neutral sentence, never a guess about the cause.
  */
