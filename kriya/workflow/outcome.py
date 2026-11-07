@@ -27,6 +27,7 @@ from kriya.workflow.requirements import (
     requirement_outcomes,
     requirement_verdict_details,
 )
+from kriya.workflow.run_recipe import derive_verified_run_recipe
 from kriya.workflow.stage_context import RunState, StageDeps
 
 # PRD-032: the environment_failure prefix of a terminal commit that did not
@@ -306,6 +307,8 @@ def completed_result(
         # unless its terminal commit did not commit).
         "workspace_commit_failure": state.terminal_commit_failure,
         **({"post_commit_persistence_errors": list(state.post_commit_persistence_errors)} if state.post_commit_persistence_errors else {}),
+        # The run recipe: only for a run that passed, only from the application runtime check Kriya really executed (kriya/workflow/run_recipe.py); absent otherwise.
+        **({"verified_run_recipe": recipe} if quality_passed and (recipe := derive_verified_run_recipe(state.gate_outcomes, state.attempt_number, workspace_path)) else {}),
         "failure_report": failure_report_dicts,
         "plan_scope_conflict": state.plan_scope_conflict,
         "toolchain_warning": state.toolchain_warning,

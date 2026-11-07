@@ -278,6 +278,7 @@ class LaunchSession:
             "error": redact_text(message)[:400] if message else None,  # S20r: redacted, then cut
             "note": "copied from the workflow's own result; the RunRecord, evidence store and trace row are the outcome authority",
             **_membership_stop_field(result),
+            **_run_recipe_field(result),
         })
         if self.review_channel is not None:
             self.review_channel.close()
@@ -303,6 +304,31 @@ def _membership_stop_field(result: Dict[str, Any]) -> Dict[str, Any]:
     raw = stop.get("paths")
     names = [redact_text(name)[:MEMBERSHIP_STOP_MAX_NAME_LENGTH] for name in (raw if isinstance(raw, list) else []) if isinstance(name, str)][:MEMBERSHIP_STOP_MAX_NAMES]
     return {"membership_authority": {"reason_code": stop["reason_code"], "paths": names}}
+
+
+RUN_RECIPE_MAX_STEPS = 8
+RUN_RECIPE_MAX_TEXT = 400
+
+
+def _run_recipe_field(result: Dict[str, Any]) -> Dict[str, Any]:
+    """The run's VERIFIED RUN RECIPE (kriya/workflow/run_recipe.py), copied typed and bounded: the user-facing steps ({kind: setup|run, command}), the entrypoint, the optional environment note and the
+    evidence statement - every text redacted, then cut. The desktop reads this and nothing else to tell the user how to run what Kriya built; it never derives a command from the run's internals.
+    ``{}`` when the result carries none (no application runtime check passed). Additive on the launch record's ``ended`` (``additionalProperties`` is allowed)."""
+    recipe = result.get("verified_run_recipe")
+    if not isinstance(recipe, dict) or not isinstance(recipe.get("steps"), list):
+        return {}
+    steps = [{"kind": step["kind"], "command": redact_text(step["command"])[:RUN_RECIPE_MAX_TEXT]} for step in recipe["steps"][:RUN_RECIPE_MAX_STEPS]
+             if isinstance(step, dict) and step.get("kind") in ("setup", "run") and isinstance(step.get("command"), str) and step["command"]]
+    if not steps:
+        return {}
+    evidence = recipe.get("evidence") if isinstance(recipe.get("evidence"), dict) else {}
+    return {"verified_run_recipe": {
+        "steps": steps,
+        "entrypoint": redact_text(recipe["entrypoint"])[:RUN_RECIPE_MAX_TEXT] if isinstance(recipe.get("entrypoint"), str) else None,
+        "environment_note": redact_text(recipe["environment_note"])[:RUN_RECIPE_MAX_TEXT] if isinstance(recipe.get("environment_note"), str) else None,
+        "statement": redact_text(evidence["statement"])[:RUN_RECIPE_MAX_TEXT] if isinstance(evidence.get("statement"), str) else None,
+        "attempt": evidence.get("attempt") if isinstance(evidence.get("attempt"), int) else None,
+    }}
 
 
 # -- the one active launch of this process ----------------------------------------------------------------------------------------------

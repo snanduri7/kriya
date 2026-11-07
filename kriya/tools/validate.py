@@ -189,6 +189,16 @@ def _installed_specifiers(venv_dir: str) -> Optional[List[str]]:
     return [s for s in specifiers if isinstance(s, str)] if isinstance(specifiers, list) else None
 
 
+def python_dependency_declaration(workspace_path: str) -> Tuple[bool, bool]:
+    """``(requirements_txt, pyproject)``: whether the workspace declares real third-party dependencies in a ``requirements.txt`` (entries beyond comments) and/or a PEP 621 ``pyproject.toml``
+    ``[project] dependencies`` array - the same two declarations ``_resolve_python_interpreter`` installs into the project environment. Pure read; used to decide whether a verified run command
+    needs an install step before it is a normal user invocation (kriya/workflow/run_recipe.py)."""
+    requirements = os.path.join(workspace_path, "requirements.txt")
+    pyproject = os.path.join(workspace_path, "pyproject.toml")
+    return (os.path.exists(requirements) and _has_real_requirements(requirements),
+            os.path.exists(pyproject) and bool(_pyproject_dependencies(pyproject)))
+
+
 def _declared_specifiers(workspace_path: str, install_args: Sequence[str]) -> List[str]:
     """The dependency specifiers ``install_args`` declares: the flat list
     itself, or - for ``-r <file>`` - the requirement lines of that file as
