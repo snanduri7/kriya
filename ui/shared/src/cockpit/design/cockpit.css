@@ -335,3 +335,13 @@
 .ck-howto-command { font-size: 17px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--ck-line); background: var(--ck-surface, rgba(255,255,255,.04)); word-break: break-all; }
 .ck-howto-label { display: block; margin-bottom: 3px; }
 .ck-howto-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+/* KRIYA LOG (the dock's real application log) */
+.ck-kriyalog { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.ck-kriyalog-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.ck-kriyalog-lines { max-height: min(34vh, 320px); min-height: 90px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.45; border: 1px solid var(--ck-line); border-radius: 6px; padding: 6px 8px; }
+.ck-logline { white-space: pre-wrap; word-break: break-word; }
+.ck-loglevel { display: inline-block; min-width: 5.2ch; font-weight: 600; }
+.ck-logline[data-level="WARNING"] .ck-loglevel, .ck-logline[data-level="WARNING"] .ck-logmsg { color: var(--ck-warn, #d9a441); }
+.ck-logline[data-level="ERROR"] .ck-loglevel, .ck-logline[data-level="CRITICAL"] .ck-loglevel, .ck-logline[data-level="ERROR"] .ck-logmsg, .ck-logline[data-level="CRITICAL"] .ck-logmsg { color: var(--ck-bad); }
+.ck-logline[data-level="INFO"] .ck-loglevel { color: var(--ck-accent); }

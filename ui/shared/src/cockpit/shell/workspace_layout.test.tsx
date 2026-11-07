@@ -174,7 +174,7 @@ describe('the Activity dock', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Start Run$/ }));
     await screen.findByRole('region', { name: 'Current run' });
     await waitFor(() => expect(dock).toHaveAttribute('data-open', 'true'));
-    expect(within(dock).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Activity', 'Build', 'Tests']);
+    expect(within(dock).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Activity', 'Kriya Log', 'Build', 'Tests']);
     fireEvent.click(within(dock).getByRole('button', { name: /ACTIVITY/ }));          // the person collapses it
     expect(dock).toHaveAttribute('data-open', 'false');
     act(() => host.exec!.finish());

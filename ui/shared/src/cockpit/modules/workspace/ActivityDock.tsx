@@ -1,8 +1,8 @@
-import { useLayoutEffect, useRef, useState } from 'react';
-import { RecordedResults, localClock, shouldStickToBottom, useExecution, useRunActivity, useWorkspaceUi } from '../../core';
+import { useLayoutEffect, useRef } from 'react';
+import { KriyaLogView, RecordedResults, localClock, shouldStickToBottom, useExecution, useRunActivity, useWorkspaceUi, type DockTab } from '../../core';
 
-type Tab = 'activity' | 'build' | 'tests';
-const TABS: ReadonlyArray<{ id: Tab; label: string }> = [{ id: 'activity', label: 'Activity' }, { id: 'build', label: 'Build' }, { id: 'tests', label: 'Tests' }];
+type Tab = DockTab;
+const TABS: ReadonlyArray<{ id: Tab; label: string }> = [{ id: 'activity', label: 'Activity' }, { id: 'log', label: 'Kriya Log' }, { id: 'build', label: 'Build' }, { id: 'tests', label: 'Tests' }];
 const MARK = { info: '•', ok: '✓', bad: '✕', wait: '⚠' } as const;
 
 /**
@@ -16,7 +16,8 @@ export function ActivityDock() {
   const run = ex.run;
   const active = run !== null && run.stage !== 'finished';
   const open = ui.dockOpen ?? active;
-  const [tab, setTab] = useState<Tab>('activity');
+  const tab = ui.dockTab;
+  const setTab = ui.setDockTab;
   const { entries, records, data } = useRunActivity(run);
   const latest = entries[entries.length - 1] ?? null;
   const list = useRef<HTMLDivElement | null>(null);
@@ -34,7 +35,7 @@ export function ActivityDock() {
         </button>
         {!open ? <span className="ck-dock-latest muted small" data-testid="activity-latest">{latest ? `${localClock(latest.at)} ${latest.text}`.trim() : run ? 'Waiting for the first record…' : 'Nothing running. What Kriya does in your next run appears here.'}</span> : (
           <div role="tablist" aria-label="Activity views" className="ck-dock-tabs">
-            {TABS.map((t) => <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'ck-primary' : ''} onClick={() => setTab(t.id)}>{t.label}</button>)}
+            {TABS.map((t) => <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'ck-primary' : ''} onClick={() => { setTab(t.id); if (t.id !== 'activity') ui.setDockOpen(true); }}>{t.label}</button>)}
           </div>
         )}
       </div>
@@ -44,8 +45,9 @@ export function ActivityDock() {
           {run && tab === 'activity' ? (entries.length === 0
             ? <p className="muted" role="status">{records && records.state === 'loading' ? 'Reading what Kriya recorded…' : 'Nothing has been recorded yet.'}</p>
             : <ol className="ck-human-timeline" aria-label="What happened" data-testid="activity-list">{entries.map((e) => <li key={e.key} data-tone={e.tone} title={`Recorded as ${e.source}`}><span className="mono small muted">{localClock(e.at)}</span> <span aria-hidden="true">{MARK[e.tone]}</span> {e.text}</li>)}</ol>) : null}
-          {run && tab !== 'activity' ? <RecordedResults records={data} family={tab} loading={records?.state === 'loading'} /> : null}
-          {run && records && records.state !== 'loading' && data === null ? <p className="muted small" role="note">The records could not be read here{records.state === 'error' ? ` (${records.code})` : ''}. Use View Details.</p> : null}
+          {run && tab === 'log' ? <KriyaLogView runId={run.launchId} live={active} /> : null}
+          {run && (tab === 'build' || tab === 'tests') ? <RecordedResults records={data} family={tab} loading={records?.state === 'loading'} /> : null}
+          {run && tab !== 'log' && records && records.state !== 'loading' && data === null ? <p className="muted small" role="note">The records could not be read here{records.state === 'error' ? ` (${records.code})` : ''}. Use View Details.</p> : null}
         </div>
       ) : null}
     </section>

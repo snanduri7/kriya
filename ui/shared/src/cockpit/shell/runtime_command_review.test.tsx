@@ -270,14 +270,14 @@ describe('a run that could not even start runtime verification says so in words 
 });
 
 describe('Activity dock: recorded facts, in words, for the run being followed', () => {
-  it('the dock is open while the run is active, on Activity (default); it names the waiting subject, then the decision; Build and Tests list only recorded results; there is no Technical Log tab', async () => {
+  it('the dock is open while the run is active, on Activity (default); it names the waiting subject, then the decision; Build and Tests list only recorded results; there is no raw Technical Log tab, only the real Kriya Log', async () => {
     const { host, bar } = await reachRuntimeReview();
     await commands();
     const drawer = await screen.findByTestId('activity-dock');       // open by itself while a run is active
     expect(drawer).toHaveAttribute('data-open', 'true');
     expect(within(drawer).getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
     expect(within(drawer).queryByRole('tab', { name: /Technical Log/i })).toBeNull();
-    expect(within(drawer).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Activity', 'Build', 'Tests']);
+    expect(within(drawer).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Activity', 'Kriya Log', 'Build', 'Tests']);
     const list = await within(drawer).findByTestId('activity-list');
     await waitFor(() => expect(list.textContent).toContain('Waiting for permission to run commands'));
     expect(list.textContent).toContain('Run started');

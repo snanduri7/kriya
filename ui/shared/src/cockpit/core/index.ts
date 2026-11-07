@@ -4,6 +4,8 @@ export * from './catalogView';
 export { localClock, shouldStickToBottom } from './activity';
 export { CopyText } from './CopyText';
 export { HowToRun } from './HowToRun';
+export { KriyaLogView } from './KriyaLogView';
+export { useRunLog } from './useRunLog';
 export * from './availability';
 export * from './capability';
 export * from './evidence';
@@ -45,4 +47,4 @@ export { BeforeAfter, deliveredLabel, recoveryText, securityText, summaryRows, w
 export { RunCapabilityStrip, runCapabilityCells, type RunCapabilityInput, type RunCell } from './RunCapabilityStrip';
 
 export { INSPECTOR_DRAWER_BELOW, INSPECTOR_NARROW_BELOW, ViewportWidthContext, useViewportWidth } from './viewport';
-export { INSPECTOR_TABS, WorkspaceUiContext, useWorkspaceUi, useWorkspaceUiState, type InspectorTab, type WorkspaceUi } from './workspaceUi';
+export { INSPECTOR_TABS, WorkspaceUiContext, useWorkspaceUi, useWorkspaceUiState, type DockTab, type InspectorTab, type WorkspaceUi } from './workspaceUi';
