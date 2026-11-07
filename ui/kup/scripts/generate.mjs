@@ -47,6 +47,7 @@ const TYPES = [
   ['HealthRow', 'workspace.schema.json', '#/$defs/HealthRow'],
   ['SecurityDemonstration', 'workspace.schema.json', '#/$defs/SecurityDemonstration'],
   ['LaunchStatus', 'workspace.schema.json', '#/$defs/LaunchStatus'],
+  ['RunLog', 'workspace.schema.json', '#/$defs/RunLog'],
   ['WorkspaceCreate', 'workspace.schema.json', '#/$defs/WorkspaceCreate'],
   ['ConfigurationApprovalStatus', 'workspace.schema.json', '#/$defs/ConfigurationApprovalStatus'],
   ['ConfigurationApprove', 'workspace.schema.json', '#/$defs/ConfigurationApprove'],

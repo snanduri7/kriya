@@ -31,6 +31,7 @@
 //     HealthRow data = Converter.HealthRowFromJsonString(jsonString);
 //     SecurityDemonstration data = Converter.SecurityDemonstrationFromJsonString(jsonString);
 //     LaunchStatus data = Converter.LaunchStatusFromJsonString(jsonString);
+//     RunLog data = Converter.RunLogFromJsonString(jsonString);
 //     WorkspaceCreate data = Converter.WorkspaceCreateFromJsonString(jsonString);
 //     ConfigurationApprovalStatus data = Converter.ConfigurationApprovalStatusFromJsonString(jsonString);
 //     ConfigurationApprove data = Converter.ConfigurationApproveFromJsonString(jsonString);
@@ -281,6 +282,14 @@ public class Converter {
 
     public static String LaunchStatusToJsonString(LaunchStatus obj) throws JsonProcessingException {
         return getLaunchStatusObjectWriter().writeValueAsString(obj);
+    }
+
+    public static RunLog RunLogFromJsonString(String json) throws IOException {
+        return getRunLogObjectReader().readValue(json);
+    }
+
+    public static String RunLogToJsonString(RunLog obj) throws JsonProcessingException {
+        return getRunLogObjectWriter().writeValueAsString(obj);
     }
 
     public static WorkspaceCreate WorkspaceCreateFromJsonString(String json) throws IOException {
@@ -1206,6 +1215,37 @@ public class Converter {
     private static ObjectWriter getLaunchStatusObjectWriter() {
         if (LaunchStatusWriter == null) instantiateLaunchStatusMapper();
         return LaunchStatusWriter;
+    }
+
+    private static ObjectReader RunLogReader;
+    private static ObjectWriter RunLogWriter;
+
+    private static void instantiateRunLogMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        RunLogReader = mapper.readerFor(RunLog.class);
+        RunLogWriter = mapper.writerFor(RunLog.class);
+    }
+
+    private static ObjectReader getRunLogObjectReader() {
+        if (RunLogReader == null) instantiateRunLogMapper();
+        return RunLogReader;
+    }
+
+    private static ObjectWriter getRunLogObjectWriter() {
+        if (RunLogWriter == null) instantiateRunLogMapper();
+        return RunLogWriter;
     }
 
     private static ObjectReader WorkspaceCreateReader;

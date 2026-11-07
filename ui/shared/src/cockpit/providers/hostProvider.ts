@@ -6,7 +6,7 @@
  */
 import { validate, validateData } from '@kriya-ui/kup';
 import type { HostAdapter, HostSettings } from '../../host/HostAdapter';
-import type { Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, KupRequest, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus, ExecutionPreflight, LaunchStatus, ExecutionContext, ExecutionModelProbe, ConfigurationApprovalStatus, ChangeApprovalReview, RuntimeCommandReview, SkillsList, SkillsDescribe, ToolsList, ToolsDescribe, ToolsApprovalState } from '../../model/kup';
+import type { Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, KupRequest, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus, ExecutionPreflight, LaunchStatus, RunLog, ExecutionContext, ExecutionModelProbe, ConfigurationApprovalStatus, ChangeApprovalReview, RuntimeCommandReview, SkillsList, SkillsDescribe, ToolsList, ToolsDescribe, ToolsApprovalState } from '../../model/kup';
 import type { ChangeContentQuery, ProviderKind, ProviderResult, RecordsQuery, UIProvider } from '../core/provider';
 
 export class HostProvider implements UIProvider {
@@ -62,6 +62,9 @@ export class HostProvider implements UIProvider {
   toolsList(workspace: string, signal?: AbortSignal) { return this.call<ToolsList>({ operation: 'tools.list', workspace }, signal); }
   toolsDescribe(workspace: string, toolId: string, signal?: AbortSignal) { return this.call<ToolsDescribe>({ operation: 'tools.describe', workspace, tool_id: toolId }, signal); }
   toolsApprovalState(workspace: string, toolId: string, signal?: AbortSignal) { return this.call<ToolsApprovalState>({ operation: 'tools.approval_state', workspace, tool_id: toolId }, signal); }
+  runLog(runId: string, page: { cursor?: string; limit?: number } = {}, signal?: AbortSignal) {
+    return this.call<RunLog>({ operation: 'run.log', run_id: runId, ...(page.cursor !== undefined ? { cursor: page.cursor } : {}), ...(page.limit !== undefined ? { limit: page.limit } : {}) }, signal);
+  }
   launchStatus(workspace: string, launchId: string, signal?: AbortSignal) { return this.call<LaunchStatus>({ operation: 'launch.status', workspace, launch_id: launchId }, signal); }
   evidenceManifest(runId: string, options: { snapshotId?: string; fromTrace?: boolean } = {}, signal?: AbortSignal) {
     return this.call<EvidenceManifest>({ operation: 'evidence.manifest', run_id: runId, ...(options.snapshotId ? { snapshot_id: options.snapshotId } : {}), ...(options.fromTrace ? { from_trace: true } : {}) }, signal);

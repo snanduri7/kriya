@@ -99,6 +99,7 @@ export type KupRequest =
   | { operation: 'workspace.describe'; workspace: string }
   | { operation: 'execution.preflight'; workspace: string }
   | { operation: 'launch.status'; workspace: string; launch_id: string }
+  | { operation: 'run.log'; run_id: string; cursor?: string; limit?: number }
   | { operation: 'workspace.create'; parent: string; name: string }
   | { operation: 'configuration.approval_status'; workspace: string }
   | { operation: 'configuration.approve'; workspace: string; fingerprint: string }
@@ -264,6 +265,14 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
       if (typeof v.launch_id !== 'string' || !LAUNCH_ID_RE.test(v.launch_id)) return { ok: false, message: 'launch_id must have the shape YYYYMMDDTHHMMSS-xxxxxxxx' };
       if (typeof v.review_id !== 'string' || !/^ra-[0-9a-f]{24}$/.test(v.review_id)) return { ok: false, message: 'review_id must be a review identity Kriya gave (ra-<24 hex>)' };
       return { ok: true, value: { operation: 'runtime_command.review', workspace: w.value, launch_id: v.launch_id, review_id: v.review_id } };
+    }
+    case 'run.log': {
+      if (!keys.every((k) => ['operation', 'run_id', 'cursor', 'limit'].includes(k))) return { ok: false, message: 'run.log accepts only run_id, cursor and limit' };
+      const r = validateRunId(v.run_id); if (!r.ok) return r;
+      const out: Extract<KupRequest, { operation: 'run.log' }> = { operation: 'run.log', run_id: r.value };
+      if (v.cursor !== undefined) { if (typeof v.cursor !== 'string' || !/^o[0-9]{1,12}$/.test(v.cursor)) return { ok: false, message: 'cursor must be a value returned by a previous run.log page' }; out.cursor = v.cursor; }
+      if (v.limit !== undefined) { if (typeof v.limit !== 'number' || !Number.isInteger(v.limit) || v.limit < 1 || v.limit > 500) return { ok: false, message: 'limit must be an integer from 1 to 500' }; out.limit = v.limit; }
+      return { ok: true, value: out };
     }
     case 'launch.status': {
       if (keys.join() !== 'launch_id,operation,workspace') return { ok: false, message: 'launch.status takes exactly workspace and launch_id' };

@@ -30,6 +30,11 @@ PROTOCOL_IMPLEMENTATION = "kriya-kup/1"
 # flags inside schema version 1, discoverable through ``capabilities``. A host that only knows the M1 set ignores them.
 CAPABILITY_SET = "1.1"
 
+# run.log (the cockpit's Kriya Log): the transport grammar of its cursor and page size. The use case (kriya/application/run_log.py) defends the same bounds itself; tests pin that they agree.
+RUN_LOG_CURSOR_PATTERN = r"^o[0-9]{1,12}$"
+RUN_LOG_DEFAULT_LIMIT = 200
+RUN_LOG_MAX_LIMIT = 500
+
 OPERATIONS = (
     "capabilities",
     "history.list",
@@ -39,6 +44,7 @@ OPERATIONS = (
     "workspace.describe",  # read-only facts Kriya reports about a folder the desktop host picked (GUI M5)
     "execution.preflight",  # what a run in a folder would be: configuration, state, models, authority, observability (GUI M6)
     "launch.status",  # one desktop launch read back from durable records (GUI M6)
+    "run.log",  # one bounded page of a run's real, redacted application log (kriya/application/run_log.py); read-only, cursor-based
     "workspace.create",  # create ONE new empty project folder (end-user experience); the only operation that makes a user-visible folder
     "execution.context",  # Skills, tools and per-role model routing a run in a folder would have; configuration/file-derived, starts nothing
     "execution.model_probe",  # one bounded local GET /models per distinct endpoint: is the model server answering and does it serve the model

@@ -51,6 +51,7 @@ class RunsPort(Protocol):
     def build_preflight(self, ctx: "RequestContext", workspace: str, cockpit_state_directory: Optional[str], *,
                         tool_visibility: "_application.ToolVisibility") -> Dict[str, Any]: ...
     def status(self, ctx: "RequestContext", cfg: "AppConfig", workspace: str, launch_id: str) -> Dict[str, Any]: ...
+    def log(self, ctx: "RequestContext", cfg: "AppConfig", run_id: str, offset: int, limit: int) -> Dict[str, Any]: ...
     def start(self, ctx: "RequestContext", cfg: "AppConfig", artifacts: "_application.RunArtifacts", deps: "_application.RunServiceDeps") -> "_application.RunHandle": ...
     def mark_in_progress(self, ctx: "RequestContext", cfg: "AppConfig", run_id: Optional[str], goal: str) -> None: ...
 
@@ -132,7 +133,7 @@ PORTS: Mapping[str, type] = {
 LOCAL_ONLY_PARAMETERS: Mapping[Tuple[str, str, str], str] = {
     ("runs", "start", "cfg"): "O2", ("runs", "mark_in_progress", "cfg"): "O2",
     **{(port, method, "cfg"): "O1" for port, methods in (
-        ("projects", ("describe",)), ("runs", ("preflight", "status")),
+        ("projects", ("describe",)), ("runs", ("preflight", "status", "log")),
         ("models", ("skills", "context", "probe")), ("skills", ("list", "describe")), ("tools", ("list", "describe", "approval_state")),
         ("evidence", ("location", "manifest", "verify", "records", "content", "store_summary")),
         ("history", ("location", "snapshot", "summary", "acquire", "snapshots", "verify_snapshot", "prune", "list", "list_in_workspace",

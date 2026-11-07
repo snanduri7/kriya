@@ -268,6 +268,15 @@ class RunService:
         """``launch.status`` of launch ``launch_id`` (validated by the caller) in the admitted folder ``workspace``."""
         return launch_status(cfg, workspace, launch_id)
 
+    def log(self, ctx: RequestContext, cfg, run_id: str, offset: int, limit: int) -> Dict[str, Any]:
+        """``run.log``: one page of the redacted per-run application log of ``run_id`` (kriya/application/run_log.py), read from the log directory ``cfg`` resolves (never a caller-supplied path)."""
+        from kriya.application.run_log import LOG_DIRECTORY_UNAVAILABLE, _unavailable, read_run_log
+
+        log_directory = self._config.log_directory(cfg)
+        if log_directory is None:
+            return _unavailable(run_id, LOG_DIRECTORY_UNAVAILABLE)
+        return read_run_log(log_directory, run_id, offset, limit)
+
     def start(self, ctx: RequestContext, cfg, artifacts: RunArtifacts, deps: RunServiceDeps) -> RunHandle:
         """The engine of one ``kriya generate`` run, composed from the CLI's names and bound to the operator artifacts."""
         llm = deps.LLMClient(cfg)

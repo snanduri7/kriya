@@ -1632,6 +1632,20 @@ def evidence_records(ctx: click.Context, run_id: str, json_output: bool, kup_ver
                                             "kind": list(kinds) or None, "from_seq": from_seq, "limit": limit, "cursor": cursor}, kup_version)
 
 
+@evidence_group.command(name="log")
+@click.argument("run_id")
+@click.option("--json", "json_output", is_flag=True)
+@_KUP_VERSION_OPTION
+@click.option("-n", "--limit", "limit", type=int, default=None, help="Page size (default 200, maximum 500).")
+@click.option("--cursor", "cursor", default=None, help="The next_cursor of the previous page.")
+@click.pass_context
+def evidence_log(ctx: click.Context, run_id: str, json_output: bool, kup_version: Optional[int], limit: Optional[int], cursor: Optional[str]) -> None:
+    """Read-only KUP: one bounded page of a run's real, redacted application log (<log dir>/runs/<run id>/kriya.log); the cockpit's Kriya Log."""
+    if not json_output or kup_version is None:
+        raise click.UsageError("evidence log is a KUP operation: pass --json --kup-version 1")
+    _evidence_kup(ctx, "run.log", {"run_id": run_id, "limit": limit, "cursor": cursor}, kup_version)
+
+
 @evidence_group.command(name="change-content")
 @click.argument("run_id")
 @click.option("--json", "json_output", is_flag=True)

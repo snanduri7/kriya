@@ -73,6 +73,7 @@ export class BrowserFixtureHost implements HostAdapter {
       // M6: the legacy M1 inspector never starts a run; the canned answers keep the operation set total.
       case 'execution.preflight': return this.load('execution.preflight.json') as Promise<KupEnvelope>;
       case 'launch.status': return this.load('errors/LAUNCH_NOT_FOUND.json') as Promise<KupEnvelope>;
+      case 'run.log': return this.load('errors/LAUNCH_NOT_FOUND.json') as Promise<KupEnvelope>;     // the browser fixture host holds no run logs
       // The legacy M1 inspector has no New Project, Skills or Tools views.
       case 'workspace.create':
       case 'configuration.approval_status':

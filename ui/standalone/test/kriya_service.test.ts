@@ -62,13 +62,20 @@ describe('allowlist (nothing but typed KUP requests reaches the child)', () => {
     expect(() => toServiceRequest('q1', { operation: 'history.list', snapshot_id: SID, shell: 'x' } as unknown as KupRequest)).toThrow(/does not take: shell/);
   });
   it('the table covers exactly the operations the host validator accepts', () => {
-    const accepted = ['change_approval.review', 'runtime_command.review', 'capabilities', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'workspace.describe', 'execution.preflight', 'execution.context', 'execution.model_probe', 'skills.list', 'skills.describe', 'tools.list', 'tools.describe', 'tools.approval_state', 'launch.status', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content', 'configuration.approval_status'];
+    const accepted = ['change_approval.review', 'runtime_command.review', 'run.log', 'capabilities', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'workspace.describe', 'execution.preflight', 'execution.context', 'execution.model_probe', 'skills.list', 'skills.describe', 'tools.list', 'tools.describe', 'tools.approval_state', 'launch.status', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content', 'configuration.approval_status'];
     // workspace.create, configuration.approve and project.initialize are in the SERVICE table (the host's own token-gated flows send them) but are NEVER accepted from the renderer's query channel.
     expect(Object.keys(SERVICE_ARGUMENTS).sort()).toEqual([...accepted, 'workspace.create', 'configuration.approve', 'project.initialize'].sort());
     expect(validateKupRequest({ operation: 'workspace.create', parent: '/tmp', name: 'x' }).ok).toBe(false);
     expect(validateKupRequest({ operation: 'configuration.approve', workspace: '/tmp', fingerprint: 'sha256:' + 'a'.repeat(64) }).ok).toBe(false);
     expect(validateKupRequest({ operation: 'project.initialize', workspace: '/tmp' }).ok).toBe(false);
     expect(validateKupRequest({ operation: 'configuration.approval_status', workspace: '/tmp' }).ok).toBe(true);
+    // run.log (the Kriya Log): a run id, an optional cursor this projection issued, an optional bounded limit - and nothing else (no path, no file name).
+    const runId = '20261010T101010-abcdef01';
+    expect(validateKupRequest({ operation: 'run.log', run_id: runId }).ok).toBe(true);
+    expect(validateKupRequest({ operation: 'run.log', run_id: runId, cursor: 'o1234', limit: 500 }).ok).toBe(true);
+    for (const bad of [{ run_id: '../../x' }, { run_id: runId, cursor: '../x' }, { run_id: runId, cursor: 'o' }, { run_id: runId, limit: 0 }, { run_id: runId, limit: 501 }, { run_id: runId, limit: '5' }, { run_id: runId, path: '/etc/passwd' }, { run_id: runId, file: 'kriya.log' }, {}]) {
+      expect(validateKupRequest({ operation: 'run.log', ...bad }).ok, JSON.stringify(bad)).toBe(false);
+    }
     expect(validateKupRequest({ operation: 'change_approval.review', workspace: '/tmp', launch_id: '20261010T101010-abcdef01', review_id: 'ra-' + 'a'.repeat(24) }).ok).toBe(true);
     expect(validateKupRequest({ operation: 'change_approval.review', workspace: '/tmp', launch_id: '20261010T101010-abcdef01', review_id: '../x' }).ok).toBe(false);
     expect(validateKupRequest({ operation: 'runtime_command.review', workspace: '/tmp', launch_id: '20261010T101010-abcdef01', review_id: 'ra-' + 'a'.repeat(24) }).ok).toBe(true);   // a READ of the commands a review asks to run

@@ -68,6 +68,9 @@ public class KupRequest {
     @JsonProperty("snapshot_id")
     public void setSnapshotid(String value) { this.snapshotid = value; }
 
+    /**
+     * The next_cursor of the previous page of the SAME run.
+     */
     @JsonProperty("cursor")
     public String getCursor() { return cursor; }
     @JsonProperty("cursor")

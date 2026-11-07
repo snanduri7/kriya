@@ -113,6 +113,18 @@ export interface FixtureHostOptions {
 
 type Json = Record<string, unknown>;
 
+/** FIXTURE DATA: the scripted run's application log, in the real line shape (`time level logger message`). Used only by this development/test host. */
+const FIXTURE_LOG: ReadonlyArray<{ time: string; level: 'INFO' | 'WARNING' | 'ERROR'; logger: string; message: string }> = [
+  { time: '2026-10-10 10:10:12,001', level: 'INFO', logger: 'kriya.core.kernel', message: 'Starting Kriya Kernel...' },
+  { time: '2026-10-10 10:10:12,044', level: 'INFO', logger: 'kriya.workflow.workflow', message: 'Analyzing workspace context...' },
+  { time: '2026-10-10 10:10:13,310', level: 'INFO', logger: 'kriya.core.llm', message: 'Sending completion request to local LLM [Model: fixture-model, Stream: True]' },
+  { time: '2026-10-10 10:10:19,872', level: 'INFO', logger: 'kriya.control.checkpoint', message: 'Checkpoint saved (stage=plan)' },
+  { time: '2026-10-10 10:10:20,015', level: 'INFO', logger: 'kriya.workflow.workflow', message: 'Developer Agent implementing source files...' },
+  { time: '2026-10-10 10:10:27,402', level: 'WARNING', logger: 'kriya.workflow.attempt', message: 'Quality Gates: the build produced a warning (fixture)' },
+  { time: '2026-10-10 10:10:31,780', level: 'INFO', logger: 'kriya.workflow.attempt', message: 'Quality Gates: Goal spec compliance PASSED' },
+  { time: '2026-10-10 10:10:40,090', level: 'INFO', logger: 'kriya.workflow.workflow', message: 'Applied terminally verified sandbox change to workspace' },
+];
+
 export class FixtureHost implements HostAdapter {
   private readonly baseScenarios: readonly Scenario[];
   private readonly extraSnapshotIds: readonly string[];
@@ -454,6 +466,16 @@ export class FixtureHost implements HostAdapter {
         const tool = tools.find((x) => x.id === request.tool_id) ?? null;
         if (request.operation === 'tools.describe') return this.env('tools.describe', { ...head, found: tool !== null, tool }, this.live, null);
         return this.env('tools.approval_state', { ...head, found: tool !== null, tool_id: unavailable ? null : request.tool_id, approval: tool ? tool.approval : unavailable ? null : { state: 'UNKNOWN', reason: 'TOOL_NOT_FOUND', records_on_file: null, recorded_tool_names: [] } }, this.live, null);
+      }
+      case 'run.log': {
+        // FIXTURE DATA (dev/test only, like everything this host answers): a scripted application log that grows with the scripted run, in the real line shape.
+        if (!this.exec || request.run_id !== LAUNCH_ID) return this.env('run.log', { run_id: request.run_id, available: false, reason: 'NO_RUN_LOG', records: [], next_cursor: null, at_end: true, size_bytes: 0, reset: false }, this.live, SOURCE);
+        const visible = this.exec.ended() ? FIXTURE_LOG.length : Math.min(FIXTURE_LOG.length, 3 + this.exec.lineCount());
+        const offset = request.cursor === undefined ? 0 : Number(request.cursor.slice(1));
+        const start = Math.min(offset, visible);
+        const page = FIXTURE_LOG.slice(start, Math.min(visible, start + (request.limit ?? 200))).map((r, i) => ({ offset: start + i, ...r }));
+        const next = start + page.length;
+        return this.env('run.log', { run_id: LAUNCH_ID, available: true, reason: null, records: page, next_cursor: `o${next}`, at_end: next >= visible, size_bytes: next * 80, reset: false }, this.live, SOURCE);
       }
       case 'launch.status': {
         const status = this.exec?.launchStatus() ?? null;

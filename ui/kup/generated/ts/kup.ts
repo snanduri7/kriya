@@ -58,6 +58,7 @@ export interface Envelope {
     | 'workspace.describe'
     | 'execution.preflight'
     | 'launch.status'
+    | 'run.log'
     | 'workspace.create'
     | 'execution.context'
     | 'execution.model_probe'
@@ -962,6 +963,33 @@ export interface PendingRuntimeCommandReview {
     [k: string]: unknown;
   } | null;
   [k: string]: unknown;
+}
+
+// ---- RunLog (workspace.schema.json#/$defs/RunLog) ----
+export type RunLogLevel = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
+
+/**
+ * data of `run.log` (owner ruling 2026-11-07, the cockpit's Kriya Log): one bounded page of ONE run's real application log (`<log dir>/runs/<run id>/kriya.log`), already redacted by the logging owner and redacted again by the projection. Only what the line format guarantees is a field: `time`, `level`, `logger`, `message` (a banner or continuation line is part of the message of the record before it); no phase is inferred from text. `next_cursor` is opaque (`o<offset>`); `at_end` says the read reached the end of the file now. `available: false` with a closed `reason` is an answer, never an empty log presented as nothing having happened.
+ */
+export interface RunLog {
+  run_id: string;
+  available: boolean;
+  reason: null | ('NO_RUN_LOG' | 'LOG_DIRECTORY_UNAVAILABLE' | 'RUN_LOG_UNREADABLE');
+  /**
+   * @maxItems 500
+   */
+  records: RunLogRecord[];
+  next_cursor: null | string;
+  at_end: boolean;
+  size_bytes: number;
+  reset: boolean;
+}
+export interface RunLogRecord {
+  offset: number;
+  time: string;
+  level: RunLogLevel;
+  logger: string;
+  message: string;
 }
 
 // ---- WorkspaceCreate (workspace.schema.json#/$defs/WorkspaceCreate) ----
@@ -1931,6 +1959,15 @@ export type KupRequest =
        * The shape of a Kriya run id; the launch id IS the run id.
        */
       launch_id: string;
+    }
+  | {
+      operation: 'run.log';
+      run_id: RunId;
+      /**
+       * The next_cursor of the previous page of the SAME run.
+       */
+      cursor?: string;
+      limit?: number;
     }
   | {
       operation: 'evidence.manifest';

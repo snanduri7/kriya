@@ -52,6 +52,7 @@ ARGUMENTS: Dict[str, frozenset] = {
     "workspace.describe": frozenset({"workspace"}),
     "execution.preflight": frozenset({"workspace"}),
     "launch.status": frozenset({"workspace", "launch_id"}),
+    "run.log": frozenset({"run_id", "cursor", "limit"}),
     "workspace.create": frozenset({"parent", "name"}),
     "configuration.approval_status": frozenset({"workspace"}),
     "configuration.approve": frozenset({"workspace", "fingerprint"}),

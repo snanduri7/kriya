@@ -47,6 +47,7 @@ export const SERVICE_ARGUMENTS: Readonly<Record<KupRequest['operation'], readonl
   'workspace.describe': ['workspace'],
   'execution.preflight': ['workspace'],
   'launch.status': ['workspace', 'launch_id'],
+  'run.log': ['run_id', 'cursor', 'limit'],
   'workspace.create': ['parent', 'name'],
   'configuration.approval_status': ['workspace'],
   'configuration.approve': ['workspace', 'fingerprint'],

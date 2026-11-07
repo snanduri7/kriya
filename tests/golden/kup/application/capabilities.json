@@ -178,6 +178,7 @@
    "workspace.describe",
    "execution.preflight",
    "launch.status",
+   "run.log",
    "workspace.create",
    "execution.context",
    "execution.model_probe",

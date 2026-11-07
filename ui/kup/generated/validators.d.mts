@@ -18,6 +18,7 @@ export const validateProjectMemory: ((value: unknown) => boolean) & { errors?: {
 export const validateHealthRow: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateSecurityDemonstration: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateLaunchStatus: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
+export const validateRunLog: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateWorkspaceCreate: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateConfigurationApprovalStatus: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateConfigurationApprove: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };

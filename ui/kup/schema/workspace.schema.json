@@ -1070,6 +1070,37 @@
       },
       "additionalProperties": true
     },
+    "RunLog": {
+      "description": "data of `run.log` (owner ruling 2026-11-07, the cockpit's Kriya Log): one bounded page of ONE run's real application log (`<log dir>/runs/<run id>/kriya.log`), already redacted by the logging owner and redacted again by the projection. Only what the line format guarantees is a field: `time`, `level`, `logger`, `message` (a banner or continuation line is part of the message of the record before it); no phase is inferred from text. `next_cursor` is opaque (`o<offset>`); `at_end` says the read reached the end of the file now. `available: false` with a closed `reason` is an answer, never an empty log presented as nothing having happened.",
+      "type": "object",
+      "required": ["run_id", "available", "reason", "records", "next_cursor", "at_end", "size_bytes", "reset"],
+      "properties": {
+        "run_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$", "maxLength": 256 },
+        "available": { "type": "boolean" },
+        "reason": { "oneOf": [ { "type": "null" }, { "enum": ["NO_RUN_LOG", "LOG_DIRECTORY_UNAVAILABLE", "RUN_LOG_UNREADABLE"] } ] },
+        "records": {
+          "type": "array", "maxItems": 500,
+          "items": {
+            "title": "RunLogRecord",
+            "type": "object",
+            "required": ["offset", "time", "level", "logger", "message"],
+            "properties": {
+              "offset": { "type": "integer", "minimum": 0 },
+              "time": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]{3}$" },
+              "level": { "title": "RunLogLevel", "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] },
+              "logger": { "type": "string", "maxLength": 256 },
+              "message": { "type": "string", "maxLength": 2100 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "next_cursor": { "oneOf": [ { "type": "null" }, { "type": "string", "pattern": "^o[0-9]{1,12}$" } ] },
+        "at_end": { "type": "boolean" },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "reset": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
     "LaunchStatus": {
       "description": "data of `launch.status` (GUI M6): one desktop launch read back from durable records only (launch record, RunRecord, attempt-evidence store, workspace run lock). `liveness` is DERIVED; no outcome is ever inferred from a process exit.",
       "type": "object",

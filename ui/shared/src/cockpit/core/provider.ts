@@ -4,7 +4,7 @@
  * which one it holds, and never contains separate "real" and "fake" logic.
  */
 import type {
-  Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus, ExecutionPreflight, LaunchStatus, ExecutionContext, ExecutionModelProbe, ConfigurationApprovalStatus, ChangeApprovalReview, RuntimeCommandReview, SkillsList, SkillsDescribe, ToolsList, ToolsDescribe, ToolsApprovalState,
+  Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus, ExecutionPreflight, LaunchStatus, RunLog, ExecutionContext, ExecutionModelProbe, ConfigurationApprovalStatus, ChangeApprovalReview, RuntimeCommandReview, SkillsList, SkillsDescribe, ToolsList, ToolsDescribe, ToolsApprovalState,
 } from '../../model/kup';
 import type { ExecutionHostPort, HostSettings, OpenInIdeResult, WorkspaceHost } from '../../host/HostAdapter';
 import type { Provenance } from './evidence';
@@ -66,6 +66,8 @@ export interface UIProvider {
   toolsApprovalState(workspace: string, toolId: string, signal?: AbortSignal): Promise<ProviderResult<ToolsApprovalState>>;
   /** One desktop launch read back from Kriya's durable records (launch record, RunRecord, evidence store, workspace lock). */
   launchStatus(workspace: string, launchId: string, signal?: AbortSignal): Promise<ProviderResult<LaunchStatus>>;
+  /** One bounded page of a run's REAL application log (KUP `run.log`), already redacted by the backend; `cursor` is the previous page's `next_cursor`. */
+  runLog(runId: string, page?: { cursor?: string; limit?: number }, signal?: AbortSignal): Promise<ProviderResult<RunLog>>;
   /** The host's Start Run port; null when this host cannot execute (a browser test host, the fixture stand-in). */
   readonly execution: ExecutionHostPort | null;
   /** The desktop folder lifecycle (native chooser, remembered folders, menu commands); null when the host has none. */

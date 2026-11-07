@@ -4,7 +4,7 @@
  */
 import { LIMITS, type KupRequest } from './ipc_contract';
 
-function evidenceHead(subcommand: 'manifest' | 'verify' | 'records' | 'change-content' | 'call-content', runId: string): string[] {
+function evidenceHead(subcommand: 'manifest' | 'verify' | 'records' | 'change-content' | 'call-content' | 'log', runId: string): string[] {
   return ['evidence', subcommand, runId, '--json', '--kup-version', '1'];
 }
 
@@ -57,6 +57,13 @@ export function buildKriyaArgv(request: KupRequest): string[] {
       return ['traces', '--json', '--execution-preflight', request.workspace];
     case 'launch.status':
       return ['traces', '--json', '--launch-status', request.launch_id, '--workspace', request.workspace];
+    case 'run.log': {
+      // Values are attached with `=` so a cursor can never be read as an option.
+      const argv = evidenceHead('log', request.run_id);
+      if (request.cursor !== undefined) argv.push(`--cursor=${request.cursor}`);
+      if (request.limit !== undefined) argv.push(`--limit=${String(request.limit)}`);
+      return argv;
+    }
     case 'workspace.create':
     case 'configuration.approval_status':
     case 'configuration.approve':
@@ -102,7 +109,7 @@ export const ALLOWED_ARGV_PREFIXES: readonly (readonly string[])[] = [
   ['runs', 'status', '--workspace'],
 ];
 
-const EVIDENCE_SUBCOMMANDS: readonly string[] = ['manifest', 'verify', 'records', 'change-content', 'call-content'];
+const EVIDENCE_SUBCOMMANDS: readonly string[] = ['manifest', 'verify', 'records', 'change-content', 'call-content', 'log'];
 
 /** `evidence <read-only KUP subcommand> <run id> --json --kup-version 1 ...`: the subcommand, the KUP flags and their position are pinned. */
 function isEvidenceArgv(argv: readonly string[]): boolean {

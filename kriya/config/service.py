@@ -102,6 +102,16 @@ class ConfigService:
     def environment(self) -> Environment:
         return self._environment
 
+    def log_directory(self, cfg) -> Optional[str]:
+        """The directory ``cfg`` writes run logs under (KRIYA_LOG_DIR > ``logging.directory`` > ``~/.kriya/logs``: kriya/core/logging_setup.py, the one resolver), or None when it cannot be
+        resolved. Read by the run-log projection (kriya/application/run_log.py): a caller never names the directory."""
+        from kriya.core.logging_setup import LogDirectoryError, resolve_log_directory
+
+        try:
+            return resolve_log_directory(cfg, self._environment)[0]
+        except LogDirectoryError:
+            return None
+
     @contextmanager
     def inside(self, ctx: RequestContext) -> Iterator[None]:
         """Hold the working-directory lock and stand in the request's workspace (when it has one) for the whole body: a caller that

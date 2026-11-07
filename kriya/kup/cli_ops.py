@@ -69,6 +69,10 @@ def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli", cli
             from kriya.kup import authority_ops
 
             return (authority_ops.status if operation == "configuration.approval_status" else authority_ops.approve)(cfg, request, request_id, client)
+        if operation == "run.log":
+            from kriya.kup import run_log_ops
+
+            return run_log_ops.run_log(cfg, request, request_id, client)
         if operation == "project.initialize":
             from kriya.kup import project_init_ops
 
