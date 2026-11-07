@@ -261,8 +261,10 @@ Every one of the 37 numbered T1 sites (site map `handover/WAVE3_W33_SITE_MAP_202
 | Scoped snapshot sandbox (operating root inside an enclosing repository) | the projection captured at construction + path-exact candidate writes; ignored operating root refused typed | 20 (U3/C2) |
 | Operating root excluded by the authority repository | typed `BOUND_TREE_OPERATING_SCOPE_EXCLUDED` | 20 |
 | Non-Git, EMPTY | a greenfield: nothing to decide; the existing bootstrap makes it a repository | 21 (U4) |
-| Non-Git, POPULATED | typed `BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY` before the contract and any membership decision | 21 (U4) |
+| Non-Git, POPULATED (any entry other than Kriya's own state, the canonical `kriya.yaml` and a desktop shell's metadata file, see below) | typed `BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY` before the contract and any membership decision | 21 (U4) |
 | Git cannot answer / disagrees with D-001 | typed `BOUND_TREE_UNAVAILABLE` | 12, 15 |
+**U4 premise change (owner sign-off 2026-11-07, registry `GREENFIELD-OS-METADATA-BLOCKS-FIRST-RUN-001`).** U4 assumed that a non-empty non-Git folder necessarily holds pre-existing user content. MEASURED in the desktop app: Finder writes `.DS_Store` into a brand-new project folder the person only looked at, and that alone refused the first Greenfield run. The premise is corrected, U4 is not removed: a REGULAR file named exactly one of `kriya.platform.filesystem_semantics.OS_METADATA_FILE_NAMES` (`.DS_Store`, `Thumbs.db`, `desktop.ini`; case-sensitive, no `._*`, no other dotfile; a directory, symlink or fifo with the name still refuses) is not an entry for the emptiness decision. It is never deleted, never committed (the bootstrap commits nothing) and the bootstrap adds those names, root-anchored, to the repository's local `info/exclude`, so they are not bound-tree members. Pinned by `tests/test_greenfield_os_metadata_admission.py`; `tests/test_w33_u4_no_git_admission.py` is unchanged.
+
 All three typed causes end as `AUTHORITY_EXECUTION_UNAVAILABLE` with `membership_authority.reason_code`. The A0 open questions are closed: Q1 (scoped sandbox lists ignored output) by U3/C2; Q2 (callers swallow `BoundTreeError`) by the re-raises in A1/U1/U3/U4 (AST-pinned); Q3 (pre-git design stage) by U4; Q4 (row 20) by the owner decision in section 11 (A0.4).
 
 ### The 37 sites
