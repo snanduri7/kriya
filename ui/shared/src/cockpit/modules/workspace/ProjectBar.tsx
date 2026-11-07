@@ -50,7 +50,7 @@ export function ProjectBar({ name, path, pre, probe, composed, inspectorOpen, ve
         <h1 title={name}>{name}</h1>
         <span className="ck-ws-path mono small muted" title={path}>{path}</span>
         {verdict === 'ready' ? <Badge tone="ok">✓ Ready</Badge> : verdict === 'action' ? <Badge tone="warn">Action required</Badge> : verdict === 'blocked' ? <Badge tone="bad">Cannot start</Badge> : null}
-        <RevealButton short />
+        <RevealButton />
         <OpenInEditorButton />
         <span className="grow" />
         {pre?.health ? <CapabilitiesControl health={pre.health} composed={composed} memory={pre.memory} /> : null}
