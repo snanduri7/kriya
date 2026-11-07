@@ -55,7 +55,6 @@ from kriya.repository.project_view import BEFORE_CONTEXT_MAX_CHARS, render_befor
 from kriya.tools.validate import MAVEN_VALIDATE_NO_VERDICT_CODES, execution_evidence
 from kriya.workflow.acceptance import output_confirms_nonzero_test_execution, subtask_owns_test_obligation
 from kriya.workflow.banners import log_gate_banner
-from kriya.workflow.context_budget import agent_request_capacity
 from kriya.workflow.edit_safety import StagedFileWrite, read_file_revision
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import (
@@ -1450,7 +1449,7 @@ async def _run_executing_candidate_gates(
         # The project BEFORE this candidate rides along (same rule: only passed when there is something to say, so existing test doubles see the same call).
         project_before = ""
         if ctx.project_view is not None:
-            spec_room = max(0, agent_request_capacity(ctx.kernel.config, ctx.spec_compliance, "spec_compliance").room(
+            spec_room = max(0, deps.request_capacity(ctx.kernel.config, getattr(ctx.spec_compliance, "role_llm", None), role="spec_compliance").room(
                 ctx.spec_compliance.system_prompt, compliance_goal))            # a quarter of the request's room, 4 characters a token
             project_before = render_before_context(ctx.project_view, spec_check_files, max_chars=min(BEFORE_CONTEXT_MAX_CHARS, spec_room))
         if project_before:

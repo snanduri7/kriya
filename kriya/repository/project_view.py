@@ -29,7 +29,6 @@ from dataclasses import dataclass
 from typing import Callable, Dict, FrozenSet, Iterable, Optional, Tuple
 
 from kriya.policy.filesystem import AuthorizedFileReader
-from kriya.policy.model import PolicyDecision
 from kriya.repository.bound_tree import NO_GIT_REPOSITORY, bound_tree_declaration, workspace_root_class
 from kriya.repository.commit import CommitState, list_commit_evidence
 
@@ -168,7 +167,7 @@ def build_current_project_view(workspace_path: str, *, exclude_directory: Option
         if exclude_directory is not None and _within_excluded_directory(workspace_path, path, exclude_directory, excluded_memo):
             continue
         full_path = os.path.join(workspace_path, path)
-        if reader.authorize(full_path).decision is not PolicyDecision.ALLOW:
+        if reader.authorize(full_path).decision != "allow":      # PolicyDecision.ALLOW (a str enum; policy.model is not a public contract module)
             continue                     # containment / hard-link / secret-bearing name: not even the name is shown
         is_tracked = path in tracked
         klass = TRACKED if is_tracked else KRIYA_ACCEPTED if path in accepted else AMBIGUOUS_UNTRACKED

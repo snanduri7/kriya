@@ -15,7 +15,6 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-from kriya.analyzer.analyzer import is_knowledge_artifact_dir, kriya_owned_index_roots
 from kriya.foundation.human_wait import human_wait
 from kriya.policy.approval import await_if_awaitable, resolve_approval_result
 from kriya.policy.egress import web_lookup_allowed
@@ -81,8 +80,8 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
     # let a Planner invent a file name (measured: run 20261107T182659-f963bb85 planned MODIFY app.py beside an existing main.py). A listing refusal is recorded, never read as "no files".
     project_view = None
     try:
-        owned_roots = kriya_owned_index_roots(deps.config, workspace_path)
-        project_view = build_current_project_view(workspace_path, exclude_directory=lambda directory: is_knowledge_artifact_dir(directory, owned_roots))
+        owned_roots = deps.kriya_owned_index_roots(deps.config, workspace_path)
+        project_view = build_current_project_view(workspace_path, exclude_directory=lambda directory: deps.is_knowledge_artifact_dir(directory, owned_roots))
     except (BoundTreeError, OSError) as view_error:
         logger.warning(f"Current Project View unavailable: {type(view_error).__name__}: {view_error}")
         state.record_event(RunEvent(

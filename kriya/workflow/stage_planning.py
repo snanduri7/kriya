@@ -16,7 +16,6 @@ from typing import Any, Dict, Optional
 
 from kriya.agents.contracts import parse_planner_structured_output
 from kriya.workflow.file_resolution import PlanCompletenessResult, classify_plan_completeness
-from kriya.workflow.plan_validation import PLANNED_FILE_ACTION_MISMATCH, planned_file_action_mismatches
 from kriya.workflow.requirements import requirements_prompt_block
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.run_lifecycle import persist_early_exit_trace, stage_run_trace
@@ -26,7 +25,7 @@ from kriya.workflow.triage import ChangeKind
 from kriya.workflow.untrusted_context import outside_untrusted_reference
 
 
-def _classify_against_project(ctx: StageContext, plan_text: str, **kwargs: Any) -> PlanCompletenessResult:
+def _classify_against_project(ctx: StageContext, deps: StageDeps, plan_text: str, **kwargs: Any) -> PlanCompletenessResult:
     """``classify_plan_completeness`` plus the project-grounded action rule (owner ruling 2026-11-07): a structured plan that MODIFIES or DELETES a path the Current Project View does not hold is
     ``schema_invalid`` with the canonical ``PLANNED_FILE_ACTION_MISMATCH`` code, so the existing bounded plan repair names the mismatch and a repaired plan is revalidated through this same call. It is
     never converted into a create here or downstream. With no view (membership could not be listed, already recorded) the plan is judged as before."""
@@ -34,10 +33,10 @@ def _classify_against_project(ctx: StageContext, plan_text: str, **kwargs: Any) 
     view = getattr(ctx, "project_view", None)
     if result.classification != "complete" or result.structured_plan is None or view is None:
         return result
-    mismatches = planned_file_action_mismatches(result.structured_plan, view.paths)
+    mismatches = deps.planned_file_action_mismatches(result.structured_plan, view.paths)
     if not mismatches:
         return result
-    return PlanCompletenessResult("schema_invalid", "; ".join(mismatches), None, reason_codes=[PLANNED_FILE_ACTION_MISMATCH])
+    return PlanCompletenessResult("schema_invalid", "; ".join(mismatches), None, reason_codes=[deps.PLANNED_FILE_ACTION_MISMATCH])
 
 
 async def plan_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[str, Any]]:
@@ -277,7 +276,7 @@ async def plan_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[st
     # legacy path share WorkflowController's own tool-capability
     # membership semantics (kriya/workflow/planner_validation.py) for
     # the first time - previously this path had no such check at all.
-    plan_completeness = _classify_against_project(ctx, plan, available_tool_names=available_tool_names,
+    plan_completeness = _classify_against_project(ctx, deps, plan, available_tool_names=available_tool_names,
                                                   plannable_tool_names=planned_tool_names)
     if plan_response_model is not None:
         record_planner_outcome(deps.planner, planner_outcome_for_completeness(plan_completeness.classification),
@@ -372,7 +371,7 @@ async def plan_work_unit(ctx: StageContext, deps: StageDeps) -> Optional[Dict[st
         # against the identical catalog, never a re-read that could
         # have drifted mid-operation (P5: no weaker validation path
         # for a repaired plan than for the initial one).
-        plan_completeness = _classify_against_project(ctx, plan, available_tool_names=available_tool_names,
+        plan_completeness = _classify_against_project(ctx, deps, plan, available_tool_names=available_tool_names,
                                                   plannable_tool_names=planned_tool_names)
         record_planner_outcome(deps.planner, planner_outcome_for_completeness(plan_completeness.classification),
                                model=plan_response_model)

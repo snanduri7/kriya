@@ -113,7 +113,8 @@ MODULES: Dict[str, Module] = {
         public=("kriya.repository", "kriya.repository.port", "kriya.repository.atomic_write",
                 "kriya.repository.commit", "kriya.repository.snapshot", "kriya.repository.worktree",
                 "kriya.repository.git", "kriya.repository.carried_state",
-                "kriya.repository.bound_tree"),   # R5/R6: the one copy of the canonical bound tree (gate views, authority and baseline copies)
+                "kriya.repository.bound_tree",    # R5/R6: the one copy of the canonical bound tree (gate views, authority and baseline copies)
+                "kriya.repository.project_view"),  # product/demo-72h: the derived Current Project View the stages and reviewers read (a projection over bound_tree, the commit journal and the filesystem)
         layer=2),
     "EXECUTION": Module(
         owner_paths=("kriya/tools/", "kriya/capabilities/", "kriya/static_analysis/"),

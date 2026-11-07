@@ -16,7 +16,7 @@ from kriya.agents.agent import (
     SkillGapAgent,
     SpecComplianceAgent,
 )
-from kriya.analyzer.analyzer import RepositoryAnalyzer
+from kriya.analyzer.analyzer import RepositoryAnalyzer, is_knowledge_artifact_dir, kriya_owned_index_roots
 from kriya.code_intel.model import CALLABLE_KINDS
 
 # `name as name` marks an explicit re-export: the helper moved to its own module
@@ -99,6 +99,7 @@ from kriya.workflow.checkpoint import (
     save_checkpoint,
     validate_resume_against_reality,
 )
+from kriya.workflow.plan_validation import PLANNED_FILE_ACTION_MISMATCH, planned_file_action_mismatches
 from kriya.workflow.context_budget import (
     CandidatePrompts,
     RetrievalLimits,
@@ -1878,6 +1879,8 @@ class WorkflowEngine:
             LocalVectorStore=LocalVectorStore,
             CandidatePrompts=CandidatePrompts, RetrievalLimits=RetrievalLimits,
             _reserve_graph_context_budget=_reserve_graph_context_budget, agent_request_capacity=agent_request_capacity,
+            kriya_owned_index_roots=kriya_owned_index_roots, is_knowledge_artifact_dir=is_knowledge_artifact_dir,
+            planned_file_action_mismatches=planned_file_action_mismatches, PLANNED_FILE_ACTION_MISMATCH=PLANNED_FILE_ACTION_MISMATCH,
             allocation_window=allocation_window, candidate_model=candidate_model,
             fit_planner_request=fit_planner_request, retrieval_limits_for=retrieval_limits_for,
             STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS=STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS,
@@ -1919,7 +1922,7 @@ class WorkflowEngine:
             review_requests=review_requests, build_reviewer_verified_evidence=build_reviewer_verified_evidence,
             build_candidate_diff_context=build_candidate_diff_context,
             ownership_review_evidence=ownership_review_evidence,
-            ContextBudgetUnsatisfiableError=ContextBudgetUnsatisfiableError,
+            ContextBudgetUnsatisfiableError=ContextBudgetUnsatisfiableError, agent_request_capacity=agent_request_capacity,
             _final_review_error_code=_final_review_error_code, _record_review_fit=_record_review_fit,
             _review_refit_recorder=_review_refit_recorder, _record_approval_decision=_record_approval_decision,
             _restore_original_bytes=_restore_original_bytes, _direct_terminal_writes=_direct_terminal_writes,

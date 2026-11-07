@@ -21,7 +21,6 @@ import time
 from typing import Any, Dict, List, Tuple
 
 from kriya.repository.project_view import BEFORE_CONTEXT_MAX_CHARS, render_before_context
-from kriya.workflow.context_budget import agent_request_capacity
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.stage_context import StageContext, StageDeps
 
@@ -34,7 +33,7 @@ def _project_before(ctx: StageContext, deps: StageDeps, written: Any) -> str:
     if view is None:
         return ""
     # Sized against the Reviewer's own request room (a quarter of what its system prompt and goal leave, 4 characters a token), so a small served window degrades it instead of failing the request.
-    room = max(0, agent_request_capacity(deps.config, deps.reviewer, "reviewer").room(deps.reviewer.system_prompt, ctx.goal))
+    room = max(0, deps.agent_request_capacity(deps.config, deps.reviewer, "reviewer").room(deps.reviewer.system_prompt, ctx.goal))
     return render_before_context(view, written, max_chars=min(BEFORE_CONTEXT_MAX_CHARS, room))
 
 
