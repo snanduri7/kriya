@@ -11,7 +11,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, session, shell, type IpcMainInvokeEvent } from 'electron';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONTENT_SECURITY_POLICY, PERMISSION_DECISION, WEB_PREFERENCES } from './hardening';
 import { buildKriyaChildEnv, resolveConfigDirectory } from './child_env';
@@ -36,6 +36,7 @@ import { resolveUiMode } from './ui_mode';
 import { mustRefuseStart } from './product_guard';
 import type { DevDrivers } from './dev_drivers';
 import { EDITOR_FORMS, planOpenInIde } from './open_in_ide';
+import { openFolderResult, planOpenFolder } from './open_folder';
 import { SettingsStore } from './settings';
 
 // Product identity (identity.ts) is set before anything else reads the application name. The name decides Electron's default userData
@@ -237,14 +238,13 @@ function registerIpc() {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     return projects.create(raw);
   });
-  ipcMain.handle(IPC_CHANNELS.revealWorkspace, (event) => {
+  // The channel keeps its original name (it is pinned by three audits); the action is "Open in Finder": it OPENS the project folder itself (the file manager opens it), it no longer selects it in its parent.
+  ipcMain.handle(IPC_CHANNELS.revealWorkspace, async (event) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
-    const current = workspaces.current(); // the folder the HOST has open; never a renderer-supplied path
-    if (current === null) return { revealed: false, reason: 'no workspace is open' };
-    if (!isDirectory(current)) return { revealed: false, reason: 'the folder is no longer there' };
-    if (dev?.captureActive) return { revealed: false, reason: 'not available while a scripted capture is running' }; // the scripted capture driver only; a real Kriya run reveals the folder
-    shell.showItemInFolder(current);
-    return { revealed: true, reason: null };
+    const plan = planOpenFolder(workspaces.current(), { realpath: realpathSync, isDirectory }); // the folder the HOST has open, canonical; never a renderer-supplied path
+    if (!plan.ok) return { revealed: false, reason: plan.reason };
+    if (dev?.captureActive) return { revealed: false, reason: 'not available while a scripted capture is running' }; // the scripted capture driver only; a real Kriya run opens the folder
+    return openFolderResult(await shell.openPath(plan.path));
   });
   ipcMain.handle(IPC_CHANNELS.cancelRun, async (event) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');

@@ -31,7 +31,7 @@ describe('Stopped by you', () => {
     const { bar } = await rejected();
     expect(bar.querySelector('h2')!.textContent).toBe('Stopped by you');
     expect(within(bar).getByTestId('stopped-by-you')).toHaveTextContent('there is nothing to resume');
-    for (const name of ['Run again', 'Edit goal and retry', 'Open in Editor', 'Reveal in Finder', 'View Details', 'New Goal']) expect(within(bar).getByRole('button', { name }), name).toBeInTheDocument();
+    for (const name of ['Run again', 'Edit goal and retry', 'Open in Editor', 'Open in Finder', 'View Details', 'New Goal']) expect(within(bar).getByRole('button', { name }), name).toBeInTheDocument();
     expect(bar.textContent).not.toMatch(/\bResume\b(?! —)/);
     expect(within(bar).queryByRole('button', { name: /resume/i })).toBeNull();
     expect(within(bar).queryByRole('button', { name: 'Recover Project' })).toBeNull();      // Kriya reports the folder CLEAN: recovery is not offered

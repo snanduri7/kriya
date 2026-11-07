@@ -1,4 +1,4 @@
-/** Small productivity actions: Copy run ID / workspace path / failure details, and Reveal in Finder. They put text on the clipboard through the host, name no path to the host, and never run a command. */
+/** Small productivity actions: Copy run ID / workspace path / failure details, and Open in Finder. They put text on the clipboard through the host, name no path to the host, and never run a command. */
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { renderWorkspaceShell } from '../testing/harness';
@@ -69,16 +69,16 @@ describe('Copy', () => {
   });
 });
 
-describe('Reveal in Finder', () => {
+describe('Open in Finder', () => {
   it('asks the host to reveal the folder IT has open (no path is sent) and reports a refusal', async () => {
     const { host } = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace' } });
     await screen.findByRole('navigation', { name: 'Destinations' });
     goTo('Project');
-    fireEvent.click(await screen.findByRole('button', { name: 'Reveal in Finder' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open in Finder' }));
     await waitFor(() => expect(host.workspaceCalls).toContain('reveal'));
     host.workspace.revealWorkspace = async () => ({ revealed: false, reason: 'the folder is no longer there' });
-    fireEvent.click(screen.getByRole('button', { name: 'Reveal in Finder' }));
-    expect(await screen.findByText('Could not reveal: the folder is no longer there')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open in Finder' }));
+    expect(await screen.findByText('Could not open: the folder is no longer there')).toBeInTheDocument();
   });
   it('is absent on a host that cannot reveal', async () => {
     const { host } = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace' } });
@@ -87,6 +87,6 @@ describe('Reveal in Finder', () => {
     goTo('Project');
     fireEvent.click(await screen.findByRole('tab', { name: 'Project' }));
     await screen.findByRole('button', { name: 'Copy workspace path' });
-    expect(screen.queryByRole('button', { name: 'Reveal in Finder' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Open in Finder' })).toBeNull();
   });
 });

@@ -44,7 +44,7 @@ export function SnapshotPicker() {
   );
 }
 
-/** Shows the open workspace's folder in Finder. The host reveals the folder IT has open; no path is sent. Absent when the host cannot. */
+/** OPENS the open workspace's folder in Finder (so the person sees the generated files). The host opens the folder IT has open; no path is sent. Absent when the host cannot. (The adapter method keeps its pinned name `revealWorkspace`.) */
 export function RevealButton({ short = false }: { short?: boolean } = {}) {
   const provider = useProvider();
   const [note, setNote] = useState<string | null>(null);
@@ -52,7 +52,7 @@ export function RevealButton({ short = false }: { short?: boolean } = {}) {
   const reveal = () => provider.desktop!.revealWorkspace!();
   return (
     <>
-      <button type="button" className="ck-quiet" onClick={() => void reveal().then((r) => setNote(r.revealed ? null : `Could not reveal: ${r.reason ?? 'unknown reason'}`), (e: unknown) => setNote(`Could not reveal: ${e instanceof Error ? e.message : String(e)}`))} aria-label="Reveal in Finder" title="Show this folder in Finder">{short ? 'Reveal' : 'Reveal in Finder'}</button>
+      <button type="button" className="ck-quiet" onClick={() => void reveal().then((r) => setNote(r.revealed ? null : `Could not open: ${r.reason ?? 'unknown reason'}`), (e: unknown) => setNote(`Could not open: ${e instanceof Error ? e.message : String(e)}`))} aria-label="Open in Finder" title="Open this folder in Finder">{short ? 'Finder' : 'Open in Finder'}</button>
       {note ? <span className="muted small" role="status">{note}</span> : null}
     </>
   );

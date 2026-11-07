@@ -1,5 +1,5 @@
 /**
- * T2: the Project Workspace. A project bar (where am I, Reveal / Open in Editor, four readiness chips, Capabilities, Settings), ONE main pane that shows exactly one primary state, an Inspector with
+ * T2: the Project Workspace. A project bar (where am I, Open in Finder / Open in Editor, four readiness chips, Capabilities, Settings), ONE main pane that shows exactly one primary state, an Inspector with
  * five tabs one click apart (only the selected one mounted), and an Activity dock. The width decides the treatment (the shell's measured width, passed to the tree): jsdom does no layout, so the
  * tests render the shell at 1500, 1000 and 800 px. The panels are the same components over the same Kriya answers; these tests pin the arrangement, not new facts.
  */
@@ -29,12 +29,12 @@ const goTo = (name: string) => fireEvent.click(within(screen.getByRole('navigati
 const tabs = () => within(screen.getByRole('tablist', { name: 'Inspector tabs' })).getAllByRole('tab');
 
 describe('the project bar', () => {
-  it('names the project and its path, offers Reveal, Open in Editor and Settings, and shows four readiness chips from Kriya\'s own answers', async () => {
+  it('names the project and its path, offers Open in Finder, Open in Editor and Settings, and shows four readiness chips from Kriya\'s own answers', async () => {
     await open();
     const bar = screen.getByRole('group', { name: 'Project' });
     expect(within(bar).getByRole('heading', { level: 1 })).toHaveTextContent('workspace');
     expect(within(bar).getByText('/fixture/workspace')).toBeInTheDocument();
-    for (const name of ['Reveal in Finder', 'Open in Editor', /Settings/]) expect(within(bar).getByRole('button', { name })).toBeInTheDocument();
+    for (const name of ['Open in Finder', 'Open in Editor', /Settings/]) expect(within(bar).getByRole('button', { name })).toBeInTheDocument();
     const chips = await within(bar).findByTestId('readiness-chips');
     expect([...chips.querySelectorAll('[data-chip]')].map((c) => c.getAttribute('data-chip'))).toEqual(['git', 'configuration', 'model', 'security']);   // a healthy folder needs no folder chip
     expect(chips.querySelector('[data-chip="security"]')).toHaveTextContent('Security Available');

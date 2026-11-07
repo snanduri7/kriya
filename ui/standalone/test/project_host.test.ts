@@ -154,17 +154,19 @@ describe('authority wiring', () => {
   });
 });
 
-describe('Reveal in Finder (host)', () => {
+describe('Open in Finder (host)', () => {
   const main = readFileSync(join(__dirname, '..', 'src', 'main', 'main.ts'), 'utf8');
-  it('reveals only the folder the HOST has open: the handler takes no argument, checks the sender, the folder, and never reveals while a scripted capture is active (and a real, non-packaged run does reveal)', () => {
+  it('opens only the folder the HOST has open: the handler takes no argument, checks the sender, plans the canonical folder, never opens while a scripted capture is active (and a real, non-packaged run does open)', () => {
     const at = main.indexOf('IPC_CHANNELS.revealWorkspace');
-    const body = main.slice(at, at + 700);
-    expect(body).toContain('(event) =>'); // no renderer-supplied argument
+    const body = main.slice(at, at + 900);
+    expect(body).toContain('async (event) =>'); // no renderer-supplied argument
     expect(body.indexOf('fromOwnedRenderer(event)')).toBeLessThan(body.indexOf('workspaces.current()'));
-    expect(body.indexOf('isDirectory(current)')).toBeLessThan(body.indexOf('shell.showItemInFolder(current)'));
-    expect(body.indexOf('if (dev?.captureActive)')).toBeLessThan(body.indexOf('shell.showItemInFolder(current)'));
-    expect(body).not.toMatch(/if \(dev\)/); // B-walkthrough A3: dev drivers are loaded by every non-packaged build, so `dev != null` is NOT "an evidence capture"; gating on it disabled Reveal in the owner's real run
-    expect((main.match(/shell\./g) ?? []).length).toBe(1); // the one use of Electron's shell module
+    expect(body.indexOf('planOpenFolder(workspaces.current()')).toBeLessThan(body.indexOf('shell.openPath(plan.path)'));
+    expect(body.indexOf('if (dev?.captureActive)')).toBeLessThan(body.indexOf('shell.openPath(plan.path)'));
+    expect(body).not.toMatch(/if \(dev\)/); // B-walkthrough A3: dev drivers are loaded by every non-packaged build, so `dev != null` is NOT "an evidence capture"
+    expect(body).not.toContain('showItemInFolder');
+    expect((main.match(/shell\./g) ?? []).length).toBe(1); // the one use of Electron's shell module, and it is openPath on the planned path only
+    expect(main).toContain('shell.openPath(plan.path)');
     expect(IPC_CHANNELS.revealWorkspace).toBe('kriya:host:workspace:reveal');
   });
 });

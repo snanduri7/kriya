@@ -68,7 +68,7 @@ export interface WorkspaceHost {
   chooseProjectParent?(): Promise<ProjectParentChoice>;
   /** New Project, step 2: ask Kriya to create `name` inside the chosen parent. */
   createProject?(request: { token: string; name: string }): Promise<ProjectCreateResult>;
-  /** Show the OPEN workspace's folder in the system file manager (Finder). The host reveals the folder it has open; the renderer names no path. Absent on a host that cannot. */
+  /** OPEN the workspace's folder itself in the system file manager (Finder) so the person sees the files. The host opens the folder it has open (canonical, never a package); the renderer names no path. Absent on a host that cannot. (Method name kept: it is pinned by the IPC audits.) */
   revealWorkspace?(): Promise<{ revealed: boolean; reason: string | null }>;
   /** Recover Project: the host asks for a native confirmation, then Kriya's `runs recover` on the folder IT has open (no argument, no path). Absent on a host that cannot. */
   recoverWorkspace?(): Promise<RecoverWorkspaceResult>;

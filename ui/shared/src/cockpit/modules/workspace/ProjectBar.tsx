@@ -38,7 +38,7 @@ export interface ProjectBarProps {
   verdict: 'ready' | 'action' | 'blocked' | null;
 }
 
-/** The PROJECT BAR: where am I (name, path), what can I do with the folder (Reveal, Open in Editor), is it ready (four chips), what is available (Capabilities), Settings. Always visible. */
+/** The PROJECT BAR: where am I (name, path), what can I do with the folder (Open in Finder, Open in Editor), is it ready (four chips), what is available (Capabilities), Settings. Always visible. */
 export function ProjectBar({ name, path, pre, probe, composed, inspectorOpen, verdict }: ProjectBarProps) {
   const ui = useWorkspaceUi();
   const go = useNavigate();
