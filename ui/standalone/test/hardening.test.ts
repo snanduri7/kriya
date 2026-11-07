@@ -122,7 +122,8 @@ describe('M6 execution (hardening): Start Run is the only execution action and i
     expect(preloadTs).not.toMatch(/ipcRenderer\.invoke\((?!IPC_CHANNELS\.)/);
     expect(preloadTs).not.toMatch(/spawn|child_process|shell|exec\(/i);
     expect(preloadTs).toContain('notifyRun: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.notifyRun, request)');
-    expect(Object.keys(IPC_CHANNELS).filter((k) => /run|exec/i.test(k)).sort()).toEqual(['decideRuntimeCommand', 'executionState', 'notifyRun', 'startRun']); // (decideApproval, decideRuntimeCommand [own host test] and the project steps are classified in their own tests)
+    expect(preloadTs).toContain('cancelRun: () => ipcRenderer.invoke(IPC_CHANNELS.cancelRun)');   // T2: Cancel Run takes NO argument (recover_host.test.ts pins the handler)
+    expect(Object.keys(IPC_CHANNELS).filter((k) => /run|exec/i.test(k)).sort()).toEqual(['cancelRun', 'decideRuntimeCommand', 'executionState', 'notifyRun', 'startRun']); // (decideApproval, decideRuntimeCommand [own host test] and the project steps are classified in their own tests)
   });
   it('both execution handlers verify the sender, and startRun hands the raw request to the host (which validates it) - the handler builds nothing', () => {
     for (const name of ['startRun', 'executionState']) {
