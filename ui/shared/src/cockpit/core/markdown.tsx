@@ -77,7 +77,8 @@ export function conciseWhy(source: string | null | undefined, maxSentences = 3, 
   if (!source) return null;
   const text = plain(source);
   if (text === '') return null;
-  const sentences = text.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g)?.map((s) => s.trim()).filter(Boolean) ?? [text];
+  // A sentence ends at ., ! or ? FOLLOWED BY WHITESPACE: a dot inside a name (`app.py`, `v1.2`) is not an end. (The earlier matcher skipped every character before such a dot, so "...script `app.py` works." began "py works.")
+  const sentences = text.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
   let out = '';
   for (const s of sentences.slice(0, maxSentences)) { if ((out + ' ' + s).trim().length > maxChars && out !== '') break; out = (out + ' ' + s).trim(); }
   return out.length > maxChars ? `${out.slice(0, maxChars - 1).trimEnd()}…` : out;

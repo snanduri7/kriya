@@ -33,6 +33,18 @@ describe('renderMarkdown: safe subset, elements only', () => {
 });
 
 describe('conciseWhy: one to three recorded sentences, deterministic', () => {
+  it('keeps a sentence that names a file with a dot (measured: the Why began "py successfully prints" for `app.py`)', () => {
+    const review = '## Code Review for app.py\n\n### Summary of Findings\nThe provided Python script `app.py` successfully prints "Hello Kriya" as requested. The change from "Hello World" to "Hello Kriya" is correctly implemented. No functional issues were identified in the code.';
+    const why = conciseWhy(review)!;
+    expect(why.startsWith('The provided Python script app.py successfully prints')).toBe(true);
+    expect(why).not.toMatch(/^py /);
+    expect(why).toContain('No functional issues were identified in the code.');
+  });
+  it('splits only on terminal punctuation followed by whitespace, and keeps unterminated text whole', () => {
+    expect(conciseWhy('Version 1.2.3 is used. Second one! Third? Fourth sentence here.')).toBe('Version 1.2.3 is used. Second one! Third?');
+    expect(conciseWhy('no terminal punctuation but app.py is named')).toBe('no terminal punctuation but app.py is named');
+    expect(conciseWhy('Ends with a dot.')).toBe('Ends with a dot.');
+  });
   it('takes the first three sentences with the markdown removed and never adds a word', () => {
     const why = conciseWhy('## Review\n\nThe change adds `clamp`. It keeps the public signature. Tests cover the edge cases. A fourth sentence is not shown.');
     expect(why).toBe('The change adds clamp. It keeps the public signature. Tests cover the edge cases.');
