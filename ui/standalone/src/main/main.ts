@@ -240,7 +240,7 @@ function registerIpc() {
     const current = workspaces.current(); // the folder the HOST has open; never a renderer-supplied path
     if (current === null) return { revealed: false, reason: 'no workspace is open' };
     if (!isDirectory(current)) return { revealed: false, reason: 'the folder is no longer there' };
-    if (dev) return { revealed: false, reason: 'not available in an evidence build' };
+    if (dev?.captureActive) return { revealed: false, reason: 'not available while a scripted capture is running' }; // the scripted capture driver only; a real Kriya run reveals the folder
     shell.showItemInFolder(current);
     return { revealed: true, reason: null };
   });
