@@ -2168,8 +2168,8 @@ class WorkflowEngine:
         """W3-3 (D-001): a ``BoundTreeError`` (the repository layer's internal exception) never leaves a production entrypoint as a raw traceback. The run ends as the
         existing typed ``AUTHORITY_EXECUTION_UNAVAILABLE`` outcome with the repository layer's detail; nothing was applied, nothing is retried or continued."""
         from kriya.workflow.authority_bundle import (
-            AUTHORITY_EXECUTION_UNAVAILABLE,
             membership_authority_unavailable_result,
+            membership_stop_event_details,
         )
 
         result = membership_authority_unavailable_result(error)
@@ -2177,7 +2177,7 @@ class WorkflowEngine:
         state.record_event(RunEvent(
             kind="membership_authority.unavailable", attempt=state.attempt_number, source="workflow.run_generation_workflow",
             authority=EventAuthority.AUTHORITATIVE, message=result["error"][:600],
-            details={"reason_code": AUTHORITY_EXECUTION_UNAVAILABLE, "membership_reason_code": error.reason_code, "stage": stage},
+            details=membership_stop_event_details(error, stage=stage),
         ))
         if run_trace is not None:       # the contract-compilation stop precedes the run's trace (opened below it): its events stay on ``state``
             persist_early_exit_trace(self._stage_deps(), state, run_trace, status="failure", failure_category=result["failure_category"])

@@ -115,6 +115,18 @@ AUTHORITY_CANDIDATE_CHANGED_DURING_RUN = "AUTHORITY_CANDIDATE_CHANGED_DURING_RUN
 AUTHORITY_VERDICT_INCONSISTENT = "AUTHORITY_VERDICT_INCONSISTENT"
 
 
+MEMBERSHIP_EVENT_MAX_ENTRY_NAMES = 5
+MEMBERSHIP_EVENT_MAX_NAME_LENGTH = 120
+
+
+def membership_stop_event_details(error: BoundTreeError, *, stage: str) -> Dict[str, Any]:
+    """The details of the ``membership_authority.unavailable`` run event: the stop's own typed code, the repository layer's reason code, the stage - and the NAMES (never paths) of the
+    entries that blocked, bounded (``BoundTreeError.paths`` are top-level entry names of the workspace root, already capped at 10 by the producer). The desktop UI reads these to say
+    which files are in the way without parsing the message text."""
+    names = [name[:MEMBERSHIP_EVENT_MAX_NAME_LENGTH] for name in list(error.paths)[:MEMBERSHIP_EVENT_MAX_ENTRY_NAMES]]
+    return {"reason_code": AUTHORITY_EXECUTION_UNAVAILABLE, "membership_reason_code": error.reason_code, "stage": stage, "paths": names}
+
+
 def membership_authority_unavailable_result(error: BoundTreeError) -> Dict[str, Any]:
     """W3-3 (D-001): the typed outcome of a run whose repository-membership authority could not decide which files belong to its workspace (a ``BoundTreeError`` at
     a result-truth guard, the Architect's owner resolution or any bound-tree consumer): the existing ``AUTHORITY_EXECUTION_UNAVAILABLE`` environment outcome in the

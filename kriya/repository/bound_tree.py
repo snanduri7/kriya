@@ -20,7 +20,7 @@ from typing import Dict, Optional, Set, Tuple
 
 from kriya.config.environment import KRIYA_DIRECTORY_NAME
 from kriya.context.workspace_identity import authority_root
-from kriya.platform.filesystem_semantics import identity_key
+from kriya.platform.filesystem_semantics import OS_METADATA_FILE_NAMES, identity_key
 from kriya.repository.git import RepositoryContentFilterRefused, is_plainly_not_a_repository, work_tree_root
 from kriya.repository.snapshot import (
     _content_identity,
@@ -135,17 +135,30 @@ def _is_canonical_kriya_config(root: str, name: str) -> bool:
         return False
 
 
+def _is_os_metadata_noise(root: str, name: str) -> bool:
+    """A desktop shell's own metadata file directly under ``root``: exactly one of ``OS_METADATA_FILE_NAMES`` (case-sensitive) AND a regular file. A directory, a symlink or any
+    other type that carries the reserved name is a user entry. It is never deleted, overwritten or promoted: being ignored here means only "it is not user project content"."""
+    if name not in OS_METADATA_FILE_NAMES:
+        return False
+    try:
+        return stat.S_ISREG(os.lstat(os.path.join(root, name)).st_mode)
+    except OSError:
+        return False
+
+
 def admit_workspace_for_mutation(root: str) -> None:
     """W3-3 U4 (owner decisions 2026-10-31): the production admission of a workspace that has no Git repository. An EMPTY one - no entry except Kriya's own control-plane
     artifacts, the ``.kriya`` state directory and the canonical root ``kriya.yaml`` (a regular file: Kriya's configuration is control-plane state, not a source baseline) - is a
-    greenfield: the existing Git bootstrap makes it a repository before any model-originated write. Any other entry (a README, a ``.gitignore``, source, a user's hidden
+    greenfield. PREMISE CHANGE (owner sign-off 2026-11-07, registry GREENFIELD-OS-METADATA-BLOCKS-FIRST-RUN-001): "a non-empty folder necessarily holds pre-existing user content" was
+    wrong for a desktop app - Finder writes ``.DS_Store`` into a brand-new project folder the person merely looked at, and that file alone refused the first run (MEASURED, run 619b4e7b).
+    A regular file named exactly one of ``OS_METADATA_FILE_NAMES`` is therefore not an entry for this decision (the folder stays a greenfield: the existing Git bootstrap makes it a repository before any model-originated write); the rule for everything else is unchanged. Any other entry (a README, a ``.gitignore``, source, a user's hidden
     file, a ``kriya.yml``, a ``kriya.yaml`` that is a directory or a symlink) makes it a brownfield WITHOUT source authority - the filesystem is never a membership authority and the bootstrap never commits user files - so it is the typed
     ``BoundTreeError(BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY)``, raised before the contract is compiled and before anything is generated. A Git-backed root is always
     admitted here (its membership is Git's); a directory that does not exist is left to the caller; one that cannot be listed is ``BOUND_TREE_UNAVAILABLE``."""
     if not os.path.isdir(root) or _root_class(root) != NO_GIT_REPOSITORY:
         return
     try:
-        entries = sorted(name for name in os.listdir(root) if name != KRIYA_DIRECTORY_NAME and not _is_canonical_kriya_config(root, name))
+        entries = sorted(name for name in os.listdir(root) if name != KRIYA_DIRECTORY_NAME and not _is_canonical_kriya_config(root, name) and not _is_os_metadata_noise(root, name))
     except OSError as error:
         raise BoundTreeError(BOUND_TREE_UNAVAILABLE, f"the entries of {root} could not be listed: {error}") from error
     if entries:

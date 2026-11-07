@@ -12,6 +12,7 @@ from typing import FrozenSet, Iterable, Iterator, List, Optional, Set, Tuple
 
 from kriya.config.environment import child_environment
 from kriya.platform import git_argv, git_environment
+from kriya.platform.filesystem_semantics import OS_METADATA_FILE_NAMES
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
@@ -528,11 +529,16 @@ def _bootstrap_greenfield_repository(workspace_path: str) -> None:
             existing_excludes = handle.read()
     except FileNotFoundError:
         pass
-    if ".kriya/" not in existing_excludes.splitlines():
+    # Kriya's own state, and (owner sign-off 2026-11-07) the desktop shell's metadata files the admission looked past (``OS_METADATA_FILE_NAMES``), anchored to the root exactly like
+    # the admission: the repository's local, uncommitted exclude file is the one place this bootstrap already writes, so such a file is neither committed nor part of the bound tree's membership.
+    wanted_excludes = [".kriya/", *(f"/{name}" for name in sorted(OS_METADATA_FILE_NAMES))]
+    present_excludes = set(existing_excludes.splitlines())
+    missing_excludes = [entry for entry in wanted_excludes if entry not in present_excludes]
+    if missing_excludes:
         with open(exclude_path, "a", encoding="utf-8") as handle:
             if existing_excludes and not existing_excludes.endswith("\n"):
                 handle.write("\n")
-            handle.write(".kriya/\n")
+            handle.write("".join(f"{entry}\n" for entry in missing_excludes))
 
     commit_command = [
         "git", *_HOOKS_DISABLED, "-c", "user.name=Kriya", "-c", "user.email=kriya@local",

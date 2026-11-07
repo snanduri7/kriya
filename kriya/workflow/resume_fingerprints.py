@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, FrozenSet, Iterable, Mapping, Optional, Sequence, Tuple
 
+from kriya.platform.filesystem_semantics import OS_METADATA_FILE_NAMES
 from kriya.tools.containment import decide_external_execution
 
 UNAVAILABLE = "UNAVAILABLE"
@@ -484,7 +485,7 @@ _SKILL_IGNORED_DIRS = frozenset({"__pycache__", ".git"})
 # Staged rules are proposals, never loaded as skills until `kriya skills
 # approve`; Finder/Explorer metadata changes behind anyone's back. Other
 # dotfiles (e.g. .skill_conflicts.json) do affect behaviour and are hashed.
-_SKILL_IGNORED_FILES = frozenset({"staged_rules.txt", ".DS_Store", "Thumbs.db", "desktop.ini"})
+_SKILL_IGNORED_FILES = frozenset({"staged_rules.txt"}) | OS_METADATA_FILE_NAMES
 
 
 def skills_fingerprint(skill_source_dirs: Optional[Sequence[str]]) -> Fingerprint:

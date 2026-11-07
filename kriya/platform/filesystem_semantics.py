@@ -41,6 +41,12 @@ class PathIdentity(enum.Enum):
     UNKNOWN = "unknown"
 
 
+# The file names a desktop shell (Finder, Explorer) writes into a folder it has displayed, never a person's project content. ONE definition for every consumer that has to
+# look past them (a skills-directory fingerprint, a skills shadow copy, the empty-folder admission of a new project). EXACT, case-sensitive names only: no wildcard, no
+# AppleDouble (``._*``) pattern, no other dotfile. A consumer that also needs a name of its own composes it with ``|``; it never widens this set.
+OS_METADATA_FILE_NAMES = frozenset({".DS_Store", "Thumbs.db", "desktop.ini"})
+
+
 def fold_name(name: str) -> str:
     """Case- and normalization-insensitive form of a path string."""
     return unicodedata.normalize("NFC", unicodedata.normalize("NFD", name).casefold())

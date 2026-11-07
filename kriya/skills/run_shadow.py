@@ -31,7 +31,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from kriya.config.environment import child_environment
 from kriya.platform import git_argv, git_environment
-from kriya.platform.filesystem_semantics import PathRelation, path_relation
+from kriya.platform.filesystem_semantics import OS_METADATA_FILE_NAMES, PathRelation, path_relation
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ REASON_ROOT_IN_WORK_TREE = "SKILL_SHADOW_ROOT_IN_WORK_TREE"
 REASON_ROOT_ENCLOSES_REPOSITORY = "SKILL_ROOT_ENCLOSES_REPOSITORY"
 REASON_ROOT_RELATION_UNKNOWN = "SKILL_ROOT_RELATION_UNKNOWN"
 
-_IGNORED_NAMES = frozenset({".DS_Store", "Thumbs.db", "desktop.ini", "__pycache__"})
+_IGNORED_NAMES = frozenset({"__pycache__"}) | OS_METADATA_FILE_NAMES
 _LINK = "symlink:"
 
 
