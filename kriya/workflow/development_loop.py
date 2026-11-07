@@ -504,6 +504,7 @@ async def prepare_development(ctx: StageContext, deps: StageDeps) -> Union[Dict[
             for entry in generation_manifest.entries
         },
         established_files=established_files or [],
+        project_view=ctx.project_view,
         retrieval_member_hints=retrieval_member_hints,
         retrieval_symbol_loci=retrieval_symbol_loci,
         protected_relpath=protected_relpath,

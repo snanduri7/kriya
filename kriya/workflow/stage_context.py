@@ -363,6 +363,7 @@ class StageContext:
     skill_staleness_warnings: List[str] = field(default_factory=list)
     repo_model: Any = None
     repo_context: str = ""
+    project_view: Any = None       # the Current Project View (kriya/repository/project_view.py), built once per work unit; None when membership could not be listed
     repo_slug: str = ""
     se: Any = None
     skills_dir: Any = None

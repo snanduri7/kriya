@@ -405,6 +405,27 @@ def _retire_superseded_plan_obligations(
         ))
 
 
+PLANNED_FILE_ACTION_MISMATCH = "PLANNED_FILE_ACTION_MISMATCH"
+
+
+def planned_file_action_mismatch_error(subtask_id: str, path: str, action: str) -> str:
+    """The ONE message of the canonical rule: a planned file that does not exist is created, never modified or deleted (and the reverse is the existing collision authority's)."""
+    return f"subtask {subtask_id!r} planned file {path!r} (action={action}) does not exist on disk and is not marked action=create"
+
+
+def planned_file_action_mismatches(structured_plan: Any, present_paths: Iterable[str]) -> List[str]:
+    """The PLANNED_FILE_ACTION_MISMATCH errors of a parsed structured plan against the paths the project holds NOW (the Current Project View's membership): every planned file whose action is
+    not ``create`` while its path is absent. Used by the direct (legacy-planner) path, which never reaches ``validate_plan``; the rule is the same one (owner ruling 2026-11-07: a MODIFY of
+    an absent file is never silently turned into a CREATE - measured: run 20261107T182659-f963bb85 planned ``MODIFY app.py`` beside an existing ``main.py``)."""
+    present = set(present_paths)
+    errors: List[str] = []
+    for subtask in getattr(structured_plan, "subtasks", None) or ():
+        for planned in subtask.planned_files:
+            if planned.action != FileAction.CREATE and planned.path not in present:
+                errors.append(planned_file_action_mismatch_error(subtask.id, planned.path, planned.action.value))
+    return errors
+
+
 async def validate_plan(
     plan: EngineeringPlan,
     *,
@@ -1139,11 +1160,8 @@ async def validate_plan(
             full_path = os.path.join(workspace_path, pf.path)
             action_mismatch = not os.path.exists(full_path) and pf.action != FileAction.CREATE
             if action_mismatch:
-                errors.append(
-                    f"subtask {st.id!r} planned file {pf.path!r} (action={pf.action.value}) "
-                    "does not exist on disk and is not marked action=create"
-                )
-                reason_codes.append("PLANNED_FILE_ACTION_MISMATCH")
+                errors.append(planned_file_action_mismatch_error(st.id, pf.path, pf.action.value))
+                reason_codes.append(PLANNED_FILE_ACTION_MISMATCH)
             if obligation_ledger is not None:
                 obligation_ledger.record(ObligationRecord(
                     id=f"plan.file.{pf.path}.action_consistency", kind=ObligationKind.PLAN_STRUCTURAL_VALIDITY,

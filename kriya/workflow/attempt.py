@@ -1577,6 +1577,8 @@ class AttemptContext:
     # straight. Default empty list keeps plain (non-milestone) generate/fix
     # calls, and any old checkpoint, unaffected.
     established_files: List[str] = field(default_factory=list)
+    # The Current Project View built before this work unit's attempts (kriya/repository/project_view.py): the project as it is BEFORE any candidate. None when it could not be built.
+    project_view: Any = None
     # Workspace-relative path of the goal-source file supplied via `kriya
     # generate --file <path>` for this run, if any - see AuthorizedFileWriter's
     # own protected_relpaths docstring (kriya/policy/filesystem.py) for the

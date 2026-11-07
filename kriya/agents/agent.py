@@ -2995,8 +2995,13 @@ class SpecComplianceAgent(BaseAgent):
         authoritative_context: Optional[str] = None,
         requirements: Optional[Any] = None,
         baseline_contents: Optional[Dict[str, Optional[str]]] = None,
+        project_context: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """baseline_contents: each file's version before this candidate
+        """project_context (Current Project View, owner ruling 2026-11-07): the project as it was BEFORE this candidate - existing files' current content, new files named as new, the other
+        files by name - so the verdict is about the project and not about the candidate's text alone (a candidate that creates a DIFFERENT file than the one the goal refers to looks
+        compliant when judged by itself). None: nothing is added to the prompt.
+
+        baseline_contents: each file's version before this candidate
         (None: a new file) - when the whole files do not fit the request, the
         changed regions are shown instead (context_budget.
         fit_spec_compliance_files).
@@ -3035,7 +3040,7 @@ class SpecComplianceAgent(BaseAgent):
                 "it is stated in general terms."
             )) + "\n"
         system_prompt = self.system_prompt + (REQUIREMENT_VERDICTS_SCHEMA if requirement_items else "")
-        head = f"{context_block}=== Goal ===\n{goal}\n\n{requirements_block}=== Files Generated ===\n"
+        head = f"{context_block}{project_context or ''}=== Goal ===\n{goal}\n\n{requirements_block}=== Files Generated ===\n"
         tail = ("\n\nDoes this code satisfy every concrete, literally-named requirement in the "
                 "goal, per the rules above?")
         from kriya.workflow.context_budget import agent_request_capacity, fit_spec_compliance_files

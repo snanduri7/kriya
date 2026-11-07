@@ -85,7 +85,7 @@ def _tool_subtask_missing_toolname_plan(
             {
                 "id": "s1", "description": "implement the fix", "execution_method": "model",
                 "execution_role": "implementation", "depends_on": [],
-                "planned_files": [{"path": planned_file_path, "action": "modify"}],
+                "planned_files": [{"path": planned_file_path, "action": "create"}],   # the workspace is empty: the file does not exist (PLANNED_FILE_ACTION_MISMATCH otherwise)
                 "provides": ["fix applied"], "requires": [],
                 "relevant_global_invariant_ids": ["gi1"], "acceptance_criteria_ids": ["ac1"],
                 "verification": [],
@@ -105,7 +105,7 @@ def _multi_tool_subtask_plan(tool_names) -> str:
     subtasks = [{
         "id": "s0", "description": "implement", "execution_method": "model",
         "execution_role": "implementation", "depends_on": [],
-        "planned_files": [{"path": "pkg/module.py", "action": "modify"}],
+        "planned_files": [{"path": "pkg/module.py", "action": "create"}],   # the workspace is empty: the file does not exist (PLANNED_FILE_ACTION_MISMATCH otherwise)
         "provides": ["fix applied"], "requires": [],
         "relevant_global_invariant_ids": ["gi1"], "acceptance_criteria_ids": ["ac1"],
         "verification": [],

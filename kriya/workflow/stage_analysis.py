@@ -15,9 +15,12 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
+from kriya.analyzer.analyzer import is_knowledge_artifact_dir, kriya_owned_index_roots
 from kriya.foundation.human_wait import human_wait
 from kriya.policy.approval import await_if_awaitable, resolve_approval_result
 from kriya.policy.egress import web_lookup_allowed
+from kriya.repository.bound_tree import BoundTreeError
+from kriya.repository.project_view import build_current_project_view, project_view_event_details, render_project_view
 from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.live_lookup import _extract_first_usable, _resolve_via_web_lookup
 from kriya.workflow.run_events import EventAuthority, RunEvent
@@ -73,6 +76,30 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
     # schema refuses an absolute planned path - a model shown the absolute
     # root copied it into planned_files and was refused for Kriya's own echo.
     repo_context = repo_model.model_dump_json(indent=2, exclude={"dependency_versions", "root_path"})
+    # CURRENT PROJECT VIEW (owner ruling 2026-11-07, Phase B): the Planner and Architect are shown which files this project holds NOW, each with its provenance class, and (a small
+    # project) their current content - a derived projection of the bound tree, commit journal, filesystem and read policy; it promotes nothing. The aggregate statistics above alone
+    # let a Planner invent a file name (measured: run 20261107T182659-f963bb85 planned MODIFY app.py beside an existing main.py). A listing refusal is recorded, never read as "no files".
+    project_view = None
+    try:
+        owned_roots = kriya_owned_index_roots(deps.config, workspace_path)
+        project_view = build_current_project_view(workspace_path, exclude_directory=lambda directory: is_knowledge_artifact_dir(directory, owned_roots))
+    except (BoundTreeError, OSError) as view_error:
+        logger.warning(f"Current Project View unavailable: {type(view_error).__name__}: {view_error}")
+        state.record_event(RunEvent(
+            kind="project_view.unavailable", attempt=0, source="workflow.analyze_work_unit", authority=EventAuthority.ADVISORY,
+            message="the Current Project View could not be built; the Planner has the aggregate analysis only",
+            details={"reason_code": getattr(view_error, "reason_code", type(view_error).__name__)},
+        ))
+    if project_view is not None:
+        state.record_event(RunEvent(
+            kind="project_view.built", attempt=0, source="workflow.analyze_work_unit", authority=EventAuthority.ADVISORY,
+            message=f"Current Project View: {len(project_view.files)} file(s) listed",
+            details=project_view_event_details(project_view),
+        ))
+        # Sized against the Planner's OWN request room (a quarter of what the system prompt, goal and repository model leave, 4 characters a token): on a small served window the view
+        # degrades from content to names to fewer names, so it can never make the request unsatisfiable.
+        view_room = max(0, agent_request_capacity(deps.config, deps.planner, "planner").room(deps.planner.system_prompt, goal, repo_context))
+        repo_context += fence_untrusted_reference(render_project_view(project_view, max_chars=view_room))
         
     # Load local workspace conventions if present
     repo_slug = os.path.basename(workspace_path).lower().strip(".")
@@ -625,6 +652,7 @@ async def analyze_work_unit(ctx: StageContext, deps: StageDeps) -> None:
     ctx.active_skills, ctx.retrieved_chunks = active_skills, retrieved_chunks
     ctx.skill_staleness_warnings, ctx.repo_model = skill_staleness_warnings, repo_model
     ctx.repo_context, ctx.repo_slug, ctx.se, ctx.skills_dir = repo_context, repo_slug, se, skills_dir
+    ctx.project_view = project_view
     ctx.convention_prompt, ctx.unresolved_skill_gap_names = convention_prompt, unresolved_skill_gap_names
     ctx.unverified_relevant, ctx.missing_skill_candidates = unverified_relevant, missing_skill_candidates
     ctx.matched_files, ctx.related_files, ctx.graph_rag_context = matched_files, related_files, graph_rag_context

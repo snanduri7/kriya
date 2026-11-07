@@ -51,9 +51,11 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.egress import dependency_lookup_decision
 from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode
+from kriya.repository.project_view import BEFORE_CONTEXT_MAX_CHARS, render_before_context
 from kriya.tools.validate import MAVEN_VALIDATE_NO_VERDICT_CODES, execution_evidence
 from kriya.workflow.acceptance import output_confirms_nonzero_test_execution, subtask_owns_test_obligation
 from kriya.workflow.banners import log_gate_banner
+from kriya.workflow.context_budget import agent_request_capacity
 from kriya.workflow.edit_safety import StagedFileWrite, read_file_revision
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import (
@@ -1445,6 +1447,14 @@ async def _run_executing_candidate_gates(
         # is their verifier (never passed otherwise, so existing callers and
         # test doubles see the same call).
         requirement_kwargs = {"requirements": ctx.requirement_set} if ctx.requirement_set is not None else {}
+        # The project BEFORE this candidate rides along (same rule: only passed when there is something to say, so existing test doubles see the same call).
+        project_before = ""
+        if ctx.project_view is not None:
+            spec_room = max(0, agent_request_capacity(ctx.kernel.config, ctx.spec_compliance, "spec_compliance").room(
+                ctx.spec_compliance.system_prompt, compliance_goal))            # a quarter of the request's room, 4 characters a token
+            project_before = render_before_context(ctx.project_view, spec_check_files, max_chars=min(BEFORE_CONTEXT_MAX_CHARS, spec_room))
+        if project_before:
+            requirement_kwargs["project_context"] = project_before
         spec_result = await ctx.spec_compliance.check(
             goal=compliance_goal, files_written=spec_check_files, file_contents=spec_file_contents,
             authoritative_context=authoritative_context, baseline_contents=spec_baselines, **requirement_kwargs,
