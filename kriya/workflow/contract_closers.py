@@ -6,9 +6,14 @@ kriya/workflow/authority_bundle.py).
 
 - ``test_addition`` ("add a test for it"): closed by the candidate's own
   mutation record and structured test evidence - a runnable test file the
-  base did not have, or a test identity in the candidate's complete suite
-  report that the base's report does not carry. Never closed by a model
-  statement, a changed test file alone, or an incomplete report.
+  base did not have, an EXISTING test file that gained a test (the structural
+  before/after of that file: a test callable present now and absent before,
+  not a rename of one that disappeared; when the run's test-delta gate
+  recorded which identities executed and passed, the new test must be one of
+  them), or a test identity in the candidate's complete suite report that the
+  base's report does not carry. Never closed by a model statement, a changed
+  test file alone (a reformat, a rename, a modified test, a non-test helper),
+  or an incomplete report.
 - ``documentation_not_applicable`` ("document it in the README's function
   list if there is one"): closed when the conditional referent is absent
   from the candidate as well as the base (nothing to document). A present
@@ -43,6 +48,7 @@ from kriya.workflow.requirements import (
     record_requirement_claim,
     requirement_obligation_id,
 )
+from kriya.workflow.test_delta import added_test_callables
 
 TEST_ADDED = "TEST_ADDED"
 TEST_ADDITION_UNPROVEN = "TEST_ADDITION_UNPROVEN"
@@ -91,19 +97,42 @@ def close_test_addition_requirements(
     reference_test_files: Optional[Sequence[str]], candidate_test_files: Iterable[str],
     base_test_identities: Optional[Iterable[str]], candidate_test_identities: Optional[Iterable[str]],
     source: str, revision: Any, read_candidate: Optional[Callable[[str], Optional[bytes]]] = None,
+    read_reference: Optional[Callable[[str], Optional[bytes]]] = None, executed_passed: Optional[Iterable[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Record the TEST_ADDITION claim of every requirement the contract binds
     to ``test_addition``: SATISFIED when a test file exists in the candidate
     that the reference (pre-run) set lacks AND contains a test
     (``file_contains_a_test``; review VC3-R7: an empty file named like a test
-    is not one), or when the candidate's complete suite report carries a test
-    identity the base's does not; otherwise the claim stays open."""
+    is not one), when an EXISTING test file (in the reference set) gained a test - the structural
+    before/after of the file (``read_reference`` reads its pre-run bytes, ``read_candidate`` the candidate's;
+    ``test_delta.added_test_callables``: a new test callable, not a rename, a reformat or a helper) - or when the
+    candidate's complete suite report carries a test identity the base's does not; otherwise the claim stays open.
+    ``executed_passed`` (the identities the run's test-delta gate recorded as executed and passed, or None when it
+    recorded none): when given, a test gained by an existing file counts only if it is one of them."""
     attempts: List[Dict[str, Any]] = []
     present = sorted(set(candidate_test_files))
     added_files = (sorted(set(present) - set(reference_test_files)) if reference_test_files is not None else None)
     if added_files:
         added_files = [path for path in added_files
                        if read_candidate is not None and file_contains_a_test(path, read_candidate(path))]
+    gained: Dict[str, List[str]] = {}
+    structural_known = False
+    if reference_test_files is not None and read_reference is not None and read_candidate is not None:
+        executed = set(executed_passed) if executed_passed is not None else None
+        for path in sorted(set(present) & set(reference_test_files)):
+            before, after = read_reference(path), read_candidate(path)
+            if before is None or after is None:
+                continue
+            try:
+                items = added_test_callables(path, before.decode("utf-8"), after.decode("utf-8"))
+            except UnicodeDecodeError:
+                continue
+            if items is None:
+                continue
+            structural_known = True
+            identities = [item.identity for item in items if executed is None or item.identity in executed]
+            if identities:
+                gained[path] = identities
     new_identities = (sorted(set(candidate_test_identities) - set(base_test_identities))
                       if base_test_identities is not None and candidate_test_identities is not None else None)
     for requirement_id, binding in contract.binding_closers(CLOSER_TEST_ADDITION):
@@ -112,22 +141,25 @@ def close_test_addition_requirements(
             continue
         evidence_id = _evidence_id(ledger, requirement_id)
         entry: Dict[str, Any] = {"requirement": requirement_id, "kind": TEST_ADDITION_METHOD, "closed": False,
-                                 "added_test_files": added_files, "new_test_identities": new_identities}
+                                 "added_test_files": added_files, "new_test_identities": new_identities,
+                                 "tests_gained_by_existing_files": gained}
         if not evidence_id:
             entry["reason"] = "the verdict has no evidence id to bind to"
-        elif added_files or new_identities:
+        elif added_files or new_identities or gained:
             record_requirement_claim(
                 ledger, requirements, requirement_id, TEST_ADDITION_CLAIM, evidence_id=evidence_id,
                 method=TEST_ADDITION_METHOD,
                 detail={"reason_code": TEST_ADDED, "added_test_files": added_files or [],
-                        "new_test_identities": new_identities or [], "required_claims": list(binding.detail.get(
+                        "new_test_identities": new_identities or [], "tests_gained_by_existing_files": gained,
+                        "required_claims": list(binding.detail.get(
                             "required_claims") or contract.required_claims_by_requirement()[requirement_id])},
                 source=source, revision=revision, status=ObligationStatus.SATISFIED)
             entry.update({"closed": True, "reason_code": TEST_ADDED})
         else:
             entry["reason_code"] = TEST_ADDITION_UNPROVEN
-            entry["reason"] = ("no runnable test file was added and no new test identity is in the candidate's "
-                               "complete report" if added_files is not None or new_identities is not None else
+            entry["reason"] = ("no runnable test file was added, no existing test file gained a test, and no new test "
+                               "identity is in the candidate's complete report"
+                               if added_files is not None or new_identities is not None or structural_known else
                                "the pre-run test files and the base test identities are unknown")
         attempts.append(entry)
     return attempts

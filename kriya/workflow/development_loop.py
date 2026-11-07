@@ -71,6 +71,7 @@ from kriya.workflow.stage_apply import (
     run_artifact_registry_gate,
 )
 from kriya.workflow.stage_context import StageContext, StageDeps
+from kriya.workflow.test_delta import executed_test_identities
 from kriya.workflow.toolchain import (
     _check_java_toolchain_mismatch,
     _resolve_java_home_override,
@@ -750,6 +751,8 @@ async def accept_candidate(ctx: StageContext, deps: StageDeps, run: DevelopmentR
                     deps.close_requirements_by_test_addition,
                     resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
                     workspace_path, revision=state.attempt_number,
+                    # the identities this attempt's test-delta gate recorded as executed and passed (None: it recorded none)
+                    executed_passed=executed_test_identities(state.gate_outcomes, state.attempt_number),
                 ),
                 "documentation": lambda: closer_call(
                     deps.close_requirements_by_documentation,

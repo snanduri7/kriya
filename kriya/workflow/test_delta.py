@@ -26,6 +26,7 @@ Decision (never from method naming, never from an aggregate count change):
 """
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional, Sequence
 
@@ -121,6 +122,67 @@ def test_source_delta(path: str, baseline: Optional[str], candidate: str) -> Opt
 
 
 test_source_delta.__test__ = False  # not a pytest test function
+
+
+def _is_test_callable(path: str, identity: str, declared_test: bool) -> bool:
+    """Whether a callable is a test BY ITS DECLARATION, never by what it contains: a JVM method carrying a test annotation; a Python function/method whose simple name starts with ``test`` (the convention the
+    runners collect on)."""
+    if path.endswith(".py"):
+        return identity.rsplit(".", 1)[-1].startswith("test")
+    return declared_test
+
+
+def _without_name(identity: str, text: bytes) -> bytes:
+    """A callable's declaration with its own simple name removed and whitespace collapsed: what stays the same when a test is only RENAMED or reformatted."""
+    simple = identity.rsplit(".", 1)[-1].encode("utf-8")
+    return b" ".join(text.replace(simple, b"\0").split())
+
+
+def added_test_callables(path: str, baseline: Optional[str], candidate: str) -> Optional[List[DeltaCallable]]:
+    """The test callables ``candidate`` genuinely ADDS to an EXISTING test file (``baseline`` is the file before the run): present now, absent before, declared a test, and not merely a rename of a test
+    that disappeared (same declaration once names are removed). A reformat changes no symbol; a modified test is "modified", not added; a new helper that is not a test is not counted. None when either version
+    cannot be parsed structurally (an unsupported language included) or there is no baseline - the caller then has no structural evidence, never a guess."""
+    if baseline is None or not is_structural_path(path):
+        return None
+    if path.endswith(".py"):
+        try:
+            ast.parse(candidate)            # the structural parser tolerates errors; a test in a file that is not valid Python is not evidence of a test
+        except (SyntaxError, ValueError):
+            return None
+    after = _callables(path, candidate)
+    before = _callables(path, baseline)
+    if after is None or before is None:
+        return None
+    gone = [_without_name(identity, text) for symbol_id, (identity, text, _declared) in before.items() if symbol_id not in after]
+    added = []
+    for symbol_id, (identity, text, declared) in sorted(after.items(), key=lambda item: item[1][0]):
+        if symbol_id in before or not _is_test_callable(path, identity, declared):
+            continue
+        fingerprint = _without_name(identity, text)
+        if fingerprint in gone:
+            gone.remove(fingerprint)      # one disappeared test explains one new name
+            continue
+        added.append(DeltaCallable(path, identity, "added", declared))
+    return added
+
+
+added_test_callables.__test__ = False  # not a pytest test function
+
+
+def executed_test_identities(gate_outcomes: Sequence[Mapping[str, object]], attempt: int) -> Optional[List[str]]:
+    """The test identities the ``test_delta`` gate of ``attempt`` recorded as EXECUTED AND PASSED (its own structured-report verdict), or None when that gate recorded no passing verdict for the attempt (it
+    runs only when the unit owns a test obligation and a test source changed). Pure read of already-recorded authoritative evidence."""
+    found: List[str] = []
+    seen = False
+    for outcome in gate_outcomes:
+        if not isinstance(outcome, Mapping) or outcome.get("type") != "test_delta" or outcome.get("attempt") != attempt or outcome.get("success") is not True:
+            continue
+        detail = outcome.get("test_delta")
+        executed = detail.get("executed") if isinstance(detail, Mapping) else None
+        if isinstance(executed, list):
+            seen = True
+            found.extend(str(identity) for identity in executed)
+    return sorted(set(found)) if seen else None
 
 
 def judge_test_delta(

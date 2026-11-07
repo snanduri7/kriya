@@ -419,15 +419,45 @@ def close_requirements_by_api_preservation(
     )
 
 
+def _reference_file_reader(deps: CloserDeps, candidate_root: str, workspace_path: str) -> Optional[Callable[[str], Optional[bytes]]]:
+    """A reader of a file's content BEFORE this run (the BEFORE of a before/after comparison), or None when it cannot be established: a sandbox candidate's real workspace is untouched until apply, so its
+    files are the before; an in-place candidate's before is the run base's revision (``_oracle_base_revision``). The same source of "before" ``_reference_test_files`` names the files of."""
+    logger = deps.logger
+    from kriya.repository.git import GIT_READ_FAILURES
+    from kriya.workflow.named_test_oracle import BaseTree
+
+    if os.path.realpath(candidate_root) != os.path.realpath(workspace_path):
+        return _workspace_file_reader(workspace_path)
+    base_revision = _oracle_base_revision(deps, candidate_root, workspace_path)
+    if not base_revision:
+        return None
+    try:
+        tree = BaseTree(candidate_root, base_revision)
+    except GIT_READ_FAILURES as exc:
+        logger.info(f"Test addition: base content unavailable: {type(exc).__name__}: {exc}")
+        return None
+
+    def read(path: str) -> Optional[bytes]:
+        try:
+            return tree.read_many([path]).get(path)
+        except (RuntimeError, OSError, *GIT_READ_FAILURES):
+            return None
+
+    return read
+
+
 def close_requirements_by_test_addition(
     deps: CloserDeps,
     ledger: Any, requirement_set: Any, contract: Any, candidate_root: str, workspace_path: str, *,
     base_test_identities: Optional[Iterable[str]] = None, candidate_test_identities: Optional[Iterable[str]] = None,
-    revision: Any,
+    executed_passed: Optional[Iterable[str]] = None, revision: Any,
 ) -> List[Dict[str, Any]]:
     """VERIFICATION-CONTRACT-003: "add a test for it" from the candidate's own
-    test files versus the pre-run set, or its structured test identities
-    versus the base's (kriya/workflow/contract_closers.py)."""
+    test files versus the pre-run set, an existing test file's structural
+    before/after (a test it gained, intersected with the identities the run's
+    test-delta gate recorded as executed and passed when it recorded any), or
+    its structured test identities versus the base's
+    (kriya/workflow/contract_closers.py)."""
     from kriya.workflow.contract_closers import close_test_addition_requirements
     from kriya.workflow.contract_compilation import CLOSER_TEST_ADDITION
 
@@ -438,6 +468,7 @@ def close_requirements_by_test_addition(
         candidate_test_files=_candidate_test_files(candidate_root), base_test_identities=base_test_identities,
         candidate_test_identities=candidate_test_identities, source="requirement_closure.test_addition",
         revision=revision, read_candidate=_workspace_file_reader(candidate_root),
+        read_reference=_reference_file_reader(deps, candidate_root, workspace_path), executed_passed=executed_passed,
     )
 
 

@@ -1380,14 +1380,14 @@ def close_requirements_by_api_preservation(
 def close_requirements_by_test_addition(
     ledger: Any, requirement_set: Any, contract: Any, candidate_root: str, workspace_path: str, *,
     base_test_identities: Optional[Iterable[str]] = None, candidate_test_identities: Optional[Iterable[str]] = None,
-    revision: Any,
+    executed_passed: Optional[Iterable[str]] = None, revision: Any,
 ) -> List[Dict[str, Any]]:
     """The body is ``kriya/workflow/requirement_closers.py::close_requirements_by_test_addition`` (E4); its collaborators
     are resolved here, at call time."""
     return closers.close_requirements_by_test_addition(
         _closer_deps(), ledger, requirement_set, contract, candidate_root, workspace_path,
         base_test_identities=base_test_identities, candidate_test_identities=candidate_test_identities,
-        revision=revision
+        executed_passed=executed_passed, revision=revision
     )
 
 
