@@ -189,9 +189,9 @@ export function CurrentRun() {
     <section className="ck-current" aria-label="Current run" data-stage={run.stage} data-outcome={run.outcome?.kind ?? ''} data-state={phase.state} data-timing={JSON.stringify(run.timing)}>
       <div className="ck-current-head">
         <div role="status" aria-live="polite" className="ck-current-status">
-          <span className={`ck-dot ${phase.tone}`} aria-hidden="true">{finished ? (phase.state === 'COMPLETED' ? '✓' : phase.state === 'STOPPED' ? '■' : '✕') : '●'}</span>
+          <span className={`ck-dot ${phase.tone}`} aria-hidden="true">{cancelled || byYou ? '■' : finished ? (phase.state === 'COMPLETED' ? '✓' : phase.state === 'STOPPED' ? '■' : '✕') : '●'}</span>
           <h2>{heading}</h2>
-          <Badge tone={TONE[phase.tone]}>{finished ? run.outcome!.label : phase.state === 'WAITING_FOR_APPROVAL' ? 'needs you' : 'in progress'}</Badge>
+          <Badge tone={cancelled || byYou ? 'warn' : TONE[phase.tone]}>{cancelled ? (ex.cancelState.phase === 'settled' && ex.cancelState.folder.kind === 'clean' ? 'cancelled by you' : 'cancelled by you - check the folder') : cancelling ? 'cancelling' : finished ? run.outcome!.label : phase.state === 'WAITING_FOR_APPROVAL' ? 'needs you' : 'in progress'}</Badge>
         </div>
         {elapsed ? <span className="muted small" title="Local clock since the launch was recorded - presentation only">elapsed {elapsed}</span> : null}
         {ex.canCancel && live ? <button type="button" className="ck-cancel" onClick={() => void ex.cancelRun()}>Cancel Run</button> : null}

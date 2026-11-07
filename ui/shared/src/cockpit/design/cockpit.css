@@ -249,7 +249,7 @@
 .ck-ws-bar { display: flex; flex-direction: column; gap: 4px; padding: 8px 14px 6px; border-bottom: 1px solid var(--ck-line); }
 .ck-ws-bar-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
 .ck-ws-bar-row .grow { flex: 1; }
-.ck-ws-path { min-width: 0; max-width: 46ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.ck-ws-path { min-width: 0; max-width: 46ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ck-ws-chips { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
 .ck-chip { border: 1px solid var(--ck-line); border-radius: 999px; padding: 1px 10px; font-size: 12px; background: transparent; color: var(--ck-fg); cursor: pointer; }
 .ck-ws-chips li[data-tone="ok"] .ck-chip { border-color: var(--ck-ok, #3fb950); }
@@ -286,3 +286,9 @@
 .ck-cancel { margin-left: 8px; border: 1px solid var(--ck-bad, #f85149); color: var(--ck-fg); background: transparent; border-radius: 6px; padding: 3px 12px; cursor: pointer; }
 .ck-cancel:disabled { opacity: .6; cursor: default; }
 @media (max-width: 899px) { .ck-ws-body { grid-template-columns: minmax(0, 1fr); } }
+
+/* The workspace fills the window exactly (the body grid row is the window minus the toolbar) and nothing in the main pane may be wider than the pane. */
+.ck-body { grid-template-rows: minmax(0, 1fr); }
+.ck-center:has(.ck-ws) { min-height: 0; }
+.ck-ws { height: 100%; }
+.ck-ws-main > * { box-sizing: border-box; max-width: 100%; }

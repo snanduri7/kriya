@@ -31,6 +31,8 @@ describe('Cancel Run', () => {
     expect(host.exec!.cancelCount).toBe(1);
     expect(run.querySelector('h2')!.textContent).toBe('Cancelled');
     expect(within(run).getByTestId('cancelled')).toHaveAttribute('data-folder', 'clean');
+    expect(run).toHaveTextContent('cancelled by you');          // the badge says so - it never reads "Run failed" for a run the person cancelled
+    expect(run).not.toHaveTextContent('Run failed');
     expect(run).toHaveTextContent(/Kriya reports the project folder is clean/);
     expect(within(run).queryByRole('button', { name: 'Recover Project' })).toBeNull();
     expect(within(run).queryByRole('button', { name: 'Cancel Run' })).toBeNull();      // nothing left to cancel
