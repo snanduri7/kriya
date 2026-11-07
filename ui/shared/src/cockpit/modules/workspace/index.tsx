@@ -1,40 +1,42 @@
-import { useEffect, useRef, useState } from 'react';
-import { Badge, CopyText, KeyValue, Panel, hasData, useExecution, useWorkspace, useWorkspacePath, type ModuleDefinition } from '../../core';
+import { useState } from 'react';
+import { INSPECTOR_DRAWER_BELOW, INSPECTOR_NARROW_BELOW, hasData, useExecution, useViewportWidth, useWorkspace, useWorkspaceUi, type ModuleDefinition } from '../../core';
 import { CONFIG_APPROVAL_BLOCKER } from './ConfigApproval';
 import { CurrentRun } from './CurrentRun';
 import { ProjectSetupCard } from './ProjectSetup';
-import { ProjectMemoryCard } from './ProjectMemory';
-import { SecurityCard } from './SecurityCard';
-import { CapabilityStrip, type ComposedCell } from './CapabilityStrip';
+import { type ComposedCell } from './CapabilityStrip';
 import { GoalComposer } from './GoalComposer';
-import { PreflightSummary, ProjectFacts, ReadinessChecklist, checklist, preflightBody, summarizeReadiness } from './Readiness';
-import { RecentRuns } from './RecentRuns';
+import { ActivityDock } from './ActivityDock';
+import { Inspector } from './Inspector';
+import { ProjectBar } from './ProjectBar';
+import { checklist, preflightBody, summarizeReadiness } from './Readiness';
 import { useRunSetup } from './runSetup';
-import { ModelRouting, SkillsSummary, ToolsSummary } from './SetupSections';
-import { RevealButton, SnapshotPicker, workspaceRows } from './WorkspaceFacts';
 
-/** Project Home: the open folder's name and state, the goal and Start Run, or - once a run has started - that run; recent runs; and everything else, one disclosure down. */
+/**
+ * The PROJECT WORKSPACE: a developer's workspace, not a stacked dashboard. A project bar on top (where am I, what can I do with the folder, is it ready, capabilities, settings); the MAIN pane
+ * showing exactly ONE primary state - the goal composer, the running task, the approval, the result or the failure - and growing with the window; the Inspector on the right (Runs, Memory, Security,
+ * Skills, Project: one click each); the Activity dock along the bottom. Below 900 px the Inspector is an overlay drawer. Every panel is the same component over the same Kriya answers as before:
+ * this arranges, it decides nothing.
+ */
 function ProjectHome() {
   const ws = useWorkspace();
   const ex = useExecution();
-  const workspace = useWorkspacePath();
+  const ui = useWorkspaceUi();
+  const width = useViewportWidth();
   const [nonce, setNonce] = useState(0);
-  const { context, probe } = useRunSetup(workspace, nonce, ex.locked);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const detailsRef = useRef<HTMLDetailsElement | null>(null);
-  const [detailsRequested, setDetailsRequested] = useState(0);
-  // "View readiness details" must be SEEN to respond: it opens the Project details panel AND brings it into view (it sits below the run, recent runs, memory and security).
-  useEffect(() => { if (detailsRequested > 0) detailsRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }); }, [detailsRequested]);
+  const { context, probe } = useRunSetup(ws.current?.path ?? null, nonce, ex.locked);
   const open = ws.current;
   if (!open) return <div className="ck-state"><strong>No project is open</strong>Open a folder from the toolbar or File &gt; Open Folder.</div>;
   const f = open.facts;
   const pre = ex.preflight.state === 'ready' ? ex.preflight.data : null;
   const summary = summarizeReadiness(ex, probe, context);
   const recheck = () => { setNonce((n) => n + 1); ex.refreshPreflight(); };
+  const drawer = width < INSPECTOR_DRAWER_BELOW;
+  const inspectorOpen = ui.inspectorOpen ?? !drawer;
+  // "View readiness details" must be SEEN to respond: it selects Inspector > Project and opens the Inspector (a drawer on a narrow window).
+  const showDetails = () => { ui.setTab('project'); ui.setInspectorOpen(true); };
   const skillCount = hasData(context) && context.data.skills ? context.data.skills.total : null;
   const unverified = hasData(context) && context.data.skills ? context.data.skills.items.filter((k) => !k.verified).length : 0;
   const mcp = hasData(context) && context.data.tools ? context.data.tools.mcp_servers.length : null;
-  const showDetails = () => { setDetailsOpen(true); setDetailsRequested((n) => n + 1); };
   // The strip's model / Skills / Tools cells are this page's own backend answers (the model probe and the catalog), passed through in their own words.
   const modelCell = pre ? checklist(pre, probe).find((r) => r.label === 'Model server') ?? null : null;
   const composed: Record<string, ComposedCell | null> = {
@@ -42,39 +44,27 @@ function ProjectHome() {
     skills: skillCount === null ? null : { label: 'Skills', tone: unverified ? 'warn' : 'ok', status: `${skillCount}${unverified ? ` · ${unverified} unverified` : ''}` },
     tools: mcp === null ? null : { label: 'Tools', tone: 'info', status: `${mcp} MCP server${mcp === 1 ? '' : 's'}` },
   };
-  // The only thing between the person and Start Run is an approval they can give here.
-  const actionOnly = ex.canApproveConfiguration && summary.state === 'blocked' && summary.blockers.length > 0 && summary.blockers.every((b) => b.code === CONFIG_APPROVAL_BLOCKER);
   // State A: a folder with no configuration file. Setup is recommended, never required (the folder is already runnable on the defaults).
   const unconfigured = !ex.run && ex.canInitializeProject && pre !== null && pre.configuration.file === null && pre.configuration.status !== 'failed' && f.name !== undefined;
+  // The only thing between the person and Start Run is an approval they can give here.
+  const actionOnly = ex.canApproveConfiguration && summary.state === 'blocked' && summary.blockers.length > 0 && summary.blockers.every((b) => b.code === CONFIG_APPROVAL_BLOCKER);
+  const verdict = ex.run ? null : summary.state === 'ready' ? 'ready' : actionOnly ? 'action' : summary.state === 'blocked' || summary.state === 'error' ? 'blocked' : null;
+  const mode = drawer ? 'drawer' : width < INSPECTOR_NARROW_BELOW ? 'medium' : 'wide';
   return (
-    <div className="ck-project">
-      <div className="ck-project-head">
-        <h1>{f.name}</h1>
-        <span className="muted mono small" title={f.workspace}>{f.workspace}</span>
-        <span className="grow" />
-        {ex.run ? null : summary.state === 'ready' ? <Badge tone="ok">✓ Ready</Badge> : actionOnly ? <Badge tone="warn">Action required</Badge> : summary.state === 'blocked' || summary.state === 'error' ? <Badge tone="bad">Cannot start</Badge> : null}
+    <div className="ck-ws" data-testid="project-workspace" data-mode={mode} data-inspector={inspectorOpen ? 'open' : 'closed'}>
+      <ProjectBar name={f.name} path={f.workspace} pre={pre} probe={probe} composed={composed} inspectorOpen={inspectorOpen} verdict={verdict} />
+      <div className="ck-ws-body">
+        <main className="ck-ws-main" aria-label="Current task">
+          {ex.run ? <CurrentRun /> : ex.available ? <GoalComposer summary={summary} onDetails={showDetails} onRecheck={recheck} /> : <section aria-label="Start a run"><h2>Enter a goal</h2><p className="muted" role="status">This host cannot start a run.</p></section>}
+          {unconfigured ? <ProjectSetupCard model={pre.model?.model ?? null} fallbacks={pre.model?.fallback_chain ?? []} onCreated={recheck} /> : null}
+        </main>
+        {inspectorOpen ? (
+          <div className={`ck-ws-inspector${drawer ? ' overlay' : ''}`}>
+            <Inspector pre={pre} probe={probe} context={context} preflightFallback={ex.available ? preflightBody(ex.preflight) : null} onRecheck={recheck} />
+          </div>
+        ) : null}
       </div>
-      {pre?.health ? <CapabilityStrip health={pre.health} composed={composed} memory={pre.memory} /> : null}
-      {unconfigured ? <ProjectSetupCard model={pre.model?.model ?? null} fallbacks={pre.model?.fallback_chain ?? []} onCreated={recheck} /> : null}
-      {ex.run ? <CurrentRun /> : ex.available ? <GoalComposer summary={summary} onDetails={showDetails} onRecheck={recheck} /> : <section aria-label="Start a run"><h2>What do you want Kriya to do?</h2><p className="muted" role="status">This host cannot start a run.</p></section>}
-      <RecentRuns />
-      {pre?.memory ? <ProjectMemoryCard memory={pre.memory} onRecheck={recheck} /> : null}
-      {pre?.security ? <SecurityCard rows={pre.health ?? []} demonstrations={pre.security.demonstrations} /> : null}
-      <details ref={detailsRef} className="ck-setup" open={detailsOpen} onToggle={(e) => setDetailsOpen((e.currentTarget as HTMLDetailsElement).open)}>
-        <summary>Project details</summary>
-        {pre ? <ProjectFacts pre={pre} probe={probe} /> : ex.available ? preflightBody(ex.preflight) : null}
-        {ex.available ? <p><button type="button" className="ck-quiet" onClick={recheck}>Check again</button></p> : null}
-        {pre ? <details className="ck-setup" data-testid="technical-project-details"><summary>Technical details</summary><ReadinessChecklist pre={pre} probe={probe} /></details> : null}
-        <details className="ck-setup"><summary>Skills{skillCount === null ? '' : ` · ${skillCount}${unverified ? ` (${unverified} unverified)` : ''}`}</summary><SkillsSummary context={context} /></details>
-        <details className="ck-setup"><summary>Tools and capabilities{mcp === null ? '' : ` · ${mcp} MCP server${mcp === 1 ? '' : 's'}`}</summary><ToolsSummary context={context} /></details>
-        <details className="ck-setup"><summary>Model routing</summary><ModelRouting context={context} probe={probe} /></details>
-        {pre ? <details className="ck-setup"><summary>Run configuration details</summary><PreflightSummary data={pre} /></details> : null}
-        <Panel title="About this project">
-          <KeyValue items={workspaceRows(f, <SnapshotPicker />, <span key="p"><span className="mono">{f.workspace}</span> <CopyText text={f.workspace} what="workspace path" /> <RevealButton /></span>)} />
-          {f.configuration.file_in_workspace ? <p className="muted small" role="note">{f.configuration.note}</p> : null}
-          <p className="muted small">Opening a folder only reads it. Nothing was written to it and no run was started.</p>
-        </Panel>
-      </details>
+      <ActivityDock />
     </div>
   );
 }

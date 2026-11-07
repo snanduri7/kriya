@@ -142,6 +142,7 @@ describe('the Project page', () => {
   it('shows the memory Kriya reported in its preflight', async () => {
     renderWorkspaceShell({ fixture: { workspace: WS, execution: { outcome: 'success', memory: memory() } } });
     await screen.findByRole('navigation', { name: 'Destinations' });
+    fireEvent.click(await screen.findByRole('tab', { name: 'Memory' }));        // one click away in the Inspector
     const card = await screen.findByRole('region', { name: 'Verified Project Memory' });
     expect(card.textContent).toContain('Build system: Maven');
   });

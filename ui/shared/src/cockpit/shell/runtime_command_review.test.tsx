@@ -268,12 +268,12 @@ describe('a run that could not even start runtime verification says so in words 
   });
 });
 
-describe('Activity drawer: recorded facts, in words, for the run being followed', () => {
-  it('Show Activity opens it on Activity (default); it names the waiting subject, then the decision; Build and Tests list only recorded results; there is no Technical Log tab', async () => {
+describe('Activity dock: recorded facts, in words, for the run being followed', () => {
+  it('the dock is open while the run is active, on Activity (default); it names the waiting subject, then the decision; Build and Tests list only recorded results; there is no Technical Log tab', async () => {
     const { host, bar } = await reachRuntimeReview();
     await commands();
-    fireEvent.click(within(bar).getByRole('button', { name: 'Show Activity' }));
-    const drawer = await within(bar).findByTestId('activity-drawer');
+    const drawer = await screen.findByTestId('activity-dock');       // open by itself while a run is active
+    expect(drawer).toHaveAttribute('data-open', 'true');
     expect(within(drawer).getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
     expect(within(drawer).queryByRole('tab', { name: /Technical Log/i })).toBeNull();
     expect(within(drawer).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Activity', 'Build', 'Tests']);
@@ -288,8 +288,9 @@ describe('Activity drawer: recorded facts, in words, for the run being followed'
     expect(await within(drawer).findByLabelText('Build results')).toHaveTextContent('✓ Build passed');   // a RECORDED compile gate of the run's evidence
     fireEvent.click(within(drawer).getByRole('tab', { name: 'Tests' }));
     expect(await within(drawer).findByLabelText('Test results')).toHaveTextContent(/Tests passed/);
-    fireEvent.click(within(drawer).getByRole('button', { name: 'Hide Activity' }));
-    expect(within(bar).queryByTestId('activity-drawer')).toBeNull();
+    fireEvent.click(within(drawer).getByRole('button', { name: /ACTIVITY/ }));      // collapse: the latest line stays visible in the bar
+    expect(drawer).toHaveAttribute('data-open', 'false');
+    expect(within(drawer).getByTestId('activity-latest').textContent).toMatch(/Commands allowed|Run started|Build|Tests|Waiting/);
   });
 });
 

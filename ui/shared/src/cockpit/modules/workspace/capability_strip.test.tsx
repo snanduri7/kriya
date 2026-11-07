@@ -3,7 +3,7 @@
  * Skills and Tools cells are the page's own backend answers; Learning is the memory block's counts. A capability with no answer is absent, never shown as available.
  * The backend rows are pinned in tests/test_project_health_rows.py.
  */
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { ExecutionPreflight, ProjectMemory } from '../../../model/kup';
 import { renderWorkspaceShell } from '../../testing/harness';
@@ -70,9 +70,14 @@ describe('the Project page', () => {
   it('shows the strip from the health rows in the preflight, with the memory counts', async () => {
     renderWorkspaceShell({ fixture: { workspace: '/fixture/empty', execution: { outcome: 'success', health: [row('security', 'AVAILABLE'), row('lsp', 'UNAVAILABLE')], memory: memory(2) } } });
     await screen.findByRole('navigation', { name: 'Destinations' });
+    const toggle = await screen.findByTestId('capabilities-toggle');                        // collapsed: ONE line of counts, not eleven cells
+    expect(screen.queryByTestId('capability-strip')).toBeNull();
+    expect(screen.getByTestId('capabilities-summary').textContent).toMatch(/\d+ ready/);
+    fireEvent.click(toggle);
     const strip = await screen.findByTestId('capability-strip');
     expect(within(strip).getByText('Security')).toBeTruthy();
     expect(within(strip).getByText('2 current')).toBeTruthy();
+    expect(within(strip).getAllByText(/\(.*evidence:/).length).toBeGreaterThan(0);        // the reason and evidence Kriya gave stay visible
   });
 
   it('shows no strip when the preflight carries no health (an older Kriya)', async () => {

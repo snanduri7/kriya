@@ -74,6 +74,7 @@ describe('Workspace: snapshot choice', () => {
     const { host } = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace', extraSnapshotIds: [other] } });
     await screen.findByRole('navigation', { name: 'Destinations' });
     goTo('Project');
+    fireEvent.click(await screen.findByRole('tab', { name: 'Project' }));
     const picker = await screen.findByRole('combobox', { name: 'Pinned snapshot' });
     expect(within(picker).getAllByRole('option')).toHaveLength(2);
     fireEvent.change(picker, { target: { value: other } });

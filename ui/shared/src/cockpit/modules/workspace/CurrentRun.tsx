@@ -1,7 +1,6 @@
-import { useState } from 'react';
 import { OpenInEditorButton, RevealButton } from './WorkspaceFacts';
 import { folderFact } from './Readiness';
-import { ActivityDrawer, ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failedDuring, failureSummary, retrySummary, runtimeStopWords, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, useWorkspacePath, VerificationLines, FormalRequirementDisclosure, TechnicalVerification, formalRequirementStatus, primaryVerification, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
+import { ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failedDuring, failureSummary, retrySummary, runtimeStopWords, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, useWorkspacePath, VerificationLines, FormalRequirementDisclosure, TechnicalVerification, formalRequirementStatus, primaryVerification, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
 const MARK = { done: '✓', current: '●', pending: '○' } as const;
@@ -164,7 +163,6 @@ export function CurrentRun() {
   const dispatch = useDispatch();
   const go = useNavigate();
   const run = ex.run;
-  const [activityOpen, setActivityOpen] = useState(false);
   const elapsed = useElapsed(run?.status?.launch.requested_at ?? null, run !== null && run.stage !== 'finished', run?.status?.launch.ended?.at ?? null);
   if (!run) return null;
   const phase = runPhase(run);
@@ -228,12 +226,10 @@ export function CurrentRun() {
       </details>
       {run.progress.error ? <div className="muted small" role="note">Live records could not be read: {run.progress.error}</div> : null}
       {run.statusError ? <div className="muted small" role="alert">Launch status unreadable: {run.statusError.code}: {run.statusError.message}</div> : null}
-      {activityOpen ? <ActivityDrawer launchId={run.launchId} onClose={() => setActivityOpen(false)} /> : null}
       {!cancelled ? (
         <>
           {finished && phase.state !== 'COMPLETED' ? <h4 className="ck-action-sub" data-testid="what-you-can-do">What you can do</h4> : null}
           <div className="ck-current-actions">
-            {!activityOpen ? <button type="button" className="ck-quiet" onClick={() => setActivityOpen(true)}>Show Activity</button> : null}
             {finished ? (
               <>
                 {phase.state !== 'COMPLETED' ? <button type="button" className="ck-primary" onClick={ex.rerun}>Run again</button> : null}

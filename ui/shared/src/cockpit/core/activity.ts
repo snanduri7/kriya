@@ -98,3 +98,19 @@ export function resultsFromRecords(records: readonly EvidenceRecord[], family: '
     return { key: `g${g.seq}`, text: word, ok: cases === 0 ? null : g.success, attempt: g.attempt };
   });
 }
+
+/**
+ * The wall-clock time of a record as the person's LOCAL HH:MM:SS (the Runs list and the rest of the cockpit show local time; the records carry UTC). `timeZone` is for tests only.
+ * An absent or unparseable time is an empty string - never a guess.
+ */
+export function localClock(iso: string | null, timeZone?: string): string {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  return new Date(t).toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', ...(timeZone ? { timeZone } : {}) });
+}
+
+/** Whether a scrolling list should follow new lines: only while the person is already at (or within `slack` px of) the bottom - scrolling up to read older lines is never undone. */
+export function shouldStickToBottom(box: { scrollTop: number; clientHeight: number; scrollHeight: number }, slack = 24): boolean {
+  return box.scrollHeight - box.scrollTop - box.clientHeight <= slack;
+}

@@ -8,7 +8,7 @@ import { createSelectionStore } from '../../core';
 import { FixtureHost, type FixtureHostOptions } from '../../providers/fixture';
 import type { FixtureExecutionOptions } from '../../providers/fixture/fixtureExecution';
 import { HostProvider } from '../../providers/hostProvider';
-import { FAST_POLL, renderWorkspaceShell } from '../../testing/harness';
+import { FAST_POLL, openInspectorTab, renderWorkspaceShell, selectInspectorTab } from '../../testing/harness';
 import { AppShell } from '../../shell/AppShell';
 import type { KupEnvelope, KupRequest } from '../../../model/kup';
 
@@ -18,10 +18,15 @@ async function openPanel(fixture: FixtureHostOptions = {}) {
   await screen.findByRole('navigation', { name: 'Destinations' });
   goTo('Project');
   await screen.findAllByText(/^✓ Ready|Cannot start|Action required/);
+  await openInspectorTab('Project');
   const readiness = await screen.findByRole('region', { name: 'Readiness' }); // under Project details: the compact summary is what sits above Start Run
   return { ...mounted, readiness };
 }
-const section = (summary: RegExp) => screen.getByText(summary, { selector: 'summary' }).closest('details') as HTMLElement;
+// Skills and Tools live in the Skills tab of the Inspector; Model routing and Run configuration details in the Project tab: selecting the right tab is part of looking for the section.
+const section = (summary: RegExp) => {
+  selectInspectorTab(/Skills|Tools and/.test(summary.source) ? 'Skills' : 'Project');
+  return screen.getByText(summary, { selector: 'summary' }).closest('details') as HTMLElement;
+};
 const row = (readiness: HTMLElement, label: string) => within(readiness).getByText(label).closest('li') as HTMLElement;
 
 describe('readiness', () => {
@@ -233,11 +238,13 @@ describe('stale answers never overwrite a newer workspace', () => {
     await waitFor(() => expect(host.workspaceCalls).toContain('remember:/fixture/empty'));
     goTo('Project');
     await screen.findAllByText(/^✓ Ready/);
+    await openInspectorTab('Project');
     const readiness = await screen.findByRole('region', { name: 'Readiness' });
     await waitFor(() => expect(within(row(readiness, 'Model server')).getByText('Not reachable')).toBeInTheDocument());
     await within(section(/^Skills/)).findByText('No Skills were discovered for this folder.');
     act(() => slow.release()); // A's late answers land now
     await new Promise((r) => setTimeout(r, 200));
+    selectInspectorTab('Project');                       // the Skills assertions above selected the Skills tab
     expect(within(row(screen.getByRole('region', { name: 'Readiness' }), 'Model server')).getByText('Not reachable')).toBeInTheDocument(); // still B's
     expect(within(section(/^Skills/)).getByText('No Skills were discovered for this folder.')).toBeInTheDocument();
     expect(within(section(/^Skills/)).queryByText('python-testing')).toBeNull();

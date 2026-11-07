@@ -1,5 +1,5 @@
 /** Test infrastructure: mount one module (or the whole shell) over the deterministic fixture provider. Never imported by product code. */
-import { render } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { initialSelection, type Selection } from '../../state/selection';
 import { createFixtureProvider, FixtureHost, type FixtureHostOptions } from '../providers/fixture';
 import { HostProvider } from '../providers/hostProvider';
@@ -44,4 +44,13 @@ export function renderWorkspaceShell(opts: { fixture?: FixtureHostOptions; regis
   const store = createSelectionStore({ ...initialSelection });
   render(<AppShell provider={provider} registry={opts.registry ?? createCockpitRegistry()} selection={store} viewportWidth={opts.width ?? 1440} pollIntervals={FAST_POLL} initialPage={opts.page} {...(opts.inspectorOpen === null ? {} : { initialInspectorOpen: opts.inspectorOpen ?? true })} />);
   return { provider, store, host };
+}
+
+/** Select an Inspector tab (Runs, Memory, Security, Skills, Project) on the Project page, synchronously: the panels moved off the long page into tabs, one click each. */
+export function selectInspectorTab(name: 'Runs' | 'Memory' | 'Security' | 'Skills' | 'Project'): void {
+  fireEvent.click(screen.getByRole('tab', { name }));
+}
+/** The same, waiting for the tab to be on screen first (right after a page or folder change). */
+export async function openInspectorTab(name: 'Runs' | 'Memory' | 'Security' | 'Skills' | 'Project'): Promise<void> {
+  fireEvent.click(await screen.findByRole('tab', { name }));
 }

@@ -11,8 +11,8 @@ const goTo = (name: string) => fireEvent.click(within(screen.getByRole('navigati
 const banner = () => screen.findByRole('region', { name: 'Current run' });
 const goalBox = () => screen.findByRole('textbox', { name: 'Engineering goal' });
 const startButton = () => screen.getByRole('button', { name: /^Start Run$|^Starting…$/ });
-/** The Project page's "Project details" disclosure holds the full readiness; the tests that read it open it like a person would. */
-const openDetails = async () => { const summary = await screen.findByText('Project details'); if (!summary.closest('details')!.open) fireEvent.click(summary); };
+/** The full readiness is the Inspector's Project tab (it used to be the "Project details" disclosure far down the page); the tests that read it open it like a person would. */
+const openDetails = async () => { fireEvent.click(await screen.findByRole('tab', { name: 'Project' })); };
 const GOAL = 'Add a clamp(value, low, high) function with tests.';
 
 async function openRunPanel(fixture = {}) {
@@ -43,11 +43,11 @@ describe('New Run entry', () => {
 });
 
 describe('goal and preflight', () => {
-  it('shows Kriya\'s preflight in its own words (under Project details) and keeps Start Run off until there is a goal', async () => {
+  it('shows Kriya\'s preflight in its own words (under the Inspector Project tab) and keeps Start Run off until there is a goal', async () => {
     await openRunPanel();
     await screen.findAllByText(/^✓ Ready/);
     await openDetails();
-    const panel = (await screen.findByRole('heading', { level: 1 })).closest('.ck-project') as HTMLElement;
+    const panel = (await screen.findByRole('heading', { level: 1 })).closest('.ck-ws') as HTMLElement;
     expect((await within(panel).findAllByText('Packaged defaults (this folder has no kriya.yaml)')).length).toBeGreaterThan(0); // checklist + details
     expect(within(panel).getAllByText(/No findings: this folder's configuration sets nothing only an operator may set/).length).toBeGreaterThan(0);
     expect(within(panel).getAllByText('/fixture/state').length).toBeGreaterThan(0);
@@ -73,7 +73,7 @@ describe('goal and preflight', () => {
       const { unmount } = (() => { const m = renderWorkspaceShell({ fixture: { workspace: folder } }); return { unmount: () => m }; })();
       await screen.findByRole('navigation', { name: 'Destinations' });
       goTo('Project');
-      const panel = (await screen.findByRole('heading', { level: 1 })).closest('.ck-project') as HTMLElement;
+      const panel = (await screen.findByRole('heading', { level: 1 })).closest('.ck-ws') as HTMLElement;
       await within(panel).findAllByText(/^✓ Ready/);
       await openDetails();
       texts.push(within(panel).getAllByRole('term').map((t) => t.textContent ?? ''));
@@ -277,6 +277,7 @@ describe('Start Run', () => {
 
   it('shows which tools a run can see, without claiming a goal needs them', async () => {
     await openRunPanel();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Project' }));   // the toolchain facts are under the Inspector's Project tab
     const line = await screen.findByText('Tools a run can see');
     const row = line.nextElementSibling as HTMLElement;
     expect(row.textContent).toContain('python3, git');

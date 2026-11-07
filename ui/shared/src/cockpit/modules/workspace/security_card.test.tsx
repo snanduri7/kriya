@@ -2,7 +2,7 @@
  * The Security card. The renderer states nothing of its own: protections are Kriya's `health` rows; every refusal is the canonical owner's decision (outcome, reason code, rule)
  * about a situation built in a disposable folder. The backend rows are pinned in tests/test_security_demonstration.py and tests/test_project_health_rows.py.
  */
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { ExecutionPreflight, SecurityDemonstration } from '../../../model/kup';
 import { renderWorkspaceShell } from '../../testing/harness';
@@ -47,6 +47,7 @@ describe('the Project page', () => {
   it('shows the security card from the preflight', async () => {
     renderWorkspaceShell({ fixture: { workspace: '/fixture/empty', execution: { outcome: 'success', health: [health('security', 'AVAILABLE')], security: { demonstrations: [demo('write_outside_scope', 'BLOCKED')] } } } });
     await screen.findByRole('navigation', { name: 'Destinations' });
+    fireEvent.click(await screen.findByRole('tab', { name: 'Security' }));      // one click away in the Inspector
     const card = await screen.findByTestId('security-card');
     expect(within(card).getByText('BLOCKED')).toBeTruthy();
   });

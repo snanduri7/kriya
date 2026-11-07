@@ -1,6 +1,7 @@
 /** The public surface of UI Core: the only thing feature modules import (from '../../core'). */
 export * from './async';
 export * from './catalogView';
+export { localClock, shouldStickToBottom } from './activity';
 export { CopyText } from './CopyText';
 export * from './availability';
 export * from './capability';
@@ -13,7 +14,7 @@ export * from './runFacts';
 export * from './elapsed';
 export * from './runFactsHooks';
 export { ApprovalReview, useChangeReview, CHANGED_MESSAGE } from './ApprovalReview';
-export { ActivityDrawer, useRunRecords } from './ActivityDrawer';
+export { RecordedResults, useRunRecords } from './ActivityDrawer';
 export { conciseWhy, renderMarkdown, reviewBody } from './markdown';
 export { activityEntries, activityFromLaunch, activityFromRecords, resultsFromRecords, type ActivityEntry } from './activity';
 export { attemptRejections, failedDuring, rejectionOf, retrySummary, DELIVERY_WORDS, type AttemptRejection, type RetrySummary } from './retryFacts';
@@ -39,3 +40,6 @@ export { RunMemoryLine, memoryRunIdOf } from './RunMemoryLine';
 export { ReplayNotice } from './ReplayNotice';
 export { BeforeAfter, deliveredLabel, recoveryText, securityText, summaryRows, writeScopeOf } from './BeforeAfter';
 export { RunCapabilityStrip, runCapabilityCells, type RunCapabilityInput, type RunCell } from './RunCapabilityStrip';
+
+export { INSPECTOR_DRAWER_BELOW, INSPECTOR_NARROW_BELOW, ViewportWidthContext, useViewportWidth } from './viewport';
+export { INSPECTOR_TABS, WorkspaceUiContext, useWorkspaceUi, useWorkspaceUiState, type InspectorTab, type WorkspaceUi } from './workspaceUi';

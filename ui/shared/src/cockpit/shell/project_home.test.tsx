@@ -72,18 +72,19 @@ describe('B/C/D. The idle Project page: goal, Start Run, compact readiness', () 
     expect(screen.getByText(/⌘ Enter|Ctrl Enter/)).toBeInTheDocument(); // the shortcut is shown beside the button
   });
 
-  it('Start Run is a first-level control: outside every disclosure and before the readiness detail, the Skills/Tools/routing sections and the recent runs in reading order', async () => {
+  it('Start Run is a first-level control in the MAIN pane: outside every disclosure, the goal box before it, and the Inspector (recent runs, memory, security, readiness) a separate pane beside it', async () => {
     await openProject();
     const start = startButton();
     expect(start.closest('details')).toBeNull();
-    const detail = screen.getByText('Project details').closest('details')!;
-    expect(detail.open).toBe(false); // the ten-row readiness is a click away, not above the button
-    const recent = screen.getByRole('region', { name: 'Recent runs' });
-    for (const later of [detail, recent]) expect(start.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const main = screen.getByRole('main', { name: 'Current task' });
+    expect(main.contains(start)).toBe(true);
+    const inspector = screen.getByTestId('inspector');
+    expect(main.contains(inspector)).toBe(false);
+    expect(screen.getByRole('region', { name: 'Recent runs' })).toBeInTheDocument();      // the Inspector opens on Runs
     expect(screen.getByRole('textbox', { name: 'Engineering goal' }).compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('readiness is one compact line: Ready, the model, how many Skills and tools - the full checklist is under Project details', async () => {
+  it('readiness is one compact line: Ready, the model, how many Skills and tools - the full checklist is the Inspector\'s Project tab', async () => {
     await openProject();
     const line = (await screen.findAllByText(/^✓ Ready/)).map((e) => e.closest('.ck-contextline')).find(Boolean) as HTMLElement;
     expect(line).toHaveTextContent(/fixture-model:7b/);
@@ -91,7 +92,7 @@ describe('B/C/D. The idle Project page: goal, Start Run, compact readiness', () 
     expect(line).toHaveTextContent(/\d+ tools?/);
     expect(within(line).getByRole('button', { name: 'View readiness details' })).toBeInTheDocument();
     fireEvent.click(within(line).getByRole('button', { name: 'View readiness details' }));
-    await waitFor(() => expect(screen.getByText('Project details').closest('details')!.open).toBe(true));
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Project' })).toHaveAttribute('aria-selected', 'true'));
     expect(screen.getByRole('region', { name: 'Readiness' })).toBeInTheDocument();
   });
 
@@ -279,21 +280,26 @@ describe('B10. a failed run says what happened and what the person can do', () =
 });
 
 describe('A6. "View readiness details" is never a dead control', () => {
-  it('opens the Project details panel and brings it into view (it sits below the run, recent runs, memory and security)', async () => {
-    const scrolled: Element[] = [];
-    const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function scrollIntoViewStub(this: Element) { scrolled.push(this); };
-    try {
-      await openProject();
-      await screen.findAllByText(/^✓ Ready/);
-      const panel = screen.getByText('Project details').closest('details')!;
-      expect(panel.open).toBe(false);
-      fireEvent.click(screen.getByRole('button', { name: 'View readiness details' }));
-      await waitFor(() => expect(panel.open).toBe(true));
-      expect(scrolled).toContain(panel);
-    } finally {
-      Element.prototype.scrollIntoView = original;
-    }
+  it('selects the Inspector\'s Project tab, which shows the readiness (one click, no scrolling)', async () => {
+    await openProject();
+    await screen.findAllByText(/^✓ Ready/);
+    expect(screen.getByRole('tab', { name: 'Project' })).toHaveAttribute('aria-selected', 'false');
+    fireEvent.click(screen.getByRole('button', { name: 'View readiness details' }));
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Project' })).toHaveAttribute('aria-selected', 'true'));
+    expect(await screen.findByTestId('project-facts')).toBeInTheDocument();
+  });
+
+  it('on a narrow window the Inspector is a closed drawer; View readiness details opens it on the Project tab', async () => {
+    const mounted = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace' }, width: 800 });
+    await screen.findByRole('navigation', { name: 'Destinations' });
+    await screen.findByText('What do you want Kriya to do?');
+    expect(screen.queryByTestId('inspector')).toBeNull();
+    await screen.findAllByText(/^✓ Ready/);
+    fireEvent.click(screen.getByRole('button', { name: 'View readiness details' }));
+    const inspector = await screen.findByTestId('inspector');
+    expect(inspector).toHaveAttribute('data-mode', 'drawer');
+    expect(screen.getByRole('tab', { name: 'Project' })).toHaveAttribute('aria-selected', 'true');
+    expect(mounted.host).toBeDefined();
   });
 });
 
@@ -394,8 +400,7 @@ describe('M/N and accessible names', () => {
 describe('Project details and Recent runs are compact and in plain words (Demo V2)', () => {
   it('Project details lead with four plain lines; the exact authority diagnostics are one level down under Technical details', async () => {
     await openProject();
-    const details = document.querySelector('details.ck-setup > summary')!.parentElement as HTMLDetailsElement;
-    details.open = true;
+    fireEvent.click(await screen.findByRole('tab', { name: 'Project' }));
     const facts = await screen.findByTestId('project-facts');
     expect(Array.from(facts.querySelectorAll('li')).map((li) => (li.textContent ?? '').replace(/\s+/g, ' ').trim().split(' Protected')[0])).toEqual(
       expect.arrayContaining(['✓ Project folder Ready', '✓ Git Ready']));

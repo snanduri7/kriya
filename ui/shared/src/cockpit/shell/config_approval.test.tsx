@@ -347,6 +347,7 @@ describe('K. an approval does not outlive the configuration it was given for', (
     fireEvent.click(approveButton());
     await waitFor(() => expect(startButton()).toBeEnabled());
     host.exec!.changeConfiguration();
+    fireEvent.click(screen.getByRole('tab', { name: 'Project' }));   // the readiness re-check is on the Inspector's Project tab
     fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
     expect(await card()).toHaveTextContent('Configuration approval required');
     await waitFor(() => expect(startButton()).toBeDisabled());
@@ -360,6 +361,7 @@ describe('K. an approval does not outlive the configuration it was given for', (
     fireEvent.click(approveButton());
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Configuration approval' })).toBeNull());
     host.exec!.revokeConfigurationApproval();
+    fireEvent.click(screen.getByRole('tab', { name: 'Project' }));   // the readiness re-check is on the Inspector's Project tab
     fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
     expect(await card()).toBeInTheDocument();
   });

@@ -2,7 +2,7 @@
  * is Kriya's workspace.describe answer; nothing is classified greenfield or brownfield; opening a folder only reads. */
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { renderWorkspaceShell } from '../testing/harness';
+import { openInspectorTab, renderWorkspaceShell } from '../testing/harness';
 import { RECENT_RUN } from './recent_runs_helpers';
 
 const toolbar = () => screen.getByRole('banner');
@@ -110,6 +110,7 @@ describe('Kriya, not the UI, says what the folder is - empty, existing, non-Git 
     await openFromWelcome();
     await screen.findByRole('navigation', { name: 'Destinations' });
     goTo('Project');
+    await openInspectorTab('Project');
     const panel = (await screen.findByRole('heading', { name: 'About this project' })).closest('section')!;
     const text = panel.textContent ?? '';
     for (const p of patterns) expect(text).toMatch(p);
@@ -126,6 +127,7 @@ describe('Kriya, not the UI, says what the folder is - empty, existing, non-Git 
       await openFromWelcome();
       await screen.findByRole('navigation', { name: 'Destinations' });
       goTo('Project');
+      await openInspectorTab('Project');
       const panel = (await screen.findByRole('heading', { name: 'About this project' })).closest('section')!;
       labels.push([...panel.querySelectorAll('dt')].map((d) => d.textContent ?? ''));
       document.body.innerHTML = '';
@@ -237,6 +239,7 @@ describe('the Project page lives in the registry like any module', () => {
     renderWorkspaceShell({ fixture: { choices: [] } });
     await screen.findByText(RECENT_RUN, undefined, { timeout: 3000 });
     goTo('Project');
+    await openInspectorTab('Project');
     const panel = (await screen.findByRole('heading', { name: 'About this project' })).closest('section')!;
     expect(panel.textContent).toMatch(/Pinned snapshot\s*2026/);
     expect(panel.querySelector('[title^="abababab"]')).not.toBeNull();

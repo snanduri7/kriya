@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CockpitProviders, NavigationContext, PROJECT_PAGE, createSelectionStore, useCapabilities, useShellSelection, useWorkspace, type ModuleRegistry, type PollIntervals, type SelectionStore, type UIProvider } from '../core';
+import { CockpitProviders, NavigationContext, PROJECT_PAGE, ViewportWidthContext, WorkspaceUiContext, useWorkspaceUiState, createSelectionStore, useCapabilities, useShellSelection, useWorkspace, type ModuleRegistry, type PollIntervals, type SelectionStore, type UIProvider } from '../core';
 import type { Selection } from '../../state/selection';
 import { EvidenceDrawer } from './EvidenceDrawer';
 import { ExecutionInspector } from './ExecutionInspector';
@@ -101,8 +101,11 @@ function Shell({ registry, viewportWidth, initialPage, initialInspectorOpen }: {
   if (workspace && !(hasInspector && showInspector)) classes.push('no-inspector');
 
   const navigate = useCallback((id: string) => { if (pages.some((p) => p.id === id)) setPageId(id); }, [pages, setPageId]);
+  const workspaceUi = useWorkspaceUiState();
   return (
     <NavigationContext.Provider value={navigate}>
+    <ViewportWidthContext.Provider value={width}>
+    <WorkspaceUiContext.Provider value={workspaceUi}>
     <div className="ck ck-shell" ref={root} onKeyDown={onKeyDown} data-width={width} data-page={folderOpen ? page?.id ?? '' : 'welcome'}>
       <GlobalToolbar bare={!folderOpen} runStrip={page?.id !== PROJECT_PAGE} showSecondaryToggle={hasSecondary} showInspectorToggle={hasInspector} open={toggles} onToggle={(which) => {
         if (which === 'secondary') setSecondaryOpen(!showSecondary);
@@ -132,6 +135,8 @@ function Shell({ registry, viewportWidth, initialPage, initialInspectorOpen }: {
       {folderOpen && workspace && runSelected && showInspector ? <EvidenceDrawer modules={drawer} /> : null} {/* Build / Tests / Git / Raw Events are the technical layer: they open with the technical timeline */}
       <NewProjectDialog />
     </div>
+    </WorkspaceUiContext.Provider>
+    </ViewportWidthContext.Provider>
     </NavigationContext.Provider>
   );
 }
