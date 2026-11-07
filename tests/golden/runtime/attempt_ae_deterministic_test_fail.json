@@ -11,7 +11,7 @@
    "authoritative_files": [],
    "commands": [
     [
-     "python3",
+     "<python:1>",
      "-m",
      "pytest",
      "-q"
@@ -82,7 +82,7 @@
   {
    "interpreter_grounding": [
     [
-     "python3",
+     "<python:1>",
      "-m",
      "pytest",
      "-q"
@@ -121,7 +121,7 @@
     "authoritative_files": [],
     "commands": [
      [
-      "python3",
+      "<python:1>",
       "-m",
       "pytest",
       "-q"

@@ -13,7 +13,7 @@
    "attempt": 1,
    "commands": [
     [
-     "python3",
+     "<python:1>",
      "-m",
      "pytest"
     ]
@@ -78,7 +78,7 @@
   {
    "interpreter_grounding": [
     [
-     "python3",
+     "<python:1>",
      "-m",
      "pytest"
     ]
@@ -122,7 +122,7 @@
   {
    "interpreter_grounding": [
     [
-     "python3",
+     "<python:1>",
      "-m",
      "pytest"
     ]
@@ -153,7 +153,7 @@
     "attempt": 1,
     "commands": [
      [
-      "python3",
+      "<python:1>",
       "-m",
       "pytest"
      ]

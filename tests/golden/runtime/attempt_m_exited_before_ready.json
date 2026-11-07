@@ -63,7 +63,7 @@
   {
    "interpreter_grounding": [
     [
-     "python3",
+     "<python:1>",
      "main.py"
     ]
    ]

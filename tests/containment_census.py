@@ -118,6 +118,7 @@ FILE_RULES: Dict[str, Tuple[str, str]] = {'tests/architecture/test_containment_d
  'tests/test_greenfield_os_metadata_admission.py': ('S', 'M'),
  'tests/test_current_project_view.py': ('S', 'M'),
  'tests/test_project_continuity_two_run.py': ('S', 'M'),
+ 'tests/test_effective_argv_authority.py': ('S', 'M'),
  'tests/test_w33_bound_membership_guards.py': ('S', 'M'),
  'tests/test_slice_f_gate_path.py': ('S', 'M'),
  'tests/test_w216a_compile_text_guard.py': ('S', 'M'),

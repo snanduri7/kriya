@@ -40,8 +40,8 @@ ENSUREPIP_FAILURE = ("Error: Command '['.kriya/venv/bin/python3', '-m', 'ensurep
 APP_OK = "print('APP_RAN')\n"
 APP_CRASH = "import sys\nprint('APP_RAN')\nsys.exit(3)\n"
 TESTS_FAIL = "def test_x():\n    assert 1 == 2\n"
-RUN_APP = [["python", "app.py"]]
-RUN_PYTEST = [["python", "-m", "pytest", "-q", "tests"]]
+RUN_APP = [[".kriya/venv/bin/python", "app.py"]]       # the EFFECTIVE argv the gate hands the validator (resolution is the caller's: RUNTIME-APPROVED-ARGV-VS-EXECUTED-INTERPRETER-001)
+RUN_PYTEST = [[".kriya/venv/bin/python", "-m", "pytest", "-q", "tests"]]
 
 
 def _workspace(tmp_path, *, app=APP_OK, manifest=True, tests=None):

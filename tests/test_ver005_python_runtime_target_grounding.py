@@ -19,7 +19,7 @@ import sys
 
 from _dependency_scope import hold_dependency_scope
 
-from kriya.tools.validate import PolymorphicValidator
+from kriya.tools.validate import PolymorphicValidator, effective_command
 from kriya.workflow.acceptance import runtime_verification_infrastructure_reason
 from kriya.workflow.attempt import (
     _build_python_runtime_grounding,
@@ -166,7 +166,7 @@ def test_app_with_entrypoint_module_form_actually_executes_correctly(tmp_path):
         all_python_files, package_dirs, entrypoints,
     )
     validator = PolymorphicValidator(str(tmp_path))
-    result = validator.run_app_sequence(corrected, timeout=10)
+    result = validator.run_app_sequence([effective_command(cmd, str(tmp_path)) for cmd in corrected], timeout=10)
     assert result["success"] is True
     assert "valid" in result["output"]
     assert runtime_verification_infrastructure_reason(result) is None
@@ -194,7 +194,7 @@ def test_bad_candidate_still_rejected_after_grounding(tmp_path):
         all_python_files, package_dirs, entrypoints,
     )
     validator = PolymorphicValidator(str(tmp_path))
-    result = validator.run_app_sequence(corrected, timeout=10)
+    result = validator.run_app_sequence([effective_command(cmd, str(tmp_path)) for cmd in corrected], timeout=10)
     # The process itself still runs successfully (exit 0) - correction never
     # fabricates a PASS/FAIL verdict, it only fixes WHICH command runs and
     # HOW. Grading that output against the goal (a separate, unmodified
@@ -375,7 +375,7 @@ def test_run_app_sequence_result_independent_of_process_cwd(tmp_path):
     other_dir = tmp_path.parent
     try:
         os.chdir(str(other_dir))
-        result = validator.run_app_sequence(corrected, timeout=10)
+        result = validator.run_app_sequence([effective_command(cmd, str(tmp_path)) for cmd in corrected], timeout=10)
     finally:
         os.chdir(original_cwd)
     assert result["success"] is True

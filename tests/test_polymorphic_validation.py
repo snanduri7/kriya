@@ -11,6 +11,7 @@ from _validator_runner import ScriptedRunner, fail, ok
 from kriya.config import AppConfig
 from kriya.tools.validate import (
     PolymorphicValidator,
+    effective_command,
     get_pom_dependencies,
     get_pom_own_coordinate,
     get_pom_reactor_modules,
@@ -500,7 +501,10 @@ def test_run_app_sequence_uses_isolated_venv_interpreter_for_python(tmp_path, mo
     assert validator.stack == "python"
 
     runner = ScriptedRunner(monkeypatch, _venv_creator(tmp_path), ok("Successfully installed django"), ok("ok"))
-    res = validator.run_app_sequence([["python", "manage.py", "runserver", "--help"]])
+    # The caller resolves the EFFECTIVE argv first (``_resolve_run_command``); the validator then only asserts it, it never chooses the interpreter itself.
+    effective = effective_command(["python", "manage.py", "runserver", "--help"], str(tmp_path))
+    assert effective[0] == ".kriya/venv/bin/python"
+    res = validator.run_app_sequence([effective])
 
     assert res["success"] is True, res["output"]
     assert runner.roles() == ["venv", "pip", "other"], runner.commands  # R3: the scope builds its own venv, never inherits one
@@ -509,6 +513,26 @@ def test_run_app_sequence_uses_isolated_venv_interpreter_for_python(tmp_path, mo
     assert run_cmd[0] != sys.executable
     assert run_cmd[1:] == ["manage.py", "runserver", "--help"]
 
+@pytest.mark.parametrize("launcher", ["python", "python3", sys.executable])
+def test_a_bare_interpreter_launcher_is_refused_not_rewritten_after_the_fact(tmp_path, monkeypatch, launcher):
+    """RUNTIME-APPROVED-ARGV-VS-EXECUTED-INTERPRETER-001: the validator never chooses an interpreter. An unresolved launcher is a typed refusal and nothing runs - not a silent rewrite to the project environment."""
+    (tmp_path / "requirements.txt").write_text("django==5.2\n")
+    (tmp_path / "manage.py").write_text("pass\n")
+    runner = ScriptedRunner(monkeypatch, _venv_creator(tmp_path), ok("Successfully installed django"), ok("ok"))
+    res = PolymorphicValidator(str(tmp_path)).run_app_sequence([[launcher, "manage.py"]])
+    assert res["success"] is False and "EFFECTIVE_ARGV_NOT_RESOLVED" in res["output"], res
+    assert "other" not in runner.roles(), runner.commands
+
+
+def test_a_command_naming_the_project_interpreter_runs_exactly_as_given(tmp_path, monkeypatch):
+    (tmp_path / "requirements.txt").write_text("django==5.2\n")
+    (tmp_path / "manage.py").write_text("pass\n")
+    runner = ScriptedRunner(monkeypatch, _venv_creator(tmp_path), ok("Successfully installed django"), ok("ok"))
+    res = PolymorphicValidator(str(tmp_path)).run_app_sequence([[".kriya/venv/bin/python", "manage.py", "--flag"]])
+    assert res["success"] is True, res["output"]
+    assert runner.commands[-1] == [".kriya/venv/bin/python", "manage.py", "--flag"]            # identity: the same argv, no substitution
+
+
 def test_run_app_sequence_reports_pip_install_failure_without_running_commands(tmp_path, monkeypatch):
     (tmp_path / "requirements.txt").write_text("this-package-does-not-exist==999.0\n")
     (tmp_path / "manage.py").write_text("pass\n")
@@ -516,7 +540,7 @@ def test_run_app_sequence_reports_pip_install_failure_without_running_commands(t
     validator = PolymorphicValidator(str(tmp_path))
 
     runner = ScriptedRunner(monkeypatch, _venv_creator(tmp_path), fail(stderr="ERROR: No matching distribution found"), strict=True)
-    res = validator.run_app_sequence([["python", "manage.py", "runserver"]])
+    res = validator.run_app_sequence([effective_command(["python", "manage.py", "runserver"], str(tmp_path))])
 
     assert res["success"] is False
     assert "pip install" in res["output"]
@@ -1504,7 +1528,7 @@ def test_run_app_sequence_multi_package_test_file_target_hits_module_not_found(t
 
     validator = PolymorphicValidator(str(tmp_path))
     result = validator.run_app_sequence(
-        [[sys.executable, "tests/test_email_rules.py"]], timeout=10
+        [effective_command([sys.executable, "tests/test_email_rules.py"], str(tmp_path))], timeout=10
     )
 
     assert result["success"] is False

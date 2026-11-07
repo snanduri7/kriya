@@ -59,6 +59,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
+from kriya.config.environment import PROJECT_PYTHON_INTERPRETER
 from kriya.foundation.human_wait import human_wait
 from kriya.foundation.redaction import redact_value
 
@@ -115,7 +116,8 @@ _NEGATION_WINDOW_WORDS = 6
 
 
 def _same_resolved_tool(written: str, argv0: str) -> bool:
-    """``argv0`` is only a PATH-resolved form of ``written`` when it is absolute and is exactly what PATH resolves ``written`` to (or Kriya's own interpreter for a python the user named)."""
+    """``argv0`` is only a PATH-resolved form of ``written`` when it is absolute and is exactly what PATH resolves ``written`` to (or Kriya's own interpreter for a python the user named).
+    (The canonical project interpreter is decided by ``_authored_spellings``, not here.)"""
     if not os.path.isabs(argv0):
         return False
     resolved = shutil.which(os.path.basename(argv0))
@@ -123,6 +125,19 @@ def _same_resolved_tool(written: str, argv0: str) -> bool:
     if resolved is not None and os.path.realpath(resolved) == real:
         return True
     return os.path.basename(argv0).startswith("python") and real == os.path.realpath(sys.executable)
+
+
+def _authored_spellings(argv: Any) -> List[str]:
+    """The command lines a user could have WRITTEN for ``argv`` (whitespace-normalised, joined). Always the argv as it stands; plus, when the executable is a PATH-resolved absolute form of the name
+    the user wrote, that name with the same arguments; plus, for exactly the canonical project interpreter (``PROJECT_PYTHON_INTERPRETER``, the effective argv of a bare ``python``/``python3`` in a Python
+    workspace), ``python`` or ``python3`` with the SAME arguments. Nothing else: not ``./python``, not ``.kriya/venv/bin/python3``, not another venv or any other path that merely ends in ``python``,
+    not a different script or an added argument (the arguments must be identical)."""
+    written = [" ".join(argv)]
+    if len(argv) > 0 and argv[0] == PROJECT_PYTHON_INTERPRETER:
+        written.extend(" ".join((launcher, *argv[1:])) for launcher in ("python", "python3"))
+    elif len(argv) > 0 and argv[0] != os.path.basename(argv[0]) and _same_resolved_tool(os.path.basename(argv[0]), argv[0]):
+        written.append(" ".join((os.path.basename(argv[0]), *argv[1:])))
+    return written
 
 
 def _is_code_or_network_command(argv: Any) -> bool:
@@ -152,9 +167,7 @@ def commands_authored_in_goal(commands: Any, goal: str, stdin_sha256: Optional[s
     for argv in commands:
         if not argv or not all(isinstance(a, str) and a for a in argv) or _is_code_or_network_command(argv):
             return False
-        written = [" ".join(argv)]
-        if len(argv) > 0 and argv[0] != os.path.basename(argv[0]) and _same_resolved_tool(os.path.basename(argv[0]), argv[0]):
-            written.append(" ".join((os.path.basename(argv[0]), *argv[1:])))
+        written = _authored_spellings(argv)
         found = None
         for candidate in dict.fromkeys(written):
             for match in re.finditer(r"(?<![\w./-])" + re.escape(candidate) + r"(?![\w-])", text):

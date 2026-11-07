@@ -2407,6 +2407,13 @@ def _resolve_run_command(command: List[str], workspace_path: Optional[str] = Non
         and os.path.exists(os.path.join(workspace_path, "Gemfile"))
     ):
         command = ["bundle", "exec"] + list(command)
+    # EFFECTIVE ARGV (owner ruling 2026-11-07, RUNTIME-APPROVED-ARGV-VS-EXECUTED-INTERPRETER-001): in a Python workspace a bare python/python3 (or the Kriya interpreter the first step above
+    # substituted) IS the project interpreter, so the argv returned here - the one a human approves, the one fingerprinted and the one executed - already names it. Pure: nothing is created or
+    # checked; a command with no workspace to ask about is unchanged.
+    if workspace_path and command:
+        from kriya.tools.validate import effective_command
+
+        command = effective_command(command, workspace_path)
     return command
 
 

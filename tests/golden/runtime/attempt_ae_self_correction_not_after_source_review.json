@@ -11,7 +11,7 @@
    "authoritative_files": [],
    "commands": [
     [
-     "python3",
+     "<python:1>",
      "main.py"
     ]
    ],
@@ -84,7 +84,7 @@
   {
    "interpreter_grounding": [
     [
-     "python3",
+     "<python:1>",
      "main.py"
     ]
    ]
@@ -129,7 +129,7 @@
     "authoritative_files": [],
     "commands": [
      [
-      "python3",
+      "<python:1>",
       "main.py"
      ]
     ],

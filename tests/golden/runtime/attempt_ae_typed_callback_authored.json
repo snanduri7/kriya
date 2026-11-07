@@ -5,7 +5,7 @@
    "attempt": 1,
    "commands": [
     [
-     "python3",
+     "<python:1>",
      "main.py"
     ]
    ],
@@ -61,13 +61,13 @@
    "typed_review": {
     "commands": [
      [
-      "python3",
+      "<python:1>",
       "main.py"
      ]
     ],
     "criterion": "The program prints 6",
     "input_channel": "none",
-    "reason": "sha256:c91c5c5e0e78e484+277",
+    "reason": "sha256:d12e4b6bd06fd1a9+280",
     "stdin_bound": false,
     "unit_id": "s3",
     "working_directory": "<wt:1>"
@@ -76,7 +76,7 @@
   {
    "interpreter_grounding": [
     [
-     "python3",
+     "<python:1>",
      "main.py"
     ]
    ]
@@ -115,7 +115,7 @@
     "attempt": 1,
     "commands": [
      [
-      "python3",
+      "<python:1>",
       "main.py"
      ]
     ],

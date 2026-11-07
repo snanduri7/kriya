@@ -44,7 +44,7 @@
   {
    "answer": true,
    "approval": "runtime",
-   "reason": "sha256:c91c5c5e0e78e484+277"
+   "reason": "sha256:d12e4b6bd06fd1a9+280"
   },
   {
    "argv": [
@@ -73,7 +73,7 @@
     "attempt": 1,
     "commands": [
      [
-      "python3",
+      "<python:1>",
       "main.py"
      ]
     ],

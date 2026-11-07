@@ -4753,7 +4753,7 @@ async def test_managed_service_python_command_is_rewritten_when_wiring_calls_thr
     ) as mock_run_managed_service:
         await run_attempt(state, ctx)
 
-    mock_substitute.assert_called_once_with([["python", "manage.py", "runserver"]])
+    mock_substitute.assert_called_once_with([[".kriya/venv/bin/python", "manage.py", "runserver"]])      # effective argv first (kriya.tools.validate.effective_command), then the validator's assertion
     mock_run_managed_service.assert_called_once()
     (spec,), _kwargs = mock_run_managed_service.call_args
     assert spec.service_command == ["/fake/project/.kriya/venv/bin/python", "manage.py", "runserver"]

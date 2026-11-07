@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 
 from kriya.capabilities import BUILD_ADAPTERS, GRADLE, JAVA, JAVAC, PIP, PYTHON, build_adapter_for_tool
 from kriya.config.config import AutonomyConfig
-from kriya.config.environment import KRIYA_DIRECTORY_NAME
+from kriya.config.environment import KRIYA_DIRECTORY_NAME, PROJECT_PYTHON_INTERPRETER
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
@@ -457,6 +457,38 @@ def _verification_gate(name: str):
     return decorate
 
 
+# --- EFFECTIVE ARGV (owner ruling 2026-11-07, RUNTIME-APPROVED-ARGV-VS-EXECUTED-INTERPRETER-001) --------------------------------------------------------------------------------------------
+PYTHON_LAUNCHERS = ("python", "python3")
+
+
+def detect_workspace_stack(workspace_path: str) -> str:
+    """``java`` | ``ruby`` | ``python`` | ``unknown`` for the workspace at ``workspace_path``: the validator's own stack detection (``PolymorphicValidator._detect_stack`` delegates here), pure so a
+    caller with no validator - the approval subject derivation - asks the same question and gets the same answer. Explicit project markers beat loose sources; it reads the directory and writes nothing."""
+    if (any(adapter.detects(workspace_path) for adapter in BUILD_ADAPTERS if adapter.language == "java")
+            or os.path.exists(os.path.join(workspace_path, "src", "main", "java"))):
+        return "java"
+    if (os.path.exists(os.path.join(workspace_path, "Gemfile")) or os.path.exists(os.path.join(workspace_path, "Rakefile"))
+            or os.path.exists(os.path.join(workspace_path, "spec"))):
+        return "ruby"
+    if any(adapter.detects(workspace_path) for adapter in BUILD_ADAPTERS if adapter.language == "python"):
+        return "python"
+    if JAVA.has_sources(workspace_path):
+        return "java"
+    if PYTHON.has_sources(workspace_path):
+        return "python"
+    return "unknown"
+
+
+def effective_command(command: List[str], workspace_path: str) -> List[str]:
+    """The EFFECTIVE argv of ``command`` in ``workspace_path``: in a Python workspace a bare ``python``/``python3`` (or Kriya's own ``sys.executable``, which a bare ``python`` becomes when none is
+    on PATH) IS the project interpreter, so its effective argv names ``PROJECT_PYTHON_INTERPRETER``. Pure and side-effect free (it neither creates the environment nor checks that it exists): what a
+    human approves, what is fingerprinted and what executes are this same argv, so nothing about the interpreter is decided after the approval. Every other command, and every command of a
+    non-Python workspace, is returned unchanged."""
+    if command and (command[0] in PYTHON_LAUNCHERS or command[0] == sys.executable) and detect_workspace_stack(workspace_path) == "python":
+        return [PROJECT_PYTHON_INTERPRETER, *command[1:]]
+    return list(command)
+
+
 class PolymorphicValidator:
     """Detects workspace language stack and executes syntactic compile checks and dynamic test runners."""
 
@@ -890,7 +922,7 @@ class PolymorphicValidator:
         venv_dir_host = os.path.join(self._origin_root(), ".kriya", "venv")  # OI-142: an environment input of the origin tree, outside any gate view
         venv_python_host = os.path.join(venv_dir_host, "bin", "python")
         venv_relative = os.path.join(".kriya", "venv")
-        venv_python_relative = os.path.join(venv_relative, "bin", "python")
+        venv_python_relative = PROJECT_PYTHON_INTERPRETER
         create_interpreter = "python3"
         create_target = venv_relative
         venv_python = venv_python_relative
@@ -1110,36 +1142,8 @@ class PolymorphicValidator:
         - a quality gate that never actually checked anything. Python is now
         detected the same way Java/Ruby are, by real markers, so "no markers
         matched" is distinguishable from "this is a Python project"."""
-        # Explicit project markers take precedence over loose source files. A
-        # mixed or migrating workspace can retain a standalone source from a
-        # different ecosystem; that residue must not override the build system
-        # the workspace explicitly declares.
-        # 1. Check for Java project markers
-        if (any(adapter.detects(self.workspace_path) for adapter in BUILD_ADAPTERS if adapter.language == "java")
-                or os.path.exists(os.path.join(self.workspace_path, "src", "main", "java"))):
-            return "java"
-
-        # 2. Check for Ruby
-        if (os.path.exists(os.path.join(self.workspace_path, "Gemfile")) or
-            os.path.exists(os.path.join(self.workspace_path, "Rakefile")) or
-            os.path.exists(os.path.join(self.workspace_path, "spec"))):
-            return "ruby"
-
-        # 3. Check for Python
-        if any(adapter.detects(self.workspace_path) for adapter in BUILD_ADAPTERS if adapter.language == "python"):
-            return "python"
-
-        # Marker-free, from-scratch Java projects still need a real compiler
-        # gate once their first generated source appears. Keep this fallback
-        # after every explicit ecosystem marker so it cannot misclassify a
-        # mixed workspace merely because an old .java file remains.
-        if self._has_any_java_file():
-            return "java"
-
-        if self._has_any_py_file():
-            return "python"
-
-        return "unknown"
+        # Delegates to the pure module-level detection above: the approval subject derivation asks the same question without a validator.
+        return detect_workspace_stack(self.workspace_path)
 
     def _has_any_java_file(self) -> bool:
         """Recognize standalone Java sources without requiring build metadata."""
@@ -2404,6 +2408,10 @@ class PolymorphicValidator:
         dependency problem underneath it."""
         if self.stack != "python":
             return commands, None
+        for cmd in commands:
+            if cmd and (cmd[0] in PYTHON_LAUNCHERS or cmd[0] == sys.executable):
+                return None, (f"EFFECTIVE_ARGV_NOT_RESOLVED: {' '.join(cmd)!r} reached the validator with an interpreter launcher instead of its effective argv "
+                              f"({PROJECT_PYTHON_INTERPRETER}); the interpreter is never chosen after the command was approved, so nothing was prepared or executed.")
         interpreter, install_error = self._resolve_python_interpreter()
         if self.python_environment_error is not None:
             return None, self.python_environment_error[1]  # typed in the caller's result (environment_reason_code)
@@ -2417,11 +2425,17 @@ class PolymorphicValidator:
         # instead (pre-existing gap, not contained-mode-specific, but only
         # actually noticed once "python3" itself became a real return value
         # of _resolve_python_interpreter's own default-interpreter case).
-        rewritten = [
-            ([interpreter] + cmd[1:]) if cmd and cmd[0] in ("python", "python3", sys.executable) else cmd
-            for cmd in commands
-        ]
-        return rewritten, None
+        # EFFECTIVE ARGV (RUNTIME-APPROVED-ARGV-VS-EXECUTED-INTERPRETER-001): this step never CHOOSES an interpreter. A command the caller resolved (``_resolve_run_command`` / ``effective_command``) names
+        # ``PROJECT_PYTHON_INTERPRETER`` and passes through UNCHANGED; the only thing decided here is an ASSERTION that the environment Kriya just prepared is exactly that interpreter. A bare launcher that
+        # reached this point was NOT effective-resolved - so what a human may have approved is not what would run - and is a typed refusal with nothing executed, never a rewrite.
+        for cmd in commands:
+            if not cmd:
+                continue
+            if cmd[0] == PROJECT_PYTHON_INTERPRETER:
+                if interpreter != PROJECT_PYTHON_INTERPRETER:
+                    return None, (f"EFFECTIVE_ARGV_INTERPRETER_MISMATCH: the command names {PROJECT_PYTHON_INTERPRETER} but the prepared project environment resolved to "
+                                  f"{interpreter!r}; nothing was executed.")
+        return commands, None
 
     @_verification_gate(RUNTIME_VERIFICATION_GATE)
     def run_app(self, command: List[str], timeout: int = 90) -> Dict[str, Any]:

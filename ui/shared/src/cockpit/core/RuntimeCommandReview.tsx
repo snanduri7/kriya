@@ -83,7 +83,7 @@ export function RuntimeCommandReviewCard({ review, launchId }: { review: Pending
 
       <h4 className="ck-action-sub">Runs in</h4>
       <div data-testid="runtime-runs-in">Kriya isolated worktree</div>
-      <p className="muted small">Kriya runs verification in an isolated worktree. Your project folder is updated only through the normal approved apply path. Before the commands run, Kriya may prepare the project&apos;s build or Python environment in that worktree, and a Python interpreter named in a command below is replaced by that environment&apos;s own interpreter when it runs. The worktree is a separate working copy of your project.{securityDetail ? <> <span data-testid="runtime-containment">{securityDetail}</span></> : null}</p>
+      <p className="muted small">Kriya runs verification in an isolated worktree. Your project folder is updated only through the normal approved apply path. Before the commands run, Kriya may prepare the project&apos;s build or Python environment in that worktree. A Python command is shown with the project environment&apos;s interpreter and runs exactly as shown, nothing is changed after you approve. The worktree is a separate working copy of your project.{securityDetail ? <> <span data-testid="runtime-containment">{securityDetail}</span></> : null}</p>
 
       <h4 className="ck-action-sub">Commands</h4>
       {shown.state === 'loading' ? <p className="muted" role="status">Loading the commands…</p> : null}

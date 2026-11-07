@@ -1402,7 +1402,7 @@ def test_f4_untracked_build_output_touches_and_authorized_writes_are_not_mutatio
 
 @pytest.mark.parametrize(("marker", "call", "gate"), [
     ("requirements.txt", lambda v: v.run_tests(), "tests"),
-    ("requirements.txt", lambda v: v.run_app(["python3", "-c", "print(1)"]), "runtime_verification"),
+    ("requirements.txt", lambda v: v.run_app([".kriya/venv/bin/python", "-c", "print(1)"]), "runtime_verification"),
     ("pom.xml", lambda v: v.run_compile_check(["src/App.java"]), "compile"),
     ("pom.xml", lambda v: v.run_tests(), "tests"),
 ])

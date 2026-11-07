@@ -21,6 +21,9 @@ from typing import Dict, Optional, Protocol, Tuple, runtime_checkable
 # The name of the Kriya directory: the user's ``~/.kriya`` (the homes below) and, beneath a workspace, ``<workspace>/.kriya`` (the
 # directory STATE keeps its control records in; CONFIG's paths.state rule refers to it: kriya/config/resolution.py).
 KRIYA_DIRECTORY_NAME = ".kriya"
+# The ONE spelling of the interpreter every Python verification runs with: the project's own environment under <workspace>/.kriya/venv, a RELATIVE path (the same argv on the host and inside a
+# container, resolved by the command's own working directory). Created by Kriya's own prerequisite step (PolymorphicValidator._ensure_project_venv); never a path a model or a repository names.
+PROJECT_PYTHON_INTERPRETER = os.path.join(KRIYA_DIRECTORY_NAME, "venv", "bin", "python")
 
 
 def kriya_install_dir() -> str:
@@ -213,7 +216,7 @@ def expand_user(path: str, environment: Optional[Environment] = None) -> str:
     return _env(environment).expand_user(path)
 
 
-__all__ = ["ADJUDICATION_HOME", "AUTHORITY_HOME", "CERTIFICATION_HOME", "EXECUTION_ENVIRONMENT_PROBE", "Environment", "KRIYA_DIRECTORY_NAME",
+__all__ = ["ADJUDICATION_HOME", "AUTHORITY_HOME", "CERTIFICATION_HOME", "EXECUTION_ENVIRONMENT_PROBE", "Environment", "KRIYA_DIRECTORY_NAME", "PROJECT_PYTHON_INTERPRETER",
            "LOG_DIR", "MCP_APPROVAL_HOME", "MODEL_RUNTIME_PROBE", "OCI_IMAGES", "ProcessEnvironment", "QUALIFICATION_HOME", "STATE_DIR",
            "STATIC_ANALYSIS_HOME", "TOOLCHAIN_VARIABLES", "TRUST_FILE", "UnknownEnvironmentVariable", "VARIABLES", "adjudication_home",
            "authority_home", "certification_home", "child_environment", "default_log_dir", "default_state_dir", "execution_environment_probe_enabled",

@@ -5,7 +5,7 @@
    "attempt": 1,
    "commands": [
     [
-     "python3",
+     "<python:1>",
      "main.py"
     ]
    ],
@@ -60,7 +60,7 @@
   {
    "interpreter_grounding": [
     [
-     "python3",
+     "<python:1>",
      "main.py"
     ]
    ]
@@ -89,7 +89,7 @@
     "attempt": 1,
     "commands": [
      [
-      "python3",
+      "<python:1>",
       "main.py"
      ]
     ],

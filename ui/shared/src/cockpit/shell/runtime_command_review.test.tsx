@@ -68,9 +68,10 @@ describe('the runtime-command review: the exact commands first, in words a perso
     expect(card(without.bar)).not.toHaveTextContent(/sandbox|container/i);
   });
 
-  it('discloses that Kriya replaces a named Python interpreter with the project environment\'s own, without rewriting the commands it shows (the approved fingerprint binds what is shown)', async () => {
+  it('states that a Python command runs exactly as shown (the effective argv is what is approved, fingerprinted and executed: nothing is substituted after approval)', async () => {
     const shown = await reachRuntimeReview();
-    expect(card(shown.bar)).toHaveTextContent(/a Python interpreter named in a command below is replaced by that environment's own interpreter when it runs/);
+    expect(card(shown.bar)).toHaveTextContent(/A Python command is shown with the project environment's interpreter and runs exactly as shown, nothing is changed after you approve/);
+    expect(card(shown.bar)).not.toHaveTextContent(/is replaced by that environment's own interpreter/);
     const list = await commands();
     expect(Array.from(list.querySelectorAll('li')).map((li) => li.textContent)).toEqual(RUNTIME_COMMANDS.map((c) => c.join(' ')));
   });

@@ -459,6 +459,22 @@ def _note_optional_runtime_check_unobserved(deps: RuntimeDeps, state: RunState, 
     ))
 
 
+def _assert_effective_argv(state: RunState, ctx: AttemptCtx, commands: List[List[str]]) -> None:
+    """Pre-flight of every finite runtime execution (RUNTIME-APPROVED-ARGV-VS-EXECUTED-INTERPRETER-001): the argv about to run IS its effective argv - what ``_resolve_run_command`` returned, what a
+    human approved and what was fingerprinted - so no interpreter is chosen after the approval. A command that is not (a stack that changed between the approval and the run, a launcher spelling that
+    escaped resolution) is a typed infrastructure stop with nothing executed, never a silent rewrite."""
+    from kriya.tools.validate import effective_command
+
+    drift = [command for command in commands if effective_command(command, ctx.worktree_path) != list(command)]
+    if not drift:
+        return
+    message = ("EFFECTIVE_ARGV_NOT_RESOLVED: the runtime command about to execute is not its effective argv ("
+               + "; ".join(" ".join(command) for command in drift) + "), so what was approved would not be what runs; nothing was executed.")
+    failure = Failure(type="verification_infrastructure_failure", message=message, raw_output=message, attempt=state.attempt_number)
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
 def _raise_runtime_verification_infrastructure_failure(
     deps: RuntimeDeps, state: RunState,
     run_result: Dict[str, Any],
@@ -1129,7 +1145,9 @@ def _validate_and_convert_managed_service_contract(
             "probe must be represented as separate structured fields, not one shell command"
         )
 
-    grounded_commands, install_error = validator._substitute_python_interpreter([service_command])
+    from kriya.tools.validate import effective_command
+
+    grounded_commands, install_error = validator._substitute_python_interpreter([effective_command(service_command, validator.workspace_path)])
     if install_error:
         return None, f"managed_service.service_command dependency resolution failed: {install_error}"
     service_command = grounded_commands[0]
@@ -1720,6 +1738,7 @@ async def _execute_runtime_verification_directly(
     )
     pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
     _run_app_sequence_started = deps.time.monotonic()
+    _assert_effective_argv(state, ctx, resolved_run_commands)
     with validator.verification_session(RUNTIME_VERIFICATION_GATE):  # OI-142: the build the command needs and the run that consumes it share one view
         deps._prepare_finite_command_runtime_artifacts(resolved_run_commands, validator, ctx, state)
         run_res = validator.run_app_sequence(
@@ -1929,6 +1948,7 @@ async def _approve_and_execute_runtime_verification(
         # failures that had nothing to do with the generated code.
         deps.assert_candidate_unchanged_since_source_review(state, ctx)  # before Maven prepares anything for the reviewed command
         pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
+        _assert_effective_argv(state, ctx, resolved_run_commands)
         with validator.verification_session(RUNTIME_VERIFICATION_GATE):  # OI-142: the build and the run that consumes it share one view
             deps._prepare_finite_command_runtime_artifacts(resolved_run_commands, validator, ctx, state)
             deps.assert_candidate_unchanged_since_source_review(state, ctx)
@@ -2174,6 +2194,7 @@ async def _approve_and_execute_runtime_verification(
                         "turn(s) - re-running the actual application to confirm."
                     )
                     pre_run_untracked_after_repair = snapshot_untracked_files(ctx.worktree_path)
+                    _assert_effective_argv(state, ctx, resolved_run_commands)
                     with validator.verification_session(RUNTIME_VERIFICATION_GATE):  # OI-142: the build and the run share one view
                         deps._prepare_finite_command_runtime_artifacts(resolved_run_commands, validator, ctx, state)
                         run_res = validator.run_app_sequence(
