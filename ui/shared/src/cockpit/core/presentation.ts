@@ -184,8 +184,9 @@ export function currentChangeVerification(gates: readonly GateFact[]): Verificat
 // ------------------------------------------------------------------ the current run, in words
 
 /** "Current activity": one plain sentence per user-facing state. It restates the STATE the records support; it adds no detail the records do not carry. */
-export function activityText(state: string, finishingAfterApproval: boolean): string {
+export function activityText(state: string, finishingAfterApproval: boolean, verifyingApplication = false): string | null {
   if (finishingAfterApproval) return 'Running final regression and safety checks…';
+  if (verifyingApplication) return 'Running the commands you approved in an isolated worktree and checking what they print…';
   switch (state) {
     case 'STARTING': return 'Starting the run…';
     case 'PLANNING': return 'Planning the change…';
@@ -193,7 +194,7 @@ export function activityText(state: string, finishingAfterApproval: boolean): st
     case 'REPAIRING': return 'Trying again after the last version did not pass its checks…';
     case 'VALIDATING': return 'Running the build, tests and checks…';
     case 'WAITING_FOR_APPROVAL': return 'Waiting for your decision…';
-    default: return 'Working…';
+    default: return null;      // the records do not say what it is doing: the line is omitted, never a placeholder
   }
 }
 

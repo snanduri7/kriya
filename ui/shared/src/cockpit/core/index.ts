@@ -15,6 +15,8 @@ export * from './elapsed';
 export * from './runFactsHooks';
 export { ApprovalReview, useChangeReview, CHANGED_MESSAGE } from './ApprovalReview';
 export { RecordedResults, useRunRecords } from './ActivityDrawer';
+export { useRunActivity } from './useRunActivity';
+export { RunStepper } from './RunStepper';
 export { conciseWhy, renderMarkdown, reviewBody } from './markdown';
 export { activityEntries, activityFromLaunch, activityFromRecords, resultsFromRecords, type ActivityEntry } from './activity';
 export { attemptRejections, failedDuring, rejectionOf, retrySummary, DELIVERY_WORDS, type AttemptRejection, type RetrySummary } from './retryFacts';

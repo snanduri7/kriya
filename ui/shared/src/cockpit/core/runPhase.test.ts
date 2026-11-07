@@ -72,9 +72,18 @@ describe('run phase from the recorded sequence of a real run', () => {
     const waiting = runPhase(run(P, { review: { review_id: 'r1' } as unknown as RunView['review'], status: status('RUNNING', 'PENDING') }));
     expect(waiting.state).toBe('WAITING_FOR_APPROVAL');
     expect(waiting.needsAction).toBe(true);
-    expect(waiting.steps?.map((s) => s.status)).toEqual(['done', 'done', 'done', 'pending']);
+    expect(waiting.steps?.map((s) => s.status)).toEqual(['done', 'current', 'pending', 'pending']); // the change under review belongs to Implementing; verification has not started
     // a PENDING record without the live-run conditions (activeReview gave no review) is NOT waiting for the person
     expect(runPhase(run(P, { status: status('RUNNING', 'PENDING') })).state).not.toBe('WAITING_FOR_APPROVAL');
+  });
+  it('the four steps carry the customer\'s words and the runtime-command approval sits inside Verifying', () => {
+    const labels = (r: RunView) => runPhase(r).steps?.map((s) => s.label);
+    expect(labels(run(P))).toEqual(['Planning', 'Implementing', 'Verifying', 'Complete']);
+    const waiting = runPhase(run(P, { runtimeReview: { review_id: 'r2' } as unknown as RunView['runtimeReview'], status: status('RUNNING', 'PENDING') }));
+    expect(waiting.steps?.map((s) => `${s.id}:${s.status}`)).toEqual(['planning:done', 'editing:done', 'validating:current', 'finished:pending']);
+    const running = runPhase(run(P, { status: { ...status('RUNNING', 'APPROVED'), launch: { ...status('RUNNING', 'APPROVED').launch, pending_approval: { ...status('RUNNING', 'APPROVED').launch.pending_approval!, kind: 'runtime_command' } } } as RunView['status'] }));
+    expect(running).toMatchObject({ label: 'Verifying your application', verifyingApplication: true });
+    expect(running.steps?.map((s) => s.status)).toEqual(['done', 'done', 'current', 'pending']);
   });
   it('after the person approved and while the run is still going: finishing verification, not waiting', () => {
     const after = runPhase(run([...P, ['verification_contract.compiled', null, null, null]], { status: status('RUNNING', 'APPROVED') }));

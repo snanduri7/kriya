@@ -144,23 +144,45 @@ describe('E/F. Start Run turns the page into the run, with only supported states
     expect(screen.queryByRole('button', { name: /^Stop/ })).toBeNull(); // the host has no stop operation, so none is offered
   });
 
-  it('the state follows the records: Starting, Editing, Validating - and says nothing a record does not say', async () => {
+  it('the state follows the records: Starting, Implementing, Verifying - and says nothing a record does not say', async () => {
     const { host, run } = await startRun({ outcome: 'success' });
     const progress = () => within(run).getByRole('list', { name: 'Progress' });
     act(() => host.exec!.advance());
     await waitFor(() => expect(run).toHaveAttribute('data-state', 'STARTING')); // the launch is recorded but no evidence record exists yet
     act(() => host.exec!.advance());
     await waitFor(() => expect(run).toHaveAttribute('data-state', 'EDITING'));
-    expect(within(run).getByRole('heading', { name: 'Editing' })).toBeInTheDocument();
+    expect(within(run).getByRole('heading', { name: 'Implementing' })).toBeInTheDocument();
     expect(within(run).getByTestId('current-activity')).toHaveTextContent('Creating or changing files…');
     expect(run.textContent).not.toMatch(/candidate|Attempt \d/); // no mechanism words on the primary surface
-    expect(within(progress()).getByText(/Editing/).closest('li')).toHaveAttribute('aria-current', 'step');
+    expect(within(progress()).getByText(/Implementing/).closest('li')).toHaveAttribute('aria-current', 'step');
     expect(within(progress()).getByText(/Planning/).closest('li')).toHaveAttribute('data-status', 'done');
     act(() => host.exec!.advance());
     await waitFor(() => expect(run).toHaveAttribute('data-state', 'VALIDATING'));
-    expect(within(progress()).getByText(/Validating/).closest('li')).toHaveAttribute('aria-current', 'step');
-    expect(within(progress()).getByText(/Finished/).closest('li')).toHaveAttribute('data-status', 'pending');
+    expect(within(progress()).getByText(/Verifying/).closest('li')).toHaveAttribute('aria-current', 'step');
+    expect(within(progress()).getByText(/Complete/).closest('li')).toHaveAttribute('data-status', 'pending');
     expect(run.textContent).not.toMatch(/\d+\s*%|step \d+ of|of \d+ tests/i); // no invented percentage or counter
+  });
+
+  it('the active run is a workspace: stepper first, then the quiet goal, what Kriya is doing now and the newest recorded activity - never a placeholder', async () => {
+    const { host, run } = await startRun({ outcome: 'success' });
+    act(() => host.exec!.advance());
+    act(() => host.exec!.advance());
+    await waitFor(() => expect(run).toHaveAttribute('data-state', 'EDITING'));
+    expect(run).toHaveAttribute('data-live', 'true');
+    const stepper = within(run).getByTestId('run-stepper');
+    const goal = run.querySelector('.ck-goalline')!;
+    expect(stepper.compareDocumentPosition(goal) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();       // the stage tracker leads, the goal is a quiet line below it
+    expect(within(run.querySelector('.ck-current-head')!).getByRole('button', { name: 'Cancel Run' })).toBeInTheDocument(); // Cancel stays in the title row
+    expect(within(run).getByTestId('current-activity')).toHaveTextContent('What Kriya is doing now');
+    expect(run.textContent).not.toMatch(/Working…|Working\.\.\./);
+    // the recent-activity preview is the SAME stream as the dock's Activity list
+    const recent = await within(run).findByTestId('recent-activity');
+    const lines = within(recent).getAllByRole('listitem').map((li) => li.textContent!.replace(/^\S*\s*[•✓✕⚠]\s*/, '').trim());
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.length).toBeLessThanOrEqual(5);
+    const dock = await screen.findByTestId('activity-list');
+    const dockLines = within(dock).getAllByRole('listitem').map((li) => li.textContent!);
+    for (const line of lines) expect(dockLines.some((d) => d.includes(line)), line).toBe(true);
   });
 
   it('the technical status (run id, record tallies, DERIVED liveness) is one disclosure away', async () => {

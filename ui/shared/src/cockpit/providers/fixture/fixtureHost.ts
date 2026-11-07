@@ -146,6 +146,8 @@ export class FixtureHost implements HostAdapter {
     this.extraSnapshotIds = options.extraSnapshotIds ?? [];
     this.exec = options.execution === false ? null : new FixtureExecution(options.execution ?? {});
     if (this.exec) this.execution = this.exec.port;
+    // Development evidence only (the fixture build is labelled FIXTURE DATA): the scripted run is reachable from the page so the screenshot driver can step it the way the tests do.
+    if (this.exec && typeof window !== 'undefined') (window as unknown as { __kriyaFixtureExec?: FixtureExecution }).__kriyaFixtureExec = this.exec;
     this.evidenceContent = options.evidenceContent ?? false;
     this.liveCapture = options.capture ?? 'full';
     this.choices = [...(options.choices ?? [])];

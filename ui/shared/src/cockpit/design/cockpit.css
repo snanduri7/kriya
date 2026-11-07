@@ -293,3 +293,36 @@
 .ck-center:has(.ck-ws) > *:has(> .ck-ws) { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }   /* the module host's wrapper must pass the height down */
 .ck-ws { flex: 1 1 auto; height: auto; min-height: 0; }
 .ck-ws-main > * { box-sizing: border-box; max-width: 100%; }
+
+/* ---- The active run: a prominent horizontal stage tracker, then the quiet goal, what Kriya is doing now and the newest activity. While a run is live the card fills the main pane's height, so the pane and the
+   Activity dock below it read as one developer workspace (no dead region between them). ---- */
+.ck-current[data-live="true"] { flex: 1 1 auto; min-height: 0; overflow: auto; gap: 14px; padding: 14px 18px 16px; }
+.ck-current[data-live="true"] .ck-current-head { position: sticky; top: 0; z-index: 2; background: var(--ck-panel); padding-bottom: 6px; margin-bottom: -4px; }
+.ck-stepper { list-style: none; margin: 4px 0 2px; padding: 14px 6px; display: flex; align-items: center; gap: 0; border-top: 1px solid var(--ck-line); border-bottom: 1px solid var(--ck-line); }
+.ck-stepper li { flex: 1 1 0; display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--ck-muted); }
+.ck-stepper li:last-child { flex: 0 0 auto; }
+.ck-stepper li:not(:last-child)::after { content: ""; flex: 1 1 auto; height: 3px; min-width: 18px; margin: 0 14px; border-radius: 2px; background: var(--ck-line); }
+.ck-stepper li[data-status="done"]:not(:last-child)::after { background: var(--ck-ok); }
+.ck-step-dot { flex: 0 0 auto; width: 32px; height: 32px; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--ck-line); display: inline-flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 700; line-height: 1; }
+.ck-step-label { font-size: 17px; white-space: nowrap; }
+.ck-stepper li[data-status="done"] { color: var(--ck-fg); }
+.ck-stepper li[data-status="done"] .ck-step-dot { background: var(--ck-ok); border-color: var(--ck-ok); color: var(--ck-bg); }
+.ck-stepper li[data-status="current"] { color: var(--ck-fg); }
+.ck-stepper li[data-status="current"] .ck-step-dot { border-color: var(--ck-accent); border-width: 3px; background: var(--ck-bg); box-shadow: 0 0 0 5px color-mix(in srgb, var(--ck-accent) 28%, transparent); position: relative; }
+.ck-stepper li[data-status="current"] .ck-step-dot::before { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--ck-accent); }
+.ck-stepper li[data-status="current"] .ck-step-label { font-size: 18px; font-weight: 700; color: var(--ck-accent); }
+.ck-stepper li[data-waiting="true"] .ck-step-dot { border-color: var(--ck-warn); box-shadow: 0 0 0 5px color-mix(in srgb, var(--ck-warn) 28%, transparent); }
+.ck-stepper li[data-waiting="true"] .ck-step-dot::before { background: var(--ck-warn); }
+.ck-stepper li[data-waiting="true"] .ck-step-label { color: var(--ck-warn); }
+@media (prefers-reduced-motion: no-preference) { .ck-stepper li[data-status="current"]:not([data-waiting="true"]) .ck-step-dot::before { animation: ck-pulse 1.6s ease-in-out infinite; } }
+@keyframes ck-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@media (max-width: 760px) { .ck-step-label { font-size: 14px; } .ck-stepper li[data-status="current"] .ck-step-label { font-size: 15px; } .ck-stepper li:not(:last-child)::after { margin: 0 6px; min-width: 8px; } .ck-step-dot { width: 26px; height: 26px; } }
+.ck-current[data-live="true"] .ck-goalline { grid-template-columns: auto 1fr; color: var(--ck-muted); font-size: var(--ck-t-secondary, 13px); max-height: 3.4em; }
+.ck-now { display: flex; flex-direction: column; gap: 2px; }
+.ck-now .ck-now-label { font-size: var(--ck-t-secondary, 13px); text-transform: uppercase; letter-spacing: .04em; color: var(--ck-muted); }
+.ck-now p { margin: 0; font-size: 18px; font-weight: 600; }
+.ck-recent { flex: 1 1 auto; min-height: 120px; display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--ck-line); padding-top: 10px; }
+.ck-recent h3 { margin: 0 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--ck-muted); }
+.ck-recent ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; font-size: 15px; }
+.ck-recent li[data-tone="bad"] { color: var(--ck-bad); } .ck-recent li[data-tone="ok"] { color: var(--ck-ok); } .ck-recent li[data-tone="wait"] { color: var(--ck-warn); }
+.ck-current[data-live="true"] .ck-tech { margin-top: auto; }

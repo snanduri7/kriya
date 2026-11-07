@@ -156,9 +156,9 @@ describe('Start Run', () => {
     act(() => host.exec!.advance());
     await waitFor(() => expect(within(bar).getByText(/7 evidence records/)).toBeInTheDocument());
     expect(within(bar).getByText(/Model requests 1/)).toBeInTheDocument();
-    // the coarse phase follows the records: attempt 1 open and the Developer working is Editing; a recorded gate is Validating
+    // the coarse phase follows the records: attempt 1 open and the Developer working is Implementing; a recorded gate is Verifying
     expect(bar).toHaveAttribute('data-state', 'VALIDATING');
-    expect(within(bar).getByRole('list', { name: 'Progress' }).textContent).toMatch(/Planning.*Editing.*Validating.*Finished/);
+    expect(within(bar).getByRole('list', { name: 'Progress' }).textContent).toMatch(/Planning.*Implementing.*Verifying.*Complete/);
     expect(within(bar).queryByText(/\d+\s*%|of \d+ tests|step \d+ of/i)).toBeNull(); // no invented percentage, count or step number
     // Records are read incrementally from the last seq, never from the top again.
     const reads = asked(host, 'evidence.records') as Array<{ operation: string; from_seq?: number }>;

@@ -27,9 +27,12 @@ export interface RunPhase {
   steps: PhaseStep[] | null;
   /** For a run that ended without success: the last stage the records show it reached. */
   lastStage: string | null;
+  /** The person approved the reviewed runtime commands and Kriya is executing them: the one running state that has its own sentence for the current-activity line. */
+  verifyingApplication?: boolean;
 }
 
-const STEP_LABEL = { planning: 'Planning', editing: 'Editing', validating: 'Validating', finished: 'Finished' } as const;
+/** The customer's four words for the four authoritative phases (ids unchanged: planning, editing, validating, finished). */
+const STEP_LABEL = { planning: 'Planning', editing: 'Implementing', validating: 'Verifying', finished: 'Complete' } as const;
 const STEP_ORDER = ['planning', 'editing', 'validating', 'finished'] as const;
 /** The roles whose model calls are Kriya checking a candidate rather than producing one. */
 const CHECKING_ROLES = new Set(['reviewer', 'run_verifier', 'spec_compliance']);
@@ -65,15 +68,15 @@ export function runPhase(run: RunView): RunPhase {
     return { ...base, state: 'FAILED', label: 'Failed', detail: run.outcome.detail, tone: 'bad', terminal: true, steps: null, lastStage };
   }
   if (run.review) {
-    return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for your approval', detail: 'Kriya paused the run and applies nothing until you decide.', tone: 'warn', needsAction: true, steps: steps(3.5) };
+    return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for your approval', detail: 'Kriya paused the run and applies nothing until you decide.', tone: 'warn', needsAction: true, steps: steps(2) };   // the change under review is the Implementing stage's product; verification has not started
   }
   if (run.runtimeReview) {
-    return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for permission to run commands', detail: 'Kriya paused the run and runs nothing until you decide.', tone: 'warn', needsAction: true, steps: steps(3.5) };
+    return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for permission to run commands', detail: 'Kriya paused the run and runs nothing until you decide.', tone: 'warn', needsAction: true, steps: steps(3) };
   }
   const pendingApproval = run.status?.launch.pending_approval;
   const approved = pendingApproval?.status === 'APPROVED' && run.status?.launch.phase === 'RUNNING';
   if (approved && pendingApproval?.kind === 'runtime_command') {
-    return { ...base, state: 'RUNNING', label: 'Verifying your application', detail: 'You allowed the reviewed commands. Kriya is running them in its isolated worktree and checking the result.', tone: 'info', steps: steps(3) };
+    return { ...base, state: 'RUNNING', label: 'Verifying your application', detail: 'You allowed the reviewed commands. Kriya is running them in its isolated worktree and checking the result.', tone: 'info', steps: steps(3), verifyingApplication: true };
   }
   if (approved) {
     return { ...base, state: 'VALIDATING', label: 'Finishing', detail: 'Your change was approved. Kriya is running final checks.', tone: 'info', steps: steps(3) };
@@ -91,9 +94,9 @@ export function runPhase(run: RunView): RunPhase {
   if (open && latest) {
     const checking = GATE_KINDS.has(latest.kind) || (latest.role !== null && CHECKING_ROLES.has(latest.role));
     const n = attempt ?? 1;
-    if (checking) return { ...base, state: 'VALIDATING', label: 'Validating', detail: `Attempt ${n}: Kriya is checking the candidate change.`, tone: 'info', steps: steps(3) };
+    if (checking) return { ...base, state: 'VALIDATING', label: 'Verifying', detail: `Attempt ${n}: Kriya is checking the candidate change.`, tone: 'info', steps: steps(3) };
     if (n >= 2) return { ...base, state: 'REPAIRING', label: 'Repairing', detail: `Attempt ${n}: Kriya is making another attempt after an earlier one did not complete the unit.`, tone: 'info', steps: steps(2) };
-    return { ...base, state: 'EDITING', label: 'Editing', detail: `Attempt ${n}: Kriya is producing a candidate change.`, tone: 'info', steps: steps(2) };
+    return { ...base, state: 'EDITING', label: 'Implementing', detail: `Attempt ${n}: Kriya is producing a candidate change.`, tone: 'info', steps: steps(2) };
   }
   // Running, but the records do not place it in one stage (between attempts, or after the last attempt closed): say only that it runs.
   const reached = stageReached(p);

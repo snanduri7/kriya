@@ -1,9 +1,11 @@
 import { OpenInEditorButton, RevealButton } from './WorkspaceFacts';
 import { folderFact } from './Readiness';
-import { ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failedDuring, failureSummary, retrySummary, runtimeStopWords, membershipStopOf, membershipStopWords, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, useWorkspacePath, VerificationLines, FormalRequirementDisclosure, TechnicalVerification, formalRequirementStatus, primaryVerification, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
+import { ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failedDuring, failureSummary, retrySummary, runtimeStopWords, membershipStopOf, membershipStopWords, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, RunStepper, activityText, changeSummary, localClock, progressCounts, runPhase, useRunActivity, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, useWorkspacePath, VerificationLines, FormalRequirementDisclosure, TechnicalVerification, formalRequirementStatus, primaryVerification, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
-const MARK = { done: '✓', current: '●', pending: '○' } as const;
+const ACTIVITY_MARK = { info: '•', ok: '✓', bad: '✕', wait: '⚠' } as const;
+/** How many of the newest activity lines the run surface previews (the dock keeps the whole history). */
+const RECENT_ACTIVITY = 5;
 const APPROVAL_KIND: Record<string, string> = {
   change_approval: 'a proposed change needs approval', knowledge_gap_acknowledgement: 'a knowledge gap needs acknowledgement', skill_gap_decision: 'a skill gap needs a decision',
   skill_conflict_decision: 'two skills may conflict', web_lookup_review: 'live-lookup references need review', web_lookup_query: 'a live-lookup search needs approval',
@@ -168,6 +170,7 @@ export function CurrentRun() {
   const dispatch = useDispatch();
   const go = useNavigate();
   const run = ex.run;
+  const { entries } = useRunActivity(run);
   const elapsed = useElapsed(run?.status?.launch.requested_at ?? null, run !== null && run.stage !== 'finished', run?.status?.launch.ended?.at ?? null);
   if (!run) return null;
   const phase = runPhase(run);
@@ -188,10 +191,13 @@ export function CurrentRun() {
   const cancelHeading = cancelled && ex.cancelState.phase === 'settled' ? (ex.cancelState.folder.kind === 'clean' ? 'Cancelled' : ex.cancelState.folder.kind === 'recovery' ? 'Cancelled — recovery required' : 'Cancelled — folder state not confirmed') : null;
   const heading = cancelHeading ?? (cancelling ? 'Cancelling…' : finished ? (phase.state === 'COMPLETED' ? 'Run completed' : phase.state === 'STOPPED' ? (byYou ? 'Stopped by you' : 'Run stopped') : 'Run failed') : finishing ? 'Finishing your change' : phase.label);
   const live = !finished && !cancelled;
+  const goalLine = ex.goal.trim() ? <div className="ck-goalline"><span className="muted">Goal</span><div>{ex.goal}</div></div> : null;
+  const nowText = live ? activityText(phase.state, finishing, phase.verifyingApplication === true) : null;
+  const recent = live ? entries.slice(-RECENT_ACTIVITY) : [];
   // Recover Project is offered only when Kriya itself says the folder needs recovery (never inferred from the run having failed).
   const needsRecovery = ex.preflight.state === 'ready' && ex.preflight.data.recovery.status === 'RECOVERY_AVAILABLE';
   return (
-    <section className="ck-current" aria-label="Current run" data-stage={run.stage} data-outcome={run.outcome?.kind ?? ''} data-state={phase.state} data-timing={JSON.stringify(run.timing)}>
+    <section className="ck-current" aria-label="Current run" data-live={live ? 'true' : 'false'} data-stage={run.stage} data-outcome={run.outcome?.kind ?? ''} data-state={phase.state} data-timing={JSON.stringify(run.timing)}>
       <div className="ck-current-head">
         <div role="status" aria-live="polite" className="ck-current-status">
           <span className={`ck-dot ${phase.tone}`} aria-hidden="true">{cancelled || byYou ? '■' : finished ? (phase.state === 'COMPLETED' ? '✓' : phase.state === 'STOPPED' ? '■' : '✕') : '●'}</span>
@@ -202,14 +208,17 @@ export function CurrentRun() {
         {ex.canCancel && live ? <button type="button" className="ck-cancel" onClick={() => void ex.cancelRun()}>Cancel Run</button> : null}
         {cancelling ? <button type="button" className="ck-cancel" disabled>Cancelling…</button> : null}
       </div>
-      {ex.goal.trim() ? <div className="ck-goalline"><span className="muted">Goal</span><div>{ex.goal}</div></div> : null}
+      {!live && goalLine}
+      {phase.steps && live ? <RunStepper steps={phase.steps} waiting={phase.needsAction} /> : null}
+      {live && goalLine}
       {live && finishing ? <p className="ck-detail" data-testid="finishing-note">{phase.detail}</p> : null}
-      {phase.steps && live ? (
-        <ol className="ck-steps" aria-label="Progress">
-          {phase.steps.map((s) => <li key={s.id} data-status={s.status} aria-current={s.status === 'current' ? 'step' : undefined}><span aria-hidden="true">{MARK[s.status]}</span> {s.label}<span className="sr-only"> ({s.status === 'done' ? 'done' : s.status === 'current' ? 'in progress' : 'not started'})</span></li>)}
-        </ol>
+      {live && !run.review && !run.runtimeReview && nowText ? <div className="ck-now" data-testid="current-activity"><span className="ck-now-label">What Kriya is doing now</span><p>{nowText}</p></div> : null}
+      {live && !run.review && !run.runtimeReview && recent.length ? (
+        <div className="ck-recent" data-testid="recent-activity">
+          <h3>Recent activity</h3>
+          <ol aria-label="Recent activity">{recent.map((e) => <li key={e.key} data-tone={e.tone}><span className="mono small muted">{localClock(e.at)}</span> <span aria-hidden="true">{ACTIVITY_MARK[e.tone]}</span> {e.text}</li>)}</ol>
+        </div>
       ) : null}
-      {live && !run.review && !run.runtimeReview ? <p className="ck-detail" data-testid="current-activity"><span className="muted">Current activity</span><br />{activityText(phase.state, finishing)}</p> : null}
       {live && run.review ? <ApprovalReview review={run.review} launchId={run.launchId} /> : null}
       {live && run.runtimeReview ? <RuntimeCommandReviewCard review={run.runtimeReview} launchId={run.launchId} /> : null}
       {!finished && !run.review && !run.runtimeReview && run.status?.launch.phase === 'RUNNING' && decided === 'REJECTED' ? <div role="note"><strong>Your rejection was recorded.</strong> {pendingKind === 'runtime_command' ? 'Kriya will not run those commands.' : 'Kriya is ending the run; nothing will be applied.'}</div> : null}

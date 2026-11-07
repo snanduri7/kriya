@@ -109,7 +109,11 @@ describe('verificationGroups: mechanism -> meaning, and nothing unmapped is dres
 
 describe('activityText and changeSummary', () => {
   it('describes the state in plain words without a mechanism term', () => {
-    for (const s of ['STARTING', 'PLANNING', 'EDITING', 'REPAIRING', 'VALIDATING', 'WAITING_FOR_APPROVAL', 'RUNNING']) expect(activityText(s, false)).not.toMatch(/candidate|attempt|gate|digest|seq/i);
+    for (const s of ['STARTING', 'PLANNING', 'EDITING', 'REPAIRING', 'VALIDATING', 'WAITING_FOR_APPROVAL']) expect(activityText(s, false)).not.toMatch(/candidate|attempt|gate|digest|seq/i);
+    expect(activityText('RUNNING', false, true)).toMatch(/commands you approved/);
+    // no placeholder: when the records do not say what it is doing, there is no line at all
+    expect(activityText('RUNNING', false)).toBeNull();
+    expect(activityText('COMPLETED', false)).toBeNull();
     expect(activityText('EDITING', false)).toBe('Creating or changing files…');
     expect(activityText('VALIDATING', true)).toBe('Running final regression and safety checks…');
   });

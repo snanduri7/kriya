@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { RecordedResults, activityEntries, localClock, shouldStickToBottom, useExecution, useRunRecords, useWorkspaceUi, type ActivityEntry } from '../../core';
+import { RecordedResults, localClock, shouldStickToBottom, useExecution, useRunActivity, useWorkspaceUi } from '../../core';
 
 type Tab = 'activity' | 'build' | 'tests';
 const TABS: ReadonlyArray<{ id: Tab; label: string }> = [{ id: 'activity', label: 'Activity' }, { id: 'build', label: 'Build' }, { id: 'tests', label: 'Tests' }];
@@ -17,10 +17,7 @@ export function ActivityDock() {
   const active = run !== null && run.stage !== 'finished';
   const open = ui.dockOpen ?? active;
   const [tab, setTab] = useState<Tab>('activity');
-  const finished = run?.stage === 'finished';
-  const records = useRunRecords(run?.launchId ?? '', run?.outcome?.traceRunId ?? null, Boolean(finished), run?.timing.refreshedAt != null, run?.progress.lastSeq ?? 0);
-  const data = run && records && (records.state === 'ready' || records.state === 'degraded') ? records.data.records : null;
-  const entries: ActivityEntry[] = run ? activityEntries(data ?? [], run.status ?? null) : [];
+  const { entries, records, data } = useRunActivity(run);
   const latest = entries[entries.length - 1] ?? null;
   const list = useRef<HTMLDivElement | null>(null);
   const stick = useRef(true);
