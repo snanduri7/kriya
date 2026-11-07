@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { RevealButton } from './WorkspaceFacts';
+import { OpenInEditorButton, RevealButton } from './WorkspaceFacts';
+import { folderFact } from './Readiness';
 import { ActivityDrawer, ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failedDuring, failureSummary, retrySummary, runtimeStopWords, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, useWorkspacePath, VerificationLines, FormalRequirementDisclosure, TechnicalVerification, formalRequirementStatus, primaryVerification, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
@@ -100,6 +101,7 @@ function Stopped({ phase }: { phase: RunPhase }) {
         ) : blocked ? (
           <span data-testid="runtime-stop"><strong>{blocked.title}</strong><br />{blocked.body}<br /><span className="muted">{blocked.note}</span></span>
         ) : <span data-testid="failure-summary">{outcome.kind === 'failure' ? (exhaustedSummary(run.status?.launch.ended?.failure_category, outcome.commitResult, retry) ?? failureSummary(run.status?.launch.ended?.failure_category, outcome.commitResult)) : outcome.detail}</span>}
+        {stoppedByYou(run) ? <span data-testid="stopped-by-you"><br />You made this decision. A new attempt is a new run - there is nothing to resume.</span> : null}
       </p>
       {outcome.approval ? (
         <div>
@@ -115,6 +117,43 @@ function Stopped({ phase }: { phase: RunPhase }) {
         <div className="muted small">{blockedCode ? <div data-testid="runtime-stop-code">Reason code <span className="mono">{blockedCode}</span></div> : null}<span className="mono">{outcome.kind === 'failure' ? outcome.detail : `Outcome kind ${outcome.kind}`}</span>{outcome.recordedError && outcome.recordedError !== outcome.detail && outcome.kind !== 'approval_required' ? <span> · <strong>Kriya reported:</strong> <span className="mono">{outcome.recordedError}</span></span> : null}</div>
         <p><CopyText what="failure details" label="Copy details" text={[`Run ${run.launchId}: ${outcome.label}`, outcome.detail, outcome.recordedError ? `Kriya reported: ${outcome.recordedError}` : null, `Source: ${outcome.source}`].filter(Boolean).join('\n')} /></p>
       </details>
+    </div>
+  );
+}
+
+/** Kriya's own record that the person rejected the review (the launch's approval history): the run then ends as the person's own decision, not as a failure. */
+export function stoppedByYou(run: { status: { launch: { approval_history?: ReadonlyArray<{ status: string }>; pending_approval?: { status: string } | null } } | null }): boolean {
+  const launch = run.status?.launch;
+  return Boolean(launch && ((launch.approval_history ?? []).some((r) => r.status === 'REJECTED') || launch.pending_approval?.status === 'REJECTED'));
+}
+
+/**
+ * A cancelled run, in Kriya's words about the FOLDER (read after the process ended): Cancelled (Kriya reports CLEAN), Cancelled - recovery required (any other recovery status; Recover Project is
+ * offered), or Cancelled - folder state not confirmed (the status could not be read; never "clean"). A new attempt is a NEW run: nothing here is a resume.
+ */
+function CancelledCard() {
+  const ex = useExecution();
+  const state = ex.cancelState;
+  if (state.phase !== 'settled') return null;
+  const folder = state.folder;
+  const clean = folder.kind === 'clean';
+  return (
+    <div className="ck-outcome" data-testid="cancelled" data-folder={folder.kind}>
+      <p data-testid="what-happened"><span className="muted">What happened</span><br />
+        {clean ? <span>You cancelled this run. Kriya reports the project folder is clean: nothing was applied and nothing needs recovery.</span>
+          : folder.kind === 'recovery' ? <span><strong>You cancelled this run, and the project folder needs recovery.</strong> {folderFact(folder.status).note ?? ''} <span className="muted small">(Kriya reports {folder.status})</span></span>
+          : <span><strong>You cancelled this run, but the project folder&apos;s state is not confirmed.</strong> {folder.reason}. Nothing is being assumed - recover the project, or check it before starting another run.</span>}
+      </p>
+      {ex.recoverState.note ? <p className="muted small" role="status" data-testid="recover-note">{ex.recoverState.note}</p> : null}
+      <h4 className="ck-action-sub">What you can do</h4>
+      <div className="ck-current-actions">
+        {!clean && ex.canRecover ? <button type="button" className="ck-primary" disabled={ex.recoverState.running} onClick={() => void ex.recoverProject()}>{ex.recoverState.running ? 'Recovering…' : 'Recover Project'}</button> : null}
+        {clean ? <button type="button" className="ck-primary" onClick={ex.rerun}>Run again</button> : null}
+        <button type="button" onClick={ex.runAgain}>Edit goal and retry</button>
+        <button type="button" onClick={ex.newGoal}>New Goal</button>
+        <OpenInEditorButton />
+        <RevealButton />
+      </div>
     </div>
   );
 }
@@ -140,7 +179,14 @@ export function CurrentRun() {
     if (tab) dispatch({ type: 'centralTab', tab });
     go(RUN_DOCUMENTS_PAGE);
   };
-  const heading = finished ? (phase.state === 'COMPLETED' ? 'Run completed' : phase.state === 'STOPPED' ? 'Run stopped' : 'Run failed') : finishing ? 'Finishing your change' : phase.label;
+  const cancelling = ex.cancelState.phase === 'cancelling';
+  const cancelled = ex.cancelState.phase === 'settled' && ex.cancelState.launchId === run.launchId;
+  const byYou = finished && phase.state === 'STOPPED' && stoppedByYou(run);
+  const cancelHeading = cancelled && ex.cancelState.phase === 'settled' ? (ex.cancelState.folder.kind === 'clean' ? 'Cancelled' : ex.cancelState.folder.kind === 'recovery' ? 'Cancelled — recovery required' : 'Cancelled — folder state not confirmed') : null;
+  const heading = cancelHeading ?? (cancelling ? 'Cancelling…' : finished ? (phase.state === 'COMPLETED' ? 'Run completed' : phase.state === 'STOPPED' ? (byYou ? 'Stopped by you' : 'Run stopped') : 'Run failed') : finishing ? 'Finishing your change' : phase.label);
+  const live = !finished && !cancelled;
+  // Recover Project is offered only when Kriya itself says the folder needs recovery (never inferred from the run having failed).
+  const needsRecovery = ex.preflight.state === 'ready' && ex.preflight.data.recovery.status === 'RECOVERY_AVAILABLE';
   return (
     <section className="ck-current" aria-label="Current run" data-stage={run.stage} data-outcome={run.outcome?.kind ?? ''} data-state={phase.state} data-timing={JSON.stringify(run.timing)}>
       <div className="ck-current-head">
@@ -150,20 +196,23 @@ export function CurrentRun() {
           <Badge tone={TONE[phase.tone]}>{finished ? run.outcome!.label : phase.state === 'WAITING_FOR_APPROVAL' ? 'needs you' : 'in progress'}</Badge>
         </div>
         {elapsed ? <span className="muted small" title="Local clock since the launch was recorded - presentation only">elapsed {elapsed}</span> : null}
+        {ex.canCancel && live ? <button type="button" className="ck-cancel" onClick={() => void ex.cancelRun()}>Cancel Run</button> : null}
+        {cancelling ? <button type="button" className="ck-cancel" disabled>Cancelling…</button> : null}
       </div>
       {ex.goal.trim() ? <div className="ck-goalline"><span className="muted">Goal</span><div>{ex.goal}</div></div> : null}
-      {finishing ? <p className="ck-detail" data-testid="finishing-note">{phase.detail}</p> : null}
-      {phase.steps && !finished ? (
+      {live && finishing ? <p className="ck-detail" data-testid="finishing-note">{phase.detail}</p> : null}
+      {phase.steps && live ? (
         <ol className="ck-steps" aria-label="Progress">
           {phase.steps.map((s) => <li key={s.id} data-status={s.status} aria-current={s.status === 'current' ? 'step' : undefined}><span aria-hidden="true">{MARK[s.status]}</span> {s.label}<span className="sr-only"> ({s.status === 'done' ? 'done' : s.status === 'current' ? 'in progress' : 'not started'})</span></li>)}
         </ol>
       ) : null}
-      {!finished && !run.review && !run.runtimeReview ? <p className="ck-detail" data-testid="current-activity"><span className="muted">Current activity</span><br />{activityText(phase.state, finishing)}</p> : null}
-      {!finished && run.review ? <ApprovalReview review={run.review} launchId={run.launchId} /> : null}
-      {!finished && run.runtimeReview ? <RuntimeCommandReviewCard review={run.runtimeReview} launchId={run.launchId} /> : null}
+      {live && !run.review && !run.runtimeReview ? <p className="ck-detail" data-testid="current-activity"><span className="muted">Current activity</span><br />{activityText(phase.state, finishing)}</p> : null}
+      {live && run.review ? <ApprovalReview review={run.review} launchId={run.launchId} /> : null}
+      {live && run.runtimeReview ? <RuntimeCommandReviewCard review={run.runtimeReview} launchId={run.launchId} /> : null}
       {!finished && !run.review && !run.runtimeReview && run.status?.launch.phase === 'RUNNING' && decided === 'REJECTED' ? <div role="note"><strong>Your rejection was recorded.</strong> {pendingKind === 'runtime_command' ? 'Kriya will not run those commands.' : 'Kriya is ending the run; nothing will be applied.'}</div> : null}
-      {finished && phase.state === 'COMPLETED' ? <Completed phase={phase} /> : null}
-      {finished && phase.state !== 'COMPLETED' ? <Stopped phase={phase} /> : null}
+      {cancelled ? <CancelledCard /> : null}
+      {finished && !cancelled && phase.state === 'COMPLETED' ? <Completed phase={phase} /> : null}
+      {finished && !cancelled && phase.state !== 'COMPLETED' ? <Stopped phase={phase} /> : null}
       <details className="ck-tech">
         <summary>Technical status</summary>
         <div><span className="muted">Run ID</span> <span className="mono small">{run.launchId}</span> <CopyText text={run.launchId} what="run ID" /></div>
@@ -180,22 +229,29 @@ export function CurrentRun() {
       {run.progress.error ? <div className="muted small" role="note">Live records could not be read: {run.progress.error}</div> : null}
       {run.statusError ? <div className="muted small" role="alert">Launch status unreadable: {run.statusError.code}: {run.statusError.message}</div> : null}
       {activityOpen ? <ActivityDrawer launchId={run.launchId} onClose={() => setActivityOpen(false)} /> : null}
-      {finished && phase.state !== 'COMPLETED' ? <h4 className="ck-action-sub" data-testid="what-you-can-do">What you can do</h4> : null}
-      <div className="ck-current-actions">
-        {!activityOpen ? <button type="button" className="ck-quiet" onClick={() => setActivityOpen(true)}>Show Activity</button> : null}
-        {finished ? (
-          <>
-            <RevealButton />
-            {phase.state === 'COMPLETED' ? <button type="button" onClick={() => viewDetails(OPEN_TARGETS.changes)}>View Changes</button> : null}
-            {phase.state === 'COMPLETED' ? <button type="button" onClick={() => viewDetails(OPEN_TARGETS.validation)}>View Verification</button> : <button type="button" onClick={() => viewDetails()}>View Failure Details</button>}
-            {phase.state !== 'COMPLETED' ? <button type="button" onClick={() => viewDetails(OPEN_TARGETS.changes)}>View Changes</button> : null}
-            <span className="grow" />
-            {phase.state !== 'COMPLETED' ? <button type="button" className="ck-primary" onClick={ex.rerun}>Run again</button> : null}
-            {phase.state !== 'COMPLETED' ? <button type="button" onClick={ex.runAgain}>Edit goal and retry</button> : null}
-            <button type="button" className={phase.state === 'COMPLETED' ? 'ck-primary' : undefined} onClick={ex.newGoal}>New Goal</button>
-          </>
-        ) : <button type="button" onClick={() => viewDetails()}>View Details</button>}
-      </div>
+      {!cancelled ? (
+        <>
+          {finished && phase.state !== 'COMPLETED' ? <h4 className="ck-action-sub" data-testid="what-you-can-do">What you can do</h4> : null}
+          <div className="ck-current-actions">
+            {!activityOpen ? <button type="button" className="ck-quiet" onClick={() => setActivityOpen(true)}>Show Activity</button> : null}
+            {finished ? (
+              <>
+                {phase.state !== 'COMPLETED' ? <button type="button" className="ck-primary" onClick={ex.rerun}>Run again</button> : null}
+                {phase.state !== 'COMPLETED' ? <button type="button" onClick={ex.runAgain}>Edit goal and retry</button> : null}
+                {phase.state !== 'COMPLETED' && needsRecovery && ex.canRecover ? <button type="button" disabled={ex.recoverState.running} onClick={() => void ex.recoverProject()}>{ex.recoverState.running ? 'Recovering…' : 'Recover Project'}</button> : null}
+                <OpenInEditorButton />
+                <RevealButton />
+                {phase.state === 'COMPLETED' ? <button type="button" onClick={() => viewDetails(OPEN_TARGETS.changes)}>View Changes</button> : null}
+                {phase.state === 'COMPLETED' ? <button type="button" onClick={() => viewDetails(OPEN_TARGETS.validation)}>View Verification</button> : <button type="button" onClick={() => viewDetails()}>View Details</button>}
+                {phase.state !== 'COMPLETED' ? <button type="button" onClick={() => viewDetails(OPEN_TARGETS.changes)}>View Changes</button> : null}
+                <span className="grow" />
+                <button type="button" className={phase.state === 'COMPLETED' ? 'ck-primary' : undefined} onClick={ex.newGoal}>New Goal</button>
+              </>
+            ) : <button type="button" onClick={() => viewDetails()}>View Details</button>}
+          </div>
+          {ex.recoverState.note ? <p className="muted small" role="status" data-testid="recover-note">{ex.recoverState.note}</p> : null}
+        </>
+      ) : null}
     </section>
   );
 }

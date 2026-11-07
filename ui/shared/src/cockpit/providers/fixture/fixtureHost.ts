@@ -183,6 +183,7 @@ export class FixtureHost implements HostAdapter {
         this.projectTokens.delete(request.token);
         return { created: true, path, code: null, message: null, reason: null };
       },
+      recoverWorkspace: async () => { this.workspaceCalls.push('recover'); return this.exec ? this.exec.recover() : { recovered: false, status: null, code: 'HOST_ERROR', message: 'no execution backend', errors: [] }; },
       revealWorkspace: async () => { this.workspaceCalls.push('reveal'); return this.settings.workspacePath ? { revealed: true, reason: null } : { revealed: false, reason: 'no workspace is open' }; },
       recent: async () => [...this.recentList],
       remember: async (path) => { this.workspaceCalls.push(`remember:${path}`); this.recentList = [path, ...this.recentList.filter((p) => p !== path)].slice(0, 10); this.settings.workspacePath = path; return [...this.recentList]; },
@@ -384,7 +385,7 @@ export class FixtureHost implements HostAdapter {
         return this.env('history.detail', this.detail(s), this.snapshotConsistency(), this.snapshotSource());
       }
       case 'history.prompt': return this.err('history.prompt', 'INVALID_REQUEST', 'the fixture host stores no prompts');
-      case 'workspace.status': return this.env('workspace.status', { workspace: request.workspace, run_active: false, status: 'CLEAN', exit_code: 0, assessment: { workspace_path: request.workspace, status: 'CLEAN', run_active: null, records: [], evidence: [], unreadable_records: [], evidence_error: null } }, this.live, null);
+      case 'workspace.status': return this.exec?.statusReadFails ? this.err('workspace.status', 'HOST_ERROR', 'Kriya could not read the workspace status') : this.env('workspace.status', { workspace: request.workspace, run_active: false, status: this.exec?.recoveryStatus ?? 'CLEAN', exit_code: 0, assessment: { workspace_path: request.workspace, status: this.exec?.recoveryStatus ?? 'CLEAN', run_active: null, records: [], evidence: [], unreadable_records: [], evidence_error: null } }, this.live, null);
       case 'workspace.describe': return this.describeFolder(request.workspace);
       case 'execution.preflight': {
         const known = this.folder(request.workspace);

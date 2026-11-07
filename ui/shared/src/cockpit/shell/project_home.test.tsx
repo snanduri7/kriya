@@ -217,7 +217,7 @@ describe('K. The outcome is understood without opening diagnostics', () => {
     expect(within(run).getByTestId('what-happened')).toHaveTextContent(/did not pass Kriya's checks/);
     expect(within(run).getByTestId('what-happened').textContent).not.toMatch(/failure category|exit code|NOT_COMMITTED|quality_gate/);
     expect(within(run).getByText('How far it got')).toBeInTheDocument();
-    expect(within(run).getByRole('button', { name: 'View Failure Details' })).toBeInTheDocument();
+    expect(within(run).getByRole('button', { name: 'View Details' })).toBeInTheDocument();
     expect(within(run).getByRole('button', { name: 'Copy failure details' })).toBeInTheDocument();
     expect(within(run).getByRole('button', { name: 'New Goal' })).toBeInTheDocument();
     expect(within(run).queryByRole('list', { name: 'Changed files' })).toBeNull(); // nothing is claimed as changed for a failed run
@@ -263,7 +263,7 @@ describe('B10. a failed run says what happened and what the person can do', () =
     act(() => host.exec!.finish());
     await waitFor(() => expect(run).toHaveAttribute('data-outcome', 'failure'));
     expect(within(run).getByTestId('what-you-can-do')).toHaveTextContent('What you can do');
-    for (const name of ['Run again', 'Edit goal and retry', 'Reveal in Finder', 'View Failure Details', 'New Goal']) expect(within(run).getByRole('button', { name })).toBeInTheDocument();
+    for (const name of ['Run again', 'Edit goal and retry', 'Reveal in Finder', 'View Details', 'New Goal']) expect(within(run).getByRole('button', { name })).toBeInTheDocument();
     expect(within(run).getByTestId('failure-summary').textContent).toMatch(/Kriya could not complete|did not pass/);   // words, not a reason code
     fireEvent.click(within(run).getByRole('button', { name: 'Run again' }));
     const next = await current();

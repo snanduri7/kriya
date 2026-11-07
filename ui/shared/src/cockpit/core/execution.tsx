@@ -74,6 +74,21 @@ export interface RunView {
   timing: RunTiming;
 }
 
+/**
+ * What Cancel Run leaves behind, in KRIYA's words: read from `workspace.status` (Kriya's own recovery assessment) AFTER the process has ended - never assumed from the host stopping a process.
+ * `clean` only when Kriya reports CLEAN; any other recovery status is `recovery`; a status that cannot be read, or that still says a run is active after a bounded wait, is `unconfirmed`
+ * (the cockpit then says the folder state is NOT confirmed - it never says Clean).
+ */
+export type FolderAfterCancel = { kind: 'clean' } | { kind: 'recovery'; status: string } | { kind: 'unconfirmed'; reason: string };
+export type CancelState =
+  | { phase: 'idle' }
+  | { phase: 'cancelling'; launchId: string }
+  | { phase: 'settled'; launchId: string; folder: FolderAfterCancel };
+/** Recover Project's own state (used after a cancellation AND from a failed run's card): running, and what Kriya/the host said when it ended. */
+export interface RecoverState { running: boolean; note: string | null }
+/** The recovery-status reads after a cancellation: how many (the process has exited, but Kriya's lock and records may need a moment); the gap is half the poll interval. */
+export const CANCEL_SETTLE_READS = 12;
+
 export interface StartRefusal { code: string; message: string; blockers: Array<{ code: string; message: string }> }
 export type PreflightState =
   | { state: 'unavailable'; reason: string }
@@ -115,6 +130,16 @@ export interface ExecutionApi {
   runAgain(): void;
   /** "Run again": start a new run with the SAME goal now (a new run, never a resume). */
   rerun(): void;
+  /** This host can cancel a run and the run is in progress (starting or running, including while it waits for a review). */
+  canCancel: boolean;
+  cancelState: CancelState;
+  /** Cancel Run: the host stops the run it started; then Kriya's recovery status is read to say what the folder is. A new run cannot be started until that is settled. */
+  cancelRun(): Promise<void>;
+  /** This host can recover a project (native confirmation, then Kriya's own `runs recover`). */
+  canRecover: boolean;
+  /** Recover Project after a cancellation that left the folder not clean: the host confirms with the person, Kriya recovers, and the status is read again. */
+  recoverProject(): Promise<void>;
+  recoverState: RecoverState;
   /** The state of the decision being taken on the pending review (never more than one in flight). */
   decision: DecisionState;
   /** Approve or reject the review that is pending NOW, with the identities Kriya gave it; Kriya validates them and the waiting run - not this window - continues. */
@@ -344,6 +369,10 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
   const [run, setRun] = useState<RunView | null>(null);
   const [decision, setDecision] = useState<DecisionState>({ state: 'idle' });
   const [runtimeDecision, setRuntimeDecision] = useState<RuntimeDecisionState>({ state: 'idle' });
+  const [cancel, setCancel] = useState<CancelState>({ phase: 'idle' });
+  const [recoverState, setRecoverState] = useState<RecoverState>({ running: false, note: null });
+  const cancelRef = useRef(false);
+  const settledRef = useRef<string | null>(null);   // the launch whose cancellation Kriya has settled: its process has ended, so it may be left even before the final records are read
   const startingRef = useRef(false);
   const runRef = useRef<RunView | null>(null);
   const acquireRef = useRef(acquire);
@@ -419,7 +448,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
 
   const start = useCallback(async () => {
     if (!port || workspace === null || startingRef.current) return;
-    if (runRef.current && runRef.current.stage !== 'finished') return;
+    if (runRef.current && runRef.current.stage !== 'finished' && settledRef.current !== runRef.current.launchId) return;
     startingRef.current = true; // synchronous: a second click in the same tick never reaches the host
     setStarting(true);
     setRefusal(null);
@@ -433,6 +462,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
         if (r?.code === 'PREFLIGHT_BLOCKED') refreshPreflight();
         return;
       }
+      setCancel({ phase: 'idle' });
       setRun({ launchId: result.launch_id, workspace, host: null, status: null, statusError: null, progress: NO_PROGRESS, stage: 'starting', outcome: null, review: null, runtimeReview: null, timing: { clickedAt, acknowledgedAt, recordSeenAt: null, terminalAt: null, refreshedAt: null } });
     } catch (error) {
       setRefusal({ code: 'HOST_ERROR', message: error instanceof Error ? error.message : String(error), blockers: [] });
@@ -532,30 +562,76 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
   const decideRuntimeCommand = useCallback(async (choice: 'approve' | 'reject', displayedReviewId: string, displayedFingerprint: string) => { await runtimeDeciderRef.current?.(choice, displayedReviewId, displayedFingerprint); }, []);
   const canDecideRuntimeCommand = typeof port?.decideRuntimeCommand === 'function';
 
-  const dismiss = useCallback(() => setRun((prev) => (prev && prev.stage === 'finished' ? null : prev)), []);
+  const dismiss = useCallback(() => { setCancel((c) => (c.phase === 'cancelling' ? c : { phase: 'idle' })); setRun((prev) => (prev && prev.stage === 'finished' ? null : prev)); }, []);
   // NEW GOAL = a blank composer; RUN AGAIN = the same goal (B3). Both only act on a FINISHED run: a run in progress is never discarded by either.
   const newGoal = useCallback(() => {
-    if (runRef.current && runRef.current.stage !== 'finished') return;
+    if (runRef.current && runRef.current.stage !== 'finished' && settledRef.current !== runRef.current.launchId) return;
     setGoal('');
     setRefusal(null);
+    setCancel({ phase: 'idle' });
     setRun(null);
   }, []);
+  const readFolderAfterCancel = useCallback(async (folder: string): Promise<FolderAfterCancel> => {
+    let last = 'the recovery status could not be read';
+    for (let i = 0; i < CANCEL_SETTLE_READS; i += 1) {
+      const read = await provider.workspaceStatus(folder);
+      if (!read.ok) return { kind: 'unconfirmed', reason: read.error.message || last };
+      const status = read.data.status;
+      if (typeof status !== 'string') return { kind: 'unconfirmed', reason: 'Kriya gave no recovery status' };
+      if (status === 'CLEAN') return { kind: 'clean' };
+      if (status !== 'RUN_ACTIVE') return { kind: 'recovery', status };
+      last = 'Kriya still reports a run in progress';
+      await new Promise((resolve) => setTimeout(resolve, Math.max(5, Math.round(intervals.visibleMs / 2))));
+    }
+    return { kind: 'unconfirmed', reason: last };
+  }, [provider, intervals.visibleMs]);
+  const cancelRun = useCallback(async () => {
+    const current = runRef.current;
+    if (!port?.cancelRun || !current || current.stage === 'finished' || cancelRef.current) return;
+    cancelRef.current = true;
+    setCancel({ phase: 'cancelling', launchId: current.launchId });
+    try {
+      let result: { cancelled: boolean; reason: string | null };
+      try { result = await port.cancelRun(); } catch { result = { cancelled: false, reason: 'the host could not cancel the run' }; }
+      if (!result.cancelled) { setCancel({ phase: 'idle' }); return; }          // nothing was stopped (the run had just ended): the ordinary outcome follows
+      const folder = await readFolderAfterCancel(current.workspace);
+      settledRef.current = current.launchId;
+      setCancel({ phase: 'settled', launchId: current.launchId, folder });
+      setNonce((n) => n + 1);                                                    // readiness is read from Kriya again
+    } finally {
+      cancelRef.current = false;
+    }
+  }, [port, readFolderAfterCancel]);
+  const recoverProject = useCallback(async () => {
+    const desktop = provider.desktop;
+    if (!desktop?.recoverWorkspace) return;
+    setRecoverState({ running: true, note: null });
+    let result;
+    try { result = await desktop.recoverWorkspace(); } catch { result = { recovered: false, status: null, code: 'HOST_ERROR', message: 'recovery could not be started', errors: [] as string[] }; }
+    const folder = workspace === null ? null : await readFolderAfterCancel(workspace);
+    const note: string | null = result.code === 'CONFIRMATION_DECLINED' ? 'Recovery was not confirmed; nothing was changed.' : result.code ? (result.message ?? 'Recovery could not be run.') : result.errors.length ? `Kriya reported: ${result.errors.join('; ')}` : null;
+    setRecoverState({ running: false, note });
+    setCancel((c) => (c.phase === 'settled' && folder ? { ...c, folder } : c));
+    setNonce((n) => n + 1);
+  }, [provider, workspace, readFolderAfterCancel]);
   const rerun = useCallback(() => {
-    if (runRef.current && runRef.current.stage !== 'finished') return;
+    if (runRef.current && runRef.current.stage !== 'finished' && settledRef.current !== runRef.current.launchId) return;
+    setCancel({ phase: 'idle' });
     setRun(null);          // the composer is what shows a refusal, so the finished card is replaced first; start() runs with the goal still in the box
     void start();
   }, [start]);
   const runAgain = useCallback(() => {
-    if (runRef.current && runRef.current.stage !== 'finished') return;
+    if (runRef.current && runRef.current.stage !== 'finished' && settledRef.current !== runRef.current.launchId) return;
     setRefusal(null);
+    setCancel({ phase: 'idle' });
     setRun(null);
   }, []);
-  const locked = starting || (run !== null && run.stage !== 'finished');
+  const locked = starting || cancel.phase === 'cancelling' || (run !== null && run.stage !== 'finished');
   // A decision belongs to the review it was taken on: a new review (a retry produced a new candidate) starts with no decision.
   // A runtime decision belongs to the review it was taken on: a new review starts with none.
   const shownRuntimeDecision = useMemo<RuntimeDecisionState>(() => (runtimeDecision.state === 'idle' || (run?.runtimeReview && runtimeDecision.reviewId !== run.runtimeReview.review_id) ? { state: 'idle' } : runtimeDecision), [runtimeDecision, run]);
   const shownDecision = useMemo<DecisionState>(() => (decision.state === 'idle' || (run?.review && decision.reviewId !== run.review.review_id) ? { state: 'idle' } : decision), [decision, run]);
-  const value = useMemo<ExecutionApi>(() => ({ available: port !== null, goal, setGoal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, canInitializeProject, initializeProject, starting, refusal, start, run, locked, dismiss, newGoal, runAgain, rerun, decision: shownDecision, decide, canDecideRuntimeCommand, runtimeDecision: shownRuntimeDecision, decideRuntimeCommand }),
-    [port, goal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, canInitializeProject, initializeProject, starting, refusal, start, run, locked, dismiss, newGoal, runAgain, rerun, shownDecision, decide, canDecideRuntimeCommand, shownRuntimeDecision, decideRuntimeCommand]);
+  const value = useMemo<ExecutionApi>(() => ({ available: port !== null, goal, setGoal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, canInitializeProject, initializeProject, starting, refusal, start, run, locked, dismiss, newGoal, runAgain, rerun, canCancel: Boolean(port?.cancelRun) && run !== null && run.stage !== 'finished' && cancel.phase === 'idle', cancelState: cancel, cancelRun, canRecover: typeof provider.desktop?.recoverWorkspace === 'function', recoverProject, recoverState, decision: shownDecision, decide, canDecideRuntimeCommand, runtimeDecision: shownRuntimeDecision, decideRuntimeCommand }),
+    [port, goal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, canInitializeProject, initializeProject, starting, refusal, start, run, locked, dismiss, newGoal, runAgain, rerun, cancel, cancelRun, recoverProject, recoverState, provider, shownDecision, decide, canDecideRuntimeCommand, shownRuntimeDecision, decideRuntimeCommand]);
   return <ExecutionContext.Provider value={value}>{children}</ExecutionContext.Provider>;
 }

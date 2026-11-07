@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Badge, useProvider, useSession } from '../../core';
+import { Badge, useProvider, useSession, useWorkspacePath } from '../../core';
 import type { WorkspaceDescribe } from '../../../model/kup';
 
 type Checkout = WorkspaceDescribe['checkout'];
@@ -53,6 +53,24 @@ export function RevealButton() {
   return (
     <>
       <button type="button" className="ck-quiet" onClick={() => void reveal().then((r) => setNote(r.revealed ? null : `Could not reveal: ${r.reason ?? 'unknown reason'}`), (e: unknown) => setNote(`Could not reveal: ${e instanceof Error ? e.message : String(e)}`))}>Reveal in Finder</button>
+      {note ? <span className="muted small" role="status">{note}</span> : null}
+    </>
+  );
+}
+
+/**
+ * Open the PROJECT FOLDER in the configured editor (the host's existing editor planner, folder mode: the selected workspace only). The result is always shown: a missing editor CLI or an
+ * editor with no folder form says why, in the host's own words - it never silently does nothing.
+ */
+export function OpenInEditorButton() {
+  const provider = useProvider();
+  const workspace = useWorkspacePath();
+  const [note, setNote] = useState<string | null>(null);
+  if (!workspace) return null;
+  const open = () => { setNote(null); void provider.openInEditor(workspace).then((r) => setNote(r.ok ? null : `Could not open editor: ${r.message}`), (e: unknown) => setNote(`Could not open editor: ${e instanceof Error ? e.message : String(e)}`)); };
+  return (
+    <>
+      <button type="button" className="ck-quiet" onClick={open}>Open in Editor</button>
       {note ? <span className="muted small" role="status">{note}</span> : null}
     </>
   );

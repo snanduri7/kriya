@@ -96,7 +96,15 @@ export class FixtureExecution {
   private reviewSuperseded = false;
   private reviewSequence = 1;
   private killed = false;
+  private cancelled = false;
   private statusFault: string | null = null;
+  /** Test hooks for Cancel Run / Recover Project: what Kriya's recovery status (`workspace.status`) answers after a cancellation, whether that read itself fails, and what a recovery attempt leaves. */
+  recoveryStatus = 'CLEAN';
+  statusReadFails = false;
+  recoverLeavesStatus: string | null = null;      // null = recovery settles the folder to CLEAN; otherwise the status Kriya still reports afterwards
+  recoverRefusal: { code: string; message: string } | null = null;
+  cancelCount = 0;
+  recoverCount = 0;
   /** Every notification the renderer asked the host for (for assertions). */
   readonly notifications: NotifyRequest[] = [];
   /** Every decision request the host received (for assertions). */
@@ -132,11 +140,20 @@ export class FixtureExecution {
         this.reviewStatus = 'PENDING';
         this.reviewSuperseded = false;
         this.killed = false;
+        this.cancelled = false;
         this.launchGoal = request.goal;
         this.launchWorkspace = request.workspace;
         return { started: true, launch_id: LAUNCH_ID, refusal: null };
       },
       state: async (): Promise<ExecutionState> => this.hostState(),
+      cancelRun: async () => {
+        if (!this.active()) return { cancelled: false, reason: 'no run is in progress' };
+        this.cancelCount += 1;
+        this.cancelled = true;
+        this.frame = 4;                // the process ended; Kriya sealed a failure record (the terminal's own Ctrl-C)
+        this.outcome = 'failure';
+        return { cancelled: true, reason: null };
+      },
       decideApproval: async (request): Promise<DecideApprovalResult> => this.decide(request),
       ...(options.noRuntimeDecisionPort ? {} : { decideRuntimeCommand: async (request: DecideRuntimeCommandRequest): Promise<DecideRuntimeCommandResult> => this.decideRuntime(request) }),
       ...(options.configuration?.noApprovalPort ? {} : { approveConfiguration: async (request: ApproveConfigurationRequest): Promise<ApproveConfigurationResult> => this.confirmThenApprove(request) }),
@@ -146,6 +163,14 @@ export class FixtureExecution {
   }
 
   setOutcome(outcome: FixtureOutcome): void { this.outcome = outcome; }
+
+  /** Recover Project: the host's native confirmation is scripted by `nativeAnswers`; Kriya then settles the folder (or leaves it at `recoverLeavesStatus`). */
+  recover(): { recovered: boolean; status: string | null; code: string | null; message: string | null; errors: string[] } {
+    this.recoverCount += 1;
+    if (this.recoverRefusal) return { recovered: false, status: null, code: this.recoverRefusal.code, message: this.recoverRefusal.message, errors: [] };
+    this.recoveryStatus = this.recoverLeavesStatus ?? 'CLEAN';
+    return { recovered: this.recoveryStatus === 'CLEAN', status: this.recoveryStatus, code: null, message: null, errors: [] };
+  }
 
   // ---- the scripted configuration-authority world ---------------------------------------------------------------------
   /** Test hook: the folder's operator-controlled settings change (any of them added, removed or changed): the fingerprint changes, a prior approval stops covering. */
@@ -262,10 +287,10 @@ export class FixtureExecution {
   private hostState(): ExecutionState {
     if (this.frame < 0) return { phase: 'idle', launch_id: null, workspace: null, started_at: null, ended_at: null, exit: null, diagnostic: null };
     const over = this.frame === 4 || this.killed;
-    const code = this.killed ? null : this.succeeds() ? 0 : this.outcome === 'refused' ? 2 : this.outcome === 'died' ? null : 1;
+    const code = this.cancelled ? 130 : this.killed ? null : this.succeeds() ? 0 : this.outcome === 'refused' ? 2 : this.outcome === 'died' ? null : 1;
     return {
       phase: over ? 'exited' : 'running', launch_id: LAUNCH_ID, workspace: this.launchWorkspace, started_at: '2026-10-10T10:10:10.000Z', ended_at: over ? '2026-10-10T10:12:00.000Z' : null,
-      exit: over ? { code, signal: this.outcome === 'died' || this.killed ? 'SIGKILL' : null } : null, diagnostic: null,
+      exit: over ? { code, signal: !this.cancelled && (this.outcome === 'died' || this.killed) ? 'SIGKILL' : null } : null, diagnostic: this.cancelled ? 'terminated_by_the_host' : null,
     };
   }
 

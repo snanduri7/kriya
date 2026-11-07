@@ -132,7 +132,7 @@ describe('Start Run', () => {
     // the goal composer is replaced by the run itself: no goal box, no second Start Run, and no control Kriya has no host operation for
     expect(screen.queryByRole('textbox', { name: 'Engineering goal' })).toBeNull();
     expect(screen.queryByRole('button', { name: /^(Start Run|Starting…)$/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: /^(Stop|Pause|Resume|Retry|Rerun|Cancel)/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^(Stop|Pause|Resume|Retry|Rerun)/ })).toBeNull();   // Cancel Run IS offered since T2 (the host can stop the run it started); nothing claims to pause or resume
   });
 
   it('shows only what Kriya\'s records say as they appear: counts by recorded kind, the latest record, DERIVED liveness - and a coarse phase that follows the records, with no invented stage or number', async () => {
