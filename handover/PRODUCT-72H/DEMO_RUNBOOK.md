@@ -57,7 +57,7 @@ Customer wording for the language server, which the product states from its own 
 
 **10. VERIFY / RECOVERY.** Result rows Build / Tests / Runtime and the Recovery row ("1 attempt (succeeded)", or "8 attempts, #1-#7 failed, #8 succeeded" on the real repair run); Attempts and Timeline pages show each attempt. (LIVE)
 
-**11. WHY / EVIDENCE.** Open a finished run -> WHY tab: each gate has its purpose label and how a baseline was handled. (LIVE)
+**11. WHY / EVIDENCE.** Runs -> open a finished run -> the top-right **Technical timeline** button (closed by default) opens the technical panels; WHY lists each gate with its purpose label and how a baseline was handled. (TESTED; not yet seen on screen - an earlier version of this line said "WHY tab", which does not exist.)
 
 **12. REPLAY.** Runs -> open any finished run: the result is labelled "Replay of Run <id> - the result below is read from the evidence Kriya stored for this run, and opening it re-executes nothing". It is a label on the stored view; there is no separate "replay mode" in the host. Absent for a row stored as in progress. (LIVE)
 
