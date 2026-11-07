@@ -41,6 +41,11 @@ export const IPC_CHANNELS = {
   notifyRun: 'kriya:host:execution:notify',
   // Reveal the open workspace's folder in Finder. No argument: the host reveals the folder IT has open (the renderer names no path).
   revealWorkspace: 'kriya:host:workspace:reveal',
+  // Cancel Run: no argument - the host stops the run IT started (the terminal's own Ctrl-C, then a kill after a grace period) and reports only whether a process was stopped.
+  // Whether the folder is clean afterwards is Kriya's answer (`runs status`), read by the cockpit. See execution_host.ts cancel().
+  cancelRun: 'kriya:host:execution:cancel',
+  // Recover Project: no argument - Kriya's `runs recover` on the folder THIS host has open, after a native confirmation. See recover_host.ts.
+  recoverWorkspace: 'kriya:host:workspace:recover',
 } as const;
 /** Main -> renderer notifications (one-way; the preload exposes a subscription, never a send). */
 export const MENU_CHANNEL = 'kriya:host:menu';

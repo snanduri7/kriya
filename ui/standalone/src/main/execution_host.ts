@@ -184,6 +184,21 @@ export class ExecutionHost {
   /** Quit-time handling: the terminal's own cancellation (SIGINT, which Kriya turns into a sealed failure record), then SIGKILL after the grace period. */
   async shutdown(): Promise<void> {
     this.closing = true;
+    await this.terminate();
+  }
+
+  /**
+   * Cancel Run: the SAME termination as quit-time (the terminal's own Ctrl-C = SIGINT, then SIGKILL after the grace period) - one path, not a second one - taking no argument (the host
+   * stops the run IT started). It reports only whether a process was stopped; whether the FOLDER is clean afterwards is Kriya's answer (`runs status`), read by the cockpit after the exit,
+   * never claimed here. The diagnostic stays `terminated_by_the_host` (the host did stop the process); that the person asked for it is the renderer's own knowledge.
+   */
+  async cancel(): Promise<{ cancelled: boolean; reason: string | null }> {
+    if (!this.child || this.current.phase !== 'running') return { cancelled: false, reason: 'no run is in progress' };
+    await this.terminate();
+    return { cancelled: true, reason: null };
+  }
+
+  private async terminate(): Promise<void> {
     const child = this.child;
     if (!child) return;
     this.current = { ...this.current, diagnostic: 'terminated_by_the_host' };

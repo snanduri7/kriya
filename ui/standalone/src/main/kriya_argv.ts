@@ -79,8 +79,17 @@ export function buildKriyaArgv(request: KupRequest): string[] {
   }
 }
 
+/**
+ * Recover Project: the ONE mutating Kriya command the cockpit may run besides a launch. The workspace is the host's own open folder (never renderer text) and `--complete-partial` is
+ * deliberately absent: recovery settles run records and staged temp files, it never changes a source file from here.
+ */
+export function recoverArgv(workspace: string): string[] {
+  return ['runs', 'recover', '--workspace', workspace, '--json'];
+}
+
 /** Every argv the shell may ever produce starts with one of these prefixes; the test pins it. */
 export const ALLOWED_ARGV_PREFIXES: readonly (readonly string[])[] = [
+  ['runs', 'recover', '--workspace'],
   ['traces', '--json', '--capabilities'],
   ['traces', '--json', '--snapshot'],
   ['traces', '--json', '--snapshots'],

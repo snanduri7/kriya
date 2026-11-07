@@ -1,4 +1,4 @@
-import type { ExecutionHostPort, ExecutionState, HostAdapter, HostInfo, HostSettings, KupEnvelope, KupRequest, MenuCommand, DecideApprovalRequest, DecideApprovalResult, DecideRuntimeCommandRequest, DecideRuntimeCommandResult, ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, StartRunRequest, StartRunResult, OpenInIdeRequest, OpenInIdeResult, WorkspaceChoice, WorkspaceHost, ProjectParentChoice, ProjectCreateResult, NotifyRequest, NotifyResult } from '@kriya-ui/shared';
+import type { CancelRunResult, RecoverWorkspaceResult, ExecutionHostPort, ExecutionState, HostAdapter, HostInfo, HostSettings, KupEnvelope, KupRequest, MenuCommand, DecideApprovalRequest, DecideApprovalResult, DecideRuntimeCommandRequest, DecideRuntimeCommandResult, ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, StartRunRequest, StartRunResult, OpenInIdeRequest, OpenInIdeResult, WorkspaceChoice, WorkspaceHost, ProjectParentChoice, ProjectCreateResult, NotifyRequest, NotifyResult } from '@kriya-ui/shared';
 
 export interface KriyaHostBridge {
   query(request: unknown): Promise<unknown>;
@@ -14,6 +14,8 @@ export interface KriyaHostBridge {
   chooseProjectParent(): Promise<unknown>;
   createProject(request: unknown): Promise<unknown>;
   revealWorkspace(): Promise<unknown>;
+  cancelRun(): Promise<unknown>;
+  recoverWorkspace(): Promise<unknown>;
   startRun(request: unknown): Promise<unknown>;
   executionState(): Promise<unknown>;
   decideApproval(request: unknown): Promise<unknown>;
@@ -38,11 +40,13 @@ export class ElectronHostAdapter implements HostAdapter {
       chooseProjectParent: () => bridge.chooseProjectParent() as Promise<ProjectParentChoice>,
       createProject: (request) => bridge.createProject(request) as Promise<ProjectCreateResult>,
       revealWorkspace: () => bridge.revealWorkspace() as Promise<{ revealed: boolean; reason: string | null }>,
+      recoverWorkspace: () => bridge.recoverWorkspace() as Promise<RecoverWorkspaceResult>,
       onMenuCommand: (listener) => bridge.onMenuCommand(listener),
     };
     this.execution = {
       startRun: (request: StartRunRequest) => bridge.startRun(request) as Promise<StartRunResult>,
       state: () => bridge.executionState() as Promise<ExecutionState>,
+      cancelRun: () => bridge.cancelRun() as Promise<CancelRunResult>,
       decideApproval: (request: DecideApprovalRequest) => bridge.decideApproval(request) as Promise<DecideApprovalResult>,
       decideRuntimeCommand: (request: DecideRuntimeCommandRequest) => bridge.decideRuntimeCommand(request) as Promise<DecideRuntimeCommandResult>,
       approveConfiguration: (request: ApproveConfigurationRequest) => bridge.approveConfiguration(request) as Promise<ApproveConfigurationResult>,

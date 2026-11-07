@@ -18,7 +18,7 @@ import { buildKriyaChildEnv, resolveConfigDirectory } from './child_env';
 import { isFixtureMode, resolveHostMode } from './host_mode';
 import { PRODUCT_NAME, WINDOW_TITLE, aboutPanelOptions, applicationMenuTemplate, resolveUserData } from './identity';
 import { IPC_CHANNELS, LIMITS, MENU_CHANNEL, type MenuCommand, type KupRequest, validateKupRequest, validateOpenInIde, rendererMayWrite, validateSettingKey, validateSettingValue } from './ipc_contract';
-import { buildKriyaArgv } from './kriya_argv';
+import { buildKriyaArgv, recoverArgv } from './kriya_argv';
 import { runKriya } from './kriya_process';
 import { KriyaServiceHolder } from './kriya_service';
 import { WorkspaceRegistry } from './workspace_host';
@@ -26,6 +26,7 @@ import { ApprovalHost } from './approval_host';
 import { RuntimeCommandHost, confirmationDialog as runtimeConfirmationDialog, isRunResponse } from './runtime_command_host';
 import { ConfigApprovalHost, confirmationDialog, isApproveResponse } from './config_approval_host';
 import { ProjectSetupHost } from './project_setup_host';
+import { RecoverHost, isRecoverResponse, recoverDialog } from './recover_host';
 import { ProjectHost } from './project_host';
 import { NotificationHost } from './notification_host';
 import { ExecutionHost } from './execution_host';
@@ -74,6 +75,7 @@ let approvals: ApprovalHost;
 let runtimeCommands: RuntimeCommandHost;
 let configApprovals: ConfigApprovalHost;
 let projectSetup: ProjectSetupHost;
+let recovery: RecoverHost;
 let projects: ProjectHost;
 let notifications: NotificationHost;
 const liveNotifications = new Set<Notification>(); // a shown notification is kept until it is clicked or closed (otherwise it can be collected before the person sees it)
@@ -244,6 +246,14 @@ function registerIpc() {
     shell.showItemInFolder(current);
     return { revealed: true, reason: null };
   });
+  ipcMain.handle(IPC_CHANNELS.cancelRun, async (event) => {
+    if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
+    return execution.cancel();   // no argument: the host stops the run IT started
+  });
+  ipcMain.handle(IPC_CHANNELS.recoverWorkspace, async (event) => {
+    if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
+    return recovery.recover();   // no argument: the folder THIS host has open, after a native confirmation
+  });
   ipcMain.handle(IPC_CHANNELS.recentWorkspaces, (event) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     return workspaces.recent();
@@ -343,6 +353,14 @@ async function confirmConfigurationApproval(workspace: string): Promise<boolean>
  * sentences plus the first commands as KRIYA recorded and re-proved them (runtime_command_host.ts): no directory, fingerprint or renderer string enters it. Cancel is the default and the Escape action; only `Run Commands` returns true.
  * An evidence build driven by the capture driver answers from the same scripted queue as the configuration confirmation; an exhausted or absent queue means Cancel.
  */
+async function confirmRecover(workspace: string): Promise<boolean> {
+  if (dev?.captureActive) return dev.nextConfirmation();
+  const options = recoverDialog(workspace);
+  const parent = ownedWindow && !ownedWindow.isDestroyed() ? ownedWindow : null;
+  const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+  return isRecoverResponse(result.response);
+}
+
 async function confirmRuntimeCommands(commands: ReadonlyArray<readonly string[]>): Promise<boolean> {
   if (dev?.captureActive) return dev.nextConfirmation();
   const options = runtimeConfirmationDialog(commands);
@@ -364,6 +382,16 @@ app.whenReady().then(async () => {
     approve: (workspace, fingerprint) => kupQuery({ operation: 'configuration.approve', workspace, fingerprint }),
     confirm: confirmConfigurationApproval,
     currentWorkspace: () => workspaces.current(), log: dev?.traceLine,
+  });
+  recovery = new RecoverHost({
+    recover: async (workspace) => {
+      const prepared = prepareExecution();
+      if (prepared === null || !prepared.ok) throw new Error(prepared === null ? 'no Kriya backend in this build' : prepared.message);
+      const outcome = await runKriya({ executable: prepared.executable, argv: recoverArgv(workspace), env: prepared.env, cwd: workspace });
+      if (outcome.kind !== 'json') throw new Error(outcome.message ?? 'Kriya gave no recovery report');
+      return outcome.json;
+    },
+    confirm: confirmRecover, currentWorkspace: () => workspaces.current(), runActive: () => execution.active(), log: dev?.traceLine,
   });
   projectSetup = new ProjectSetupHost({
     initialize: (workspace) => kupQuery({ operation: 'project.initialize', workspace }),

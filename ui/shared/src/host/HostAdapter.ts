@@ -53,6 +53,10 @@ export type NotifyKind = 'approval_required' | 'runtime_approval_required' | 'ru
 export interface NotifyRequest { kind: NotifyKind; launch_id: string }
 export interface NotifyResult { shown: boolean; reason: string }
 export type MenuCommand = 'openFolder' | 'newProject' | 'showRun';
+/** Cancel Run: whether the host stopped a process. NOT a claim about the folder: whether it is clean afterwards is Kriya's own answer (`workspace.status`). */
+export interface CancelRunResult { cancelled: boolean; reason: string | null }
+/** Recover Project: Kriya's own recovery status after `runs recover`, or a closed refusal code when nothing was attempted. `recovered` is true only when Kriya itself reports CLEAN. */
+export interface RecoverWorkspaceResult { recovered: boolean; status: string | null; code: string | null; message: string | null; errors: string[] }
 export interface WorkspaceHost {
   /** The native folder chooser. Cancelling resolves { chosen: false } and changes nothing. */
   choose(): Promise<WorkspaceChoice>;
@@ -66,6 +70,8 @@ export interface WorkspaceHost {
   createProject?(request: { token: string; name: string }): Promise<ProjectCreateResult>;
   /** Show the OPEN workspace's folder in the system file manager (Finder). The host reveals the folder it has open; the renderer names no path. Absent on a host that cannot. */
   revealWorkspace?(): Promise<{ revealed: boolean; reason: string | null }>;
+  /** Recover Project: the host asks for a native confirmation, then Kriya's `runs recover` on the folder IT has open (no argument, no path). Absent on a host that cannot. */
+  recoverWorkspace?(): Promise<RecoverWorkspaceResult>;
   /** Application-menu commands (File > Open Folder...). Returns the unsubscribe function. */
   onMenuCommand(listener: (command: MenuCommand) => void): () => void;
 }
@@ -75,6 +81,8 @@ export interface WorkspaceHost {
 export interface ExecutionHostPort {
   startRun(request: StartRunRequest): Promise<StartRunResult>;
   state(): Promise<ExecutionState>;
+  /** Cancel Run: the host stops the run IT started (no argument). Resolves once the process has ended. Absent on a host that cannot. */
+  cancelRun?(): Promise<CancelRunResult>;
   /** Review decision (GUI final): the host relays ONE typed decision to the waiting Kriya process over the run's private review channel and reports Kriya's answer. It never decides. */
   decideApproval(request: DecideApprovalRequest): Promise<DecideApprovalResult>;
   /** Runtime-command decision (Demo V2): a DIFFERENT subject from the change review - allowing Kriya to run the exact verification commands it recorded. The host re-proves the pending review, shows a

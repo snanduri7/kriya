@@ -275,6 +275,34 @@ describe('quitting while a run exists', () => {
   });
 });
 
+describe('Cancel Run (host): the same termination as quitting, with no argument', () => {
+  it('stops the run it started with SIGINT (the terminal\'s own cancellation), reports a process was stopped, and leaves the host free for a new run', async () => {
+    const m = make();
+    await m.host.start(request());
+    expect(await m.host.cancel()).toEqual({ cancelled: true, reason: null });
+    expect(m.children[0]!.kills).toEqual(['SIGINT']);
+    expect(m.host.state()).toMatchObject({ phase: 'exited', diagnostic: 'terminated_by_the_host' });
+    expect(m.host.active()).toBe(false);
+    expect(await m.host.start(request())).toMatchObject({ started: true });     // unlike shutdown(), cancelling does not close the host
+  });
+  it('escalates to SIGKILL after the grace period when the process ignores SIGINT - and still reports only that a process was stopped', async () => {
+    const m = make();
+    await m.host.start(request());
+    m.children[0]!.killsSignalsExit = null;
+    expect(await m.host.cancel()).toEqual({ cancelled: true, reason: null });
+    expect(m.children[0]!.kills).toEqual(['SIGINT', 'SIGKILL']);
+    expect(m.host.active()).toBe(false);
+  });
+  it('with no run in progress there is nothing to cancel and nothing is signalled (no claim of a cancellation)', async () => {
+    const m = make();
+    expect(await m.host.cancel()).toEqual({ cancelled: false, reason: 'no run is in progress' });
+    await m.host.start(request());
+    await m.host.cancel();
+    expect(await m.host.cancel()).toMatchObject({ cancelled: false });          // already ended
+    expect(m.children[0]!.kills).toEqual(['SIGINT']);
+  });
+});
+
 describe('state is a copy', () => {
   it('mutating the returned state does not change the host', async () => {
     const m = make();
