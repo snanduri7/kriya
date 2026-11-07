@@ -24,7 +24,7 @@ export function ActivityDock() {
   const stick = useRef(true);
   useLayoutEffect(() => {
     const box = list.current;
-    if (box && stick.current) box.scrollTop = box.scrollHeight;
+    if (box && stick.current && tab !== 'log') box.scrollTop = box.scrollHeight;     // the Kriya Log scrolls inside its own box (and keeps its toolbar in view)
   }, [entries.length, open, tab]);
   const toggle = () => ui.setDockOpen(!open);
   return (
@@ -40,7 +40,7 @@ export function ActivityDock() {
         )}
       </div>
       {open ? (
-        <div className="ck-dock-body" ref={list} data-testid="activity-scroll" onScroll={(e) => { stick.current = shouldStickToBottom(e.currentTarget); }}>
+        <div className="ck-dock-body" ref={list} data-testid="activity-scroll" data-tab={tab} onScroll={(e) => { stick.current = shouldStickToBottom(e.currentTarget); }}>
           {!run ? <p className="muted" role="status">Nothing is running. What Kriya does in your next run appears here, line by line, from its own records.</p> : null}
           {run && tab === 'activity' ? (entries.length === 0
             ? <p className="muted" role="status">{records && records.state === 'loading' ? 'Reading what Kriya recorded…' : 'Nothing has been recorded yet.'}</p>

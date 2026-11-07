@@ -279,6 +279,7 @@
 .ck-dock-toggle { background: transparent; border: 0; color: var(--ck-fg); cursor: pointer; padding: 2px 4px; }
 .ck-dock-latest { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ck-dock-tabs { display: flex; gap: 4px; }
+.ck-dock-body[data-tab="log"] { overflow: hidden; }
 .ck-dock-body { overflow: auto; min-height: 60px; max-height: calc(40vh - 34px); padding: 4px 14px 10px; }
 .ck-dock-body ol { margin: 0; padding: 0; list-style: none; }
 .ck-dock-body li { padding: 1px 0; }
@@ -339,7 +340,7 @@
 /* KRIYA LOG (the dock's real application log) */
 .ck-kriyalog { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
 .ck-kriyalog-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.ck-kriyalog-lines { max-height: min(34vh, 320px); min-height: 90px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.45; border: 1px solid var(--ck-line); border-radius: 6px; padding: 6px 8px; }
+.ck-kriyalog-lines { max-height: max(110px, calc(40vh - 104px)); min-height: 90px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.45; border: 1px solid var(--ck-line); border-radius: 6px; padding: 6px 8px; }
 .ck-logline { white-space: pre-wrap; word-break: break-word; }
 .ck-loglevel { display: inline-block; min-width: 5.2ch; font-weight: 600; }
 .ck-logline[data-level="WARNING"] .ck-loglevel, .ck-logline[data-level="WARNING"] .ck-logmsg { color: var(--ck-warn, #d9a441); }
