@@ -35,7 +35,8 @@ describe('1. a new folder with no configuration is offered Project Setup', () =>
     expect(c).toHaveTextContent('Recommended');
     expect(c).toHaveTextContent('fixture-model:7b'); // the model Kriya reports it would use
     expect(c).toHaveTextContent('fixture-fallback:3b');
-    expect(c).toHaveTextContent('Held for my approval');
+    expect(c).toHaveTextContent('Require your approval');
+    expect(within(c).getByTestId('setup-changes-help')).toHaveTextContent('You review the proposed diff before they are accepted into the project.');
     expect(c).toHaveTextContent('Local only; live web lookup off');
     for (const jargon of ['autonomy.mode', 'llm_chain', 'paths.memory', 'paths.skills', 'workflow_controller']) expect(c.textContent).not.toContain(jargon);
     expect(within(c).getByRole('button', { name: 'Create Project Configuration' })).toBeEnabled();

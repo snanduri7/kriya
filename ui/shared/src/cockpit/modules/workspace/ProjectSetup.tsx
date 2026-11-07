@@ -34,11 +34,11 @@ export function ProjectSetupCard({ model, fallbacks, onCreated }: { model: strin
         <div><dt className="muted small">Fallback</dt><dd>{fallbacks.length ? fallbacks.join(', ') : 'none'}</dd></div>
         <div><dt className="muted small">Execution</dt><dd>Local</dd></div>
         <div><dt className="muted small">Network</dt><dd>Local only; live web lookup off</dd></div>
-        <div><dt className="muted small">Changes</dt><dd>Held for my approval</dd></div>
+        <div><dt className="muted small">Changes</dt><dd>Require your approval<div className="muted small" data-testid="setup-changes-help">Kriya prepares changes first. You review the proposed diff before they are accepted into the project.</div></dd></div>
       </dl>
       <details className="ck-tech">
         <summary>Advanced configuration</summary>
-        <p className="muted small" data-testid="setup-advanced">Setup creates a <span className="mono">kriya.yaml</span> in this folder: the governed workflow is switched on, changes wait for your approval, live web lookup is off, and the model settings are Kriya&apos;s own defaults. You will review these settings and approve them before Kriya uses them. You can edit the file afterwards; changing a protected setting asks for approval again.</p>
+        <p className="muted small" data-testid="setup-advanced">Most projects work with Kriya&apos;s defaults, so this is optional. <strong>Create Project Configuration</strong> writes a <span className="mono">kriya.yaml</span> file into this folder with the settings Kriya recommends for local models: the model, execution, verification and Skills. You review these settings and approve them before Kriya uses them. Create it when you want project-specific settings you can edit later; changing a protected setting asks for approval again.</p>
       </details>
       {failure ? <div className="ck-state" role="alert"><strong>The project was not set up</strong> {failure.reason && REASON_WORDS[failure.reason] ? REASON_WORDS[failure.reason] : failure.message} <span className="muted small">({failure.code}{failure.reason ? `: ${failure.reason}` : ''})</span></div> : null}
       <div className="ck-runbar-head">

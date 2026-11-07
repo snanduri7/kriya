@@ -109,7 +109,7 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
         <div className="muted small mono">review {review.review_id} · launch {launchId} · candidate {shortDigest(review.candidate_digest)}{data ? ` · verified by Kriya against ${data.files.length} file digest${data.files.length === 1 ? '' : 's'}` : ''}</div>
       </details>
 
-      <p className="muted small" data-testid="decision-help"><strong>Approve &amp; Continue</strong>: Kriya finishes its checks and, if they pass, applies this change to your folder. <strong>Reject</strong>: nothing is applied and this run ends.</p>
+      <p className="muted small" data-testid="decision-help">After you approve the proposed changes, Kriya will still verify them against your goal. <strong>Approve &amp; Continue</strong>: if that verification passes, the change is applied to your folder. <strong>Reject</strong>: nothing is applied and this run ends.</p>
       <div className="ck-runbar-head ck-decision">
         <button type="button" onClick={openEditor} disabled={!existing} title={existing ? `Open ${existing.path} in your editor` : 'This change only adds new files; there is nothing to open yet'}>Open in Editor</button>
         <span className="grow" />

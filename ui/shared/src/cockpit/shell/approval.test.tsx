@@ -80,7 +80,7 @@ describe('the review of a change: the EXACT change first, then why, verification
   it('says what each decision does BEFORE it is pressed', async () => {
     const { bar } = await reachReview();
     const help = within(within(bar).getByRole('region', { name: 'Change review' })).getByTestId('decision-help');
-    expect(help).toHaveTextContent(/Approve & Continue: Kriya finishes its checks and, if they pass, applies this change to your folder/);
+    expect(help).toHaveTextContent(/After you approve the proposed changes, Kriya will still verify them against your goal\. Approve & Continue: if that verification passes, the change is applied to your folder/);
     expect(help).toHaveTextContent(/Reject: nothing is applied and this run ends/);
   });
 

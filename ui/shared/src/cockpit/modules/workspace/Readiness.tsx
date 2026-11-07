@@ -52,7 +52,7 @@ export function checklist(pre: ExecutionPreflight, probe: Availability<Execution
   const c = pre.configuration;
   const git = pre.toolchains.tools.find((t) => t.tool === 'git');
   const rows: Row[] = [
-    { label: 'Workspace', tone: pre.recovery.status === 'CLEAN' ? 'ok' : 'bad', status: pre.recovery.status === 'CLEAN' ? 'Clean' : `Recovery state ${pre.recovery.status}`, detail: pre.workspace.name },
+    { label: 'Workspace', tone: pre.recovery.status === 'CLEAN' ? 'ok' : pre.recovery.status === 'RUN_ACTIVE' ? 'info' : 'bad', status: pre.recovery.status === 'CLEAN' ? 'Clean' : `Recovery state ${pre.recovery.status}`, detail: pre.workspace.name },
     { label: 'Configuration', tone: c.status === 'loaded' ? (AUTHORITY_TONE[c.authority.status as keyof typeof AUTHORITY_TONE] ?? 'warn') : 'bad', status: AUTHORITY[c.authority.status] ?? c.authority.status, detail: SOURCES[c.source] ?? c.source },
     { label: 'Run state', tone: pre.state.directory ? (pre.state.observable_by_cockpit === false ? 'bad' : 'ok') : 'bad', status: pre.state.directory ? (pre.state.observable_by_cockpit === false ? 'Not read by this app' : 'Recorded where this app reads') : 'Not resolved', detail: pre.state.directory ?? undefined },
     { label: 'Git (needed by every run)', tone: git ? (git.available ? 'ok' : 'bad') : 'neutral', status: git ? (git.available ? 'Available' : 'Unavailable') : 'Not reported', detail: git && !git.available && typeof git.reason === 'string' ? git.reason : undefined },
@@ -99,6 +99,23 @@ export function preflightBody(state: PreflightState) {
   }
 }
 
+/**
+ * The Project folder fact, one row per recovery status Kriya reports (kriya/control/recovery.py STATUS_*). B1 (owner walkthrough 2026-11-07): this used to be `status === 'CLEAN' ? Ready : Needs recovery`,
+ * so a run IN PROGRESS (RUN_ACTIVE) was shown as a broken folder. Every status states its own meaning; a status this table does not know is shown as exactly that - never as a recovery - and a test
+ * reads the backend's status list so a new one cannot be added without a row here.
+ */
+export const FOLDER_FACTS: Record<string, { status: string; tone: ProjectFact['tone']; note?: string }> = {
+  CLEAN: { status: 'Ready', tone: 'ok' },
+  RUN_ACTIVE: { status: 'A run is in progress', tone: 'info', note: 'One run owns a folder at a time; this clears when the run ends.' },
+  RECOVERY_AVAILABLE: { status: 'Needs recovery', tone: 'bad', note: 'A previous run was interrupted. Kriya can restore the folder to a consistent state.' },
+  COMPLETE_PARTIAL_REQUIRED: { status: 'Needs recovery', tone: 'bad', note: 'A previous change was only partly applied. Recovery can complete or undo it.' },
+  MANUAL_ACTION_REQUIRED: { status: 'Needs your attention', tone: 'bad', note: 'Kriya cannot settle the state of this folder on its own. See the technical details.' },
+};
+export function folderFact(status: string): ProjectFact {
+  const known = FOLDER_FACTS[status];
+  return known ? { id: 'folder', label: 'Project folder', ...known } : { id: 'folder', label: 'Project folder', status: 'State not recognised', tone: 'neutral', note: `Kriya reported the folder state "${status}", which this version does not describe.` };
+}
+
 /** The four facts a person needs about a project, in words (Demo V2). Each is derived from the same Kriya answer as the technical checklist; the exact authority/storage diagnostics stay under Technical details. */
 export interface ProjectFact { id: 'folder' | 'configuration' | 'git' | 'model'; label: string; status: string; tone: 'ok' | 'warn' | 'bad' | 'info' | 'neutral'; note?: string }
 export function projectFacts(pre: ExecutionPreflight, probe: Availability<ExecutionModelProbe>): ProjectFact[] {
@@ -110,7 +127,7 @@ export function projectFacts(pre: ExecutionPreflight, probe: Availability<Execut
     : c.authority.status === 'no_findings' ? { id: 'configuration', label: 'Configuration', status: 'Ready', tone: 'ok' }
     : { id: 'configuration', label: 'Configuration', status: 'Needs your approval', tone: 'warn', note: 'Protected project settings have not been approved yet.' };
   return [
-    pre.recovery.status === 'CLEAN' ? { id: 'folder', label: 'Project folder', status: 'Ready', tone: 'ok' } : { id: 'folder', label: 'Project folder', status: 'Needs recovery', tone: 'bad', note: 'The last run left the folder mid-change.' },
+    folderFact(pre.recovery.status),
     configuration,
     git ? (git.available ? { id: 'git', label: 'Git', status: 'Ready', tone: 'ok' } : { id: 'git', label: 'Git', status: 'Unavailable', tone: 'bad' }) : { id: 'git', label: 'Git', status: 'Not reported', tone: 'neutral' },
     model.tone === 'ok' ? { id: 'model', label: 'Model', status: 'Connected', tone: 'ok' } : model.tone === 'bad' ? { id: 'model', label: 'Model', status: model.status === 'Not reachable' ? 'Not reachable' : 'Not available', tone: 'bad' }

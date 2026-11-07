@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Badge, CopyText, KeyValue, Panel, hasData, useExecution, useWorkspace, useWorkspacePath, type ModuleDefinition } from '../../core';
 import { CONFIG_APPROVAL_BLOCKER } from './ConfigApproval';
 import { CurrentRun } from './CurrentRun';
@@ -21,6 +21,10 @@ function ProjectHome() {
   const [nonce, setNonce] = useState(0);
   const { context, probe } = useRunSetup(workspace, nonce, ex.locked);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsRef = useRef<HTMLDetailsElement | null>(null);
+  const [detailsRequested, setDetailsRequested] = useState(0);
+  // "View readiness details" must be SEEN to respond: it opens the Project details panel AND brings it into view (it sits below the run, recent runs, memory and security).
+  useEffect(() => { if (detailsRequested > 0) detailsRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }); }, [detailsRequested]);
   const open = ws.current;
   if (!open) return <div className="ck-state"><strong>No project is open</strong>Open a folder from the toolbar or File &gt; Open Folder.</div>;
   const f = open.facts;
@@ -30,7 +34,7 @@ function ProjectHome() {
   const skillCount = hasData(context) && context.data.skills ? context.data.skills.total : null;
   const unverified = hasData(context) && context.data.skills ? context.data.skills.items.filter((k) => !k.verified).length : 0;
   const mcp = hasData(context) && context.data.tools ? context.data.tools.mcp_servers.length : null;
-  const showDetails = () => setDetailsOpen(true);
+  const showDetails = () => { setDetailsOpen(true); setDetailsRequested((n) => n + 1); };
   // The strip's model / Skills / Tools cells are this page's own backend answers (the model probe and the catalog), passed through in their own words.
   const modelCell = pre ? checklist(pre, probe).find((r) => r.label === 'Model server') ?? null : null;
   const composed: Record<string, ComposedCell | null> = {
@@ -54,9 +58,9 @@ function ProjectHome() {
       {unconfigured ? <ProjectSetupCard model={pre.model?.model ?? null} fallbacks={pre.model?.fallback_chain ?? []} onCreated={recheck} /> : null}
       {ex.run ? <CurrentRun /> : ex.available ? <GoalComposer summary={summary} onDetails={showDetails} onRecheck={recheck} /> : <section aria-label="Start a run"><h2>What do you want Kriya to do?</h2><p className="muted" role="status">This host cannot start a run.</p></section>}
       <RecentRuns />
-      {pre?.memory ? <ProjectMemoryCard memory={pre.memory} /> : null}
+      {pre?.memory ? <ProjectMemoryCard memory={pre.memory} onRecheck={recheck} /> : null}
       {pre?.security ? <SecurityCard rows={pre.health ?? []} demonstrations={pre.security.demonstrations} /> : null}
-      <details className="ck-setup" open={detailsOpen} onToggle={(e) => setDetailsOpen((e.currentTarget as HTMLDetailsElement).open)}>
+      <details ref={detailsRef} className="ck-setup" open={detailsOpen} onToggle={(e) => setDetailsOpen((e.currentTarget as HTMLDetailsElement).open)}>
         <summary>Project details</summary>
         {pre ? <ProjectFacts pre={pre} probe={probe} /> : ex.available ? preflightBody(ex.preflight) : null}
         {ex.available ? <p><button type="button" className="ck-quiet" onClick={recheck}>Check again</button></p> : null}
