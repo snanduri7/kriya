@@ -99,7 +99,6 @@ from kriya.workflow.checkpoint import (
     save_checkpoint,
     validate_resume_against_reality,
 )
-from kriya.workflow.plan_validation import PLANNED_FILE_ACTION_MISMATCH, planned_file_action_mismatches
 from kriya.workflow.context_budget import (
     CandidatePrompts,
     RetrievalLimits,
@@ -250,6 +249,7 @@ from kriya.workflow.ownership_findings import (
 )
 from kriya.workflow.plan_executor import WorkUnitInvocation
 from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS, EngineeringPlan
+from kriya.workflow.plan_validation import PLANNED_FILE_ACTION_MISMATCH, planned_file_action_mismatches
 from kriya.workflow.planner_repair import (
     STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS,
     build_structured_plan_repair_prompt,
