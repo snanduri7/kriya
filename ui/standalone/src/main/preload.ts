@@ -19,6 +19,7 @@ const api = {
   chooseProjectParent: () => ipcRenderer.invoke(IPC_CHANNELS.chooseProjectParent),
   createProject: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.createProject, request),
   revealWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.revealWorkspace),
+  openTerminal: () => ipcRenderer.invoke(IPC_CHANNELS.openTerminal),
   cancelRun: () => ipcRenderer.invoke(IPC_CHANNELS.cancelRun),
   recoverWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.recoverWorkspace),
   startRun: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.startRun, request),

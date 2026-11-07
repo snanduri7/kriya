@@ -317,6 +317,23 @@ export function membershipStopOf(ended: unknown): MembershipStop | null {
   if (typeof code !== 'string') return null;
   return { code, paths: Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string') : [] };
 }
+/** The VERIFIED RUN RECIPE on a launch record's `ended` section (additive field written by the backend, kriya/workflow/run_recipe.py -> kriya/control/launch.py): the user-facing steps Kriya's own
+ * application runtime check really executed and saw succeed. The cockpit shows exactly these strings; it derives, rewrites and invents nothing. null when absent or malformed. */
+export interface RunRecipeStep { kind: 'setup' | 'run'; command: string }
+export interface RunRecipe { steps: RunRecipeStep[]; entrypoint: string | null; note: string | null; statement: string | null }
+export function runRecipeOf(ended: unknown): RunRecipe | null {
+  const recipe = typeof ended === 'object' && ended !== null ? (ended as { verified_run_recipe?: unknown }).verified_run_recipe : undefined;
+  if (typeof recipe !== 'object' || recipe === null) return null;
+  const { steps, entrypoint, environment_note: note, statement } = recipe as { steps?: unknown; entrypoint?: unknown; environment_note?: unknown; statement?: unknown };
+  if (!Array.isArray(steps)) return null;
+  const clean = steps.flatMap((s): RunRecipeStep[] => {
+    const step = s as { kind?: unknown; command?: unknown };
+    return (step?.kind === 'setup' || step?.kind === 'run') && typeof step.command === 'string' && step.command !== '' ? [{ kind: step.kind, command: step.command }] : [];
+  });
+  if (!clean.some((s) => s.kind === 'run')) return null;
+  return { steps: clean, entrypoint: typeof entrypoint === 'string' ? entrypoint : null, note: typeof note === 'string' ? note : null, statement: typeof statement === 'string' ? statement : null };
+}
+export const NO_RUN_RECIPE_TEXT = 'Kriya did not run this application, so it has no verified run command.';
 export interface MembershipStopWords { title: string; body: string; names: string | null; action: string; note: string }
 const MAX_NAMES_SHOWN = 5;
 const MAX_NAME_LENGTH = 60;

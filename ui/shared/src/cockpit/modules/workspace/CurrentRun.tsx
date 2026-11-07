@@ -1,6 +1,6 @@
 import { OpenInEditorButton, RevealButton } from './WorkspaceFacts';
 import { folderFact } from './Readiness';
-import { ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failedDuring, failureSummary, retrySummary, runtimeStopWords, membershipStopOf, membershipStopWords, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, RunStepper, activityText, changeSummary, localClock, progressCounts, runPhase, useRunActivity, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, useWorkspacePath, VerificationLines, FormalRequirementDisclosure, TechnicalVerification, formalRequirementStatus, primaryVerification, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
+import { ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failedDuring, failureSummary, retrySummary, runtimeStopWords, membershipStopOf, membershipStopWords, runRecipeOf, HowToRun, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, RunStepper, activityText, changeSummary, localClock, progressCounts, runPhase, useRunActivity, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, useWorkspacePath, VerificationLines, FormalRequirementDisclosure, TechnicalVerification, formalRequirementStatus, primaryVerification, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
 const ACTIVITY_MARK = { info: '•', ok: '✓', bad: '✕', wait: '⚠' } as const;
@@ -40,6 +40,7 @@ function Completed({ phase }: { phase: RunPhase }) {
   const app = application && (application.state === 'ready' || application.state === 'degraded') ? application.data : null;
   const applied = outcome.commitResult === 'COMMITTED';
   const workspace = useWorkspacePath();
+  const recipe = runRecipeOf(run.status?.launch.ended);       // the backend's verified run recipe (null: Kriya did not run the application)
   // A NEW application: every recorded change is a file Kriya added AND Kriya recorded executing it successfully (from the executor's recorded steps - never a claim).
   const created = applied && app?.status === 'EXECUTED' && app.succeeded === true && files !== null && files.length > 0 && files.every((f) => f.changeType === 'added');
   const projectName = workspace ? workspace.split('/').filter(Boolean).pop() ?? null : null;
@@ -61,7 +62,8 @@ function Completed({ phase }: { phase: RunPhase }) {
           </>
         )}
 
-      {why !== null ? <><h3>Why</h3><p data-testid="outcome-why">{why}</p>{fullReview !== null ? <details className="ck-tech" data-testid="outcome-full-review"><summary>Full review</summary>{renderMarkdown(fullReview)}</details> : null}</> : null}
+
+      <HowToRun recipe={recipe} />
 
       <h3>Verification</h3>
       {groups === null ? <p className="muted" role="status">{reading('results')}</p>
@@ -72,6 +74,7 @@ function Completed({ phase }: { phase: RunPhase }) {
 
       {groups ? <FormalRequirementDisclosure status={formalRequirementStatus(groups.technical)} /> : null}
       {groups ? <TechnicalVerification gates={groups.technical} /> : null}
+      {why !== null ? <><h3>Why</h3><p data-testid="outcome-why">{why}</p>{fullReview !== null ? <details className="ck-tech" data-testid="outcome-full-review"><summary>Full review</summary>{renderMarkdown(fullReview)}</details> : null}</> : null}
       {outcome.declined.length ? <p className="muted small">Decisions declined, nothing approved (the run proceeded without them): {outcome.declined.map((d) => `${d.kind}: ${d.reason}`).join('; ')}</p> : null}
       {phase.state === 'COMPLETED' && review && review.files.length ? (
         <details className="ck-tech"><summary>The approved change</summary>{review.files.map((f) => <FileDiff key={f.path} file={f} />)}</details>

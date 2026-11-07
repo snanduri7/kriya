@@ -61,6 +61,8 @@ export interface FixtureExecutionOptions {
   blockedReason?: 'MANAGED_SERVICE_APPROVAL_UNSUPPORTED' | 'REQUIRED_RUNTIME_VERIFICATION_DECLINED' | 'REQUIRED_RUNTIME_VERIFICATION_DISABLED';
   /** A failed run Kriya refused to START because the repository layer found entries it does not own in a new project folder: the run's recorded `membership_authority.unavailable` event carries its reason code and (bounded) entry names. */
   membershipStop?: { paths: string[] };
+  /** A SUCCESSFUL run whose launch record carries the backend's verified run recipe (DEV/TEST ONLY): the user-facing steps Kriya's own runtime check executed and saw succeed. */
+  runRecipe?: { steps: Array<{ kind: 'setup' | 'run'; command: string }>; environmentNote?: string | null };
   /** The host has no runtime-command decision path (an older host): the review is shown but cannot be decided from this window. */
   noRuntimeDecisionPort?: boolean;
   /** The host refuses the start with this typed refusal (EXECUTION_BUSY is produced by the real host; here for UI tests). */
@@ -367,6 +369,7 @@ export class FixtureExecution {
       at: '2026-10-10T10:12:00+00:00', exit_code: refused ? 2 : ok ? 0 : 1, workflow_status: approval || rejected ? null : refused ? 'refused' : ok ? 'success' : 'failure',
       quality_gates_passed: refused || rejected ? false : ok, failure_category: outcome === 'failure' ? 'quality_gate_failed' : null, trace_run_id: refused || approval ? null : LAUNCHED_TRACE_ID,
       error: refused ? 'another Kriya run already owns this folder' : approval ? 'Aborted!' : outcome === 'failure' ? 'Failed to create an isolated generation sandbox (fixture)' : null, note: 'copied from the workflow\'s own result; the RunRecord, evidence store and trace row are the outcome authority',
+      ...(ok && this.options.runRecipe ? { verified_run_recipe: { steps: this.options.runRecipe.steps, entrypoint: 'main.py', environment_note: this.options.runRecipe.environmentNote ?? null, statement: 'Kriya ran this in its isolated project environment and it succeeded; this is how it was verified, not a guarantee about another machine.', attempt: 1 } } : {}),
       ...(outcome === 'failure' && this.options.membershipStop ? { membership_authority: { reason_code: 'BOUND_TREE_NON_GIT_WORKSPACE_NOT_EMPTY', paths: this.options.membershipStop.paths } } : {}),
     } : null;
     const pending = this.pendingReview();

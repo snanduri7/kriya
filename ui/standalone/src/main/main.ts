@@ -36,6 +36,7 @@ import { resolveUiMode } from './ui_mode';
 import { mustRefuseStart } from './product_guard';
 import type { DevDrivers } from './dev_drivers';
 import { EDITOR_FORMS, planOpenInIde } from './open_in_ide';
+import { planOpenTerminal } from './open_terminal';
 import { openFolderResult, planOpenFolder } from './open_folder';
 import { SettingsStore } from './settings';
 
@@ -245,6 +246,18 @@ function registerIpc() {
     if (!plan.ok) return { revealed: false, reason: plan.reason };
     if (dev?.captureActive) return { revealed: false, reason: 'not available while a scripted capture is running' }; // the scripted capture driver only; a real Kriya run opens the folder
     return openFolderResult(await shell.openPath(plan.path));
+  });
+  // "Open Terminal Here": a terminal window AT the folder this host has open. Fixed program and arguments (planOpenTerminal), no shell, nothing executed in the terminal; the person pastes the verified run command.
+  ipcMain.handle(IPC_CHANNELS.openTerminal, async (event) => {
+    if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
+    const plan = planOpenTerminal(workspaces.current(), { realpath: realpathSync, isDirectory });
+    if (!plan.ok) return { opened: false, reason: plan.reason };
+    if (dev?.captureActive) return { opened: false, reason: 'not available while a scripted capture is running' };
+    return new Promise((resolve) => {
+      const child = spawn(plan.binary, plan.argv, { stdio: 'ignore', shell: false, detached: false });
+      child.on('error', (e) => resolve({ opened: false, reason: `the system could not open a terminal (${e.message.slice(0, 160)})` }));
+      child.on('spawn', () => resolve({ opened: true, reason: null }));
+    });
   });
   ipcMain.handle(IPC_CHANNELS.cancelRun, async (event) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');

@@ -3,6 +3,7 @@ export * from './async';
 export * from './catalogView';
 export { localClock, shouldStickToBottom } from './activity';
 export { CopyText } from './CopyText';
+export { HowToRun } from './HowToRun';
 export * from './availability';
 export * from './capability';
 export * from './evidence';

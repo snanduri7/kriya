@@ -326,3 +326,12 @@
 .ck-recent ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; font-size: 15px; }
 .ck-recent li[data-tone="bad"] { color: var(--ck-bad); } .ck-recent li[data-tone="ok"] { color: var(--ck-ok); } .ck-recent li[data-tone="wait"] { color: var(--ck-warn); }
 .ck-current[data-live="true"] .ck-tech { margin-top: auto; }
+
+/* HOW TO RUN (the verified run recipe): the command is the hero of a successful result */
+.ck-howto { margin: 14px 0 4px; padding: 12px 14px; border: 1px solid var(--ck-line); border-left: 3px solid var(--ck-ok); border-radius: 8px; background: color-mix(in srgb, var(--ck-ok) 5%, transparent); }
+.ck-howto h3 { margin-top: 0; }
+.ck-howto-steps { list-style: none; margin: 6px 0 8px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ck-howto-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ck-howto-command { font-size: 17px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--ck-line); background: var(--ck-surface, rgba(255,255,255,.04)); word-break: break-all; }
+.ck-howto-label { display: block; margin-bottom: 3px; }
+.ck-howto-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

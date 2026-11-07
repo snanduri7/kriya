@@ -70,6 +70,8 @@ export interface WorkspaceHost {
   createProject?(request: { token: string; name: string }): Promise<ProjectCreateResult>;
   /** OPEN the workspace's folder itself in the system file manager (Finder) so the person sees the files. The host opens the folder it has open (canonical, never a package); the renderer names no path. Absent on a host that cannot. (Method name kept: it is pinned by the IPC audits.) */
   revealWorkspace?(): Promise<{ revealed: boolean; reason: string | null }>;
+  /** Open a TERMINAL at the workspace's folder (macOS). The host opens it at the folder it has open (canonical, never a package); the renderer names no path and nothing is executed in the terminal: the person pastes the verified run command themselves. */
+  openTerminal?(): Promise<{ opened: boolean; reason: string | null }>;
   /** Recover Project: the host asks for a native confirmation, then Kriya's `runs recover` on the folder IT has open (no argument, no path). Absent on a host that cannot. */
   recoverWorkspace?(): Promise<RecoverWorkspaceResult>;
   /** Application-menu commands (File > Open Folder...). Returns the unsubscribe function. */
